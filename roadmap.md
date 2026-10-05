@@ -5,7 +5,7 @@
 Plan: `docs/agentic-plan.md`.
 
 - [x] Gateway tool calling — `aiAgentStep` in `src/lib/ai-gateway.server.ts`: one provider-neutral agent turn (transcript + tool specs → text, tool calls, stop reason, usage) for OpenAI, Anthropic and Gemini native tool-calling dialects; org key only, every call in the `ai_usage_events` ledger under an `agent_*` slug, tool arguments returned unvalidated for the registry to check; `toolParameters` turns zod v4 schemas into tool JSON Schema; unit-tested with stubbed providers (`scripts/agent-gateway.test.ts`, in CI)
-- [ ] `agent_*` tables (migration `0024`) and the agent runtime worker (`/api/public/agent-tick`)
+- [x] Agent tables and runtime — migration `0024` (`agent_policies`, `agent_events`, `agent_runs`, `agent_steps`, `agent_tasks`, `agent_metrics_daily`) and `src/server/agents/`: registry (agents list their tools; tools carry a zod v4 input, a read / write / external risk, optional template id and untrusted-output flag), autonomy policy (`suggest` / `act_and_notify` / `autonomous`, org-wide `'*'` pause), and the runtime — transcript-as-checkpoint runs on behalf of a human principal, lease/claim with reclaim, per-tick turn cap, step/token budgets, built-in `ask_human` / `request_approval` / `handoff`, approval tasks with edit-then-approve, role- or assignee-checked `resolveTask`, `cancelRun`, untrusted() fencing of third-party tool output, audit of every write/external action and decision; `/api/public/agent-tick` cron route; runtime suite against Postgres in CI (`scripts/agent-runtime.test.ts`)
 - [ ] Tool registry with agent identity in `audit_log`
 - [ ] `agent_policies` + Agents settings page (default `suggest`)
 - [ ] Decisions inbox

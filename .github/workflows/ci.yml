@@ -50,3 +50,6 @@ jobs:
 
       - name: Integration tests
         run: bun test scripts/integration.verify.test.ts
+
+      - name: Agent runtime tests
+        run: bun test scripts/agent-runtime.test.ts

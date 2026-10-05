@@ -188,6 +188,7 @@ Cloud Scheduler (all call the app with `Authorization: Bearer <value of atsiq-cr
 | every 15 min | `https://atsiq.yavar.ai/api/public/sync-hrms` (refreshes the HRMS employee caches) |
 | every 15 min | `https://atsiq.yavar.ai/api/public/board-sync` (job-board application poll/backfill + webhook-event retention) |
 | every 5 min | `https://atsiq.yavar.ai/api/public/screening-prep` (prepares screening kits for shortlisted candidates in the background; retries ≤3) |
+| every 1 min | `https://atsiq.yavar.ai/api/public/agent-tick` (drives the agent runtime: claims queued runs, resumes runs after a human decision; no-op until agents are enabled) |
 
 Registering these in Cloud Scheduler is a **devops step** — the app only serves the
 routes. Until `screening-prep` is registered, screening kits are still built when a

@@ -1689,3 +1689,222 @@ export const boardSyncState = pgTable(
   },
   (t) => [uniqueIndex("board_sync_state_integration_key").on(t.integrationId)],
 );
+
+/* ------------------------------------------------------------ agents (0024) */
+/* docs/agentic-plan.md §7. Statuses are app-level text, like email_outbox. */
+
+export type AgentType =
+  | "copilot"
+  | "requisition"
+  | "jd"
+  | "publishing"
+  | "intake"
+  | "screening"
+  | "interview"
+  | "evaluation"
+  | "offer"
+  | "onboarding"
+  | "followup";
+export type AgentAutonomy = "suggest" | "act_and_notify" | "autonomous";
+export type AgentRunStatus =
+  "queued" | "running" | "awaiting_human" | "done" | "failed" | "cancelled";
+export type AgentTaskKind = "gate" | "approval" | "clarification";
+export type AgentTaskStatus =
+  "open" | "approved" | "rejected" | "answered" | "expired" | "cancelled";
+export type AgentEventStatus = "pending" | "processing" | "done" | "failed";
+
+/**
+ * Per org × agent type: the autonomy dial, template whitelist and budget.
+ * No row means the defaults (enabled, `suggest`, no budget cap). The row with
+ * agent_type '*' is the org-wide switch: enabled = false pauses every agent.
+ */
+export const agentPolicies = pgTable(
+  "agent_policies",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    agentType: text("agent_type").$type<AgentType | "*">().notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    autonomy: text("autonomy").$type<AgentAutonomy>().notNull().default("suggest"),
+    /** Content-template ids an agent may send without per-message approval. */
+    whitelistedTemplates: jsonb("whitelisted_templates")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    monthlyTokenBudget: integer("monthly_token_budget"),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("agent_policies_org_agent_key").on(t.orgId, t.agentType)],
+);
+
+/** Domain-event outbox written by lifecycle choke points; drained by the orchestrator. */
+export const agentEvents = pgTable(
+  "agent_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    subjectType: text("subject_type"),
+    subjectId: uuid("subject_id"),
+    actorUserId: uuid("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    payload: jsonb("payload")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    status: text("status").$type<AgentEventStatus>().notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("agent_events_queue_idx").on(t.status, t.createdAt),
+    index("agent_events_org_idx").on(t.orgId, t.createdAt),
+  ],
+);
+
+/**
+ * One agent run. `transcript` is the provider-neutral conversation
+ * (AgentMessage[]) and doubles as the checkpoint; `pending` holds tool calls
+ * parked behind a human decision. Every run acts on behalf of a human
+ * principal — it can never do more than that person could.
+ */
+export const agentRuns = pgTable(
+  "agent_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    agentType: text("agent_type").$type<AgentType>().notNull(),
+    status: text("status").$type<AgentRunStatus>().notNull().default("queued"),
+    principalUserId: uuid("principal_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    subjectType: text("subject_type"),
+    subjectId: uuid("subject_id"),
+    triggerEventId: uuid("trigger_event_id").references(() => agentEvents.id, {
+      onDelete: "set null",
+    }),
+    goal: text("goal").notNull(),
+    transcript: jsonb("transcript")
+      .$type<unknown[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    pending: jsonb("pending").$type<unknown>(),
+    result: text("result"),
+    stepCount: integer("step_count").notNull().default(0),
+    tokensUsed: integer("tokens_used").notNull().default(0),
+    maxSteps: integer("max_steps").notNull().default(20),
+    maxTokens: integer("max_tokens").notNull().default(200000),
+    traceId: uuid("trace_id").notNull().defaultRandom(),
+    leaseUntil: timestamp("lease_until", { withTimezone: true }),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("agent_runs_queue_idx").on(t.status, t.updatedAt),
+    index("agent_runs_org_status_idx").on(t.orgId, t.status),
+    index("agent_runs_subject_idx").on(t.orgId, t.subjectType, t.subjectId),
+  ],
+);
+
+/** Append-only step log of a run: model turns, tool calls, decisions. Also the trace spans. */
+export const agentSteps = pgTable(
+  "agent_steps",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    seq: integer("seq").notNull(),
+    /** model | tool | decision | error */
+    kind: text("kind").notNull(),
+    toolName: text("tool_name"),
+    toolCallId: text("tool_call_id"),
+    /** ok | error | blocked | awaiting */
+    status: text("status").notNull(),
+    /** Redacted summaries only — never full CV, document or mail text. */
+    input: jsonb("input").$type<unknown>(),
+    output: jsonb("output").$type<unknown>(),
+    promptTokens: integer("prompt_tokens").notNull().default(0),
+    completionTokens: integer("completion_tokens").notNull().default(0),
+    durationMs: integer("duration_ms").notNull().default(0),
+    spanId: uuid("span_id").notNull().defaultRandom(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("agent_steps_run_seq_key").on(t.runId, t.seq)],
+);
+
+/** Human-in-the-loop items: gates, action approvals and clarifying questions. */
+export const agentTasks = pgTable(
+  "agent_tasks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<AgentTaskKind>().notNull(),
+    status: text("status").$type<AgentTaskStatus>().notNull().default("open"),
+    title: text("title").notNull(),
+    body: text("body").notNull().default(""),
+    /** The tool call waiting on this decision: { toolCallId, name, args }. */
+    proposedAction: jsonb("proposed_action").$type<unknown>(),
+    assigneeRole: text("assignee_role").$type<(typeof appRoleEnum.enumValues)[number]>(),
+    assigneeUserId: uuid("assignee_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** The human's answer: edited args, free-text reply, rejection reason. */
+    response: jsonb("response").$type<unknown>(),
+    decidedBy: uuid("decided_by").references(() => users.id, { onDelete: "set null" }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("agent_tasks_org_status_idx").on(t.orgId, t.status),
+    index("agent_tasks_run_idx").on(t.runId),
+  ],
+);
+
+/** Daily rollup per org × agent for dashboards and alerts (docs/agentic-plan.md §9). */
+export const agentMetricsDaily = pgTable(
+  "agent_metrics_daily",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    agentType: text("agent_type").$type<AgentType>().notNull(),
+    day: date("day").notNull(),
+    runsStarted: integer("runs_started").notNull().default(0),
+    runsDone: integer("runs_done").notNull().default(0),
+    runsFailed: integer("runs_failed").notNull().default(0),
+    steps: integer("steps").notNull().default(0),
+    toolErrors: integer("tool_errors").notNull().default(0),
+    promptTokens: integer("prompt_tokens").notNull().default(0),
+    completionTokens: integer("completion_tokens").notNull().default(0),
+    tasksOpened: integer("tasks_opened").notNull().default(0),
+    tasksApproved: integer("tasks_approved").notNull().default(0),
+    tasksRejected: integer("tasks_rejected").notNull().default(0),
+    tasksEdited: integer("tasks_edited").notNull().default(0),
+    hitlWaitMsTotal: integer("hitl_wait_ms_total").notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("agent_metrics_daily_key").on(t.orgId, t.agentType, t.day)],
+);

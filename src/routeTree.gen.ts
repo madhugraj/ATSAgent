@@ -47,6 +47,7 @@ import { Route as ApiAuthRegisterRouteImport } from './routes/api/auth/register'
 import { Route as ApiAuthRequestResetRouteImport } from './routes/api/auth/request-reset'
 import { Route as ApiAuthResetRouteImport } from './routes/api/auth/reset'
 import { Route as ApiAuthSessionRouteImport } from './routes/api/auth/session'
+import { Route as ApiPublicAgentTickRouteImport } from './routes/api/public/agent-tick'
 import { Route as ApiPublicBoardSyncRouteImport } from './routes/api/public/board-sync'
 import { Route as ApiPublicCaptureRouteImport } from './routes/api/public/capture'
 import { Route as ApiPublicInboundEmailRouteImport } from './routes/api/public/inbound-email'
@@ -251,6 +252,11 @@ const ApiAuthSessionRoute = ApiAuthSessionRouteImport.update({
   path: '/api/auth/session',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicAgentTickRoute = ApiPublicAgentTickRouteImport.update({
+  id: '/api/public/agent-tick',
+  path: '/api/public/agent-tick',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicBoardSyncRoute = ApiPublicBoardSyncRouteImport.update({
   id: '/api/public/board-sync',
   path: '/api/public/board-sync',
@@ -362,6 +368,7 @@ export interface FileRoutesByFullPath {
   '/api/auth/request-reset': typeof ApiAuthRequestResetRoute
   '/api/auth/reset': typeof ApiAuthResetRoute
   '/api/auth/session': typeof ApiAuthSessionRoute
+  '/api/public/agent-tick': typeof ApiPublicAgentTickRoute
   '/api/public/board-sync': typeof ApiPublicBoardSyncRoute
   '/api/public/capture': typeof ApiPublicCaptureRoute
   '/api/public/inbound-email': typeof ApiPublicInboundEmailRoute
@@ -415,6 +422,7 @@ export interface FileRoutesByTo {
   '/api/auth/request-reset': typeof ApiAuthRequestResetRoute
   '/api/auth/reset': typeof ApiAuthResetRoute
   '/api/auth/session': typeof ApiAuthSessionRoute
+  '/api/public/agent-tick': typeof ApiPublicAgentTickRoute
   '/api/public/board-sync': typeof ApiPublicBoardSyncRoute
   '/api/public/capture': typeof ApiPublicCaptureRoute
   '/api/public/inbound-email': typeof ApiPublicInboundEmailRoute
@@ -469,6 +477,7 @@ export interface FileRoutesById {
   '/api/auth/request-reset': typeof ApiAuthRequestResetRoute
   '/api/auth/reset': typeof ApiAuthResetRoute
   '/api/auth/session': typeof ApiAuthSessionRoute
+  '/api/public/agent-tick': typeof ApiPublicAgentTickRoute
   '/api/public/board-sync': typeof ApiPublicBoardSyncRoute
   '/api/public/capture': typeof ApiPublicCaptureRoute
   '/api/public/inbound-email': typeof ApiPublicInboundEmailRoute
@@ -524,6 +533,7 @@ export interface FileRouteTypes {
     | '/api/auth/request-reset'
     | '/api/auth/reset'
     | '/api/auth/session'
+    | '/api/public/agent-tick'
     | '/api/public/board-sync'
     | '/api/public/capture'
     | '/api/public/inbound-email'
@@ -577,6 +587,7 @@ export interface FileRouteTypes {
     | '/api/auth/request-reset'
     | '/api/auth/reset'
     | '/api/auth/session'
+    | '/api/public/agent-tick'
     | '/api/public/board-sync'
     | '/api/public/capture'
     | '/api/public/inbound-email'
@@ -630,6 +641,7 @@ export interface FileRouteTypes {
     | '/api/auth/request-reset'
     | '/api/auth/reset'
     | '/api/auth/session'
+    | '/api/public/agent-tick'
     | '/api/public/board-sync'
     | '/api/public/capture'
     | '/api/public/inbound-email'
@@ -684,6 +696,7 @@ export interface RootRouteChildren {
   ApiAuthRequestResetRoute: typeof ApiAuthRequestResetRoute
   ApiAuthResetRoute: typeof ApiAuthResetRoute
   ApiAuthSessionRoute: typeof ApiAuthSessionRoute
+  ApiPublicAgentTickRoute: typeof ApiPublicAgentTickRoute
   ApiPublicBoardSyncRoute: typeof ApiPublicBoardSyncRoute
   ApiPublicCaptureRoute: typeof ApiPublicCaptureRoute
   ApiPublicInboundEmailRoute: typeof ApiPublicInboundEmailRoute
@@ -967,6 +980,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSessionRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/agent-tick': {
+      id: '/api/public/agent-tick'
+      path: '/api/public/agent-tick'
+      fullPath: '/api/public/agent-tick'
+      preLoaderRoute: typeof ApiPublicAgentTickRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/board-sync': {
       id: '/api/public/board-sync'
       path: '/api/public/board-sync'
@@ -1100,6 +1120,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAuthRequestResetRoute: ApiAuthRequestResetRoute,
   ApiAuthResetRoute: ApiAuthResetRoute,
   ApiAuthSessionRoute: ApiAuthSessionRoute,
+  ApiPublicAgentTickRoute: ApiPublicAgentTickRoute,
   ApiPublicBoardSyncRoute: ApiPublicBoardSyncRoute,
   ApiPublicCaptureRoute: ApiPublicCaptureRoute,
   ApiPublicInboundEmailRoute: ApiPublicInboundEmailRoute,
