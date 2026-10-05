@@ -45,5 +45,8 @@ jobs:
       - name: Apply database schema
         run: bun scripts/migrate-pg.mjs
 
+      - name: Unit tests (agent gateway)
+        run: bun test scripts/agent-gateway.test.ts
+
       - name: Integration tests
         run: bun test scripts/integration.verify.test.ts

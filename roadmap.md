@@ -1,5 +1,17 @@
 # Roadmap
 
+## Agentic platform — Phase 0 foundations (in progress)
+
+Plan: `docs/agentic-plan.md`.
+
+- [x] Gateway tool calling — `aiAgentStep` in `src/lib/ai-gateway.server.ts`: one provider-neutral agent turn (transcript + tool specs → text, tool calls, stop reason, usage) for OpenAI, Anthropic and Gemini native tool-calling dialects; org key only, every call in the `ai_usage_events` ledger under an `agent_*` slug, tool arguments returned unvalidated for the registry to check; `toolParameters` turns zod v4 schemas into tool JSON Schema; unit-tested with stubbed providers (`scripts/agent-gateway.test.ts`, in CI)
+- [ ] `agent_*` tables (migration `0024`) and the agent runtime worker (`/api/public/agent-tick`)
+- [ ] Tool registry with agent identity in `audit_log`
+- [ ] `agent_policies` + Agents settings page (default `suggest`)
+- [ ] Decisions inbox
+- [ ] Observability foundation (structured logger, run/step traces, agent metrics)
+- [ ] Eval harness
+
 ## Lovable decoupling (2026-10-05)
 
 ATSAgent builds, runs and deploys with no Lovable packages, routes, env vars or hosted services.

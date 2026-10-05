@@ -15,6 +15,7 @@
 
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
+import { z as zodV4 } from "zod/v4";
 
 import { db } from "../server/db";
 import { aiProviderCredentials, aiSettings } from "@db/schema";
@@ -975,4 +976,406 @@ export async function aiResearchJson<T>(opts: {
     grounded,
     usage: stream.usage,
   };
+}
+
+/* ------------------------------------------------------------ agent steps */
+
+/**
+ * One turn of a tool-using agent loop (docs/agentic-plan.md §3.3).
+ *
+ * The caller (the agent runtime) owns the loop: it sends the transcript plus
+ * the tools the agent may use, executes any tool calls the model asks for, and
+ * appends their results for the next step. This function only speaks each
+ * provider's native tool-calling dialect, logs the request to the AI spend
+ * ledger, and returns a provider-neutral result. It never executes tools and
+ * never validates tool arguments — the tool registry does both, so a model
+ * cannot reach anything the registry would not allow.
+ *
+ * Unlike `aiJson` this does not stream: agent steps are short, run in a
+ * background worker rather than a user request, and assembling streamed
+ * tool-call fragments across three dialects is all risk and no benefit here.
+ */
+
+/** A tool the model may call. `parameters` is a JSON Schema object (see `toolParameters`). */
+export type AgentToolSpec = {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+};
+
+export type AgentToolCall = { id: string; name: string; args: unknown };
+
+export type AgentMessage =
+  | { role: "user"; content: string }
+  | { role: "assistant"; content: string; toolCalls?: AgentToolCall[] }
+  | { role: "tool"; toolCallId: string; name: string; content: string; isError?: boolean };
+
+export type AgentStopReason = "tool_use" | "end" | "max_tokens" | "other";
+
+export type AgentStepResult =
+  | {
+      ok: true;
+      text: string;
+      toolCalls: AgentToolCall[];
+      stopReason: AgentStopReason;
+      usage: AiUsage | null;
+    }
+  | { ok: false; status: number; message: string };
+
+/** Marker put in `args` when the model emitted tool arguments that are not valid JSON. */
+export const INVALID_TOOL_ARGS = "__invalid_json__";
+
+/** Provider JSON is untyped; adapters read it defensively. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Loose = any;
+
+const AGENT_STEP_TIMEOUT_MS = 120_000;
+const AGENT_MAX_OUTPUT_TOKENS = 8192;
+
+/**
+ * JSON Schema for a tool's input, from a zod v4 schema (`import { z } from "zod/v4"`).
+ * The `$schema` marker is dropped: providers want the bare object schema.
+ */
+export function toolParameters(schema: unknown): Record<string, unknown> {
+  const json = (zodV4.toJSONSchema(schema as never) ?? {}) as Record<string, unknown>;
+  delete json["$schema"];
+  return json;
+}
+
+function parseToolArgs(raw: unknown): unknown {
+  if (typeof raw !== "string") return raw ?? {};
+  if (!raw.trim()) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return { [INVALID_TOOL_ARGS]: raw.slice(0, 2000) };
+  }
+}
+
+function toUsage(prompt: unknown, completion: unknown, total?: unknown): AiUsage | null {
+  if (typeof prompt !== "number" && typeof completion !== "number") return null;
+  const promptTokens = typeof prompt === "number" ? prompt : 0;
+  const completionTokens = typeof completion === "number" ? completion : 0;
+  return {
+    promptTokens,
+    completionTokens,
+    totalTokens: typeof total === "number" ? total : promptTokens + completionTokens,
+  };
+}
+
+/* OpenAI chat-completions dialect */
+
+function openAiAgentBody(
+  cfg: AiConfig,
+  system: string,
+  messages: AgentMessage[],
+  tools: AgentToolSpec[],
+) {
+  const out: unknown[] = [{ role: "system", content: system }];
+  for (const m of messages) {
+    if (m.role === "user") out.push({ role: "user", content: m.content });
+    else if (m.role === "assistant") {
+      out.push({
+        role: "assistant",
+        content: m.content || null,
+        ...(m.toolCalls?.length
+          ? {
+              tool_calls: m.toolCalls.map((c) => ({
+                id: c.id,
+                type: "function",
+                function: { name: c.name, arguments: JSON.stringify(c.args ?? {}) },
+              })),
+            }
+          : {}),
+      });
+    } else {
+      out.push({
+        role: "tool",
+        tool_call_id: m.toolCallId,
+        content: m.isError ? `ERROR: ${m.content}` : m.content,
+      });
+    }
+  }
+  return {
+    model: cfg.model,
+    messages: out,
+    ...(tools.length
+      ? {
+          tools: tools.map((t) => ({
+            type: "function",
+            function: { name: t.name, description: t.description, parameters: t.parameters },
+          })),
+        }
+      : {}),
+  };
+}
+
+function parseOpenAiAgent(json: Loose): Omit<Extract<AgentStepResult, { ok: true }>, "ok"> {
+  const choice = json?.choices?.[0];
+  const msg = choice?.message ?? {};
+  const toolCalls: AgentToolCall[] = Array.isArray(msg.tool_calls)
+    ? msg.tool_calls
+        .filter((c: Loose) => c?.type === "function" || c?.function)
+        .map((c: Loose, i: number) => ({
+          id: String(c.id ?? `call_${i}`),
+          name: String(c.function?.name ?? ""),
+          args: parseToolArgs(c.function?.arguments),
+        }))
+    : [];
+  const finish = choice?.finish_reason;
+  const stopReason: AgentStopReason = toolCalls.length
+    ? "tool_use"
+    : finish === "stop"
+      ? "end"
+      : finish === "length"
+        ? "max_tokens"
+        : "other";
+  const u = json?.usage;
+  return {
+    text: typeof msg.content === "string" ? msg.content : "",
+    toolCalls,
+    stopReason,
+    usage: u ? toUsage(u.prompt_tokens, u.completion_tokens, u.total_tokens) : null,
+  };
+}
+
+/* Anthropic messages dialect */
+
+function anthropicAgentBody(
+  cfg: AiConfig,
+  system: string,
+  messages: AgentMessage[],
+  tools: AgentToolSpec[],
+) {
+  // Anthropic requires every tool_result for one assistant turn in a single
+  // user message, and strictly alternating roles — fold consecutive turns.
+  const out: { role: "user" | "assistant"; content: unknown[] }[] = [];
+  const push = (role: "user" | "assistant", block: unknown) => {
+    const last = out[out.length - 1];
+    if (last && last.role === role) last.content.push(block);
+    else out.push({ role, content: [block] });
+  };
+  for (const m of messages) {
+    if (m.role === "user") push("user", { type: "text", text: m.content });
+    else if (m.role === "assistant") {
+      if (m.content) push("assistant", { type: "text", text: m.content });
+      for (const c of m.toolCalls ?? []) {
+        push("assistant", { type: "tool_use", id: c.id, name: c.name, input: c.args ?? {} });
+      }
+    } else {
+      push("user", {
+        type: "tool_result",
+        tool_use_id: m.toolCallId,
+        content: m.content,
+        ...(m.isError ? { is_error: true } : {}),
+      });
+    }
+  }
+  return {
+    model: cfg.model,
+    max_tokens: AGENT_MAX_OUTPUT_TOKENS,
+    system,
+    messages: out,
+    ...(tools.length
+      ? {
+          tools: tools.map((t) => ({
+            name: t.name,
+            description: t.description,
+            input_schema: t.parameters,
+          })),
+        }
+      : {}),
+  };
+}
+
+function parseAnthropicAgent(json: Loose): Omit<Extract<AgentStepResult, { ok: true }>, "ok"> {
+  const blocks: Loose[] = Array.isArray(json?.content) ? json.content : [];
+  const text = blocks
+    .filter((b) => b?.type === "text" && typeof b.text === "string")
+    .map((b) => b.text)
+    .join("");
+  const toolCalls: AgentToolCall[] = blocks
+    .filter((b) => b?.type === "tool_use")
+    .map((b, i) => ({
+      id: String(b.id ?? `call_${i}`),
+      name: String(b.name ?? ""),
+      args: b.input ?? {},
+    }));
+  const stop = json?.stop_reason;
+  const stopReason: AgentStopReason = toolCalls.length
+    ? "tool_use"
+    : stop === "end_turn" || stop === "stop_sequence"
+      ? "end"
+      : stop === "max_tokens"
+        ? "max_tokens"
+        : "other";
+  const u = json?.usage;
+  return {
+    text,
+    toolCalls,
+    stopReason,
+    usage: u ? toUsage(u.input_tokens, u.output_tokens) : null,
+  };
+}
+
+/* Google Gemini dialect */
+
+function googleAgentBody(system: string, messages: AgentMessage[], tools: AgentToolSpec[]) {
+  const contents: { role: "user" | "model"; parts: unknown[] }[] = [];
+  const push = (role: "user" | "model", part: unknown) => {
+    const last = contents[contents.length - 1];
+    if (last && last.role === role) last.parts.push(part);
+    else contents.push({ role, parts: [part] });
+  };
+  for (const m of messages) {
+    if (m.role === "user") push("user", { text: m.content });
+    else if (m.role === "assistant") {
+      if (m.content) push("model", { text: m.content });
+      for (const c of m.toolCalls ?? []) {
+        push("model", { functionCall: { id: c.id, name: c.name, args: c.args ?? {} } });
+      }
+    } else {
+      push("user", {
+        functionResponse: {
+          id: m.toolCallId,
+          name: m.name,
+          response: m.isError ? { error: m.content } : { result: m.content },
+        },
+      });
+    }
+  }
+  return {
+    systemInstruction: { parts: [{ text: system }] },
+    contents,
+    generationConfig: { maxOutputTokens: AGENT_MAX_OUTPUT_TOKENS },
+    ...(tools.length
+      ? {
+          tools: [
+            {
+              functionDeclarations: tools.map((t) => ({
+                name: t.name,
+                description: t.description,
+                parametersJsonSchema: t.parameters,
+              })),
+            },
+          ],
+        }
+      : {}),
+  };
+}
+
+function parseGoogleAgent(json: Loose): Omit<Extract<AgentStepResult, { ok: true }>, "ok"> {
+  const candidate = json?.candidates?.[0];
+  const parts: Loose[] = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
+  const text = parts
+    .filter((p) => typeof p?.text === "string" && !p.thought)
+    .map((p) => p.text)
+    .join("");
+  const toolCalls: AgentToolCall[] = parts
+    .filter((p) => p?.functionCall)
+    .map((p, i) => ({
+      id: String(p.functionCall.id ?? `call_${i}`),
+      name: String(p.functionCall.name ?? ""),
+      args: p.functionCall.args ?? {},
+    }));
+  const finish = candidate?.finishReason;
+  const stopReason: AgentStopReason = toolCalls.length
+    ? "tool_use"
+    : finish === "STOP"
+      ? "end"
+      : finish === "MAX_TOKENS"
+        ? "max_tokens"
+        : "other";
+  const u = json?.usageMetadata;
+  const prompt = u?.promptTokenCount;
+  const total = u?.totalTokenCount;
+  const completion =
+    typeof total === "number" && typeof prompt === "number"
+      ? total - prompt
+      : (u?.candidatesTokenCount ?? 0) + (u?.thoughtsTokenCount ?? 0);
+  return { text, toolCalls, stopReason, usage: u ? toUsage(prompt, completion, total) : null };
+}
+
+/**
+ * Run one agent step against the organisation's configured model.
+ * `feature` is the ledger slug (`agent_*` in AI_FEATURES).
+ */
+export async function aiAgentStep(opts: {
+  system: string;
+  messages: AgentMessage[];
+  tools?: AgentToolSpec[];
+  orgId?: string | null | undefined;
+  config?: AiConfig;
+  feature: string;
+}): Promise<AgentStepResult> {
+  const cfg = opts.config ?? (await resolveAiConfig(opts.orgId));
+  if (!cfg.apiKey) return NO_KEY_ERROR;
+
+  const tools = opts.tools ?? [];
+  const startedAt = Date.now();
+  const fail = async (status: number, message: string) => {
+    await logUsage(opts.feature, cfg, opts.orgId, {
+      status: "error",
+      attempt: 1,
+      startedAt,
+      usage: null,
+      message,
+    });
+    return { ok: false as const, status, message };
+  };
+
+  let url: string;
+  let headers: Record<string, string> = { "Content-Type": "application/json" };
+  let body: unknown;
+  if (cfg.provider === "anthropic") {
+    url = ANTHROPIC_ENDPOINT;
+    headers = { ...headers, "x-api-key": cfg.apiKey, "anthropic-version": "2023-06-01" };
+    body = anthropicAgentBody(cfg, opts.system, opts.messages, tools);
+  } else if (cfg.provider === "google") {
+    url = `${GOOGLE_ENDPOINT}/${encodeURIComponent(cfg.model)}:generateContent`;
+    headers = { ...headers, "x-goog-api-key": cfg.apiKey };
+    body = googleAgentBody(opts.system, opts.messages, tools);
+  } else {
+    url = OPENAI_ENDPOINT;
+    headers = { ...headers, Authorization: `Bearer ${cfg.apiKey}` };
+    body = openAiAgentBody(cfg, opts.system, opts.messages, tools);
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(AGENT_STEP_TIMEOUT_MS),
+    });
+  } catch (e) {
+    return fail(502, `AI request failed: ${(e as Error).message}`);
+  }
+  const raw = await res.text().catch(() => "");
+  if (!res.ok) {
+    const out = providerError(res.status, raw);
+    return fail(out.status, out.message);
+  }
+
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    return fail(502, "AI returned a response that could not be parsed.");
+  }
+  const parsed =
+    cfg.provider === "anthropic"
+      ? parseAnthropicAgent(json)
+      : cfg.provider === "google"
+        ? parseGoogleAgent(json)
+        : parseOpenAiAgent(json);
+
+  await logUsage(opts.feature, cfg, opts.orgId, {
+    status: "ok",
+    attempt: 1,
+    startedAt,
+    usage: parsed.usage,
+  });
+  return { ok: true, ...parsed };
 }
