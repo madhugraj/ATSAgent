@@ -1,3 +1,12 @@
+# ATSAgent
+
+Internal development fork of [ATSIQ](https://github.com/madhu-yavar/yavar-ats) (Profile Matcher Pro) for building a fully agentic version of the platform. The original ATSIQ repository and its production deployment (atsiq.yavar.ai) are not modified by work in this repository.
+
+- Forked from upstream `main` at commit `382fbac` (2026-10-01), with full history
+- Upstream remote is fetch-only; pushing to it is disabled in this clone
+
+---
+
 # ATSIQ
 
 ATSIQ by Yavar AI is an enterprise recruiting intelligence platform. It combines governed hiring workflows with evidence-led JD↔CV matching, prescreening, compensation research, Talent Brain workforce intelligence and Return on Individual analysis.
