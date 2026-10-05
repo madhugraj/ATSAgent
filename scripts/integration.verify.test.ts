@@ -347,9 +347,11 @@ describe("H4: CV vault degrades gracefully without storage configured", () => {
 });
 
 describe("screening prep queue (shortlist → background kit)", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- loaded lazily inside the suite
   const { recordStageTransition } = require("../src/lib/stage-events.server") as {
     recordStageTransition: typeof import("../src/lib/stage-events.server").recordStageTransition;
   };
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- loaded lazily inside the suite
   const { runScreeningPrep } = require("../src/lib/screening-prep.server") as {
     runScreeningPrep: typeof import("../src/lib/screening-prep.server").runScreeningPrep;
   };
@@ -461,7 +463,8 @@ describe("screening prep queue (shortlist → background kit)", () => {
     for (let i = 0; i < 3; i++) {
       await runScreeningPrep({ max: 100 });
       await db.execute(
-        (await import("drizzle-orm")).sql`update screening_prep_jobs set updated_at = now() - interval '5 minutes' where status = 'pending'`,
+        (await import("drizzle-orm"))
+          .sql`update screening_prep_jobs set updated_at = now() - interval '5 minutes' where status = 'pending'`,
       );
     }
     const job = await jobFor(appShortlisted);
@@ -477,9 +480,7 @@ describe("screening prep queue (shortlist → background kit)", () => {
     const kits = await db
       .select({ id: screeningKits.id })
       .from(screeningKits)
-      .where(
-        and(eq(screeningKits.candidateId, job!.candidateId), eq(screeningKits.orgId, orgA)),
-      );
+      .where(and(eq(screeningKits.candidateId, job!.candidateId), eq(screeningKits.orgId, orgA)));
     expect(kits.length).toBe(0);
   });
 });
