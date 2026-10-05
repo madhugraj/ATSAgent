@@ -391,7 +391,7 @@ ALTER TABLE public.ai_provider_credentials OWNER TO postgres;
 CREATE TABLE public.ai_settings (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     singleton boolean DEFAULT true NOT NULL,
-    provider text DEFAULT 'lovable'::text NOT NULL,
+    provider text DEFAULT 'openai'::text NOT NULL,
     model text DEFAULT 'google/gemini-3.7-flash'::text NOT NULL,
     last_test_status text DEFAULT 'untested'::text NOT NULL,
     last_test_message text,

@@ -1,8 +1,7 @@
 import { and, asc, eq, ilike, inArray, isNotNull, lte, sql } from "drizzle-orm";
 import { createServerFn } from "@tanstack/react-start";
 
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import type { AppRole } from "./auth.middleware";
+import { requireIdentity, type AppRole } from "./auth.middleware";
 import { db } from "../server/db";
 import {
   interviews,
@@ -30,7 +29,7 @@ export type Notification = {
 };
 
 export const myNotifications = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireIdentity])
   .handler(async ({ context }): Promise<Notification[]> => {
     const email = (context.claims?.["email"] as string | undefined)?.toLowerCase() ?? null;
     const out: Notification[] = [];

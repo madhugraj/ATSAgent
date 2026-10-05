@@ -5,7 +5,7 @@
  * 1. the address must be deliverable-looking and not a free consumer mailbox,
  * 2. it must not be a known disposable/throwaway domain,
  * 3. every internal user of a tenant must share the owner's verified domain,
- * 4. Supabase Auth confirms the mailbox itself (confirmation link) before sign-in.
+ * 4. the emailed confirmation link (/api/auth/register) proves the mailbox before sign-in.
  */
 
 const FREE_DOMAINS = new Set([

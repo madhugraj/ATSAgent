@@ -64,7 +64,7 @@ jobs:
             --region "${{ vars.GCP_REGION }}" \
             --port 3000 \
             --allow-unauthenticated \
-            --set-secrets "DATABASE_URL=atsiq-database-url:latest,SESSION_SECRET=atsiq-session-secret:latest,SECRET_ENCRYPTION_KEY=atsiq-secret-encryption-key:latest,SMTP_URL=atsiq-smtp-url:latest,INBOUND_EMAIL_SECRET=atsiq-inbound-email-secret:latest,LOVABLE_CRON_SECRET=atsiq-cron-secret:latest" \
+            --set-secrets "DATABASE_URL=atsiq-database-url:latest,SESSION_SECRET=atsiq-session-secret:latest,SECRET_ENCRYPTION_KEY=atsiq-secret-encryption-key:latest,SMTP_URL=atsiq-smtp-url:latest,INBOUND_EMAIL_SECRET=atsiq-inbound-email-secret:latest,CRON_SECRET=atsiq-cron-secret:latest" \
             --set-env-vars "PUBLIC_SITE_URL=https://atsiq.yavar.ai,TRUSTED_PROXY_COUNT=1" \
             --add-cloudsql-instances "${{ secrets.GCP_PROJECT }}:${{ vars.GCP_REGION }}:atsiq" \
             --quiet

@@ -1,1 +1,0 @@
-create index if not exists organizations_email_domain_idx on public.organizations (email_domain) where email_domain is not null;

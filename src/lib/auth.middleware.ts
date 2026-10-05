@@ -1,13 +1,12 @@
 /**
  * Authorization seam.
  *
- * `requireSupabaseAuth` (authn) verifies the caller's identity. Everything on
+ * `requireIdentity` (authn) verifies the caller's identity. Everything on
  * top of it here is authorization, computed from the verified identity only —
  * never from client input. Every tenant-scoped server function must use
  * `requireOrg` (or `requireRole`), and every query it issues must carry an
- * explicit `org_id` predicate. During the migration, `requireOrg` wraps the
- * legacy JWT middleware; the session-cookie cutover replaces only the inner
- * authn step, leaving these wrappers untouched.
+ * explicit `org_id` predicate. `requireIdentity` reads the
+ * database-backed session cookie.
  */
 import { createMiddleware } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";

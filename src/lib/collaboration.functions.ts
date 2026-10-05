@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { and, desc, eq, ilike, inArray, isNotNull, or } from "drizzle-orm";
 import { z } from "zod";
 
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { requireIdentity } from "@/lib/auth.middleware";
 import { db } from "../server/db";
 import {
   applications,
@@ -50,7 +50,7 @@ export type PoolTeammate = {
 
 /** Colleagues who can own, receive or be mentioned on a candidate. */
 export const poolTeam = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireIdentity])
   .handler(async ({ context }): Promise<PoolTeammate[]> => {
     const me = await membership(context.userId);
     const rows = await db
@@ -79,7 +79,7 @@ export const poolTeam = createServerFn({ method: "GET" })
 
 /** Assign, hand over or release ownership of candidates, with an audit trail. */
 export const setCandidateOwner = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireIdentity])
   .inputValidator((data: unknown) =>
     z
       .object({
@@ -132,7 +132,7 @@ export const setCandidateOwner = createServerFn({ method: "POST" })
 
 /** Send a candidate to a colleague, optionally against one of their roles. */
 export const referCandidate = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireIdentity])
   .inputValidator((data: unknown) =>
     z
       .object({
@@ -188,7 +188,7 @@ export const referCandidate = createServerFn({ method: "POST" })
  * attaches the candidate to the role when one was named, so the hand-off is real.
  */
 export const respondReferral = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireIdentity])
   .inputValidator((data: unknown) =>
     z
       .object({
@@ -271,7 +271,7 @@ export const respondReferral = createServerFn({ method: "POST" })
 
 /** Leave a note on a candidate and optionally pull colleagues in by mention. */
 export const addCandidateNote = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireIdentity])
   .inputValidator((data: unknown) =>
     z
       .object({
@@ -319,7 +319,7 @@ export const addCandidateNote = createServerFn({ method: "POST" })
 
 /** Ask the rest of the team for people matching a skill or role. */
 export const createTalentRequest = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireIdentity])
   .inputValidator((data: unknown) =>
     z
       .object({
@@ -349,7 +349,7 @@ export const createTalentRequest = createServerFn({ method: "POST" })
 
 /** Suggest one of your candidates against a colleague's request. */
 export const suggestToRequest = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireIdentity])
   .inputValidator((data: unknown) =>
     z
       .object({
@@ -395,7 +395,7 @@ export const suggestToRequest = createServerFn({ method: "POST" })
 
 /** Close your own request once you have what you need. */
 export const closeTalentRequest = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireIdentity])
   .inputValidator((data: unknown) => z.object({ requestId: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const me = await membership(context.userId);
@@ -430,7 +430,7 @@ export type PoolShare = {
 
 /** Cross-organisation pool sharing agreements, both directions. */
 export const listPoolShares = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireIdentity])
   .handler(async ({ context }): Promise<PoolShare[]> => {
     const me = await membership(context.userId);
     const shares = await db
@@ -477,7 +477,7 @@ export const listPoolShares = createServerFn({ method: "GET" })
  * they accept, and either side can revoke it at any time.
  */
 export const offerPoolShare = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireIdentity])
   .inputValidator((data: unknown) =>
     z
       .object({
@@ -520,7 +520,7 @@ export const offerPoolShare = createServerFn({ method: "POST" })
 
 /** Accept, decline or revoke a sharing agreement. */
 export const respondPoolShare = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireIdentity])
   .inputValidator((data: unknown) =>
     z
       .object({ shareId: z.string().uuid(), action: z.enum(["accept", "decline", "revoke"]) })

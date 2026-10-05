@@ -87,16 +87,16 @@ SUPABASE_PUBLISHABLE_KEY=e2e-local-publishable-key
 DATABASE_URL=postgres://postgres@127.0.0.1:54333/atsiq_e2e
 SESSION_SECRET=e2e-local-session-secret-0123456789abcdef
 PUBLIC_SITE_URL=http://localhost:8080
-LOVABLE_CRON_SECRET=local-e2e-cron-secret
+CRON_SECRET=local-e2e-cron-secret
 ENV
   echo ".env.local: written (points app at local stack)"
 fi
 
 # Existing checkouts keep their .env.local — add the cron secret in place so
 # the /api/public/* job routes stay curl-able locally.
-if ! grep -q "LOVABLE_CRON_SECRET" .env.local 2>/dev/null; then
-  printf '\nLOVABLE_CRON_SECRET=local-e2e-cron-secret\n' >> .env.local
-  echo ".env.local: added LOVABLE_CRON_SECRET (cron routes curl-able locally)"
+if ! grep -q "CRON_SECRET" .env.local 2>/dev/null; then
+  printf '\nCRON_SECRET=local-e2e-cron-secret\n' >> .env.local
+  echo ".env.local: added CRON_SECRET (cron routes curl-able locally)"
 fi
 
 # 4. Dev server

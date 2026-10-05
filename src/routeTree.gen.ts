@@ -56,9 +56,6 @@ import { Route as ApiPublicScreeningPrepRouteImport } from './routes/api/public/
 import { Route as ApiPublicSyncCandidatesRouteImport } from './routes/api/public/sync-candidates'
 import { Route as ApiPublicSyncHrmsRouteImport } from './routes/api/public/sync-hrms'
 import { Route as ApiPublicLinkedinCallbackRouteImport } from './routes/api/public/linkedin/callback'
-import { Route as LovableEmailAuthPreviewRouteImport } from './routes/lovable/email/auth/preview'
-import { Route as LovableEmailAuthWebhookRouteImport } from './routes/lovable/email/auth/webhook'
-import { Route as LovableEmailTransactionalPreviewRouteImport } from './routes/lovable/email/transactional/preview'
 import { Route as ApiPublicBoardsProviderTokenRouteImport } from './routes/api/public/boards/$provider.$token'
 import { Route as ApiPublicIntegrationsGoogleCallbackRouteImport } from './routes/api/public/integrations/google/callback'
 import { Route as ApiPublicIntegrationsMicrosoftCallbackRouteImport } from './routes/api/public/integrations/microsoft/callback'
@@ -301,22 +298,6 @@ const ApiPublicLinkedinCallbackRoute =
     path: '/api/public/linkedin/callback',
     getParentRoute: () => rootRouteImport,
   } as any)
-const LovableEmailAuthPreviewRoute = LovableEmailAuthPreviewRouteImport.update({
-  id: '/lovable/email/auth/preview',
-  path: '/lovable/email/auth/preview',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LovableEmailAuthWebhookRoute = LovableEmailAuthWebhookRouteImport.update({
-  id: '/lovable/email/auth/webhook',
-  path: '/lovable/email/auth/webhook',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LovableEmailTransactionalPreviewRoute =
-  LovableEmailTransactionalPreviewRouteImport.update({
-    id: '/lovable/email/transactional/preview',
-    path: '/lovable/email/transactional/preview',
-    getParentRoute: () => rootRouteImport,
-  } as any)
 const ApiPublicBoardsProviderTokenRoute =
   ApiPublicBoardsProviderTokenRouteImport.update({
     id: '/api/public/boards/$provider/$token',
@@ -390,9 +371,6 @@ export interface FileRoutesByFullPath {
   '/api/public/sync-candidates': typeof ApiPublicSyncCandidatesRoute
   '/api/public/sync-hrms': typeof ApiPublicSyncHrmsRoute
   '/api/public/linkedin/callback': typeof ApiPublicLinkedinCallbackRoute
-  '/lovable/email/auth/preview': typeof LovableEmailAuthPreviewRoute
-  '/lovable/email/auth/webhook': typeof LovableEmailAuthWebhookRoute
-  '/lovable/email/transactional/preview': typeof LovableEmailTransactionalPreviewRoute
   '/api/public/boards/$provider/$token': typeof ApiPublicBoardsProviderTokenRoute
   '/api/public/integrations/google/callback': typeof ApiPublicIntegrationsGoogleCallbackRoute
   '/api/public/integrations/microsoft/callback': typeof ApiPublicIntegrationsMicrosoftCallbackRoute
@@ -446,9 +424,6 @@ export interface FileRoutesByTo {
   '/api/public/sync-candidates': typeof ApiPublicSyncCandidatesRoute
   '/api/public/sync-hrms': typeof ApiPublicSyncHrmsRoute
   '/api/public/linkedin/callback': typeof ApiPublicLinkedinCallbackRoute
-  '/lovable/email/auth/preview': typeof LovableEmailAuthPreviewRoute
-  '/lovable/email/auth/webhook': typeof LovableEmailAuthWebhookRoute
-  '/lovable/email/transactional/preview': typeof LovableEmailTransactionalPreviewRoute
   '/api/public/boards/$provider/$token': typeof ApiPublicBoardsProviderTokenRoute
   '/api/public/integrations/google/callback': typeof ApiPublicIntegrationsGoogleCallbackRoute
   '/api/public/integrations/microsoft/callback': typeof ApiPublicIntegrationsMicrosoftCallbackRoute
@@ -503,9 +478,6 @@ export interface FileRoutesById {
   '/api/public/sync-candidates': typeof ApiPublicSyncCandidatesRoute
   '/api/public/sync-hrms': typeof ApiPublicSyncHrmsRoute
   '/api/public/linkedin/callback': typeof ApiPublicLinkedinCallbackRoute
-  '/lovable/email/auth/preview': typeof LovableEmailAuthPreviewRoute
-  '/lovable/email/auth/webhook': typeof LovableEmailAuthWebhookRoute
-  '/lovable/email/transactional/preview': typeof LovableEmailTransactionalPreviewRoute
   '/api/public/boards/$provider/$token': typeof ApiPublicBoardsProviderTokenRoute
   '/api/public/integrations/google/callback': typeof ApiPublicIntegrationsGoogleCallbackRoute
   '/api/public/integrations/microsoft/callback': typeof ApiPublicIntegrationsMicrosoftCallbackRoute
@@ -561,9 +533,6 @@ export interface FileRouteTypes {
     | '/api/public/sync-candidates'
     | '/api/public/sync-hrms'
     | '/api/public/linkedin/callback'
-    | '/lovable/email/auth/preview'
-    | '/lovable/email/auth/webhook'
-    | '/lovable/email/transactional/preview'
     | '/api/public/boards/$provider/$token'
     | '/api/public/integrations/google/callback'
     | '/api/public/integrations/microsoft/callback'
@@ -617,9 +586,6 @@ export interface FileRouteTypes {
     | '/api/public/sync-candidates'
     | '/api/public/sync-hrms'
     | '/api/public/linkedin/callback'
-    | '/lovable/email/auth/preview'
-    | '/lovable/email/auth/webhook'
-    | '/lovable/email/transactional/preview'
     | '/api/public/boards/$provider/$token'
     | '/api/public/integrations/google/callback'
     | '/api/public/integrations/microsoft/callback'
@@ -673,9 +639,6 @@ export interface FileRouteTypes {
     | '/api/public/sync-candidates'
     | '/api/public/sync-hrms'
     | '/api/public/linkedin/callback'
-    | '/lovable/email/auth/preview'
-    | '/lovable/email/auth/webhook'
-    | '/lovable/email/transactional/preview'
     | '/api/public/boards/$provider/$token'
     | '/api/public/integrations/google/callback'
     | '/api/public/integrations/microsoft/callback'
@@ -730,9 +693,6 @@ export interface RootRouteChildren {
   ApiPublicSyncCandidatesRoute: typeof ApiPublicSyncCandidatesRoute
   ApiPublicSyncHrmsRoute: typeof ApiPublicSyncHrmsRoute
   ApiPublicLinkedinCallbackRoute: typeof ApiPublicLinkedinCallbackRoute
-  LovableEmailAuthPreviewRoute: typeof LovableEmailAuthPreviewRoute
-  LovableEmailAuthWebhookRoute: typeof LovableEmailAuthWebhookRoute
-  LovableEmailTransactionalPreviewRoute: typeof LovableEmailTransactionalPreviewRoute
   ApiPublicBoardsProviderTokenRoute: typeof ApiPublicBoardsProviderTokenRoute
   ApiPublicIntegrationsGoogleCallbackRoute: typeof ApiPublicIntegrationsGoogleCallbackRoute
   ApiPublicIntegrationsMicrosoftCallbackRoute: typeof ApiPublicIntegrationsMicrosoftCallbackRoute
@@ -1070,27 +1030,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicLinkedinCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/lovable/email/auth/preview': {
-      id: '/lovable/email/auth/preview'
-      path: '/lovable/email/auth/preview'
-      fullPath: '/lovable/email/auth/preview'
-      preLoaderRoute: typeof LovableEmailAuthPreviewRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/lovable/email/auth/webhook': {
-      id: '/lovable/email/auth/webhook'
-      path: '/lovable/email/auth/webhook'
-      fullPath: '/lovable/email/auth/webhook'
-      preLoaderRoute: typeof LovableEmailAuthWebhookRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/lovable/email/transactional/preview': {
-      id: '/lovable/email/transactional/preview'
-      path: '/lovable/email/transactional/preview'
-      fullPath: '/lovable/email/transactional/preview'
-      preLoaderRoute: typeof LovableEmailTransactionalPreviewRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/api/public/boards/$provider/$token': {
       id: '/api/public/boards/$provider/$token'
       path: '/api/public/boards/$provider/$token'
@@ -1170,9 +1109,6 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicSyncCandidatesRoute: ApiPublicSyncCandidatesRoute,
   ApiPublicSyncHrmsRoute: ApiPublicSyncHrmsRoute,
   ApiPublicLinkedinCallbackRoute: ApiPublicLinkedinCallbackRoute,
-  LovableEmailAuthPreviewRoute: LovableEmailAuthPreviewRoute,
-  LovableEmailAuthWebhookRoute: LovableEmailAuthWebhookRoute,
-  LovableEmailTransactionalPreviewRoute: LovableEmailTransactionalPreviewRoute,
   ApiPublicBoardsProviderTokenRoute: ApiPublicBoardsProviderTokenRoute,
   ApiPublicIntegrationsGoogleCallbackRoute:
     ApiPublicIntegrationsGoogleCallbackRoute,

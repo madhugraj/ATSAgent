@@ -2,10 +2,7 @@ import { createStart, createCsrfMiddleware, createMiddleware } from "@tanstack/r
 
 import { renderErrorPage } from "./lib/error-page";
 
-const errorMiddleware = createMiddleware().server(async ({ next, request }) => {
-  if (request && new URL(request.url).pathname.startsWith("/lovable/")) {
-    return next();
-  }
+const errorMiddleware = createMiddleware().server(async ({ next }) => {
   try {
     return await next();
   } catch (error) {

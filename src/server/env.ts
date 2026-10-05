@@ -67,12 +67,11 @@ const schema = z.object({
 });
 
 // Some hosts expose the plain Postgres connection string under a different
-// variable name (DB_URL); accept those aliases so the server boots there too.
+// variable name (DB_URL); accept that alias so the server boots there too.
 // This is a standard Postgres DSN — Drizzle connects directly, no vendor SDK.
 const parsed = schema.safeParse({
   ...process.env,
-  DATABASE_URL:
-    process.env["DATABASE_URL"] ?? process.env["DB_URL"] ?? process.env["SUPABASE_DB_URL"],
+  DATABASE_URL: process.env["DATABASE_URL"] ?? process.env["DB_URL"],
 });
 if (!parsed.success) {
   const missing = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`);

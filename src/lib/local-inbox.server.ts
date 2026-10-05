@@ -161,7 +161,7 @@ export async function receiveMail(mail: InboundMail): Promise<InboundResult> {
   }
 
   const sender = displayName(mail.from ?? "");
-  const { attachmentText, looksLikeCv } = await import("./inbox.server");
+  const { attachmentText, looksLikeCv } = await import("./cv-text.server");
   const attachments = (mail.attachments ?? []).filter((a) => looksLikeCv(a.filename ?? ""));
   const cv = attachments[0] ?? null;
 

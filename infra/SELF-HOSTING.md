@@ -1,13 +1,13 @@
-# ATSIQ self-hosting — leaving Lovable behind
+# ATSIQ self-hosting
 
 The application is fully portable: TanStack Start (React 19 SSR on Nitro) as a
 plain Node server, ordinary PostgreSQL via drizzle, S3-compatible object
-storage, and first-party cookie auth. Nothing in the runtime needs Lovable or
-Supabase. This document is the step-by-step exit plan; `DEPLOYMENT-GCP.md`
+storage, SMTP and first-party cookie auth — no hosted-platform SDKs. This
+document is the step-by-step Cloud Run plan; `DEPLOYMENT-GCP.md`
 remains the reference for the full GCP environment (GKE variant, OAuth
 redirects, cron jobs).
 
-## 0. Runtime dependencies after the exit
+## 0. Runtime dependencies
 
 | Need                                              | Provider                             | Env                                                                                 |
 | ------------------------------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------- |
@@ -21,28 +21,20 @@ redirects, cron jobs).
 Optional feature flags (LinkedIn/Google/Teams/Zoom OAuth, cron secrets) are
 listed in `DEPLOYMENT-GCP.md` §4 and stay dark when unset.
 
-## 1. Get the data out of Lovable
+## 1. Database
 
-The source of truth for a fresh database is `drizzle/pg-migrations/` — the
-Lovable-era `drizzle/migrations` journal is incomplete (core tables were
-applied outside drizzle) and must NOT be used with `drizzle-kit migrate`.
+The schema source of truth is `drizzle/pg-migrations/`, applied by the
+idempotent runner (safe to re-run; it records applied files in `pg_migrations`):
 
-1. Ask Lovable support (or the project's database console) for a recent backup
-   / `pg_dump` of the production database — required especially while the
-   point-in-time restore discussed with them is outstanding.
-2. For a **fresh** database instead, apply the schema with the idempotent
-   runner (no dump needed):
+```bash
+DATABASE_URL="postgres://…/atsiq" bun scripts/migrate-pg.mjs
+```
 
-   ```bash
-   DATABASE_URL="postgres://…/atsiq" bun scripts/migrate-pg.mjs
-   ```
+To bring existing data across, restore a data-only dump over that schema:
 
-3. To **migrate existing production data**, restore their dump over the schema
-   from step 2 (restore with `--data-only`, or drop the dump's schema section):
-
-   ```bash
-   pg_restore --data-only --no-owner -d "$DATABASE_URL" lovable-dump.dump
-   ```
+```bash
+pg_restore --data-only --no-owner -d "$DATABASE_URL" existing.dump
+```
 
 ## 2. One-time GCP setup (Cloud Run path)
 
@@ -83,18 +75,5 @@ every push to `main`. Enable it by adding the repo secrets `GCP_PROJECT`,
    `/platform`, upload a CV.
 2. In Cloudflare, switch the `atsiq.yavar.ai` origin to the Cloud Run URL (or
    add a CNAME to `ghs.googlehosted.com` and let Cloudflare proxy it).
-3. Keep the Lovable deployment parked (not deleted) until a week of clean
-   operation, then cancel it.
-
-## 5. Remaining legacy fragments (non-blocking)
-
-- `@lovable.dev/email-js` is only a _fallback_ in `src/lib/email-templates/send-email.ts`;
-  with `SMTP_URL` set, email never touches Lovable. Removing the fallback is a
-  small cleanup.
-- `@lovable.dev/vite-tanstack-config` is a build-time vite helper; swapping it
-  for the raw `@tanstack/react-start` plugin is optional hygiene.
-- `drizzle/migrations/` (incomplete Lovable journal) can be deleted once
-  nothing references it — `scripts/migrate-pg.mjs` + `drizzle/pg-migrations/`
-  are the canonical schema path.
-- Supabase JWT bearer auth was removed; the leftover `src/integrations/supabase/`
-  folder is re-export seams and type definitions only.
+3. Keep the previous origin available until a week of clean operation, then
+   retire it.

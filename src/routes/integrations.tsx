@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import type { Tables } from "@/integrations/supabase/types";
+import type { Tables } from "@/lib/database.types";
 import {
   disconnectIntegration,
   listSourceIntegrations,
@@ -40,7 +40,6 @@ import {
   linkedinStatus,
   startLinkedInConnect,
 } from "@/lib/linkedin.functions";
-import { careersInboxStatus, importCareersInbox } from "@/lib/inbox.functions";
 import {
   disconnectHrmsIntegration,
   listHrmsIntegrations,
@@ -834,29 +833,7 @@ function CareersInboxPanel() {
     queryFn: () => orgInbox({ data: undefined }),
     refetchOnWindowFocus: false,
   });
-  const status = useQuery({
-    queryKey: ["careers_inbox"],
-    queryFn: () => careersInboxStatus({ data: undefined }),
-    refetchOnWindowFocus: false,
-  });
-  const runImport = useServerFn(importCareersInbox);
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<Awaited<ReturnType<typeof importCareersInbox>> | null>(null);
-  const s = status.data;
   const address = mine.data?.address ?? null;
-
-  async function onImport() {
-    setBusy(true);
-    try {
-      const r = await runImport({ data: {} });
-      setResult(r);
-      toast.success(`${r.imported} new, ${r.updated} updated from ${r.scanned} emails`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Import failed");
-    } finally {
-      setBusy(false);
-    }
-  }
 
   return (
     <div className="mt-4 rounded-lg border border-primary/30 bg-primary/5 p-4">
@@ -914,34 +891,6 @@ function CareersInboxPanel() {
           administrator to finish onboarding for this workspace.
         </p>
       )}
-
-      {s?.error ? <p className="mt-2 text-xs text-amber-600">{s.error}</p> : null}
-
-      {s?.connected ? (
-        <Button size="sm" variant="outline" className="mt-3" onClick={onImport} disabled={busy}>
-          {busy ? <Loader2 className="size-4 animate-spin" /> : null} Also import from {s.email}
-        </Button>
-      ) : null}
-
-      {result ? (
-        <div className="mt-3 rounded-md border border-border bg-background p-3">
-          <p className="num text-xs text-muted-foreground">
-            {result.scanned} emails scanned · {result.imported} new candidates · {result.updated}{" "}
-            refreshed · {result.skipped} skipped · {result.errors} failed
-          </p>
-          {result.outcomes.length ? (
-            <ul className="mt-2 space-y-1 text-xs">
-              {result.outcomes.slice(0, 20).map((o, i) => (
-                <li key={i} className="flex flex-wrap gap-x-2 text-muted-foreground">
-                  <span className="font-medium text-foreground">{o.status}</span>
-                  <span className="truncate">{o.detail}</span>
-                  {o.requisition ? <span>→ {o.requisition}</span> : null}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
-      ) : null}
     </div>
   );
 }

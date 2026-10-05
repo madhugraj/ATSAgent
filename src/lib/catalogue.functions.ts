@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { ilike } from "drizzle-orm";
 import { z } from "zod";
 
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { requireIdentity } from "@/lib/auth.middleware";
 import { db } from "../server/db";
 import { platformAdmins, productCatalogueCommercials } from "@db/schema";
 import { CATALOGUE_MODULES, type CatalogueModule } from "@/lib/product-catalogue";
@@ -45,7 +45,7 @@ export type CatalogueResult = {
 
 /** The live catalogue: shipped modules merged with their saved commercial terms. */
 export const readCatalogue = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireIdentity])
   .handler(async ({ context }): Promise<CatalogueResult> => {
     await requireSuperUser(context);
     const saved = new Map(
@@ -88,7 +88,7 @@ export const saveCatalogueCommercials = createServerFn({ method: "POST" })
       })
       .parse(d),
   )
-  .middleware([requireSupabaseAuth])
+  .middleware([requireIdentity])
   .handler(async ({ data, context }) => {
     await requireSuperUser(context);
     if (!CATALOGUE_MODULES.some((m) => m.id === data.moduleId)) throw new Error("Unknown module.");

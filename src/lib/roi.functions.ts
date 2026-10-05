@@ -11,7 +11,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { and, eq, ilike, inArray } from "drizzle-orm";
 import { z } from "zod";
 
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { requireIdentity } from "@/lib/auth.middleware";
 import { db } from "../server/db";
 import {
   applications,
@@ -229,7 +229,7 @@ async function loadCapabilities(orgId: string): Promise<{ nodes: OntologyNode[];
 
 /** The CHRO's answer to "what return on individual have we got?" */
 export const readReturnOnIndividual = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireIdentity])
   .inputValidator((input: unknown) =>
     z.object({ orgId: z.string().uuid().optional() }).parse(input ?? {}),
   )

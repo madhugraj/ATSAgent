@@ -5,7 +5,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
 
-import { authenticateCronRequest } from "@/integrations/supabase/cron-auth";
+import { authenticateCronRequest } from "@/server/cron-auth";
 
 const Body = z.object({
   max: z.number().min(1).max(100).optional(),

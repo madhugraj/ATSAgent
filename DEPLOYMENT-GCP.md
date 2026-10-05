@@ -40,7 +40,7 @@ gcloud builds submit \
 
 Container: port **3000**, `HOST=0.0.0.0`. No `/health` endpoint exists — use `GET /` (HTTP 200) as readiness/liveness probe. One DB migration **Job per release** (below) must complete before rolling the Deployment.
 
-**Migrations** (run once per release, before deploy). The schema source of truth is `drizzle/pg-migrations/` applied by `scripts/migrate-pg.mjs` (idempotent — safe to re-run; records applied files in `pg_migrations`). **Do NOT use `bunx drizzle-kit migrate`** — the legacy `drizzle/migrations` journal is incomplete and cannot build a fresh database:
+**Migrations** (run once per release, before deploy). The schema source of truth is `drizzle/pg-migrations/` applied by `scripts/migrate-pg.mjs` (idempotent — safe to re-run; records applied files in `pg_migrations`). **Do NOT use `bunx drizzle-kit migrate`** — the runner is the only supported migration path:
 
 ```bash
 DATABASE_URL="postgresql://USER:PASS@PRIVATE_IP:5432/atsiq" node scripts/migrate-pg.mjs
@@ -80,10 +80,10 @@ Recent additions to note per release: `0015_ai_usage_events.sql` (AI usage ledge
 | OAuth state signing (required if any meeting OAuth above is enabled) | `OAUTH_STATE_SECRET` (random 32+)                                                                                                                                                      |
 | Google sign-in button                                                | `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`                                                                                                                                 |
 | Careers-inbox email webhook                                          | `INBOUND_EMAIL_SECRET` (random 32+), `INBOUND_EMAIL_DOMAIN`                                                                                                                            |
-| Scheduler/cron routes                                                | `LOVABLE_CRON_SECRET` (random 32+; optional `LOVABLE_CRON_SECRET_PREVIOUS` for rotation)                                                                                               |
+| Scheduler/cron routes                                                | `CRON_SECRET` (random 32+; optional `CRON_SECRET_PREVIOUS` for rotation)                                                                                               |
 | Transactional email                                                  | `SMTP_URL` (e.g. `smtps://user:pass@smtp.example.com:465`), `EMAIL_FROM`                                                                                                               |
 
-**Secrets to generate:** `SESSION_SECRET`, `SECRET_ENCRYPTION_KEY` (AES-256 key for credentials at rest; `openssl rand -base64 32`), `OAUTH_STATE_SECRET`, `LINKEDIN_STATE_SECRET`, `INBOUND_EMAIL_SECRET`, `LOVABLE_CRON_SECRET` — stored in Secret Manager. `SECRET_ENCRYPTION_KEY` is mandatory before saving OAuth or AI credentials. Rotating it requires re-encrypting stored values.
+**Secrets to generate:** `SESSION_SECRET`, `SECRET_ENCRYPTION_KEY` (AES-256 key for credentials at rest; `openssl rand -base64 32`), `OAUTH_STATE_SECRET`, `LINKEDIN_STATE_SECRET`, `INBOUND_EMAIL_SECRET`, `CRON_SECRET` — stored in Secret Manager. `SECRET_ENCRYPTION_KEY` is mandatory before saving OAuth or AI credentials. Rotating it requires re-encrypting stored values.
 
 ### Organisation-owned AI credentials
 
@@ -113,11 +113,11 @@ All under the new domain:
 
 ## 6. Cron (Cloud Scheduler, auth via header)
 
-All endpoints expect `Authorization: Bearer $LOVABLE_CRON_SECRET`:
+All endpoints expect `Authorization: Bearer $CRON_SECRET`:
 
 | Job                       | Target                                                | Typical cadence |
 | ------------------------- | ----------------------------------------------------- | --------------- |
-| Careers-inbox sync        | `https://z-atsiq.yavar.ai/api/public/inbox-sync`      | every 5–15 min  |
+| Careers-inbox scoring     | `https://z-atsiq.yavar.ai/api/public/inbox-sync`      | every 5–15 min  |
 | Candidate re-sync/scoring | `https://z-atsiq.yavar.ai/api/public/sync-candidates` | hourly          |
 | Candidate email outbox    | `https://z-atsiq.yavar.ai/api/public/process-email-outbox` | every 5 min |
 | HRMS employee sync        | `https://z-atsiq.yavar.ai/api/public/sync-hrms`       | every 15 min    |

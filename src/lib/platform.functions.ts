@@ -29,8 +29,7 @@ import {
   userRoles,
   users,
 } from "@db/schema";
-import { requirePlatformAdmin } from "./auth.middleware";
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { requireIdentity, requirePlatformAdmin } from "./auth.middleware";
 
 /**
  * Platform (product owner) layer. A super user is anyone whose email address is on the
@@ -74,7 +73,7 @@ export const platformState = createServerFn({ method: "GET" })
   // A status probe must ANSWER, not throw: gating it behind requirePlatformAdmin
   // turned "not a super user" into a thrown error that every normal user's
   // session retried and re-fetched forever on the org gate.
-  .middleware([requireSupabaseAuth])
+  .middleware([requireIdentity])
   .handler(async ({ context }): Promise<PlatformState> => {
     const email = (context.claims?.email as string | undefined)?.toLowerCase() ?? null;
     if (!email) return { isSuperUser: false, claimable: false, email: null };

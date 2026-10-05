@@ -11,7 +11,7 @@ import { z } from "zod";
 
 import { db } from "../../../server/db";
 import { applications, candidateVerifications, candidates } from "@db/schema";
-import { authenticateCronRequest } from "@/integrations/supabase/cron-auth";
+import { authenticateCronRequest } from "@/server/cron-auth";
 import { verifyClaims } from "@/lib/verification.server";
 
 const Body = z.object({

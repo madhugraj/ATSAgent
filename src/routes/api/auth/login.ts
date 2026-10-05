@@ -1,7 +1,7 @@
 /**
  * POST /api/auth/login — first-party password sign-in.
  * Verifies the scrypt hash in our own Postgres and establishes the
- * atsiq_session httpOnly cookie. No Supabase/Lovable involvement.
+ * atsiq_session httpOnly cookie.
  */
 import { createFileRoute } from "@tanstack/react-router";
 import { eq } from "drizzle-orm";

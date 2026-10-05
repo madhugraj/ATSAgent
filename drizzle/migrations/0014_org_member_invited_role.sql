@@ -1,1 +1,0 @@
-alter table public.org_members add column if not exists invited_role app_role;
