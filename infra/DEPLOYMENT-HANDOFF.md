@@ -1,13 +1,13 @@
 # ATSIQ — GCP deployment handoff for DevOps
 
-**Goal:** deploy ATSIQ (the ATS web app) to Google Cloud Run under **https://atsiq.yavar.ai**, backed by Cloud SQL PostgreSQL, and retire the current Lovable.dev hosting. The application is fully portable — a plain Node server + ordinary PostgreSQL + S3-compatible storage + SMTP. It has **no runtime dependency on Lovable or Supabase** (verified: the production build boots with only `DATABASE_URL` and `SESSION_SECRET` set).
+**Goal:** deploy ATSIQ (the ATS web app) to Google Cloud Run under **https://atsiq.yavar.ai**, backed by Cloud SQL PostgreSQL. The application is fully portable — a plain Node server + ordinary PostgreSQL + S3-compatible storage + SMTP. It has **no runtime dependency on Lovable or Supabase** (verified: the production build boots with only `DATABASE_URL` and `SESSION_SECRET` set).
 
 | | |
 |---|---|
 | Source repo | https://github.com/madhu-yavar/yavar-ats — branch `main` (deploy latest commit) |
 | App type | TanStack Start (React 19 SSR on Nitro) → plain **Node server** (`.output/server/index.mjs`) |
 | Container | `Dockerfile` at repo root — multi-stage, final image `node:22-slim`, listens on **port 3000**, `HOST=0.0.0.0` |
-| Database | Ordinary **PostgreSQL 14+** (drizzle ORM). Schema source of truth: `drizzle/pg-migrations/` applied by `scripts/migrate-pg.mjs` (idempotent). **Do NOT use `drizzle-kit migrate`** — the old `drizzle/migrations` journal is incomplete and cannot build a fresh database. |
+| Database | Ordinary **PostgreSQL 14+** (drizzle ORM). Schema source of truth: `drizzle/pg-migrations/` applied by `scripts/migrate-pg.mjs` (idempotent). **Do NOT use `drizzle-kit migrate`** — the runner is the only supported migration path. |
 | Auth | First-party: scrypt password hashes in the `users` table, httpOnly `atsiq_session` cookie, DB-backed `sessions` table. No external identity provider. |
 | Object storage (CV vault, template sources, brand logos) | Any S3-compatible store. Recommended: **GCS bucket with HMAC keys**. |
 | Email | Any SMTP relay (`SMTP_URL`). Used for: registration confirmation, invitations, password reset, org approval notices, and the queued candidate emails (acknowledgment, stage update, interview invitation, offer) drained by the `process-email-outbox` cron. |
@@ -23,7 +23,7 @@
 | GCP project ID + region | e.g. `yavar-studio`, region `asia-south1` |
 | DNS control for `atsiq.yavar.ai` | Currently proxied through **Cloudflare**; origin must be repointed at the Cloud Run URL at cut-over |
 | SMTP credentials | Host/port/user/pass (or an existing corporate relay). Password-reset and invitation emails depend on this |
-| Confirmation that Lovable's DB backup/restore is settled | The production data (users, organisations, candidates) currently lives in Lovable's managed database; a `pg_dump` must be exported from there — see §3 |
+| A `pg_dump` of any existing data | Needed only when migrating existing users, organisations and candidates — see §3 |
 
 ---
 
@@ -98,17 +98,15 @@ DATABASE_URL="postgres://atsiq:<pw>@/atsiq?host=/cloudsql/PROJECT:REGION:atsiq" 
 
 Safe to re-run; it records applied files in a `pg_migrations` table.
 
-**Existing production data (this is our case):** the data lives in Lovable's
-managed Postgres. Get a dump from Lovable support / the project's database
-console, then:
+**Existing data:** take a dump from the current database, then:
 
 ```bash
 # Schema first (same command as above), then data-only restore:
-pg_restore --data-only --no-owner -d "$DATABASE_URL" lovable-dump.dump
+pg_restore --data-only --no-owner -d "$DATABASE_URL" existing.dump
 # (if they provide plain SQL instead: psql -d "$DATABASE_URL" -f dump.sql)
 ```
 
-**Verify the restore** (counts must match what Lovable's console shows):
+**Verify the restore** (counts must match the source database):
 
 ```sql
 SELECT count(*) FROM users;          -- expect ≥ 1 (madhu.r@yavar.ai)
@@ -174,17 +172,17 @@ On the Cloud Run URL:
 1. In Cloudflare, repoint `atsiq.yavar.ai` to the Cloud Run URL
    (`https://atsiq.yavar.ai` → CNAME `ghs.googlehosted.com` proxied, or origin
    rule to the `*.run.app` URL).
-2. Keep the **Lovable deployment parked (not deleted)** for a week of clean
-   operation, then cancel it.
-3. Rollback = switch the Cloudflare origin back to Lovable.
+2. Keep the **previous origin available** for a week of clean operation, then
+   retire it.
+3. Rollback = switch the Cloudflare origin back to the previous origin.
 
-## 7. Scheduled jobs (optional, previously on Lovable cron)
+## 7. Scheduled jobs (optional)
 
 Cloud Scheduler (all call the app with `Authorization: Bearer <value of atsiq-cron-secret>`):
 
 | Schedule | Target |
 |---|---|
-| every 5–15 min | `https://atsiq.yavar.ai/api/public/inbox-sync` |
+| every 5–15 min | `https://atsiq.yavar.ai/api/public/inbox-sync` (scores candidates that arrived through the careers-inbox webhook) |
 | hourly | `https://atsiq.yavar.ai/api/public/sync-candidates` |
 | every 5 min | `https://atsiq.yavar.ai/api/public/process-email-outbox` (drains the candidate email queue) |
 | every 15 min | `https://atsiq.yavar.ai/api/public/sync-hrms` (refreshes the HRMS employee caches) |

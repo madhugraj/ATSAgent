@@ -9,7 +9,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { and, eq } from "drizzle-orm";
 
-import { authenticateCronRequest } from "@/integrations/supabase/cron-auth";
+import { authenticateCronRequest } from "@/server/cron-auth";
 
 async function run(request: Request) {
   const denied = await authenticateCronRequest(request);

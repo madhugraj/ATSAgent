@@ -1,1 +1,0 @@
-alter table public.organizations add column if not exists email_domain text;

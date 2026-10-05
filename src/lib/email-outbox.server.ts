@@ -17,7 +17,7 @@ import {
   type EmailOutboxKind,
   type EmailOutboxStatus,
 } from "@db/schema";
-import { EmailAttachmentsUnsupportedError, sendTemplateEmail } from "./email-templates/send-email";
+import { sendTemplateEmail } from "./email-templates/send-email";
 import { DEFAULT_EMAIL_SETTINGS, type EmailSettingsEffective } from "./email-settings.shared";
 
 const MAX_ATTEMPTS = 5;
@@ -231,29 +231,20 @@ export async function processEmailOutbox(opts: { max?: number } = {}): Promise<O
 
   for (const row of claimed) {
     try {
-      const result = await sendTemplateEmail(row.templateName, row.toEmail, {
+      await sendTemplateEmail(row.templateName, row.toEmail, {
         templateData: row.templateData,
         idempotencyKey: `outbox:${row.id}`,
         ...(row.replyTo ? { replyTo: row.replyTo } : {}),
         ...(row.attachments.length ? { attachments: row.attachments } : {}),
       });
-      if (result.sent) {
-        await db
-          .update(emailOutbox)
-          .set({ status: "sent", sentAt: new Date(), lastError: null })
-          .where(eq(emailOutbox.id, row.id));
-        counts.sent++;
-      } else {
-        await db
-          .update(emailOutbox)
-          .set({ status: "suppressed", lastError: "recipient_suppressed by email provider" })
-          .where(eq(emailOutbox.id, row.id));
-        counts.suppressed++;
-      }
+      await db
+        .update(emailOutbox)
+        .set({ status: "sent", sentAt: new Date(), lastError: null })
+        .where(eq(emailOutbox.id, row.id));
+      counts.sent++;
     } catch (e) {
-      const terminal = e instanceof EmailAttachmentsUnsupportedError;
       const attempts = row.attempts + 1;
-      const isFinal = terminal || attempts >= MAX_ATTEMPTS;
+      const isFinal = attempts >= MAX_ATTEMPTS;
       await db
         .update(emailOutbox)
         .set({

@@ -5,7 +5,7 @@
  * offer. What is NOT allowed is moving backwards through the funnel without
  * parking the candidate (on_hold / reserve) first, so the audit trail stays honest.
  */
-import type { Database } from "@/integrations/supabase/types";
+import type { Database } from "@/lib/database.types";
 
 export type Stage = Database["public"]["Enums"]["app_stage"];
 

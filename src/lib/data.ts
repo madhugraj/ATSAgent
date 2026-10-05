@@ -45,7 +45,7 @@ import type { ScreeningQueueCounts } from "./screening-queue.functions";
 import { addMasterItem as addMasterItemFn } from "./master.functions";
 import { getLatestBenchmark, type BenchmarkRow } from "./salary-benchmark.functions";
 import { listTemplates, type TemplateWire } from "./templates.functions";
-import type { Json, Tables } from "@/integrations/supabase/types";
+import type { Json, Tables } from "@/lib/database.types";
 
 export type Department = Tables<"departments">;
 export type Requisition = Tables<"requisitions"> & { job_card_overrides: Json | null };

@@ -1,36 +1,20 @@
 import * as React from "react";
 import { render } from "@react-email/render";
-import { EmailAPIError, sendLovableEmail } from "@lovable.dev/email-js";
 import nodemailer from "nodemailer";
 import { TEMPLATES, type TemplateData } from "./registry";
 
-// Server-only: reads SMTP_URL (self-hosted) or LOVABLE_API_KEY (Lovable Cloud).
-// Never import from client components.
+// Server-only: sends over SMTP_URL. Never import from client components.
 
-// Configuration baked in at scaffold time
 const SITE_NAME = "ATSIQ";
-// SENDER_DOMAIN is the verified sender subdomain FQDN (e.g., "notify.example.com").
-// It MUST match the subdomain delegated to Lovable's nameservers. NEVER use the root domain.
-const SENDER_DOMAIN = "notify.atsiq.yavar.ai";
-// FROM_DOMAIN is the domain shown in the From: header (e.g., "example.com").
-// Can be the root domain when display_from_root is enabled — this is cosmetic only.
+// Domain shown in the default From: header; override with EMAIL_FROM.
 const FROM_DOMAIN = "atsiq.yavar.ai";
 
-export type SendTemplateEmailResult =
-  { sent: true } | { sent: false; reason: "recipient_suppressed" };
+export type SendTemplateEmailResult = { sent: true };
 
 export interface EmailAttachment {
   filename: string;
   contentBase64: string;
   contentType: string;
-}
-
-/** Thrown when attachments are requested but the active transport cannot carry them. */
-export class EmailAttachmentsUnsupportedError extends Error {
-  constructor() {
-    super("Attachments are only supported over SMTP — configure SMTP_URL to send them");
-    this.name = "EmailAttachmentsUnsupportedError";
-  }
 }
 
 export interface SendTemplateEmailOptions {
@@ -42,11 +26,9 @@ export interface SendTemplateEmailOptions {
 }
 
 /**
- * Renders a registered template and sends it through Lovable's managed email
- * API. Suppression, retries, and rate limits are enforced by Lovable
- * server-side. A suppressed recipient is an expected outcome
- * ({ sent: false }); any other failure throws — EmailAPIError exposes
- * .code and .status for branching.
+ * Renders a registered template and sends it over the deployment's SMTP
+ * relay (SMTP_URL). Any transport failure throws; the email outbox
+ * (src/lib/email-outbox.server.ts) owns retries.
  */
 export async function sendTemplateEmail(
   templateName: string,
@@ -75,65 +57,29 @@ export async function sendTemplateEmail(
     typeof template.subject === "function" ? template.subject(templateData) : template.subject;
   const from = process.env["EMAIL_FROM"] || `${SITE_NAME} <noreply@${FROM_DOMAIN}>`;
 
-  // Self-hosted deployments send over their own SMTP (documented in
-  // DEPLOYMENT-GCP.md); the Lovable API path only exists on Lovable Cloud.
   const smtpUrl = process.env["SMTP_URL"];
-  if (smtpUrl) {
-    const transporter = nodemailer.createTransport(smtpUrl);
-    await transporter.sendMail({
-      from,
-      to: recipient,
-      subject,
-      html,
-      text,
-      ...(options.replyTo ? { replyTo: options.replyTo } : {}),
-      ...(options.attachments?.length
-        ? {
-            attachments: options.attachments.map((a) => ({
-              filename: a.filename,
-              content: Buffer.from(a.contentBase64, "base64"),
-              contentType: a.contentType,
-            })),
-          }
-        : {}),
-      headers: { "X-ATSIQ-Idempotency-Key": options.idempotencyKey || crypto.randomUUID() },
-    });
-    return { sent: true };
+  if (!smtpUrl) {
+    throw new Error("Email is not configured: set SMTP_URL");
   }
 
-  if (options.attachments?.length) {
-    throw new EmailAttachmentsUnsupportedError();
-  }
-
-  const apiKey = process.env["LOVABLE_API_KEY"];
-  if (!apiKey) {
-    throw new Error(
-      "Email is not configured: set SMTP_URL (self-hosted) or LOVABLE_API_KEY (Lovable Cloud)",
-    );
-  }
-
-  try {
-    await sendLovableEmail(
-      {
-        to: recipient,
-        from,
-        sender_domain: SENDER_DOMAIN,
-        subject,
-        html,
-        text,
-        purpose: "transactional",
-        label: templateName,
-        idempotency_key: options.idempotencyKey || crypto.randomUUID(),
-        ...(options.replyTo ? { reply_to: options.replyTo } : {}),
-      },
-      { apiKey, sendUrl: process.env["LOVABLE_SEND_URL"] },
-    );
-  } catch (error) {
-    if (error instanceof EmailAPIError && error.code === "recipient_suppressed") {
-      return { sent: false, reason: "recipient_suppressed" };
-    }
-    throw error;
-  }
-
+  const transporter = nodemailer.createTransport(smtpUrl);
+  await transporter.sendMail({
+    from,
+    to: recipient,
+    subject,
+    html,
+    text,
+    ...(options.replyTo ? { replyTo: options.replyTo } : {}),
+    ...(options.attachments?.length
+      ? {
+          attachments: options.attachments.map((a) => ({
+            filename: a.filename,
+            content: Buffer.from(a.contentBase64, "base64"),
+            contentType: a.contentType,
+          })),
+        }
+      : {}),
+    headers: { "X-ATSIQ-Idempotency-Key": options.idempotencyKey || crypto.randomUUID() },
+  });
   return { sent: true };
 }

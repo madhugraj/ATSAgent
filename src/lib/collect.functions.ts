@@ -106,26 +106,6 @@ export const collectApplicants = createServerFn({ method: "POST" })
       summary.mailboxNote = e instanceof Error ? e.message : "Could not read your careers mail.";
     }
 
-    // 2b. An optional external mailbox, when one has been connected as well.
-    try {
-      const { inboxConfigured, syncCareersInbox } = await import("./inbox.server");
-      if (inboxConfigured()) {
-        const run = await syncCareersInbox({
-          requisitionId: data.requisitionId ?? null,
-          max: data.max ?? 25,
-          orgId,
-        });
-        summary.scanned += run.scanned;
-        summary.imported += run.imported;
-        summary.updated += run.updated;
-        summary.skipped += run.skipped;
-        summary.importErrors += run.errors;
-      }
-    } catch {
-      // The built-in careers address above is the supported path; an extra
-      // mailbox failing must never stop the collect run.
-    }
-
     // 3. Score everything still unscored, so HR never has to run matching by hand.
     const { scoreUnscored } = await import("./autoscore.server");
     const scoring = await scoreUnscored({

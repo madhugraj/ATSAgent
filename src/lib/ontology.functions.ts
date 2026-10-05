@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { and, desc, eq, ilike, inArray } from "drizzle-orm";
 import { z } from "zod";
 
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { requireIdentity } from "@/lib/auth.middleware";
 import { db } from "../server/db";
 import {
   applications,
@@ -204,7 +204,7 @@ function history(snapshots: Array<typeof ontologySnapshots.$inferSelect>) {
 
 /** Read the stored graph (cheap) — falls back to a fresh in-memory build when empty. */
 export const readTalentBrain = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireIdentity])
   .inputValidator((input: unknown) =>
     z.object({ scope: z.enum(["org", "platform"]).default("org") }).parse(input ?? {}),
   )
@@ -242,7 +242,7 @@ export const readTalentBrain = createServerFn({ method: "POST" })
  * store nodes/edges/evidence, then record a snapshot so growth and shrink are auditable.
  */
 export const rebuildTalentBrain = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireIdentity])
   .inputValidator((input: unknown) => z.object({}).parse(input ?? {}))
   .handler(async ({ context }): Promise<TalentBrain> => {
     const email = context.claims?.email ?? null;

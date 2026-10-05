@@ -1,7 +1,7 @@
 /**
  * POST /api/auth/register — first-party credential signup.
  * Creates the user in our own Postgres and emails a confirmation link via
- * SMTP_URL (self-hosted) — no Supabase/Lovable involvement.
+ * SMTP_URL.
  */
 import { createFileRoute } from "@tanstack/react-router";
 import { eq } from "drizzle-orm";

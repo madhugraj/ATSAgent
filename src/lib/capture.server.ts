@@ -173,7 +173,7 @@ export async function capture(input: CaptureInput): Promise<CaptureResult> {
 
   if (input.file?.content) {
     try {
-      const { attachmentText } = await import("./inbox.server");
+      const { attachmentText } = await import("./cv-text.server");
       fileBytes = base64ToBytes(input.file.content);
       // PDF parsers may transfer/detach the ArrayBuffer they receive. Parse a
       // copy so the original bytes remain intact for the private CV vault.

@@ -82,7 +82,7 @@ async function githubEvidence(url: string | null): Promise<{
 
   const headers: Record<string, string> = {
     Accept: "application/vnd.github+json",
-    "User-Agent": "lovable-ats",
+    "User-Agent": "atsiq",
   };
   const token = process.env["GITHUB_TOKEN"];
   if (token) headers["Authorization"] = `Bearer ${token}`;

@@ -1,7 +1,7 @@
 /**
  * ATSIQ schema — single source of truth for plain-Postgres deployments.
  *
- * Ported from drizzle/migrations/0000-0027 (Supabase era) with:
+ * Ported from the retired Supabase-era migrations (0000-0027) with:
  *  - all RLS policies / grants / auth.uid()-dependent helpers removed
  *    (authorization is enforced in server code — see src/server/auth.ts)
  *  - auth.users replaced by the `users` table
@@ -806,8 +806,8 @@ export const aiSettings = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     singleton: boolean("singleton").notNull().default(true),
     orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
-    provider: text("provider").notNull().default("lovable"),
-    model: text("model").notNull().default("google/gemini-3.7-flash"),
+    provider: text("provider").notNull().default("openai"),
+    model: text("model").notNull().default("gpt-5.5"),
     lastTestStatus: text("last_test_status").notNull().default("untested"),
     lastTestMessage: text("last_test_message"),
     lastTestedAt: timestamp("last_tested_at", { withTimezone: true }),

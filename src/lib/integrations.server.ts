@@ -97,7 +97,7 @@ async function testGithub(secrets: Record<string, string>): Promise<TestOutcome>
   const token = secrets["token"] ?? env.GITHUB_TOKEN ?? "";
   const headers: Record<string, string> = {
     Accept: "application/vnd.github+json",
-    "User-Agent": "lovable-ats",
+    "User-Agent": "atsiq",
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
   try {

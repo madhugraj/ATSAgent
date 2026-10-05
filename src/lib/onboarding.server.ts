@@ -397,7 +397,7 @@ export async function extractDocument(input: {
         });
       }
     } else {
-      const { attachmentText } = await import("./inbox.server");
+      const { attachmentText } = await import("./cv-text.server");
       const read = await attachmentText(input.fileName, input.bytes);
       text = read.trim() ? read.slice(0, 120_000) : null;
     }
