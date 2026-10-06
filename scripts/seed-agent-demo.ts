@@ -23,6 +23,9 @@ const {
   agentRuns,
   agentSteps,
   agentTasks,
+  applications,
+  candidates,
+  matchScores,
   orgMembers,
   organizations,
   requisitions,
@@ -57,7 +60,11 @@ await db.insert(orgMembers).values({
 });
 await db.insert(userRoles).values({ userId: user!.id, orgId: org!.id, role: "hr_head" });
 
-const run = async (agentType: "requisition" | "jd" | "screening", goal: string, status: string) =>
+const run = async (
+  agentType: "requisition" | "jd" | "screening" | "intake",
+  goal: string,
+  status: string,
+) =>
   (
     await db
       .insert(agentRuns)
@@ -124,7 +131,100 @@ const [req104] = await db
   })
   .returning({ id: requisitions.id });
 
+// An approved role with held candidates, for the intake rejection batch and
+// the screening approval below.
+const [req098] = await db
+  .insert(requisitions)
+  .values({
+    orgId: org!.id,
+    code: "REQ-2026-098",
+    title: "Platform SRE",
+    location: "Bengaluru",
+    openings: 1,
+    experienceMin: 4,
+    experienceMax: 8,
+    mustHaveSkills: ["Kubernetes", "Go"],
+    status: "approved",
+    createdBy: user!.id,
+  })
+  .returning({ id: requisitions.id });
+const applicant = async (name: string, stage: string, score: number, skills: string[]) => {
+  const [c] = await db
+    .insert(candidates)
+    .values({
+      orgId: org!.id,
+      fullName: name,
+      email: `${name.toLowerCase().replace(/\s/g, ".")}@demo-candidate.test`,
+      skills,
+    })
+    .returning({ id: candidates.id });
+  const [a] = await db
+    .insert(applications)
+    .values({
+      orgId: org!.id,
+      requisitionId: req098!.id,
+      candidateId: c!.id,
+      stage: stage as never,
+      source: "apply",
+    })
+    .returning({ id: applications.id });
+  await db.insert(matchScores).values({
+    orgId: org!.id,
+    applicationId: a!.id,
+    overallScore: score,
+    recommendation: score >= 75 ? "select" : score >= 60 ? "hold" : "reject",
+    rationale: `Demo score ${score}/100`,
+  } as never);
+  return a!.id;
+};
+const shortlistedApp = await applicant("Meera Iyer", "shortlisted", 84, ["Kubernetes", "Go"]);
+const heldA = await applicant("Arjun Rao", "ai_screened", 41, ["PHP", "MySQL"]);
+const heldB = await applicant("Kiran Das", "ai_screened", 38, ["Excel"]);
+const r4 = await run(
+  "intake",
+  `Review the pipeline for REQ-2026-098 "Platform SRE"`,
+  "awaiting_human",
+);
+await db
+  .update(agentRuns)
+  .set({ subjectType: "requisition", subjectId: req098!.id })
+  .where(eq(agentRuns.id, r4));
+
 await db.insert(agentTasks).values([
+  {
+    orgId: org!.id,
+    runId: r4,
+    kind: "gate",
+    title: "Reject 2 candidates for REQ-2026-098 Platform SRE",
+    body: [
+      "Both are well below the shortlist bar and miss the must-have skills.",
+      "",
+      "Candidates to reject (2):",
+      "• Arjun Rao (REQ-2026-098, ai_screened) — Missing must-haves Kubernetes and Go; 41/100",
+      "• Kiran Das (REQ-2026-098, ai_screened) — Missing must-haves Kubernetes and Go; 38/100",
+    ].join("\n"),
+    assigneeUserId: user!.id,
+    proposedAction: {
+      name: "request_approval",
+      args: {
+        subject: {
+          type: "rejection",
+          items: [
+            {
+              applicationId: heldA,
+              reason: "Missing must-haves Kubernetes and Go",
+              expects: "ai_screened",
+            },
+            {
+              applicationId: heldB,
+              reason: "Missing must-haves Kubernetes and Go",
+              expects: "ai_screened",
+            },
+          ],
+        },
+      },
+    },
+  },
   {
     orgId: org!.id,
     runId: r1,
@@ -146,7 +246,7 @@ await db.insert(agentTasks).values([
     proposedAction: {
       toolCallId: "c1",
       name: "send_assessment",
-      args: { requisition: "REQ-098", candidates: 5, template: "assessment_invite", dueInDays: 3 },
+      args: { applicationId: shortlistedApp, dueInDays: 3 },
     },
   },
   {

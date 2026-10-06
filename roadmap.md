@@ -1,5 +1,14 @@
 # Roadmap
 
+## Agentic platform — Phase 2: intake → match → screen (2026-10-06)
+
+- [x] Pipeline cores (`src/lib/pipeline.server.ts`) shared by the screens and agent tools — stage moves, adding talent-pool candidates (now verifies the candidates belong to the organisation, closing a gap in `addApplicationsToRequisition`), candidate notes; `createAssessmentCore`
+- [x] Rejection batches as inbox decisions — the Intake agent proposes rejections with a reason per candidate tied to the requisition's requirements; approving rejects them as the decider (anyone who moved meanwhile is skipped), declining rejects nobody; agents cannot reject on their own
+- [x] Intake & matching agent (score new applications, review held candidates, shortlist / reserve with reasons, propose rejections, top up from the talent pool), Screening agent (screening kits, assessments with email invite and reminder, proceed / hold notes), Follow-up agent (daily overdue sweep: approvals, JD reviews, unanswered agent requests, incomplete assessments; reminders to members)
+- [x] New emails: candidate assessment invitation (pre-approvable for agents) and internal member reminder
+- [x] Orchestrator: shortlists start the Screening agent; sweeps start Intake for approved roles with unscored or held applications (6 h cooldown) and one Follow-up per organisation per day — only for switched-on agents
+- [x] `scripts/agent-phase2.test.ts` (11 tests) in CI
+
 ## Agentic platform — Phase 1: requisition → JD → publish (2026-10-06)
 
 - [x] Lifecycle cores (`src/lib/requisitions.server.ts`) shared by the screens and agent tools; every requisition / JD change emits a domain event (`agent_events`); trails mark agent actions `via: "agent"`; migration `0025` records who raised each requisition
@@ -9,7 +18,7 @@
 - [x] Agents are opt-in (off until switched on in Agent settings); "Ask the agents" on `/agents`; "Request changes" on a pending JD
 - [x] `scripts/agent-phase1.test.ts` (real tools, cores and orchestrator; scripted model) in CI
 - [ ] Live model verification with an organisation key (`bun run eval:agents`)
-- [ ] SLA chasing of approvers moves to the Follow-up agent (Phase 2)
+- [x] SLA chasing of approvers — delivered by the Follow-up agent (Phase 2)
 
 ## Agentic platform — Phase 0 foundations (2026-10-06)
 

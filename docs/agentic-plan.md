@@ -353,6 +353,9 @@ One place where agents' requests land, extending the live action inbox in
   decided in the inbox, as the deciding person (their role is checked by the
   same lifecycle core as the requisition page); a decision made on the
   regular pages closes the matching inbox request.
+- a rejection batch lists every candidate with a reason tied to the
+  requisition's stated requirements; approving rejects them as the deciding
+  person (anyone who moved meanwhile is skipped), declining rejects nobody.
 
 ### 5.4 Kill switches
 
