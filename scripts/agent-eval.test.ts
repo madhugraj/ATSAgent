@@ -24,6 +24,18 @@ const JD = {
   full_text: "# Platform SRE",
 };
 const AI_FIXTURES: Record<string, unknown> = {
+  offer_letter: {
+    subject: "Offer of employment — Platform SRE",
+    greeting: "Dear Sana,",
+    opening: "We are delighted to offer you the role of Platform SRE.",
+    sections: [
+      { heading: "Role and Responsibilities", body: "Run the platform." },
+      { heading: "Compensation and Benefits", body: "Annual CTC of 30,00,000." },
+      { heading: "Terms of Employment", body: "Standard terms apply." },
+      { heading: "Next Steps", body: "Please confirm acceptance." },
+    ],
+    closing: "Sincerely,",
+  },
   jd_generate: JD,
   linkedin_post: {
     headline: "Hiring SREs",
@@ -57,7 +69,8 @@ const { registerTool, resetRegistry, isGateToolName, listAgents } =
 const { registerPhase1Tools } = await import("../src/server/agents/tools");
 const { registerPhase2Tools } = await import("../src/server/agents/tools-phase2");
 const { registerPhase3Tools } = await import("../src/server/agents/tools-phase3");
-const { registerPhase1Agents, registerPhase2Agents, registerPhase3Agents } =
+const { registerPhase4Tools } = await import("../src/server/agents/tools-phase4");
+const { registerPhase1Agents, registerPhase2Agents, registerPhase3Agents, registerPhase4Agents } =
   await import("../src/server/agents/definitions");
 const { runScenario } = await import("../src/server/agents/eval.server");
 const { scenarios } = await import("./evals/scenarios");
@@ -67,9 +80,11 @@ const registerReal = () => {
   registerPhase1Tools();
   registerPhase2Tools();
   registerPhase3Tools();
+  registerPhase4Tools();
   registerPhase1Agents();
   registerPhase2Agents();
   registerPhase3Agents();
+  registerPhase4Agents();
 };
 
 beforeAll(() => {

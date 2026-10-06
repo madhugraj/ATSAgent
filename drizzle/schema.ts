@@ -869,7 +869,8 @@ export type EmailOutboxKind =
   | "interview_invite"
   | "offer_released"
   | "assessment_invite"
-  | "member_reminder";
+  | "member_reminder"
+  | "document_request";
 export type EmailOutboxStatus = "queued" | "sent" | "failed" | "suppressed";
 export type EmailOutboxAttachment = {
   filename: string;

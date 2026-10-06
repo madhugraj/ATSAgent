@@ -14,7 +14,8 @@ process.env["SESSION_SECRET"] ??= "lockfile-generation-only-0123456789abcdef";
 const { registerPhase1Tools } = await import("../src/server/agents/tools");
 const { registerPhase2Tools } = await import("../src/server/agents/tools-phase2");
 const { registerPhase3Tools } = await import("../src/server/agents/tools-phase3");
-const { registerPhase1Agents, registerPhase2Agents, registerPhase3Agents } =
+const { registerPhase4Tools } = await import("../src/server/agents/tools-phase4");
+const { registerPhase1Agents, registerPhase2Agents, registerPhase3Agents, registerPhase4Agents } =
   await import("../src/server/agents/definitions");
 const { listAgents } = await import("../src/server/agents/registry");
 const { manifestHash } = await import("../src/server/agents/manifest.server");
@@ -22,9 +23,11 @@ const { manifestHash } = await import("../src/server/agents/manifest.server");
 registerPhase1Tools();
 registerPhase2Tools();
 registerPhase3Tools();
+registerPhase4Tools();
 registerPhase1Agents();
 registerPhase2Agents();
 registerPhase3Agents();
+registerPhase4Agents();
 
 const lock = Object.fromEntries(
   listAgents()

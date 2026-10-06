@@ -513,6 +513,130 @@ export function scenarios(): ScriptedScenario[] {
         say("Recommended HOLD; the hiring manager decides."),
       ],
     },
+    {
+      name: "offer: drafts in band, generates the letter and routes it to the HR head",
+      agentType: "offer",
+      autonomy: "act_and_notify",
+      setup: async ({ orgId, userId }) => {
+        const requisitionId = await seedRequisition(orgId, userId, "approved");
+        const { db } = await import("../../src/server/db");
+        const { requisitions, candidateNotes, applications } = await import("../../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        await db
+          .update(requisitions)
+          .set({ ctcBandMin: "2500000", ctcBandMax: "3500000", budgetCtc: "3000000" })
+          .where(eq(requisitions.id, requisitionId));
+        const app = await seedApplication(orgId, requisitionId, "Sana", "l3", 86);
+        const [a] = await db
+          .select({ c: applications.candidateId })
+          .from(applications)
+          .where(eq(applications.id, app));
+        await db.insert(candidateNotes).values({
+          orgId,
+          candidateId: a!.c,
+          authorId: userId,
+          body: "Hiring decision: SELECT. Strong across rounds.",
+        });
+        return { requisitionId, app };
+      },
+      goal: (d) => `Prepare the offer. app=${d["app"]}\n\nRequisition id: ${d["requisitionId"]}`,
+      decide: () => ({ status: "approved" }),
+      expect: {
+        status: "done",
+        calls: [
+          "get_offer_context",
+          "draft_offer",
+          "generate_offer_letter",
+          "submit_offer_for_approval",
+          "request_approval",
+        ],
+        gateRole: "hr_head",
+      },
+      script: [
+        (m) => call("c", "get_offer_context", { applicationId: fromGoal(m, "app") }),
+        (m) => call("d", "draft_offer", { applicationId: fromGoal(m, "app"), offeredCtc: 3000000 }),
+        (m) =>
+          call("l", "generate_offer_letter", {
+            offerId: String(toolResult(m, "draft_offer")["offerId"]),
+          }),
+        (m) =>
+          call("s", "submit_offer_for_approval", {
+            offerId: String(toolResult(m, "draft_offer")["offerId"]),
+          }),
+        (m) =>
+          call("g", "request_approval", {
+            title: "Approve the offer for Sana",
+            summary: "30 L — band midpoint; matches internal parity.",
+            assignee_role: "hr_head",
+            subject: { type: "offer", id: String(toolResult(m, "draft_offer")["offerId"]) },
+          }),
+        say("Offer at 30 L approved by the HR head; waiting for the CBO."),
+      ],
+    },
+    {
+      name: "onboarding: requests missing documents, then asks HR to validate",
+      agentType: "onboarding",
+      setup: async ({ orgId, userId }) => {
+        const requisitionId = await seedRequisition(orgId, userId, "approved");
+        const app = await seedApplication(orgId, requisitionId, "Sana", "offer_pending", 86);
+        const { db } = await import("../../src/server/db");
+        const { applications, offers, onboardingDocuments } = await import("../../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const [a] = await db
+          .select({ c: applications.candidateId })
+          .from(applications)
+          .where(eq(applications.id, app));
+        await db
+          .insert(offers)
+          .values({ orgId, applicationId: app, offeredCtc: "3000000", status: "approved" });
+        await db.insert(onboardingDocuments).values({
+          orgId,
+          applicationId: app,
+          candidateId: a!.c,
+          docType: "payslip",
+          fileName: "payslip-sep.pdf",
+          source: "upload",
+          extractionStatus: "ok",
+          status: "pending",
+          uploadedBy: userId,
+          extracted: { monthlyGross: 210000 },
+        } as never);
+        return { requisitionId, app };
+      },
+      goal: (d) => `Pre-onboarding. app=${d["app"]}\n\nRequisition id: ${d["requisitionId"]}`,
+      decide: () => ({ status: "approved" }),
+      expect: {
+        status: "done",
+        calls: ["onboarding_status", "request_documents", "request_approval"],
+        gateRole: "hr_head",
+      },
+      script: [
+        (m) => call("o", "onboarding_status", { applicationId: fromGoal(m, "app") }),
+        (m) =>
+          call("r", "request_documents", {
+            applicationId: fromGoal(m, "app"),
+            documentTypes: (
+              toolResult(m, "onboarding_status")["missingRequired"] as { type: string }[]
+            )
+              .map((x) => x.type)
+              .filter((t) => t !== "payslip"),
+          }),
+        (m) =>
+          call("v", "request_approval", {
+            title: "Validate Sana's payslip",
+            summary: "Payslip shows 2.1 L monthly gross; consistent with declared CTC.",
+            assignee_role: "hr_head",
+            subject: {
+              type: "document_validation",
+              applicationId: fromGoal(m, "app"),
+              documentIds: (
+                toolResult(m, "onboarding_status")["documents"] as { documentId: string }[]
+              ).map((d) => d.documentId),
+            },
+          }),
+        say("Requested 3 documents; HR verified the payslip."),
+      ],
+    },
   ];
 }
 

@@ -360,6 +360,11 @@ One place where agents' requests land, extending the live action inbox in
   recommendation and rationale; approving a reject or hold moves the
   candidate as the decider, approving a select records it and hands it to
   the offer stage, declining changes nothing.
+- offer approval goes to the HR head, then the CBO, and is performed as the
+  decider; document validation goes to the HR head (approve verifies,
+  decline rejects with the reason the candidate sees); offer release goes to
+  the HR head and can only be requested once every required pre-onboarding
+  document is verified.
 
 ### 5.4 Kill switches
 

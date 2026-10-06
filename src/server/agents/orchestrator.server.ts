@@ -21,6 +21,7 @@ import {
   applications,
   jobDescriptions,
   matchScores,
+  offers,
   orgMembers,
   requisitions,
 } from "@db/schema";
@@ -122,9 +123,30 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
     );
   }
 
+  if (e.type === "offer.status_changed") {
+    const from = String((e.payload as { from?: string }).from ?? "");
+    synced += await syncGateTasks(e.orgId, { type: "offer", id: e.subjectId }, e.actorUserId, from);
+  }
+
   // 2. Dispatch the next agent in the chain.
-  const payload = e.payload as { to?: string; requisitionId?: string; comment?: string };
-  const requisitionId = e.subjectType === "requisition" ? e.subjectId : payload.requisitionId;
+  const payload = e.payload as {
+    to?: string;
+    requisitionId?: string;
+    applicationId?: string;
+    comment?: string;
+  };
+  // Candidate- and offer-level events: find the application and its requisition.
+  const applicationId =
+    e.subjectType === "application" ? e.subjectId : (payload.applicationId ?? null);
+  let requisitionId = e.subjectType === "requisition" ? e.subjectId : payload.requisitionId;
+  if (!requisitionId && applicationId) {
+    const [app] = await db
+      .select({ requisitionId: applications.requisitionId })
+      .from(applications)
+      .where(and(eq(applications.id, applicationId), eq(applications.orgId, e.orgId)))
+      .limit(1);
+    requisitionId = app?.requisitionId;
+  }
   if (!requisitionId) return { started, synced };
   const [req] = await db
     .select({
@@ -142,7 +164,7 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
   if (!principal) return { started, synced };
 
   const dispatch = async (
-    agent: "jd" | "publishing" | "screening" | "interview" | "evaluation",
+    agent: "jd" | "publishing" | "screening" | "interview" | "evaluation" | "offer" | "onboarding",
     goal: string,
     /** Per-candidate work (evaluation) de-duplicates on the application instead. */
     subject: { type: "requisition" | "application"; id: string } = {
@@ -209,6 +231,43 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
       `A level ${p.level ?? "?"} scorecard (${p.verdict ?? "?"}) was submitted for ${req.code} "${req.title}". Debrief candidate application ${p.applicationId} and ask the hiring manager for the hiring decision.`,
       p.applicationId ? { type: "application", id: p.applicationId } : undefined,
     );
+  }
+
+  if (applicationId && e.type === "hiring.selected") {
+    await dispatch(
+      "offer",
+      `The hiring manager selected candidate application ${applicationId} for ${req.code} "${req.title}". Prepare the offer within the approved band and take it through approval.`,
+      { type: "application", id: applicationId },
+    );
+  }
+
+  if (applicationId && e.type === "offer.status_changed" && payload.to === "approved") {
+    await dispatch(
+      "onboarding",
+      `The offer for candidate application ${applicationId} (${req.code} "${req.title}") is approved. Collect and cross-check the pre-onboarding documents, ask HR to validate them, then ask for the release.`,
+      { type: "application", id: applicationId },
+    );
+  }
+
+  if (applicationId && e.type === "onboarding.document_received") {
+    // Only once the candidate has an approved offer (documents can arrive earlier).
+    const [approved] = await db
+      .select({ id: offers.id })
+      .from(offers)
+      .where(
+        and(
+          eq(offers.orgId, e.orgId),
+          eq(offers.applicationId, applicationId),
+          eq(offers.status, "approved"),
+        ),
+      )
+      .limit(1);
+    if (approved)
+      await dispatch(
+        "onboarding",
+        `A pre-onboarding document arrived for candidate application ${applicationId} (${req.code} "${req.title}"). Check readiness and ask HR to validate what is pending.`,
+        { type: "application", id: applicationId },
+      );
   }
 
   if (e.type === "jd.changes_requested") {
