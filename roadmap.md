@@ -1,5 +1,16 @@
 # Roadmap
 
+## Agentic platform — Phase 1: requisition → JD → publish (2026-10-06)
+
+- [x] Lifecycle cores (`src/lib/requisitions.server.ts`) shared by the screens and agent tools; every requisition / JD change emits a domain event (`agent_events`); trails mark agent actions `via: "agent"`; migration `0025` records who raised each requisition
+- [x] Orchestrator v1 — requisition approved → JD agent; JD changes requested → JD agent (with the reviewer's comment); JD approved → Publishing agent; never duplicates an active run; inline best-effort kick after events and decisions, scheduler tick remains the source of truth
+- [x] Requisition agent (similar roles → draft → market band with sources → scoring weights → submit → approval brief through DH → HR → CBO), JD agent (draft / revise → DH review), Publishing agent (internal posting, LinkedIn draft, board publish always reviewed by a person and only for an HR-head principal), Copilot (plans, `start_agent` confirmation)
+- [x] Inbox gates tied to real records — approving or declining a requisition / JD request in the Decisions inbox performs the real approval step as the decider, with their role checked; decisions made on the regular pages close the matching inbox request
+- [x] Agents are opt-in (off until switched on in Agent settings); "Ask the agents" on `/agents`; "Request changes" on a pending JD
+- [x] `scripts/agent-phase1.test.ts` (real tools, cores and orchestrator; scripted model) in CI
+- [ ] Live model verification with an organisation key (`bun run eval:agents`)
+- [ ] SLA chasing of approvers moves to the Follow-up agent (Phase 2)
+
 ## Agentic platform — Phase 0 foundations (2026-10-06)
 
 Plan: `docs/agentic-plan.md`.

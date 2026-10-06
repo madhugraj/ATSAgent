@@ -19,8 +19,16 @@ if (!["127.0.0.1", "localhost", "::1"].includes(new URL(url).hostname)) {
 
 const { db, sql } = await import("../src/server/db");
 const { hashPassword } = await import("../src/server/password");
-const { agentRuns, agentSteps, agentTasks, orgMembers, organizations, userRoles, users } =
-  await import("../drizzle/schema");
+const {
+  agentRuns,
+  agentSteps,
+  agentTasks,
+  orgMembers,
+  organizations,
+  requisitions,
+  userRoles,
+  users,
+} = await import("../drizzle/schema");
 
 const [existing] = await db.select().from(users).where(eq(users.email, DEMO_EMAIL));
 if (existing) await db.delete(users).where(eq(users.id, existing.id));
@@ -83,6 +91,39 @@ const r3 = await run(
   "awaiting_human",
 );
 
+// A real requisition waiting for Department Head approval: approving the gate
+// below in the inbox performs that approval (the demo owner passes role checks).
+const [req104] = await db
+  .insert(requisitions)
+  .values({
+    orgId: org!.id,
+    code: "REQ-2026-104",
+    title: "Backend Engineer",
+    location: "Bengaluru",
+    openings: 2,
+    experienceMin: 4,
+    experienceMax: 8,
+    budgetCtc: "3100000",
+    ctcBandMin: "2800000",
+    ctcBandMax: "3600000",
+    mustHaveSkills: ["Go", "PostgreSQL", "Kubernetes"],
+    goodToHaveSkills: ["Kafka"],
+    status: "pending_dh",
+    createdBy: user!.id,
+    approvalTrail: [
+      {
+        from: "draft",
+        to: "pending_dh",
+        actor: DEMO_EMAIL,
+        decision: "pending_dh",
+        comment: "Submitted by the requisition agent.",
+        at: new Date().toISOString(),
+        via: "agent",
+      },
+    ] as never,
+  })
+  .returning({ id: requisitions.id });
+
 await db.insert(agentTasks).values([
   {
     orgId: org!.id,
@@ -90,8 +131,11 @@ await db.insert(agentTasks).values([
     kind: "gate",
     title: "Approve requisition REQ-104 — Backend Engineer ×2",
     body: "Band ₹28–36 L (market median ₹31 L, 4 cited sources). Replaces 1 exit + 1 new headcount. No duplicate open requisition.",
-    assigneeRole: "hr_head",
-    proposedAction: { name: "request_approval", args: {} },
+    assigneeRole: "department_head",
+    proposedAction: {
+      name: "request_approval",
+      args: { subject: { type: "requisition", id: req104!.id, expects: "pending_dh" } },
+    },
   },
   {
     orgId: org!.id,
