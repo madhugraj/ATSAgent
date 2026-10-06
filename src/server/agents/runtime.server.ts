@@ -26,6 +26,7 @@ import {
   type AgentMessage,
   type AgentToolCall,
   type AgentToolSpec,
+  type AiConfig,
 } from "@/lib/ai-gateway.server";
 import { assertRole, type AppRole } from "@/lib/auth.middleware";
 import { db } from "../db";
@@ -41,6 +42,15 @@ import {
 } from "@db/schema";
 import { decideToolCall, loadPolicy } from "./policy";
 import { getAgent, getTool, type ToolContext } from "./registry";
+
+/**
+ * Eval-only: run agents against a fixed model config instead of the org's
+ * saved key (scripts/agent-eval.ts). Never set in the app.
+ */
+let modelOverride: AiConfig | null = null;
+export function setEvalModelOverride(cfg: AiConfig | null): void {
+  modelOverride = cfg;
+}
 
 const LEASE_MINUTES = 10;
 const MAX_ATTEMPTS = 3;
@@ -245,7 +255,10 @@ export type TickCounts = {
 };
 
 /** One scheduler tick: reclaim expired leases, claim queued runs, drive them. */
-export async function runAgentTick(opts: { max?: number } = {}): Promise<TickCounts> {
+/** `orgId` limits the tick to one organisation (eval harness); the scheduler omits it. */
+export async function runAgentTick(
+  opts: { max?: number; orgId?: string } = {},
+): Promise<TickCounts> {
   const max = Math.min(Math.max(opts.max ?? 10, 1), 50);
   const counts: TickCounts = {
     reclaimed: 0,
@@ -267,7 +280,13 @@ export async function runAgentTick(opts: { max?: number } = {}): Promise<TickCou
       leaseUntil: null,
       updatedAt: now,
     })
-    .where(and(eq(agentRuns.status, "running"), lt(agentRuns.leaseUntil, now)))
+    .where(
+      and(
+        eq(agentRuns.status, "running"),
+        lt(agentRuns.leaseUntil, now),
+        opts.orgId ? eq(agentRuns.orgId, opts.orgId) : undefined,
+      ),
+    )
     .returning({ id: agentRuns.id });
   counts.reclaimed = expired.length;
 
@@ -285,7 +304,13 @@ export async function runAgentTick(opts: { max?: number } = {}): Promise<TickCou
   const dueIds = db
     .select({ id: agentRuns.id })
     .from(agentRuns)
-    .where(and(eq(agentRuns.status, "queued"), sql`not exists (${paused})`))
+    .where(
+      and(
+        eq(agentRuns.status, "queued"),
+        sql`not exists (${paused})`,
+        opts.orgId ? eq(agentRuns.orgId, opts.orgId) : undefined,
+      ),
+    )
     .orderBy(agentRuns.updatedAt)
     .limit(max)
     .for("update", { skipLocked: true });
@@ -392,6 +417,7 @@ async function driveRun(run: AgentRun): Promise<"done" | "awaiting" | "yielded" 
       tools: specs,
       orgId: run.orgId,
       feature: def.feature,
+      ...(modelOverride ? { config: modelOverride } : {}),
     });
     stepCount++;
     if (!res.ok) {

@@ -47,7 +47,29 @@ export type AgentDefinition = {
 const tools = new Map<string, AgentTool<never>>();
 const agents = new Map<AgentType, AgentDefinition>();
 
+/**
+ * Gate guard (docs/agentic-plan.md §1 principle 2): approving, releasing,
+ * rejecting, hiring and revoking are human decisions, so no agent tool may
+ * perform them. Agents can only `propose_*`, `request_*` or `submit_*` (send
+ * for a human's approval). Enforced at registration so a gate tool can never
+ * reach a model.
+ */
+const GATE_VERB = /(^|_)(approve|approval|release|reject|hire|revoke|decline|accept)(_|$)/;
+const ALLOWED_PREFIX = /^(propose|request|submit)_/;
+
+export function isGateToolName(name: string): boolean {
+  return GATE_VERB.test(name) && !ALLOWED_PREFIX.test(name);
+}
+
 export function registerTool<I>(tool: AgentTool<I>): void {
+  if (!/^[a-z][a-z0-9_]{1,63}$/.test(tool.name)) {
+    throw new Error(`Invalid tool name: ${tool.name}`);
+  }
+  if (isGateToolName(tool.name)) {
+    throw new Error(
+      `Tool ${tool.name} would perform a human decision; expose propose_/request_/submit_ instead.`,
+    );
+  }
   tools.set(tool.name, tool as unknown as AgentTool<never>);
 }
 
