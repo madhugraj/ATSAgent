@@ -19,7 +19,7 @@ if (!["127.0.0.1", "localhost", "::1"].includes(new URL(url).hostname)) {
 
 const { db, sql } = await import("../src/server/db");
 const { hashPassword } = await import("../src/server/password");
-const { agentRuns, agentTasks, orgMembers, organizations, userRoles, users } =
+const { agentRuns, agentSteps, agentTasks, orgMembers, organizations, userRoles, users } =
   await import("../drizzle/schema");
 
 const [existing] = await db.select().from(users).where(eq(users.email, DEMO_EMAIL));
@@ -114,6 +114,97 @@ await db.insert(agentTasks).values([
     assigneeUserId: user!.id,
   },
 ]);
+
+// A believable step trail per run, so the run inspector and tiles have data.
+const trail = (
+  runId: string,
+  steps: { kind: string; tool?: string; status: string; output: unknown; tokens?: number }[],
+) =>
+  db.insert(agentSteps).values(
+    steps.map((x, i) => ({
+      runId,
+      orgId: org!.id,
+      seq: i + 1,
+      kind: x.kind,
+      toolName: x.tool ?? null,
+      status: x.status,
+      output: x.output as never,
+      promptTokens: x.tokens ?? 0,
+      completionTokens: x.tokens ? Math.round(x.tokens / 5) : 0,
+      durationMs: x.kind === "model" ? 1800 + i * 150 : 120,
+    })),
+  );
+await trail(r1, [
+  { kind: "model", status: "ok", output: { toolCalls: ["find_similar_roles"] }, tokens: 1400 },
+  {
+    kind: "tool",
+    tool: "find_similar_roles",
+    status: "ok",
+    output: { preview: "2 similar roles last quarter" },
+  },
+  { kind: "model", status: "ok", output: { toolCalls: ["research_compensation"] }, tokens: 1600 },
+  {
+    kind: "tool",
+    tool: "research_compensation",
+    status: "ok",
+    output: { preview: "median ₹31 L, 4 sources" },
+  },
+  {
+    kind: "model",
+    status: "ok",
+    output: { toolCalls: ["ask_human", "request_approval"] },
+    tokens: 900,
+  },
+  { kind: "tool", tool: "ask_human", status: "awaiting", output: { note: "remote or office?" } },
+  {
+    kind: "tool",
+    tool: "request_approval",
+    status: "awaiting",
+    output: { note: "routed to HR head" },
+  },
+]);
+await trail(r2, [
+  { kind: "model", status: "ok", output: { toolCalls: ["get_template"] }, tokens: 1100 },
+  {
+    kind: "tool",
+    tool: "get_template",
+    status: "ok",
+    output: { preview: "Platform JD template v3" },
+  },
+  { kind: "model", status: "ok", output: { toolCalls: ["generate_jd"] }, tokens: 2300 },
+  {
+    kind: "tool",
+    tool: "generate_jd",
+    status: "error",
+    output: { error: "Template field missing: team size" },
+  },
+  { kind: "model", status: "ok", output: { toolCalls: ["generate_jd"] }, tokens: 2100 },
+  {
+    kind: "tool",
+    tool: "generate_jd",
+    status: "ok",
+    output: { preview: "JD drafted (612 words)" },
+  },
+  {
+    kind: "model",
+    status: "ok",
+    output: { text: "Drafted the JD and sent it for DH approval." },
+    tokens: 600,
+  },
+]);
+await trail(r3, [
+  { kind: "model", status: "ok", output: { toolCalls: ["list_applications"] }, tokens: 1200 },
+  { kind: "tool", tool: "list_applications", status: "ok", output: { preview: "5 shortlisted" } },
+  { kind: "model", status: "ok", output: { toolCalls: ["send_assessment"] }, tokens: 800 },
+  {
+    kind: "tool",
+    tool: "send_assessment",
+    status: "awaiting",
+    output: { note: "needs approval (Suggest)" },
+  },
+]);
+const { rollupAgentMetrics } = await import("../src/server/agents/metrics.server");
+await rollupAgentMetrics();
 
 console.log(`Seeded ${DEMO_EMAIL} (org ${org!.id}); runs ${r1}, ${r2}, ${r3}`);
 await sql.end();
