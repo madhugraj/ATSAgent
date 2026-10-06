@@ -11,7 +11,8 @@ export type AgentEventType =
   | "requisition.status_changed"
   | "jd.submitted"
   | "jd.approved"
-  | "jd.changes_requested";
+  | "jd.changes_requested"
+  | "application.shortlisted";
 
 export async function emitAgentEvent(e: {
   orgId: string;

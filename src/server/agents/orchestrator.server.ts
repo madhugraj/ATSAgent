@@ -14,7 +14,16 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "../db";
-import { agentEvents, agentRuns, jobDescriptions, requisitions } from "@db/schema";
+import {
+  agentEvents,
+  agentPolicies,
+  agentRuns,
+  applications,
+  jobDescriptions,
+  matchScores,
+  orgMembers,
+  requisitions,
+} from "@db/schema";
 import { log } from "../log";
 import { loadPolicy } from "./policy";
 import { getAgent } from "./registry";
@@ -132,7 +141,7 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
   const principal = req.createdBy ?? e.actorUserId;
   if (!principal) return { started, synced };
 
-  const dispatch = async (agent: "jd" | "publishing", goal: string) => {
+  const dispatch = async (agent: "jd" | "publishing" | "screening", goal: string) => {
     if (!getAgent(agent)) return;
     const policy = await loadPolicy(e.orgId, agent);
     if (!policy.enabled) return;
@@ -167,6 +176,14 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
         `Requisition ${req.code} "${req.title}" is approved. Draft its job description and get it approved by the department head.`,
       );
     }
+  }
+
+  if (e.type === "application.shortlisted") {
+    const ids = (e.payload as { applicationIds?: string[] }).applicationIds ?? [];
+    await dispatch(
+      "screening",
+      `${ids.length} candidate(s) were shortlisted for ${req.code} "${req.title}". Prepare their screening kits, send assessments and summarise who should proceed.`,
+    );
   }
 
   if (e.type === "jd.changes_requested") {
@@ -237,4 +254,123 @@ export async function pendingEventCount(orgId: string): Promise<number> {
     .from(agentEvents)
     .where(and(eq(agentEvents.orgId, orgId), eq(agentEvents.status, "pending")));
   return Number(r?.n ?? 0);
+}
+
+/* ------------------------------------------------------------------ sweeps */
+
+const INTAKE_COOLDOWN_HOURS = 6;
+const FOLLOWUP_COOLDOWN_HOURS = 20;
+
+async function enabledOrgs(agentType: string, orgId?: string): Promise<string[]> {
+  const rows = await db
+    .select({ orgId: agentPolicies.orgId })
+    .from(agentPolicies)
+    .where(
+      and(
+        eq(agentPolicies.agentType, agentType as never),
+        eq(agentPolicies.enabled, true),
+        orgId ? eq(agentPolicies.orgId, orgId) : undefined,
+        sql`not exists (select 1 from agent_policies p where p.org_id = ${agentPolicies.orgId} and p.agent_type = '*' and p.enabled = false)`,
+      ),
+    );
+  return rows.map((r) => r.orgId);
+}
+
+async function ownerOf(orgId: string): Promise<string | null> {
+  const [o] = await db
+    .select({ userId: orgMembers.userId })
+    .from(orgMembers)
+    .where(
+      and(
+        eq(orgMembers.orgId, orgId),
+        eq(orgMembers.isOwner, true),
+        eq(orgMembers.status, "active"),
+      ),
+    )
+    .limit(1);
+  return o?.userId ?? null;
+}
+
+async function recentRun(
+  orgId: string,
+  agentType: string,
+  hours: number,
+  subjectId?: string,
+): Promise<boolean> {
+  const [r] = await db
+    .select({ id: agentRuns.id })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.orgId, orgId),
+        eq(agentRuns.agentType, agentType as never),
+        subjectId ? eq(agentRuns.subjectId, subjectId) : undefined,
+        sql`(${agentRuns.status} in ('queued','running','awaiting_human') or ${agentRuns.createdAt} >= now() - make_interval(hours => ${hours}))`,
+      ),
+    )
+    .limit(1);
+  return Boolean(r);
+}
+
+/**
+ * Time-based work the event stream does not cover (docs/agentic-plan.md §3.1):
+ * intake for approved requisitions with unscored or held applications, and a
+ * daily follow-up pass. Only for organisations that switched the agent on.
+ */
+export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<number> {
+  let started = 0;
+  if (getAgent("intake")) {
+    for (const orgId of await enabledOrgs("intake", opts.orgId)) {
+      const reqs = await db
+        .select({
+          id: requisitions.id,
+          code: requisitions.code,
+          title: requisitions.title,
+          createdBy: requisitions.createdBy,
+        })
+        .from(requisitions)
+        .where(
+          and(
+            eq(requisitions.orgId, orgId),
+            eq(requisitions.status, "approved"),
+            sql`exists (
+              select 1 from ${applications} a
+              left join ${matchScores} m on m.application_id = a.id
+              where a.requisition_id = ${requisitions.id}
+                and (m.id is null or a.stage = 'ai_screened')
+            )`,
+          ),
+        )
+        .limit(5);
+      for (const r of reqs) {
+        if (await recentRun(orgId, "intake", INTAKE_COOLDOWN_HOURS, r.id)) continue;
+        const principal = r.createdBy ?? (await ownerOf(orgId));
+        if (!principal) continue;
+        await startRun({
+          orgId,
+          agentType: "intake",
+          principalUserId: principal,
+          goal: `Review the pipeline for ${r.code} "${r.title}": score new applications, review held candidates, propose rejections for a person to confirm, and top up from the talent pool if the shortlist is thin.\n\nRequisition id: ${r.id}`,
+          subjectType: "requisition",
+          subjectId: r.id,
+        });
+        started++;
+      }
+    }
+  }
+  if (getAgent("followup")) {
+    for (const orgId of await enabledOrgs("followup", opts.orgId)) {
+      if (await recentRun(orgId, "followup", FOLLOWUP_COOLDOWN_HOURS)) continue;
+      const owner = await ownerOf(orgId);
+      if (!owner) continue;
+      await startRun({
+        orgId,
+        agentType: "followup",
+        principalUserId: owner,
+        goal: "Daily follow-up: find everything overdue and remind the right people.",
+      });
+      started++;
+    }
+  }
+  return started;
 }

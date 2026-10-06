@@ -59,3 +59,6 @@ jobs:
 
       - name: Phase 1 agents (requisition, JD, publishing, orchestrator)
         run: bun test scripts/agent-phase1.test.ts
+
+      - name: Phase 2 agents (intake, screening, follow-up)
+        run: bun test scripts/agent-phase2.test.ts

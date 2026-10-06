@@ -78,6 +78,7 @@ export async function recordStageTransitions(inputs: RecordStageTransitionInput[
     )
     .returning({ id: stageEvents.id });
 
+  await emitShortlistEvents(inputs);
   // Multi-row INSERT ... RETURNING preserves insertion order.
   const eligible = inputs
     .map((input, i) => ({ input, eventId: events[i]?.id }))
@@ -211,5 +212,47 @@ async function enqueueScreeningPrep(inputs: RecordStageTransitionInput[]): Promi
       });
   } catch (e) {
     console.error("[screening-prep] enqueue failed (stage move unaffected):", e);
+  }
+}
+
+/**
+ * Tell the orchestrator about new shortlists (one event per requisition and
+ * org), so a switched-on Screening agent can prepare screening and assessments.
+ */
+async function emitShortlistEvents(inputs: RecordStageTransitionInput[]): Promise<void> {
+  const shortlisted = inputs.filter(
+    (i) => i.toStage === "shortlisted" && i.fromStage !== "shortlisted",
+  );
+  if (!shortlisted.length) return;
+  const apps = await db
+    .select({
+      id: applications.id,
+      orgId: applications.orgId,
+      requisitionId: applications.requisitionId,
+    })
+    .from(applications)
+    .where(
+      inArray(
+        applications.id,
+        shortlisted.map((i) => i.applicationId),
+      ),
+    );
+  const byReq = new Map<string, { orgId: string; applicationIds: string[] }>();
+  for (const a of apps) {
+    if (!a.orgId) continue;
+    const entry = byReq.get(a.requisitionId) ?? { orgId: a.orgId, applicationIds: [] };
+    entry.applicationIds.push(a.id);
+    byReq.set(a.requisitionId, entry);
+  }
+  const { emitAgentEvent } = await import("../server/agents/events");
+  for (const [requisitionId, e] of byReq) {
+    await emitAgentEvent({
+      orgId: e.orgId,
+      type: "application.shortlisted",
+      subjectType: "requisition",
+      subjectId: requisitionId,
+      actorUserId: null,
+      payload: { applicationIds: e.applicationIds },
+    });
   }
 }

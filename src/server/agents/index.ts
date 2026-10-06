@@ -3,8 +3,9 @@
  * drives or inspects agents sees the same set (docs/agentic-plan.md §10).
  */
 import { getAgent } from "./registry";
-import { registerPhase1Agents } from "./definitions";
+import { registerPhase1Agents, registerPhase2Agents } from "./definitions";
 import { registerPhase1Tools } from "./tools";
+import { registerPhase2Tools } from "./tools-phase2";
 import type { AgentType } from "@db/schema";
 
 let registered = false;
@@ -14,7 +15,9 @@ export function ensureAgentsRegistered(): void {
   if (registered) return;
   registered = true;
   registerPhase1Tools();
+  registerPhase2Tools();
   registerPhase1Agents();
+  registerPhase2Agents();
 }
 
 ensureAgentsRegistered();

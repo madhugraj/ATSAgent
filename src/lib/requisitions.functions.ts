@@ -321,22 +321,12 @@ export const addApplicationsToRequisition = createServerFn({ method: "POST" })
       .parse(data),
   )
   .handler(async ({ data, context }) => {
-    const [requisition] = await db
-      .select({ id: requisitions.id })
-      .from(requisitions)
-      .where(and(eq(requisitions.id, data.requisitionId), eq(requisitions.orgId, context.orgId)))
-      .limit(1);
-    if (!requisition) throw new Error("Requisition not found");
-
-    await db.insert(applications).values(
-      data.candidateIds.map((candidateId) => ({
-        requisitionId: data.requisitionId,
-        candidateId,
-        orgId: context.orgId,
-        source: data.source,
-      })),
+    const { addApplicationsCore } = await import("./pipeline.server");
+    const r = await addApplicationsCore(
+      { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
+      { requisitionId: data.requisitionId, candidateIds: data.candidateIds, source: data.source },
     );
-    return { ok: true as const, added: data.candidateIds.length };
+    return { ok: true as const, added: r.added };
   });
 
 /* -------------------------------------------------------- create requisition */

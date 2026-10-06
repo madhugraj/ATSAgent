@@ -117,6 +117,7 @@ export const WHITELISTABLE_TEMPLATES: { id: string; label: string }[] = [
   { id: "application_ack", label: "Application acknowledgement" },
   { id: "stage_update", label: "Stage update" },
   { id: "interview_invite", label: "Interview invitation" },
+  { id: "assessment_invite", label: "Assessment invitation (and reminder)" },
 ];
 
 export const AGENT_LABEL: Record<string, string> = Object.fromEntries(

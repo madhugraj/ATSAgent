@@ -37,6 +37,8 @@ import {
   agentRuns,
   agentSteps,
   agentTasks,
+  applications,
+  candidates,
   jobDescriptions,
   requisitions,
   type AgentTaskKind,
@@ -91,10 +93,24 @@ const HITL_TOOLS = {
       summary: z.string().min(1).max(4000),
       assignee_role: z.enum(ROLES),
       subject: z
-        .object({ type: z.enum(["requisition", "jd"]), id: z.string().uuid() })
+        .union([
+          z.object({ type: z.enum(["requisition", "jd"]), id: z.string().uuid() }),
+          z.object({
+            type: z.literal("rejection"),
+            items: z
+              .array(
+                z.object({
+                  applicationId: z.string().uuid(),
+                  reason: z.string().min(3).max(500),
+                }),
+              )
+              .min(1)
+              .max(50),
+          }),
+        ])
         .optional()
         .describe(
-          "The requisition or JD version awaiting this approval. When set, approving or declining in the inbox performs the real approval step, and the approver role is taken from where the item is in its approval chain.",
+          "What the approval is for. A requisition or JD version: approving or declining in the inbox performs the real approval step, and the approver role comes from where the item is in its chain. A rejection batch: the listed candidates are rejected with their reasons only if the person approves.",
         ),
     }),
   },
@@ -109,13 +125,62 @@ const isHitl = (name: string): name is HitlName => name in HITL_TOOLS;
 
 /* --------------------------------------------- gates tied to real records */
 
-type GateSubject = { type: "requisition" | "jd"; id: string; expects?: string };
+type RecordSubject = { type: "requisition" | "jd"; id: string; expects?: string };
+type RejectionSubject = {
+  type: "rejection";
+  items: { applicationId: string; reason: string; expects?: string }[];
+};
+type GateSubject = RecordSubject | RejectionSubject;
+
+const TERMINAL_STAGES = new Set(["rejected", "hired", "joined", "withdrawn", "no_show"]);
 
 /** Which role must decide `subject` now, or why it is not awaiting approval. */
-async function gateFor(
-  orgId: string,
-  subject: GateSubject,
-): Promise<{ role: AppRole; status: string } | { error: string }> {
+type GateInfo = {
+  role: AppRole | null;
+  status: string;
+  /** Rejection batches go to the person the agent works for. */
+  toPrincipal?: boolean;
+  /** Server-built detail appended to the agent's summary. */
+  detail?: string;
+  subject?: GateSubject;
+};
+
+async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | { error: string }> {
+  if (subject.type === "rejection") {
+    const ids = subject.items.map((i) => i.applicationId);
+    const rows = await db
+      .select({
+        id: applications.id,
+        stage: applications.stage,
+        name: candidates.fullName,
+        code: requisitions.code,
+      })
+      .from(applications)
+      .innerJoin(candidates, eq(candidates.id, applications.candidateId))
+      .innerJoin(requisitions, eq(requisitions.id, applications.requisitionId))
+      .where(and(inArray(applications.id, ids), eq(applications.orgId, orgId)));
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const missing = ids.filter((id) => !byId.has(id));
+    if (missing.length) return { error: `Applications not found: ${missing.join(", ")}` };
+    const closed = rows.filter((r) => TERMINAL_STAGES.has(r.stage));
+    if (closed.length) {
+      return { error: `Already closed: ${closed.map((r) => r.name).join(", ")}` };
+    }
+    const items = subject.items.map((i) => ({ ...i, expects: byId.get(i.applicationId)!.stage }));
+    const detail = items
+      .map((i) => {
+        const r = byId.get(i.applicationId)!;
+        return `• ${r.name} (${r.code}, ${r.stage}) — ${i.reason}`;
+      })
+      .join("\n");
+    return {
+      role: null,
+      status: "batch",
+      toPrincipal: true,
+      detail: `Candidates to reject (${items.length}):\n${detail}`,
+      subject: { type: "rejection", items },
+    };
+  }
   const { APPROVER_ROLE } = await import("@/lib/requisitions.server");
   if (subject.type === "requisition") {
     const [r] = await db
@@ -156,6 +221,25 @@ async function performGate(
   const org = await activeOrgOf(userId);
   if (!org || org.orgId !== orgId) throw new Error("You are not a member of this organisation.");
   const actor = { orgId, userId, memberEmail: org.memberEmail };
+  if (subject.type === "rejection") {
+    if (decision.status !== "approved") return; // declining rejects nobody
+    const { moveStageCore } = await import("@/lib/pipeline.server");
+    for (const item of subject.items) {
+      const [app] = await db
+        .select({ stage: applications.stage })
+        .from(applications)
+        .where(and(eq(applications.id, item.applicationId), eq(applications.orgId, orgId)))
+        .limit(1);
+      // Skip anyone who moved since the batch was proposed.
+      if (!app || (item.expects && app.stage !== item.expects)) continue;
+      await moveStageCore(actor, {
+        applicationId: item.applicationId,
+        toStage: "rejected",
+        reason: item.reason,
+      });
+    }
+    return;
+  }
   const reason =
     decision.status === "rejected"
       ? (decision.reason ?? null)
@@ -212,8 +296,8 @@ export async function syncGateTasks(
     );
   let closed = 0;
   for (const t of open) {
-    const expects = (t.proposedAction as { args?: { subject?: GateSubject } } | null)?.args?.subject
-      ?.expects;
+    const expects = (t.proposedAction as { args?: { subject?: RecordSubject } } | null)?.args
+      ?.subject?.expects;
     const current =
       subject.type === "requisition"
         ? (
@@ -442,6 +526,8 @@ export async function runAgentTick(
   try {
     const { processAgentEvents } = await import("./orchestrator.server");
     counts.events = (await processAgentEvents(opts.orgId ? { orgId: opts.orgId } : {})).processed;
+    const { scheduleSweeps } = await import("./orchestrator.server");
+    await scheduleSweeps(opts.orgId ? { orgId: opts.orgId } : {});
   } catch (e) {
     log.error("agent.orchestrator.failed", { error: e instanceof Error ? e : String(e) });
   }
@@ -755,18 +841,26 @@ async function handleCall(
     let assigneeRole: AppRole | null = data.assignee_role ?? null;
     let args: unknown = call.args;
     const subject = (parsed.data as { subject?: GateSubject }).subject;
+    let toPrincipal = false;
+    let detail = "";
     if (call.name === "request_approval" && subject) {
       const gate = await gateFor(run.orgId, subject);
       if ("error" in gate) return toolError(gate.error);
       assigneeRole = gate.role;
-      args = { ...(call.args as object), subject: { ...subject, expects: gate.status } };
+      toPrincipal = gate.toPrincipal ?? false;
+      detail = gate.detail ?? "";
+      args = {
+        ...(call.args as object),
+        subject: gate.subject ?? { ...subject, expects: gate.status },
+      };
     }
     const taskId = await openTask(run, {
       kind,
       title: data.title ?? "The agent has a question",
-      body: data.summary ?? data.question ?? "",
+      body: [data.summary ?? data.question ?? "", detail].filter(Boolean).join("\n\n"),
       assigneeRole,
       proposedAction: { toolCallId: call.id, name: call.name, args },
+      ...(toPrincipal ? { assigneeUserId: run.principalUserId } : {}),
     });
     await recordStep(run, seq, {
       kind: "tool",
@@ -913,6 +1007,7 @@ async function openTask(
     body: string;
     assigneeRole: AppRole | null;
     proposedAction: unknown;
+    assigneeUserId?: string;
   },
 ): Promise<string> {
   const [row] = await db
@@ -922,10 +1017,10 @@ async function openTask(
       runId: run.id,
       kind: t.kind,
       title: t.title.slice(0, 200),
-      body: t.body.slice(0, 4000),
+      body: t.body.slice(0, 8000),
       assigneeRole: t.assigneeRole,
       // Action approvals default to the person the agent works for.
-      assigneeUserId: t.kind === "approval" ? run.principalUserId : null,
+      assigneeUserId: t.assigneeUserId ?? (t.kind === "approval" ? run.principalUserId : null),
       proposedAction: t.proposedAction as never,
     })
     .returning({ id: agentTasks.id });

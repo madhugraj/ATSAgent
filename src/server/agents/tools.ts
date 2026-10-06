@@ -477,9 +477,9 @@ export function registerPhase1Tools(): void {
   registerTool({
     name: "start_agent",
     description:
-      "Hand a piece of work to a specialist agent: requisition (draft and submit a new role), jd (draft or revise a JD for an existing requisition) or publishing (post an approved role). The person confirms before it starts.",
+      "Hand a piece of work to a specialist agent: requisition (draft and submit a new role), jd (draft or revise a JD for an existing requisition), publishing (post an approved role), intake (score and review an approved role's applicants) or screening (screen its shortlisted candidates). The person confirms before it starts.",
     input: z.object({
-      agent: z.enum(["requisition", "jd", "publishing"]),
+      agent: z.enum(["requisition", "jd", "publishing", "intake", "screening"]),
       goal: z.string().min(10).max(2000),
       requisitionId: z.string().uuid().optional(),
     }),
@@ -487,7 +487,7 @@ export function registerPhase1Tools(): void {
     describe: (i) => `Start the ${i.agent} agent: ${i.goal.slice(0, 120)}`,
     run: async (ctx, i) => {
       if (i.agent !== "requisition" && !i.requisitionId) {
-        throw new Error("The jd and publishing agents need a requisitionId.");
+        throw new Error("Only the requisition agent can start without a requisitionId.");
       }
       if (i.requisitionId) await loadRequisition(ctx.orgId, i.requisitionId);
       const { startRun } = await import("./runtime.server");
