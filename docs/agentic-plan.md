@@ -326,15 +326,31 @@ Mostly deterministic; uses the model only to draft messages.
 
 ### 5.2 Autonomy dial (per org, per agent) ✅
 
-| Level            | `write` tools                                    | `external` tools (leave the org)                |
-| ---------------- | ------------------------------------------------ | ----------------------------------------------- |
-| `suggest`        | proposal → approve                               | proposal → approve                              |
-| `act_and_notify` | run, notify owner, 1-click undo where reversible | proposal → approve, unless template whitelisted |
-| `autonomous`     | run                                              | run for whitelisted templates; else approve     |
+| Level            | `write` tools                                                               | `external` tools (leave the org)                |
+| ---------------- | --------------------------------------------------------------------------- | ----------------------------------------------- |
+| `suggest`        | proposal → approve                                                          | proposal → approve                              |
+| `act_and_notify` | run; the principal is told (bell + "Acted for you") until they mark it seen | proposal → approve, unless template whitelisted |
+| `autonomous`     | run (no notification; still in activity and audit)                          | run for whitelisted templates; else approve     |
 
 Gates (§5.1) ignore the dial. Agents are **opt-in**: every agent is off
 until the organisation switches it on, and starts at `suggest`, so value is
-visible before trust is extended.
+visible before trust is extended. One-click undo of a notified action is not
+built; reversing it is a normal edit in the app.
+
+**Autonomy recommendations (Phase 5).** Agent settings shows, per switched-on
+agent, a recommendation measured over 30 days with its evidence. It never
+changes anything itself — a person clicks Apply, and the save is audited with
+`viaRecommendation`. Rules (`src/server/agents/autonomy.server.ts`):
+
+| Recommendation                        | When                                                                                                                                              |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| lower one level                       | a critical health issue is open                                                                                                                   |
+| lower to `suggest`                    | ≥ 10 decided requests and > 25% rejected or > 40% edited before approval                                                                          |
+| raise `suggest` → `act_and_notify`    | ≥ 20 decided requests, ≥ 90% approved unchanged, ≤ 5% rejected, ≤ 5% tool errors, ≤ 10% failed runs, no open serious issue, 14+ days at the level |
+| raise `act_and_notify` → `autonomous` | ≥ 20 actions reported to the principal, ≤ 5% rejected, ≤ 5% tool errors, ≤ 10% failed runs, no open serious issue, 14+ days at the level          |
+| pre-approve a template                | above `suggest`: ≥ 10 approvals of that template, ≥ 95% unchanged, none rejected                                                                  |
+
+Otherwise it holds and says which condition is not met yet.
 
 ### 5.3 Decisions inbox
 
@@ -499,12 +515,12 @@ them must be explainable.
 
 ### 9.2 Where people see it
 
-| View                        | Audience                   | Shows                                                                                                          |
-| --------------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| **Agent activity timeline** | recruiter, HR, hiring team | on each requisition / candidate / offer: what each agent did, why, evidence, and which human unblocked it      |
-| **Run inspector**           | HR head, org owner         | one run step by step: prompts (redacted), tool calls, results, decisions, cost, timings; replay button         |
-| **Org agent dashboard**     | HR head, CHRO, org owner   | throughput per stage, time saved, approval wait times, human-edit rate per agent, spend vs budget              |
-| **Platform agent console**  | platform super admin       | runs, failures, latency and spend across tenants (extends `/platform-ai-usage`); vendor detail stays here only |
+| View                        | Audience                   | Shows                                                                                                                     |
+| --------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| **Agent activity timeline** | recruiter, HR, hiring team | on each requisition / candidate / offer: what each agent did, why, evidence, and which human unblocked it                 |
+| **Run inspector**           | HR head, org owner         | one run step by step: prompts (redacted), tool calls, results, decisions, cost, timings; dry-run replay and comparison ✅ |
+| **Org agent dashboard**     | HR head, CHRO, org owner   | throughput per stage, time saved, approval wait times, human-edit rate per agent, spend vs budget                         |
+| **Platform agent console**  | platform super admin       | runs, failures, latency and spend across tenants (`/platform-agents`) ✅; vendor detail stays here only                   |
 
 ### 9.3 Health rules and alerts (implemented)
 
@@ -530,7 +546,22 @@ acknowledged; every issue is listed on Governance → Agent observability.
 | Audit             | `audit.gap`           | critical          | a write / external tool call has no audit entry                                 |
 | Orchestrator      | `orchestrator.events` | serious           | lifecycle events failed, or pending 15+ min                                     |
 
+| Tools | `tools.injection` | warning → serious | a tool result carrying third-party text looked like instructions to the model (serious from 3 in 24 h) |
+
 Evals are enforced before deployment (CI), not at runtime.
+
+**Injection tripwire.** Third-party text still reaches the model only fenced
+by `untrusted()`; on top of that, every untrusted tool result is scanned for
+instruction-like patterns (and the extraction pipeline's own injection flag).
+A match marks the step (`agent_steps.injection_suspected`), writes an
+`agent.injection.suspected` audit entry and feeds `tools.injection`. It never
+changes what the model sees.
+
+**Alert channels.** Besides the bell, a newly opened serious or critical issue
+is pushed once: e-mail to the owner, HR heads and CBOs (on by default) and,
+optionally, a webhook signed with HMAC-SHA256 (`X-ATSAgent-Signature`)
+configured in Agent settings → Trace export and alerts. Each push is audited
+(`agent.issue.alerted`, with the channels used).
 
 ### 9.4 Rules
 
@@ -543,9 +574,13 @@ Evals are enforced before deployment (CI), not at runtime.
   and the org's own AI settings, as today.
 - **Retention:** step payload detail kept for a fixed window (see §12),
   metrics and audit kept long-term.
-- **Portable:** the logger and span model follow OpenTelemetry conventions so
-  an org or the platform can export to its own backend later without code
-  changes.
+- **Portable:** the logger and span model follow OpenTelemetry conventions.
+  An organisation can switch on trace export (Phase 5): each finished run is
+  posted as one OTLP/HTTP JSON trace (run root span, one child span per step)
+  to its own collector through `safeFetch`, with header values encrypted at
+  rest. Spans carry ids, kinds, tool names, statuses, token counts and timings
+  — no goals, prompts, payloads or model names. Failed exports back off for
+  10 minutes; runs older than 7 days are not back-filled.
 
 ---
 
@@ -586,12 +621,18 @@ Each phase ships end-to-end and keeps the app working without agents.
 - Offer agent (band-aware proposal, letter, approval brief)
 - Pre-onboarding & release agent (documents, cross-checks, release prep)
 
-**Phase 5 — Hardening and scale**
+**Phase 5 — Hardening and scale** ✅
 
-- autonomy upgrades per org based on measured approval/edit rates
-- platform console for agent runs; cost and latency tuning; replay tooling
-- alerting (stuck runs, error spikes, budget, injection detections) and
-  optional OpenTelemetry export to the org's own tracing backend
+- autonomy recommendations per org and agent from measured approval / edit
+  rates (§5.2), applied by a person; "act and notify" now actually notifies
+- platform agent console (`/platform-agents`): throughput, failure rate,
+  run and model-turn p50 / p95, tokens per run, tool error and edit rates per
+  agent, per model and per organisation — the evidence for cost and latency
+  tuning (no automatic tuning knobs were added)
+- dry-run replay of any finished run with a tool-sequence comparison (§11)
+- alerting: `tools.injection` rule, e-mail and signed-webhook alert channels
+  on top of the existing stuck-run, failure, budget and error-rate rules
+- optional OpenTelemetry trace export to the org's own collector (§9.4)
 
 ---
 
@@ -605,8 +646,16 @@ Each phase ships end-to-end and keeps the app working without agents.
 - **Human-edit rate** per agent and template (how often people change or
   reject what the agent proposed) is the main quality metric and the input
   for raising autonomy.
-- **Replay**: any `agent_run` can be re-executed against a new prompt/model
-  in a sandbox org and diffed.
+- **Replay** ✅: any finished live run can be re-executed as a **dry run**
+  under the agent's current definition and the org's current model settings
+  (HR head / CBO / owner). Read tools run with the requester's permissions;
+  write, external and human-in-the-loop steps are simulated (status
+  `simulated`, nothing executed, nobody asked, no tasks opened), so a replay
+  runs even while the agent is switched off. The comparison aligns the two
+  tool sequences and shows outcome, steps, tokens and duration side by side.
+  Replays never count as real work for the orchestrator or the failure rule.
+  Choosing a different model per replay and a separate sandbox organisation
+  are not built.
 
 ---
 

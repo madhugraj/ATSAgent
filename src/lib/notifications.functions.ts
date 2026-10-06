@@ -7,6 +7,7 @@ import {
   agentIssues,
   agentPolicies,
   agentRuns,
+  agentSteps,
   agentTasks,
   interviews,
   offers,
@@ -350,6 +351,32 @@ export const myNotifications = createServerFn({ method: "GET" })
           to: "/agents",
           at: t.createdAt.toISOString(),
           severity: t.kind === "gate" ? "warn" : "info",
+        });
+
+      // "Act and notify": actions agents ran for this person, until marked seen.
+      const [acted] = await db
+        .select({
+          n: sql<number>`count(*)::int`,
+          last: sql<string | null>`max(${agentSteps.createdAt})::text`,
+        })
+        .from(agentSteps)
+        .innerJoin(agentRuns, eq(agentRuns.id, agentSteps.runId))
+        .where(
+          and(
+            eq(agentSteps.orgId, orgId),
+            eq(agentSteps.notifyState, "pending"),
+            eq(agentRuns.principalUserId, context.userId),
+          ),
+        );
+      if (acted && acted.n > 0)
+        out.push({
+          id: "agent-acted",
+          kind: "agent",
+          title: `Agents acted for you: ${acted.n} action(s)`,
+          body: "Agents set to act and notify made these changes on your behalf. Review them under Agent activity.",
+          to: "/agents",
+          at: acted.last ? new Date(acted.last).toISOString() : null,
+          severity: "info",
         });
     }
 

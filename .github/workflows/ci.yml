@@ -74,3 +74,6 @@ jobs:
 
       - name: Agent health engine (rules, issues, heartbeat)
         run: bun test scripts/agent-health.test.ts
+
+      - name: Agents Phase 5 (replay, autonomy recommendations, alerts, trace export)
+        run: bun test scripts/agent-phase5.test.ts

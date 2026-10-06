@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-67 tables across 9 domains.
+68 tables across 9 domains.
 
 ## Identity & access
 
@@ -978,6 +978,8 @@ erDiagram
 | `agent_tasks` | `decided_by` | `users` | no action |
 | `agent_tasks` | `org_id` | `organizations` | cascade |
 | `agent_tasks` | `run_id` | `agent_runs` | cascade |
+| `agent_telemetry_settings` | `org_id` | `organizations` | cascade |
+| `agent_telemetry_settings` | `updated_by` | `users` | no action |
 | `ai_interviews` | `application_id` | `applications` | cascade |
 | `ai_interviews` | `org_id` | `organizations` | cascade |
 | `ai_provider_credentials` | `org_id` | `organizations` | cascade |
@@ -1091,13 +1093,14 @@ erDiagram
 |---|---|---|---|
 | `agent_definitions` | — | 6 | (agentType+hash) |
 | `agent_events` | — | 12 | — |
-| `agent_issues` | — | 15 | — |
+| `agent_issues` | — | 16 | — |
 | `agent_metrics_daily` | — | 17 | — |
 | `agent_policies` | — | 10 | (orgId+agentType) |
-| `agent_runs` | — | 27 | — |
+| `agent_runs` | — | 30 | — |
 | `agent_runtime_heartbeat` | — | 4 | — |
-| `agent_steps` | — | 15 | (runId+seq) |
+| `agent_steps` | — | 17 | (runId+seq) |
 | `agent_tasks` | — | 16 | — |
+| `agent_telemetry_settings` | — | 12 | — |
 | `ai_interviews` | Screening & interviews | 8 | — |
 | `ai_provider_credentials` | Communications & AI settings | 4 | (orgId+provider) |
 | `ai_settings` | Communications & AI settings | 9 | (org_id) |

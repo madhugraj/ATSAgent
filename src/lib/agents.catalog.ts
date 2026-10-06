@@ -99,12 +99,12 @@ export const AUTONOMY_OPTIONS: { value: AgentAutonomy; label: string; hint: stri
   {
     value: "act_and_notify",
     label: "Act and notify",
-    hint: "Internal changes run and you are told; messages outside the organisation still wait for approval unless the template is pre-approved.",
+    hint: "Internal changes run and you are told about each one (bell and Agent activity) until you mark them seen; messages outside the organisation still wait for approval unless the template is pre-approved.",
   },
   {
     value: "autonomous",
     label: "Autonomous",
-    hint: "Internal changes run; pre-approved templates send on their own; everything else waits for approval.",
+    hint: "Internal changes run without a notification (they stay in Agent activity and the audit trail); pre-approved templates send on their own; everything else waits for approval.",
   },
 ];
 

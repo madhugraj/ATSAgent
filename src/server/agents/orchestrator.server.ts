@@ -287,6 +287,7 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
           eq(agentRuns.agentType, "publishing"),
           eq(agentRuns.subjectId, req.id),
           eq(agentRuns.status, "done"),
+          eq(agentRuns.mode, "live"),
         ),
       )
       .limit(1);
@@ -388,6 +389,8 @@ async function recentRun(
       and(
         eq(agentRuns.orgId, orgId),
         eq(agentRuns.agentType, agentType as never),
+        // Dry-run replays never stand in for real work.
+        eq(agentRuns.mode, "live"),
         subjectId ? eq(agentRuns.subjectId, subjectId) : undefined,
         sql`(${agentRuns.status} in ('queued','running','awaiting_human') or ${agentRuns.createdAt} >= now() - make_interval(hours => ${hours}))`,
       ),

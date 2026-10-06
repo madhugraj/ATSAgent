@@ -122,6 +122,12 @@ export const NAV_GROUPS: NavGroup[] = [
         show: (c) => c.isSuperUser,
       },
       {
+        to: "/platform-agents",
+        label: "Platform agents",
+        icon: Bot,
+        show: (c) => c.isSuperUser,
+      },
+      {
         to: "/catalogue",
         label: "Product catalogue",
         icon: BookMarked,

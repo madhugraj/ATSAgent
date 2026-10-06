@@ -23,6 +23,7 @@ import { Route as MatchingRouteImport } from './routes/matching'
 import { Route as OffersRouteImport } from './routes/offers'
 import { Route as OrganisationRouteImport } from './routes/organisation'
 import { Route as PlatformRouteImport } from './routes/platform'
+import { Route as PlatformAgentsRouteImport } from './routes/platform-agents'
 import { Route as PlatformAiUsageRouteImport } from './routes/platform-ai-usage'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as ReportsRouteImport } from './routes/reports'
@@ -134,6 +135,11 @@ const OrganisationRoute = OrganisationRouteImport.update({
 const PlatformRoute = PlatformRouteImport.update({
   id: '/platform',
   path: '/platform',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PlatformAgentsRoute = PlatformAgentsRouteImport.update({
+  id: '/platform-agents',
+  path: '/platform-agents',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PlatformAiUsageRoute = PlatformAiUsageRouteImport.update({
@@ -368,6 +374,7 @@ export interface FileRoutesByFullPath {
   '/offers': typeof OffersRoute
   '/organisation': typeof OrganisationRoute
   '/platform': typeof PlatformRoute
+  '/platform-agents': typeof PlatformAgentsRoute
   '/platform-ai-usage': typeof PlatformAiUsageRoute
   '/privacy': typeof PrivacyRoute
   '/reports': typeof ReportsRoute
@@ -426,6 +433,7 @@ export interface FileRoutesByTo {
   '/offers': typeof OffersRoute
   '/organisation': typeof OrganisationRoute
   '/platform': typeof PlatformRoute
+  '/platform-agents': typeof PlatformAgentsRoute
   '/platform-ai-usage': typeof PlatformAiUsageRoute
   '/privacy': typeof PrivacyRoute
   '/reports': typeof ReportsRoute
@@ -485,6 +493,7 @@ export interface FileRoutesById {
   '/offers': typeof OffersRoute
   '/organisation': typeof OrganisationRoute
   '/platform': typeof PlatformRoute
+  '/platform-agents': typeof PlatformAgentsRoute
   '/platform-ai-usage': typeof PlatformAiUsageRoute
   '/privacy': typeof PrivacyRoute
   '/reports': typeof ReportsRoute
@@ -545,6 +554,7 @@ export interface FileRouteTypes {
     | '/offers'
     | '/organisation'
     | '/platform'
+    | '/platform-agents'
     | '/platform-ai-usage'
     | '/privacy'
     | '/reports'
@@ -603,6 +613,7 @@ export interface FileRouteTypes {
     | '/offers'
     | '/organisation'
     | '/platform'
+    | '/platform-agents'
     | '/platform-ai-usage'
     | '/privacy'
     | '/reports'
@@ -661,6 +672,7 @@ export interface FileRouteTypes {
     | '/offers'
     | '/organisation'
     | '/platform'
+    | '/platform-agents'
     | '/platform-ai-usage'
     | '/privacy'
     | '/reports'
@@ -720,6 +732,7 @@ export interface RootRouteChildren {
   OffersRoute: typeof OffersRoute
   OrganisationRoute: typeof OrganisationRoute
   PlatformRoute: typeof PlatformRoute
+  PlatformAgentsRoute: typeof PlatformAgentsRoute
   PlatformAiUsageRoute: typeof PlatformAiUsageRoute
   PrivacyRoute: typeof PrivacyRoute
   ReportsRoute: typeof ReportsRoute
@@ -862,6 +875,13 @@ declare module '@tanstack/react-router' {
       path: '/platform'
       fullPath: '/platform'
       preLoaderRoute: typeof PlatformRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/platform-agents': {
+      id: '/platform-agents'
+      path: '/platform-agents'
+      fullPath: '/platform-agents'
+      preLoaderRoute: typeof PlatformAgentsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/platform-ai-usage': {
@@ -1176,6 +1196,7 @@ const rootRouteChildren: RootRouteChildren = {
   OffersRoute: OffersRoute,
   OrganisationRoute: OrganisationRoute,
   PlatformRoute: PlatformRoute,
+  PlatformAgentsRoute: PlatformAgentsRoute,
   PlatformAiUsageRoute: PlatformAiUsageRoute,
   PrivacyRoute: PrivacyRoute,
   ReportsRoute: ReportsRoute,
