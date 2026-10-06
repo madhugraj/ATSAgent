@@ -213,6 +213,7 @@ erDiagram
     integer weight_education
     integer weight_social
     jsonb approval_trail
+    uuid created_by FK
     timestamptz opened_at
     timestamptz created_at
     text billing_type
@@ -269,6 +270,7 @@ erDiagram
 
   requisitions }o--o| organizations : "org_id · cascade"
   requisitions }o--o| departments : "department_id"
+  requisitions }o--o| users : "created_by"
   job_descriptions }o--|| requisitions : "requisition_id · cascade"
   job_descriptions }o--o| organizations : "org_id · cascade"
   content_templates }o--|| organizations : "org_id · cascade"
@@ -1042,6 +1044,7 @@ erDiagram
 | `org_pool_shares` | `partner_org` | `organizations` | cascade |
 | `requisition_board_postings` | `org_id` | `organizations` | cascade |
 | `requisition_board_postings` | `requisition_id` | `requisitions` | cascade |
+| `requisitions` | `created_by` | `users` | no action |
 | `requisitions` | `department_id` | `departments` | no action |
 | `requisitions` | `org_id` | `organizations` | cascade |
 | `salary_benchmarks` | `org_id` | `organizations` | cascade |
@@ -1130,7 +1133,7 @@ erDiagram
 | `platform_admins` | Identity & access | 6 | (email) |
 | `product_catalogue_commercials` | Organisations & masters | 8 | — |
 | `requisition_board_postings` | — | 16 | (requisitionId+provider) |
-| `requisitions` | Requisitions & job content | 39 | (orgId+code) |
+| `requisitions` | Requisitions & job content | 40 | (orgId+code) |
 | `salary_benchmarks` | Intelligence | 15 | — |
 | `screening_kits` | Screening & interviews | 11 | — |
 | `screening_prep_jobs` | Screening & interviews | 10 | (application_id) |

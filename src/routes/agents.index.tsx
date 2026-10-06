@@ -2,7 +2,16 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Bot, Check, Loader2, MessageSquareText, ShieldCheck, X } from "lucide-react";
+import {
+  Bot,
+  Check,
+  Loader2,
+  MessageSquareText,
+  Send,
+  ShieldCheck,
+  Sparkles,
+  X,
+} from "lucide-react";
 
 import { EmptyState, PageHeader } from "@/components/ats";
 import { Badge } from "@/components/ui/badge";
@@ -11,7 +20,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { AGENT_LABEL, ROLE_NAME } from "@/lib/agents.catalog";
 import {
+  agentSettings,
   agentSummary,
+  askAgents,
   cancelAgentRun,
   decideAgentTask,
   getAgentRun,
@@ -67,6 +78,8 @@ function AgentsPage() {
         }
       />
 
+      <AskAgents />
+
       <Tabs defaultValue="decisions" className="mt-4">
         <TabsList>
           <TabsTrigger value="decisions">
@@ -94,6 +107,72 @@ function AgentsPage() {
         </TabsContent>
       </Tabs>
     </>
+  );
+}
+
+function AskAgents() {
+  const qc = useQueryClient();
+  const settings = useQuery({ queryKey: ["agent_settings"], queryFn: () => agentSettings() });
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const copilot = settings.data?.agents.find((a) => a.type === "copilot");
+  const ready = Boolean(copilot?.live && copilot.enabled && !settings.data?.allPaused);
+
+  async function send() {
+    setBusy(true);
+    try {
+      await askAgents({ data: { message } });
+      setMessage("");
+      toast.success("The copilot is on it — its plan will appear under Waiting for you.");
+      qc.invalidateQueries({ queryKey: ["agent_runs"] });
+      setTimeout(() => {
+        qc.invalidateQueries({ queryKey: ["agent_tasks"] });
+        qc.invalidateQueries({ queryKey: ["agent_runs"] });
+      }, 6000);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not start the copilot");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="panel mt-4 p-5">
+      <div className="flex items-center gap-2">
+        <Sparkles className="size-4 text-primary" />
+        <h2 className="font-semibold">Ask the agents</h2>
+      </div>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Describe what you need, for example “Open 2 backend engineer roles for the Bengaluru
+        platform team, 4–8 years, Go and Kubernetes.” The copilot plans it and asks you to confirm
+        before any agent starts.
+      </p>
+      <Textarea
+        className="mt-3"
+        rows={3}
+        placeholder="What do you need?"
+        value={message}
+        disabled={!ready || busy}
+        onChange={(e) => setMessage(e.target.value)}
+      />
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <Button size="sm" disabled={!ready || busy || message.trim().length < 5} onClick={send}>
+          {busy ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />} Send
+        </Button>
+        {!ready && settings.data ? (
+          <p className="text-xs text-muted-foreground">
+            {settings.data.allPaused
+              ? "Agents are paused for this organisation."
+              : "Switch on the Copilot (and the agents it should use) in"}{" "}
+            {!settings.data.allPaused ? (
+              <Link to="/agents/settings" className="underline">
+                Agent settings
+              </Link>
+            ) : null}
+          </p>
+        ) : null}
+      </div>
+    </section>
   );
 }
 

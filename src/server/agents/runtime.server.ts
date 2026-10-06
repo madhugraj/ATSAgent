@@ -37,6 +37,8 @@ import {
   agentRuns,
   agentSteps,
   agentTasks,
+  jobDescriptions,
+  requisitions,
   type AgentTaskKind,
   type AgentType,
 } from "@db/schema";
@@ -88,6 +90,12 @@ const HITL_TOOLS = {
       title: z.string().min(1).max(200),
       summary: z.string().min(1).max(4000),
       assignee_role: z.enum(ROLES),
+      subject: z
+        .object({ type: z.enum(["requisition", "jd"]), id: z.string().uuid() })
+        .optional()
+        .describe(
+          "The requisition or JD version awaiting this approval. When set, approving or declining in the inbox performs the real approval step, and the approver role is taken from where the item is in its approval chain.",
+        ),
     }),
   },
   handoff: {
@@ -98,6 +106,166 @@ const HITL_TOOLS = {
 } as const;
 type HitlName = keyof typeof HITL_TOOLS;
 const isHitl = (name: string): name is HitlName => name in HITL_TOOLS;
+
+/* --------------------------------------------- gates tied to real records */
+
+type GateSubject = { type: "requisition" | "jd"; id: string; expects?: string };
+
+/** Which role must decide `subject` now, or why it is not awaiting approval. */
+async function gateFor(
+  orgId: string,
+  subject: GateSubject,
+): Promise<{ role: AppRole; status: string } | { error: string }> {
+  const { APPROVER_ROLE } = await import("@/lib/requisitions.server");
+  if (subject.type === "requisition") {
+    const [r] = await db
+      .select({ status: requisitions.status })
+      .from(requisitions)
+      .where(and(eq(requisitions.id, subject.id), eq(requisitions.orgId, orgId)))
+      .limit(1);
+    if (!r) return { error: "Requisition not found." };
+    const role = APPROVER_ROLE[r.status];
+    if (!role) return { error: `The requisition is ${r.status}, not waiting for an approval.` };
+    return { role, status: r.status };
+  }
+  const [jd] = await db
+    .select({ status: jobDescriptions.status })
+    .from(jobDescriptions)
+    .where(and(eq(jobDescriptions.id, subject.id), eq(jobDescriptions.orgId, orgId)))
+    .limit(1);
+  if (!jd) return { error: "Job description not found." };
+  if (jd.status !== "pending_dh") {
+    return { error: `The job description is ${jd.status}, not waiting for review.` };
+  }
+  return { role: "department_head", status: jd.status };
+}
+
+/**
+ * Carry out the human decision on a gate tied to a requisition or JD, as the
+ * person deciding — the lifecycle core checks their role exactly as on the
+ * requisition page. Throws (and the task stays open) if they may not decide.
+ */
+async function performGate(
+  orgId: string,
+  userId: string,
+  subject: GateSubject,
+  decision: TaskDecision,
+): Promise<void> {
+  const lifecycle = await import("@/lib/requisitions.server");
+  const { activeOrgOf } = await import("@/lib/auth.middleware");
+  const org = await activeOrgOf(userId);
+  if (!org || org.orgId !== orgId) throw new Error("You are not a member of this organisation.");
+  const actor = { orgId, userId, memberEmail: org.memberEmail };
+  const reason =
+    decision.status === "rejected"
+      ? (decision.reason ?? null)
+      : decision.status === "approved"
+        ? (decision.comment ?? null)
+        : null;
+  if (subject.type === "requisition") {
+    const [r] = await db
+      .select({ status: requisitions.status })
+      .from(requisitions)
+      .where(and(eq(requisitions.id, subject.id), eq(requisitions.orgId, orgId)))
+      .limit(1);
+    if (!r) throw new Error("Requisition not found.");
+    if (subject.expects && r.status !== subject.expects) {
+      throw new Error("This requisition has already moved on; refresh to see its current state.");
+    }
+    const to =
+      decision.status === "approved" ? lifecycle.NEXT_APPROVAL[r.status] : ("rejected" as const);
+    if (!to) throw new Error(`The requisition is ${r.status}, not waiting for an approval.`);
+    await lifecycle.advanceRequisitionCore(actor, { id: subject.id, status: to, comment: reason });
+    return;
+  }
+  if (decision.status === "approved") {
+    await lifecycle.approveJobDescriptionCore(actor, { id: subject.id });
+  } else {
+    await lifecycle.requestJdChangesCore(actor, {
+      id: subject.id,
+      comment: reason?.trim() || "Changes requested.",
+    });
+  }
+}
+
+/**
+ * Close gate tasks whose requisition or JD was decided outside the inbox
+ * (e.g. on the requisition page), so the waiting agent run carries on.
+ */
+export async function syncGateTasks(
+  orgId: string,
+  subject: { type: "requisition" | "jd"; id: string },
+  decidedBy: string | null,
+  /** The status the event moved the record away from; only gates waiting on it close. */
+  fromStatus: string,
+): Promise<number> {
+  const open = await db
+    .select()
+    .from(agentTasks)
+    .where(
+      and(
+        eq(agentTasks.orgId, orgId),
+        eq(agentTasks.status, "open"),
+        eq(agentTasks.kind, "gate"),
+        sql`${agentTasks.proposedAction} -> 'args' -> 'subject' ->> 'id' = ${subject.id}`,
+      ),
+    );
+  let closed = 0;
+  for (const t of open) {
+    const expects = (t.proposedAction as { args?: { subject?: GateSubject } } | null)?.args?.subject
+      ?.expects;
+    const current =
+      subject.type === "requisition"
+        ? (
+            await db
+              .select({ status: requisitions.status })
+              .from(requisitions)
+              .where(eq(requisitions.id, subject.id))
+              .limit(1)
+          )[0]?.status
+        : (
+            await db
+              .select({ status: jobDescriptions.status })
+              .from(jobDescriptions)
+              .where(eq(jobDescriptions.id, subject.id))
+              .limit(1)
+          )[0]?.status;
+    if (expects !== fromStatus || !current || current === expects) continue;
+    const declined = current === "rejected" || current === "changes_requested";
+    const now = new Date();
+    const done = await db
+      .update(agentTasks)
+      .set({
+        status: declined ? "rejected" : "approved",
+        response: {
+          status: declined ? "rejected" : "approved",
+          [declined ? "reason" : "comment"]: `Decided outside the inbox (now ${current}).`,
+        } as never,
+        decidedBy,
+        decidedAt: now,
+        updatedAt: now,
+      })
+      .where(and(eq(agentTasks.id, t.id), eq(agentTasks.status, "open")))
+      .returning({ id: agentTasks.id });
+    if (!done.length) continue;
+    closed++;
+    await requeueIfUnblocked(t.runId);
+  }
+  return closed;
+}
+
+async function requeueIfUnblocked(runId: string) {
+  const [stillOpen] = await db
+    .select({ id: agentTasks.id })
+    .from(agentTasks)
+    .where(and(eq(agentTasks.runId, runId), eq(agentTasks.status, "open")))
+    .limit(1);
+  if (stillOpen) return;
+  await db
+    .update(agentRuns)
+    .set({ status: "queued", updatedAt: new Date() })
+    .where(and(eq(agentRuns.id, runId), eq(agentRuns.status, "awaiting_human")));
+}
 
 const RUNTIME_RULES = [
   "Operating rules:",
@@ -175,6 +343,14 @@ export async function resolveTask(input: {
     throw new Error("Approve or reject this request.");
   }
 
+  // A gate tied to a requisition or JD performs the real approval step first;
+  // if the decider may not make it, this throws and the task stays open.
+  const gateSubject = (task.proposedAction as { args?: { subject?: GateSubject } } | null)?.args
+    ?.subject;
+  if (task.kind === "gate" && gateSubject) {
+    await performGate(input.orgId, input.userId, gateSubject, decision);
+  }
+
   const now = new Date();
   const updated = await db
     .update(agentTasks)
@@ -203,17 +379,7 @@ export async function resolveTask(input: {
     },
   });
 
-  const [stillOpen] = await db
-    .select({ id: agentTasks.id })
-    .from(agentTasks)
-    .where(and(eq(agentTasks.runId, task.runId), eq(agentTasks.status, "open")))
-    .limit(1);
-  if (!stillOpen) {
-    await db
-      .update(agentRuns)
-      .set({ status: "queued", updatedAt: now })
-      .where(and(eq(agentRuns.id, task.runId), eq(agentRuns.status, "awaiting_human")));
-  }
+  await requeueIfUnblocked(task.runId);
 }
 
 /** Stop a run and close its open tasks. */
@@ -246,6 +412,7 @@ export async function cancelRun(input: { orgId: string; runId: string; userId: s
 }
 
 export type TickCounts = {
+  events: number;
   reclaimed: number;
   claimed: number;
   done: number;
@@ -261,6 +428,7 @@ export async function runAgentTick(
 ): Promise<TickCounts> {
   const max = Math.min(Math.max(opts.max ?? 10, 1), 50);
   const counts: TickCounts = {
+    events: 0,
     reclaimed: 0,
     claimed: 0,
     done: 0,
@@ -269,6 +437,14 @@ export async function runAgentTick(
     failed: 0,
   };
   const now = new Date();
+
+  // 0. Turn lifecycle events into agent runs and close gates decided elsewhere.
+  try {
+    const { processAgentEvents } = await import("./orchestrator.server");
+    counts.events = (await processAgentEvents(opts.orgId ? { orgId: opts.orgId } : {})).processed;
+  } catch (e) {
+    log.error("agent.orchestrator.failed", { error: e instanceof Error ? e : String(e) });
+  }
 
   // 1. Reclaim runs whose worker died mid-turn; give up after MAX_ATTEMPTS.
   const expired = await db
@@ -290,15 +466,26 @@ export async function runAgentTick(
     .returning({ id: agentRuns.id });
   counts.reclaimed = expired.length;
 
-  // 2. Claim queued runs (skip paused orgs/agents), disjoint across workers.
+  // 2. Claim queued runs of agents the org has switched on (opt-in) and not
+  //    paused org-wide; disjoint across workers.
   const paused = db
     .select({ one: sql`1` })
     .from(agentPolicies)
     .where(
       and(
         eq(agentPolicies.orgId, agentRuns.orgId),
+        eq(agentPolicies.agentType, "*"),
         eq(agentPolicies.enabled, false),
-        sql`${agentPolicies.agentType} in ('*', ${agentRuns.agentType})`,
+      ),
+    );
+  const switchedOn = db
+    .select({ one: sql`1` })
+    .from(agentPolicies)
+    .where(
+      and(
+        eq(agentPolicies.orgId, agentRuns.orgId),
+        sql`${agentPolicies.agentType} = ${agentRuns.agentType}`,
+        eq(agentPolicies.enabled, true),
       ),
     );
   const dueIds = db
@@ -308,6 +495,7 @@ export async function runAgentTick(
       and(
         eq(agentRuns.status, "queued"),
         sql`not exists (${paused})`,
+        sql`exists (${switchedOn})`,
         opts.orgId ? eq(agentRuns.orgId, opts.orgId) : undefined,
       ),
     )
@@ -355,7 +543,7 @@ export async function runAgentTick(
   } catch (e) {
     log.error("agent.metrics.rollup_failed", { error: e instanceof Error ? e : String(e) });
   }
-  if (counts.claimed || counts.reclaimed) log.info("agent.tick", counts);
+  if (counts.claimed || counts.reclaimed || counts.events) log.info("agent.tick", counts);
   return counts;
 }
 
@@ -564,12 +752,21 @@ async function handleCall(
       summary?: string;
       assignee_role?: AppRole;
     };
+    let assigneeRole: AppRole | null = data.assignee_role ?? null;
+    let args: unknown = call.args;
+    const subject = (parsed.data as { subject?: GateSubject }).subject;
+    if (call.name === "request_approval" && subject) {
+      const gate = await gateFor(run.orgId, subject);
+      if ("error" in gate) return toolError(gate.error);
+      assigneeRole = gate.role;
+      args = { ...(call.args as object), subject: { ...subject, expects: gate.status } };
+    }
     const taskId = await openTask(run, {
       kind,
       title: data.title ?? "The agent has a question",
       body: data.summary ?? data.question ?? "",
-      assigneeRole: data.assignee_role ?? null,
-      proposedAction: { toolCallId: call.id, name: call.name, args: call.args },
+      assigneeRole,
+      proposedAction: { toolCallId: call.id, name: call.name, args },
     });
     await recordStep(run, seq, {
       kind: "tool",

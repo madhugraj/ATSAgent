@@ -93,11 +93,13 @@ export async function runScenario(s: Scenario): Promise<EvalReport> {
       isOwner: true,
       joinedAt: new Date(),
     });
-    if (s.autonomy) {
-      await db
-        .insert(agentPolicies)
-        .values({ orgId, agentType: s.agent.type, autonomy: s.autonomy });
-    }
+    // Agents are opt-in: switch the scenario's agent on.
+    await db.insert(agentPolicies).values({
+      orgId,
+      agentType: s.agent.type,
+      enabled: true,
+      autonomy: s.autonomy ?? "suggest",
+    });
 
     const { runId } = await startRun({
       orgId,
