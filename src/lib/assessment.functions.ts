@@ -16,69 +16,72 @@ const CreateInput = z.object({
 });
 
 /** Build a role-specific questionnaire and issue a private candidate link. */
+/** Shared by the candidate page and the Screening agent. */
+export async function createAssessmentCore(orgId: string, data: z.infer<typeof CreateInput>) {
+  const [candidate] = await db
+    .select({
+      id: candidates.id,
+      fullName: candidates.fullName,
+      currentEmployer: candidates.currentEmployer,
+      skills: candidates.skills,
+    })
+    .from(candidates)
+    .where(and(eq(candidates.id, data.candidateId), eq(candidates.orgId, orgId)))
+    .limit(1);
+  if (!candidate) throw new Error("Candidate not found");
+
+  let title = candidate.currentEmployer
+    ? `their next role after ${candidate.currentEmployer}`
+    : "the role";
+  let mustHave: string[] = candidate.skills ?? [];
+  let responsibilities: string | null = null;
+
+  if (data.requisitionId) {
+    const [req] = await db
+      .select({
+        title: requisitions.title,
+        mustHaveSkills: requisitions.mustHaveSkills,
+        responsibilities: requisitions.responsibilities,
+      })
+      .from(requisitions)
+      .where(and(eq(requisitions.id, data.requisitionId), eq(requisitions.orgId, orgId)))
+      .limit(1);
+    if (req) {
+      title = req.title;
+      mustHave = req.mustHaveSkills ?? mustHave;
+      responsibilities = req.responsibilities ?? null;
+    }
+  }
+
+  const questions = await generateQuestions({
+    orgId: orgId,
+    title,
+    mustHave,
+    responsibilities,
+    count: data.count,
+  });
+  const token = crypto.randomUUID().replace(/-/g, "");
+
+  const [row] = await db
+    .insert(candidateAssessments)
+    .values({
+      candidateId: candidate.id,
+      requisitionId: data.requisitionId ?? null,
+      orgId: orgId,
+      token,
+      status: "sent",
+      questions,
+    })
+    .returning({ id: candidateAssessments.id, token: candidateAssessments.token });
+  if (!row) throw new Error("The assessment could not be created.");
+
+  return { id: row.id, token: row.token, questions };
+}
+
 export const createAssessment = createServerFn({ method: "POST" })
   .middleware([requireOrg])
   .inputValidator((data: unknown) => CreateInput.parse(data))
-  .handler(async ({ data, context }) => {
-    const [candidate] = await db
-      .select({
-        id: candidates.id,
-        fullName: candidates.fullName,
-        currentEmployer: candidates.currentEmployer,
-        skills: candidates.skills,
-      })
-      .from(candidates)
-      .where(and(eq(candidates.id, data.candidateId), eq(candidates.orgId, context.orgId)))
-      .limit(1);
-    if (!candidate) throw new Error("Candidate not found");
-
-    let title = candidate.currentEmployer
-      ? `their next role after ${candidate.currentEmployer}`
-      : "the role";
-    let mustHave: string[] = candidate.skills ?? [];
-    let responsibilities: string | null = null;
-
-    if (data.requisitionId) {
-      const [req] = await db
-        .select({
-          title: requisitions.title,
-          mustHaveSkills: requisitions.mustHaveSkills,
-          responsibilities: requisitions.responsibilities,
-        })
-        .from(requisitions)
-        .where(and(eq(requisitions.id, data.requisitionId), eq(requisitions.orgId, context.orgId)))
-        .limit(1);
-      if (req) {
-        title = req.title;
-        mustHave = req.mustHaveSkills ?? mustHave;
-        responsibilities = req.responsibilities ?? null;
-      }
-    }
-
-    const questions = await generateQuestions({
-      orgId: context.orgId,
-      title,
-      mustHave,
-      responsibilities,
-      count: data.count,
-    });
-    const token = crypto.randomUUID().replace(/-/g, "");
-
-    const [row] = await db
-      .insert(candidateAssessments)
-      .values({
-        candidateId: candidate.id,
-        requisitionId: data.requisitionId ?? null,
-        orgId: context.orgId,
-        token,
-        status: "sent",
-        questions,
-      })
-      .returning({ id: candidateAssessments.id, token: candidateAssessments.token });
-    if (!row) throw new Error("The assessment could not be created.");
-
-    return { id: row.id, token: row.token, questions };
-  });
+  .handler(async ({ data, context }) => createAssessmentCore(context.orgId, data));
 
 /* ------------------------------------------------------------ candidate side */
 

@@ -861,7 +861,13 @@ export const aiUsageEvents = pgTable(
   ],
 );
 
-export type EmailOutboxKind = "ack" | "stage_update" | "interview_invite" | "offer_released";
+export type EmailOutboxKind =
+  | "ack"
+  | "stage_update"
+  | "interview_invite"
+  | "offer_released"
+  | "assessment_invite"
+  | "member_reminder";
 export type EmailOutboxStatus = "queued" | "sent" | "failed" | "suppressed";
 export type EmailOutboxAttachment = {
   filename: string;

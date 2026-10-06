@@ -36,58 +36,17 @@ export const moveStage = createServerFn({ method: "POST" })
   .middleware([requireOrg])
   .inputValidator((data: unknown) => MoveInput.parse(data))
   .handler(async ({ data, context }) => {
-    const [app] = await db
-      .select({ id: applications.id, stage: applications.stage })
-      .from(applications)
-      .where(and(eq(applications.id, data.applicationId), eq(applications.orgId, context.orgId)))
-      .limit(1);
-    if (!app) throw new Error("Application not found");
-
-    const from = app.stage as Stage;
-    if (from === data.toStage)
-      return { ok: true as const, from, to: data.toStage, unchanged: true };
-
-    if (!canMove(from, data.toStage)) {
-      throw new Error(
-        `${STAGE_LABEL[from]} → ${STAGE_LABEL[data.toStage]} is not an allowed transition. Park the candidate on hold or in the reserve pool first.`,
-      );
-    }
-    if (REASON_REQUIRED.includes(data.toStage) && !data.reason?.trim()) {
-      throw new Error(`A reason is required to move a candidate to ${STAGE_LABEL[data.toStage]}.`);
-    }
-    if (HR_CONTROLLED_TARGETS.has(data.toStage)) {
-      await assertRole(
-        context.userId,
-        context.orgId,
-        ["hr_head", "president_cbo"],
-        "Only the HR head or an owner can move a candidate into an offer or hiring stage.",
-      );
-    }
-
-    const now = new Date();
-    await db
-      .update(applications)
-      .set({
-        stage: data.toStage,
-        stageReason: data.reason?.trim() || null,
-        stageNote: data.note?.trim() || null,
-        lastActivityAt: now,
-      })
-      .where(eq(applications.id, app.id));
-
-    const actor = (context.claims as Record<string, unknown> | undefined)?.["email"];
-    const { recordStageTransition } = await import("./stage-events.server");
-    await recordStageTransition({
-      orgId: context.orgId,
-      applicationId: app.id,
-      fromStage: from,
-      toStage: data.toStage,
-      actor: typeof actor === "string" ? actor : context.userId,
-      reason: data.reason?.trim() || null,
-      note: data.note?.trim() || null,
-    });
-
-    return { ok: true as const, from, to: data.toStage, unchanged: false };
+    const { moveStageCore } = await import("./pipeline.server");
+    const r = await moveStageCore(
+      { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
+      {
+        applicationId: data.applicationId,
+        toStage: data.toStage,
+        reason: data.reason ?? null,
+        note: data.note ?? null,
+      },
+    );
+    return { ok: true as const, ...r };
   });
 
 /** Same validation, applied to a selection from the talent pool table. */

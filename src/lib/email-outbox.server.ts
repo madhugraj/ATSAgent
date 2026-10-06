@@ -24,14 +24,17 @@ const MAX_ATTEMPTS = 5;
 const ACK_HOURLY_CAP = 50;
 const CLAIM_LEASE_MINUTES = 5;
 
+/** Per-kind org toggle; null = governed only by the master switch (internal mail). */
 const KIND_TOGGLE: Record<
   EmailOutboxKind,
-  "ackEnabled" | "stageEnabled" | "interviewEnabled" | "offerEnabled"
+  "ackEnabled" | "stageEnabled" | "interviewEnabled" | "offerEnabled" | null
 > = {
   ack: "ackEnabled",
   stage_update: "stageEnabled",
   interview_invite: "interviewEnabled",
   offer_released: "offerEnabled",
+  assessment_invite: "stageEnabled",
+  member_reminder: null,
 };
 
 export async function getOrgEmailSettings(orgId: string): Promise<EmailSettingsEffective> {
@@ -115,7 +118,8 @@ export async function enqueueEmail(input: EnqueueEmailInput): Promise<void> {
   if (!to) return;
 
   const settings = await getOrgEmailSettings(input.orgId);
-  if (!settings.enabled || !settings[KIND_TOGGLE[input.kind]]) return;
+  const toggle = KIND_TOGGLE[input.kind];
+  if (!settings.enabled || (toggle && !settings[toggle])) return;
 
   let status: EmailOutboxStatus = "queued";
   if (input.kind === "ack") {
