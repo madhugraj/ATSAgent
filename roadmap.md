@@ -1,5 +1,16 @@
 # Roadmap
 
+## Agentic platform — governance hardening (2026-10-06)
+
+- [x] Agent manifests (`src/server/agents/definitions.ts`): identity, version, accountable owner, responsibility, permission scope, must-never list, gates, risk tier, evals; tools declare the AI skills they call
+- [x] Version per run — `agent_definitions` stores each manifest version once by content hash (migration `0026`); runs record the definition they executed under; mid-run definition changes recorded and audited
+- [x] Change control — `scripts/agents.lock.json` (`bun run agents:lock`); CI fails on a manifest change without a version bump and on any live agent without a real-agent eval
+- [x] AI attribution — `ai_usage_events.agent_run_id` for every request inside a run, including AI calls inside tools
+- [x] Monthly token budget enforced — over-budget agents pause (re-checked hourly, resets monthly), audited once, surfaced in the notification bell
+- [x] Run lifecycle audit — started / completed / failed / definition changed / budget paused / exported
+- [x] Real-agent eval scenarios for all seven live agents (`scripts/evals/scenarios.ts`); governance suite `scripts/agent-governance.test.ts`
+- [x] Agent register (Governance → Agent register) and per-run trail export (JSON, vendor-neutral)
+
 ## Agentic platform — Phase 2: intake → match → screen (2026-10-06)
 
 - [x] Pipeline cores (`src/lib/pipeline.server.ts`) shared by the screens and agent tools — stage moves, adding talent-pool candidates (now verifies the candidates belong to the organisation, closing a gap in `addApplicationsToRequisition`), candidate notes; `createAssessmentCore`

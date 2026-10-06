@@ -151,6 +151,7 @@ export function registerPhase2Tools(): void {
       "Score every unscored application for a requisition against its JD (up to 25 per call). Strong matches are shortlisted automatically, the rest are held at ai_screened for a person to review.",
     input: ReqId,
     risk: "write",
+    skills: ["candidate_score", "linkedin_signal", "writing_signal"],
     describe: () => "Score new applications against the JD",
     run: async (ctx, i) => {
       const { scoreUnscored } = await import("@/lib/autoscore.server");
@@ -322,6 +323,7 @@ export function registerPhase2Tools(): void {
       "Build the screening-call kit (questions and focus areas) for a shortlisted candidate if it is missing.",
     input: AppId,
     risk: "write",
+    skills: ["screening_kit"],
     describe: () => "Prepare the screening-call kit",
     run: async (ctx, i) => {
       const app = await loadApplication(ctx.orgId, i.applicationId);
@@ -342,6 +344,7 @@ export function registerPhase2Tools(): void {
       "Create a role-specific written assessment for a shortlisted candidate and email them the private link. Leaves the organisation, so a person approves it unless the assessment email is pre-approved.",
     input: AppId.extend({ dueInDays: z.number().int().min(1).max(14).default(3) }),
     risk: "external",
+    skills: ["assessment_generate"],
     templateOf: () => "assessment_invite",
     describe: (i) => `Send a written assessment (due in ${i.dueInDays} days)`,
     run: async (ctx, i) => {

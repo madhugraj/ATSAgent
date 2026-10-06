@@ -44,6 +44,8 @@ import {
   type AgentTaskKind,
   type AgentType,
 } from "@db/schema";
+import { agentRunScope } from "./context";
+import { ensureDefinition, manifestHash, RUNTIME_RULES } from "./manifest.server";
 import { decideToolCall, loadPolicy } from "./policy";
 import { getAgent, getTool, type ToolContext } from "./registry";
 
@@ -351,15 +353,6 @@ async function requeueIfUnblocked(runId: string) {
     .where(and(eq(agentRuns.id, runId), eq(agentRuns.status, "awaiting_human")));
 }
 
-const RUNTIME_RULES = [
-  "Operating rules:",
-  "- You act on behalf of the person who started this run and can only use the tools provided.",
-  "- Never claim an action happened unless a tool result confirms it.",
-  "- Approvals of requisitions, JDs and offers, offer release, rejecting a candidate and the hiring decision belong to people: use request_approval, never work around it.",
-  "- If an action is declined, do not retry it unchanged; adapt or hand off.",
-  "- When the goal is complete, reply with a short summary and no tool calls.",
-].join("\n");
-
 /* ------------------------------------------------------------ public API */
 
 /** Queue a new run. The goal must not embed untrusted text without untrusted(). */
@@ -375,9 +368,13 @@ export async function startRun(input: {
 }): Promise<{ runId: string }> {
   const def = getAgent(input.agentType);
   if (!def) throw new Error(`Unknown agent: ${input.agentType}`);
+  const definition = await ensureDefinition(def);
   const [run] = await db
     .insert(agentRuns)
     .values({
+      definitionId: definition.id,
+      definitionVersion: definition.version,
+      definitionHash: definition.hash,
       orgId: input.orgId,
       agentType: input.agentType,
       principalUserId: input.principalUserId,
@@ -389,6 +386,21 @@ export async function startRun(input: {
       transcript: [{ role: "user", content: input.goal } satisfies AgentMessage],
     })
     .returning({ id: agentRuns.id });
+  await writeAudit({
+    actor: `agent:${input.agentType}:${run!.id}`,
+    actorUserId: input.principalUserId,
+    orgId: input.orgId,
+    action: "agent.run.started",
+    entityType: "agent_run",
+    entityId: run!.id,
+    detail: {
+      on_behalf_of: input.principalUserId,
+      definition_version: definition.version,
+      definition_hash: definition.hash,
+      subject: input.subjectId ? { type: input.subjectType ?? null, id: input.subjectId } : null,
+      trigger_event_id: input.triggerEventId ?? null,
+    },
+  });
   return { runId: run!.id };
 }
 
@@ -580,6 +592,8 @@ export async function runAgentTick(
     .where(
       and(
         eq(agentRuns.status, "queued"),
+        // leaseUntil on a queued run is a "not before" (budget pause).
+        sql`(${agentRuns.leaseUntil} is null or ${agentRuns.leaseUntil} < now())`,
         sql`not exists (${paused})`,
         sql`exists (${switchedOn})`,
         opts.orgId ? eq(agentRuns.orgId, opts.orgId) : undefined,
@@ -611,11 +625,16 @@ export async function runAgentTick(
         org_id: run.orgId,
         agent: run.agentType,
       });
-      const outcome = await driveRun(run).catch(async (e: unknown) => {
-        runLog.error("agent.run.crashed", { error: e instanceof Error ? e : String(e) });
-        await finish(run!, "failed", null, e instanceof Error ? e.message : String(e));
-        return "failed" as const;
-      });
+      const scoped = run;
+      const outcome = await agentRunScope
+        .run({ runId: scoped.id, orgId: scoped.orgId, agentType: scoped.agentType }, () =>
+          driveRun(scoped),
+        )
+        .catch(async (e: unknown) => {
+          runLog.error("agent.run.crashed", { error: e instanceof Error ? e : String(e) });
+          await finish(run!, "failed", null, e instanceof Error ? e.message : String(e));
+          return "failed" as const;
+        });
       runLog.info("agent.run.turn", { outcome, duration_ms: Date.now() - started });
       counts[outcome]++;
     }
@@ -677,7 +696,32 @@ async function driveRun(run: AgentRun): Promise<"done" | "awaiting" | "yielded" 
   ];
   const system = `${INJECTION_RULES}\n\n${RUNTIME_RULES}\n\n${def.system}`;
 
+  // A deploy may have changed the agent since this run started: record the
+  // definition the remaining steps execute under.
+  if (run.definitionHash !== manifestHash(def)) {
+    const d = await ensureDefinition(def);
+    await db
+      .update(agentRuns)
+      .set({ definitionId: d.id, definitionVersion: d.version, definitionHash: d.hash })
+      .where(eq(agentRuns.id, run.id));
+    await writeAudit({
+      actor: ctx.actor,
+      actorUserId: run.principalUserId,
+      orgId: run.orgId,
+      action: "agent.run.definition_changed",
+      entityType: "agent_run",
+      entityId: run.id,
+      detail: { from: run.definitionHash, to: d.hash, version: d.version },
+    });
+    run.definitionHash = d.hash;
+  }
+
   for (let turn = 0; turn < TURNS_PER_TICK; turn++) {
+    if (await overBudget(run, policy.monthlyTokenBudget)) {
+      await save(run, transcript, null, stepCount, tokensUsed);
+      await pauseForBudget(run);
+      return "yielded";
+    }
     if (stepCount >= run.maxSteps || tokensUsed >= run.maxTokens) {
       await save(run, transcript, null, stepCount, tokensUsed);
       await finish(run, "failed", null, "The run reached its step or token budget.");
@@ -1096,6 +1140,73 @@ async function finish(
     .update(agentRuns)
     .set({ status, result, lastError: error, leaseUntil: null, finishedAt: now, updatedAt: now })
     .where(eq(agentRuns.id, run.id));
+  await writeAudit({
+    actor: `agent:${run.agentType}:${run.id}`,
+    actorUserId: run.principalUserId,
+    orgId: run.orgId,
+    action: status === "done" ? "agent.run.completed" : "agent.run.failed",
+    entityType: "agent_run",
+    entityId: run.id,
+    detail: {
+      on_behalf_of: run.principalUserId,
+      definition_hash: run.definitionHash,
+      handed_off: Boolean(result?.startsWith("Handed off:")),
+      error: error ? error.slice(0, 300) : null,
+    },
+  });
+}
+
+export const BUDGET_PAUSE_MESSAGE = "Paused: this agent reached its monthly token budget.";
+
+/** Month-to-date tokens of this org's agent, from the AI ledger (incl. AI inside tools). */
+export async function monthTokens(orgId: string, agentType: string): Promise<number> {
+  const { aiUsageEvents } = await import("@db/schema");
+  const [r] = await db
+    .select({ n: sql<number>`coalesce(sum(${aiUsageEvents.totalTokens}), 0)::bigint` })
+    .from(aiUsageEvents)
+    .innerJoin(agentRuns, eq(agentRuns.id, aiUsageEvents.agentRunId))
+    .where(
+      and(
+        eq(agentRuns.orgId, orgId),
+        eq(agentRuns.agentType, agentType as never),
+        sql`${aiUsageEvents.createdAt} >= date_trunc('month', now())`,
+      ),
+    );
+  return Number(r?.n ?? 0);
+}
+
+async function overBudget(run: AgentRun, budget: number | null): Promise<boolean> {
+  if (budget == null) return false;
+  return (await monthTokens(run.orgId, run.agentType)) >= budget;
+}
+
+/** Park the run (re-checked hourly; the budget resets with the month) and record it once. */
+async function pauseForBudget(run: AgentRun) {
+  const firstTime = run.lastError !== BUDGET_PAUSE_MESSAGE;
+  await db
+    .update(agentRuns)
+    .set({
+      status: "queued",
+      lastError: BUDGET_PAUSE_MESSAGE,
+      leaseUntil: new Date(Date.now() + 60 * 60_000),
+      updatedAt: new Date(),
+    })
+    .where(eq(agentRuns.id, run.id));
+  if (firstTime) {
+    log.warn("agent.run.budget_paused", {
+      run_id: run.id,
+      org_id: run.orgId,
+      agent: run.agentType,
+    });
+    await writeAudit({
+      actor: `agent:${run.agentType}:${run.id}`,
+      actorUserId: run.principalUserId,
+      orgId: run.orgId,
+      action: "agent.run.budget_paused",
+      entityType: "agent_run",
+      entityId: run.id,
+    });
+  }
 }
 
 function preview(text: string): string {

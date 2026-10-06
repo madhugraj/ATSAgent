@@ -168,6 +168,15 @@ beforeEach(async () => {
   });
   registerAgent({
     type: "requisition",
+    name: "Test agent",
+    version: "0.0.0-test",
+    owner: "hr_head",
+    responsibility: "Test fixture.",
+    mustNever: [],
+    scope: { reads: [], writes: [], external: [] },
+    gates: ["general"],
+    riskTier: "low",
+    evals: [],
     feature: "agent_requisition",
     system: "Test agent.",
     tools: ["lookup", "save_draft", "read_cv"],

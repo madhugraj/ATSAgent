@@ -89,6 +89,12 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: "/organisation", label: "Organisation", icon: Building2, show: (c) => c.isOwner },
       { to: "/integrations", label: "Integrations", icon: Plug, show: (c) => c.governance },
       { to: "/agents/settings", label: "Agent settings", icon: Bot, show: (c) => c.governance },
+      {
+        to: "/agents/register",
+        label: "Agent register",
+        icon: ShieldCheck,
+        show: (c) => c.governance,
+      },
       { to: "/masters", label: "Master data", icon: Database, show: (c) => c.governance },
       {
         to: "/templates",

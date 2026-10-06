@@ -1,0 +1,30 @@
+{
+  "copilot": {
+    "version": "1.0.0",
+    "hash": "b7ce498f2fe3050385d13e33c96dece1f4a61ef51aa07defa9c43f30634cfcdb"
+  },
+  "followup": {
+    "version": "1.0.0",
+    "hash": "21af815ef05da28fa8f60f05d1c7d04d9942912f220e3fa8540070d8108dda9e"
+  },
+  "intake": {
+    "version": "1.0.0",
+    "hash": "57ec1abd39ff6e8eb60f546913b8ea66d23c60a128ba140a9ad13b88f2659c90"
+  },
+  "jd": {
+    "version": "1.0.0",
+    "hash": "ddcc5e1516e77ad9beaf2ee47340bde70db85ef1d5b9dc36d9e2c5bc68d2665f"
+  },
+  "publishing": {
+    "version": "1.0.0",
+    "hash": "15aefa374fc9e443c5fb7323b806e4f9964c622fb79494284b0493cd0339785e"
+  },
+  "requisition": {
+    "version": "1.0.0",
+    "hash": "f9dd0c1f4de757ed7a9aa47208b78647d5ce51f643487b630915deba6c975912"
+  },
+  "screening": {
+    "version": "1.0.0",
+    "hash": "56cdf0b429ee6025184dc83d5a78dbbc2e2bac89a2a83a45f443e482660770e7"
+  }
+}

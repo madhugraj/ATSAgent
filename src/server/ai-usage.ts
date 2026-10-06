@@ -1,3 +1,4 @@
+import { currentAgentRun } from "./agents/context";
 import { db } from "./db";
 import { aiUsageEvents, type AiUsageStatus } from "@db/schema";
 
@@ -86,6 +87,8 @@ export async function recordAiUsage(input: {
           : Math.max(0, Math.round(input.durationMs)),
       grounded: input.grounded ?? null,
       errorMessage: input.errorMessage ? input.errorMessage.slice(0, 500) : null,
+      // Attribute requests made inside an agent run (incl. AI calls within tools).
+      agentRunId: currentAgentRun()?.runId ?? null,
     });
   } catch (e) {
     console.error("[ai-usage] failed to record", input.feature, e);

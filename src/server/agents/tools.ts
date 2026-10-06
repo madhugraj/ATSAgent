@@ -171,6 +171,7 @@ export function registerPhase1Tools(): void {
       "Live market pay research for the requisition's role, location and experience, with cited sources and a recommended budget and band. Slow; call once per requisition.",
     input: RequisitionId.extend({ currency: z.string().length(3).default("INR") }),
     risk: "read",
+    skills: ["market_benchmark"],
     untrustedOutput: true,
     run: async (ctx, i) => {
       const r = await loadRequisition(ctx.orgId, i.requisitionId);
@@ -201,6 +202,7 @@ export function registerPhase1Tools(): void {
       "Suggest how the 100 candidate-scoring points should be split across skills, experience, career, impact, education and social for this requisition.",
     input: RequisitionId,
     risk: "read",
+    skills: ["weight_suggest"],
     run: async (ctx, i) => {
       const r = await loadRequisition(ctx.orgId, i.requisitionId);
       const { suggestWeightsCore } = await import("@/lib/matching.functions");
@@ -223,6 +225,7 @@ export function registerPhase1Tools(): void {
       tone: z.enum(["professional", "warm", "bold"]).default("professional"),
     }),
     risk: "read",
+    skills: ["linkedin_post"],
     run: async (ctx, i) => {
       const r = await loadRequisition(ctx.orgId, i.requisitionId);
       const [jd] = await db
@@ -385,6 +388,7 @@ export function registerPhase1Tools(): void {
       "Draft the job description for the requisition with the organisation's JD template and file it as the next version for Department Head review. Pass revisionNotes to address reviewer feedback.",
     input: RequisitionId.extend({ revisionNotes: z.string().max(4000).optional() }),
     risk: "write",
+    skills: ["jd_generate"],
     describe: (i) =>
       i.revisionNotes
         ? "Revise and resubmit the job description"

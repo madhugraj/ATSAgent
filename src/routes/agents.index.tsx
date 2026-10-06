@@ -25,6 +25,7 @@ import {
   askAgents,
   cancelAgentRun,
   decideAgentTask,
+  exportAgentRun,
   getAgentRun,
   listAgentRuns,
   listAgentTasks,
@@ -356,17 +357,38 @@ function SummaryTiles() {
   );
 }
 
+async function downloadTrail(runId: string) {
+  try {
+    const { fileName, json } = await exportAgentRun({ data: { runId } });
+    const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    link.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : "Could not export the trail");
+  }
+}
+
 function RunSteps({ runId }: { runId: string }) {
   const q = useQuery({
     queryKey: ["agent_run", runId],
     queryFn: () => getAgentRun({ data: { runId } }),
   });
   if (q.isLoading) return <p className="mt-2 text-xs text-muted-foreground">Loading steps…</p>;
-  if (!q.data?.steps.length)
-    return <p className="mt-2 text-xs text-muted-foreground">No steps recorded yet.</p>;
+  if (!q.data) return null;
   return (
     <div className="mt-3 rounded-md border border-border bg-muted/30 p-3">
-      <p className="num mb-2 text-[11px] text-muted-foreground">Trace {q.data.traceId}</p>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="num text-[11px] text-muted-foreground">Trace {q.data.traceId}</p>
+        <Button size="sm" variant="outline" onClick={() => downloadTrail(runId)}>
+          Export trail (JSON)
+        </Button>
+      </div>
+      {!q.data.steps.length ? (
+        <p className="text-xs text-muted-foreground">No steps recorded yet.</p>
+      ) : null}
       <ol className="space-y-1.5">
         {q.data.steps.map((s) => (
           <li key={s.seq} className="text-xs">

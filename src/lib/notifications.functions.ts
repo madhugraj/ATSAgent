@@ -4,6 +4,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireIdentity, type AppRole } from "./auth.middleware";
 import { db } from "../server/db";
 import {
+  agentRuns,
   agentTasks,
   interviews,
   offers,
@@ -254,6 +255,31 @@ export const myNotifications = createServerFn({ method: "GET" })
         )
         .orderBy(asc(agentTasks.createdAt))
         .limit(20);
+      // Agents paused at their monthly token budget — for whoever sets budgets.
+      if (member.isOwner || roles.includes("hr_head") || roles.includes("president_cbo")) {
+        const paused = await db
+          .select({ agentType: agentRuns.agentType, n: sql<number>`count(*)::int` })
+          .from(agentRuns)
+          .where(
+            and(
+              eq(agentRuns.orgId, orgId),
+              eq(agentRuns.status, "queued"),
+              eq(agentRuns.lastError, "Paused: this agent reached its monthly token budget."),
+            ),
+          )
+          .groupBy(agentRuns.agentType);
+        for (const p of paused)
+          out.push({
+            id: `agent-budget:${p.agentType}`,
+            kind: "agent",
+            title: `The ${p.agentType} agent reached its monthly token budget`,
+            body: `${p.n} run(s) are paused until next month or until you raise the budget in Agent settings.`,
+            to: "/agents/settings",
+            at: null,
+            severity: "warn",
+          });
+      }
+
       for (const t of agentAsks)
         out.push({
           id: `agent:${t.id}`,

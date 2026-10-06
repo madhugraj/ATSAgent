@@ -33,6 +33,20 @@
   the organisation's own Integrations → AI model settings (BYO-key page).
   Strip `model` / `engine` fields from server-fn wire returns (keep them in
   the database) and keep marketing, manual and error copy vendor-neutral.
+- Hiring agents (src/server/agents/) are governed by their manifest in
+  `definitions.ts`: identity, version, accountable owner, responsibility,
+  permission scope, must-never list, gates, risk tier and evals. Any change
+  to an agent's instructions, tools or tool contracts must bump its
+  `version` and refresh `scripts/agents.lock.json` (`bun run agents:lock`);
+  CI fails otherwise. Every live agent needs at least one real-agent eval
+  in `scripts/evals/scenarios.ts`.
+- Agent tools wrap the shared lifecycle cores and run as the run's human
+  principal; never add a tool that approves, releases, rejects, hires,
+  revokes, declines or accepts (the registry refuses it) — expose
+  `propose_` / `request_` / `submit_` and let a person decide.
+- AI calls inside agent runs must go through the gateway so they are
+  attributed to the run (`ai_usage_events.agent_run_id`); declare the AI
+  features a tool calls in its `skills`.
 - Security review reports live in SECURITY_AUDIT_REPORT*.md — never commit
   them while the repository is public.
 

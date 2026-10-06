@@ -851,6 +851,8 @@ export const aiUsageEvents = pgTable(
     durationMs: integer("duration_ms"),
     grounded: boolean("grounded"),
     errorMessage: text("error_message"),
+    /** The agent run that caused this request (model turn or AI call inside a tool). */
+    agentRunId: uuid("agent_run_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -1777,6 +1779,20 @@ export const agentEvents = pgTable(
   ],
 );
 
+/** Immutable snapshot of each agent manifest version, keyed by content hash. */
+export const agentDefinitions = pgTable(
+  "agent_definitions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    agentType: text("agent_type").$type<AgentType>().notNull(),
+    version: text("version").notNull(),
+    hash: text("hash").notNull(),
+    manifest: jsonb("manifest").$type<Record<string, unknown>>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("agent_definitions_type_hash_key").on(t.agentType, t.hash)],
+);
+
 /**
  * One agent run. `transcript` is the provider-neutral conversation
  * (AgentMessage[]) and doubles as the checkpoint; `pending` holds tool calls
@@ -1800,6 +1816,12 @@ export const agentRuns = pgTable(
     triggerEventId: uuid("trigger_event_id").references(() => agentEvents.id, {
       onDelete: "set null",
     }),
+    /** The manifest version this run executed under (agent_definitions). */
+    definitionId: uuid("definition_id").references(() => agentDefinitions.id, {
+      onDelete: "set null",
+    }),
+    definitionVersion: text("definition_version"),
+    definitionHash: text("definition_hash"),
     goal: text("goal").notNull(),
     transcript: jsonb("transcript")
       .$type<unknown[]>()
