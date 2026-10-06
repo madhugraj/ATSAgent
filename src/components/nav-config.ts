@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  Bot,
   BookMarked,
   BookOpen,
   Brain,
@@ -63,6 +64,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: "/interviews", label: "Interviews", icon: CalendarClock, show: (c) => c.recruiterView },
       { to: "/interviews/mine", label: "My interviews", icon: CalendarClock, show: (c) => c.inOrg },
       { to: "/offers", label: "Offers", icon: FileSignature, show: (c) => c.recruiterView },
+      { to: "/agents", label: "Agent decisions", icon: Bot, show: (c) => c.inOrg },
     ],
   },
   {
@@ -86,6 +88,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: "/team", label: "Users & roles", icon: ShieldCheck, show: (c) => c.governance },
       { to: "/organisation", label: "Organisation", icon: Building2, show: (c) => c.isOwner },
       { to: "/integrations", label: "Integrations", icon: Plug, show: (c) => c.governance },
+      { to: "/agents/settings", label: "Agent settings", icon: Bot, show: (c) => c.governance },
       { to: "/masters", label: "Master data", icon: Database, show: (c) => c.governance },
       {
         to: "/templates",

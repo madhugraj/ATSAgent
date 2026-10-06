@@ -30,6 +30,8 @@ import { Route as RoiRouteImport } from './routes/roi'
 import { Route as ScreeningRouteImport } from './routes/screening'
 import { Route as TeamRouteImport } from './routes/team'
 import { Route as TemplatesRouteImport } from './routes/templates'
+import { Route as AgentsIndexRouteImport } from './routes/agents.index'
+import { Route as AgentsSettingsRouteImport } from './routes/agents.settings'
 import { Route as ApplyIdRouteImport } from './routes/apply.$id'
 import { Route as AssessTokenRouteImport } from './routes/assess.$token'
 import { Route as AuthResetRouteImport } from './routes/auth.reset'
@@ -47,6 +49,7 @@ import { Route as ApiAuthRegisterRouteImport } from './routes/api/auth/register'
 import { Route as ApiAuthRequestResetRouteImport } from './routes/api/auth/request-reset'
 import { Route as ApiAuthResetRouteImport } from './routes/api/auth/reset'
 import { Route as ApiAuthSessionRouteImport } from './routes/api/auth/session'
+import { Route as ApiPublicAgentTickRouteImport } from './routes/api/public/agent-tick'
 import { Route as ApiPublicBoardSyncRouteImport } from './routes/api/public/board-sync'
 import { Route as ApiPublicCaptureRouteImport } from './routes/api/public/capture'
 import { Route as ApiPublicInboundEmailRouteImport } from './routes/api/public/inbound-email'
@@ -166,6 +169,16 @@ const TemplatesRoute = TemplatesRouteImport.update({
   path: '/templates',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AgentsIndexRoute = AgentsIndexRouteImport.update({
+  id: '/agents/',
+  path: '/agents/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentsSettingsRoute = AgentsSettingsRouteImport.update({
+  id: '/agents/settings',
+  path: '/agents/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApplyIdRoute = ApplyIdRouteImport.update({
   id: '/apply/$id',
   path: '/apply/$id',
@@ -249,6 +262,11 @@ const ApiAuthResetRoute = ApiAuthResetRouteImport.update({
 const ApiAuthSessionRoute = ApiAuthSessionRouteImport.update({
   id: '/api/auth/session',
   path: '/api/auth/session',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPublicAgentTickRoute = ApiPublicAgentTickRouteImport.update({
+  id: '/api/public/agent-tick',
+  path: '/api/public/agent-tick',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiPublicBoardSyncRoute = ApiPublicBoardSyncRouteImport.update({
@@ -345,12 +363,14 @@ export interface FileRoutesByFullPath {
   '/screening': typeof ScreeningRoute
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
+  '/agents/settings': typeof AgentsSettingsRoute
   '/apply/$id': typeof ApplyIdRoute
   '/assess/$token': typeof AssessTokenRoute
   '/auth/reset': typeof AuthResetRoute
   '/candidates/$id': typeof CandidatesIdRoute
   '/interviews/mine': typeof InterviewsMineRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
+  '/agents/': typeof AgentsIndexRoute
   '/candidates/': typeof CandidatesIndexRoute
   '/interviews/': typeof InterviewsIndexRoute
   '/requisitions/': typeof RequisitionsIndexRoute
@@ -362,6 +382,7 @@ export interface FileRoutesByFullPath {
   '/api/auth/request-reset': typeof ApiAuthRequestResetRoute
   '/api/auth/reset': typeof ApiAuthResetRoute
   '/api/auth/session': typeof ApiAuthSessionRoute
+  '/api/public/agent-tick': typeof ApiPublicAgentTickRoute
   '/api/public/board-sync': typeof ApiPublicBoardSyncRoute
   '/api/public/capture': typeof ApiPublicCaptureRoute
   '/api/public/inbound-email': typeof ApiPublicInboundEmailRoute
@@ -398,12 +419,14 @@ export interface FileRoutesByTo {
   '/screening': typeof ScreeningRoute
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
+  '/agents/settings': typeof AgentsSettingsRoute
   '/apply/$id': typeof ApplyIdRoute
   '/assess/$token': typeof AssessTokenRoute
   '/auth/reset': typeof AuthResetRoute
   '/candidates/$id': typeof CandidatesIdRoute
   '/interviews/mine': typeof InterviewsMineRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
+  '/agents': typeof AgentsIndexRoute
   '/candidates': typeof CandidatesIndexRoute
   '/interviews': typeof InterviewsIndexRoute
   '/requisitions': typeof RequisitionsIndexRoute
@@ -415,6 +438,7 @@ export interface FileRoutesByTo {
   '/api/auth/request-reset': typeof ApiAuthRequestResetRoute
   '/api/auth/reset': typeof ApiAuthResetRoute
   '/api/auth/session': typeof ApiAuthSessionRoute
+  '/api/public/agent-tick': typeof ApiPublicAgentTickRoute
   '/api/public/board-sync': typeof ApiPublicBoardSyncRoute
   '/api/public/capture': typeof ApiPublicCaptureRoute
   '/api/public/inbound-email': typeof ApiPublicInboundEmailRoute
@@ -452,12 +476,14 @@ export interface FileRoutesById {
   '/screening': typeof ScreeningRoute
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
+  '/agents/settings': typeof AgentsSettingsRoute
   '/apply/$id': typeof ApplyIdRoute
   '/assess/$token': typeof AssessTokenRoute
   '/auth/reset': typeof AuthResetRoute
   '/candidates/$id': typeof CandidatesIdRoute
   '/interviews/mine': typeof InterviewsMineRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
+  '/agents/': typeof AgentsIndexRoute
   '/candidates/': typeof CandidatesIndexRoute
   '/interviews/': typeof InterviewsIndexRoute
   '/requisitions/': typeof RequisitionsIndexRoute
@@ -469,6 +495,7 @@ export interface FileRoutesById {
   '/api/auth/request-reset': typeof ApiAuthRequestResetRoute
   '/api/auth/reset': typeof ApiAuthResetRoute
   '/api/auth/session': typeof ApiAuthSessionRoute
+  '/api/public/agent-tick': typeof ApiPublicAgentTickRoute
   '/api/public/board-sync': typeof ApiPublicBoardSyncRoute
   '/api/public/capture': typeof ApiPublicCaptureRoute
   '/api/public/inbound-email': typeof ApiPublicInboundEmailRoute
@@ -507,12 +534,14 @@ export interface FileRouteTypes {
     | '/screening'
     | '/team'
     | '/templates'
+    | '/agents/settings'
     | '/apply/$id'
     | '/assess/$token'
     | '/auth/reset'
     | '/candidates/$id'
     | '/interviews/mine'
     | '/requisitions/$id'
+    | '/agents/'
     | '/candidates/'
     | '/interviews/'
     | '/requisitions/'
@@ -524,6 +553,7 @@ export interface FileRouteTypes {
     | '/api/auth/request-reset'
     | '/api/auth/reset'
     | '/api/auth/session'
+    | '/api/public/agent-tick'
     | '/api/public/board-sync'
     | '/api/public/capture'
     | '/api/public/inbound-email'
@@ -560,12 +590,14 @@ export interface FileRouteTypes {
     | '/screening'
     | '/team'
     | '/templates'
+    | '/agents/settings'
     | '/apply/$id'
     | '/assess/$token'
     | '/auth/reset'
     | '/candidates/$id'
     | '/interviews/mine'
     | '/requisitions/$id'
+    | '/agents'
     | '/candidates'
     | '/interviews'
     | '/requisitions'
@@ -577,6 +609,7 @@ export interface FileRouteTypes {
     | '/api/auth/request-reset'
     | '/api/auth/reset'
     | '/api/auth/session'
+    | '/api/public/agent-tick'
     | '/api/public/board-sync'
     | '/api/public/capture'
     | '/api/public/inbound-email'
@@ -613,12 +646,14 @@ export interface FileRouteTypes {
     | '/screening'
     | '/team'
     | '/templates'
+    | '/agents/settings'
     | '/apply/$id'
     | '/assess/$token'
     | '/auth/reset'
     | '/candidates/$id'
     | '/interviews/mine'
     | '/requisitions/$id'
+    | '/agents/'
     | '/candidates/'
     | '/interviews/'
     | '/requisitions/'
@@ -630,6 +665,7 @@ export interface FileRouteTypes {
     | '/api/auth/request-reset'
     | '/api/auth/reset'
     | '/api/auth/session'
+    | '/api/public/agent-tick'
     | '/api/public/board-sync'
     | '/api/public/capture'
     | '/api/public/inbound-email'
@@ -667,12 +703,14 @@ export interface RootRouteChildren {
   ScreeningRoute: typeof ScreeningRoute
   TeamRoute: typeof TeamRoute
   TemplatesRoute: typeof TemplatesRoute
+  AgentsSettingsRoute: typeof AgentsSettingsRoute
   ApplyIdRoute: typeof ApplyIdRoute
   AssessTokenRoute: typeof AssessTokenRoute
   AuthResetRoute: typeof AuthResetRoute
   CandidatesIdRoute: typeof CandidatesIdRoute
   InterviewsMineRoute: typeof InterviewsMineRoute
   RequisitionsIdRoute: typeof RequisitionsIdRoute
+  AgentsIndexRoute: typeof AgentsIndexRoute
   CandidatesIndexRoute: typeof CandidatesIndexRoute
   InterviewsIndexRoute: typeof InterviewsIndexRoute
   RequisitionsIndexRoute: typeof RequisitionsIndexRoute
@@ -684,6 +722,7 @@ export interface RootRouteChildren {
   ApiAuthRequestResetRoute: typeof ApiAuthRequestResetRoute
   ApiAuthResetRoute: typeof ApiAuthResetRoute
   ApiAuthSessionRoute: typeof ApiAuthSessionRoute
+  ApiPublicAgentTickRoute: typeof ApiPublicAgentTickRoute
   ApiPublicBoardSyncRoute: typeof ApiPublicBoardSyncRoute
   ApiPublicCaptureRoute: typeof ApiPublicCaptureRoute
   ApiPublicInboundEmailRoute: typeof ApiPublicInboundEmailRoute
@@ -848,6 +887,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TemplatesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/agents/': {
+      id: '/agents/'
+      path: '/agents'
+      fullPath: '/agents/'
+      preLoaderRoute: typeof AgentsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agents/settings': {
+      id: '/agents/settings'
+      path: '/agents/settings'
+      fullPath: '/agents/settings'
+      preLoaderRoute: typeof AgentsSettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/apply/$id': {
       id: '/apply/$id'
       path: '/apply/$id'
@@ -967,6 +1020,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSessionRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/agent-tick': {
+      id: '/api/public/agent-tick'
+      path: '/api/public/agent-tick'
+      fullPath: '/api/public/agent-tick'
+      preLoaderRoute: typeof ApiPublicAgentTickRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/board-sync': {
       id: '/api/public/board-sync'
       path: '/api/public/board-sync'
@@ -1083,12 +1143,14 @@ const rootRouteChildren: RootRouteChildren = {
   ScreeningRoute: ScreeningRoute,
   TeamRoute: TeamRoute,
   TemplatesRoute: TemplatesRoute,
+  AgentsSettingsRoute: AgentsSettingsRoute,
   ApplyIdRoute: ApplyIdRoute,
   AssessTokenRoute: AssessTokenRoute,
   AuthResetRoute: AuthResetRoute,
   CandidatesIdRoute: CandidatesIdRoute,
   InterviewsMineRoute: InterviewsMineRoute,
   RequisitionsIdRoute: RequisitionsIdRoute,
+  AgentsIndexRoute: AgentsIndexRoute,
   CandidatesIndexRoute: CandidatesIndexRoute,
   InterviewsIndexRoute: InterviewsIndexRoute,
   RequisitionsIndexRoute: RequisitionsIndexRoute,
@@ -1100,6 +1162,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAuthRequestResetRoute: ApiAuthRequestResetRoute,
   ApiAuthResetRoute: ApiAuthResetRoute,
   ApiAuthSessionRoute: ApiAuthSessionRoute,
+  ApiPublicAgentTickRoute: ApiPublicAgentTickRoute,
   ApiPublicBoardSyncRoute: ApiPublicBoardSyncRoute,
   ApiPublicCaptureRoute: ApiPublicCaptureRoute,
   ApiPublicInboundEmailRoute: ApiPublicInboundEmailRoute,

@@ -38,8 +38,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     label: string;
     icon: React.ComponentType<{ className?: string }>;
   }) {
-    // /interviews must not stay highlighted while on /interviews/mine.
-    const exact = to === "/" || to === "/interviews";
+    // /interviews and /agents must not stay highlighted on their sub-pages.
+    const exact = to === "/" || to === "/interviews" || to === "/agents";
     return (
       <Link
         key={to}
@@ -154,7 +154,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Link
               key={to}
               to={to}
-              activeOptions={{ exact: to === "/" || to === "/interviews" }}
+              activeOptions={{ exact: to === "/" || to === "/interviews" || to === "/agents" }}
               className="whitespace-nowrap rounded-md px-3 py-1.5 text-xs text-muted-foreground"
               activeProps={{
                 className:

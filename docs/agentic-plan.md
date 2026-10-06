@@ -205,7 +205,7 @@ Initial tool surface (each maps to existing code):
 | Pipeline    | `list_applications`, `get_candidate`, `score_candidate`, `verify_claims`, `move_stage` (non-reject), `propose_rejection`, `search_talent_pool` |
 | Screening   | `build_screening_kit`, `grade_screening`, `send_assessment`                                                                                    |
 | Interviews  | `find_slots`, `schedule_interview`, `remind_interviewer`, `summarise_scorecards`                                                               |
-| Offer       | `draft_offer`, `generate_offer_letter`, `submit_offer`, `onboarding_readiness`, `request_documents`, `prepare_release`                         |
+| Offer       | `draft_offer`, `generate_offer_letter`, `submit_offer`, `onboarding_readiness`, `request_documents`, `propose_release`                         |
 | Comms       | `draft_candidate_email`, `send_candidate_email` (via outbox), `notify_member`                                                                  |
 | HITL        | `request_approval`, `ask_human` (clarifying question), `handoff` (give up with reason)                                                         |
 
@@ -380,6 +380,10 @@ agent: `actor = "agent:<type>:<runId>"` with `on_behalf_of = userId`.
   too; `INJECTION_RULES` is in every agent system prompt; a detected
   injection marks the candidate (`suspected_prompt_injection`) and forces
   `suggest` for that run.
+- **Gate guard:** the tool registry refuses to register any tool whose
+  name approves, releases, rejects, hires, revokes, declines or accepts —
+  agents only get `propose_*`, `request_*` and `submit_*` variants, so a gate
+  action can never be offered to a model.
 - **Server-built trails:** approval trails stay server-built; agents can't
   write trail entries.
 - **safeFetch only** for any URL a tool fetches.
@@ -596,7 +600,7 @@ dial.
 | Pipeline    | `list_applications`, `get_candidate`, `score_candidate`, `verify_claims`, `move_stage` (no reject), `propose_rejection`, `search_talent_pool` | read / write     | `autoscore.server.ts`, `lifecycle.ts`, `stage-events.server.ts` |
 | Screening   | `build_screening_kit`, `grade_screening`, `send_assessment`                                                                                   | write / external | `screening-prep.server.ts`, `screening.*`                       |
 | Interviews  | `find_slots`, `schedule_interview`, `remind_interviewer`, `summarise_scorecards`                                                              | write / external | `interviews.functions.ts`                                       |
-| Offer       | `draft_offer`, `generate_offer_letter`, `submit_offer`, `onboarding_readiness`, `request_documents`, `prepare_release`                        | write / external | `offers.functions.ts`, `onboarding.*`                           |
+| Offer       | `draft_offer`, `generate_offer_letter`, `submit_offer`, `onboarding_readiness`, `request_documents`, `propose_release`                        | write / external | `offers.functions.ts`, `onboarding.*`                           |
 | Comms       | `draft_candidate_email`, `send_candidate_email` (outbox), `notify_member`                                                                     | external         | `email-outbox.server.ts`                                        |
 | HITL        | `request_approval`, `ask_human`, `handoff`                                                                                                    | —                | new: `agent_tasks`                                              |
 | Control     | `start_agent`, `pause_run`, `explain_run` (Copilot only)                                                                                      | write            | new: runtime                                                    |

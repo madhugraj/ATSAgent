@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-58 tables across 9 domains.
+64 tables across 9 domains.
 
 ## Identity & access
 
@@ -958,6 +958,20 @@ erDiagram
 
 | From (child) | Column | To (parent) | ON DELETE |
 |---|---|---|---|
+| `agent_events` | `actor_user_id` | `users` | no action |
+| `agent_events` | `org_id` | `organizations` | cascade |
+| `agent_metrics_daily` | `org_id` | `organizations` | cascade |
+| `agent_policies` | `org_id` | `organizations` | cascade |
+| `agent_policies` | `updated_by` | `users` | no action |
+| `agent_runs` | `org_id` | `organizations` | cascade |
+| `agent_runs` | `principal_user_id` | `users` | cascade |
+| `agent_runs` | `trigger_event_id` | `agent_events` | no action |
+| `agent_steps` | `org_id` | `organizations` | cascade |
+| `agent_steps` | `run_id` | `agent_runs` | cascade |
+| `agent_tasks` | `assignee_user_id` | `users` | no action |
+| `agent_tasks` | `decided_by` | `users` | no action |
+| `agent_tasks` | `org_id` | `organizations` | cascade |
+| `agent_tasks` | `run_id` | `agent_runs` | cascade |
 | `ai_interviews` | `application_id` | `applications` | cascade |
 | `ai_interviews` | `org_id` | `organizations` | cascade |
 | `ai_provider_credentials` | `org_id` | `organizations` | cascade |
@@ -1068,6 +1082,12 @@ erDiagram
 
 | Table | Domain | Columns | Unique constraints |
 |---|---|---|---|
+| `agent_events` | — | 12 | — |
+| `agent_metrics_daily` | — | 17 | — |
+| `agent_policies` | — | 10 | (orgId+agentType) |
+| `agent_runs` | — | 24 | — |
+| `agent_steps` | — | 15 | (runId+seq) |
+| `agent_tasks` | — | 16 | — |
 | `ai_interviews` | Screening & interviews | 8 | — |
 | `ai_provider_credentials` | Communications & AI settings | 4 | (orgId+provider) |
 | `ai_settings` | Communications & AI settings | 9 | (org_id) |

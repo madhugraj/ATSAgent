@@ -23,7 +23,8 @@
   (src/server/crypto.ts) — never plaintext.
 - Public endpoints and server-fn RPCs are rate-limited in src/server.ts; do
   not add new public routes without limiter coverage.
-- Every AI provider request must go through `aiJson` / `aiResearchJson`
+- Every AI provider request must go through `aiJson` / `aiResearchJson` /
+  `aiAgentStep` (agent tool-calling turns)
   (src/lib/ai-gateway.server.ts) with a `feature` slug from `AI_FEATURES`
   (src/server/ai-usage.ts); the gateway writes the `ai_usage_events` ledger
   row automatically. Never call provider REST endpoints directly, and never

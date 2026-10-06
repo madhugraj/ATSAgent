@@ -37,7 +37,8 @@ export default defineConfig(({ command }) => ({
       "react/jsx-dev-runtime",
     ],
   },
-  server: { host: "::", port: 8080 },
+  // PORT lets tooling pick a free port; 8080 stays the default.
+  server: { host: "::", port: Number(process.env["PORT"]) || 8080 },
   plugins: [
     {
       name: "atsiq-stub-browser-3d-on-server",

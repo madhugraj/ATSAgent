@@ -31,6 +31,18 @@ export const AI_FEATURES = [
   "copilot",
   "talent_brain",
   "model_test",
+  // Agent steps (docs/agentic-plan.md §4) — one slug per agent.
+  "agent_copilot",
+  "agent_requisition",
+  "agent_jd",
+  "agent_publishing",
+  "agent_intake",
+  "agent_screening",
+  "agent_interview",
+  "agent_evaluation",
+  "agent_offer",
+  "agent_onboarding",
+  "agent_followup",
 ] as const;
 
 export type AiFeature = (typeof AI_FEATURES)[number];
