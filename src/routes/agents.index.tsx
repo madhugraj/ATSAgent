@@ -11,8 +11,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { AGENT_LABEL, ROLE_NAME } from "@/lib/agents.catalog";
 import {
+  agentSummary,
   cancelAgentRun,
   decideAgentTask,
+  getAgentRun,
   listAgentRuns,
   listAgentTasks,
   type AgentDecisionInput,
@@ -86,7 +88,8 @@ function AgentsPage() {
           )}
         </TabsContent>
 
-        <TabsContent value="activity" className="mt-4">
+        <TabsContent value="activity" className="mt-4 space-y-4">
+          <SummaryTiles />
           <RunList runs={runs.data ?? []} loading={runs.isLoading} />
         </TabsContent>
       </Tabs>
@@ -228,8 +231,97 @@ const RUN_STATUS: Record<
   cancelled: { label: "Cancelled", tone: "outline" },
 };
 
+function SummaryTiles() {
+  const q = useQuery({ queryKey: ["agent_summary"], queryFn: () => agentSummary() });
+  const d = q.data;
+  if (!d) return null;
+  const pct = (n: number, of: number) => (of ? `${Math.round((n / of) * 100)}%` : "—");
+  const tiles: { label: string; value: string; hint: string }[] = [
+    {
+      label: "Runs",
+      value: d.runsStarted.toLocaleString(),
+      hint: `${d.runsDone} done · ${d.runsFailed} stopped`,
+    },
+    { label: "Tokens used", value: d.tokens.toLocaleString(), hint: `${d.toolErrors} tool errors` },
+    {
+      label: "Decisions by people",
+      value: d.decisions.toLocaleString(),
+      hint: `${pct(d.approved, d.decisions)} approved · ${pct(d.rejected, d.decisions)} declined`,
+    },
+    {
+      label: "Edited before approval",
+      value: pct(d.edited, d.approved),
+      hint: "How often people changed what an agent proposed",
+    },
+    {
+      label: "Average wait for a person",
+      value: d.avgWaitMinutes == null ? "—" : `${d.avgWaitMinutes} min`,
+      hint: "From request to decision",
+    },
+  ];
+  return (
+    <section>
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Last {d.days} days
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        {tiles.map((t) => (
+          <div key={t.label} className="panel p-4">
+            <p className="text-xs text-muted-foreground">{t.label}</p>
+            <p className="num mt-1 text-xl font-semibold">{t.value}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{t.hint}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function RunSteps({ runId }: { runId: string }) {
+  const q = useQuery({
+    queryKey: ["agent_run", runId],
+    queryFn: () => getAgentRun({ data: { runId } }),
+  });
+  if (q.isLoading) return <p className="mt-2 text-xs text-muted-foreground">Loading steps…</p>;
+  if (!q.data?.steps.length)
+    return <p className="mt-2 text-xs text-muted-foreground">No steps recorded yet.</p>;
+  return (
+    <div className="mt-3 rounded-md border border-border bg-muted/30 p-3">
+      <p className="num mb-2 text-[11px] text-muted-foreground">Trace {q.data.traceId}</p>
+      <ol className="space-y-1.5">
+        {q.data.steps.map((s) => (
+          <li key={s.seq} className="text-xs">
+            <span className="num text-muted-foreground">#{s.seq}</span>{" "}
+            <span className="font-medium">{s.kind}</span>
+            {s.tool ? (
+              <>
+                {" "}
+                · <code>{s.tool}</code>
+              </>
+            ) : null}{" "}
+            ·{" "}
+            <span className={s.status === "error" ? "text-destructive" : "text-muted-foreground"}>
+              {s.status}
+            </span>
+            <span className="num text-muted-foreground">
+              {s.tokens ? ` · ${s.tokens.toLocaleString()} tokens` : ""}
+              {s.durationMs ? ` · ${s.durationMs} ms` : ""}
+            </span>
+            {s.detail ? (
+              <pre className="mt-0.5 whitespace-pre-wrap break-all font-mono text-[11px] text-muted-foreground">
+                {s.detail}
+              </pre>
+            ) : null}
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 function RunList({ runs, loading }: { runs: AgentRunView[]; loading: boolean }) {
   const qc = useQueryClient();
+  const [openRun, setOpenRun] = useState<string | null>(null);
   if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>;
   if (!runs.length) {
     return (
@@ -270,10 +362,24 @@ function RunList({ runs, loading }: { runs: AgentRunView[]; loading: boolean }) 
                 {r.tokens.toLocaleString()} tokens
               </p>
             </div>
-            {active ? (
-              <Button size="sm" variant="ghost" onClick={() => stop(r.id)}>
-                Stop
+            <div className="flex gap-1">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setOpenRun(openRun === r.id ? null : r.id)}
+              >
+                {openRun === r.id ? "Hide steps" : "Steps"}
               </Button>
+              {active ? (
+                <Button size="sm" variant="ghost" onClick={() => stop(r.id)}>
+                  Stop
+                </Button>
+              ) : null}
+            </div>
+            {openRun === r.id ? (
+              <div className="w-full">
+                <RunSteps runId={r.id} />
+              </div>
             ) : null}
           </div>
         );

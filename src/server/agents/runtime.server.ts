@@ -30,6 +30,7 @@ import {
 import { assertRole, type AppRole } from "@/lib/auth.middleware";
 import { db } from "../db";
 import { writeAudit } from "../audit";
+import { log } from "../log";
 import {
   agentPolicies,
   agentRuns,
@@ -304,14 +305,32 @@ export async function runAgentTick(opts: { max?: number } = {}): Promise<TickCou
   const queue = [...claimed];
   const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
     for (let run = queue.shift(); run; run = queue.shift()) {
+      const started = Date.now();
+      const runLog = log.child({
+        trace_id: run.traceId,
+        run_id: run.id,
+        org_id: run.orgId,
+        agent: run.agentType,
+      });
       const outcome = await driveRun(run).catch(async (e: unknown) => {
+        runLog.error("agent.run.crashed", { error: e instanceof Error ? e : String(e) });
         await finish(run!, "failed", null, e instanceof Error ? e.message : String(e));
         return "failed" as const;
       });
+      runLog.info("agent.run.turn", { outcome, duration_ms: Date.now() - started });
       counts[outcome]++;
     }
   });
   await Promise.all(workers);
+
+  // 4. Keep today's dashboard rollup fresh (cheap: only orgs with recent activity).
+  try {
+    const { rollupAgentMetrics } = await import("./metrics.server");
+    await rollupAgentMetrics();
+  } catch (e) {
+    log.error("agent.metrics.rollup_failed", { error: e instanceof Error ? e : String(e) });
+  }
+  if (counts.claimed || counts.reclaimed) log.info("agent.tick", counts);
   return counts;
 }
 
@@ -603,6 +622,14 @@ async function execute(
     return { role: "tool", toolCallId: call.id, name, content };
   } catch (e) {
     const message = e instanceof Error ? e.message : "The tool failed.";
+    log.warn("agent.tool.error", {
+      trace_id: run.traceId,
+      run_id: run.id,
+      org_id: run.orgId,
+      agent: run.agentType,
+      tool: name,
+      error: message,
+    });
     await recordStep(run, seq, {
       kind: "tool",
       toolName: name,

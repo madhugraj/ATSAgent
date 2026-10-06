@@ -290,3 +290,111 @@ export const saveAgentPolicy = createServerFn({ method: "POST" })
   });
 
 export { ROLES as AGENT_TASK_ROLES };
+
+/* ----------------------------------------------------- observability views */
+
+export type AgentRunDetail = {
+  id: string;
+  traceId: string;
+  steps: {
+    seq: number;
+    kind: string;
+    tool: string | null;
+    status: string;
+    detail: string;
+    tokens: number;
+    durationMs: number;
+    at: string;
+  }[];
+};
+
+/** Run inspector: the step trail of one run (redacted summaries, no provider text). */
+export const getAgentRun = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) => z.object({ runId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<AgentRunDetail> => {
+    const { agentSteps } = await import("@db/schema");
+    const [run] = await db
+      .select({ id: agentRuns.id, traceId: agentRuns.traceId })
+      .from(agentRuns)
+      .where(and(eq(agentRuns.id, data.runId), eq(agentRuns.orgId, context.orgId)))
+      .limit(1);
+    if (!run) throw new Error("Run not found");
+    const steps = await db
+      .select()
+      .from(agentSteps)
+      .where(and(eq(agentSteps.runId, run.id), eq(agentSteps.orgId, context.orgId)))
+      .orderBy(agentSteps.seq);
+    return {
+      id: run.id,
+      traceId: run.traceId,
+      steps: steps.map((s) => {
+        // Model-call failures carry provider text; keep it server-side.
+        const output =
+          s.kind === "model" && s.status === "error" ? { error: GENERIC_RUN_ERROR } : s.output;
+        const detail = JSON.stringify({ input: s.input ?? undefined, output: output ?? undefined });
+        return {
+          seq: s.seq,
+          kind: s.kind,
+          tool: s.toolName,
+          status: s.status,
+          detail: clip(detail === "{}" ? "" : detail, 1200) ?? "",
+          tokens: s.promptTokens + s.completionTokens,
+          durationMs: s.durationMs,
+          at: s.createdAt.toISOString(),
+        };
+      }),
+    };
+  });
+
+export type AgentSummary = {
+  days: number;
+  runsStarted: number;
+  runsDone: number;
+  runsFailed: number;
+  tokens: number;
+  toolErrors: number;
+  decisions: number;
+  approved: number;
+  rejected: number;
+  edited: number;
+  avgWaitMinutes: number | null;
+};
+
+/** Org dashboard numbers for the last 30 days, from agent_metrics_daily. */
+export const agentSummary = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .handler(async ({ context }): Promise<AgentSummary> => {
+    const { agentMetricsDaily } = await import("@db/schema");
+    const { gte, sql } = await import("drizzle-orm");
+    const days = 30;
+    const since = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10);
+    const [r] = await db
+      .select({
+        runsStarted: sql<number>`coalesce(sum(${agentMetricsDaily.runsStarted}), 0)::int`,
+        runsDone: sql<number>`coalesce(sum(${agentMetricsDaily.runsDone}), 0)::int`,
+        runsFailed: sql<number>`coalesce(sum(${agentMetricsDaily.runsFailed}), 0)::int`,
+        tokens: sql<number>`coalesce(sum(${agentMetricsDaily.promptTokens} + ${agentMetricsDaily.completionTokens}), 0)::bigint`,
+        toolErrors: sql<number>`coalesce(sum(${agentMetricsDaily.toolErrors}), 0)::int`,
+        approved: sql<number>`coalesce(sum(${agentMetricsDaily.tasksApproved}), 0)::int`,
+        rejected: sql<number>`coalesce(sum(${agentMetricsDaily.tasksRejected}), 0)::int`,
+        edited: sql<number>`coalesce(sum(${agentMetricsDaily.tasksEdited}), 0)::int`,
+        waitMs: sql<number>`coalesce(sum(${agentMetricsDaily.hitlWaitMsTotal}), 0)::bigint`,
+      })
+      .from(agentMetricsDaily)
+      .where(and(eq(agentMetricsDaily.orgId, context.orgId), gte(agentMetricsDaily.day, since)));
+    const decisions = Number(r?.approved ?? 0) + Number(r?.rejected ?? 0);
+    return {
+      days,
+      runsStarted: Number(r?.runsStarted ?? 0),
+      runsDone: Number(r?.runsDone ?? 0),
+      runsFailed: Number(r?.runsFailed ?? 0),
+      tokens: Number(r?.tokens ?? 0),
+      toolErrors: Number(r?.toolErrors ?? 0),
+      decisions,
+      approved: Number(r?.approved ?? 0),
+      rejected: Number(r?.rejected ?? 0),
+      edited: Number(r?.edited ?? 0),
+      avgWaitMinutes: decisions ? Math.round(Number(r?.waitMs ?? 0) / decisions / 60000) : null,
+    };
+  });

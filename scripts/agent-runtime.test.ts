@@ -44,6 +44,7 @@ mock.module("../src/lib/ai-gateway.server", () => ({
 const { db } = await import("../src/server/db");
 const schema = await import("../drizzle/schema");
 const {
+  agentMetricsDaily,
   agentPolicies,
   agentRuns,
   agentSteps,
@@ -58,6 +59,7 @@ const { registerAgent, registerTool, resetRegistry } =
   await import("../src/server/agents/registry");
 const { cancelRun, resolveTask, runAgentTick, startRun } =
   await import("../src/server/agents/runtime.server");
+const { rollupAgentMetrics } = await import("../src/server/agents/metrics.server");
 
 /* ------------------------------------------------------------- fixtures */
 
@@ -441,5 +443,36 @@ describe("agent runtime", () => {
         decision: { status: "approved" },
       }),
     ).rejects.toThrow("Task not found");
+  });
+
+  test("the daily rollup counts runs, tokens and edited approvals", async () => {
+    const { runId } = await start();
+    script.push(call({ id: "w1", name: "save_draft", args: { text: "v1" } }));
+    await runAgentTick();
+    const [task] = await openTasks(runId);
+    await resolveTask({
+      orgId,
+      taskId: task!.id,
+      userId: recruiterId,
+      decision: { status: "approved", args: { text: "v2" } },
+    });
+    script.push(say("done"));
+    await runAgentTick();
+    await rollupAgentMetrics();
+    const [m] = await db
+      .select()
+      .from(agentMetricsDaily)
+      .where(
+        and(eq(agentMetricsDaily.orgId, orgId), eq(agentMetricsDaily.agentType, "requisition")),
+      );
+    expect(m).toMatchObject({
+      runsStarted: 1,
+      runsDone: 1,
+      tasksOpened: 1,
+      tasksApproved: 1,
+      tasksEdited: 1,
+      promptTokens: 20,
+      completionTokens: 10,
+    });
   });
 });

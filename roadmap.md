@@ -9,7 +9,7 @@ Plan: `docs/agentic-plan.md`.
 - [x] Tool registry with agent identity in `audit_log` — runs act on behalf of a human principal; every write/external tool call is audited as `agent:<type>:<runId>` with `on_behalf_of`, every human decision as the deciding user
 - [x] Agent settings page (`/agents/settings`, Governance) — org-wide pause, per-agent enable, autonomy (default `suggest`), pre-approved candidate emails (acknowledgement, stage update, interview invite — never the offer release mail) and monthly token budget; HR head / CBO / owner only, audited; agents not yet built are labelled "Not live yet"
 - [x] Decisions inbox (`/agents`) — gates, action approvals (edit-then-approve, decline with reason) and questions routed by role or assignee (owner sees all); agent activity list with stop; agent requests in the notification bell and the dashboard "Needs you today" strip; provider error text never reaches the client; `scripts/seed-agent-demo.ts` seeds a local demo
-- [ ] Observability foundation (structured logger, run/step traces, agent metrics)
+- [x] Observability foundation — `src/server/log.ts` structured JSON logger (OpenTelemetry field names, `LOG_LEVEL`), runtime logs every run turn, crash and tool error with `trace_id` / `run_id`; `agent_steps` are the trace spans; `rollupAgentMetrics` (each tick, today + yesterday, idempotent) fills `agent_metrics_daily`; Agent activity shows 30-day tiles (runs, tokens, decisions, edited-before-approval rate, average wait for a person) and a per-run step inspector with the trace id; model-call error text stays server-side
 - [ ] Eval harness
 
 ## Lovable decoupling (2026-10-05)
