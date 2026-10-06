@@ -68,3 +68,6 @@ jobs:
 
       - name: Agent governance (change control, traceability, budget, audit)
         run: bun test scripts/agent-governance.test.ts
+
+      - name: Agent health engine (rules, issues, heartbeat)
+        run: bun test scripts/agent-health.test.ts

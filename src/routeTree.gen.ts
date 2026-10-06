@@ -31,6 +31,7 @@ import { Route as ScreeningRouteImport } from './routes/screening'
 import { Route as TeamRouteImport } from './routes/team'
 import { Route as TemplatesRouteImport } from './routes/templates'
 import { Route as AgentsIndexRouteImport } from './routes/agents.index'
+import { Route as AgentsObservabilityRouteImport } from './routes/agents.observability'
 import { Route as AgentsRegisterRouteImport } from './routes/agents.register'
 import { Route as AgentsSettingsRouteImport } from './routes/agents.settings'
 import { Route as ApplyIdRouteImport } from './routes/apply.$id'
@@ -173,6 +174,11 @@ const TemplatesRoute = TemplatesRouteImport.update({
 const AgentsIndexRoute = AgentsIndexRouteImport.update({
   id: '/agents/',
   path: '/agents/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentsObservabilityRoute = AgentsObservabilityRouteImport.update({
+  id: '/agents/observability',
+  path: '/agents/observability',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgentsRegisterRoute = AgentsRegisterRouteImport.update({
@@ -369,6 +375,7 @@ export interface FileRoutesByFullPath {
   '/screening': typeof ScreeningRoute
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
+  '/agents/observability': typeof AgentsObservabilityRoute
   '/agents/register': typeof AgentsRegisterRoute
   '/agents/settings': typeof AgentsSettingsRoute
   '/apply/$id': typeof ApplyIdRoute
@@ -426,6 +433,7 @@ export interface FileRoutesByTo {
   '/screening': typeof ScreeningRoute
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
+  '/agents/observability': typeof AgentsObservabilityRoute
   '/agents/register': typeof AgentsRegisterRoute
   '/agents/settings': typeof AgentsSettingsRoute
   '/apply/$id': typeof ApplyIdRoute
@@ -484,6 +492,7 @@ export interface FileRoutesById {
   '/screening': typeof ScreeningRoute
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
+  '/agents/observability': typeof AgentsObservabilityRoute
   '/agents/register': typeof AgentsRegisterRoute
   '/agents/settings': typeof AgentsSettingsRoute
   '/apply/$id': typeof ApplyIdRoute
@@ -543,6 +552,7 @@ export interface FileRouteTypes {
     | '/screening'
     | '/team'
     | '/templates'
+    | '/agents/observability'
     | '/agents/register'
     | '/agents/settings'
     | '/apply/$id'
@@ -600,6 +610,7 @@ export interface FileRouteTypes {
     | '/screening'
     | '/team'
     | '/templates'
+    | '/agents/observability'
     | '/agents/register'
     | '/agents/settings'
     | '/apply/$id'
@@ -657,6 +668,7 @@ export interface FileRouteTypes {
     | '/screening'
     | '/team'
     | '/templates'
+    | '/agents/observability'
     | '/agents/register'
     | '/agents/settings'
     | '/apply/$id'
@@ -715,6 +727,7 @@ export interface RootRouteChildren {
   ScreeningRoute: typeof ScreeningRoute
   TeamRoute: typeof TeamRoute
   TemplatesRoute: typeof TemplatesRoute
+  AgentsObservabilityRoute: typeof AgentsObservabilityRoute
   AgentsRegisterRoute: typeof AgentsRegisterRoute
   AgentsSettingsRoute: typeof AgentsSettingsRoute
   ApplyIdRoute: typeof ApplyIdRoute
@@ -905,6 +918,13 @@ declare module '@tanstack/react-router' {
       path: '/agents'
       fullPath: '/agents/'
       preLoaderRoute: typeof AgentsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agents/observability': {
+      id: '/agents/observability'
+      path: '/agents/observability'
+      fullPath: '/agents/observability'
+      preLoaderRoute: typeof AgentsObservabilityRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/agents/register': {
@@ -1163,6 +1183,7 @@ const rootRouteChildren: RootRouteChildren = {
   ScreeningRoute: ScreeningRoute,
   TeamRoute: TeamRoute,
   TemplatesRoute: TemplatesRoute,
+  AgentsObservabilityRoute: AgentsObservabilityRoute,
   AgentsRegisterRoute: AgentsRegisterRoute,
   AgentsSettingsRoute: AgentsSettingsRoute,
   ApplyIdRoute: ApplyIdRoute,

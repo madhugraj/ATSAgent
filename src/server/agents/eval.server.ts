@@ -17,7 +17,6 @@ import {
   agentRuns,
   agentSteps,
   agentTasks,
-  candidateNotes,
   orgMembers,
   organizations,
   users,
@@ -222,8 +221,6 @@ export async function runScenario(s: Scenario): Promise<EvalReport> {
       result: run?.result ?? null,
     };
   } finally {
-    // candidate_notes.org_id has no cascade; clear the scenario's notes first.
-    await db.delete(candidateNotes).where(eq(candidateNotes.orgId, orgId));
     await db.delete(organizations).where(eq(organizations.id, orgId));
     await db.delete(users).where(inArray(users.id, [userId]));
   }

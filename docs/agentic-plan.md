@@ -501,16 +501,31 @@ them must be explainable.
 | **Org agent dashboard**     | HR head, CHRO, org owner   | throughput per stage, time saved, approval wait times, human-edit rate per agent, spend vs budget              |
 | **Platform agent console**  | platform super admin       | runs, failures, latency and spend across tenants (extends `/platform-ai-usage`); vendor detail stays here only |
 
-### 9.3 Alerts
+### 9.3 Health rules and alerts (implemented)
 
-| Alert                                                              | Sent to                   |
-| ------------------------------------------------------------------ | ------------------------- |
-| run stuck (lease expired twice, or running past wall-clock budget) | platform admin            |
-| tool or model error rate above threshold for an agent              | platform admin            |
-| org at 80% / 100% of monthly agent budget                          | org owner, HR head        |
-| prompt-injection detected in candidate content                     | HR head                   |
-| HITL task past SLA (after escalation)                              | next approver, HR head    |
-| gate-crossing attempt blocked                                      | platform admin (security) |
+The health engine evaluates a fixed rule set every 5 minutes per
+organisation. A firing rule opens an issue (organisation × agent × rule) with
+a severity; re-firing updates it; a rule that stops firing resolves it.
+Openings, resolutions and acknowledgements are audited. Serious and critical
+issues appear in the HR head / CBO / owner notification bell until
+acknowledged; every issue is listed on Governance → Agent observability.
+
+| Element           | Rule                  | Severity          | Fires when                                                                      |
+| ----------------- | --------------------- | ----------------- | ------------------------------------------------------------------------------- |
+| Harness           | `harness.stuck_run`   | critical          | a run is still "running" 15 min after its lease expired, or was reclaimed twice |
+| Harness           | `harness.failures`    | serious           | 3+ failed runs of one agent in 24 h                                             |
+| Harness           | `scheduler.heartbeat` | critical          | no scheduler tick for 5+ min (checked on read)                                  |
+| Human-in-the-loop | `hitl.overdue`        | warning → serious | a request is open past 48 h (serious past 120 h)                                |
+| Human-in-the-loop | `hitl.decline_rate`   | warning           | more than half of 6+ requests declined in 7 days                                |
+| Tools             | `tools.error_rate`    | serious           | more than 20% of 10+ tool calls failed in 24 h                                  |
+| AI skills         | `skills.ai_errors`    | serious           | more than 20% of 5+ AI requests in runs failed in 24 h                          |
+| AI skills         | `skills.latency`      | warning           | AI p95 above 60 s over 24 h                                                     |
+| Budget            | `budget.paused`       | warning           | runs paused at the monthly token budget                                         |
+| Definition        | `definition.churn`    | warning           | definition changed under 3+ running runs in 7 days                              |
+| Audit             | `audit.gap`           | critical          | a write / external tool call has no audit entry                                 |
+| Orchestrator      | `orchestrator.events` | serious           | lifecycle events failed, or pending 15+ min                                     |
+
+Evals are enforced before deployment (CI), not at runtime.
 
 ### 9.4 Rules
 
