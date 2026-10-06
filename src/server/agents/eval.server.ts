@@ -21,8 +21,15 @@ import {
   organizations,
   users,
   type AgentAutonomy,
+  type AgentType,
 } from "@db/schema";
-import { registerAgent, registerTool, type AgentDefinition, type AgentTool } from "./registry";
+import {
+  getAgent,
+  registerAgent,
+  registerTool,
+  type AgentDefinition,
+  type AgentTool,
+} from "./registry";
 import { resolveTask, runAgentTick, startRun, type TaskDecision } from "./runtime.server";
 
 export type EvalTask = {
@@ -32,11 +39,24 @@ export type EvalTask = {
   action: { name: string; args: unknown } | null;
 };
 
+/** Data a scenario seeds in its throwaway organisation before the run. */
+export type EvalContext = { orgId: string; userId: string };
+
 export type Scenario = {
   name: string;
-  agent: AgentDefinition;
-  tools: AgentTool<never>[];
-  goal: string;
+  /**
+   * Either a stand-in agent with its own fake tools (harness tests), or
+   * `agentType` to run the REAL registered agent and tools against data the
+   * scenario seeds in `setup`.
+   */
+  agent?: AgentDefinition;
+  tools?: AgentTool<never>[];
+  agentType?: AgentType;
+  /** Seed data; the returned values are available to `goal` (and scripts). */
+  setup?: (ctx: EvalContext) => Promise<Record<string, string>>;
+  goal: string | ((seeded: Record<string, string>) => string);
+  /** Other agents the scenario's agent may start (e.g. copilot → requisition). */
+  alsoEnable?: AgentType[];
   autonomy?: AgentAutonomy;
   /** How the simulated people respond to each request the agent raises. */
   decide?: (task: EvalTask) => TaskDecision;
@@ -69,8 +89,12 @@ export type EvalReport = {
 const MAX_TICKS = 12;
 
 export async function runScenario(s: Scenario): Promise<EvalReport> {
-  for (const t of s.tools) registerTool(t);
-  registerAgent(s.agent);
+  for (const t of s.tools ?? []) registerTool(t);
+  if (s.agent) registerAgent(s.agent);
+  const agentType = s.agent?.type ?? s.agentType;
+  if (!agentType) throw new Error(`Scenario "${s.name}" names no agent.`);
+  const def = getAgent(agentType);
+  if (!def) throw new Error(`Scenario "${s.name}": agent ${agentType} is not registered.`);
 
   // Throwaway tenant: an owner principal so role checks pass for any gate.
   const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -96,17 +120,25 @@ export async function runScenario(s: Scenario): Promise<EvalReport> {
     // Agents are opt-in: switch the scenario's agent on.
     await db.insert(agentPolicies).values({
       orgId,
-      agentType: s.agent.type,
+      agentType,
       enabled: true,
       autonomy: s.autonomy ?? "suggest",
     });
 
+    for (const other of s.alsoEnable ?? []) {
+      await db.insert(agentPolicies).values({ orgId, agentType: other, enabled: true });
+    }
+    const seeded = s.setup ? await s.setup({ orgId, userId }) : {};
     const { runId } = await startRun({
       orgId,
-      agentType: s.agent.type,
+      agentType,
       principalUserId: userId,
-      goal: s.goal,
-      maxSteps: s.agent.maxSteps ?? 20,
+      goal: typeof s.goal === "function" ? s.goal(seeded) : s.goal,
+      maxSteps: def.maxSteps ?? 20,
+      // Tie the run to its requisition like real runs, so sweeps don't duplicate it.
+      ...(seeded["requisitionId"]
+        ? { subjectType: "requisition", subjectId: seeded["requisitionId"] }
+        : {}),
     });
 
     let humanRequests = 0;

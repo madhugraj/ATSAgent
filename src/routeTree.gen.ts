@@ -31,6 +31,7 @@ import { Route as ScreeningRouteImport } from './routes/screening'
 import { Route as TeamRouteImport } from './routes/team'
 import { Route as TemplatesRouteImport } from './routes/templates'
 import { Route as AgentsIndexRouteImport } from './routes/agents.index'
+import { Route as AgentsRegisterRouteImport } from './routes/agents.register'
 import { Route as AgentsSettingsRouteImport } from './routes/agents.settings'
 import { Route as ApplyIdRouteImport } from './routes/apply.$id'
 import { Route as AssessTokenRouteImport } from './routes/assess.$token'
@@ -172,6 +173,11 @@ const TemplatesRoute = TemplatesRouteImport.update({
 const AgentsIndexRoute = AgentsIndexRouteImport.update({
   id: '/agents/',
   path: '/agents/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentsRegisterRoute = AgentsRegisterRouteImport.update({
+  id: '/agents/register',
+  path: '/agents/register',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgentsSettingsRoute = AgentsSettingsRouteImport.update({
@@ -363,6 +369,7 @@ export interface FileRoutesByFullPath {
   '/screening': typeof ScreeningRoute
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
+  '/agents/register': typeof AgentsRegisterRoute
   '/agents/settings': typeof AgentsSettingsRoute
   '/apply/$id': typeof ApplyIdRoute
   '/assess/$token': typeof AssessTokenRoute
@@ -419,6 +426,7 @@ export interface FileRoutesByTo {
   '/screening': typeof ScreeningRoute
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
+  '/agents/register': typeof AgentsRegisterRoute
   '/agents/settings': typeof AgentsSettingsRoute
   '/apply/$id': typeof ApplyIdRoute
   '/assess/$token': typeof AssessTokenRoute
@@ -476,6 +484,7 @@ export interface FileRoutesById {
   '/screening': typeof ScreeningRoute
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
+  '/agents/register': typeof AgentsRegisterRoute
   '/agents/settings': typeof AgentsSettingsRoute
   '/apply/$id': typeof ApplyIdRoute
   '/assess/$token': typeof AssessTokenRoute
@@ -534,6 +543,7 @@ export interface FileRouteTypes {
     | '/screening'
     | '/team'
     | '/templates'
+    | '/agents/register'
     | '/agents/settings'
     | '/apply/$id'
     | '/assess/$token'
@@ -590,6 +600,7 @@ export interface FileRouteTypes {
     | '/screening'
     | '/team'
     | '/templates'
+    | '/agents/register'
     | '/agents/settings'
     | '/apply/$id'
     | '/assess/$token'
@@ -646,6 +657,7 @@ export interface FileRouteTypes {
     | '/screening'
     | '/team'
     | '/templates'
+    | '/agents/register'
     | '/agents/settings'
     | '/apply/$id'
     | '/assess/$token'
@@ -703,6 +715,7 @@ export interface RootRouteChildren {
   ScreeningRoute: typeof ScreeningRoute
   TeamRoute: typeof TeamRoute
   TemplatesRoute: typeof TemplatesRoute
+  AgentsRegisterRoute: typeof AgentsRegisterRoute
   AgentsSettingsRoute: typeof AgentsSettingsRoute
   ApplyIdRoute: typeof ApplyIdRoute
   AssessTokenRoute: typeof AssessTokenRoute
@@ -892,6 +905,13 @@ declare module '@tanstack/react-router' {
       path: '/agents'
       fullPath: '/agents/'
       preLoaderRoute: typeof AgentsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agents/register': {
+      id: '/agents/register'
+      path: '/agents/register'
+      fullPath: '/agents/register'
+      preLoaderRoute: typeof AgentsRegisterRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/agents/settings': {
@@ -1143,6 +1163,7 @@ const rootRouteChildren: RootRouteChildren = {
   ScreeningRoute: ScreeningRoute,
   TeamRoute: TeamRoute,
   TemplatesRoute: TemplatesRoute,
+  AgentsRegisterRoute: AgentsRegisterRoute,
   AgentsSettingsRoute: AgentsSettingsRoute,
   ApplyIdRoute: ApplyIdRoute,
   AssessTokenRoute: AssessTokenRoute,

@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-64 tables across 9 domains.
+65 tables across 9 domains.
 
 ## Identity & access
 
@@ -913,6 +913,7 @@ erDiagram
     integer duration_ms "nullable"
     boolean grounded "nullable"
     text error_message "nullable"
+    uuid agent_run_id "nullable"
     timestamptz created_at
   }
   email_outbox {
@@ -965,6 +966,7 @@ erDiagram
 | `agent_metrics_daily` | `org_id` | `organizations` | cascade |
 | `agent_policies` | `org_id` | `organizations` | cascade |
 | `agent_policies` | `updated_by` | `users` | no action |
+| `agent_runs` | `definition_id` | `agent_definitions` | no action |
 | `agent_runs` | `org_id` | `organizations` | cascade |
 | `agent_runs` | `principal_user_id` | `users` | cascade |
 | `agent_runs` | `trigger_event_id` | `agent_events` | no action |
@@ -1085,16 +1087,17 @@ erDiagram
 
 | Table | Domain | Columns | Unique constraints |
 |---|---|---|---|
+| `agent_definitions` | — | 6 | (agentType+hash) |
 | `agent_events` | — | 12 | — |
 | `agent_metrics_daily` | — | 17 | — |
 | `agent_policies` | — | 10 | (orgId+agentType) |
-| `agent_runs` | — | 24 | — |
+| `agent_runs` | — | 27 | — |
 | `agent_steps` | — | 15 | (runId+seq) |
 | `agent_tasks` | — | 16 | — |
 | `ai_interviews` | Screening & interviews | 8 | — |
 | `ai_provider_credentials` | Communications & AI settings | 4 | (orgId+provider) |
 | `ai_settings` | Communications & AI settings | 9 | (org_id) |
-| `ai_usage_events` | Communications & AI settings | 15 | — |
+| `ai_usage_events` | Communications & AI settings | 16 | — |
 | `applications` | Candidates & pipeline | 10 | (requisitionId+candidateId) |
 | `audit_log` | Identity & access | 10 | — |
 | `board_sync_state` | — | 11 | (integration_id) |

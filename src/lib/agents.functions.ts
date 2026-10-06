@@ -28,6 +28,7 @@ const SAFE_RUN_ERRORS = new Set([
   "The run reached its step or token budget.",
   "The worker stopped before finishing this step.",
   "No AI model key saved. Add one on the Integrations page.",
+  "Paused: this agent reached its monthly token budget.",
 ]);
 const GENERIC_RUN_ERROR = "The agent could not complete this step.";
 
@@ -436,4 +437,236 @@ export const askAgents = createServerFn({ method: "POST" })
     const { kickAgents } = await import("../server/agents/orchestrator.server");
     kickAgents(context.orgId);
     return { runId };
+  });
+
+/* ------------------------------------------------------ register and export */
+
+const GOVERNANCE_ROLES = ["hr_head", "president_cbo"] as const;
+
+export type AgentManifestView = {
+  name: string;
+  owner: string;
+  responsibility: string;
+  mustNever: string[];
+  scope: { reads: string[]; writes: string[]; external: string[] };
+  gates: string[];
+  riskTier: string;
+  evals: string[];
+  skills: string[];
+  maxSteps: number;
+  instructions: string;
+  tools: {
+    name: string;
+    description: string;
+    risk: string;
+    skills: string[];
+    preApprovable: boolean;
+    untrustedOutput: boolean;
+  }[];
+};
+
+export type AgentRegisterEntry = {
+  type: string;
+  version: string;
+  hash: string;
+  manifest: AgentManifestView;
+  /** The complete canonical manifest (incl. tool input schemas) as JSON text. */
+  manifestJson: string;
+  versions: { version: string; hash: string; firstSeen: string }[];
+  policy: { enabled: boolean; autonomy: string; monthlyTokenBudget: number | null };
+  monthTokens: number;
+  last30: { runs: number; done: number; failed: number; decisions: number; edited: number };
+};
+
+/** The agent register: what every agent is, may do and has done (governance roles). */
+export const agentRegister = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .handler(async ({ context }): Promise<AgentRegisterEntry[]> => {
+    const { assertRole } = await import("./auth.middleware");
+    await assertRole(context.userId, context.orgId, [...GOVERNANCE_ROLES]);
+    const { ensureAgentsRegistered } = await import("../server/agents");
+    ensureAgentsRegistered();
+    const { getTool, listAgents, skillsOf } = await import("../server/agents/registry");
+    const { canonicalManifest, manifestHash } = await import("../server/agents/manifest.server");
+    const { loadPolicy } = await import("../server/agents/policy");
+    const { monthTokens } = await import("../server/agents/runtime.server");
+    const { agentDefinitions, agentMetricsDaily } = await import("@db/schema");
+    const { gte, sql } = await import("drizzle-orm");
+    const since = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+    const out: AgentRegisterEntry[] = [];
+    for (const def of listAgents()) {
+      const versions = await db
+        .select({
+          version: agentDefinitions.version,
+          hash: agentDefinitions.hash,
+          firstSeen: agentDefinitions.createdAt,
+        })
+        .from(agentDefinitions)
+        .where(eq(agentDefinitions.agentType, def.type))
+        .orderBy(desc(agentDefinitions.createdAt));
+      const [m] = await db
+        .select({
+          runs: sql<number>`coalesce(sum(${agentMetricsDaily.runsStarted}), 0)::int`,
+          done: sql<number>`coalesce(sum(${agentMetricsDaily.runsDone}), 0)::int`,
+          failed: sql<number>`coalesce(sum(${agentMetricsDaily.runsFailed}), 0)::int`,
+          decisions: sql<number>`coalesce(sum(${agentMetricsDaily.tasksApproved} + ${agentMetricsDaily.tasksRejected}), 0)::int`,
+          edited: sql<number>`coalesce(sum(${agentMetricsDaily.tasksEdited}), 0)::int`,
+        })
+        .from(agentMetricsDaily)
+        .where(
+          and(
+            eq(agentMetricsDaily.orgId, context.orgId),
+            eq(agentMetricsDaily.agentType, def.type),
+            gte(agentMetricsDaily.day, since),
+          ),
+        );
+      const policy = await loadPolicy(context.orgId, def.type);
+      out.push({
+        type: def.type,
+        version: def.version,
+        hash: manifestHash(def),
+        manifest: {
+          name: def.name,
+          owner: def.owner,
+          responsibility: def.responsibility,
+          mustNever: def.mustNever,
+          scope: def.scope,
+          gates: def.gates,
+          riskTier: def.riskTier,
+          evals: def.evals,
+          skills: skillsOf(def),
+          maxSteps: def.maxSteps ?? 20,
+          instructions: def.system,
+          tools: def.tools.map((name) => {
+            const t = getTool(name);
+            return {
+              name,
+              description: t?.description ?? "(missing)",
+              risk: t?.risk ?? "unknown",
+              skills: t?.skills ?? [],
+              preApprovable: Boolean(t?.templateOf),
+              untrustedOutput: Boolean(t?.untrustedOutput),
+            };
+          }),
+        },
+        manifestJson: JSON.stringify(canonicalManifest(def), null, 2),
+        versions: versions.map((v) => ({ ...v, firstSeen: v.firstSeen.toISOString() })),
+        policy: {
+          enabled: policy.enabled,
+          autonomy: policy.autonomy,
+          monthlyTokenBudget: policy.monthlyTokenBudget,
+        },
+        monthTokens: await monthTokens(context.orgId, def.type),
+        last30: {
+          runs: Number(m?.runs ?? 0),
+          done: Number(m?.done ?? 0),
+          failed: Number(m?.failed ?? 0),
+          decisions: Number(m?.decisions ?? 0),
+          edited: Number(m?.edited ?? 0),
+        },
+      });
+    }
+    return out;
+  });
+
+/**
+ * One run's complete, self-contained audit trail as JSON: the run, the exact
+ * manifest it executed under, every step, every human decision, the audit
+ * rows and the AI requests it caused (without vendor or model names).
+ */
+export const exportAgentRun = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) => z.object({ runId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<{ fileName: string; json: string }> => {
+    const schema = await import("@db/schema");
+    const [run] = await db
+      .select()
+      .from(agentRuns)
+      .where(and(eq(agentRuns.id, data.runId), eq(agentRuns.orgId, context.orgId)))
+      .limit(1);
+    if (!run) throw new Error("Run not found");
+    if (run.principalUserId !== context.userId) {
+      const { assertRole } = await import("./auth.middleware");
+      await assertRole(context.userId, context.orgId, [...GOVERNANCE_ROLES]);
+    }
+    const [definition] = run.definitionId
+      ? await db
+          .select()
+          .from(schema.agentDefinitions)
+          .where(eq(schema.agentDefinitions.id, run.definitionId))
+          .limit(1)
+      : [];
+    const steps = await db
+      .select()
+      .from(schema.agentSteps)
+      .where(and(eq(schema.agentSteps.runId, run.id), eq(schema.agentSteps.orgId, context.orgId)))
+      .orderBy(schema.agentSteps.seq);
+    const tasks = await db
+      .select()
+      .from(agentTasks)
+      .where(and(eq(agentTasks.runId, run.id), eq(agentTasks.orgId, context.orgId)));
+    const taskIds = tasks.map((t) => t.id);
+    const audit = await db
+      .select()
+      .from(schema.auditLog)
+      .where(
+        and(
+          eq(schema.auditLog.orgId, context.orgId),
+          or(
+            eq(schema.auditLog.entityId, run.id),
+            taskIds.length ? inArray(schema.auditLog.entityId, taskIds) : undefined,
+          ),
+        ),
+      )
+      .orderBy(schema.auditLog.createdAt);
+    const ai = await db
+      .select({
+        at: schema.aiUsageEvents.createdAt,
+        feature: schema.aiUsageEvents.feature,
+        status: schema.aiUsageEvents.status,
+        promptTokens: schema.aiUsageEvents.promptTokens,
+        completionTokens: schema.aiUsageEvents.completionTokens,
+        totalTokens: schema.aiUsageEvents.totalTokens,
+        attempt: schema.aiUsageEvents.attempt,
+        durationMs: schema.aiUsageEvents.durationMs,
+      })
+      .from(schema.aiUsageEvents)
+      .where(eq(schema.aiUsageEvents.agentRunId, run.id))
+      .orderBy(schema.aiUsageEvents.createdAt);
+    const { writeAudit } = await import("../server/audit");
+    await writeAudit({
+      actor: `user:${context.userId}`,
+      actorUserId: context.userId,
+      orgId: context.orgId,
+      action: "agent.run.exported",
+      entityType: "agent_run",
+      entityId: run.id,
+    });
+    const trail = {
+      exportedAt: new Date().toISOString(),
+      exportedBy: context.memberEmail,
+      run: {
+        ...run,
+        lastError: run.lastError
+          ? SAFE_RUN_ERRORS.has(run.lastError)
+            ? run.lastError
+            : GENERIC_RUN_ERROR
+          : null,
+      },
+      definition: definition
+        ? { version: definition.version, hash: definition.hash, manifest: definition.manifest }
+        : null,
+      steps: steps.map((s) =>
+        s.kind === "model" && s.status === "error"
+          ? { ...s, output: { error: GENERIC_RUN_ERROR } }
+          : s,
+      ),
+      decisions: tasks,
+      audit,
+      aiRequests: ai,
+    };
+    return {
+      fileName: `agent-run-${run.agentType}-${run.id.slice(0, 8)}.json`,
+      json: JSON.stringify(trail, null, 2),
+    };
   });

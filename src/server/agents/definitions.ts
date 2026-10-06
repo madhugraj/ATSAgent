@@ -1,12 +1,31 @@
 /**
- * Phase 1 agents (docs/agentic-plan.md §4.1–4.3, §4.10). Instructions are
- * role-specific; the runtime prepends the injection and operating rules.
+ * Agent manifests (docs/agentic-plan.md §4, §6): identity, accountability,
+ * permission scope, gates, risk tier, evals and instructions for every agent.
+ * Any change here changes the manifest hash — bump `version` (CI-enforced,
+ * scripts/agents.lock.json). The runtime prepends the injection and operating rules.
  */
 import { registerAgent } from "./registry";
 
 export function registerPhase1Agents(): void {
   registerAgent({
     type: "copilot",
+    name: "Copilot",
+    version: "1.0.0",
+    owner: "hr_head",
+    responsibility:
+      "Turns a person's request into work for the specialist agents and starts them only after the person confirms.",
+    mustNever: [
+      "Start a specialist agent without the person's confirmation",
+      "Change requisitions, JDs or candidates itself",
+    ],
+    scope: {
+      reads: ["requisitions (list and detail)", "departments"],
+      writes: ["agent runs it starts (after confirmation)"],
+      external: [],
+    },
+    gates: ["general"],
+    riskTier: "low",
+    evals: ["copilot: hands a new role to the requisition agent after confirmation"],
     feature: "agent_copilot",
     maxSteps: 8,
     tools: ["list_requisitions", "get_requisition", "list_departments", "start_agent"],
@@ -22,6 +41,29 @@ export function registerPhase1Agents(): void {
 
   registerAgent({
     type: "requisition",
+    name: "Requisition agent",
+    version: "1.0.0",
+    owner: "hr_head",
+    responsibility:
+      "Turns a hiring need into a complete, evidence-backed draft requisition and walks it through the DH → HR → CBO approval chain.",
+    mustNever: [
+      "Approve a requisition at any stage",
+      "Invent pay figures — every number must come from market research or the organisation's data",
+      "Resubmit a declined requisition on its own",
+    ],
+    scope: {
+      reads: ["requisitions", "departments", "live market pay research"],
+      writes: [
+        "draft requisitions",
+        "pay band and budget on drafts",
+        "scoring weights",
+        "submission into the approval chain",
+      ],
+      external: [],
+    },
+    gates: ["requisition", "general"],
+    riskTier: "medium",
+    evals: ["requisition: drafts, bands, submits and routes the real requisition to the DH"],
     feature: "agent_requisition",
     maxSteps: 16,
     tools: [
@@ -54,6 +96,23 @@ export function registerPhase1Agents(): void {
 
   registerAgent({
     type: "jd",
+    name: "JD agent",
+    version: "1.0.0",
+    owner: "department_head",
+    responsibility:
+      "Drafts and revises the job description for an approved requisition and gets it reviewed by the department head.",
+    mustNever: [
+      "Approve a job description",
+      "Ignore or paraphrase away a reviewer's requested change",
+    ],
+    scope: {
+      reads: ["requisitions", "JD versions", "the organisation's JD template"],
+      writes: ["new JD versions submitted for review"],
+      external: [],
+    },
+    gates: ["jd", "general"],
+    riskTier: "low",
+    evals: ["jd: drafts the JD and routes it to the department head"],
     feature: "agent_jd",
     maxSteps: 10,
     tools: ["get_requisition", "submit_jd_version"],
@@ -68,6 +127,25 @@ export function registerPhase1Agents(): void {
 
   registerAgent({
     type: "publishing",
+    name: "Publishing agent",
+    version: "1.0.0",
+    owner: "hr_head",
+    responsibility:
+      "Makes an approved requisition visible: internal job board first, then reviewed external job-board posts.",
+    mustNever: [
+      "Publish anything outside the organisation without a person's review",
+      "Publish a requisition or JD that is not approved",
+    ],
+    scope: {
+      reads: ["requisitions", "approved JD text"],
+      writes: ["internal job posting (IJP) flag"],
+      external: [
+        "job-board posts (LinkedIn, Indeed, Naukri) — always reviewed, HR-head principal only",
+      ],
+    },
+    gates: ["general"],
+    riskTier: "medium",
+    evals: ["publishing: posts internally and puts the external post up for review"],
     feature: "agent_publishing",
     maxSteps: 10,
     tools: [
@@ -91,6 +169,32 @@ export function registerPhase1Agents(): void {
 export function registerPhase2Agents(): void {
   registerAgent({
     type: "intake",
+    name: "Intake & matching agent",
+    version: "1.0.0",
+    owner: "hr_head",
+    responsibility:
+      "Keeps an approved requisition's pipeline scored, reviewed and full; proposes rejections for a person to decide.",
+    mustNever: [
+      "Reject a candidate — rejections are proposed, a person decides",
+      "Use anything but the requisition's stated requirements as a rejection reason",
+      "Move a candidate flagged for prompt injection",
+    ],
+    scope: {
+      reads: [
+        "applications, match scores and CV-derived summaries",
+        "the organisation's talent pool",
+      ],
+      writes: [
+        "candidate scoring",
+        "stage moves to shortlisted / on hold / reserve",
+        "adding pool candidates to the pipeline",
+        "candidate notes",
+      ],
+      external: [],
+    },
+    gates: ["rejection", "general"],
+    riskTier: "high",
+    evals: ["intake: shortlists with reasons and proposes rejections for a person"],
     feature: "agent_intake",
     maxSteps: 16,
     tools: [
@@ -116,6 +220,23 @@ export function registerPhase2Agents(): void {
 
   registerAgent({
     type: "screening",
+    name: "Screening agent",
+    version: "1.0.0",
+    owner: "hr_head",
+    responsibility:
+      "Moves shortlisted candidates through screening: kits, assessments, reminders and proceed / hold notes.",
+    mustNever: [
+      "Reject a candidate",
+      "Email a candidate without approval unless the assessment email is pre-approved",
+    ],
+    scope: {
+      reads: ["shortlisted applications", "screening kits, calls and assessment results"],
+      writes: ["screening kits", "assessments", "candidate notes", "stage move to on hold"],
+      external: ["candidate assessment invitations and reminders"],
+    },
+    gates: ["general"],
+    riskTier: "medium",
+    evals: ["screening: prepares the kit and proposes the assessment"],
     feature: "agent_screening",
     maxSteps: 20,
     tools: [
@@ -140,6 +261,27 @@ export function registerPhase2Agents(): void {
 
   registerAgent({
     type: "followup",
+    name: "Follow-up agent",
+    version: "1.0.0",
+    owner: "hr_head",
+    responsibility: "Once a day, finds work that is overdue and reminds the right person.",
+    mustNever: [
+      "Remind anyone outside the organisation except a candidate about their own assessment",
+      "Remind the same person about the same item more than once a day",
+    ],
+    scope: {
+      reads: [
+        "pending approvals and JD reviews",
+        "open agent requests",
+        "incomplete assessments",
+        "members and roles",
+      ],
+      writes: ["internal reminder emails to members"],
+      external: ["assessment reminders to candidates"],
+    },
+    gates: [],
+    riskTier: "low",
+    evals: ["followup: reminds the approver of an overdue requisition"],
     feature: "agent_followup",
     maxSteps: 16,
     tools: ["list_overdue", "list_members", "remind_member", "remind_assessment"],

@@ -401,7 +401,33 @@ agent: `actor = "agent:<type>:<runId>"` with `on_behalf_of = userId`.
 - **Rate limits:** the new cron route sits behind `CRON_SECRET`; new user RPCs
   inherit the server-fn limiter.
 
-### 6.3 Fairness and explainability
+### 6.3 Agent governance (traceability)
+
+Every agent is defined by a versioned **manifest** (identity, version,
+accountable owner, responsibility, permission scope, must-never list, gates
+it may request, risk tier, eval suite, instructions, tools and the AI skills
+those tools use).
+
+- **Version per run:** each manifest version is stored once
+  (`agent_definitions`, keyed by content hash); every run records the
+  definition it executed under, and a change mid-run is recorded and
+  audited.
+- **Change control:** `scripts/agents.lock.json` pins each agent's version
+  and hash; CI fails if a manifest changes without a version bump, or if a
+  live agent has no real-agent eval.
+- **Attribution:** every AI request inside a run — model turns and AI calls
+  inside tools — carries the run id in the AI ledger.
+- **Budgets:** an agent over its monthly token budget pauses (not fails),
+  is audited once and is surfaced to HR leadership.
+- **Audit:** run started / completed / failed / definition changed / budget
+  paused / exported, plus every write or external action and every human
+  decision.
+- **Register and export:** Governance → Agent register shows each manifest,
+  version history and activity; any run's complete trail (definition
+  snapshot, steps, decisions, audit, AI requests without vendor names)
+  exports as JSON.
+
+### 6.4 Fairness and explainability
 
 - No automated final rejection (principle 3); every proposed rejection
   carries reasons tied to the requisition's stated requirements.
