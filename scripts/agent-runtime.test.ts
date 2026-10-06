@@ -134,6 +134,8 @@ beforeEach(async () => {
   executed.length = 0;
   await db.delete(agentRuns).where(eq(agentRuns.orgId, orgId));
   await db.delete(agentPolicies).where(eq(agentPolicies.orgId, orgId));
+  // Agents are opt-in: switch the test agent on.
+  await db.insert(agentPolicies).values({ orgId, agentType: "requisition", enabled: true });
   resetRegistry();
   registerTool({
     name: "lookup",
@@ -270,8 +272,9 @@ describe("agent runtime", () => {
 
   test("act_and_notify runs write tools without asking", async () => {
     await db
-      .insert(agentPolicies)
-      .values({ orgId, agentType: "requisition", autonomy: "act_and_notify" });
+      .update(agentPolicies)
+      .set({ autonomy: "act_and_notify" })
+      .where(and(eq(agentPolicies.orgId, orgId), eq(agentPolicies.agentType, "requisition")));
     const { runId } = await start();
     script.push(call({ id: "w1", name: "save_draft", args: { text: "x" } }), say("ok"));
     await runAgentTick();
@@ -405,7 +408,9 @@ describe("agent runtime", () => {
     expect((await runAgentTick()).claimed).toBe(0);
     expect((await runRow(runId)).status).toBe("queued");
 
-    await db.delete(agentPolicies).where(eq(agentPolicies.orgId, orgId));
+    await db
+      .delete(agentPolicies)
+      .where(and(eq(agentPolicies.orgId, orgId), eq(agentPolicies.agentType, "*")));
     script.push(call({ id: "h", name: "handoff", args: { reason: "needs legal" } }));
     await runAgentTick();
     const run = await runRow(runId);
@@ -474,5 +479,17 @@ describe("agent runtime", () => {
       promptTokens: 20,
       completionTokens: 10,
     });
+  });
+
+  test("agents are opt-in: a switched-off agent's runs are not claimed", async () => {
+    await db
+      .update(agentPolicies)
+      .set({ enabled: false })
+      .where(and(eq(agentPolicies.orgId, orgId), eq(agentPolicies.agentType, "requisition")));
+    const { runId } = await start();
+    expect((await runAgentTick()).claimed).toBe(0);
+    await db.delete(agentPolicies).where(eq(agentPolicies.orgId, orgId));
+    expect((await runAgentTick()).claimed).toBe(0);
+    expect((await runRow(runId)).status).toBe("queued");
   });
 });

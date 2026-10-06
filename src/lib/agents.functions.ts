@@ -132,6 +132,8 @@ export const decideAgentTask = createServerFn({ method: "POST" })
       userId: context.userId,
       decision: data.decision,
     });
+    const { kickAgents } = await import("../server/agents/orchestrator.server");
+    kickAgents(context.orgId);
     return { ok: true as const };
   });
 
@@ -231,7 +233,7 @@ export const agentSettings = createServerFn({ method: "GET" })
         return {
           type: a.type,
           live: isAgentLive(a.type),
-          enabled: r?.enabled ?? true,
+          enabled: r?.enabled ?? false,
           autonomy: r?.autonomy ?? "suggest",
           whitelistedTemplates: r?.whitelistedTemplates ?? [],
           monthlyTokenBudget: r?.monthlyTokenBudget ?? null,
@@ -397,4 +399,41 @@ export const agentSummary = createServerFn({ method: "GET" })
       edited: Number(r?.edited ?? 0),
       avgWaitMinutes: decisions ? Math.round(Number(r?.waitMs ?? 0) / decisions / 60000) : null,
     };
+  });
+
+/* ------------------------------------------------------------ ask the agents */
+
+/**
+ * Start a Copilot run for the signed-in member from a free-text request. The
+ * Copilot plans and proposes starting a specialist agent; under `suggest` that
+ * proposal is an approval the member confirms in the inbox.
+ */
+export const askAgents = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) =>
+    z.object({ message: z.string().trim().min(5).max(2000) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { ensureAgentsRegistered } = await import("../server/agents");
+    ensureAgentsRegistered();
+    const { loadPolicy } = await import("../server/agents/policy");
+    const policy = await loadPolicy(context.orgId, "copilot");
+    if (!policy.enabled) {
+      throw new Error("Switch on the Copilot in Agent settings first.");
+    }
+    const { resolveAiConfig } = await import("./ai-gateway.server");
+    const cfg = await resolveAiConfig(context.orgId);
+    if (!cfg.apiKey) {
+      throw new Error("Add your organisation's AI model key in Integrations first.");
+    }
+    const { startRun } = await import("../server/agents/runtime.server");
+    const { runId } = await startRun({
+      orgId: context.orgId,
+      agentType: "copilot",
+      principalUserId: context.userId,
+      goal: data.message,
+    });
+    const { kickAgents } = await import("../server/agents/orchestrator.server");
+    kickAgents(context.orgId);
+    return { runId };
   });

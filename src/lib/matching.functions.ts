@@ -63,20 +63,26 @@ export type GeneratedJd = {
   full_text: string;
 };
 
+/** Draft a JD with the org's template; shared by the server fn and the JD agent. */
+export async function generateJdCore(
+  orgId: string,
+  data: z.infer<typeof JdInput>,
+): Promise<GeneratedJd> {
+  const template = await resolveTemplate(orgId, "jd", data.templateId);
+  const result = await aiJson<GeneratedJd>({
+    orgId,
+    feature: "jd_generate",
+    system: buildTemplateSystemPrompt({ base: BASE_JD_SYSTEM, template }),
+    prompt: JSON.stringify(data),
+  });
+  if (!result.ok) throw new Error(result.message);
+  return stripAll(result.data);
+}
+
 export const generateJd = createServerFn({ method: "POST" })
   .middleware([requireOrg])
   .inputValidator((data: unknown) => JdInput.parse(data))
-  .handler(async ({ data, context }) => {
-    const template = await resolveTemplate(context.orgId, "jd", data.templateId);
-    const result = await aiJson<GeneratedJd>({
-      orgId: context.orgId,
-      feature: "jd_generate",
-      system: buildTemplateSystemPrompt({ base: BASE_JD_SYSTEM, template }),
-      prompt: JSON.stringify(data),
-    });
-    if (!result.ok) throw new Error(result.message);
-    return stripAll(result.data);
-  });
+  .handler(async ({ data, context }) => generateJdCore(context.orgId, data));
 
 /* ------------------------------------------------- Existing JD import */
 
@@ -139,51 +145,59 @@ export type WeightAdvice = {
  * Ask the model to distribute the 100 scoring points across the six dimensions
  * for THIS job, then hard-normalise server-side so the total is always exactly 100.
  */
+/** Distribute the 100 scoring points for one JD; shared by the server fn and agents. */
+export async function suggestWeightsCore(
+  orgId: string,
+  data: z.infer<typeof WeightAdviceInput>,
+): Promise<WeightAdvice> {
+  const result = await aiJson<WeightAdvice>({
+    orgId,
+    feature: "weight_suggest",
+    system:
+      "You tune the scoring model for one specific job description. Distribute exactly 100 points across " +
+      "six dimensions: skills, experience (years vs band), career (tenure stability, progression, gaps), " +
+      "impact (quantified outcomes, ownership, innovation evidence), education and social (public-profile " +
+      "evidence). Reason about the role: deep technical/IC roles weight skills highest; leadership and " +
+      "regulated roles weight experience and career higher; high-churn or business-critical roles raise " +
+      "career; product, founding, R&D and growth roles raise impact; research, medical, academic or " +
+      "licence-bound roles raise education; developer-relations, design, content and open-source-heavy " +
+      "roles raise social. Keep career and impact between 5 and 25 each, and social between 5 and 30 and " +
+      "never 0 unless the role has no public footprint at all. Return ONLY JSON with keys: skills, " +
+      "experience, career, impact, education, social (integers summing to 100), rationale (2-3 sentences), " +
+      "notes (2-4 short bullet strings).",
+    prompt: JSON.stringify(data),
+  });
+  if (!result.ok) throw new Error(result.message);
+
+  const keys = ["skills", "experience", "career", "impact", "education", "social"] as const;
+  const raw = Object.fromEntries(
+    keys.map((k) => [
+      k,
+      Math.max(0, Math.round(Number((result.data as never as Record<string, unknown>)[k]) || 0)),
+    ]),
+  ) as Record<(typeof keys)[number], number>;
+  const total = keys.reduce((s, k) => s + raw[k], 0) || 1;
+  const scaled = Object.fromEntries(
+    keys.map((k) => [k, Math.round((raw[k] / total) * 100)]),
+  ) as Record<(typeof keys)[number], number>;
+  // Push any rounding drift onto the largest bucket so the total is exactly 100.
+  const drift = 100 - keys.reduce((s, k) => s + scaled[k], 0);
+  const biggest = keys.reduce((a, b) => (scaled[a] >= scaled[b] ? a : b));
+  scaled[biggest] += drift;
+
+  return {
+    ...scaled,
+    rationale: result.data.rationale ?? "",
+    notes: result.data.notes ?? [],
+  };
+}
+
 export const suggestWeights = createServerFn({ method: "POST" })
   .middleware([requireOrg])
   .inputValidator((data: unknown) => WeightAdviceInput.parse(data))
-  .handler(async ({ data, context }): Promise<WeightAdvice> => {
-    const result = await aiJson<WeightAdvice>({
-      orgId: context.orgId,
-      feature: "weight_suggest",
-      system:
-        "You tune the scoring model for one specific job description. Distribute exactly 100 points across " +
-        "six dimensions: skills, experience (years vs band), career (tenure stability, progression, gaps), " +
-        "impact (quantified outcomes, ownership, innovation evidence), education and social (public-profile " +
-        "evidence). Reason about the role: deep technical/IC roles weight skills highest; leadership and " +
-        "regulated roles weight experience and career higher; high-churn or business-critical roles raise " +
-        "career; product, founding, R&D and growth roles raise impact; research, medical, academic or " +
-        "licence-bound roles raise education; developer-relations, design, content and open-source-heavy " +
-        "roles raise social. Keep career and impact between 5 and 25 each, and social between 5 and 30 and " +
-        "never 0 unless the role has no public footprint at all. Return ONLY JSON with keys: skills, " +
-        "experience, career, impact, education, social (integers summing to 100), rationale (2-3 sentences), " +
-        "notes (2-4 short bullet strings).",
-      prompt: JSON.stringify(data),
-    });
-    if (!result.ok) throw new Error(result.message);
-
-    const keys = ["skills", "experience", "career", "impact", "education", "social"] as const;
-    const raw = Object.fromEntries(
-      keys.map((k) => [
-        k,
-        Math.max(0, Math.round(Number((result.data as never as Record<string, unknown>)[k]) || 0)),
-      ]),
-    ) as Record<(typeof keys)[number], number>;
-    const total = keys.reduce((s, k) => s + raw[k], 0) || 1;
-    const scaled = Object.fromEntries(
-      keys.map((k) => [k, Math.round((raw[k] / total) * 100)]),
-    ) as Record<(typeof keys)[number], number>;
-    // Push any rounding drift onto the largest bucket so the total is exactly 100.
-    const drift = 100 - keys.reduce((s, k) => s + scaled[k], 0);
-    const biggest = keys.reduce((a, b) => (scaled[a] >= scaled[b] ? a : b));
-    scaled[biggest] += drift;
-
-    return {
-      ...scaled,
-      rationale: result.data.rationale ?? "",
-      notes: result.data.notes ?? [],
-    };
-  });
+  .handler(async ({ data, context }): Promise<WeightAdvice> =>
+    suggestWeightsCore(context.orgId, data),
+  );
 
 /* --------------------------------------------- LinkedIn job post designer */
 
@@ -216,30 +230,36 @@ export type SocialJobPost = {
 };
 
 /** Draft a ready-to-publish LinkedIn job post from the approved requisition + JD. */
+/** Draft a LinkedIn job post; shared by the server fn and the Publishing agent. */
+export async function draftLinkedinPostCore(
+  orgId: string,
+  data: z.infer<typeof PostInput>,
+): Promise<SocialJobPost> {
+  const template = await resolveTemplate(orgId, "linkedin_post", data.templateId);
+  const result = await aiJson<SocialJobPost>({
+    orgId: orgId,
+    feature: "linkedin_post",
+    system: buildTemplateSystemPrompt({
+      base: BASE_POST_SYSTEM,
+      template,
+      tone: data.tone,
+    }),
+    prompt: JSON.stringify(data),
+  });
+  if (!result.ok) throw new Error(result.message);
+  return {
+    ...result.data,
+    headline: stripUnreplacedPlaceholders(result.data.headline ?? ""),
+    body: stripUnreplacedPlaceholders(result.data.body ?? ""),
+    hashtags: (result.data.hashtags ?? []).map((h) => stripUnreplacedPlaceholders(h)),
+    call_to_action: stripUnreplacedPlaceholders(result.data.call_to_action ?? ""),
+  };
+}
+
 export const draftLinkedinPost = createServerFn({ method: "POST" })
   .middleware([requireOrg])
   .inputValidator((data: unknown) => PostInput.parse(data))
-  .handler(async ({ data, context }) => {
-    const template = await resolveTemplate(context.orgId, "linkedin_post", data.templateId);
-    const result = await aiJson<SocialJobPost>({
-      orgId: context.orgId,
-      feature: "linkedin_post",
-      system: buildTemplateSystemPrompt({
-        base: BASE_POST_SYSTEM,
-        template,
-        tone: data.tone,
-      }),
-      prompt: JSON.stringify(data),
-    });
-    if (!result.ok) throw new Error(result.message);
-    return {
-      ...result.data,
-      headline: stripUnreplacedPlaceholders(result.data.headline ?? ""),
-      body: stripUnreplacedPlaceholders(result.data.body ?? ""),
-      hashtags: (result.data.hashtags ?? []).map((h) => stripUnreplacedPlaceholders(h)),
-      call_to_action: stripUnreplacedPlaceholders(result.data.call_to_action ?? ""),
-    };
-  });
+  .handler(async ({ data, context }) => draftLinkedinPostCore(context.orgId, data));
 
 /* -------------------------------------------------------------- JD vs CV */
 

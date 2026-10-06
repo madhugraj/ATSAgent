@@ -61,7 +61,7 @@ function AgentSettingsPage() {
       <PageHeader
         eyebrow="Governance"
         title="Agent settings"
-        description="Choose how much each hiring agent may do on its own. Approving requisitions, JDs and offers, releasing offers, rejecting candidates and hiring decisions always stay with people, whatever you set here."
+        description="Agents are off until you switch them on. Choose how much each hiring agent may do on its own. Approving requisitions, JDs and offers, releasing offers, rejecting candidates and hiring decisions always stay with people, whatever you set here."
         actions={
           <Button asChild variant="outline" size="sm">
             <Link to="/agents">Agent decisions</Link>
@@ -151,7 +151,7 @@ function AgentRow({
           <Switch
             id={`en-${row.type}`}
             checked={row.enabled}
-            disabled={!canEdit}
+            disabled={!canEdit || !row.live}
             onCheckedChange={(enabled) => onSave({ ...base, enabled })}
           />
         </div>

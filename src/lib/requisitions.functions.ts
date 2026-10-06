@@ -3,13 +3,13 @@
  * internal job posting (IJP) apply flow. Every function verifies the caller's
  * organisation (`requireOrg`) and predicates every read/write on it.
  */
-import { and, desc, eq, like } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { db } from "../server/db";
-import { applications, candidates, departments, jobDescriptions, requisitions } from "@db/schema";
-import { assertRole, requireOrg, requireRole, type AppRole } from "./auth.middleware";
+import { applications, candidates, departments, requisitions } from "@db/schema";
+import { assertRole, requireOrg, requireRole } from "./auth.middleware";
 
 const ReqStatus = z.enum([
   "draft",
@@ -21,30 +21,6 @@ const ReqStatus = z.enum([
   "on_hold",
   "closed",
 ]);
-
-/**
- * The requisition approval chain (DH → HR → CBO) is enforced HERE, not in the
- * UI: each target status names the legal source statuses and the role that may
- * make the hop. Org owners pass every role check (assertRole semantics).
- */
-const REQ_TRANSITIONS: Partial<
-  Record<(typeof ReqStatus.options)[number], { from: string[]; role?: AppRole | AppRole[] }>
-> = {
-  draft: { from: ["draft", "rejected", "on_hold"] },
-  pending_dh: { from: ["draft", "rejected", "on_hold"] },
-  pending_hr: { from: ["pending_dh"], role: "department_head" },
-  pending_cbo: { from: ["pending_hr"], role: "hr_head" },
-  approved: { from: ["pending_cbo"], role: "president_cbo" },
-  rejected: {
-    from: ["pending_dh", "pending_hr", "pending_cbo"],
-    role: ["department_head", "hr_head", "president_cbo"],
-  },
-  on_hold: {
-    from: ["draft", "pending_dh", "pending_hr", "pending_cbo", "approved"],
-    role: ["hr_head", "president_cbo"],
-  },
-  closed: { from: ["approved", "on_hold"], role: ["hr_head", "president_cbo"] },
-};
 
 /* ------------------------------------------------------------- requisitions */
 
@@ -61,51 +37,11 @@ export const advanceRequisition = createServerFn({ method: "POST" })
       .parse(data),
   )
   .handler(async ({ data, context }) => {
-    const [current] = await db
-      .select({ status: requisitions.status, approvalTrail: requisitions.approvalTrail })
-      .from(requisitions)
-      .where(and(eq(requisitions.id, data.id), eq(requisitions.orgId, context.orgId)))
-      .limit(1);
-    if (!current) throw new Error("Requisition not found.");
-
-    const rule = REQ_TRANSITIONS[data.status];
-    if (!rule || !rule.from.includes(current.status)) {
-      throw new Error(`A requisition cannot move from ${current.status} to ${data.status}.`);
-    }
-    if (rule.role) {
-      await assertRole(context.userId, context.orgId, rule.role);
-    }
-
-    // The approval trail is evidence — it is rebuilt server-side and never
-    // accepted from the client.
-    const prior = Array.isArray(current.approvalTrail) ? current.approvalTrail : [];
-    const trail = [
-      ...prior,
-      {
-        from: current.status,
-        to: data.status,
-        actor: context.memberEmail,
-        decision: data.status,
-        comment: data.comment ?? null,
-        at: new Date().toISOString(),
-      },
-    ];
-
-    await db
-      .update(requisitions)
-      .set({ status: data.status, approvalTrail: trail as never })
-      .where(and(eq(requisitions.id, data.id), eq(requisitions.orgId, context.orgId)));
-
-    // Closing a role takes its job-board postings down with it — best-effort,
-    // audited per posting, never blocking the transition itself.
-    if (data.status === "closed") {
-      const { closePostingsForRequisition } = await import("../server/boards/publish.server");
-      await closePostingsForRequisition({
-        orgId: context.orgId,
-        actor: { memberEmail: context.memberEmail, userId: context.userId },
-        requisitionId: data.id,
-      }).catch(() => undefined);
-    }
+    const { advanceRequisitionCore } = await import("./requisitions.server");
+    await advanceRequisitionCore(
+      { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
+      { id: data.id, status: data.status, comment: data.comment ?? null },
+    );
     return { ok: true as const };
   });
 
@@ -177,13 +113,12 @@ export const setRequisitionIjp = createServerFn({ method: "POST" })
     z.object({ id: z.string().uuid(), enabled: z.boolean() }).parse(data),
   )
   .handler(async ({ data, context }) => {
-    await db
-      .update(requisitions)
-      .set({
-        ijpEnabled: data.enabled,
-        ijpPostedAt: data.enabled ? new Date() : null,
-      })
-      .where(and(eq(requisitions.id, data.id), eq(requisitions.orgId, context.orgId)));
+    const { setRequisitionIjpCore } = await import("./requisitions.server");
+    await setRequisitionIjpCore(
+      { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
+      data.id,
+      data.enabled,
+    );
     return { ok: true as const };
   });
 
@@ -220,17 +155,12 @@ export const saveRequisitionWeights = createServerFn({ method: "POST" })
       .parse(data),
   )
   .handler(async ({ data, context }) => {
-    await db
-      .update(requisitions)
-      .set({
-        weightSkills: data.weights.skills,
-        weightExperience: data.weights.experience,
-        weightCareer: data.weights.career,
-        weightImpact: data.weights.impact,
-        weightEducation: data.weights.education,
-        weightSocial: data.weights.social,
-      })
-      .where(and(eq(requisitions.id, data.id), eq(requisitions.orgId, context.orgId)));
+    const { saveRequisitionWeightsCore } = await import("./requisitions.server");
+    await saveRequisitionWeightsCore(
+      { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
+      data.id,
+      data.weights,
+    );
     return { ok: true as const };
   });
 
@@ -249,15 +179,17 @@ export const updateRequisitionCompensation = createServerFn({ method: "POST" })
       .parse(data),
   )
   .handler(async ({ data, context }) => {
-    await db
-      .update(requisitions)
-      .set({
-        budgetCtc: String(Number(data.budgetCtc) || 0),
-        ctcBandMin: data.ctcBandMin ? String(Number(data.ctcBandMin)) : null,
-        ctcBandMax: data.ctcBandMax ? String(Number(data.ctcBandMax)) : null,
-        careerLevel: data.careerLevel || null,
-      })
-      .where(and(eq(requisitions.id, data.id), eq(requisitions.orgId, context.orgId)));
+    const { updateRequisitionCompensationCore } = await import("./requisitions.server");
+    await updateRequisitionCompensationCore(
+      { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
+      {
+        id: data.id,
+        budgetCtc: Number(data.budgetCtc) || 0,
+        ctcBandMin: data.ctcBandMin ? Number(data.ctcBandMin) : null,
+        ctcBandMax: data.ctcBandMax ? Number(data.ctcBandMax) : null,
+        careerLevel: data.careerLevel ?? null,
+      },
+    );
     return { ok: true as const };
   });
 
@@ -293,41 +225,16 @@ export const saveJobDescription = createServerFn({ method: "POST" })
       .parse(data),
   )
   .handler(async ({ data, context }) => {
-    const [requisition] = await db
-      .select({ id: requisitions.id })
-      .from(requisitions)
-      .where(and(eq(requisitions.id, data.requisitionId), eq(requisitions.orgId, context.orgId)))
-      .limit(1);
-    if (!requisition) throw new Error("Requisition not found");
-
-    const [latest] = await db
-      .select({ version: jobDescriptions.version })
-      .from(jobDescriptions)
-      .where(
-        and(
-          eq(jobDescriptions.requisitionId, data.requisitionId),
-          eq(jobDescriptions.orgId, context.orgId),
-        ),
-      )
-      .orderBy(desc(jobDescriptions.version))
-      .limit(1);
-
-    await db.insert(jobDescriptions).values({
-      requisitionId: data.requisitionId,
-      orgId: context.orgId,
-      version: (latest?.version ?? 0) + 1,
-      status: "pending_dh",
-      purpose: data.jd.purpose,
-      responsibilities: data.jd.responsibilities,
-      mustHave: data.jd.must_have,
-      goodToHave: data.jd.good_to_have,
-      qualifications: data.jd.qualifications,
-      successFactors: data.jd.success_factors,
-      reportingTo: data.jd.reporting_to,
-      fullText: data.jd.full_text,
-      templateId: data.templateId || null,
-      templateName: data.templateName || null,
-    });
+    const { saveJobDescriptionCore } = await import("./requisitions.server");
+    await saveJobDescriptionCore(
+      { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
+      {
+        requisitionId: data.requisitionId,
+        jd: data.jd,
+        templateId: data.templateId ?? null,
+        templateName: data.templateName ?? null,
+      },
+    );
     return { ok: true as const };
   });
 
@@ -338,23 +245,26 @@ export const approveJobDescription = createServerFn({ method: "POST" })
     z.object({ id: z.string().uuid(), fullText: z.string().nullish() }).parse(data),
   )
   .handler(async ({ data, context }) => {
-    await assertRole(
-      context.userId,
-      context.orgId,
-      ["department_head", "hr_head", "president_cbo"],
-      "Only a department head, HR head or the CBO can approve a job description.",
+    const { approveJobDescriptionCore } = await import("./requisitions.server");
+    await approveJobDescriptionCore(
+      { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
+      { id: data.id, fullText: data.fullText ?? null },
     );
-    const [jd] = await db
-      .select({ status: jobDescriptions.status })
-      .from(jobDescriptions)
-      .where(and(eq(jobDescriptions.id, data.id), eq(jobDescriptions.orgId, context.orgId)))
-      .limit(1);
-    if (!jd) throw new Error("Job description not found.");
-    if (jd.status === "approved") throw new Error("This version is already approved.");
-    await db
-      .update(jobDescriptions)
-      .set({ status: "approved", fullText: data.fullText ?? null })
-      .where(and(eq(jobDescriptions.id, data.id), eq(jobDescriptions.orgId, context.orgId)));
+    return { ok: true as const };
+  });
+
+/** Send a JD version back with the reviewer's comment — department head and above. */
+export const requestJdChanges = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((data: unknown) =>
+    z.object({ id: z.string().uuid(), comment: z.string().min(1).max(4000) }).parse(data),
+  )
+  .handler(async ({ data, context }) => {
+    const { requestJdChangesCore } = await import("./requisitions.server");
+    await requestJdChangesCore(
+      { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
+      { id: data.id, comment: data.comment },
+    );
     return { ok: true as const };
   });
 
@@ -466,41 +376,34 @@ export const createRequisition = createServerFn({ method: "POST" })
       .parse(data),
   )
   .handler(async ({ data, context }) => {
-    const year = new Date().getFullYear();
-    const [latest] = await db
-      .select({ code: requisitions.code })
-      .from(requisitions)
-      .where(and(eq(requisitions.orgId, context.orgId), like(requisitions.code, `REQ-${year}-%`)))
-      .orderBy(desc(requisitions.code))
-      .limit(1);
-    const next = Number(latest?.code?.match(/REQ-\d{4}-(\d+)$/)?.[1] ?? 0) + 1;
-    const code = `REQ-${year}-${String(next).padStart(3, "0")}`;
-
-    await db.insert(requisitions).values({
-      orgId: context.orgId,
-      code,
-      title: data.title,
-      departmentId: data.departmentId || null,
-      location: data.location,
-      openings: Number(data.openings) || 1,
-      experienceMin: Number(data.experienceMin) || 0,
-      experienceMax: Number(data.experienceMax) || 0,
-      budgetCtc: String(Number(data.budgetCtc) || 0),
-      ctcBandMin: data.ctcBandMin ? String(Number(data.ctcBandMin)) : null,
-      ctcBandMax: data.ctcBandMax ? String(Number(data.ctcBandMax)) : null,
-      maxNoticePeriodDays: data.maxNoticePeriodDays ? Number(data.maxNoticePeriodDays) : null,
-      workAuthorizationRequired: data.workAuthorizationRequired || null,
-      hiringManager: data.hiringManager || null,
-      mustHaveSkills: data.mustHaveSkills,
-      goodToHaveSkills: data.goodToHaveSkills,
-      responsibilities: data.responsibilities || null,
-      educationRequirement: data.educationRequirement || null,
-      billingType: data.billingType,
-      engagementType: data.engagementType,
-      clientName: data.clientName || null,
-      costCenter: data.costCenter || null,
-      status: "pending_dh",
-    });
+    const { createRequisitionCore } = await import("./requisitions.server");
+    const num = (v: string) => Number(v) || 0;
+    const { code } = await createRequisitionCore(
+      { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
+      {
+        title: data.title,
+        departmentId: data.departmentId || null,
+        location: data.location,
+        openings: num(data.openings) || 1,
+        experienceMin: num(data.experienceMin),
+        experienceMax: num(data.experienceMax),
+        budgetCtc: num(data.budgetCtc),
+        ctcBandMin: data.ctcBandMin ? num(data.ctcBandMin) : null,
+        ctcBandMax: data.ctcBandMax ? num(data.ctcBandMax) : null,
+        maxNoticePeriodDays: data.maxNoticePeriodDays ? num(data.maxNoticePeriodDays) : null,
+        workAuthorizationRequired: data.workAuthorizationRequired || null,
+        hiringManager: data.hiringManager || null,
+        mustHaveSkills: data.mustHaveSkills,
+        goodToHaveSkills: data.goodToHaveSkills,
+        responsibilities: data.responsibilities || null,
+        educationRequirement: data.educationRequirement || null,
+        billingType: data.billingType,
+        engagementType: data.engagementType,
+        clientName: data.clientName || null,
+        costCenter: data.costCenter || null,
+      },
+      "pending_dh",
+    );
     return { ok: true as const, code };
   });
 

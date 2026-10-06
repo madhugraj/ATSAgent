@@ -332,8 +332,9 @@ Mostly deterministic; uses the model only to draft messages.
 | `act_and_notify` | run, notify owner, 1-click undo where reversible | proposal → approve, unless template whitelisted |
 | `autonomous`     | run                                              | run for whitelisted templates; else approve     |
 
-Gates (§5.1) ignore the dial. Defaults for a new org: everything `suggest`,
-so value is visible before trust is extended.
+Gates (§5.1) ignore the dial. Agents are **opt-in**: every agent is off
+until the organisation switches it on, and starts at `suggest`, so value is
+visible before trust is extended.
 
 ### 5.3 Decisions inbox
 
@@ -348,6 +349,10 @@ One place where agents' requests land, extending the live action inbox in
 - routed by role (same matrix as `docs/roles-and-rights.md`), with SLA
   escalation to the next approver;
 - decisions are written to `audit_log` and fed back to the agent run.
+- a gate tied to a requisition or JD performs the real approval step when
+  decided in the inbox, as the deciding person (their role is checked by the
+  same lifecycle core as the requisition page); a decision made on the
+  regular pages closes the matching inbox request.
 
 ### 5.4 Kill switches
 

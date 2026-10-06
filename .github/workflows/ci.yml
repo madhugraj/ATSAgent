@@ -56,3 +56,6 @@ jobs:
 
       - name: Agent eval scenarios (scripted model) and gate guard
         run: bun test scripts/agent-eval.test.ts
+
+      - name: Phase 1 agents (requisition, JD, publishing, orchestrator)
+        run: bun test scripts/agent-phase1.test.ts

@@ -19,8 +19,12 @@ export type EffectivePolicy = {
   monthlyTokenBudget: number | null;
 };
 
+/**
+ * Agents are opt-in: with no policy row an agent is off. Turning one on in
+ * Agent settings writes the row (autonomy defaults to `suggest`).
+ */
 export const DEFAULT_POLICY: EffectivePolicy = {
-  enabled: true,
+  enabled: false,
   autonomy: "suggest",
   whitelistedTemplates: [],
   monthlyTokenBudget: null,
@@ -44,7 +48,7 @@ export function decideToolCall(
   return whitelisted ? "run" : "approve";
 }
 
-/** The org-wide switch ('*') and the agent's own row, merged over the defaults. */
+/** The org-wide switch ('*') and the agent's own row (opt-in), merged over the defaults. */
 export async function loadPolicy(orgId: string, agentType: AgentType): Promise<EffectivePolicy> {
   const rows = await db
     .select()
@@ -53,7 +57,7 @@ export async function loadPolicy(orgId: string, agentType: AgentType): Promise<E
   const orgWide = rows.find((r) => r.agentType === "*");
   const own = rows.find((r) => r.agentType === agentType);
   return {
-    enabled: (orgWide?.enabled ?? true) && (own?.enabled ?? true),
+    enabled: orgWide?.enabled !== false && own?.enabled === true,
     autonomy: own?.autonomy ?? DEFAULT_POLICY.autonomy,
     whitelistedTemplates: own?.whitelistedTemplates ?? [],
     monthlyTokenBudget: own?.monthlyTokenBudget ?? null,

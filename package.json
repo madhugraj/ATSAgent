@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node scripts/migrate-pg.mjs",
-    "test": "bun test scripts/agent-gateway.test.ts && bun test scripts/integration.verify.test.ts && bun test scripts/agent-runtime.test.ts && bun test scripts/agent-eval.test.ts",
+    "test": "bun test scripts/agent-gateway.test.ts && bun test scripts/integration.verify.test.ts && bun test scripts/agent-runtime.test.ts && bun test scripts/agent-eval.test.ts && bun test scripts/agent-phase1.test.ts",
     "eval:agents": "bun scripts/agent-eval.ts",
     "test:e2e": "bun scripts/local-e2e/e2e-check.ts",
     "bias-report": "bun scripts/bias-report.ts"

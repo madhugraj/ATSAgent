@@ -19,6 +19,7 @@ import {
   addApplicationsToRequisition,
   advanceRequisition,
   approveJobDescription,
+  requestJdChanges,
   saveJobDescription,
   saveRequisitionWeights,
   setRequisitionIjp,
@@ -459,6 +460,21 @@ function RequisitionDetail() {
       return;
     }
     toast.success("JD approved — sourcing can begin");
+    qc.invalidateQueries({ queryKey: ["jd", id] });
+    qc.invalidateQueries({ queryKey: ["jd_statuses"] });
+  }
+
+  async function requestChanges() {
+    if (!latestJd) return;
+    const comment = window.prompt("What should change in this JD?")?.trim();
+    if (!comment) return;
+    try {
+      await requestJdChanges({ data: { id: latestJd.id, comment } });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not send the JD back");
+      return;
+    }
+    toast.success("Sent back with your comments");
     qc.invalidateQueries({ queryKey: ["jd", id] });
     qc.invalidateQueries({ queryKey: ["jd_statuses"] });
   }
@@ -934,6 +950,11 @@ function RequisitionDetail() {
                   <Button onClick={approveJd} disabled={latestJd.status === "approved"}>
                     {latestJd.status === "approved" ? "JD approved" : "Approve JD"}
                   </Button>
+                  {latestJd.status === "pending_dh" ? (
+                    <Button variant="outline" onClick={requestChanges}>
+                      Request changes
+                    </Button>
+                  ) : null}
                   <Button asChild variant="outline">
                     <Link to="/matching" search={{ req: r.id }}>
                       Score candidates against this JD

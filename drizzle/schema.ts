@@ -334,6 +334,8 @@ export const requisitions = pgTable(
     approvalTrail: jsonb("approval_trail")
       .notNull()
       .default(sql`'[]'::jsonb`),
+    /** Member who raised it; agents act for this person (docs/agentic-plan.md §6.1). */
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
     openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     billingType: text("billing_type").notNull().default("non_billable"),
@@ -1715,8 +1717,8 @@ export type AgentEventStatus = "pending" | "processing" | "done" | "failed";
 
 /**
  * Per org × agent type: the autonomy dial, template whitelist and budget.
- * No row means the defaults (enabled, `suggest`, no budget cap). The row with
- * agent_type '*' is the org-wide switch: enabled = false pauses every agent.
+ * Agents are opt-in — no row (or enabled = false) means the agent is off. The
+ * row with agent_type '*' is the org-wide switch: enabled = false pauses all.
  */
 export const agentPolicies = pgTable(
   "agent_policies",
