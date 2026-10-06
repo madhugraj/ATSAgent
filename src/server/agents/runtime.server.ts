@@ -130,8 +130,8 @@ export async function startRun(input: {
 }
 
 export type TaskDecision =
-  | { status: "approved"; args?: unknown; comment?: string }
-  | { status: "rejected"; reason?: string }
+  | { status: "approved"; args?: unknown; comment?: string | undefined }
+  | { status: "rejected"; reason?: string | undefined }
   | { status: "answered"; answer: string };
 
 /**

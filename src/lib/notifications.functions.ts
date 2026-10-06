@@ -1,9 +1,10 @@
-import { and, asc, eq, ilike, inArray, isNotNull, lte, sql } from "drizzle-orm";
+import { and, asc, eq, ilike, inArray, isNotNull, lte, or, sql } from "drizzle-orm";
 import { createServerFn } from "@tanstack/react-start";
 
 import { requireIdentity, type AppRole } from "./auth.middleware";
 import { db } from "../server/db";
 import {
+  agentTasks,
   interviews,
   offers,
   orgMembers,
@@ -20,7 +21,7 @@ import {
 
 export type Notification = {
   id: string;
-  kind: "approval" | "interview" | "offer" | "invite" | "platform" | "stale";
+  kind: "approval" | "interview" | "offer" | "invite" | "platform" | "stale" | "agent";
   title: string;
   body: string;
   to: string;
@@ -226,6 +227,47 @@ export const myNotifications = createServerFn({ method: "GET" })
           to: "/team",
           at: i.createdAt.toISOString(),
           severity: "info",
+        });
+
+      // Agent requests waiting on this person (docs/agentic-plan.md §5.3):
+      // their own action approvals, gates and questions routed to one of
+      // their roles; the owner sees every open request.
+      const agentAsks = await db
+        .select({
+          id: agentTasks.id,
+          kind: agentTasks.kind,
+          title: agentTasks.title,
+          createdAt: agentTasks.createdAt,
+        })
+        .from(agentTasks)
+        .where(
+          and(
+            eq(agentTasks.orgId, orgId),
+            eq(agentTasks.status, "open"),
+            member.isOwner
+              ? undefined
+              : or(
+                  eq(agentTasks.assigneeUserId, context.userId),
+                  roles.length ? inArray(agentTasks.assigneeRole, roles) : undefined,
+                ),
+          ),
+        )
+        .orderBy(asc(agentTasks.createdAt))
+        .limit(20);
+      for (const t of agentAsks)
+        out.push({
+          id: `agent:${t.id}`,
+          kind: "agent",
+          title: t.title,
+          body:
+            t.kind === "clarification"
+              ? "An agent has a question for you."
+              : t.kind === "gate"
+                ? "An agent prepared this for your decision."
+                : "An agent is waiting for your approval to act.",
+          to: "/agents",
+          at: t.createdAt.toISOString(),
+          severity: t.kind === "gate" ? "warn" : "info",
         });
     }
 

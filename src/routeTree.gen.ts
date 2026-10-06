@@ -30,6 +30,8 @@ import { Route as RoiRouteImport } from './routes/roi'
 import { Route as ScreeningRouteImport } from './routes/screening'
 import { Route as TeamRouteImport } from './routes/team'
 import { Route as TemplatesRouteImport } from './routes/templates'
+import { Route as AgentsIndexRouteImport } from './routes/agents.index'
+import { Route as AgentsSettingsRouteImport } from './routes/agents.settings'
 import { Route as ApplyIdRouteImport } from './routes/apply.$id'
 import { Route as AssessTokenRouteImport } from './routes/assess.$token'
 import { Route as AuthResetRouteImport } from './routes/auth.reset'
@@ -165,6 +167,16 @@ const TeamRoute = TeamRouteImport.update({
 const TemplatesRoute = TemplatesRouteImport.update({
   id: '/templates',
   path: '/templates',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentsIndexRoute = AgentsIndexRouteImport.update({
+  id: '/agents/',
+  path: '/agents/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentsSettingsRoute = AgentsSettingsRouteImport.update({
+  id: '/agents/settings',
+  path: '/agents/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApplyIdRoute = ApplyIdRouteImport.update({
@@ -351,12 +363,14 @@ export interface FileRoutesByFullPath {
   '/screening': typeof ScreeningRoute
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
+  '/agents/settings': typeof AgentsSettingsRoute
   '/apply/$id': typeof ApplyIdRoute
   '/assess/$token': typeof AssessTokenRoute
   '/auth/reset': typeof AuthResetRoute
   '/candidates/$id': typeof CandidatesIdRoute
   '/interviews/mine': typeof InterviewsMineRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
+  '/agents/': typeof AgentsIndexRoute
   '/candidates/': typeof CandidatesIndexRoute
   '/interviews/': typeof InterviewsIndexRoute
   '/requisitions/': typeof RequisitionsIndexRoute
@@ -405,12 +419,14 @@ export interface FileRoutesByTo {
   '/screening': typeof ScreeningRoute
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
+  '/agents/settings': typeof AgentsSettingsRoute
   '/apply/$id': typeof ApplyIdRoute
   '/assess/$token': typeof AssessTokenRoute
   '/auth/reset': typeof AuthResetRoute
   '/candidates/$id': typeof CandidatesIdRoute
   '/interviews/mine': typeof InterviewsMineRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
+  '/agents': typeof AgentsIndexRoute
   '/candidates': typeof CandidatesIndexRoute
   '/interviews': typeof InterviewsIndexRoute
   '/requisitions': typeof RequisitionsIndexRoute
@@ -460,12 +476,14 @@ export interface FileRoutesById {
   '/screening': typeof ScreeningRoute
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
+  '/agents/settings': typeof AgentsSettingsRoute
   '/apply/$id': typeof ApplyIdRoute
   '/assess/$token': typeof AssessTokenRoute
   '/auth/reset': typeof AuthResetRoute
   '/candidates/$id': typeof CandidatesIdRoute
   '/interviews/mine': typeof InterviewsMineRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
+  '/agents/': typeof AgentsIndexRoute
   '/candidates/': typeof CandidatesIndexRoute
   '/interviews/': typeof InterviewsIndexRoute
   '/requisitions/': typeof RequisitionsIndexRoute
@@ -516,12 +534,14 @@ export interface FileRouteTypes {
     | '/screening'
     | '/team'
     | '/templates'
+    | '/agents/settings'
     | '/apply/$id'
     | '/assess/$token'
     | '/auth/reset'
     | '/candidates/$id'
     | '/interviews/mine'
     | '/requisitions/$id'
+    | '/agents/'
     | '/candidates/'
     | '/interviews/'
     | '/requisitions/'
@@ -570,12 +590,14 @@ export interface FileRouteTypes {
     | '/screening'
     | '/team'
     | '/templates'
+    | '/agents/settings'
     | '/apply/$id'
     | '/assess/$token'
     | '/auth/reset'
     | '/candidates/$id'
     | '/interviews/mine'
     | '/requisitions/$id'
+    | '/agents'
     | '/candidates'
     | '/interviews'
     | '/requisitions'
@@ -624,12 +646,14 @@ export interface FileRouteTypes {
     | '/screening'
     | '/team'
     | '/templates'
+    | '/agents/settings'
     | '/apply/$id'
     | '/assess/$token'
     | '/auth/reset'
     | '/candidates/$id'
     | '/interviews/mine'
     | '/requisitions/$id'
+    | '/agents/'
     | '/candidates/'
     | '/interviews/'
     | '/requisitions/'
@@ -679,12 +703,14 @@ export interface RootRouteChildren {
   ScreeningRoute: typeof ScreeningRoute
   TeamRoute: typeof TeamRoute
   TemplatesRoute: typeof TemplatesRoute
+  AgentsSettingsRoute: typeof AgentsSettingsRoute
   ApplyIdRoute: typeof ApplyIdRoute
   AssessTokenRoute: typeof AssessTokenRoute
   AuthResetRoute: typeof AuthResetRoute
   CandidatesIdRoute: typeof CandidatesIdRoute
   InterviewsMineRoute: typeof InterviewsMineRoute
   RequisitionsIdRoute: typeof RequisitionsIdRoute
+  AgentsIndexRoute: typeof AgentsIndexRoute
   CandidatesIndexRoute: typeof CandidatesIndexRoute
   InterviewsIndexRoute: typeof InterviewsIndexRoute
   RequisitionsIndexRoute: typeof RequisitionsIndexRoute
@@ -859,6 +885,20 @@ declare module '@tanstack/react-router' {
       path: '/templates'
       fullPath: '/templates'
       preLoaderRoute: typeof TemplatesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agents/': {
+      id: '/agents/'
+      path: '/agents'
+      fullPath: '/agents/'
+      preLoaderRoute: typeof AgentsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agents/settings': {
+      id: '/agents/settings'
+      path: '/agents/settings'
+      fullPath: '/agents/settings'
+      preLoaderRoute: typeof AgentsSettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/apply/$id': {
@@ -1103,12 +1143,14 @@ const rootRouteChildren: RootRouteChildren = {
   ScreeningRoute: ScreeningRoute,
   TeamRoute: TeamRoute,
   TemplatesRoute: TemplatesRoute,
+  AgentsSettingsRoute: AgentsSettingsRoute,
   ApplyIdRoute: ApplyIdRoute,
   AssessTokenRoute: AssessTokenRoute,
   AuthResetRoute: AuthResetRoute,
   CandidatesIdRoute: CandidatesIdRoute,
   InterviewsMineRoute: InterviewsMineRoute,
   RequisitionsIdRoute: RequisitionsIdRoute,
+  AgentsIndexRoute: AgentsIndexRoute,
   CandidatesIndexRoute: CandidatesIndexRoute,
   InterviewsIndexRoute: InterviewsIndexRoute,
   RequisitionsIndexRoute: RequisitionsIndexRoute,

@@ -41,8 +41,9 @@ import { ScoreChip, StageBadge, StatusBadge, inr } from "@/components/ats";
 import { RolePeek } from "@/components/RolePeek";
 import { useRoles } from "@/hooks/useRoles";
 import { useOrg } from "@/hooks/useOrg";
-import { Brain } from "lucide-react";
+import { Bot, Brain } from "lucide-react";
 import { usePlatform } from "@/hooks/usePlatform";
+import { listAgentTasks } from "@/lib/agents.functions";
 import { attachApplication } from "@/lib/candidates.functions";
 import { getHrPerformance } from "@/lib/hr-performance.functions";
 import { readReturnOnIndividual } from "@/lib/roi.functions";
@@ -302,6 +303,12 @@ function Dashboard() {
 
   /* ---------- needs you today ---------- */
   const countsQ = useQuery({ ...screeningQueueCountsQuery, enabled: Boolean(org) });
+  const agentTasksQ = useQuery({
+    queryKey: ["agent_tasks"],
+    queryFn: () => listAgentTasks(),
+    enabled: Boolean(org),
+  });
+  const agentAsks = agentTasksQ.data?.length ?? 0;
   // Strictly "yours": canApprove mirrors the server's approval-role map, so a
   // recruiter sees only their drafts and a DH only the DH hop. Deliberately not
   // myNotifications — those approval items are org-wide, not role-filtered.
@@ -643,7 +650,8 @@ function Dashboard() {
             | "/candidates"
             | "/interviews"
             | "/screening"
-            | "/offers";
+            | "/offers"
+            | "/agents";
           tone?: "default" | "warning";
           params?: { id: string };
         }[] = [];
@@ -679,6 +687,14 @@ function Dashboard() {
             label: "Candidates past their stage SLA",
             value: stalledTotal,
             to: "/candidates",
+            tone: "warning",
+          });
+        if (agentAsks)
+          strip.push({
+            icon: Bot,
+            label: "Agent requests waiting for you",
+            value: agentAsks,
+            to: "/agents",
             tone: "warning",
           });
         if (isExecutive && offersAwaiting)
@@ -1412,7 +1428,8 @@ function ActionRow({
     | "/candidates"
     | "/interviews"
     | "/screening"
-    | "/offers";
+    | "/offers"
+    | "/agents";
   tone?: "default" | "warning";
   params?: { id: string };
 }) {

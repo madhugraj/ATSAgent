@@ -24,6 +24,7 @@ async function run(request: Request) {
     /* no body is fine — defaults apply */
   }
 
+  await import("@/server/agents");
   const { runAgentTick } = await import("@/server/agents/runtime.server");
 
   try {
