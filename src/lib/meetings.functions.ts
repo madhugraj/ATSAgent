@@ -56,39 +56,37 @@ const CreateInput = z.object({
 });
 
 /** Create a real meeting with the HR user's own provider credentials. */
+/** Shared by the Interviews page and the Interview coordinator agent. */
+export async function createMeetingLinkCore(orgId: string, data: z.infer<typeof CreateInput>) {
+  const [row] = await db
+    .select({
+      id: sourceIntegrations.id,
+      enabled: sourceIntegrations.enabled,
+      hasCredentials: sourceIntegrations.hasCredentials,
+      label: sourceIntegrations.label,
+    })
+    .from(sourceIntegrations)
+    .where(and(eq(sourceIntegrations.orgId, orgId), eq(sourceIntegrations.provider, data.provider)))
+    .limit(1);
+  if (!row) throw new Error("That meeting provider is not set up yet.");
+  if (!row.enabled || !row.hasCredentials)
+    throw new Error(
+      `${row.label} is not connected — add the credentials on the Integrations page first.`,
+    );
+
+  const { readSecrets } = await import("./integrations.server");
+  const { createMeeting } = await import("./meetings.server");
+  const secrets = await readSecrets(row.id);
+  return createMeeting(data.provider, secrets, {
+    topic: data.topic,
+    startIso: data.startIso,
+    durationMins: data.durationMins,
+    attendees: data.attendees,
+    agenda: data.agenda ?? null,
+  });
+}
+
 export const createMeetingLink = createServerFn({ method: "POST" })
   .middleware([requireOrg])
   .inputValidator((data: unknown) => CreateInput.parse(data))
-  .handler(async ({ data, context }) => {
-    const [row] = await db
-      .select({
-        id: sourceIntegrations.id,
-        enabled: sourceIntegrations.enabled,
-        hasCredentials: sourceIntegrations.hasCredentials,
-        label: sourceIntegrations.label,
-      })
-      .from(sourceIntegrations)
-      .where(
-        and(
-          eq(sourceIntegrations.orgId, context.orgId),
-          eq(sourceIntegrations.provider, data.provider),
-        ),
-      )
-      .limit(1);
-    if (!row) throw new Error("That meeting provider is not set up yet.");
-    if (!row.enabled || !row.hasCredentials)
-      throw new Error(
-        `${row.label} is not connected — add the credentials on the Integrations page first.`,
-      );
-
-    const { readSecrets } = await import("./integrations.server");
-    const { createMeeting } = await import("./meetings.server");
-    const secrets = await readSecrets(row.id);
-    return createMeeting(data.provider, secrets, {
-      topic: data.topic,
-      startIso: data.startIso,
-      durationMins: data.durationMins,
-      attendees: data.attendees,
-      agenda: data.agenda ?? null,
-    });
-  });
+  .handler(async ({ data, context }) => createMeetingLinkCore(context.orgId, data));

@@ -25,6 +25,7 @@ const {
   agentTasks,
   applications,
   candidates,
+  evaluations,
   matchScores,
   orgMembers,
   organizations,
@@ -61,7 +62,7 @@ await db.insert(orgMembers).values({
 await db.insert(userRoles).values({ userId: user!.id, orgId: org!.id, role: "hr_head" });
 
 const run = async (
-  agentType: "requisition" | "jd" | "screening" | "intake",
+  agentType: "requisition" | "jd" | "screening" | "intake" | "evaluation",
   goal: string,
   status: string,
 ) =>
@@ -180,6 +181,36 @@ const applicant = async (name: string, stage: string, score: number, skills: str
 const shortlistedApp = await applicant("Meera Iyer", "shortlisted", 84, ["Kubernetes", "Go"]);
 const heldA = await applicant("Arjun Rao", "ai_screened", 41, ["PHP", "MySQL"]);
 const heldB = await applicant("Kiran Das", "ai_screened", 38, ["Excel"]);
+const finalist = await applicant("Sana Kapoor", "l3", 86, ["Kubernetes", "Go", "Terraform"]);
+await db.insert(evaluations).values([
+  {
+    orgId: org!.id,
+    applicationId: finalist,
+    level: 1,
+    rating: 4,
+    recommendation: "select",
+    evaluator: "lead.engineer@demo-org.test",
+    comments: "Strong Kubernetes depth; designed a sensible multi-region failover.",
+  },
+  {
+    orgId: org!.id,
+    applicationId: finalist,
+    level: 2,
+    rating: 4,
+    recommendation: "select",
+    evaluator: "platform.head@demo-org.test",
+    comments: "Good incident leadership; clear post-mortem culture.",
+  },
+  {
+    orgId: org!.id,
+    applicationId: finalist,
+    level: 3,
+    rating: 3,
+    recommendation: "select",
+    evaluator: "cto@demo-org.test",
+    comments: "Solid; would like more evidence of cost ownership.",
+  },
+] as never);
 const r4 = await run(
   "intake",
   `Review the pipeline for REQ-2026-098 "Platform SRE"`,
@@ -190,7 +221,45 @@ await db
   .set({ subjectType: "requisition", subjectId: req098!.id })
   .where(eq(agentRuns.id, r4));
 
+const r5 = await run(
+  "evaluation",
+  "Debrief Sana Kapoor after L3 and ask for the hiring decision",
+  "awaiting_human",
+);
+await db
+  .update(agentRuns)
+  .set({ subjectType: "application", subjectId: finalist })
+  .where(eq(agentRuns.id, r5));
 await db.insert(agentTasks).values([
+  {
+    orgId: org!.id,
+    runId: r5,
+    kind: "gate",
+    title: "Hiring decision: Sana Kapoor — Platform SRE",
+    body: [
+      "Consistent select across three rounds (4, 4, 3 out of 5); the only open point is cost ownership.",
+      "",
+      "Hiring decision for Sana Kapoor (REQ-2026-098 Platform SRE, l3).",
+      "Recommendation: SELECT",
+      "Rationale: Select verdicts in all three rounds (4/5, 4/5, 3/5); Kubernetes and incident leadership evidenced; cost ownership to probe at offer stage.",
+      "",
+      "Approve to accept this recommendation; decline to leave the candidate where they are.",
+    ].join("\n"),
+    assigneeRole: "hiring_manager",
+    proposedAction: {
+      name: "request_approval",
+      args: {
+        subject: {
+          type: "hiring_decision",
+          applicationId: finalist,
+          recommendation: "select",
+          rationale:
+            "Select verdicts in all three rounds (4/5, 4/5, 3/5); Kubernetes and incident leadership evidenced; cost ownership to probe at offer stage.",
+          expects: "l3",
+        },
+      },
+    },
+  },
   {
     orgId: org!.id,
     runId: r4,

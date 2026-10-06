@@ -1,5 +1,16 @@
 # Roadmap
 
+## Agentic platform — Phase 3: interviews → evaluation (2026-10-06)
+
+- [x] Shared cores: `scheduleInterviewCore` (round, stage, candidate invite with calendar file) and `createMeetingLinkCore`
+- [x] Interview coordinator — books the next round for candidates who advanced: panel limited to active members (prior interviewers first, then hiring managers / department heads), proposed working-hours slot, optional Zoom / Meet / Teams link; the candidate invite is reviewed unless the interview invitation is pre-approved. No calendar free/busy integration yet — slots are proposals a person reviews
+- [x] Evaluation agent — debrief across match, screening, assessment and every scorecard (disagreements surfaced), organisation-wide selection-parity check, and a hiring decision request
+- [x] Hiring decisions as inbox gates for the hiring manager — approving a reject or hold moves the candidate as the decider; approving a select records the decision and emits `hiring.selected` for the Offer agent (Phase 4); declining changes nothing; stale proposals cannot be decided
+- [x] Orchestrator: advancing into a round (by a verdict, not by booking) starts the coordinator; each submitted scorecard starts one evaluation per candidate
+- [x] Follow-up agent v1.1.0 also chases interviews that ended without a scorecard; human-in-the-loop tool contracts are now part of every manifest hash (all agents bumped to v1.1.0 under change control)
+- [x] `scripts/agent-phase3.test.ts` (9 tests) and real-agent evals for both new agents in CI
+- [ ] Calendar free/busy integration for slot finding
+
 ## Agentic platform — governance hardening (2026-10-06)
 
 - [x] Agent manifests (`src/server/agents/definitions.ts`): identity, version, accountable owner, responsibility, permission scope, must-never list, gates, risk tier, evals; tools declare the AI skills they call

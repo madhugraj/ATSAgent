@@ -68,62 +68,7 @@ const PREVIEW_CHARS = 600;
 type AgentRun = typeof agentRuns.$inferSelect;
 type PendingCall = { taskId: string; call: AgentToolCall };
 
-const ROLES = [
-  "recruiter",
-  "hiring_manager",
-  "department_head",
-  "hr_head",
-  "president_cbo",
-] as const;
-
-/* ------------------------------------------------------------ HITL tools */
-
-const HITL_TOOLS = {
-  ask_human: {
-    description:
-      "Ask a person a clarifying question when you cannot proceed safely without their answer. The run pauses until they reply.",
-    input: z.object({
-      question: z.string().min(1).max(2000),
-      assignee_role: z.enum(ROLES).optional(),
-    }),
-  },
-  request_approval: {
-    description:
-      "Ask the responsible approver for a decision that only a person may make (requisition, JD or offer approval, offer release, rejection, hiring decision). Explain what you prepared and why. The run pauses until they decide.",
-    input: z.object({
-      title: z.string().min(1).max(200),
-      summary: z.string().min(1).max(4000),
-      assignee_role: z.enum(ROLES),
-      subject: z
-        .union([
-          z.object({ type: z.enum(["requisition", "jd"]), id: z.string().uuid() }),
-          z.object({
-            type: z.literal("rejection"),
-            items: z
-              .array(
-                z.object({
-                  applicationId: z.string().uuid(),
-                  reason: z.string().min(3).max(500),
-                }),
-              )
-              .min(1)
-              .max(50),
-          }),
-        ])
-        .optional()
-        .describe(
-          "What the approval is for. A requisition or JD version: approving or declining in the inbox performs the real approval step, and the approver role comes from where the item is in its chain. A rejection batch: the listed candidates are rejected with their reasons only if the person approves.",
-        ),
-    }),
-  },
-  handoff: {
-    description:
-      "Stop and hand the work back to a person when the task is outside what you can do. Give the reason.",
-    input: z.object({ reason: z.string().min(1).max(2000) }),
-  },
-} as const;
-type HitlName = keyof typeof HITL_TOOLS;
-const isHitl = (name: string): name is HitlName => name in HITL_TOOLS;
+import { HITL_TOOLS, isHitl, type HitlName } from "./hitl";
 
 /* --------------------------------------------- gates tied to real records */
 
@@ -132,7 +77,16 @@ type RejectionSubject = {
   type: "rejection";
   items: { applicationId: string; reason: string; expects?: string }[];
 };
-type GateSubject = RecordSubject | RejectionSubject;
+type HiringDecisionSubject = {
+  type: "hiring_decision";
+  applicationId: string;
+  recommendation: "select" | "hold" | "reject";
+  rationale: string;
+  expects?: string;
+};
+type GateSubject = RecordSubject | RejectionSubject | HiringDecisionSubject;
+
+const DECISION_STAGES = new Set(["l1", "l2", "l3", "on_hold", "reserve", "offer_pending"]);
 
 const TERMINAL_STAGES = new Set(["rejected", "hired", "joined", "withdrawn", "no_show"]);
 
@@ -148,6 +102,32 @@ type GateInfo = {
 };
 
 async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | { error: string }> {
+  if (subject.type === "hiring_decision") {
+    const [row] = await db
+      .select({
+        stage: applications.stage,
+        name: candidates.fullName,
+        code: requisitions.code,
+        title: requisitions.title,
+      })
+      .from(applications)
+      .innerJoin(candidates, eq(candidates.id, applications.candidateId))
+      .innerJoin(requisitions, eq(requisitions.id, applications.requisitionId))
+      .where(and(eq(applications.id, subject.applicationId), eq(applications.orgId, orgId)))
+      .limit(1);
+    if (!row) return { error: "Application not found." };
+    if (!DECISION_STAGES.has(row.stage)) {
+      return {
+        error: `The candidate is ${row.stage}; a hiring decision follows the interview rounds.`,
+      };
+    }
+    return {
+      role: "hiring_manager",
+      status: row.stage,
+      detail: `Hiring decision for ${row.name} (${row.code} ${row.title}, ${row.stage}).\nRecommendation: ${subject.recommendation.toUpperCase()}\nRationale: ${subject.rationale}\n\nApprove to accept this recommendation; decline to leave the candidate where they are.`,
+      subject: { ...subject, expects: row.stage },
+    };
+  }
   if (subject.type === "rejection") {
     const ids = subject.items.map((i) => i.applicationId);
     const rows = await db
@@ -223,6 +203,44 @@ async function performGate(
   const org = await activeOrgOf(userId);
   if (!org || org.orgId !== orgId) throw new Error("You are not a member of this organisation.");
   const actor = { orgId, userId, memberEmail: org.memberEmail };
+  if (subject.type === "hiring_decision") {
+    if (decision.status !== "approved") return; // declining changes nothing
+    const [app] = await db
+      .select({ stage: applications.stage, candidateId: applications.candidateId })
+      .from(applications)
+      .where(and(eq(applications.id, subject.applicationId), eq(applications.orgId, orgId)))
+      .limit(1);
+    if (!app) throw new Error("Application not found.");
+    if (subject.expects && app.stage !== subject.expects) {
+      throw new Error("This candidate has already moved on; refresh to see their current stage.");
+    }
+    const pipeline = await import("@/lib/pipeline.server");
+    const note =
+      decision.status === "approved" && decision.comment ? ` Comment: ${decision.comment}` : "";
+    if (subject.recommendation === "select") {
+      await pipeline.addCandidateNoteCore(actor, {
+        candidateId: app.candidateId,
+        body: `Hiring decision: SELECT. ${subject.rationale}${note}`,
+      });
+      const { emitAgentEvent } = await import("./events");
+      await emitAgentEvent({
+        orgId,
+        type: "hiring.selected",
+        subjectType: "application",
+        subjectId: subject.applicationId,
+        actorUserId: userId,
+        payload: { rationale: subject.rationale },
+      });
+      return;
+    }
+    await pipeline.moveStageCore(actor, {
+      applicationId: subject.applicationId,
+      toStage: subject.recommendation === "reject" ? "rejected" : "on_hold",
+      reason: subject.rationale,
+      note: note.trim() || null,
+    });
+    return;
+  }
   if (subject.type === "rejection") {
     if (decision.status !== "approved") return; // declining rejects nobody
     const { moveStageCore } = await import("@/lib/pipeline.server");

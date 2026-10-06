@@ -48,7 +48,8 @@ const {
 const registry = await import("../src/server/agents/registry");
 const { registerPhase1Tools } = await import("../src/server/agents/tools");
 const { registerPhase2Tools } = await import("../src/server/agents/tools-phase2");
-const { registerPhase1Agents, registerPhase2Agents } =
+const { registerPhase3Tools } = await import("../src/server/agents/tools-phase3");
+const { registerPhase1Agents, registerPhase2Agents, registerPhase3Agents } =
   await import("../src/server/agents/definitions");
 const { manifestHash } = await import("../src/server/agents/manifest.server");
 const { runAgentTick, startRun, BUDGET_PAUSE_MESSAGE } =
@@ -146,8 +147,10 @@ describe("change control", () => {
     registry.resetRegistry();
     registerPhase1Tools();
     registerPhase2Tools();
+    registerPhase3Tools();
     registerPhase1Agents();
     registerPhase2Agents();
+    registerPhase3Agents();
     const lock = JSON.parse(
       readFileSync(new URL("./agents.lock.json", import.meta.url), "utf8"),
     ) as Record<string, { version: string; hash: string }>;

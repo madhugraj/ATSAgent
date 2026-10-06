@@ -413,6 +413,106 @@ export function scenarios(): ScriptedScenario[] {
         say("Reminded the owner."),
       ],
     },
+    {
+      name: "interview: books the next round with a member panel after review",
+      agentType: "interview",
+      setup: async ({ orgId, userId }) => {
+        const requisitionId = await seedRequisition(orgId, userId, "approved");
+        const app = await seedApplication(orgId, requisitionId, "Ravi", "l1", 80);
+        const { db } = await import("../../src/server/db");
+        const { orgMembers } = await import("../../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const [m] = await db
+          .select({ email: orgMembers.email })
+          .from(orgMembers)
+          .where(eq(orgMembers.userId, userId));
+        return { requisitionId, app, interviewer: m!.email };
+      },
+      goal: (d) =>
+        `Book next rounds. app=${d["app"]} interviewer=${d["interviewer"]}\n\nRequisition id: ${d["requisitionId"]}`,
+      decide: () => ({ status: "approved" }),
+      expect: { status: "done", calls: ["get_interview_plan", "schedule_interview"] },
+      script: [
+        (m) => call("p", "get_interview_plan", { applicationId: fromGoal(m, "app") }),
+        (m) =>
+          call("s", "schedule_interview", {
+            applicationId: fromGoal(m, "app"),
+            level: 1,
+            interviewerEmail: firstUserMsg(m).match(/interviewer=(\S+)/)![1]!,
+            scheduledAt: new Date(Date.now() + 3 * 864e5).toISOString(),
+            durationMins: 60,
+            mode: "online",
+          }),
+        say("Booked Ravi's L1."),
+      ],
+    },
+    {
+      name: "evaluation: debriefs and asks the hiring manager to decide",
+      agentType: "evaluation",
+      autonomy: "act_and_notify",
+      setup: async ({ orgId, userId }) => {
+        const requisitionId = await seedRequisition(orgId, userId, "approved");
+        const app = await seedApplication(orgId, requisitionId, "Sana", "l3", 86);
+        const { db } = await import("../../src/server/db");
+        const { evaluations } = await import("../../drizzle/schema");
+        await db.insert(evaluations).values([
+          {
+            orgId,
+            applicationId: app,
+            level: 1,
+            rating: 4,
+            recommendation: "select",
+            evaluator: "a@x",
+            comments: "Strong systems",
+          },
+          {
+            orgId,
+            applicationId: app,
+            level: 2,
+            rating: 2,
+            recommendation: "hold",
+            evaluator: "b@x",
+            comments: "Weak on incident comms",
+          },
+        ] as never);
+        return { requisitionId, app };
+      },
+      goal: (d) => `Debrief app=${d["app"]}\n\nRequisition id: ${d["requisitionId"]}`,
+      decide: () => ({ status: "approved" }),
+      expect: {
+        status: "done",
+        calls: [
+          "get_candidate_dossier",
+          "selection_parity",
+          "add_candidate_note",
+          "request_approval",
+        ],
+        gateRole: "hiring_manager",
+      },
+      script: [
+        (m) => call("d", "get_candidate_dossier", { applicationId: fromGoal(m, "app") }),
+        call("b", "selection_parity", {}),
+        (m) =>
+          call("n", "add_candidate_note", {
+            candidateId: String(toolResult(m, "get_candidate_dossier")["candidateId"]),
+            note: "Debrief: L1 4/5 select, L2 2/5 hold — interviewers disagree on incident communication.",
+          }),
+        (m) =>
+          call("h", "request_approval", {
+            title: "Hiring decision: Sana",
+            summary: "Mixed signals; recommend hold for a focused follow-up.",
+            assignee_role: "hiring_manager",
+            subject: {
+              type: "hiring_decision",
+              applicationId: fromGoal(m, "app"),
+              recommendation: "hold",
+              rationale:
+                "L1 4/5 select vs L2 2/5 hold on incident communication; resolve with a focused follow-up.",
+            },
+          }),
+        say("Recommended HOLD; the hiring manager decides."),
+      ],
+    },
   ];
 }
 
@@ -488,4 +588,17 @@ async function seedApplication(
     rationale: `Score ${score}`,
   } as never);
   return a!.id;
+}
+
+/** JSON result of the most recent call to a named tool (unwrapping an untrusted fence). */
+function toolResult(m: Msg[], name: string): Record<string, unknown> {
+  const hit = [...m]
+    .reverse()
+    .find((x) => x.role === "tool" && (x as { name?: string }).name === name);
+  if (!hit?.content) throw new Error(`no ${name} result in the transcript`);
+  const raw = hit.content;
+  const body = raw.startsWith("<untrusted_data")
+    ? raw.slice(raw.indexOf("\n") + 1, raw.lastIndexOf("\n"))
+    : raw;
+  return JSON.parse(body) as Record<string, unknown>;
 }

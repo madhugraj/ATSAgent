@@ -56,7 +56,8 @@ const { registerTool, resetRegistry, isGateToolName, listAgents } =
   await import("../src/server/agents/registry");
 const { registerPhase1Tools } = await import("../src/server/agents/tools");
 const { registerPhase2Tools } = await import("../src/server/agents/tools-phase2");
-const { registerPhase1Agents, registerPhase2Agents } =
+const { registerPhase3Tools } = await import("../src/server/agents/tools-phase3");
+const { registerPhase1Agents, registerPhase2Agents, registerPhase3Agents } =
   await import("../src/server/agents/definitions");
 const { runScenario } = await import("../src/server/agents/eval.server");
 const { scenarios } = await import("./evals/scenarios");
@@ -65,8 +66,10 @@ const registerReal = () => {
   resetRegistry();
   registerPhase1Tools();
   registerPhase2Tools();
+  registerPhase3Tools();
   registerPhase1Agents();
   registerPhase2Agents();
+  registerPhase3Agents();
 };
 
 beforeAll(() => {
