@@ -22,6 +22,7 @@ import {
   type ObservabilityView,
 } from "@/lib/agents-observability.functions";
 import { AGENT_LABEL } from "@/lib/agents.catalog";
+import { AgentDetailDrawer, type DrawerTab } from "@/components/AgentDetailDrawer";
 
 export const Route = createFileRoute("/agents/observability")({
   head: () => ({
@@ -84,6 +85,7 @@ const mins = (m: number | null) =>
 /* --------------------------------------------------------------- page */
 
 function ObservabilityPage() {
+  const [open, setOpen] = useState<{ agent: string; tab: DrawerTab } | null>(null);
   const q = useQuery({
     queryKey: ["agent_observability"],
     queryFn: () => agentObservability(),
@@ -120,8 +122,19 @@ function ObservabilityPage() {
             rules={d.rules}
           />
           {d.agents.map((a) => (
-            <AgentPanel key={a.type} a={a} slaHours={d.slaHours} />
+            <AgentPanel
+              key={a.type}
+              a={a}
+              slaHours={d.slaHours}
+              onOpen={(tab) => setOpen({ agent: a.type, tab })}
+            />
           ))}
+          <AgentDetailDrawer
+            agentType={open?.agent ?? null}
+            tab={open?.tab ?? "identity"}
+            onTab={(tab) => setOpen((o) => (o ? { ...o, tab } : o))}
+            onClose={() => setOpen(null)}
+          />
         </div>
       )}
     </>
@@ -326,9 +339,24 @@ function IssuesPanel({
 
 /* -------------------------------------------------------- agent panel */
 
-function ElementCell({ name, status, lines }: { name: string; status: Status; lines: string[] }) {
+function ElementCell({
+  name,
+  status,
+  lines,
+  onClick,
+}: {
+  name: string;
+  status: Status;
+  lines: string[];
+  onClick: () => void;
+}) {
   return (
-    <div className="rounded-md border border-border p-3">
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded-md border border-border p-3 text-left transition-colors hover:border-primary/50 hover:bg-muted/40 focus-visible:outline-2 focus-visible:outline-primary"
+      aria-label={`${name} details`}
+    >
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           {name}
@@ -340,7 +368,7 @@ function ElementCell({ name, status, lines }: { name: string; status: Status; li
           {l}
         </p>
       ))}
-    </div>
+    </button>
   );
 }
 
@@ -397,7 +425,15 @@ function RunsChart({ daily }: { daily: { day: string; runs: number; failed: numb
   );
 }
 
-function AgentPanel({ a, slaHours }: { a: AgentObservability; slaHours: number }) {
+function AgentPanel({
+  a,
+  slaHours,
+  onOpen,
+}: {
+  a: AgentObservability;
+  slaHours: number;
+  onOpen: (tab: DrawerTab) => void;
+}) {
   const activity = a.harness.runs7d + a.hitl.open + a.tools.calls7d + a.skills.requests7d;
   const base: Status = activity ? "good" : "idle";
   const budgetShare = a.budget.cap ? a.budget.monthTokens / a.budget.cap : null;
@@ -424,8 +460,11 @@ function AgentPanel({ a, slaHours }: { a: AgentObservability; slaHours: number }
         <Badge variant={a.enabled ? "default" : "outline"}>
           {a.enabled ? `On · ${a.autonomy.replace(/_/g, " ")}` : "Off"}
         </Badge>
-        <span className="ml-auto">
+        <span className="ml-auto flex items-center gap-3">
           <StatusPill status={overall} label={overall === "idle" ? "No activity yet" : undefined} />
+          <Button size="sm" variant="outline" onClick={() => onOpen("identity")}>
+            Details
+          </Button>
         </span>
       </div>
 
@@ -433,6 +472,7 @@ function AgentPanel({ a, slaHours }: { a: AgentObservability; slaHours: number }
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           <ElementCell
             name="Identity & definition"
+            onClick={() => onOpen("identity")}
             status={worst(a.issues, "definition", "good")}
             lines={[
               `owner ${a.owner.replace(/_/g, " ")} · hash ${a.hash.slice(0, 10)}`,
@@ -441,6 +481,7 @@ function AgentPanel({ a, slaHours }: { a: AgentObservability; slaHours: number }
           />
           <ElementCell
             name="Harness"
+            onClick={() => onOpen("harness")}
             status={worst(a.issues, "harness", base)}
             lines={[
               `${a.harness.runs7d} runs · ${a.harness.done7d} done · ${a.harness.failed7d} failed`,
@@ -449,6 +490,7 @@ function AgentPanel({ a, slaHours }: { a: AgentObservability; slaHours: number }
           />
           <ElementCell
             name="Human-in-the-loop"
+            onClick={() => onOpen("hitl")}
             status={worst(a.issues, "hitl", base)}
             lines={[
               `${a.hitl.open} open · ${a.hitl.overdue} past ${slaHours} h SLA`,
@@ -457,6 +499,7 @@ function AgentPanel({ a, slaHours }: { a: AgentObservability; slaHours: number }
           />
           <ElementCell
             name="Tools"
+            onClick={() => onOpen("tools")}
             status={worst(a.issues, "tools", base)}
             lines={[
               `${a.tools.declared} assigned · ${a.tools.calls7d} calls`,
@@ -465,6 +508,7 @@ function AgentPanel({ a, slaHours }: { a: AgentObservability; slaHours: number }
           />
           <ElementCell
             name="AI skills"
+            onClick={() => onOpen("skills")}
             status={worst(a.issues, "skills", base)}
             lines={[
               `${a.skills.declared.length} skills · ${a.skills.requests7d} requests · ${a.skills.tokens7d.toLocaleString()} tokens`,
@@ -473,6 +517,7 @@ function AgentPanel({ a, slaHours }: { a: AgentObservability; slaHours: number }
           />
           <ElementCell
             name="Evals"
+            onClick={() => onOpen("evals")}
             status={a.evals.declared.length ? "good" : "critical"}
             lines={[
               `${a.evals.declared.length} scenario(s) run in CI on every change`,
@@ -481,6 +526,7 @@ function AgentPanel({ a, slaHours }: { a: AgentObservability; slaHours: number }
           />
           <ElementCell
             name="Budget"
+            onClick={() => onOpen("harness")}
             status={budgetStatus}
             lines={[
               `${a.budget.monthTokens.toLocaleString()} tokens this month`,
@@ -491,6 +537,7 @@ function AgentPanel({ a, slaHours }: { a: AgentObservability; slaHours: number }
           />
           <ElementCell
             name="Audit"
+            onClick={() => onOpen("audit")}
             status={worst(a.issues, "audit", base)}
             lines={[
               `${a.audit.events7d} agent audit events / 7 d`,
@@ -503,6 +550,7 @@ function AgentPanel({ a, slaHours }: { a: AgentObservability; slaHours: number }
           />
           <ElementCell
             name="Orchestration"
+            onClick={() => onOpen("issues")}
             status={base}
             lines={[
               `${a.harness.budgetPaused} paused at budget`,
@@ -515,7 +563,12 @@ function AgentPanel({ a, slaHours }: { a: AgentObservability; slaHours: number }
           <RunsChart daily={a.harness.daily} />
           {a.tools.byTool.length ? (
             <div>
-              <p className="mb-1 text-xs text-muted-foreground">Busiest tools · 7 days</p>
+              <p className="mb-1 text-xs text-muted-foreground">
+                Busiest tools · 7 days ·{" "}
+                <button type="button" className="underline" onClick={() => onOpen("tools")}>
+                  all {a.tools.declared} assigned tools
+                </button>
+              </p>
               <table className="w-full text-xs">
                 <tbody>
                   {a.tools.byTool.map((t) => (

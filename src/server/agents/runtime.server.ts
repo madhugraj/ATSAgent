@@ -67,6 +67,18 @@ const TURNS_PER_TICK = 8;
 const CONCURRENCY = 2;
 const PREVIEW_CHARS = 600;
 
+/** The harness limits every run executes under (shown in Agent observability). */
+export const HARNESS_LIMITS = {
+  leaseMinutes: LEASE_MINUTES,
+  maxAttempts: MAX_ATTEMPTS,
+  turnsPerTick: TURNS_PER_TICK,
+  concurrency: CONCURRENCY,
+  /** agent_runs.max_tokens default (per run). */
+  maxTokensPerRun: 200_000,
+  /** Budget-paused runs are re-checked after this many minutes. */
+  budgetRecheckMinutes: 60,
+} as const;
+
 type AgentRun = typeof agentRuns.$inferSelect;
 type PendingCall = { taskId: string; call: AgentToolCall };
 

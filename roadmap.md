@@ -19,6 +19,7 @@
 - [x] Agent observability page (Governance → Agent observability): scheduler status, 7-day KPIs, detected issues with the rule that fired and its plain-language condition, and a panel per agent with every element's status and metrics (identity & definition, harness, human-in-the-loop, tools, AI skills, evals, budget, audit, orchestration), a 14-day runs chart and busiest tools
 - [x] Fix: `candidate_notes.org_id` now cascades on organisation delete (migration `0028`) — deleting an organisation with notes failed, including platform tenant deletion
 - [x] `scripts/agent-health.test.ts` (8 tests) in CI; `scripts/seed-agent-demo.ts` seeds observability activity locally
+- [x] Agent detail drawer — click an agent (or any element on its card): identity & settings, every assigned tool with its risk, input contract, 7-day usage and last error, AI skills with the tools that use them, the harness limits / autonomy matrix / human-in-the-loop tools / instructions and recent runs, open and decided human requests, evals, audit events, and open and resolved issues
 
 ## Agentic platform — Phase 3: interviews → evaluation (2026-10-06)
 
