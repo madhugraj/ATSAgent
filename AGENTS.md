@@ -44,6 +44,9 @@
   principal; never add a tool that approves, releases, rejects, hires,
   revokes, declines or accepts (the registry refuses it) — expose
   `propose_` / `request_` / `submit_` and let a person decide.
+- New agent failure modes get a health rule in
+  `src/server/agents/health.server.ts` (element, severity, threshold,
+  plain-language description) with a test in `scripts/agent-health.test.ts`.
 - AI calls inside agent runs must go through the gateway so they are
   attributed to the run (`ai_usage_events.agent_run_id`); declare the AI
   features a tool calls in its `skills`.

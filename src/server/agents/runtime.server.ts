@@ -667,6 +667,17 @@ export async function runAgentTick(
     log.error("agent.metrics.rollup_failed", { error: e instanceof Error ? e : String(e) });
   }
   if (counts.claimed || counts.reclaimed || counts.events) log.info("agent.tick", counts);
+
+  // 5. Liveness heartbeat, and the health engine every few minutes. Only the
+  //    scheduler's org-wide tick counts — not inline per-org kicks.
+  if (!opts.orgId) {
+    try {
+      const { heartbeatAndMaybeEvaluate } = await import("./health.server");
+      await heartbeatAndMaybeEvaluate(counts);
+    } catch (e) {
+      log.error("agent.health.failed", { error: e instanceof Error ? e : String(e) });
+    }
+  }
   return counts;
 }
 

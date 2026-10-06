@@ -4,6 +4,8 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireIdentity, type AppRole } from "./auth.middleware";
 import { db } from "../server/db";
 import {
+  agentIssues,
+  agentPolicies,
   agentRuns,
   agentTasks,
   interviews,
@@ -255,6 +257,60 @@ export const myNotifications = createServerFn({ method: "GET" })
         )
         .orderBy(asc(agentTasks.createdAt))
         .limit(20);
+      // Agent health: serious / critical issues not yet acknowledged, and a
+      // stopped scheduler (only for orgs that switched an agent on).
+      if (member.isOwner || roles.includes("hr_head") || roles.includes("president_cbo")) {
+        const health = await db
+          .select({
+            id: agentIssues.id,
+            title: agentIssues.title,
+            severity: agentIssues.severity,
+            agentType: agentIssues.agentType,
+            firstSeenAt: agentIssues.firstSeenAt,
+          })
+          .from(agentIssues)
+          .where(
+            and(
+              eq(agentIssues.orgId, orgId),
+              eq(agentIssues.status, "open"),
+              inArray(agentIssues.severity, ["serious", "critical"]),
+            ),
+          )
+          .limit(10);
+        for (const i of health)
+          out.push({
+            id: `agent-issue:${i.id}`,
+            kind: "agent",
+            title: `Agent health: ${i.title}`,
+            body: `${i.agentType === "*" ? "Orchestrator" : `The ${i.agentType} agent`} — ${i.severity}. Review it on Agent observability.`,
+            to: "/agents/observability",
+            at: i.firstSeenAt.toISOString(),
+            severity: i.severity === "critical" ? "urgent" : "warn",
+          });
+        const [anyOn] = await db
+          .select({ id: agentPolicies.id })
+          .from(agentPolicies)
+          .where(and(eq(agentPolicies.orgId, orgId), eq(agentPolicies.enabled, true)))
+          .limit(1);
+        if (anyOn) {
+          const { schedulerStatus } = await import("../server/agents/health.server");
+          const sched = await schedulerStatus();
+          if (!sched.healthy)
+            out.push({
+              id: "agent-scheduler",
+              kind: "agent",
+              title: "The agent scheduler is not running",
+              body:
+                sched.minutesSinceTick == null
+                  ? "No scheduler tick has ever been recorded — register /api/public/agent-tick in the scheduler."
+                  : `Last tick ${sched.minutesSinceTick} minutes ago — agents are not picking up work.`,
+              to: "/agents/observability",
+              at: sched.lastTickAt,
+              severity: "urgent",
+            });
+        }
+      }
+
       // Agents paused at their monthly token budget — for whoever sets budgets.
       if (member.isOwner || roles.includes("hr_head") || roles.includes("president_cbo")) {
         const paused = await db

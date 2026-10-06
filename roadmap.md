@@ -1,5 +1,14 @@
 # Roadmap
 
+## Agentic platform — observability and health (2026-10-06)
+
+- [x] Agent health engine (`src/server/agents/health.server.ts`, migration `0027`): 11 rules across harness (stuck runs, failure bursts), human-in-the-loop (requests past the 48 h SLA, serious after 120 h; high decline rate), tools (error rate), AI skills (error rate, p95 latency), budget (paused), definition (churn under running work), audit (write / external action without its audit entry) and orchestrator (failed or stale lifecycle events); evaluated every 5 minutes by the scheduler; issues open, re-see, escalate and auto-resolve; opened / resolved / acknowledged are audited
+- [x] Scheduler heartbeat — a stopped scheduler is reported on read (it cannot report itself) in the observability page and the bell
+- [x] Serious and critical issues reach the HR head / CBO / owner in the notification bell until acknowledged
+- [x] Agent observability page (Governance → Agent observability): scheduler status, 7-day KPIs, detected issues with the rule that fired and its plain-language condition, and a panel per agent with every element's status and metrics (identity & definition, harness, human-in-the-loop, tools, AI skills, evals, budget, audit, orchestration), a 14-day runs chart and busiest tools
+- [x] Fix: `candidate_notes.org_id` now cascades on organisation delete (migration `0028`) — deleting an organisation with notes failed, including platform tenant deletion
+- [x] `scripts/agent-health.test.ts` (8 tests) in CI; `scripts/seed-agent-demo.ts` seeds observability activity locally
+
 ## Agentic platform — Phase 3: interviews → evaluation (2026-10-06)
 
 - [x] Shared cores: `scheduleInterviewCore` (round, stage, candidate invite with calendar file) and `createMeetingLinkCore`

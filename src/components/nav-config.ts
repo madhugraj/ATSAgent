@@ -1,4 +1,5 @@
 import {
+  Activity,
   BarChart3,
   Bot,
   BookMarked,
@@ -93,6 +94,12 @@ export const NAV_GROUPS: NavGroup[] = [
         to: "/agents/register",
         label: "Agent register",
         icon: ShieldCheck,
+        show: (c) => c.governance,
+      },
+      {
+        to: "/agents/observability",
+        label: "Agent observability",
+        icon: Activity,
         show: (c) => c.governance,
       },
       { to: "/masters", label: "Master data", icon: Database, show: (c) => c.governance },

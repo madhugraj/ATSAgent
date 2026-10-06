@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-65 tables across 9 domains.
+67 tables across 9 domains.
 
 ## Identity & access
 
@@ -520,7 +520,7 @@ erDiagram
   talent_request_suggestions }o--|| organizations : "org_id"
   talent_request_suggestions }o--|| talent_requests : "request_id · cascade"
   talent_request_suggestions }o--|| candidates : "candidate_id · cascade"
-  candidate_notes }o--o| organizations : "org_id"
+  candidate_notes }o--o| organizations : "org_id · cascade"
   candidate_notes }o--|| candidates : "candidate_id · cascade"
 ```
 
@@ -963,6 +963,8 @@ erDiagram
 |---|---|---|---|
 | `agent_events` | `actor_user_id` | `users` | no action |
 | `agent_events` | `org_id` | `organizations` | cascade |
+| `agent_issues` | `acknowledged_by` | `users` | no action |
+| `agent_issues` | `org_id` | `organizations` | cascade |
 | `agent_metrics_daily` | `org_id` | `organizations` | cascade |
 | `agent_policies` | `org_id` | `organizations` | cascade |
 | `agent_policies` | `updated_by` | `users` | no action |
@@ -992,7 +994,7 @@ erDiagram
 | `candidate_assessments` | `org_id` | `organizations` | cascade |
 | `candidate_assessments` | `requisition_id` | `requisitions` | no action |
 | `candidate_notes` | `candidate_id` | `candidates` | cascade |
-| `candidate_notes` | `org_id` | `organizations` | no action |
+| `candidate_notes` | `org_id` | `organizations` | cascade |
 | `candidate_ownership_events` | `candidate_id` | `candidates` | cascade |
 | `candidate_ownership_events` | `org_id` | `organizations` | no action |
 | `candidate_referrals` | `candidate_id` | `candidates` | cascade |
@@ -1089,9 +1091,11 @@ erDiagram
 |---|---|---|---|
 | `agent_definitions` | — | 6 | (agentType+hash) |
 | `agent_events` | — | 12 | — |
+| `agent_issues` | — | 15 | — |
 | `agent_metrics_daily` | — | 17 | — |
 | `agent_policies` | — | 10 | (orgId+agentType) |
 | `agent_runs` | — | 27 | — |
+| `agent_runtime_heartbeat` | — | 4 | — |
 | `agent_steps` | — | 15 | (runId+seq) |
 | `agent_tasks` | — | 16 | — |
 | `ai_interviews` | Screening & interviews | 8 | — |

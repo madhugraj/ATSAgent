@@ -416,6 +416,109 @@ await trail(r3, [
     output: { note: "needs approval (Suggest)" },
   },
 ]);
+// Observability demo: realistic activity for the dashboard and the health
+// engine — AI usage linked to runs, a burst of tool failures, failed runs, an
+// overdue human request and a failed lifecycle event. Local demo data only.
+{
+  const { agentEvents, agentPolicies, aiUsageEvents } = await import("../drizzle/schema");
+  await db.insert(agentPolicies).values([
+    { orgId: org!.id, agentType: "requisition", enabled: true, autonomy: "suggest" },
+    {
+      orgId: org!.id,
+      agentType: "intake",
+      enabled: true,
+      autonomy: "suggest",
+      monthlyTokenBudget: 60000,
+    },
+    { orgId: org!.id, agentType: "screening", enabled: true, autonomy: "act_and_notify" },
+    { orgId: org!.id, agentType: "evaluation", enabled: true, autonomy: "suggest" },
+  ]);
+  const ago = (h: number) => new Date(Date.now() - h * 3600_000);
+  const ai = (
+    runId: string,
+    feature: string,
+    n: number,
+    opts: { errors?: number; ms?: number } = {},
+  ) =>
+    db.insert(aiUsageEvents).values(
+      Array.from({ length: n }, (_, i) => ({
+        orgId: org!.id,
+        agentRunId: runId,
+        feature,
+        provider: "demo",
+        model: "demo",
+        status: (i < (opts.errors ?? 0) ? "error" : "ok") as never,
+        promptTokens: 900,
+        completionTokens: 250,
+        totalTokens: 1150,
+        durationMs: (opts.ms ?? 4200) + i * 300,
+        createdAt: ago(1 + i),
+      })),
+    );
+  await ai(r1, "agent_requisition", 6);
+  await ai(r1, "market_benchmark", 2, { ms: 21000 });
+  await ai(r2, "agent_jd", 4);
+  await ai(r2, "jd_generate", 2, { ms: 9000 });
+  await ai(r3, "agent_screening", 5);
+  await ai(r4, "agent_intake", 8, { errors: 3 });
+  await ai(r4, "candidate_score", 10, { ms: 7000 });
+  // Screening: a burst of tool failures in the last 24 h (12 calls, 4 errors).
+  await db.insert(agentSteps).values(
+    Array.from({ length: 12 }, (_, i) => ({
+      runId: r3,
+      orgId: org!.id,
+      seq: 100 + i,
+      kind: "tool",
+      toolName: i % 3 === 0 ? "prepare_screening_kit" : "get_screening_status",
+      status: i % 3 === 0 ? "error" : "ok",
+      output: (i % 3 === 0
+        ? { error: "No job description text for this role yet." }
+        : { preview: "ok" }) as never,
+      durationMs: 300,
+      createdAt: ago(2 + i),
+    })),
+  );
+  // Intake: three runs that failed today, and a backlog of history over 14 days.
+  for (let d = 0; d < 14; d++) {
+    const count = [2, 0, 1, 3, 1, 0, 2, 4, 1, 2, 3, 1, 2, 3][d]!;
+    for (let k = 0; k < count; k++) {
+      const failed = d === 13 && k < 3;
+      const created = new Date(Date.now() - (13 - d) * 864e5 - (k + 1) * 3600_000);
+      await db.insert(agentRuns).values({
+        orgId: org!.id,
+        agentType: "intake",
+        principalUserId: user!.id,
+        goal: `Review the pipeline for REQ-2026-098 (sweep ${d}-${k})`,
+        status: failed ? "failed" : "done",
+        lastError: failed ? "The tool failed." : null,
+        result: failed ? null : "Scored new applicants; proposed rejections for review.",
+        stepCount: 5 + k,
+        tokensUsed: 5200,
+        createdAt: created,
+        startedAt: created,
+        finishedAt: new Date(created.getTime() + (6 + k) * 60_000),
+      });
+    }
+  }
+  // A question nobody has answered for three days (past the 48 h SLA).
+  await db
+    .update(agentTasks)
+    .set({ createdAt: ago(72) })
+    .where(eq(agentTasks.kind, "clarification"));
+  // A lifecycle event the orchestrator could not process.
+  await db.insert(agentEvents).values({
+    orgId: org!.id,
+    type: "requisition.status_changed",
+    subjectType: "requisition",
+    subjectId: req104!.id,
+    status: "failed",
+    attempts: 3,
+    lastError: "Demo: event handler failed",
+  });
+  const { evaluateAgentHealth } = await import("../src/server/agents/health.server");
+  await evaluateAgentHealth({ orgId: org!.id });
+}
+
 const { rollupAgentMetrics } = await import("../src/server/agents/metrics.server");
 await rollupAgentMetrics();
 

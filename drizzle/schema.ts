@@ -1170,7 +1170,7 @@ export const talentRequestSuggestions = pgTable(
 
 export const candidateNotes = pgTable("candidate_notes", {
   id: uuid("id").primaryKey().defaultRandom(),
-  orgId: uuid("org_id").references(() => organizations.id),
+  orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
   candidateId: uuid("candidate_id")
     .notNull()
     .references(() => candidates.id, { onDelete: "cascade" }),
@@ -1938,3 +1938,53 @@ export const agentMetricsDaily = pgTable(
   },
   (t) => [uniqueIndex("agent_metrics_daily_key").on(t.orgId, t.agentType, t.day)],
 );
+
+/* --------------------------------------------------- agent health (0027) */
+
+export type AgentIssueSeverity = "warning" | "serious" | "critical";
+export type AgentIssueStatus = "open" | "acknowledged" | "resolved";
+
+/** A problem the health engine detected for one org × agent × rule, while it lasts. */
+export const agentIssues = pgTable(
+  "agent_issues",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** Agent type, or "*" for organisation-wide (orchestrator) issues. */
+    agentType: text("agent_type").notNull(),
+    element: text("element").notNull(),
+    rule: text("rule").notNull(),
+    severity: text("severity").$type<AgentIssueSeverity>().notNull(),
+    status: text("status").$type<AgentIssueStatus>().notNull().default("open"),
+    title: text("title").notNull(),
+    detail: jsonb("detail")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    occurrences: integer("occurrences").notNull().default(1),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    acknowledgedBy: uuid("acknowledged_by").references(() => users.id, { onDelete: "set null" }),
+    acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("agent_issues_active_key")
+      .on(t.orgId, t.agentType, t.rule)
+      .where(sql`status <> 'resolved'`),
+    index("agent_issues_org_status_idx").on(t.orgId, t.status),
+  ],
+);
+
+/** Scheduler liveness: the last tick and health evaluation (single row, id "agents"). */
+export const agentRuntimeHeartbeat = pgTable("agent_runtime_heartbeat", {
+  id: text("id").primaryKey(),
+  lastTickAt: timestamp("last_tick_at", { withTimezone: true }),
+  lastHealthAt: timestamp("last_health_at", { withTimezone: true }),
+  lastCounts: jsonb("last_counts")
+    .$type<Record<string, unknown>>()
+    .notNull()
+    .default(sql`'{}'::jsonb`),
+});
