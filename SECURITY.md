@@ -62,6 +62,14 @@ application is routed through ATSIQ's own org-scoped posting rows, and every del
 first in `board_webhook_events` (deduplicated, signature failures kept for forensics, terminal
 rows purged after 30 days). Publishing and webhook rotation are `hr_head`-gated and audited.
 
+Agent telemetry leaves the platform only to destinations an organisation configures (HR head /
+CBO / owner, audited as `agent.telemetry.updated`): OpenTelemetry trace export and alert webhooks
+are sent through `safeFetch` (https only, private ranges blocked), collector header values and the
+webhook signing secret are stored with `encryptSecret` and never returned to the browser, and
+alert webhooks are signed with HMAC-SHA256 (`X-ATSAgent-Signature: sha256=<hex>`). Exported spans
+and alerts carry ids, rule names, statuses, timings and token counts only — no goals, prompts,
+candidate content or model names.
+
 ## Release evidence
 
 `VERIFICATION_REPORT.md` records the latest automated and browser checks. A fresh application security

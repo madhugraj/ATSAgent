@@ -45,6 +45,8 @@ export const HEALTH = {
   eventBacklogMinutes: 15,
   /** Scheduler considered stopped after this many minutes without a tick. */
   heartbeatMinutes: 5,
+  /** Suspected prompt injections in tool results over 24 h: warning from 1, serious from this many. */
+  injectionSerious24h: 3,
   /** Re-evaluate at most this often (minutes). */
   evaluateEveryMinutes: 5,
 } as const;
@@ -102,7 +104,8 @@ export const RULES: Rule[] = [
         select agent_type, count(*)::int n,
           count(*) filter (where last_error like '%step or token budget%')::int budget
         from agent_runs
-        where org_id = ${orgId} and status = 'failed' and finished_at >= now() - interval '24 hours'
+        where org_id = ${orgId} and status = 'failed' and mode = 'live'
+          and finished_at >= now() - interval '24 hours'
         group by agent_type having count(*) >= ${HEALTH.failedRuns24h}`);
       return r.map((x) => ({
         agentType: x.agent_type,
@@ -202,6 +205,26 @@ export const RULES: Rule[] = [
           title: `${x.errors} of ${x.calls} tool calls failed in 24 h${x.top ? ` (mostly ${x.top})` : ""}`,
           detail: { calls: x.calls, errors: x.errors, topFailingTool: x.top },
         }));
+    },
+  },
+  {
+    id: "tools.injection",
+    element: "tools",
+    severity: "warning",
+    description: `Third-party text (CV, mail, document) returned by a tool looked like instructions to the model in the last 24 hours (serious from ${HEALTH.injectionSerious24h}). The text stays fenced as data; review the runs.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ agent_type: string; n: number; runs: number }>(sql`
+        select r.agent_type, count(*)::int n, count(distinct st.run_id)::int runs
+        from agent_steps st join agent_runs r on r.id = st.run_id
+        where st.org_id = ${orgId} and st.injection_suspected
+          and st.created_at >= now() - interval '24 hours'
+        group by r.agent_type`);
+      return r.map((x) => ({
+        agentType: x.agent_type,
+        title: `${x.n} suspected prompt injection(s) in tool results across ${x.runs} run(s) in 24 h`,
+        detail: { detections: x.n, runs: x.runs },
+        severity: x.n >= HEALTH.injectionSerious24h ? ("serious" as const) : ("warning" as const),
+      }));
     },
   },
   {
@@ -457,6 +480,10 @@ export async function heartbeatAndMaybeEvaluate(
     .where(eq(agentRuntimeHeartbeat.id, HEARTBEAT_ID));
   const c = await evaluateAgentHealth();
   if (c.opened || c.resolved) log.info("agent.health", c);
+  // Push channels (e-mail, webhook) for newly opened serious / critical issues.
+  const { dispatchAgentAlerts } = await import("./alerts.server");
+  const a = await dispatchAgentAlerts();
+  if (a.alerted) log.info("agent.alerts", a);
 }
 
 /** Scheduler liveness for the observability page (a stopped scheduler can't report itself). */

@@ -151,6 +151,9 @@ export type AgentRunView = {
   tokens: number;
   createdAt: string;
   finishedAt: string | null;
+  /** live | replay (dry run of `replayOf`). */
+  mode: "live" | "replay";
+  replayOf: string | null;
 };
 
 export const listAgentRuns = createServerFn({ method: "GET" })
@@ -177,6 +180,8 @@ export const listAgentRuns = createServerFn({ method: "GET" })
       tokens: r.tokensUsed,
       createdAt: r.createdAt.toISOString(),
       finishedAt: r.finishedAt?.toISOString() ?? null,
+      mode: r.mode,
+      replayOf: r.replayOf,
     }));
   });
 
@@ -212,6 +217,8 @@ export type AgentSettingsView = {
     autonomy: "suggest" | "act_and_notify" | "autonomous";
     whitelistedTemplates: string[];
     monthlyTokenBudget: number | null;
+    /** Measured over 30 days; a person applies it (docs/agentic-plan.md §5.2). */
+    recommendation: import("../server/agents/autonomy.server").AutonomyRecommendation | null;
   }[];
 };
 
@@ -225,6 +232,13 @@ export const agentSettings = createServerFn({ method: "GET" })
       .where(eq(agentPolicies.orgId, context.orgId));
     const roles = await rolesOf(context.userId, context.orgId);
     const by = new Map(rows.map((r) => [r.agentType, r]));
+    const { autonomyRecommendations } = await import("../server/agents/autonomy.server");
+    const { ensureAgentsRegistered } = await import("../server/agents");
+    ensureAgentsRegistered();
+    const recs = await autonomyRecommendations(
+      context.orgId,
+      AGENT_CATALOG.map((a) => a.type),
+    );
     return {
       canEdit:
         context.isOwner || roles.some((r) => (SETTINGS_ROLES as readonly string[]).includes(r)),
@@ -238,6 +252,7 @@ export const agentSettings = createServerFn({ method: "GET" })
           autonomy: r?.autonomy ?? "suggest",
           whitelistedTemplates: r?.whitelistedTemplates ?? [],
           monthlyTokenBudget: r?.monthlyTokenBudget ?? null,
+          recommendation: recs[a.type] ?? null,
         };
       }),
     };
@@ -252,6 +267,8 @@ const PolicyInput = z.object({
     .max(20)
     .optional(),
   monthlyTokenBudget: z.number().int().min(0).max(1_000_000_000).nullable().optional(),
+  /** Set when the change applies a measured recommendation (recorded in the audit entry). */
+  viaRecommendation: z.boolean().optional(),
 });
 
 export type AgentPolicyInput = z.infer<typeof PolicyInput>;
@@ -669,4 +686,114 @@ export const exportAgentRun = createServerFn({ method: "POST" })
       fileName: `agent-run-${run.agentType}-${run.id.slice(0, 8)}.json`,
       json: JSON.stringify(trail, null, 2),
     };
+  });
+
+/* ------------------------------------------------------- dry-run replays */
+
+/**
+ * Re-execute a finished run as a dry run under the agent's current
+ * definition (docs/agentic-plan.md §11). HR head / CBO / owner.
+ */
+export const replayAgentRun = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) => z.object({ runId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { assertRole } = await import("./auth.middleware");
+    await assertRole(context.userId, context.orgId, [...GOVERNANCE_ROLES]);
+    const { ensureAgentsRegistered } = await import("../server/agents");
+    ensureAgentsRegistered();
+    const { startReplay } = await import("../server/agents/runtime.server");
+    const r = await startReplay({
+      orgId: context.orgId,
+      runId: data.runId,
+      userId: context.userId,
+    });
+    const { kickAgents } = await import("../server/agents/orchestrator.server");
+    kickAgents(context.orgId);
+    return r;
+  });
+
+export type AgentRunComparison = import("../server/agents/replay.server").RunComparison;
+
+export const compareAgentRun = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) => z.object({ runId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<AgentRunComparison> => {
+    const { compareRuns } = await import("../server/agents/replay.server");
+    return compareRuns(context.orgId, data.runId);
+  });
+
+/* ------------------------------------------- act and notify: acted for you */
+
+export type AgentActionView = {
+  stepId: string;
+  runId: string;
+  agentType: string;
+  tool: string;
+  goal: string;
+  at: string;
+  seen: boolean;
+};
+
+/** Actions agents ran on the caller's behalf under "act and notify" (last 14 days). */
+export const myAgentActions = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .handler(async ({ context }): Promise<AgentActionView[]> => {
+    const { agentSteps } = await import("@db/schema");
+    const { gte, isNotNull } = await import("drizzle-orm");
+    const rows = await db
+      .select({
+        stepId: agentSteps.id,
+        runId: agentRuns.id,
+        agentType: agentRuns.agentType,
+        tool: agentSteps.toolName,
+        goal: agentRuns.goal,
+        at: agentSteps.createdAt,
+        state: agentSteps.notifyState,
+      })
+      .from(agentSteps)
+      .innerJoin(agentRuns, eq(agentRuns.id, agentSteps.runId))
+      .where(
+        and(
+          eq(agentSteps.orgId, context.orgId),
+          eq(agentRuns.principalUserId, context.userId),
+          isNotNull(agentSteps.notifyState),
+          gte(agentSteps.createdAt, new Date(Date.now() - 14 * 864e5)),
+        ),
+      )
+      .orderBy(desc(agentSteps.createdAt))
+      .limit(100);
+    return rows.map((r) => ({
+      stepId: r.stepId,
+      runId: r.runId,
+      agentType: r.agentType,
+      tool: r.tool ?? "",
+      goal: clip(r.goal, 200) ?? "",
+      at: r.at.toISOString(),
+      seen: r.state === "seen",
+    }));
+  });
+
+export const markAgentActionsSeen = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .handler(async ({ context }) => {
+    const { agentSteps } = await import("@db/schema");
+    const mine = db
+      .select({ id: agentRuns.id })
+      .from(agentRuns)
+      .where(
+        and(eq(agentRuns.orgId, context.orgId), eq(agentRuns.principalUserId, context.userId)),
+      );
+    const done = await db
+      .update(agentSteps)
+      .set({ notifyState: "seen" })
+      .where(
+        and(
+          eq(agentSteps.orgId, context.orgId),
+          eq(agentSteps.notifyState, "pending"),
+          inArray(agentSteps.runId, mine),
+        ),
+      )
+      .returning({ id: agentSteps.id });
+    return { seen: done.length };
   });

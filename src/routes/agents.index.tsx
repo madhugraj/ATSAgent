@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import {
   Bot,
   Check,
+  FlaskConical,
   Loader2,
   MessageSquareText,
   Send,
@@ -24,11 +25,16 @@ import {
   agentSummary,
   askAgents,
   cancelAgentRun,
+  compareAgentRun,
   decideAgentTask,
   exportAgentRun,
   getAgentRun,
   listAgentRuns,
   listAgentTasks,
+  markAgentActionsSeen,
+  myAgentActions,
+  replayAgentRun,
+  type AgentActionView,
   type AgentDecisionInput,
   type AgentRunView,
   type AgentTaskView,
@@ -65,6 +71,12 @@ function AgentsPage() {
     refetchInterval: 15_000,
   });
   const open = tasks.data ?? [];
+  const actions = useQuery({
+    queryKey: ["agent_actions"],
+    queryFn: () => myAgentActions(),
+    refetchInterval: 30_000,
+  });
+  const unseen = (actions.data ?? []).filter((a) => !a.seen).length;
 
   return (
     <>
@@ -86,6 +98,7 @@ function AgentsPage() {
           <TabsTrigger value="decisions">
             Waiting for you{open.length ? ` (${open.length})` : ""}
           </TabsTrigger>
+          <TabsTrigger value="acted">Acted for you{unseen ? ` (${unseen})` : ""}</TabsTrigger>
           <TabsTrigger value="activity">Agent activity</TabsTrigger>
         </TabsList>
 
@@ -100,6 +113,10 @@ function AgentsPage() {
               hint="When an agent needs an approval, a decision or an answer from you, it appears here and in your notifications."
             />
           )}
+        </TabsContent>
+
+        <TabsContent value="acted" className="mt-4 space-y-3">
+          <ActedForYou actions={actions.data ?? []} loading={actions.isLoading} />
         </TabsContent>
 
         <TabsContent value="activity" className="mt-4 space-y-4">
@@ -423,6 +440,9 @@ function RunSteps({ runId }: { runId: string }) {
 function RunList({ runs, loading }: { runs: AgentRunView[]; loading: boolean }) {
   const qc = useQueryClient();
   const [openRun, setOpenRun] = useState<string | null>(null);
+  const [compare, setCompare] = useState<string | null>(null);
+  const settings = useQuery({ queryKey: ["agent_settings"], queryFn: () => agentSettings() });
+  const canReplay = settings.data?.canEdit ?? false;
   if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>;
   if (!runs.length) {
     return (
@@ -442,6 +462,15 @@ function RunList({ runs, loading }: { runs: AgentRunView[]; loading: boolean }) 
       toast.error(e instanceof Error ? e.message : "Could not stop the run");
     }
   }
+  async function replay(runId: string) {
+    try {
+      await replayAgentRun({ data: { runId } });
+      toast.success("Dry-run replay queued — it appears at the top of this list");
+      qc.invalidateQueries({ queryKey: ["agent_runs"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not start the replay");
+    }
+  }
   return (
     <div className="panel divide-y divide-border">
       {runs.map((r) => {
@@ -454,6 +483,11 @@ function RunList({ runs, loading }: { runs: AgentRunView[]; loading: boolean }) 
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-medium">{AGENT_LABEL[r.agentType] ?? "Agent"}</span>
                 <Badge variant={s.tone}>{s.label}</Badge>
+                {r.mode === "replay" ? (
+                  <Badge variant="outline" className="gap-1">
+                    <FlaskConical className="size-3" /> Dry-run replay
+                  </Badge>
+                ) : null}
               </div>
               <p className="mt-1 text-sm text-muted-foreground">{r.goal}</p>
               {r.result ? <p className="mt-1 text-sm">{r.result}</p> : null}
@@ -471,6 +505,25 @@ function RunList({ runs, loading }: { runs: AgentRunView[]; loading: boolean }) 
               >
                 {openRun === r.id ? "Hide steps" : "Steps"}
               </Button>
+              {r.mode === "replay" && !active ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setCompare(compare === r.id ? null : r.id)}
+                >
+                  {compare === r.id ? "Hide comparison" : "Compare"}
+                </Button>
+              ) : null}
+              {r.mode === "live" && !active && canReplay ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-label="Replay as a dry run (changes and messages are simulated)"
+                  onClick={() => replay(r.id)}
+                >
+                  Replay
+                </Button>
+              ) : null}
               {active ? (
                 <Button size="sm" variant="ghost" onClick={() => stop(r.id)}>
                   Stop
@@ -482,9 +535,125 @@ function RunList({ runs, loading }: { runs: AgentRunView[]; loading: boolean }) 
                 <RunSteps runId={r.id} />
               </div>
             ) : null}
+            {compare === r.id ? (
+              <div className="w-full">
+                <RunCompare runId={r.id} />
+              </div>
+            ) : null}
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/** A dry-run replay next to the live run it re-executed. */
+function RunCompare({ runId }: { runId: string }) {
+  const q = useQuery({
+    queryKey: ["agent_run_compare", runId],
+    queryFn: () => compareAgentRun({ data: { runId } }),
+  });
+  if (q.isLoading) return <p className="mt-2 text-xs text-muted-foreground">Comparing…</p>;
+  if (q.error) return <p className="mt-2 text-xs text-destructive">{(q.error as Error).message}</p>;
+  const c = q.data;
+  if (!c) return null;
+  const side = (label: string, x: typeof c.original) => (
+    <div className="rounded-md border border-border p-3">
+      <p className="text-xs font-medium">{label}</p>
+      <p className="num mt-1 text-xs text-muted-foreground">
+        {x.status} · {x.definitionVersion ? `v${x.definitionVersion}` : "version not recorded"} ·{" "}
+        {x.steps} step(s) · {x.tokens.toLocaleString()} tokens
+        {x.durationMs != null ? ` · ${Math.round(x.durationMs / 1000)} s` : ""}
+      </p>
+      {x.result ? <p className="mt-1 text-xs">{x.result}</p> : null}
+    </div>
+  );
+  const OP = {
+    same: { sign: "=", cls: "text-muted-foreground" },
+    removed: { sign: "−", cls: "text-destructive" },
+    added: { sign: "+", cls: "text-primary" },
+  } as const;
+  return (
+    <div className="mt-3 space-y-3 rounded-md border border-border bg-muted/30 p-3">
+      <p className="text-xs text-muted-foreground">
+        {c.sameSequence
+          ? "The replay called the same tools in the same order."
+          : "The replay took a different path — see the tool sequence below."}{" "}
+        {c.definitionChanged
+          ? "The agent's definition changed since the original run."
+          : "Same agent definition as the original run."}{" "}
+        Changes, messages and human steps in a replay are simulated.
+      </p>
+      <div className="grid gap-2 md:grid-cols-2">
+        {side("Original run", c.original)}
+        {side("Dry-run replay", c.replay)}
+      </div>
+      <ol className="space-y-0.5 font-mono text-xs">
+        {c.diff.map((d, i) => (
+          <li key={i} className={OP[d.op].cls}>
+            {OP[d.op].sign} {d.tool}
+            <span className="text-muted-foreground">
+              {d.op === "same" ? ` (${d.was} → ${d.now})` : ` (${d.was ?? d.now})`}
+            </span>
+          </li>
+        ))}
+        {!c.diff.length ? (
+          <li className="text-muted-foreground">No tool calls in either run.</li>
+        ) : null}
+      </ol>
+    </div>
+  );
+}
+
+/** "Act and notify": what agents changed on the signed-in person's behalf. */
+function ActedForYou({ actions, loading }: { actions: AgentActionView[]; loading: boolean }) {
+  const qc = useQueryClient();
+  if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  if (!actions.length)
+    return (
+      <EmptyState
+        title="No actions reported"
+        hint="Agents set to “Act and notify” list the changes they made for you here (last 14 days)."
+      />
+    );
+  async function markSeen() {
+    try {
+      await markAgentActionsSeen();
+      qc.invalidateQueries({ queryKey: ["agent_actions"] });
+      qc.invalidateQueries({ queryKey: ["notifications"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not update");
+    }
+  }
+  const unseen = actions.some((a) => !a.seen);
+  return (
+    <div className="panel">
+      <div className="flex items-center justify-between gap-2 border-b border-border p-4">
+        <p className="text-sm text-muted-foreground">
+          Changes agents made on your behalf without asking first, because their autonomy is set to
+          “Act and notify”.
+        </p>
+        <Button size="sm" variant="outline" disabled={!unseen} onClick={markSeen}>
+          Mark all seen
+        </Button>
+      </div>
+      <ul className="divide-y divide-border">
+        {actions.map((a) => (
+          <li key={a.stepId} className="flex flex-wrap items-start gap-2 p-4 text-sm">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-medium">{AGENT_LABEL[a.agentType] ?? "Agent"}</span>
+                <code className="text-xs">{a.tool}</code>
+                {!a.seen ? <Badge>New</Badge> : null}
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">{a.goal}</p>
+            </div>
+            <span className="num text-xs text-muted-foreground">
+              {new Date(a.at).toLocaleString()}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

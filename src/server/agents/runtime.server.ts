@@ -48,6 +48,7 @@ import {
 } from "@db/schema";
 import { agentRunScope } from "./context";
 import { ensureDefinition, manifestHash, RUNTIME_RULES } from "./manifest.server";
+import { looksLikeInjection } from "./injection";
 import { decideToolCall, loadPolicy } from "./policy";
 import { getAgent, getTool, type ToolContext } from "./registry";
 
@@ -584,6 +585,68 @@ export async function startRun(input: {
   return { runId: run!.id };
 }
 
+/** Statuses a run can be replayed from. */
+const REPLAYABLE = new Set(["done", "failed", "cancelled"]);
+
+/**
+ * Queue a dry-run replay of a finished live run (docs/agentic-plan.md §11):
+ * the same goal under the agent's current definition and the org's current
+ * model settings. Read tools run for real; write, external and human steps
+ * are simulated, so a replay changes nothing and asks nobody. Compare it with
+ * the original via `compareRuns`.
+ */
+export async function startReplay(input: {
+  orgId: string;
+  runId: string;
+  userId: string;
+}): Promise<{ runId: string }> {
+  const [orig] = await db
+    .select()
+    .from(agentRuns)
+    .where(and(eq(agentRuns.id, input.runId), eq(agentRuns.orgId, input.orgId)))
+    .limit(1);
+  if (!orig) throw new Error("Run not found");
+  if (orig.mode !== "live") throw new Error("Replay the original run, not a replay.");
+  if (!REPLAYABLE.has(orig.status)) throw new Error("Only finished runs can be replayed.");
+  const def = getAgent(orig.agentType);
+  if (!def) throw new Error(`Unknown agent: ${orig.agentType}`);
+  const definition = await ensureDefinition(def);
+  const [run] = await db
+    .insert(agentRuns)
+    .values({
+      definitionId: definition.id,
+      definitionVersion: definition.version,
+      definitionHash: definition.hash,
+      orgId: orig.orgId,
+      agentType: orig.agentType,
+      // Reads run with the requester's own permissions.
+      principalUserId: input.userId,
+      goal: orig.goal,
+      subjectType: orig.subjectType,
+      subjectId: orig.subjectId,
+      maxSteps: orig.maxSteps,
+      mode: "replay",
+      replayOf: orig.id,
+      transcript: [{ role: "user", content: orig.goal } satisfies AgentMessage],
+    })
+    .returning({ id: agentRuns.id });
+  await writeAudit({
+    actor: `user:${input.userId}`,
+    actorUserId: input.userId,
+    orgId: input.orgId,
+    action: "agent.run.replay_started",
+    entityType: "agent_run",
+    entityId: run!.id,
+    detail: {
+      replay_of: orig.id,
+      original_definition_hash: orig.definitionHash,
+      definition_version: definition.version,
+      definition_hash: definition.hash,
+    },
+  });
+  return { runId: run!.id };
+}
+
 export type TaskDecision =
   | { status: "approved"; args?: unknown; comment?: string | undefined }
   | { status: "rejected"; reason?: string | undefined }
@@ -775,7 +838,8 @@ export async function runAgentTick(
         // leaseUntil on a queued run is a "not before" (budget pause).
         sql`(${agentRuns.leaseUntil} is null or ${agentRuns.leaseUntil} < now())`,
         sql`not exists (${paused})`,
-        sql`exists (${switchedOn})`,
+        // A dry-run replay changes nothing, so it does not need the agent switched on.
+        sql`(${agentRuns.mode} = 'replay' or exists (${switchedOn}))`,
         opts.orgId ? eq(agentRuns.orgId, opts.orgId) : undefined,
       ),
     )
@@ -838,6 +902,17 @@ export async function runAgentTick(
       await heartbeatAndMaybeEvaluate(counts);
     } catch (e) {
       log.error("agent.health.failed", { error: e instanceof Error ? e : String(e) });
+    }
+  }
+
+  // 6. Trace export to organisations' own OpenTelemetry collectors.
+  if (!opts.orgId) {
+    try {
+      const { exportAgentTraces } = await import("./otel.server");
+      const x = await exportAgentTraces();
+      if (x.runs) log.info("agent.otel.exported", x);
+    } catch (e) {
+      log.error("agent.otel.failed", { error: e instanceof Error ? e : String(e) });
     }
   }
   return counts;
@@ -1066,6 +1141,14 @@ async function handleCall(
       });
       return { kind: "handoff", reason };
     }
+    if (run.mode === "replay" && call.name === "ask_human") {
+      return simulated(
+        run,
+        call,
+        seq,
+        "No person is available in a dry-run replay. Continue with your best judgement and state any assumption you make.",
+      );
+    }
     const kind: AgentTaskKind = call.name === "ask_human" ? "clarification" : "gate";
     const data = parsed.data as {
       question?: string;
@@ -1081,6 +1164,11 @@ async function handleCall(
     if (call.name === "request_approval" && subject) {
       const gate = await gateFor(run.orgId, subject);
       if ("error" in gate) return toolError(gate.error);
+      if (run.mode === "replay") {
+        return simulated(run, call, seq, "Approval simulated as granted; nothing was changed.", {
+          gate: gate.role,
+        });
+      }
       assigneeRole = gate.role;
       toPrincipal = gate.toPrincipal ?? false;
       detail = gate.detail ?? "";
@@ -1114,6 +1202,15 @@ async function handleCall(
   if (!parsed.success) return toolError(`Invalid arguments: ${parsed.error.message}`);
 
   const verdict = decideToolCall(tool.risk, policy, tool.templateOf?.(parsed.data) ?? null);
+  if (run.mode === "replay" && tool.risk !== "read") {
+    return simulated(
+      run,
+      call,
+      seq,
+      `${tool.name} was not executed (simulated success). In a live run it would ${verdict === "run" ? "run now" : "wait for a person's approval"}.`,
+      { args: redactArgs(parsed.data), wouldRun: verdict === "run" },
+    );
+  }
   if (verdict === "approve") {
     const taskId = await openTask(run, {
       kind: "approval",
@@ -1133,7 +1230,39 @@ async function handleCall(
     return { kind: "pending", taskId };
   }
 
-  return { kind: "message", message: await execute(run, ctx, tool.name, call, parsed.data, seq) };
+  // act_and_notify: the action runs now and the person the agent works for is told.
+  const notify = tool.risk !== "read" && policy.autonomy === "act_and_notify";
+  return {
+    kind: "message",
+    message: await execute(run, ctx, tool.name, call, parsed.data, seq, notify),
+  };
+}
+
+/** Dry-run replay: record a step the live run would have taken and tell the model it "happened". */
+async function simulated(
+  run: AgentRun,
+  call: AgentToolCall,
+  seq: number,
+  message: string,
+  output: Record<string, unknown> = {},
+): Promise<CallOutcome> {
+  await recordStep(run, seq, {
+    kind: "tool",
+    toolName: call.name,
+    toolCallId: call.id,
+    status: "simulated",
+    input: redactArgs(call.args),
+    output,
+  });
+  return {
+    kind: "message",
+    message: {
+      role: "tool",
+      toolCallId: call.id,
+      name: call.name,
+      content: `[Dry-run replay] ${message}`,
+    },
+  };
 }
 
 /** Run an allowed tool and turn its result (or failure) into a tool message. */
@@ -1144,6 +1273,7 @@ async function execute(
   call: AgentToolCall,
   args: unknown,
   seq: number,
+  notify = false,
 ): Promise<AgentMessage> {
   const tool = getTool(name)!;
   const started = Date.now();
@@ -1151,6 +1281,7 @@ async function execute(
     const result = await tool.run(ctx, args);
     const raw = typeof result === "string" ? result : JSON.stringify(result ?? null);
     const content = tool.untrustedOutput ? untrusted(`${name} result`, raw) : raw;
+    const injection = Boolean(tool.untrustedOutput) && looksLikeInjection(raw);
     await recordStep(run, seq, {
       kind: "tool",
       toolName: name,
@@ -1159,7 +1290,27 @@ async function execute(
       input: redactArgs(args),
       output: tool.untrustedOutput ? { chars: raw.length } : { preview: preview(raw) },
       durationMs: Date.now() - started,
+      ...(notify ? { notifyState: "pending" as const } : {}),
+      injectionSuspected: injection,
     });
+    if (injection) {
+      log.warn("agent.injection.suspected", {
+        trace_id: run.traceId,
+        run_id: run.id,
+        org_id: run.orgId,
+        agent: run.agentType,
+        tool: name,
+      });
+      await writeAudit({
+        actor: ctx.actor,
+        actorUserId: ctx.principalUserId,
+        orgId: ctx.orgId,
+        action: "agent.injection.suspected",
+        entityType: "agent_run",
+        entityId: ctx.runId,
+        detail: { tool: name, seq },
+      });
+    }
     if (tool.risk !== "read") {
       await writeAudit({
         actor: ctx.actor,
@@ -1283,6 +1434,8 @@ async function recordStep(
     promptTokens?: number;
     completionTokens?: number;
     durationMs?: number;
+    notifyState?: "pending";
+    injectionSuspected?: boolean;
   },
 ) {
   await db.insert(agentSteps).values({
@@ -1298,6 +1451,8 @@ async function recordStep(
     promptTokens: s.promptTokens ?? 0,
     completionTokens: s.completionTokens ?? 0,
     durationMs: s.durationMs ?? 0,
+    notifyState: s.notifyState ?? null,
+    injectionSuspected: s.injectionSuspected ?? false,
   });
 }
 
@@ -1341,6 +1496,7 @@ async function finish(
     detail: {
       on_behalf_of: run.principalUserId,
       definition_hash: run.definitionHash,
+      mode: run.mode,
       handed_off: Boolean(result?.startsWith("Handed off:")),
       error: error ? error.slice(0, 300) : null,
     },

@@ -12,6 +12,7 @@
  */
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   boolean,
   check,
   date,
@@ -1723,6 +1724,7 @@ export type AgentTaskKind = "gate" | "approval" | "clarification";
 export type AgentTaskStatus =
   "open" | "approved" | "rejected" | "answered" | "expired" | "cancelled";
 export type AgentEventStatus = "pending" | "processing" | "done" | "failed";
+export type AgentRunMode = "live" | "replay";
 
 /**
  * Per org × agent type: the autonomy dial, template whitelist and budget.
@@ -1842,6 +1844,13 @@ export const agentRuns = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
+    /** live | replay — a replay is a dry run of `replayOf`: write, external and human steps are simulated. */
+    mode: text("mode").$type<AgentRunMode>().notNull().default("live"),
+    replayOf: uuid("replay_of").references((): AnyPgColumn => agentRuns.id, {
+      onDelete: "set null",
+    }),
+    /** When this run's trace was exported to the org's OpenTelemetry endpoint. */
+    otelExportedAt: timestamp("otel_exported_at", { withTimezone: true }),
   },
   (t) => [
     index("agent_runs_queue_idx").on(t.status, t.updatedAt),
@@ -1866,7 +1875,7 @@ export const agentSteps = pgTable(
     kind: text("kind").notNull(),
     toolName: text("tool_name"),
     toolCallId: text("tool_call_id"),
-    /** ok | error | blocked | awaiting */
+    /** ok | error | blocked | awaiting | simulated (dry-run replay) */
     status: text("status").notNull(),
     /** Redacted summaries only — never full CV, document or mail text. */
     input: jsonb("input").$type<unknown>(),
@@ -1875,6 +1884,10 @@ export const agentSteps = pgTable(
     completionTokens: integer("completion_tokens").notNull().default(0),
     durationMs: integer("duration_ms").notNull().default(0),
     spanId: uuid("span_id").notNull().defaultRandom(),
+    /** act_and_notify: 'pending' until the principal marks the action seen, then 'seen'. */
+    notifyState: text("notify_state").$type<"pending" | "seen">(),
+    /** Third-party text in this tool result looked like an instruction to the model. */
+    injectionSuspected: boolean("injection_suspected").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("agent_steps_run_seq_key").on(t.runId, t.seq)],
@@ -1970,6 +1983,8 @@ export const agentIssues = pgTable(
     acknowledgedBy: uuid("acknowledged_by").references(() => users.id, { onDelete: "set null" }),
     acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    /** Alert e-mail / webhook sent for this issue (serious and critical only). */
+    notifiedAt: timestamp("notified_at", { withTimezone: true }),
   },
   (t) => [
     uniqueIndex("agent_issues_active_key")
@@ -1988,4 +2003,29 @@ export const agentRuntimeHeartbeat = pgTable("agent_runtime_heartbeat", {
     .$type<Record<string, unknown>>()
     .notNull()
     .default(sql`'{}'::jsonb`),
+});
+
+/* ------------------------------------------- agent telemetry & alerts (0029) */
+
+/**
+ * Per-org trace export (OTLP/HTTP JSON to the org's own collector) and alert
+ * channels for agent health issues. Header values and the webhook signing
+ * secret are encrypted at rest (encryptSecret).
+ */
+export const agentTelemetrySettings = pgTable("agent_telemetry_settings", {
+  orgId: uuid("org_id")
+    .primaryKey()
+    .references(() => organizations.id, { onDelete: "cascade" }),
+  otlpEnabled: boolean("otlp_enabled").notNull().default(false),
+  otlpEndpoint: text("otlp_endpoint"),
+  otlpHeadersEnc: text("otlp_headers_enc"),
+  alertEmailEnabled: boolean("alert_email_enabled").notNull().default(true),
+  alertWebhookUrl: text("alert_webhook_url"),
+  alertWebhookSecretEnc: text("alert_webhook_secret_enc"),
+  lastExportAt: timestamp("last_export_at", { withTimezone: true }),
+  /** Last export attempt (successful or not), for back-off after failures. */
+  lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+  lastExportError: text("last_export_error"),
+  updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

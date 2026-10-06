@@ -1,5 +1,17 @@
 # Roadmap
 
+## Agentic platform — Phase 5: hardening and scale (2026-10-06)
+
+- [x] "Act and notify" now notifies: actions run without approval are listed for the person the agent works for (bell + Agents → "Acted for you") until marked seen; "autonomous" runs them silently (still in activity and audit)
+- [x] Autonomy recommendations in Agent settings — per agent, measured over 30 days (decided requests, approved unchanged, edited, rejected, reported actions, tool errors, failed runs, open issues, days at the level), raise / lower / hold with the reason and an Apply button; template pre-approval hints; never applied automatically, saves audited with `viaRecommendation`
+- [x] Dry-run replay of a finished run (HR head / CBO / owner): current definition, reads for real, writes / external / human steps simulated, no tasks or audit side effects; side-by-side comparison with a tool-sequence diff
+- [x] Prompt-injection tripwire on untrusted tool output (step flag, audit, new `tools.injection` health rule — 12 rules)
+- [x] Alert channels: e-mail to owner / HR heads / CBOs and an optional HMAC-signed webhook, once per serious or critical issue, audited
+- [x] OpenTelemetry trace export (OTLP/HTTP JSON) to the org's own collector — ids, steps, timings and token counts only; encrypted headers; back-off; test buttons
+- [x] Platform agent console (`/platform-agents`, super admins): scheduler, totals, per-organisation, per-agent cost and latency (run and model-turn p50 / p95, tokens per run, tool error and edit rates), per-model, recent failures
+- [x] Migration `0029` (`agent_runs.mode / replay_of / otel_exported_at`, `agent_steps.notify_state / injection_suspected`, `agent_issues.notified_at`, `agent_telemetry_settings`); `scripts/agent-phase5.test.ts` (17 tests) in CI
+- [ ] Not built: one-click undo of notified actions; per-replay model choice and a separate sandbox organisation; automatic cost / latency tuning
+
 ## Agentic platform — Phase 4: offer → pre-onboarding → release (2026-10-06)
 
 - [x] Shared cores: `createOfferCore` (agents start at `draft`), `advanceOfferCore` (emits `offer.status_changed`; agent actions marked `via: "agent"` in the trail), `generateOfferLetterCore`, `reviewOnboardingDocCore`; a `onboarding.document_received` event when documents are filed
