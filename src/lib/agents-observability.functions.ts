@@ -369,3 +369,371 @@ export const acknowledgeAgentIssue = createServerFn({ method: "POST" })
     });
     return { ok: true as const };
   });
+
+/* ------------------------------------------------------------ agent detail */
+
+export type AgentDetail = {
+  identity: {
+    type: string;
+    name: string;
+    version: string;
+    hash: string;
+    owner: string;
+    riskTier: string;
+    responsibility: string;
+    mustNever: string[];
+    scope: { reads: string[]; writes: string[]; external: string[] };
+    gates: string[];
+    feature: string;
+    versions: { version: string; hash: string; firstSeen: string; runs: number }[];
+    policy: {
+      enabled: boolean;
+      autonomy: string;
+      whitelistedTemplates: string[];
+      monthlyTokenBudget: number | null;
+    };
+  };
+  tools: {
+    name: string;
+    description: string;
+    risk: string;
+    skills: string[];
+    preApprovable: boolean;
+    untrustedOutput: boolean;
+    inputSchemaJson: string;
+    calls7d: number;
+    errors7d: number;
+    avgMs: number | null;
+    awaitingApproval7d: number;
+    lastError: string | null;
+    lastUsedAt: string | null;
+  }[];
+  skills: {
+    feature: string;
+    usedBy: string[];
+    requests7d: number;
+    errors7d: number;
+    tokens7d: number;
+    avgMs: number | null;
+    p95Ms: number | null;
+  }[];
+  harness: {
+    maxSteps: number;
+    maxTokensPerRun: number;
+    turnsPerTick: number;
+    leaseMinutes: number;
+    maxAttempts: number;
+    concurrency: number;
+    budgetRecheckMinutes: number;
+    autonomyRules: { risk: string; suggest: string; act_and_notify: string; autonomous: string }[];
+    humanTools: { name: string; description: string }[];
+    sharedRules: string;
+    injectionRules: string;
+    instructions: string;
+    recentRuns: {
+      id: string;
+      status: string;
+      goal: string;
+      steps: number;
+      tokens: number;
+      definitionVersion: string | null;
+      createdAt: string;
+      durationMinutes: number | null;
+      error: string | null;
+    }[];
+  };
+  hitl: {
+    open: { id: string; kind: string; title: string; assignee: string; ageHours: number }[];
+    recent: {
+      id: string;
+      kind: string;
+      title: string;
+      status: string;
+      decidedBy: string | null;
+      waitMinutes: number | null;
+      edited: boolean;
+      decidedAt: string | null;
+    }[];
+  };
+  evals: { name: string }[];
+  audit: { action: string; actor: string; entityType: string | null; at: string }[];
+  issues: {
+    open: IssueView[];
+    resolved: {
+      rule: string;
+      title: string;
+      severity: string;
+      firstSeenAt: string;
+      resolvedAt: string;
+    }[];
+  };
+};
+
+const SAFE_ERRORS = new Set([
+  "The run reached its step or token budget.",
+  "The worker stopped before finishing this step.",
+  "No AI model key saved. Add one on the Integrations page.",
+  "Paused: this agent reached its monthly token budget.",
+]);
+
+/** Everything about one agent for the observability drawer (loaded on click). */
+export const agentObservabilityDetail = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) => z.object({ agentType: z.string().min(2).max(40) }).parse(d))
+  .handler(async ({ data, context }): Promise<AgentDetail> => {
+    const { assertRole } = await import("./auth.middleware");
+    await assertRole(context.userId, context.orgId, [...GOVERNANCE_ROLES]);
+    try {
+      return await buildDetail(context.orgId, data.agentType);
+    } catch (e) {
+      const { log } = await import("../server/log");
+      log.error("agent.observability.detail_failed", {
+        org_id: context.orgId,
+        agent: data.agentType,
+        error: e as Error,
+      });
+      throw new Error(
+        e instanceof Error && e.message === "Unknown agent."
+          ? e.message
+          : "Agent detail could not be loaded. The error has been logged.",
+      );
+    }
+  });
+
+async function buildDetail(org: string, agentType: string): Promise<AgentDetail> {
+  const { ensureAgentsRegistered } = await import("../server/agents");
+  ensureAgentsRegistered();
+  const { getAgent, getTool, skillsOf } = await import("../server/agents/registry");
+  const def = getAgent(agentType as never);
+  if (!def) throw new Error("Unknown agent.");
+  const { manifestHash, RUNTIME_RULES } = await import("../server/agents/manifest.server");
+  const { HITL_TOOLS } = await import("../server/agents/hitl");
+  const { INJECTION_RULES, toolParameters } = await import("./ai-gateway.server");
+  const { HARNESS_LIMITS } = await import("../server/agents/runtime.server");
+  const { loadPolicy } = await import("../server/agents/policy");
+  const { RULES } = await import("../server/agents/health.server");
+
+  const policy = await loadPolicy(org, def.type);
+  const versions = await q(sql`
+    select d.version, d.hash, d.created_at,
+      (select count(*) from agent_runs r where r.org_id = ${org} and r.definition_id = d.id)::int runs
+    from agent_definitions d where d.agent_type = ${def.type} order by d.created_at desc limit 20`);
+
+  const toolRows = await q(sql`
+    select st.tool_name tool,
+      count(*) filter (where st.status in ('ok','error'))::int calls,
+      count(*) filter (where st.status = 'error')::int errors,
+      count(*) filter (where st.status = 'awaiting')::int awaiting,
+      round(avg(st.duration_ms) filter (where st.status in ('ok','error')))::int avg_ms,
+      max(st.created_at) last_used
+    from agent_steps st join agent_runs r on r.id = st.run_id
+    where st.org_id = ${org} and r.agent_type = ${def.type} and st.kind = 'tool'
+      and st.created_at >= now() - interval '7 days'
+    group by st.tool_name`);
+  const lastErrors = await q(sql`
+    select distinct on (st.tool_name) st.tool_name tool, st.output ->> 'error' err
+    from agent_steps st join agent_runs r on r.id = st.run_id
+    where st.org_id = ${org} and r.agent_type = ${def.type} and st.kind = 'tool' and st.status = 'error'
+    order by st.tool_name, st.created_at desc`);
+
+  const skillRows = await q(sql`
+    select u.feature, count(*)::int requests, count(*) filter (where u.status = 'error')::int errors,
+      coalesce(sum(u.total_tokens), 0)::bigint tokens, round(avg(u.duration_ms))::int avg_ms,
+      percentile_cont(0.95) within group (order by u.duration_ms)::int p95
+    from ai_usage_events u join agent_runs r on r.id = u.agent_run_id
+    where r.org_id = ${org} and r.agent_type = ${def.type} and u.created_at >= now() - interval '7 days'
+    group by u.feature`);
+
+  const runs = await q(sql`
+    select id, status, goal, step_count, tokens_used, definition_version, created_at, last_error,
+      round((extract(epoch from (finished_at - started_at)) / 60)::numeric, 1) dur
+    from agent_runs where org_id = ${org} and agent_type = ${def.type}
+    order by created_at desc limit 15`);
+
+  const openTasks = await q(sql`
+    select t.id, t.kind, t.title, coalesce(t.assignee_role, 'named person') assignee,
+      floor(extract(epoch from (now() - t.created_at)) / 3600)::int age
+    from agent_tasks t join agent_runs r on r.id = t.run_id
+    where t.org_id = ${org} and r.agent_type = ${def.type} and t.status = 'open'
+    order by t.created_at limit 50`);
+  const recentTasks = await q(sql`
+    select t.id, t.kind, t.title, t.status, m.email decided_by, t.decided_at,
+      round(extract(epoch from (t.decided_at - t.created_at)) / 60)::int wait,
+      (t.status = 'approved' and t.response ? 'args') edited
+    from agent_tasks t join agent_runs r on r.id = t.run_id
+    left join org_members m on m.user_id = t.decided_by and m.org_id = t.org_id
+    where t.org_id = ${org} and r.agent_type = ${def.type} and t.status not in ('open')
+    order by t.decided_at desc nulls last limit 20`);
+
+  const audit = await q(sql`
+    select action, actor, entity_type, created_at from audit_log
+    where org_id = ${org} and actor like ${`agent:${def.type}:%`}
+    order by created_at desc limit 30`);
+
+  const issueRows = await db
+    .select()
+    .from(agentIssues)
+    .where(and(eq(agentIssues.orgId, org), eq(agentIssues.agentType, def.type)));
+  const ruleText = new Map(RULES.map((r) => [r.id, r.description]));
+
+  return {
+    identity: {
+      type: def.type,
+      name: def.name,
+      version: def.version,
+      hash: manifestHash(def),
+      owner: def.owner,
+      riskTier: def.riskTier,
+      responsibility: def.responsibility,
+      mustNever: def.mustNever,
+      scope: def.scope,
+      gates: def.gates,
+      feature: def.feature,
+      versions: versions.map((v) => ({
+        version: String(v["version"]),
+        hash: String(v["hash"]),
+        firstSeen: new Date(String(v["created_at"])).toISOString(),
+        runs: n(v["runs"]),
+      })),
+      policy: {
+        enabled: policy.enabled,
+        autonomy: policy.autonomy,
+        whitelistedTemplates: policy.whitelistedTemplates,
+        monthlyTokenBudget: policy.monthlyTokenBudget,
+      },
+    },
+    tools: def.tools.map((name) => {
+      const t = getTool(name);
+      const u = toolRows.find((r) => r["tool"] === name) ?? {};
+      return {
+        name,
+        description: t?.description ?? "(not registered)",
+        risk: t?.risk ?? "unknown",
+        skills: t?.skills ?? [],
+        preApprovable: Boolean(t?.templateOf),
+        untrustedOutput: Boolean(t?.untrustedOutput),
+        inputSchemaJson: t ? JSON.stringify(toolParameters(t.input), null, 2) : "{}",
+        calls7d: n(u["calls"]),
+        errors7d: n(u["errors"]),
+        avgMs: nOrNull(u["avg_ms"]),
+        awaitingApproval7d: n(u["awaiting"]),
+        lastError:
+          (lastErrors.find((e) => e["tool"] === name)?.["err"] as string | undefined) ?? null,
+        lastUsedAt: u["last_used"] ? new Date(String(u["last_used"])).toISOString() : null,
+      };
+    }),
+    skills: skillsOf(def).map((feature) => {
+      const r = skillRows.find((x) => x["feature"] === feature) ?? {};
+      return {
+        feature,
+        usedBy:
+          feature === def.feature
+            ? ["the agent's own reasoning turns"]
+            : def.tools.filter((name) => getTool(name)?.skills?.includes(feature)),
+        requests7d: n(r["requests"]),
+        errors7d: n(r["errors"]),
+        tokens7d: n(r["tokens"]),
+        avgMs: nOrNull(r["avg_ms"]),
+        p95Ms: nOrNull(r["p95"]),
+      };
+    }),
+    harness: {
+      maxSteps: def.maxSteps ?? 20,
+      maxTokensPerRun: HARNESS_LIMITS.maxTokensPerRun,
+      turnsPerTick: HARNESS_LIMITS.turnsPerTick,
+      leaseMinutes: HARNESS_LIMITS.leaseMinutes,
+      maxAttempts: HARNESS_LIMITS.maxAttempts,
+      concurrency: HARNESS_LIMITS.concurrency,
+      budgetRecheckMinutes: HARNESS_LIMITS.budgetRecheckMinutes,
+      autonomyRules: [
+        { risk: "read", suggest: "runs", act_and_notify: "runs", autonomous: "runs" },
+        { risk: "write", suggest: "asks a person", act_and_notify: "runs", autonomous: "runs" },
+        {
+          risk: "external",
+          suggest: "asks a person",
+          act_and_notify: "asks unless the template is pre-approved",
+          autonomous: "asks unless the template is pre-approved",
+        },
+      ],
+      humanTools: Object.entries(HITL_TOOLS).map(([name, t]) => ({
+        name,
+        description: t.description,
+      })),
+      sharedRules: RUNTIME_RULES,
+      injectionRules: INJECTION_RULES,
+      instructions: def.system,
+      recentRuns: runs.map((r) => {
+        const err = r["last_error"] as string | null;
+        return {
+          id: String(r["id"]),
+          status: String(r["status"]),
+          goal: String(r["goal"]).slice(0, 200),
+          steps: n(r["step_count"]),
+          tokens: n(r["tokens_used"]),
+          definitionVersion: (r["definition_version"] as string | null) ?? null,
+          createdAt: new Date(String(r["created_at"])).toISOString(),
+          durationMinutes: nOrNull(r["dur"]),
+          error: err
+            ? SAFE_ERRORS.has(err)
+              ? err
+              : "The agent could not complete this step."
+            : null,
+        };
+      }),
+    },
+    hitl: {
+      open: openTasks.map((t) => ({
+        id: String(t["id"]),
+        kind: String(t["kind"]),
+        title: String(t["title"]),
+        assignee: String(t["assignee"]),
+        ageHours: n(t["age"]),
+      })),
+      recent: recentTasks.map((t) => ({
+        id: String(t["id"]),
+        kind: String(t["kind"]),
+        title: String(t["title"]),
+        status: String(t["status"]),
+        decidedBy: (t["decided_by"] as string | null) ?? null,
+        waitMinutes: nOrNull(t["wait"]),
+        edited: Boolean(t["edited"]),
+        decidedAt: t["decided_at"] ? new Date(String(t["decided_at"])).toISOString() : null,
+      })),
+    },
+    evals: def.evals.map((name) => ({ name })),
+    audit: audit.map((a) => ({
+      action: String(a["action"]),
+      actor: String(a["actor"]),
+      entityType: (a["entity_type"] as string | null) ?? null,
+      at: new Date(String(a["created_at"])).toISOString(),
+    })),
+    issues: {
+      open: issueRows
+        .filter((i) => i.status !== "resolved")
+        .map((i) => ({
+          id: i.id,
+          agentType: i.agentType,
+          element: i.element,
+          rule: i.rule,
+          severity: i.severity,
+          status: i.status as "open" | "acknowledged",
+          title: i.title,
+          description: ruleText.get(i.rule) ?? "",
+          firstSeenAt: i.firstSeenAt.toISOString(),
+          lastSeenAt: i.lastSeenAt.toISOString(),
+          occurrences: i.occurrences,
+        })),
+      resolved: issueRows
+        .filter((i) => i.status === "resolved" && i.resolvedAt)
+        .sort((a, b) => b.resolvedAt!.getTime() - a.resolvedAt!.getTime())
+        .slice(0, 10)
+        .map((i) => ({
+          rule: i.rule,
+          title: i.title,
+          severity: i.severity,
+          firstSeenAt: i.firstSeenAt.toISOString(),
+          resolvedAt: i.resolvedAt!.toISOString(),
+        })),
+    },
+  };
+}

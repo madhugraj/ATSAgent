@@ -10,7 +10,7 @@ export function registerPhase1Agents(): void {
   registerAgent({
     type: "copilot",
     name: "Copilot",
-    version: "1.1.0",
+    version: "1.2.0",
     owner: "hr_head",
     responsibility:
       "Turns a person's request into work for the specialist agents and starts them only after the person confirms.",
@@ -42,7 +42,7 @@ export function registerPhase1Agents(): void {
   registerAgent({
     type: "requisition",
     name: "Requisition agent",
-    version: "1.1.0",
+    version: "1.2.0",
     owner: "hr_head",
     responsibility:
       "Turns a hiring need into a complete, evidence-backed draft requisition and walks it through the DH → HR → CBO approval chain.",
@@ -97,7 +97,7 @@ export function registerPhase1Agents(): void {
   registerAgent({
     type: "jd",
     name: "JD agent",
-    version: "1.1.0",
+    version: "1.2.0",
     owner: "department_head",
     responsibility:
       "Drafts and revises the job description for an approved requisition and gets it reviewed by the department head.",
@@ -128,7 +128,7 @@ export function registerPhase1Agents(): void {
   registerAgent({
     type: "publishing",
     name: "Publishing agent",
-    version: "1.1.0",
+    version: "1.2.0",
     owner: "hr_head",
     responsibility:
       "Makes an approved requisition visible: internal job board first, then reviewed external job-board posts.",
@@ -170,7 +170,7 @@ export function registerPhase2Agents(): void {
   registerAgent({
     type: "intake",
     name: "Intake & matching agent",
-    version: "1.1.0",
+    version: "1.2.0",
     owner: "hr_head",
     responsibility:
       "Keeps an approved requisition's pipeline scored, reviewed and full; proposes rejections for a person to decide.",
@@ -221,7 +221,7 @@ export function registerPhase2Agents(): void {
   registerAgent({
     type: "screening",
     name: "Screening agent",
-    version: "1.1.0",
+    version: "1.2.0",
     owner: "hr_head",
     responsibility:
       "Moves shortlisted candidates through screening: kits, assessments, reminders and proceed / hold notes.",
@@ -262,7 +262,7 @@ export function registerPhase2Agents(): void {
   registerAgent({
     type: "followup",
     name: "Follow-up agent",
-    version: "1.1.0",
+    version: "1.2.0",
     owner: "hr_head",
     responsibility: "Once a day, finds work that is overdue and reminds the right person.",
     mustNever: [
@@ -309,7 +309,7 @@ export function registerPhase3Agents(): void {
   registerAgent({
     type: "interview",
     name: "Interview coordinator",
-    version: "1.0.0",
+    version: "1.1.0",
     owner: "hr_head",
     responsibility:
       "Books the next interview round for candidates who advanced: panel from organisation members, a proposed slot, a meeting link, and the candidate's invite.",
@@ -355,7 +355,7 @@ export function registerPhase3Agents(): void {
   registerAgent({
     type: "evaluation",
     name: "Evaluation agent",
-    version: "1.0.0",
+    version: "1.1.0",
     owner: "hiring_manager",
     responsibility:
       "After interview rounds, writes the debrief across all evidence, surfaces disagreements and fairness signals, and asks the hiring manager for the hiring decision.",
@@ -384,6 +384,95 @@ export function registerPhase3Agents(): void {
       "3. selection_parity; if any source breaches four-fifths, say so in the debrief as a pipeline-level signal (never as a reason about this candidate).",
       "4. request_approval with subject {type: 'hiring_decision', applicationId, recommendation: select | hold | reject, rationale} addressed to hiring_manager. The rationale must rest on job-relevant evidence only.",
       "Finish with the recommendation and the person who decides.",
+    ].join("\n"),
+  });
+}
+
+/** Phase 4 agents (docs/agentic-plan.md §4.8, §4.9). */
+export function registerPhase4Agents(): void {
+  registerAgent({
+    type: "offer",
+    name: "Offer agent",
+    version: "1.0.0",
+    owner: "hr_head",
+    responsibility:
+      "Turns a hiring decision into a draft offer inside the approved band, with its letter and an approval brief, and walks it through HR head and CBO approval.",
+    mustNever: [
+      "Approve or release an offer",
+      "Offer outside the requisition's approved band without a person's explicit go-ahead",
+      "Change an offer after it has been submitted for approval",
+    ],
+    scope: {
+      reads: [
+        "candidate compensation (current, expected, notice)",
+        "the requisition's band and budget",
+        "the recorded hiring decision",
+        "the organisation's recent offers for the same role",
+        "live market pay research",
+      ],
+      writes: [
+        "draft offers",
+        "offer letters on draft offers",
+        "submission into the approval chain",
+      ],
+      external: [],
+    },
+    gates: ["general"],
+    riskTier: "high",
+    evals: ["offer: drafts in band, generates the letter and routes it to the HR head"],
+    feature: "agent_offer",
+    maxSteps: 14,
+    tools: [
+      "get_offer_context",
+      "research_compensation",
+      "draft_offer",
+      "generate_offer_letter",
+      "submit_offer_for_approval",
+    ],
+    system: [
+      "You are the offer agent. You turn a hiring decision into an offer that people approve.",
+      "1. get_offer_context. Only continue if the hiring decision says SELECT and there is no active offer.",
+      "2. Propose a CTC inside the requisition's band: anchor on the candidate's expected CTC, the internal parity median and the band midpoint; use research_compensation if the band is missing. Never exceed the band — ask_human instead.",
+      "3. draft_offer (joining date: notice period from today, rounded to the next Monday, if known).",
+      "4. generate_offer_letter, then submit_offer_for_approval.",
+      "5. request_approval with subject {type: 'offer', id: <offerId>} and a brief: CTC and where it sits in the band, internal parity, the candidate's expectation and hike, risks. When the HR head approves, request the CBO's approval the same way.",
+      "If an approval is declined, stop and summarise the reason; do not change the offer yourself.",
+    ].join("\n"),
+  });
+
+  registerAgent({
+    type: "onboarding",
+    name: "Pre-onboarding & release agent",
+    version: "1.0.0",
+    owner: "hr_head",
+    responsibility:
+      "Collects and cross-checks the pre-onboarding documents for an approved offer, asks HR to validate them, and asks the HR head to release the offer once everything is verified.",
+    mustNever: [
+      "Mark a document verified or rejected itself",
+      "Release an offer",
+      "Request documents beyond the organisation's document catalogue",
+    ],
+    scope: {
+      reads: [
+        "pre-onboarding documents and what was extracted from them",
+        "the offer and compensation evidence",
+      ],
+      writes: [],
+      external: ["document request emails to the candidate"],
+    },
+    gates: ["general"],
+    riskTier: "high",
+    evals: ["onboarding: requests missing documents, then asks HR to validate"],
+    feature: "agent_onboarding",
+    maxSteps: 14,
+    tools: ["onboarding_status", "compensation_cross_check", "request_documents"],
+    system: [
+      "You are the pre-onboarding agent for one approved offer.",
+      "1. onboarding_status.",
+      "2. If required documents are missing and you have not asked in this run, request_documents for exactly the missing types.",
+      "3. For documents received and pending review: compensation_cross_check, then request_approval with subject {type: 'document_validation', applicationId, documentIds} addressed to hr_head. In the summary, list for each document what it shows and any conflict with the candidate's declared details or the offer.",
+      "4. When every required document is verified, request_approval with subject {type: 'offer_release', offerId} addressed to hr_head.",
+      "Finish with what is still missing, what is waiting for HR, or that the release was requested.",
     ].join("\n"),
   });
 }

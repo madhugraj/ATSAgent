@@ -497,6 +497,16 @@ export async function storeOnboardingDocument(input: {
     })
     .returning({ id: onboardingDocuments.id });
   if (!row) throw new Error("The document could not be filed.");
+  // Tell the orchestrator: a switched-on Pre-onboarding agent re-checks readiness.
+  const { emitAgentEvent } = await import("../server/agents/events");
+  await emitAgentEvent({
+    orgId: input.orgId,
+    type: "onboarding.document_received",
+    subjectType: "application",
+    subjectId: input.applicationId,
+    actorUserId: null,
+    payload: { documentId: row.id, extractionStatus: read.status },
+  });
   return { id: row.id, extractionStatus: read.status, note: read.note };
 }
 

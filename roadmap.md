@@ -1,5 +1,16 @@
 # Roadmap
 
+## Agentic platform — Phase 4: offer → pre-onboarding → release (2026-10-06)
+
+- [x] Shared cores: `createOfferCore` (agents start at `draft`), `advanceOfferCore` (emits `offer.status_changed`; agent actions marked `via: "agent"` in the trail), `generateOfferLetterCore`, `reviewOnboardingDocCore`; a `onboarding.document_received` event when documents are filed
+- [x] Offer agent — reads the candidate's compensation, the requisition band, the recorded hiring decision and internal parity (same role, last 12 months); drafts the offer **inside the approved band** (outside the band it must ask a person), generates the letter, submits it, and requests HR head then CBO approval with a brief
+- [x] Pre-onboarding & release agent — readiness and extracted documents, compensation cross-check, document request email to the candidate (pre-approvable; catalogue types only), HR validation request, and the release request once every required document is verified
+- [x] Inbox gates: offer approval (HR head → CBO, performed as the decider), document validation (approve verifies, decline rejects with the reason the candidate sees), offer release (HR head; refused until pre-onboarding is complete; moves the candidate to offer released); decisions on the Offers page close matching inbox requests
+- [x] Orchestrator: hiring decision → Offer agent; offer approved → Pre-onboarding agent; a document arriving after approval → Pre-onboarding agent
+- [x] New candidate email: pre-onboarding document request (offer email toggle)
+- [x] Human-in-the-loop contracts changed again, so every existing agent moved one version under change control; lock covers 11 agents
+- [x] `scripts/agent-phase4.test.ts` (8 tests) and real-agent evals for both new agents in CI
+
 ## Agentic platform — observability and health (2026-10-06)
 
 - [x] Agent health engine (`src/server/agents/health.server.ts`, migration `0027`): 11 rules across harness (stuck runs, failure bursts), human-in-the-loop (requests past the 48 h SLA, serious after 120 h; high decline rate), tools (error rate), AI skills (error rate, p95 latency), budget (paused), definition (churn under running work), audit (write / external action without its audit entry) and orchestrator (failed or stale lifecycle events); evaluated every 5 minutes by the scheduler; issues open, re-see, escalate and auto-resolve; opened / resolved / acknowledged are audited
@@ -8,6 +19,7 @@
 - [x] Agent observability page (Governance → Agent observability): scheduler status, 7-day KPIs, detected issues with the rule that fired and its plain-language condition, and a panel per agent with every element's status and metrics (identity & definition, harness, human-in-the-loop, tools, AI skills, evals, budget, audit, orchestration), a 14-day runs chart and busiest tools
 - [x] Fix: `candidate_notes.org_id` now cascades on organisation delete (migration `0028`) — deleting an organisation with notes failed, including platform tenant deletion
 - [x] `scripts/agent-health.test.ts` (8 tests) in CI; `scripts/seed-agent-demo.ts` seeds observability activity locally
+- [x] Agent detail drawer — click an agent (or any element on its card): identity & settings, every assigned tool with its risk, input contract, 7-day usage and last error, AI skills with the tools that use them, the harness limits / autonomy matrix / human-in-the-loop tools / instructions and recent runs, open and decided human requests, evals, audit events, and open and resolved issues
 
 ## Agentic platform — Phase 3: interviews → evaluation (2026-10-06)
 

@@ -30,7 +30,13 @@ export const HITL_TOOLS = {
       assignee_role: z.enum(ROLES),
       subject: z
         .union([
-          z.object({ type: z.enum(["requisition", "jd"]), id: z.string().uuid() }),
+          z.object({ type: z.enum(["requisition", "jd", "offer"]), id: z.string().uuid() }),
+          z.object({ type: z.literal("offer_release"), offerId: z.string().uuid() }),
+          z.object({
+            type: z.literal("document_validation"),
+            applicationId: z.string().uuid(),
+            documentIds: z.array(z.string().uuid()).min(1).max(20),
+          }),
           z.object({
             type: z.literal("hiring_decision"),
             applicationId: z.string().uuid(),
@@ -52,7 +58,7 @@ export const HITL_TOOLS = {
         ])
         .optional()
         .describe(
-          "What the approval is for. A requisition or JD version: approving or declining in the inbox performs the real approval step, and the approver role comes from where the item is in its chain. A rejection batch: the listed candidates are rejected with their reasons only if the person approves.",
+          "What the approval is for. An offer, requisition or JD version: approving or declining in the inbox performs the real approval step, and the approver role comes from where the item is in its chain. A rejection batch: the listed candidates are rejected with their reasons only if the person approves.",
         ),
     }),
   },

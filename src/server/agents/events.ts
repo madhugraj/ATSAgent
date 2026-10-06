@@ -15,12 +15,14 @@ export type AgentEventType =
   | "application.shortlisted"
   | "application.advanced"
   | "scorecard.submitted"
-  | "hiring.selected";
+  | "hiring.selected"
+  | "offer.status_changed"
+  | "onboarding.document_received";
 
 export async function emitAgentEvent(e: {
   orgId: string;
   type: AgentEventType;
-  subjectType: "requisition" | "jd" | "application";
+  subjectType: "requisition" | "jd" | "application" | "offer";
   subjectId: string;
   actorUserId: string | null;
   payload?: Record<string, unknown>;

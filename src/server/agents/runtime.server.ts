@@ -40,6 +40,8 @@ import {
   applications,
   candidates,
   jobDescriptions,
+  offers,
+  onboardingDocuments,
   requisitions,
   type AgentTaskKind,
   type AgentType,
@@ -65,6 +67,18 @@ const TURNS_PER_TICK = 8;
 const CONCURRENCY = 2;
 const PREVIEW_CHARS = 600;
 
+/** The harness limits every run executes under (shown in Agent observability). */
+export const HARNESS_LIMITS = {
+  leaseMinutes: LEASE_MINUTES,
+  maxAttempts: MAX_ATTEMPTS,
+  turnsPerTick: TURNS_PER_TICK,
+  concurrency: CONCURRENCY,
+  /** agent_runs.max_tokens default (per run). */
+  maxTokensPerRun: 200_000,
+  /** Budget-paused runs are re-checked after this many minutes. */
+  budgetRecheckMinutes: 60,
+} as const;
+
 type AgentRun = typeof agentRuns.$inferSelect;
 type PendingCall = { taskId: string; call: AgentToolCall };
 
@@ -72,7 +86,7 @@ import { HITL_TOOLS, isHitl, type HitlName } from "./hitl";
 
 /* --------------------------------------------- gates tied to real records */
 
-type RecordSubject = { type: "requisition" | "jd"; id: string; expects?: string };
+type RecordSubject = { type: "requisition" | "jd" | "offer"; id: string; expects?: string };
 type RejectionSubject = {
   type: "rejection";
   items: { applicationId: string; reason: string; expects?: string }[];
@@ -84,7 +98,27 @@ type HiringDecisionSubject = {
   rationale: string;
   expects?: string;
 };
-type GateSubject = RecordSubject | RejectionSubject | HiringDecisionSubject;
+type OfferReleaseSubject = { type: "offer_release"; offerId: string; expects?: string };
+type DocumentValidationSubject = {
+  type: "document_validation";
+  applicationId: string;
+  documentIds: string[];
+};
+type GateSubject =
+  | RecordSubject
+  | RejectionSubject
+  | HiringDecisionSubject
+  | OfferReleaseSubject
+  | DocumentValidationSubject;
+
+const OFFER_APPROVER: Record<string, AppRole> = {
+  pending_hr: "hr_head",
+  pending_cbo: "president_cbo",
+};
+const OFFER_NEXT: Record<string, "pending_cbo" | "approved"> = {
+  pending_hr: "pending_cbo",
+  pending_cbo: "approved",
+};
 
 const DECISION_STAGES = new Set(["l1", "l2", "l3", "on_hold", "reserve", "offer_pending"]);
 
@@ -102,6 +136,77 @@ type GateInfo = {
 };
 
 async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | { error: string }> {
+  if (subject.type === "offer" || subject.type === "offer_release") {
+    const offerId = "offerId" in subject ? subject.offerId : subject.id;
+    const [o] = await db
+      .select({
+        status: offers.status,
+        applicationId: offers.applicationId,
+        ctc: offers.offeredCtc,
+        name: candidates.fullName,
+        title: requisitions.title,
+      })
+      .from(offers)
+      .innerJoin(applications, eq(applications.id, offers.applicationId))
+      .innerJoin(candidates, eq(candidates.id, applications.candidateId))
+      .innerJoin(requisitions, eq(requisitions.id, applications.requisitionId))
+      .where(and(eq(offers.id, offerId), eq(offers.orgId, orgId)))
+      .limit(1);
+    if (!o) return { error: "Offer not found." };
+    if (subject.type === "offer") {
+      const role = OFFER_APPROVER[o.status];
+      if (!role) return { error: `The offer is ${o.status}, not waiting for an approval.` };
+      return {
+        role,
+        status: o.status,
+        detail: `Offer for ${o.name} (${o.title}): ${Number(o.ctc).toLocaleString()} CTC — ${o.status}.`,
+      };
+    }
+    if (o.status !== "approved")
+      return { error: `The offer is ${o.status}; only approved offers are released.` };
+    const { readinessFor, docTypeLabel } = await import("@/lib/onboarding.server");
+    const ready = await readinessFor(orgId, o.applicationId);
+    if (!ready.ready) {
+      return {
+        error: `Pre-onboarding is incomplete — still missing verified: ${ready.missing.map(docTypeLabel).join(", ")}.`,
+      };
+    }
+    return {
+      role: "hr_head",
+      status: o.status,
+      detail: `Release the approved offer to ${o.name} (${o.title}). All required pre-onboarding documents are verified.\n\nApprove to release the offer letter; decline to hold it.`,
+      subject: { ...subject, expects: o.status },
+    };
+  }
+  if (subject.type === "document_validation") {
+    const docs = await db
+      .select({
+        id: onboardingDocuments.id,
+        docType: onboardingDocuments.docType,
+        fileName: onboardingDocuments.fileName,
+        status: onboardingDocuments.status,
+      })
+      .from(onboardingDocuments)
+      .where(
+        and(
+          inArray(onboardingDocuments.id, subject.documentIds),
+          eq(onboardingDocuments.orgId, orgId),
+          eq(onboardingDocuments.applicationId, subject.applicationId),
+        ),
+      );
+    if (docs.length !== new Set(subject.documentIds).size) {
+      return { error: "Some documents were not found for this application." };
+    }
+    const notPending = docs.filter((d) => d.status !== "pending");
+    if (notPending.length)
+      return { error: `Already reviewed: ${notPending.map((d) => d.fileName).join(", ")}` };
+    const { docTypeLabel } = await import("@/lib/onboarding.server");
+    return {
+      role: "hr_head",
+      status: "pending",
+      detail: `Documents to validate (${docs.length}):\n${docs.map((d) => `• ${docTypeLabel(d.docType)} — ${d.fileName}`).join("\n")}\n\nApprove to mark them verified; decline to reject them (give the reason the candidate will see).`,
+    };
+  }
   if (subject.type === "hiring_decision") {
     const [row] = await db
       .select({
@@ -203,6 +308,55 @@ async function performGate(
   const org = await activeOrgOf(userId);
   if (!org || org.orgId !== orgId) throw new Error("You are not a member of this organisation.");
   const actor = { orgId, userId, memberEmail: org.memberEmail };
+  if (subject.type === "offer" || subject.type === "offer_release") {
+    if (decision.status !== "approved") return; // declining leaves the offer where it is
+    const offerId = "offerId" in subject ? subject.offerId : subject.id;
+    const [o] = await db
+      .select({ status: offers.status })
+      .from(offers)
+      .where(and(eq(offers.id, offerId), eq(offers.orgId, orgId)))
+      .limit(1);
+    if (!o) throw new Error("Offer not found.");
+    if (subject.expects && o.status !== subject.expects) {
+      throw new Error("This offer has already moved on; refresh to see its current state.");
+    }
+    const { advanceOfferCore } = await import("@/lib/offers.functions");
+    if (subject.type === "offer_release") {
+      await advanceOfferCore(actor, {
+        id: offerId,
+        status: "released",
+        applicationStage: "offer_released",
+      });
+      return;
+    }
+    const next = OFFER_NEXT[o.status];
+    if (!next) throw new Error(`The offer is ${o.status}, not waiting for an approval.`);
+    await advanceOfferCore(actor, { id: offerId, status: next });
+    return;
+  }
+  if (subject.type === "document_validation") {
+    const { reviewOnboardingDocCore } = await import("@/lib/onboarding.functions");
+    const note =
+      decision.status === "approved"
+        ? (decision.comment ?? null)
+        : decision.status === "rejected"
+          ? decision.reason?.trim() || "Not accepted at HR validation — please resend a clear copy."
+          : null;
+    for (const id of subject.documentIds) {
+      const [d] = await db
+        .select({ status: onboardingDocuments.status })
+        .from(onboardingDocuments)
+        .where(and(eq(onboardingDocuments.id, id), eq(onboardingDocuments.orgId, orgId)))
+        .limit(1);
+      if (!d || d.status !== "pending") continue;
+      await reviewOnboardingDocCore(actor, {
+        id,
+        decision: decision.status === "approved" ? "verified" : "rejected",
+        note,
+      });
+    }
+    return;
+  }
   if (subject.type === "hiring_decision") {
     if (decision.status !== "approved") return; // declining changes nothing
     const [app] = await db
@@ -298,7 +452,7 @@ async function performGate(
  */
 export async function syncGateTasks(
   orgId: string,
-  subject: { type: "requisition" | "jd"; id: string },
+  subject: { type: "requisition" | "jd" | "offer"; id: string },
   decidedBy: string | null,
   /** The status the event moved the record away from; only gates waiting on it close. */
   fromStatus: string,
@@ -319,21 +473,29 @@ export async function syncGateTasks(
     const expects = (t.proposedAction as { args?: { subject?: RecordSubject } } | null)?.args
       ?.subject?.expects;
     const current =
-      subject.type === "requisition"
+      subject.type === "offer"
         ? (
             await db
-              .select({ status: requisitions.status })
-              .from(requisitions)
-              .where(eq(requisitions.id, subject.id))
+              .select({ status: offers.status })
+              .from(offers)
+              .where(eq(offers.id, subject.id))
               .limit(1)
           )[0]?.status
-        : (
-            await db
-              .select({ status: jobDescriptions.status })
-              .from(jobDescriptions)
-              .where(eq(jobDescriptions.id, subject.id))
-              .limit(1)
-          )[0]?.status;
+        : subject.type === "requisition"
+          ? (
+              await db
+                .select({ status: requisitions.status })
+                .from(requisitions)
+                .where(eq(requisitions.id, subject.id))
+                .limit(1)
+            )[0]?.status
+          : (
+              await db
+                .select({ status: jobDescriptions.status })
+                .from(jobDescriptions)
+                .where(eq(jobDescriptions.id, subject.id))
+                .limit(1)
+            )[0]?.status;
     if (expects !== fromStatus || !current || current === expects) continue;
     const declined = current === "rejected" || current === "changes_requested";
     const now = new Date();

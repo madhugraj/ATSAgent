@@ -280,6 +280,55 @@ export const reextractOnboardingDoc = createServerFn({ method: "POST" })
  * HR/TA validation decision. Recruiters and HR heads may validate (owners pass);
  * the decision, the reviewer and the note are recorded and audited.
  */
+/** Shared by the server function and the agents (acting member in `actor`). */
+export async function reviewOnboardingDocCore(
+  actor: { orgId: string; userId: string; memberEmail: string },
+  data: {
+    id: string;
+    decision: "verified" | "rejected" | "pending";
+    note?: string | null | undefined;
+  },
+) {
+  await assertRole(
+    actor.userId,
+    actor.orgId,
+    ["recruiter", "hr_head"],
+    "Only TA or HR can validate pre-onboarding documents.",
+  );
+  const [row] = await db
+    .select({ id: onboardingDocuments.id, docType: onboardingDocuments.docType })
+    .from(onboardingDocuments)
+    .where(and(eq(onboardingDocuments.id, data.id), eq(onboardingDocuments.orgId, actor.orgId)))
+    .limit(1);
+  if (!row) throw new Error("That document is no longer here.");
+  if (data.decision === "rejected" && !(data.note ?? "").trim()) {
+    throw new Error(
+      "Say why the document is rejected — the candidate has to be told what to resend.",
+    );
+  }
+
+  await db
+    .update(onboardingDocuments)
+    .set({
+      status: data.decision,
+      reviewNote: data.note?.trim() || null,
+      reviewedBy: data.decision === "pending" ? null : actor.userId,
+      reviewedAt: data.decision === "pending" ? null : new Date(),
+    })
+    .where(and(eq(onboardingDocuments.id, row.id), eq(onboardingDocuments.orgId, actor.orgId)));
+
+  await writeAudit({
+    actor: actor.memberEmail,
+    actorUserId: actor.userId,
+    orgId: actor.orgId,
+    action: `onboarding_document_${data.decision}`,
+    entityType: "onboarding_document",
+    entityId: row.id,
+    detail: { docType: row.docType, note: data.note?.trim() || null },
+  });
+  return { ok: true as const };
+}
+
 export const reviewOnboardingDoc = createServerFn({ method: "POST" })
   .middleware([requireOrg])
   .inputValidator((data: unknown) =>
@@ -291,46 +340,12 @@ export const reviewOnboardingDoc = createServerFn({ method: "POST" })
       })
       .parse(data),
   )
-  .handler(async ({ data, context }) => {
-    await assertRole(
-      context.userId,
-      context.orgId,
-      ["recruiter", "hr_head"],
-      "Only TA or HR can validate pre-onboarding documents.",
-    );
-    const [row] = await db
-      .select({ id: onboardingDocuments.id, docType: onboardingDocuments.docType })
-      .from(onboardingDocuments)
-      .where(and(eq(onboardingDocuments.id, data.id), eq(onboardingDocuments.orgId, context.orgId)))
-      .limit(1);
-    if (!row) throw new Error("That document is no longer here.");
-    if (data.decision === "rejected" && !(data.note ?? "").trim()) {
-      throw new Error(
-        "Say why the document is rejected — the candidate has to be told what to resend.",
-      );
-    }
-
-    await db
-      .update(onboardingDocuments)
-      .set({
-        status: data.decision,
-        reviewNote: data.note?.trim() || null,
-        reviewedBy: data.decision === "pending" ? null : context.userId,
-        reviewedAt: data.decision === "pending" ? null : new Date(),
-      })
-      .where(and(eq(onboardingDocuments.id, row.id), eq(onboardingDocuments.orgId, context.orgId)));
-
-    await writeAudit({
-      actor: context.memberEmail,
-      actorUserId: context.userId,
-      orgId: context.orgId,
-      action: `onboarding_document_${data.decision}`,
-      entityType: "onboarding_document",
-      entityId: row.id,
-      detail: { docType: row.docType, note: data.note?.trim() || null },
-    });
-    return { ok: true as const };
-  });
+  .handler(async ({ data, context }) =>
+    reviewOnboardingDocCore(
+      { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
+      data,
+    ),
+  );
 
 /** Delete a wrongly filed document and its stored file. */
 export const deleteOnboardingDoc = createServerFn({ method: "POST" })
