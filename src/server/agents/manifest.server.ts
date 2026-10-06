@@ -10,6 +10,7 @@ import { createHash } from "node:crypto";
 import { INJECTION_RULES, toolParameters } from "@/lib/ai-gateway.server";
 import { db } from "../db";
 import { agentDefinitions } from "@db/schema";
+import { HITL_TOOLS } from "./hitl";
 import { getTool, skillsOf, type AgentDefinition } from "./registry";
 
 /** Shared operating rules prepended to every agent (part of each hash). */
@@ -68,7 +69,11 @@ export function canonicalManifest(def: AgentDefinition): Record<string, unknown>
     harness: {
       injectionRules: INJECTION_RULES,
       runtimeRules: RUNTIME_RULES,
-      humanTools: ["ask_human", "request_approval", "handoff"],
+      humanTools: Object.entries(HITL_TOOLS).map(([name, t]) => ({
+        name,
+        description: t.description,
+        input: toolParameters(t.input),
+      })),
     },
   };
 }

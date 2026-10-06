@@ -10,7 +10,7 @@ export function registerPhase1Agents(): void {
   registerAgent({
     type: "copilot",
     name: "Copilot",
-    version: "1.0.0",
+    version: "1.1.0",
     owner: "hr_head",
     responsibility:
       "Turns a person's request into work for the specialist agents and starts them only after the person confirms.",
@@ -42,7 +42,7 @@ export function registerPhase1Agents(): void {
   registerAgent({
     type: "requisition",
     name: "Requisition agent",
-    version: "1.0.0",
+    version: "1.1.0",
     owner: "hr_head",
     responsibility:
       "Turns a hiring need into a complete, evidence-backed draft requisition and walks it through the DH → HR → CBO approval chain.",
@@ -97,7 +97,7 @@ export function registerPhase1Agents(): void {
   registerAgent({
     type: "jd",
     name: "JD agent",
-    version: "1.0.0",
+    version: "1.1.0",
     owner: "department_head",
     responsibility:
       "Drafts and revises the job description for an approved requisition and gets it reviewed by the department head.",
@@ -128,7 +128,7 @@ export function registerPhase1Agents(): void {
   registerAgent({
     type: "publishing",
     name: "Publishing agent",
-    version: "1.0.0",
+    version: "1.1.0",
     owner: "hr_head",
     responsibility:
       "Makes an approved requisition visible: internal job board first, then reviewed external job-board posts.",
@@ -170,7 +170,7 @@ export function registerPhase2Agents(): void {
   registerAgent({
     type: "intake",
     name: "Intake & matching agent",
-    version: "1.0.0",
+    version: "1.1.0",
     owner: "hr_head",
     responsibility:
       "Keeps an approved requisition's pipeline scored, reviewed and full; proposes rejections for a person to decide.",
@@ -221,7 +221,7 @@ export function registerPhase2Agents(): void {
   registerAgent({
     type: "screening",
     name: "Screening agent",
-    version: "1.0.0",
+    version: "1.1.0",
     owner: "hr_head",
     responsibility:
       "Moves shortlisted candidates through screening: kits, assessments, reminders and proceed / hold notes.",
@@ -262,7 +262,7 @@ export function registerPhase2Agents(): void {
   registerAgent({
     type: "followup",
     name: "Follow-up agent",
-    version: "1.0.0",
+    version: "1.1.0",
     owner: "hr_head",
     responsibility: "Once a day, finds work that is overdue and reminds the right person.",
     mustNever: [
@@ -284,15 +284,106 @@ export function registerPhase2Agents(): void {
     evals: ["followup: reminds the approver of an overdue requisition"],
     feature: "agent_followup",
     maxSteps: 16,
-    tools: ["list_overdue", "list_members", "remind_member", "remind_assessment"],
+    tools: [
+      "list_overdue",
+      "list_pending_scorecards",
+      "list_members",
+      "remind_member",
+      "remind_assessment",
+    ],
     system: [
       "You are the follow-up agent. Once a day you make sure nothing is stuck.",
       "1. list_overdue.",
       "2. For each requisition or JD waiting on an approver: list_members, pick the member(s) holding the waiting role, and remind_member with a one-line heading naming the requisition and how long it has waited, and the path /requisitions/<requisitionId>.",
       "3. For agent requests nobody answered: remind the assignee (or the role holders) with path /agents.",
       "4. For assessments not completed: remind_assessment only if the application is known; otherwise skip.",
+      "5. list_pending_scorecards; remind each interviewer who is a member (path /interviews/mine).",
       "Never remind the same person about the same item twice in one run. Keep messages short, specific and polite.",
       "Finish with who was reminded about what.",
+    ].join("\n"),
+  });
+}
+
+/** Phase 3 agents (docs/agentic-plan.md §4.6, §4.7). */
+export function registerPhase3Agents(): void {
+  registerAgent({
+    type: "interview",
+    name: "Interview coordinator",
+    version: "1.0.0",
+    owner: "hr_head",
+    responsibility:
+      "Books the next interview round for candidates who advanced: panel from organisation members, a proposed slot, a meeting link, and the candidate's invite.",
+    mustNever: [
+      "Invite an interviewer who is not an active member of the organisation",
+      "Book a slot without a person's review unless the interview invitation is pre-approved",
+      "Change a candidate's stage except by booking their next round",
+    ],
+    scope: {
+      reads: [
+        "applications and their interview rounds",
+        "members and roles",
+        "meeting integrations",
+      ],
+      writes: ["interview rounds", "application stage set to the booked round"],
+      external: [
+        "candidate interview invitations with calendar file",
+        "meeting links (Zoom / Meet / Teams)",
+      ],
+    },
+    gates: ["general"],
+    riskTier: "medium",
+    evals: ["interview: books the next round with a member panel after review"],
+    feature: "agent_interview",
+    maxSteps: 16,
+    tools: [
+      "get_requisition",
+      "list_applications",
+      "get_interview_plan",
+      "list_panel_options",
+      "schedule_interview",
+    ],
+    system: [
+      "You are the interview coordinator for one requisition. You book the next round for candidates who advanced.",
+      "1. list_applications for stages l1, l2 and l3; for each, get_interview_plan.",
+      "2. Only where nextLevelToSchedule is set: list_panel_options and pick the member who has interviewed for this role before, or a hiring manager / department head. Never invent an interviewer.",
+      "3. schedule_interview: a weekday 10:00–17:00 slot in the organisation's time zone, at least one working day ahead, 60 minutes, online; add a meeting provider only if you were told one is connected. A person reviews the booking.",
+      "4. If a booking is declined, propose one alternative slot, then hand off.",
+      "Finish with a list: candidate, level, interviewer, time.",
+    ].join("\n"),
+  });
+
+  registerAgent({
+    type: "evaluation",
+    name: "Evaluation agent",
+    version: "1.0.0",
+    owner: "hiring_manager",
+    responsibility:
+      "After interview rounds, writes the debrief across all evidence, surfaces disagreements and fairness signals, and asks the hiring manager for the hiring decision.",
+    mustNever: [
+      "Make the hiring decision — it recommends, the hiring manager decides",
+      "Base a recommendation on anything but job-relevant evidence in the scorecards, screening and assessment",
+    ],
+    scope: {
+      reads: [
+        "the candidate's match, screening, assessment and every scorecard",
+        "organisation-wide selection parity",
+      ],
+      writes: ["candidate notes (debrief)"],
+      external: [],
+    },
+    gates: ["hiring_decision", "general"],
+    riskTier: "high",
+    evals: ["evaluation: debriefs and asks the hiring manager to decide"],
+    feature: "agent_evaluation",
+    maxSteps: 14,
+    tools: ["get_candidate_dossier", "selection_parity", "add_candidate_note", "list_applications"],
+    system: [
+      "You are the evaluation agent. You turn interview evidence into a clear debrief and a recommendation; the hiring manager decides.",
+      "1. get_candidate_dossier for the candidate named in the goal.",
+      "2. Write a debrief with add_candidate_note: strengths and gaps per competency, where interviewers disagree (ratings two or more apart, or opposite verdicts), and open questions. Cite scores.",
+      "3. selection_parity; if any source breaches four-fifths, say so in the debrief as a pipeline-level signal (never as a reason about this candidate).",
+      "4. request_approval with subject {type: 'hiring_decision', applicationId, recommendation: select | hold | reject, rationale} addressed to hiring_manager. The rationale must rest on job-relevant evidence only.",
+      "Finish with the recommendation and the person who decides.",
     ].join("\n"),
   });
 }

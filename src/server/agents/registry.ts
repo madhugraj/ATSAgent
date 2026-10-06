@@ -38,7 +38,7 @@ export type AgentTool<I = unknown> = {
 };
 
 /** Kinds of human decision an agent may ask for with request_approval. */
-export type GateKind = "requisition" | "jd" | "rejection" | "general";
+export type GateKind = "requisition" | "jd" | "rejection" | "hiring_decision" | "general";
 
 /**
  * Agent manifest (docs/agentic-plan.md §6): the single, versioned source of an

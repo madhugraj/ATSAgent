@@ -1,30 +1,38 @@
 {
   "copilot": {
+    "version": "1.1.0",
+    "hash": "4933ac55ce77f9bed3ff53c12f68e64bc2128fb0915b2b300c72956b2b295454"
+  },
+  "evaluation": {
     "version": "1.0.0",
-    "hash": "b7ce498f2fe3050385d13e33c96dece1f4a61ef51aa07defa9c43f30634cfcdb"
+    "hash": "07dbe274b0dbc0b5bb1e6eabc8b318745178278b1dc85db2b5c551e62afa5ea0"
   },
   "followup": {
-    "version": "1.0.0",
-    "hash": "21af815ef05da28fa8f60f05d1c7d04d9942912f220e3fa8540070d8108dda9e"
+    "version": "1.1.0",
+    "hash": "81fcaaeb9658464e36479b25dec10728d2b4a7dbde154c116ed913ee0e5c11a3"
   },
   "intake": {
+    "version": "1.1.0",
+    "hash": "a557166f1e3f8dcf5d4048ddc738ce29f4ad365b3a2381b79b50ef9ad5d3a878"
+  },
+  "interview": {
     "version": "1.0.0",
-    "hash": "57ec1abd39ff6e8eb60f546913b8ea66d23c60a128ba140a9ad13b88f2659c90"
+    "hash": "f85aed1c8c06b689c5c3ef132e43eec285dd186ee8cf27c379f3ede857a4eaf3"
   },
   "jd": {
-    "version": "1.0.0",
-    "hash": "ddcc5e1516e77ad9beaf2ee47340bde70db85ef1d5b9dc36d9e2c5bc68d2665f"
+    "version": "1.1.0",
+    "hash": "43048c459e030bbf8e348d7274e34424b783779de52e125eed1def5bca0d5ab1"
   },
   "publishing": {
-    "version": "1.0.0",
-    "hash": "15aefa374fc9e443c5fb7323b806e4f9964c622fb79494284b0493cd0339785e"
+    "version": "1.1.0",
+    "hash": "ac87693f339c444f3da37adc0a5f99080f9947b2aea81dd036b2da4a244e9eda"
   },
   "requisition": {
-    "version": "1.0.0",
-    "hash": "f9dd0c1f4de757ed7a9aa47208b78647d5ce51f643487b630915deba6c975912"
+    "version": "1.1.0",
+    "hash": "f398493dbffaf21f54f1f7706c25c88a9cc17458b3eb7a0f19380f366976016f"
   },
   "screening": {
-    "version": "1.0.0",
-    "hash": "56cdf0b429ee6025184dc83d5a78dbbc2e2bac89a2a83a45f443e482660770e7"
+    "version": "1.1.0",
+    "hash": "27ddcf2fb2a1abf5a5dccaea796db9eca5b9b72bc180d25387fccbe566af545a"
   }
 }

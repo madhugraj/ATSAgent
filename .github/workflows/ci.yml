@@ -63,5 +63,8 @@ jobs:
       - name: Phase 2 agents (intake, screening, follow-up)
         run: bun test scripts/agent-phase2.test.ts
 
+      - name: Phase 3 agents (interview coordinator, evaluation, hiring decision)
+        run: bun test scripts/agent-phase3.test.ts
+
       - name: Agent governance (change control, traceability, budget, audit)
         run: bun test scripts/agent-governance.test.ts

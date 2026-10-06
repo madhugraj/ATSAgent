@@ -141,18 +141,26 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
   const principal = req.createdBy ?? e.actorUserId;
   if (!principal) return { started, synced };
 
-  const dispatch = async (agent: "jd" | "publishing" | "screening", goal: string) => {
+  const dispatch = async (
+    agent: "jd" | "publishing" | "screening" | "interview" | "evaluation",
+    goal: string,
+    /** Per-candidate work (evaluation) de-duplicates on the application instead. */
+    subject: { type: "requisition" | "application"; id: string } = {
+      type: "requisition",
+      id: req.id,
+    },
+  ) => {
     if (!getAgent(agent)) return;
     const policy = await loadPolicy(e.orgId, agent);
     if (!policy.enabled) return;
-    if (await activeRunFor(e.orgId, agent, req.id)) return;
+    if (await activeRunFor(e.orgId, agent, subject.id)) return;
     await startRun({
       orgId: e.orgId,
       agentType: agent,
       principalUserId: principal,
       goal: `${goal}\n\nRequisition id: ${req.id}`,
-      subjectType: "requisition",
-      subjectId: req.id,
+      subjectType: subject.type,
+      subjectId: subject.id,
       triggerEventId: e.id,
     });
     started++;
@@ -183,6 +191,23 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
     await dispatch(
       "screening",
       `${ids.length} candidate(s) were shortlisted for ${req.code} "${req.title}". Prepare their screening kits, send assessments and summarise who should proceed.`,
+    );
+  }
+
+  if (e.type === "application.advanced") {
+    const ids = (e.payload as { applicationIds?: string[] }).applicationIds ?? [];
+    await dispatch(
+      "interview",
+      `${ids.length} candidate(s) advanced to an interview round for ${req.code} "${req.title}". Book their next rounds.`,
+    );
+  }
+
+  if (e.type === "scorecard.submitted") {
+    const p = e.payload as { applicationId?: string; level?: number; verdict?: string };
+    await dispatch(
+      "evaluation",
+      `A level ${p.level ?? "?"} scorecard (${p.verdict ?? "?"}) was submitted for ${req.code} "${req.title}". Debrief candidate application ${p.applicationId} and ask the hiring manager for the hiring decision.`,
+      p.applicationId ? { type: "application", id: p.applicationId } : undefined,
     );
   }
 

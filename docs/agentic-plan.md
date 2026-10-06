@@ -356,6 +356,10 @@ One place where agents' requests land, extending the live action inbox in
 - a rejection batch lists every candidate with a reason tied to the
   requisition's stated requirements; approving rejects them as the deciding
   person (anyone who moved meanwhile is skipped), declining rejects nobody.
+- a hiring decision goes to the hiring manager with the Evaluation agent's
+  recommendation and rationale; approving a reject or hold moves the
+  candidate as the decider, approving a select records it and hands it to
+  the offer stage, declining changes nothing.
 
 ### 5.4 Kill switches
 

@@ -78,7 +78,7 @@ export async function recordStageTransitions(inputs: RecordStageTransitionInput[
     )
     .returning({ id: stageEvents.id });
 
-  await emitShortlistEvents(inputs);
+  await emitAgentStageEvents(inputs);
   // Multi-row INSERT ... RETURNING preserves insertion order.
   const eligible = inputs
     .map((input, i) => ({ input, eventId: events[i]?.id }))
@@ -165,7 +165,7 @@ async function enqueueScreeningPrep(inputs: RecordStageTransitionInput[]): Promi
       .where(
         inArray(
           applications.id,
-          shortlisted.map((i) => i.applicationId),
+          inputs.map((i) => i.applicationId),
         ),
       );
     const candidates2 = appRows.filter((a) => a.orgId && a.requisitionId);
@@ -219,11 +219,26 @@ async function enqueueScreeningPrep(inputs: RecordStageTransitionInput[]): Promi
  * Tell the orchestrator about new shortlists (one event per requisition and
  * org), so a switched-on Screening agent can prepare screening and assessments.
  */
-async function emitShortlistEvents(inputs: RecordStageTransitionInput[]): Promise<void> {
+async function emitAgentStageEvents(inputs: RecordStageTransitionInput[]): Promise<void> {
+  const ROUNDS = ["l1", "l2", "l3"];
+  // Advanced into an interview round by a decision (not by scheduling it):
+  // the next round needs coordinating.
+  const advanced = inputs.filter(
+    (i) =>
+      ROUNDS.includes(i.toStage) && i.fromStage !== i.toStage && i.cause !== "interview_scheduled",
+  );
   const shortlisted = inputs.filter(
     (i) => i.toStage === "shortlisted" && i.fromStage !== "shortlisted",
   );
+  if (advanced.length) await emitPerRequisition(advanced, "application.advanced");
   if (!shortlisted.length) return;
+  await emitPerRequisition(shortlisted, "application.shortlisted");
+}
+
+async function emitPerRequisition(
+  inputs: RecordStageTransitionInput[],
+  type: "application.shortlisted" | "application.advanced",
+): Promise<void> {
   const apps = await db
     .select({
       id: applications.id,
@@ -234,7 +249,7 @@ async function emitShortlistEvents(inputs: RecordStageTransitionInput[]): Promis
     .where(
       inArray(
         applications.id,
-        shortlisted.map((i) => i.applicationId),
+        inputs.map((i) => i.applicationId),
       ),
     );
   const byReq = new Map<string, { orgId: string; applicationIds: string[] }>();
@@ -248,7 +263,7 @@ async function emitShortlistEvents(inputs: RecordStageTransitionInput[]): Promis
   for (const [requisitionId, e] of byReq) {
     await emitAgentEvent({
       orgId: e.orgId,
-      type: "application.shortlisted",
+      type,
       subjectType: "requisition",
       subjectId: requisitionId,
       actorUserId: null,

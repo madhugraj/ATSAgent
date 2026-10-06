@@ -12,12 +12,15 @@ export type AgentEventType =
   | "jd.submitted"
   | "jd.approved"
   | "jd.changes_requested"
-  | "application.shortlisted";
+  | "application.shortlisted"
+  | "application.advanced"
+  | "scorecard.submitted"
+  | "hiring.selected";
 
 export async function emitAgentEvent(e: {
   orgId: string;
   type: AgentEventType;
-  subjectType: "requisition" | "jd";
+  subjectType: "requisition" | "jd" | "application";
   subjectId: string;
   actorUserId: string | null;
   payload?: Record<string, unknown>;

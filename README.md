@@ -28,7 +28,7 @@ ATSIQ by Yavar AI is an enterprise recruiting intelligence platform. It combines
 - Live compensation research with cited evidence and saved organisation corrections
 - CHRO dashboard, reports, Talent Brain ontology and Return on Individual capability-to-goal planning
 - Guided first-login journey in the HR copilot, mirrored by the in-app manual
-- Hiring agents (opt-in, human-in-the-loop): Copilot, Requisition, JD, Publishing, Intake & matching, Screening and Follow-up agents with a Decisions inbox, per-organisation autonomy settings and agent activity tracing — see `docs/agentic-plan.md`
+- Hiring agents (opt-in, human-in-the-loop): Copilot, Requisition, JD, Publishing, Intake & matching, Screening, Follow-up, Interview coordinator and Evaluation agents with a Decisions inbox, per-organisation autonomy settings and agent activity tracing — see `docs/agentic-plan.md`
 - Product catalogue and organisation oversight for the platform super admin, including an AI usage console (every AI request logged per organisation, module and model with token counts and latency)
 
 ## Architecture

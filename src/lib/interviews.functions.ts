@@ -233,6 +233,25 @@ export const submitScorecard = createServerFn({ method: "POST" })
       })
       .returning({ id: evaluations.id });
     if (!evaluation) throw new Error("The scorecard could not be saved.");
+    {
+      // Tell the orchestrator: a switched-on Evaluation agent debriefs the round.
+      const [req] = await db
+        .select({ requisitionId: applications.requisitionId })
+        .from(applications)
+        .where(eq(applications.id, data.applicationId))
+        .limit(1);
+      if (req) {
+        const { emitAgentEvent } = await import("../server/agents/events");
+        await emitAgentEvent({
+          orgId: context.orgId,
+          type: "scorecard.submitted",
+          subjectType: "requisition",
+          subjectId: req.requisitionId,
+          actorUserId: context.userId,
+          payload: { applicationId: data.applicationId, level: data.level, verdict: data.verdict },
+        });
+      }
+    }
 
     if (data.interviewId) {
       await db
@@ -308,7 +327,7 @@ export const submitScorecard = createServerFn({ method: "POST" })
 
 /* ------------------------------------------------------------- scheduling */
 
-const ScheduleInput = z.object({
+export const ScheduleInput = z.object({
   applicationId: z.string().uuid(),
   level: z.number().min(1).max(3),
   interviewer: z.string().optional().nullable(),
@@ -326,213 +345,225 @@ const ScheduleInput = z.object({
 });
 
 /** Create or re-schedule a round and park the application on that interview stage. */
+/**
+ * Create or re-schedule a round, park the application on that interview stage
+ * and queue the candidate's invite. Shared by the Interviews page and the
+ * Interview coordinator agent (`actor` is the label written to stage events).
+ */
+export async function scheduleInterviewCore(
+  ctx: { orgId: string; actor: string },
+  data: z.infer<typeof ScheduleInput>,
+) {
+  const actor = ctx.actor;
+  const now = new Date();
+  const scheduledAt = new Date(data.scheduledAt);
+  if (Number.isNaN(scheduledAt.getTime())) {
+    throw new Error("Choose a valid interview date and time.");
+  }
+  const row = {
+    applicationId: data.applicationId,
+    level: data.level,
+    interviewer: data.interviewer?.trim() || null,
+    interviewerEmail: data.interviewerEmail?.trim().toLowerCase() || null,
+    scheduledAt,
+    durationMins: data.durationMins,
+    mode: data.mode,
+    teamsLink: data.meetingLink?.trim() || null,
+    agenda: data.agenda?.trim() || null,
+    status: "scheduled",
+  };
+
+  const { recordStageTransition } = await import("./stage-events.server");
+
+  const [app] = await db
+    .select({
+      id: applications.id,
+      stage: applications.stage,
+      candidateId: applications.candidateId,
+    })
+    .from(applications)
+    .where(and(eq(applications.orgId, ctx.orgId), eq(applications.id, data.applicationId)))
+    .limit(1);
+  if (!app) throw new Error("Application not found in your organisation.");
+
+  /* Candidate email is the invite address: confirm it before the round exists. */
+  let candidateEmail: string | null = null;
+  let candidateName: string | null = null;
+  {
+    const [cand] = await db
+      .select({ id: candidates.id, email: candidates.email, fullName: candidates.fullName })
+      .from(candidates)
+      .where(and(eq(candidates.orgId, ctx.orgId), eq(candidates.id, app.candidateId)))
+      .limit(1);
+    candidateEmail = cand?.email ?? null;
+    candidateName = cand?.fullName ?? null;
+    const typed = data.candidateEmail?.trim().toLowerCase() || null;
+    if (typed && typed !== (candidateEmail ?? "").toLowerCase()) {
+      await db
+        .update(candidates)
+        .set({ email: typed })
+        .where(and(eq(candidates.orgId, ctx.orgId), eq(candidates.id, app.candidateId)));
+      candidateEmail = typed;
+    }
+  }
+  if (!candidateEmail) {
+    throw new Error(
+      "This candidate has no email on file — add one before scheduling, or the invite cannot be sent.",
+    );
+  }
+
+  let rescheduled = false;
+  let interviewId: string | null = data.interviewId ?? null;
+  if (data.interviewId) {
+    const reason = data.rescheduleReason?.trim();
+    if (!reason)
+      throw new Error("Give a reason for the re-schedule — it is written to the audit trail.");
+    const [previous] = await db
+      .select({ scheduledAt: interviews.scheduledAt })
+      .from(interviews)
+      .where(and(eq(interviews.orgId, ctx.orgId), eq(interviews.id, data.interviewId)))
+      .limit(1);
+    await db
+      .update(interviews)
+      .set({ ...row, status: "rescheduled" })
+      .where(and(eq(interviews.orgId, ctx.orgId), eq(interviews.id, data.interviewId)));
+    rescheduled = true;
+
+    {
+      const wasAt = previous?.scheduledAt ? previous.scheduledAt.toISOString() : "unscheduled";
+      await recordStageTransition({
+        orgId: ctx.orgId,
+        applicationId: app.id,
+        fromStage: app.stage as Stage,
+        toStage: app.stage as Stage,
+        actor,
+        reason: `L${data.level} re-scheduled: ${reason}`,
+        note: `${wasAt} → ${scheduledAt.toISOString()}`,
+        cause: "interview_scheduled",
+      });
+    }
+  } else {
+    const [created] = await db
+      .insert(interviews)
+      .values({ ...row, orgId: ctx.orgId })
+      .returning({ id: interviews.id });
+    interviewId = created?.id ?? null;
+  }
+
+  const target = `l${data.level}` as Stage;
+  if (app.stage !== target && canMove(app.stage as Stage, target)) {
+    await db
+      .update(applications)
+      .set({ stage: target, stageReason: `L${data.level} scheduled`, lastActivityAt: now })
+      .where(and(eq(applications.orgId, ctx.orgId), eq(applications.id, app.id)));
+    await recordStageTransition({
+      orgId: ctx.orgId,
+      applicationId: app.id,
+      fromStage: app.stage as Stage,
+      toStage: target,
+      actor,
+      reason: `L${data.level} interview scheduled`,
+      cause: "interview_scheduled",
+    });
+  } else {
+    await db
+      .update(applications)
+      .set({ lastActivityAt: now })
+      .where(and(eq(applications.orgId, ctx.orgId), eq(applications.id, app.id)));
+    if (!rescheduled) {
+      await recordStageTransition({
+        orgId: ctx.orgId,
+        applicationId: app.id,
+        fromStage: app.stage as Stage,
+        toStage: app.stage as Stage,
+        actor,
+        reason: `L${data.level} interview scheduled`,
+        note: scheduledAt.toISOString(),
+        cause: "interview_scheduled",
+      });
+    }
+  }
+
+  /* Invite email with calendar attachment — best-effort, both create and
+   * reschedule. The .ics UID is the interview id so reschedules update the
+   * same calendar entry. */
+  try {
+    const { enqueueEmail, formatInOrgTZ, getOrgEmailSettings } =
+      await import("./email-outbox.server");
+    const [ctxRow] = await db
+      .select({ jobTitle: requisitions.title, orgName: organizations.name })
+      .from(applications)
+      .innerJoin(requisitions, eq(applications.requisitionId, requisitions.id))
+      .innerJoin(organizations, eq(applications.orgId, organizations.id))
+      .where(eq(applications.id, app.id))
+      .limit(1);
+    if (interviewId) {
+      const roundLabel = `L${data.level} interview`;
+      const whereText = data.meetingLink?.trim() || null;
+      const modeLabel =
+        data.mode === "online" ? "Online" : data.mode === "onsite" ? "Onsite" : "Phone";
+      const ics = buildIcs({
+        uid: `interview-${interviewId}@atsiq`,
+        title: `${roundLabel}: ${ctxRow?.jobTitle ?? "Role"}${
+          ctxRow?.orgName ? ` (${ctxRow.orgName})` : ""
+        }`,
+        description:
+          [
+            data.interviewer?.trim() ? `Interviewer: ${data.interviewer.trim()}` : null,
+            data.agenda?.trim() || null,
+          ]
+            .filter(Boolean)
+            .join("\n") || null,
+        location: whereText ?? (data.mode === "onsite" ? (ctxRow?.orgName ?? null) : null),
+        startsAt: scheduledAt.toISOString(),
+        durationMins: data.durationMins,
+        attendees: [candidateEmail],
+      });
+      const templateData: Record<string, string | undefined> = {
+        candidateName: candidateName ?? undefined,
+        orgName: ctxRow?.orgName,
+        jobTitle: ctxRow?.jobTitle,
+        roundLabel,
+        scheduledAtText: formatInOrgTZ(
+          scheduledAt,
+          (await getOrgEmailSettings(ctx.orgId)).timezone,
+        ),
+        durationMins: String(data.durationMins),
+        modeLabel,
+      };
+      if (whereText) templateData["whereText"] = whereText;
+      if (data.interviewer?.trim()) templateData["interviewerName"] = data.interviewer.trim();
+      if (data.agenda?.trim()) templateData["agenda"] = data.agenda.trim();
+      await enqueueEmail({
+        orgId: ctx.orgId,
+        kind: "interview_invite",
+        templateName: "interview_invite",
+        toEmail: candidateEmail,
+        applicationId: app.id,
+        templateData,
+        attachments: [
+          {
+            filename: `interview-l${data.level}.ics`,
+            contentBase64: Buffer.from(ics, "utf8").toString("base64"),
+            contentType: "text/calendar",
+          },
+        ],
+        idempotencyKey: `interview-invite:${interviewId}:${scheduledAt.toISOString()}`,
+      });
+    }
+  } catch {
+    /* best-effort: scheduling must succeed even if the invite cannot be queued */
+  }
+
+  return { ok: true as const, rescheduled, candidateEmail };
+}
+
 export const scheduleInterview = createServerFn({ method: "POST" })
   .middleware([requireOrg])
   .inputValidator((data: unknown) => ScheduleInput.parse(data))
-  .handler(async ({ data, context }) => {
-    const actor = actorOf(context);
-    const now = new Date();
-    const scheduledAt = new Date(data.scheduledAt);
-    if (Number.isNaN(scheduledAt.getTime())) {
-      throw new Error("Choose a valid interview date and time.");
-    }
-    const row = {
-      applicationId: data.applicationId,
-      level: data.level,
-      interviewer: data.interviewer?.trim() || null,
-      interviewerEmail: data.interviewerEmail?.trim().toLowerCase() || null,
-      scheduledAt,
-      durationMins: data.durationMins,
-      mode: data.mode,
-      teamsLink: data.meetingLink?.trim() || null,
-      agenda: data.agenda?.trim() || null,
-      status: "scheduled",
-    };
-
-    const { recordStageTransition } = await import("./stage-events.server");
-
-    const [app] = await db
-      .select({
-        id: applications.id,
-        stage: applications.stage,
-        candidateId: applications.candidateId,
-      })
-      .from(applications)
-      .where(and(eq(applications.orgId, context.orgId), eq(applications.id, data.applicationId)))
-      .limit(1);
-    if (!app) throw new Error("Application not found in your organisation.");
-
-    /* Candidate email is the invite address: confirm it before the round exists. */
-    let candidateEmail: string | null = null;
-    let candidateName: string | null = null;
-    {
-      const [cand] = await db
-        .select({ id: candidates.id, email: candidates.email, fullName: candidates.fullName })
-        .from(candidates)
-        .where(and(eq(candidates.orgId, context.orgId), eq(candidates.id, app.candidateId)))
-        .limit(1);
-      candidateEmail = cand?.email ?? null;
-      candidateName = cand?.fullName ?? null;
-      const typed = data.candidateEmail?.trim().toLowerCase() || null;
-      if (typed && typed !== (candidateEmail ?? "").toLowerCase()) {
-        await db
-          .update(candidates)
-          .set({ email: typed })
-          .where(and(eq(candidates.orgId, context.orgId), eq(candidates.id, app.candidateId)));
-        candidateEmail = typed;
-      }
-    }
-    if (!candidateEmail) {
-      throw new Error(
-        "This candidate has no email on file — add one before scheduling, or the invite cannot be sent.",
-      );
-    }
-
-    let rescheduled = false;
-    let interviewId: string | null = data.interviewId ?? null;
-    if (data.interviewId) {
-      const reason = data.rescheduleReason?.trim();
-      if (!reason)
-        throw new Error("Give a reason for the re-schedule — it is written to the audit trail.");
-      const [previous] = await db
-        .select({ scheduledAt: interviews.scheduledAt })
-        .from(interviews)
-        .where(and(eq(interviews.orgId, context.orgId), eq(interviews.id, data.interviewId)))
-        .limit(1);
-      await db
-        .update(interviews)
-        .set({ ...row, status: "rescheduled" })
-        .where(and(eq(interviews.orgId, context.orgId), eq(interviews.id, data.interviewId)));
-      rescheduled = true;
-
-      {
-        const wasAt = previous?.scheduledAt ? previous.scheduledAt.toISOString() : "unscheduled";
-        await recordStageTransition({
-          orgId: context.orgId,
-          applicationId: app.id,
-          fromStage: app.stage as Stage,
-          toStage: app.stage as Stage,
-          actor,
-          reason: `L${data.level} re-scheduled: ${reason}`,
-          note: `${wasAt} → ${scheduledAt.toISOString()}`,
-          cause: "interview_scheduled",
-        });
-      }
-    } else {
-      const [created] = await db
-        .insert(interviews)
-        .values({ ...row, orgId: context.orgId })
-        .returning({ id: interviews.id });
-      interviewId = created?.id ?? null;
-    }
-
-    const target = `l${data.level}` as Stage;
-    if (app.stage !== target && canMove(app.stage as Stage, target)) {
-      await db
-        .update(applications)
-        .set({ stage: target, stageReason: `L${data.level} scheduled`, lastActivityAt: now })
-        .where(and(eq(applications.orgId, context.orgId), eq(applications.id, app.id)));
-      await recordStageTransition({
-        orgId: context.orgId,
-        applicationId: app.id,
-        fromStage: app.stage as Stage,
-        toStage: target,
-        actor,
-        reason: `L${data.level} interview scheduled`,
-        cause: "interview_scheduled",
-      });
-    } else {
-      await db
-        .update(applications)
-        .set({ lastActivityAt: now })
-        .where(and(eq(applications.orgId, context.orgId), eq(applications.id, app.id)));
-      if (!rescheduled) {
-        await recordStageTransition({
-          orgId: context.orgId,
-          applicationId: app.id,
-          fromStage: app.stage as Stage,
-          toStage: app.stage as Stage,
-          actor,
-          reason: `L${data.level} interview scheduled`,
-          note: scheduledAt.toISOString(),
-          cause: "interview_scheduled",
-        });
-      }
-    }
-
-    /* Invite email with calendar attachment — best-effort, both create and
-     * reschedule. The .ics UID is the interview id so reschedules update the
-     * same calendar entry. */
-    try {
-      const { enqueueEmail, formatInOrgTZ, getOrgEmailSettings } =
-        await import("./email-outbox.server");
-      const [ctxRow] = await db
-        .select({ jobTitle: requisitions.title, orgName: organizations.name })
-        .from(applications)
-        .innerJoin(requisitions, eq(applications.requisitionId, requisitions.id))
-        .innerJoin(organizations, eq(applications.orgId, organizations.id))
-        .where(eq(applications.id, app.id))
-        .limit(1);
-      if (interviewId) {
-        const roundLabel = `L${data.level} interview`;
-        const whereText = data.meetingLink?.trim() || null;
-        const modeLabel =
-          data.mode === "online" ? "Online" : data.mode === "onsite" ? "Onsite" : "Phone";
-        const ics = buildIcs({
-          uid: `interview-${interviewId}@atsiq`,
-          title: `${roundLabel}: ${ctxRow?.jobTitle ?? "Role"}${
-            ctxRow?.orgName ? ` (${ctxRow.orgName})` : ""
-          }`,
-          description:
-            [
-              data.interviewer?.trim() ? `Interviewer: ${data.interviewer.trim()}` : null,
-              data.agenda?.trim() || null,
-            ]
-              .filter(Boolean)
-              .join("\n") || null,
-          location: whereText ?? (data.mode === "onsite" ? (ctxRow?.orgName ?? null) : null),
-          startsAt: scheduledAt.toISOString(),
-          durationMins: data.durationMins,
-          attendees: [candidateEmail],
-        });
-        const templateData: Record<string, string | undefined> = {
-          candidateName: candidateName ?? undefined,
-          orgName: ctxRow?.orgName,
-          jobTitle: ctxRow?.jobTitle,
-          roundLabel,
-          scheduledAtText: formatInOrgTZ(
-            scheduledAt,
-            (await getOrgEmailSettings(context.orgId)).timezone,
-          ),
-          durationMins: String(data.durationMins),
-          modeLabel,
-        };
-        if (whereText) templateData["whereText"] = whereText;
-        if (data.interviewer?.trim()) templateData["interviewerName"] = data.interviewer.trim();
-        if (data.agenda?.trim()) templateData["agenda"] = data.agenda.trim();
-        await enqueueEmail({
-          orgId: context.orgId,
-          kind: "interview_invite",
-          templateName: "interview_invite",
-          toEmail: candidateEmail,
-          applicationId: app.id,
-          templateData,
-          attachments: [
-            {
-              filename: `interview-l${data.level}.ics`,
-              contentBase64: Buffer.from(ics, "utf8").toString("base64"),
-              contentType: "text/calendar",
-            },
-          ],
-          idempotencyKey: `interview-invite:${interviewId}:${scheduledAt.toISOString()}`,
-        });
-      }
-    } catch {
-      /* best-effort: scheduling must succeed even if the invite cannot be queued */
-    }
-
-    return { ok: true as const, rescheduled, candidateEmail };
-  });
+  .handler(async ({ data, context }) =>
+    scheduleInterviewCore({ orgId: context.orgId, actor: actorOf(context) }, data),
+  );
 
 /* ------------------------------------------------------ AI screening filing */
 
