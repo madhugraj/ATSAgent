@@ -50,6 +50,16 @@ beforeAll(async () => {
     );
   }
 
+  // This suite truncates every organisation, user and candidate. Never run it
+  // against a working database (e.g. the one in .env.local): the database name
+  // must mark it as disposable.
+  const databaseName = new URL(databaseUrl).pathname.replace(/^\//, "");
+  if (!/(^|_)(test|ci|verify|tmp|scratch)(_|$)/i.test(databaseName)) {
+    throw new Error(
+      `Refusing to wipe database "${databaseName}": use a disposable database whose name contains test, ci, verify, tmp or scratch (e.g. atsagent_test).`,
+    );
+  }
+
   // Clean slate (cascades handle children)
   await db.execute(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
