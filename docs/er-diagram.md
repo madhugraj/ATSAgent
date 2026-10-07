@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-68 tables across 9 domains.
+70 tables across 9 domains.
 
 ## Identity & access
 
@@ -1019,6 +1019,12 @@ erDiagram
 | `evaluations` | `application_id` | `applications` | cascade |
 | `evaluations` | `interview_id` | `interviews` | no action |
 | `evaluations` | `org_id` | `organizations` | cascade |
+| `hiring_conversations` | `created_by` | `users` | cascade |
+| `hiring_conversations` | `org_id` | `organizations` | cascade |
+| `hiring_conversations` | `requisition_id` | `requisitions` | no action |
+| `hiring_conversations` | `reuse_jd_from` | `requisitions` | no action |
+| `hiring_messages` | `conversation_id` | `hiring_conversations` | cascade |
+| `hiring_messages` | `org_id` | `organizations` | cascade |
 | `hr_incentive_schemes` | `org_id` | `organizations` | cascade |
 | `hrms_employees` | `integration_id` | `source_integrations` | cascade |
 | `hrms_employees` | `org_id` | `organizations` | cascade |
@@ -1096,7 +1102,7 @@ erDiagram
 | `agent_issues` | — | 16 | — |
 | `agent_metrics_daily` | — | 17 | — |
 | `agent_policies` | — | 10 | (orgId+agentType) |
-| `agent_runs` | — | 30 | — |
+| `agent_runs` | — | 31 | — |
 | `agent_runtime_heartbeat` | — | 4 | — |
 | `agent_steps` | — | 17 | (runId+seq) |
 | `agent_tasks` | — | 16 | — |
@@ -1123,6 +1129,8 @@ erDiagram
 | `email_outbox` | Communications & AI settings | 16 | (idempotency_key) |
 | `email_settings` | Communications & AI settings | 11 | (org_id) |
 | `evaluations` | Candidates & pipeline | 14 | — |
+| `hiring_conversations` | — | 10 | — |
+| `hiring_messages` | — | 8 | — |
 | `hr_incentive_schemes` | Offers & onboarding | 9 | — |
 | `hrms_employees` | — | 15 | (integrationId+externalId) |
 | `hrms_field_mappings` | — | 6 | (integration_id) |

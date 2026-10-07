@@ -323,8 +323,22 @@ export const MANUAL_SECTIONS: ManualSection[] = [
     ],
   },
   {
+    id: "hiring-desk",
+    title: "18. Hiring desk",
+    summary:
+      "Describe who you need in plain words; the hiring agents gather the details, find similar roles, rank candidates and line up screening, and stop at every decision that is yours.",
+    steps: [
+      'Open Hiring desk and type the need, for example "I need a Full stack developer in Chennai". The desk asks one short question at a time until it knows the role, location, experience, number of openings and must-have skills.',
+      "It then shows similar roles. Continue with an open role, create a new role, or create a new role that reuses an earlier role's approved job description (no new JD approval is needed; the reuse is recorded in the audit log).",
+      "A new role is created as a draft in your name. The Requisition agent adds the pay band and scoring weights and sends it through the usual department head → HR → CBO approval chain.",
+      'Once the job description is approved, the Intake & matching agent searches the talent pool and posts a ranked list in the thread. Tick candidates and choose Screen selected, or type "talk to the first 5".',
+      "Every request an agent makes for a person — an approval, a decision or a question — appears in the thread with Approve, Decline or Answer, and also in Agent decisions. Deciding in either place is the same decision.",
+      "The agents must be switched on in Agent settings and an AI model key saved under Integrations; if an agent is off, the desk says so in the thread instead of waiting silently. Automated screening calls arrive with the voice agent integration.",
+    ],
+  },
+  {
     id: "roles",
-    title: "18. Permission guide",
+    title: "19. Permission guide",
     summary:
       "Access follows the smallest role needed for each decision, with the organisation owner and platform super admin kept distinct.",
     steps: [
@@ -338,7 +352,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
   },
   {
     id: "platform",
-    title: "19. Platform super admin (product owner only)",
+    title: "20. Platform super admin (product owner only)",
     summary: "Cross-tenant administration lives on Platform console (/platform).",
     steps: [
       "Review the pending registration queue and approve or reject organisations; the registering owner is emailed the decision.",
@@ -350,7 +364,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
   },
   {
     id: "account-recovery",
-    title: "20. Sign-in and account recovery",
+    title: "21. Sign-in and account recovery",
     summary: "ATSIQ uses first-party database-backed sessions and secure browser cookies.",
     steps: [
       "Sign in with the confirmed work email and password used during registration or invitation. A successful session remains active in the browser and is renewed while it is used.",

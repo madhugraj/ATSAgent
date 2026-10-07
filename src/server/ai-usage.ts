@@ -44,6 +44,8 @@ export const AI_FEATURES = [
   "agent_offer",
   "agent_onboarding",
   "agent_followup",
+  // Hiring desk conversation turns (docs/agentic-plan.md §13.2).
+  "hiring_desk",
 ] as const;
 
 export type AiFeature = (typeof AI_FEATURES)[number];

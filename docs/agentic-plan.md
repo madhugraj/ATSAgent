@@ -683,7 +683,7 @@ Each phase ships end-to-end and keeps the app working without agents.
 
 ## 13. Phase 6 — conversational hiring desk and voice agent (plan)
 
-Status: **planned, not built.** Target: about **75% of the hiring steps run
+Status: **6a built; 6b–6e planned.** Target: about **75% of the hiring steps run
 without a person**; people keep the decisions that commit the organisation.
 
 ### 13.1 The experience
@@ -826,14 +826,29 @@ arrives):
 
 | Slice | Scope                                                                                                      | Depends on         |
 | ----- | ---------------------------------------------------------------------------------------------------------- | ------------------ |
-| 6a    | Hiring desk thread, slot filling, similar-role cards, JD reuse, ranked list in chat, "talk to the first N" | —                  |
+| 6a ✅ | Hiring desk thread, slot filling, similar-role cards, JD reuse, ranked list in chat, "talk to the first N" | —                  |
 | 6b    | Voice adapter, `voice_calls`, webhook, calling rules and consent, screening calls → grading → report gate  | in-house voice API |
 | 6c    | Scheduling calls (slot offer and booking)                                                                  | 6b                 |
 | 6d    | Pre-offer and document calls, acceptance links, pre-joining check-ins, no-show risk, closure mails         | 6b                 |
 | 6e    | HRMS create on joining, "75% autonomous" preset, voice observability and health rules, evals               | 6a–6d              |
 
-6a can start now; 6b starts when the voice API documentation arrives (a mock
-voice provider lets 6b's agent side be built and tested first).
+6b starts when the voice API documentation arrives (a mock voice provider
+lets 6b's agent side be built and tested first).
+
+**6a as built.** `/desk` (Hiring desk): threads in `hiring_conversations` /
+`hiring_messages` (migration `0030`); `agent_runs.conversation_id` links every
+run working for the thread — set explicitly by the desk or resolved from the
+run's requisition (or the application's requisition) — so results, requests
+for a person (with Approve / Decline / Answer on the card) and the ranked list
+after matching are posted into it. The model (`hiring_desk` ledger slug)
+only extracts details, commands and the wording of the next question; the
+desk decides in code. A new role is created as a draft **by the person**
+(`desk.requisition_created`) and handed to the Requisition agent; JD reuse is
+the person's explicit choice, applied when the new requisition is approved
+(`jd.reused`, then the normal `jd.approved` event). After a thread's JD is
+approved the Intake & matching agent ranks candidates; "talk to the first N"
+or ticked candidates start the Screening agent (`desk.candidates_selected`).
+Visible to the thread's creator and HR leadership.
 
 ### 13.7 Assumptions to confirm
 

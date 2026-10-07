@@ -199,13 +199,22 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
     )[0];
 
   if (e.type === "requisition.status_changed" && payload.to === "approved") {
-    const jd = await latestJd();
+    // Hiring desk: the person chose to reuse an earlier role's approved JD.
+    const { reuseJdIfChosen } = await import("../desk/desk.server");
+    const reused = await reuseJdIfChosen(e.orgId, req.id);
+    const jd = reused ? { status: "approved" as const } : await latestJd();
     if (!jd || jd.status === "draft" || jd.status === "changes_requested") {
       await dispatch(
         "jd",
         `Requisition ${req.code} "${req.title}" is approved. Draft its job description and get it approved by the department head.`,
       );
     }
+  }
+
+  // Hiring desk: once a thread's JD is approved, rank candidates for it.
+  if (e.type === "jd.approved") {
+    const { onJdApproved } = await import("../desk/desk.server");
+    await onJdApproved(e.orgId, req.id);
   }
 
   if (e.type === "application.shortlisted") {

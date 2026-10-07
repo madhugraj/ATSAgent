@@ -7,7 +7,7 @@
  *
  * Demo login (local only): agent-demo@test.local / AgentDemo#2026
  */
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 const DEMO_EMAIL = "agent-demo@test.local";
 const DEMO_PASSWORD = "AgentDemo#2026";
@@ -517,6 +517,89 @@ await trail(r3, [
   });
   const { evaluateAgentHealth } = await import("../src/server/agents/health.server");
   await evaluateAgentHealth({ orgId: org!.id });
+}
+
+// Hiring desk demo (Phase 6a): one thread that has reached the ranked list
+// for REQ-2026-098, and one still gathering details. Local demo data only.
+{
+  const { hiringConversations, agentTasks: tasks } = await import("../drizzle/schema");
+  const desk = await import("../src/server/desk/desk.server");
+  const [active] = await db
+    .insert(hiringConversations)
+    .values({
+      orgId: org!.id,
+      createdBy: user!.id,
+      title: "Platform SRE · Bengaluru",
+      status: "active",
+      requisitionId: req098!.id,
+      slots: {
+        roleTitle: "Platform SRE",
+        location: "Bengaluru",
+        experienceMin: 4,
+        experienceMax: 8,
+        openings: 1,
+        mustHaveSkills: ["Kubernetes", "Go"],
+      } as never,
+    })
+    .returning();
+  const say = (role: "user" | "desk" | "agent", body: string, extra: object = {}) =>
+    desk.postMessage(active!, { role, body, ...extra });
+  await say("user", "Hey, I need a Platform SRE in Bengaluru");
+  await say("desk", "How many years of experience should candidates have (for example 4–8)?");
+  await say("user", "4 to 8 years, Kubernetes and Go are a must. Just one person.");
+  await say(
+    "desk",
+    "Got it: 1 × Platform SRE in Bengaluru · 4–8 years · must have Kubernetes, Go. I found 1 similar role(s).",
+    {
+      card: {
+        type: "similar_roles",
+        items: [
+          {
+            requisitionId: req098!.id,
+            code: "REQ-2026-098",
+            title: "Platform SRE",
+            location: "Bengaluru",
+            status: "approved",
+            openings: 1,
+            jdApproved: false,
+            usable: true,
+          },
+        ],
+      },
+    },
+  );
+  await say("desk", 'Continuing with REQ-2026-098 "Platform SRE" (Bengaluru, approved).');
+  await say("agent", "Scored the pipeline and added two talent-pool matches.", {
+    agentType: "intake",
+  });
+  await desk.postRankedList(active!);
+  const [open] = await db
+    .select()
+    .from(tasks)
+    .where(and(eq(tasks.orgId, org!.id), eq(tasks.status, "open"), eq(tasks.kind, "approval")))
+    .limit(1);
+  if (open)
+    await desk.postMessage(active!, {
+      role: "agent",
+      agentType: "screening",
+      body: "May I go ahead with this?",
+      card: { type: "task", taskId: open.id, kind: open.kind, title: open.title, body: open.body },
+    });
+
+  const [gathering] = await db
+    .insert(hiringConversations)
+    .values({
+      orgId: org!.id,
+      createdBy: user!.id,
+      title: "Data Analyst",
+      slots: { roleTitle: "Data Analyst" } as never,
+    })
+    .returning();
+  await desk.postMessage(gathering!, { role: "user", body: "Need a data analyst" });
+  await desk.postMessage(gathering!, {
+    role: "desk",
+    body: "Which location is this role based in? For example Chennai or Bengaluru.",
+  });
 }
 
 const { rollupAgentMetrics } = await import("../src/server/agents/metrics.server");
