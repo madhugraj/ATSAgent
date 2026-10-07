@@ -645,7 +645,9 @@ function Trends({ d }: { d: ObservabilityView }) {
               ? "p95 seconds of AI requests inside agent runs · dashed line: 60 s health threshold"
               : "p95 seconds of AI requests inside agent runs · well under the 60 s health threshold"
           }
-          empty={!data.some((x) => x.latencySeconds != null) && "No AI requests in the last 14 days"}
+          empty={
+            !data.some((x) => x.latencySeconds != null) && "No AI requests in the last 14 days"
+          }
         >
           <ChartContainer config={latencyConfig} className={h}>
             <LineChart data={data} margin={{ left: 0, right: 8, top: 8 }}>
