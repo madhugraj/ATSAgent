@@ -10,6 +10,7 @@
 - [x] OpenTelemetry trace export (OTLP/HTTP JSON) to the org's own collector — ids, steps, timings and token counts only; encrypted headers; back-off; test buttons
 - [x] Platform agent console (`/platform-agents`, super admins): scheduler, totals, per-organisation, per-agent cost and latency (run and model-turn p50 / p95, tokens per run, tool error and edit rates), per-model, recent failures
 - [x] Migration `0029` (`agent_runs.mode / replay_of / otel_exported_at`, `agent_steps.notify_state / injection_suspected`, `agent_issues.notified_at`, `agent_telemetry_settings`); `scripts/agent-phase5.test.ts` (17 tests) in CI
+- [x] Agent observability redesign: overall health summary, KPI tiles with 14-day sparklines, 14-day trend charts (runs by outcome, token usage, human-in-the-loop requested vs decided, tool calls succeeded vs failed, wait for a person against the SLA, AI p95 latency against the health threshold, runs by agent) and compact per-agent cards whose element rows open the detail drawer; the local demo seed now carries 14 days of history
 - [ ] Not built: one-click undo of notified actions; per-replay model choice and a separate sandbox organisation; automatic cost / latency tuning
 
 ## Agentic platform — Phase 4: offer → pre-onboarding → release (2026-10-06)

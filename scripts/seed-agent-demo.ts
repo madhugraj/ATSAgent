@@ -484,20 +484,74 @@ await trail(r3, [
     for (let k = 0; k < count; k++) {
       const failed = d === 13 && k < 3;
       const created = new Date(Date.now() - (13 - d) * 864e5 - (k + 1) * 3600_000);
-      await db.insert(agentRuns).values({
-        orgId: org!.id,
-        agentType: "intake",
-        principalUserId: user!.id,
-        goal: `Review the pipeline for REQ-2026-098 (sweep ${d}-${k})`,
-        status: failed ? "failed" : "done",
-        lastError: failed ? "The tool failed." : null,
-        result: failed ? null : "Scored new applicants; proposed rejections for review.",
-        stepCount: 5 + k,
-        tokensUsed: 5200,
-        createdAt: created,
-        startedAt: created,
-        finishedAt: new Date(created.getTime() + (6 + k) * 60_000),
-      });
+      const [hist] = await db
+        .insert(agentRuns)
+        .values({
+          orgId: org!.id,
+          agentType: "intake",
+          principalUserId: user!.id,
+          goal: `Review the pipeline for REQ-2026-098 (sweep ${d}-${k})`,
+          status: failed ? "failed" : "done",
+          lastError: failed ? "The tool failed." : null,
+          result: failed ? null : "Scored new applicants; proposed rejections for review.",
+          stepCount: 5 + k,
+          tokensUsed: 5200,
+          createdAt: created,
+          startedAt: created,
+          finishedAt: new Date(created.getTime() + (6 + k) * 60_000),
+        })
+        .returning({ id: agentRuns.id });
+      // Its trail: tool calls, AI requests and one decided approval, so the
+      // 14-day trend charts have history (demo data, deterministic).
+      const at = (min: number) => new Date(created.getTime() + min * 60_000);
+      await db.insert(agentSteps).values(
+        ["list_applications", "score_application", "shortlist"].map((tool, i) => ({
+          runId: hist!.id,
+          orgId: org!.id,
+          seq: i + 1,
+          kind: "tool",
+          toolName: tool,
+          status: failed && i === 2 ? "error" : (d + k + i) % 9 === 0 ? "error" : "ok",
+          output: { preview: "demo" } as never,
+          durationMs: 250 + i * 120,
+          createdAt: at(i + 1),
+        })),
+      );
+      await db.insert(aiUsageEvents).values(
+        [0, 1].map((i) => ({
+          orgId: org!.id,
+          agentRunId: hist!.id,
+          feature: i ? "candidate_score" : "agent_intake",
+          provider: "demo",
+          model: "demo",
+          status: "ok" as never,
+          promptTokens: 1800,
+          completionTokens: 400,
+          totalTokens: 2200,
+          durationMs: 3500 + ((d * 7 + k * 3 + i * 5) % 11) * 900,
+          createdAt: at(2 + i),
+        })),
+      );
+      if (!failed) {
+        const waitH = [3, 9, 26, 5, 14, 40, 7, 2, 19, 11, 31, 4, 8, 16][(d + k) % 14]!;
+        const outcome = (d + k) % 7 === 0 ? "rejected" : "approved";
+        await db.insert(agentTasks).values({
+          orgId: org!.id,
+          runId: hist!.id,
+          kind: "approval",
+          status: outcome,
+          title: "Shortlist the top-scored applicants",
+          proposedAction: { name: "shortlist", args: {} } as never,
+          response: (outcome === "rejected"
+            ? { status: "rejected", reason: "Wait for the referral to apply." }
+            : (d + k) % 5 === 0
+              ? { status: "approved", args: { note: "edited" } }
+              : { status: "approved" }) as never,
+          decidedBy: user!.id,
+          createdAt: at(5),
+          decidedAt: new Date(Math.min(at(5).getTime() + waitH * 3600_000, Date.now() - 600_000)),
+        });
+      }
     }
   }
   // A question nobody has answered for three days (past the 48 h SLA).

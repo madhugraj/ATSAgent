@@ -78,6 +78,24 @@ export type AgentObservability = {
   issues: IssueView[];
 };
 
+export type TrendDay = {
+  day: string;
+  /** Live runs started that day, by their current outcome. */
+  completed: number;
+  failed: number;
+  inProgress: number;
+  stopped: number;
+  tokens: number;
+  toolOk: number;
+  toolErrors: number;
+  hitlOpened: number;
+  hitlDecided: number;
+  /** Median wait of requests decided that day (hours). */
+  medianWaitHours: number | null;
+  /** p95 latency of AI requests inside runs that day (seconds). */
+  aiP95Seconds: number | null;
+};
+
 export type ObservabilityView = {
   scheduler: { lastTickAt: string | null; minutesSinceTick: number | null; healthy: boolean };
   slaHours: number;
@@ -91,6 +109,8 @@ export type ObservabilityView = {
     issues: { critical: number; serious: number; warning: number };
   };
   orgIssues: IssueView[];
+  /** Organisation-wide daily series for the last 14 days (UTC days, oldest first). */
+  trends: TrendDay[];
   agents: AgentObservability[];
   rules: { id: string; element: string; severity: string; description: string }[];
 };
@@ -221,6 +241,70 @@ async function buildObservability(orgId: string): Promise<ObservabilityView> {
         (select round((percentile_cont(0.5) within group (order by extract(epoch from (decided_at - created_at)) / 60))::numeric)
           from agent_tasks where org_id = ${org} and decided_at >= now() - interval '7 days') median_wait`);
 
+    const trendRows = await q(sql`
+      with d as (
+        select (current_date - g)::date as day from generate_series(0, 13) g
+      ),
+      r as (
+        select (created_at at time zone 'utc')::date as day,
+          count(*) filter (where status = 'done')::int completed,
+          count(*) filter (where status = 'failed')::int failed,
+          count(*) filter (where status in ('queued','running','awaiting_human'))::int in_progress,
+          count(*) filter (where status = 'cancelled')::int stopped
+        from agent_runs where org_id = ${org} and mode = 'live'
+          and created_at >= current_date - 13
+        group by 1
+      ),
+      u as (
+        select (u.created_at at time zone 'utc')::date as day,
+          coalesce(sum(u.total_tokens), 0)::bigint tokens,
+          percentile_cont(0.95) within group (order by u.duration_ms) p95
+        from ai_usage_events u join agent_runs ar on ar.id = u.agent_run_id
+        where ar.org_id = ${org} and u.created_at >= current_date - 13
+        group by 1
+      ),
+      s as (
+        select (created_at at time zone 'utc')::date as day,
+          count(*) filter (where status = 'ok')::int ok,
+          count(*) filter (where status = 'error')::int errors
+        from agent_steps where org_id = ${org} and kind = 'tool' and status in ('ok','error')
+          and created_at >= current_date - 13
+        group by 1
+      ),
+      o as (
+        select (created_at at time zone 'utc')::date as day, count(*)::int opened
+        from agent_tasks where org_id = ${org} and created_at >= current_date - 13 group by 1
+      ),
+      dc as (
+        select (decided_at at time zone 'utc')::date as day, count(*)::int decided,
+          percentile_cont(0.5) within group (order by extract(epoch from (decided_at - created_at)) / 3600) wait_h
+        from agent_tasks where org_id = ${org} and decided_at >= current_date - 13 group by 1
+      )
+      select d.day::text as day,
+        coalesce(r.completed, 0) completed, coalesce(r.failed, 0) failed,
+        coalesce(r.in_progress, 0) in_progress, coalesce(r.stopped, 0) stopped,
+        coalesce(u.tokens, 0) tokens, u.p95,
+        coalesce(s.ok, 0) tool_ok, coalesce(s.errors, 0) tool_errors,
+        coalesce(o.opened, 0) opened, coalesce(dc.decided, 0) decided, dc.wait_h
+      from d
+      left join r using (day) left join u using (day) left join s using (day)
+      left join o using (day) left join dc using (day)
+      order by d.day`);
+    const trends: TrendDay[] = trendRows.map((r) => ({
+      day: String(r["day"]),
+      completed: n(r["completed"]),
+      failed: n(r["failed"]),
+      inProgress: n(r["in_progress"]),
+      stopped: n(r["stopped"]),
+      tokens: n(r["tokens"]),
+      toolOk: n(r["tool_ok"]),
+      toolErrors: n(r["tool_errors"]),
+      hitlOpened: n(r["opened"]),
+      hitlDecided: n(r["decided"]),
+      medianWaitHours: r["wait_h"] == null ? null : Math.round(Number(r["wait_h"]) * 10) / 10,
+      aiP95Seconds: r["p95"] == null ? null : Math.round(Number(r["p95"]) / 100) / 10,
+    }));
+
     const by = <T extends Row>(rows: T[], type: string) =>
       rows.filter((r) => r["agent_type"] === type);
     const agents: AgentObservability[] = [];
@@ -328,6 +412,7 @@ async function buildObservability(orgId: string): Promise<ObservabilityView> {
         },
       },
       orgIssues: issues.filter((i) => i.agentType === "*"),
+      trends,
       agents,
       rules: RULES.map((r) => ({
         id: r.id,
