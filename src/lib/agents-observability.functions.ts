@@ -93,7 +93,7 @@ export type TrendDay = {
   /** Median wait of requests decided that day (hours). */
   medianWaitHours: number | null;
   /** p95 latency of AI requests inside runs that day (seconds). */
-  aiP95Seconds: number | null;
+  latencySeconds: number | null;
 };
 
 export type ObservabilityView = {
@@ -302,7 +302,7 @@ async function buildObservability(orgId: string): Promise<ObservabilityView> {
       hitlOpened: n(r["opened"]),
       hitlDecided: n(r["decided"]),
       medianWaitHours: r["wait_h"] == null ? null : Math.round(Number(r["wait_h"]) * 10) / 10,
-      aiP95Seconds: r["p95"] == null ? null : Math.round(Number(r["p95"]) / 100) / 10,
+      latencySeconds: r["p95"] == null ? null : Math.round(Number(r["p95"]) / 100) / 10,
     }));
 
     const by = <T extends Row>(rows: T[], type: string) =>

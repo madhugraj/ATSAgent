@@ -136,7 +136,7 @@ const waitConfig = {
   medianWaitHours: { label: "Median wait (h)", theme: SERIES_1 },
 } satisfies ChartConfig;
 const latencyConfig = {
-  aiP95Seconds: { label: "p95 latency (s)", theme: SERIES_1 },
+  latencySeconds: { label: "p95 latency (s)", theme: SERIES_1 },
 } satisfies ChartConfig;
 const agentsConfig = {
   done: { label: "Completed", theme: GOOD },
@@ -454,7 +454,7 @@ function Trends({ d }: { d: ObservabilityView }) {
     );
   }
   const h = "mt-3 aspect-auto h-[220px] w-full";
-  const maxLatency = Math.max(0, ...data.map((x) => x.aiP95Seconds ?? 0));
+  const maxLatency = Math.max(0, ...data.map((x) => x.latencySeconds ?? 0));
   return (
     <section>
       <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -645,7 +645,7 @@ function Trends({ d }: { d: ObservabilityView }) {
               ? "p95 seconds of AI requests inside agent runs · dashed line: 60 s health threshold"
               : "p95 seconds of AI requests inside agent runs · well under the 60 s health threshold"
           }
-          empty={!data.some((x) => x.aiP95Seconds != null) && "No AI requests in the last 14 days"}
+          empty={!data.some((x) => x.latencySeconds != null) && "No AI requests in the last 14 days"}
         >
           <ChartContainer config={latencyConfig} className={h}>
             <LineChart data={data} margin={{ left: 0, right: 8, top: 8 }}>
@@ -664,8 +664,8 @@ function Trends({ d }: { d: ObservabilityView }) {
               <Line
                 isAnimationActive={false}
                 type="monotone"
-                dataKey="aiP95Seconds"
-                stroke="var(--color-aiP95Seconds)"
+                dataKey="latencySeconds"
+                stroke="var(--color-latencySeconds)"
                 strokeWidth={2}
                 dot={{ r: 3 }}
                 connectNulls
