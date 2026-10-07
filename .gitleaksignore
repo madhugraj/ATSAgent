@@ -1,0 +1,4 @@
+# Reviewed false positives only — one exact finding per line, with the reason.
+# a486589 agents.observability.tsx:667 — recharts dataKey="aiP95Seconds" (a chart
+# field name, not a secret; renamed to latencySeconds in 0cf5675).
+a4865892586a907e3c086f8731639327ffb56fe0:src/routes/agents.observability.tsx:generic-api-key:667
