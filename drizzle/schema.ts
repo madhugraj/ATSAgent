@@ -1851,6 +1851,10 @@ export const agentRuns = pgTable(
     }),
     /** When this run's trace was exported to the org's OpenTelemetry endpoint. */
     otelExportedAt: timestamp("otel_exported_at", { withTimezone: true }),
+    /** The hiring-desk thread this run works for; its results are posted there. */
+    conversationId: uuid("conversation_id").references((): AnyPgColumn => hiringConversations.id, {
+      onDelete: "set null",
+    }),
   },
   (t) => [
     index("agent_runs_queue_idx").on(t.status, t.updatedAt),
@@ -2029,3 +2033,59 @@ export const agentTelemetrySettings = pgTable("agent_telemetry_settings", {
   updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/* ------------------------------------------------------ hiring desk (0030) */
+
+export type HiringConversationStatus = "gathering" | "confirming" | "active" | "closed";
+export type HiringMessageRole = "user" | "desk" | "agent";
+
+/** One chat thread per hiring need (docs/agentic-plan.md §13.2). */
+export const hiringConversations = pgTable(
+  "hiring_conversations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    title: text("title").notNull().default("New hiring need"),
+    status: text("status").$type<HiringConversationStatus>().notNull().default("gathering"),
+    /** The hiring details gathered so far (role, location, experience, …). */
+    slots: jsonb("slots")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    requisitionId: uuid("requisition_id").references(() => requisitions.id, {
+      onDelete: "set null",
+    }),
+    /** An approved JD of this earlier requisition is reused (the person's choice). */
+    reuseJdFrom: uuid("reuse_jd_from").references(() => requisitions.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("hiring_conversations_org_idx").on(t.orgId, t.updatedAt)],
+);
+
+/** Messages of a hiring-desk thread; `card` carries structured results. */
+export const hiringMessages = pgTable(
+  "hiring_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => hiringConversations.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    role: text("role").$type<HiringMessageRole>().notNull(),
+    agentType: text("agent_type"),
+    body: text("body").notNull().default(""),
+    card: jsonb("card").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("hiring_messages_conv_idx").on(t.conversationId, t.createdAt)],
+);

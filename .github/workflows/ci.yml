@@ -77,3 +77,6 @@ jobs:
 
       - name: Agents Phase 5 (replay, autonomy recommendations, alerts, trace export)
         run: bun test scripts/agent-phase5.test.ts
+
+      - name: Agents Phase 6a (hiring desk)
+        run: bun test scripts/agent-phase6a.test.ts

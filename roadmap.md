@@ -1,5 +1,14 @@
 # Roadmap
 
+## Agentic platform — Phase 6a: hiring desk (2026-10-07)
+
+- [x] Hiring desk (`/desk`): one chat thread per hiring need; the desk asks one short question at a time until role, location, experience, openings and must-have skills are known, then shows similar roles as cards
+- [x] Continue with an open role, create a new role (drafted as the person, then completed and submitted by the Requisition agent), or reuse an earlier role's approved JD (applied on approval, audited as `jd.reused`)
+- [x] Runs working for a thread post their results, approval / decision / question cards (decidable in the thread) and, after matching, a ranked candidate list
+- [x] "Talk to the first 5" or ticked candidates start the Screening agent; switched-off agents are reported in the thread
+- [x] Migration `0030` (`hiring_conversations`, `hiring_messages`, `agent_runs.conversation_id`); `hiring_desk` AI ledger slug; `scripts/agent-phase6a.test.ts` (12 tests) in CI; user manual section; local demo seed includes two desk threads
+- [ ] Next: 6b voice agent integration (screening calls) once the in-house voice API is available
+
 ## Agentic platform — Phase 5: hardening and scale (2026-10-06)
 
 - [x] "Act and notify" now notifies: actions run without approval are listed for the person the agent works for (bell + Agents → "Acted for you") until marked seen; "autonomous" runs them silently (still in activity and audit)

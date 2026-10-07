@@ -546,10 +546,25 @@ export async function startRun(input: {
   subjectId?: string | null;
   triggerEventId?: string | null;
   maxSteps?: number;
+  /** Hiring-desk thread; defaults to the thread of the subject's requisition. */
+  conversationId?: string | null;
 }): Promise<{ runId: string }> {
   const def = getAgent(input.agentType);
   if (!def) throw new Error(`Unknown agent: ${input.agentType}`);
   const definition = await ensureDefinition(def);
+  let conversationId = input.conversationId ?? null;
+  if (!conversationId && input.subjectId) {
+    try {
+      const { conversationForSubject } = await import("../desk/desk.server");
+      conversationId = await conversationForSubject(
+        input.orgId,
+        input.subjectType,
+        input.subjectId,
+      );
+    } catch (e) {
+      log.warn("desk.link_failed", { org_id: input.orgId, error: e as Error });
+    }
+  }
   const [run] = await db
     .insert(agentRuns)
     .values({
@@ -564,6 +579,7 @@ export async function startRun(input: {
       subjectId: input.subjectId ?? null,
       triggerEventId: input.triggerEventId ?? null,
       maxSteps: input.maxSteps ?? def.maxSteps ?? 20,
+      conversationId,
       transcript: [{ role: "user", content: input.goal } satisfies AgentMessage],
     })
     .returning({ id: agentRuns.id });
@@ -1410,6 +1426,14 @@ async function openTask(
       proposedAction: t.proposedAction as never,
     })
     .returning({ id: agentTasks.id });
+  if (run.conversationId) {
+    try {
+      const { onTaskOpened } = await import("../desk/desk.server");
+      await onTaskOpened(run, { id: row!.id, kind: t.kind, title: t.title, body: t.body });
+    } catch (e) {
+      log.warn("desk.post_failed", { run_id: run.id, error: e as Error });
+    }
+  }
   return row!.id;
 }
 
@@ -1501,6 +1525,14 @@ async function finish(
       error: error ? error.slice(0, 300) : null,
     },
   });
+  if (run.conversationId) {
+    try {
+      const { onRunFinished } = await import("../desk/desk.server");
+      await onRunFinished({ ...run, status, result, error });
+    } catch (e) {
+      log.warn("desk.post_failed", { run_id: run.id, error: e as Error });
+    }
+  }
 }
 
 export const BUDGET_PAUSE_MESSAGE = "Paused: this agent reached its monthly token budget.";

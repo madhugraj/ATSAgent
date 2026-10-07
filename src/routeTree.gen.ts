@@ -14,6 +14,7 @@ import { Route as BrainRouteImport } from './routes/brain'
 import { Route as CatalogueRouteImport } from './routes/catalogue'
 import { Route as CollaborationRouteImport } from './routes/collaboration'
 import { Route as CookiesRouteImport } from './routes/cookies'
+import { Route as DeskRouteImport } from './routes/desk'
 import { Route as HelpRouteImport } from './routes/help'
 import { Route as IjpRouteImport } from './routes/ijp'
 import { Route as InboxRouteImport } from './routes/inbox'
@@ -90,6 +91,11 @@ const CollaborationRoute = CollaborationRouteImport.update({
 const CookiesRoute = CookiesRouteImport.update({
   id: '/cookies',
   path: '/cookies',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DeskRoute = DeskRouteImport.update({
+  id: '/desk',
+  path: '/desk',
   getParentRoute: () => rootRouteImport,
 } as any)
 const HelpRoute = HelpRouteImport.update({
@@ -365,6 +371,7 @@ export interface FileRoutesByFullPath {
   '/catalogue': typeof CatalogueRoute
   '/collaboration': typeof CollaborationRoute
   '/cookies': typeof CookiesRoute
+  '/desk': typeof DeskRoute
   '/help': typeof HelpRoute
   '/ijp': typeof IjpRoute
   '/inbox': typeof InboxRoute
@@ -424,6 +431,7 @@ export interface FileRoutesByTo {
   '/catalogue': typeof CatalogueRoute
   '/collaboration': typeof CollaborationRoute
   '/cookies': typeof CookiesRoute
+  '/desk': typeof DeskRoute
   '/help': typeof HelpRoute
   '/ijp': typeof IjpRoute
   '/inbox': typeof InboxRoute
@@ -484,6 +492,7 @@ export interface FileRoutesById {
   '/catalogue': typeof CatalogueRoute
   '/collaboration': typeof CollaborationRoute
   '/cookies': typeof CookiesRoute
+  '/desk': typeof DeskRoute
   '/help': typeof HelpRoute
   '/ijp': typeof IjpRoute
   '/inbox': typeof InboxRoute
@@ -545,6 +554,7 @@ export interface FileRouteTypes {
     | '/catalogue'
     | '/collaboration'
     | '/cookies'
+    | '/desk'
     | '/help'
     | '/ijp'
     | '/inbox'
@@ -604,6 +614,7 @@ export interface FileRouteTypes {
     | '/catalogue'
     | '/collaboration'
     | '/cookies'
+    | '/desk'
     | '/help'
     | '/ijp'
     | '/inbox'
@@ -663,6 +674,7 @@ export interface FileRouteTypes {
     | '/catalogue'
     | '/collaboration'
     | '/cookies'
+    | '/desk'
     | '/help'
     | '/ijp'
     | '/inbox'
@@ -723,6 +735,7 @@ export interface RootRouteChildren {
   CatalogueRoute: typeof CatalogueRoute
   CollaborationRoute: typeof CollaborationRoute
   CookiesRoute: typeof CookiesRoute
+  DeskRoute: typeof DeskRoute
   HelpRoute: typeof HelpRoute
   IjpRoute: typeof IjpRoute
   InboxRoute: typeof InboxRoute
@@ -812,6 +825,13 @@ declare module '@tanstack/react-router' {
       path: '/cookies'
       fullPath: '/cookies'
       preLoaderRoute: typeof CookiesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/desk': {
+      id: '/desk'
+      path: '/desk'
+      fullPath: '/desk'
+      preLoaderRoute: typeof DeskRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/help': {
@@ -1187,6 +1207,7 @@ const rootRouteChildren: RootRouteChildren = {
   CatalogueRoute: CatalogueRoute,
   CollaborationRoute: CollaborationRoute,
   CookiesRoute: CookiesRoute,
+  DeskRoute: DeskRoute,
   HelpRoute: HelpRoute,
   IjpRoute: IjpRoute,
   InboxRoute: InboxRoute,
