@@ -322,4 +322,44 @@ describe("google dialect", () => {
     expect(res.stopReason).toBe("tool_use");
     expect(res.toolCalls).toEqual([{ id: "call_0", name: "get_requisition", args: { id: "R4" } }]);
   });
+
+  test("keeps a thinking model's thoughtSignature and sends it back with the call", async () => {
+    stubFetch(200, {
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                functionCall: { id: "g1", name: "get_requisition", args: { id: "R9" } },
+                thoughtSignature: "sig-abc",
+              },
+            ],
+          },
+          finishReason: "STOP",
+        },
+      ],
+    });
+    const first = await run("google");
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.toolCalls).toEqual([
+      { id: "g1", name: "get_requisition", args: { id: "R9" }, signature: "sig-abc" },
+    ]);
+
+    // Next turn: the signature travels with the functionCall part, unchanged.
+    const calls = stubFetch(200, {
+      candidates: [{ content: { parts: [{ text: "done" }] }, finishReason: "STOP" }],
+    });
+    await run("google", [
+      { role: "user", content: "Read R9" },
+      { role: "assistant", content: "", toolCalls: first.toolCalls },
+      { role: "tool", toolCallId: "g1", name: "get_requisition", content: "{}" },
+    ]);
+    expect(calls[0]!.body.contents[1].parts).toEqual([
+      {
+        functionCall: { id: "g1", name: "get_requisition", args: { id: "R9" } },
+        thoughtSignature: "sig-abc",
+      },
+    ]);
+  });
 });

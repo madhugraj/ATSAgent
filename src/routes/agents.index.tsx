@@ -40,7 +40,14 @@ import {
   type AgentTaskView,
 } from "@/lib/agents.functions";
 
+const TABS = ["decisions", "acted", "activity"] as const;
+type AgentsTab = (typeof TABS)[number];
+
 export const Route = createFileRoute("/agents/")({
+  validateSearch: (search: Record<string, unknown>): { tab?: AgentsTab } =>
+    TABS.includes(search["tab"] as AgentsTab) && search["tab"] !== "decisions"
+      ? { tab: search["tab"] as AgentsTab }
+      : {},
   head: () => ({
     meta: [
       { title: "Agent decisions — ATSIQ" },
@@ -60,6 +67,8 @@ const KIND_META: Record<AgentTaskView["kind"], { label: string; icon: typeof Che
 };
 
 function AgentsPage() {
+  const { tab = "decisions" } = Route.useSearch();
+  const navigate = Route.useNavigate();
   const tasks = useQuery({
     queryKey: ["agent_tasks"],
     queryFn: () => listAgentTasks(),
@@ -93,7 +102,13 @@ function AgentsPage() {
 
       <AskAgents />
 
-      <Tabs defaultValue="decisions" className="mt-4">
+      <Tabs
+        value={tab}
+        onValueChange={(v) =>
+          navigate({ search: v === "decisions" ? {} : { tab: v as AgentsTab }, replace: true })
+        }
+        className="mt-4"
+      >
         <TabsList>
           <TabsTrigger value="decisions">
             Waiting for you{open.length ? ` (${open.length})` : ""}
@@ -158,12 +173,16 @@ function AskAgents() {
     <section className="panel mt-4 p-5">
       <div className="flex items-center gap-2">
         <Sparkles className="size-4 text-primary" />
-        <h2 className="font-semibold">Ask the agents</h2>
+        <h2 className="font-semibold">Give the agents a task</h2>
       </div>
       <p className="mt-1 text-sm text-muted-foreground">
-        Describe what you need, for example “Open 2 backend engineer roles for the Bengaluru
-        platform team, 4–8 years, Go and Kubernetes.” The copilot plans it and asks you to confirm
-        before any agent starts.
+        For work on an existing role, for example “Publish REQ-2026-104” or “Screen the shortlisted
+        candidates for REQ-2026-098”. The copilot plans it and asks you to confirm before any agent
+        starts. Hiring someone new? Start in the{" "}
+        <Link to="/desk" className="font-medium text-primary underline">
+          Hiring desk
+        </Link>
+        .
       </p>
       <Textarea
         className="mt-3"

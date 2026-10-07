@@ -3,7 +3,18 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
-import { Bot, Loader2, MessageSquarePlus, Send, Sparkles, UserRound } from "lucide-react";
+import {
+  Bot,
+  CheckCircle2,
+  Circle,
+  CircleDot,
+  Loader2,
+  MessageSquarePlus,
+  RotateCcw,
+  Send,
+  Sparkles,
+  UserRound,
+} from "lucide-react";
 
 import { EmptyState, PageHeader } from "@/components/ats";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +27,7 @@ import {
   chooseDeskRole,
   getDeskConversation,
   listDeskConversations,
+  retryDeskRun,
   screenDeskCandidates,
   sendDeskMessage,
   startDeskConversation,
@@ -246,6 +258,7 @@ function Thread({ id }: { id: string }) {
           </Link>
         ) : null}
       </header>
+      <ProgressPanel conv={d} onChanged={refresh} />
       <div className="flex-1 space-y-3 overflow-y-auto p-4">
         {d.messages.map((m) => (
           <Message key={m.id} m={m} conv={d} onChanged={refresh} />
@@ -348,6 +361,8 @@ function Card({
   if (card.type === "ranked_candidates")
     return <RankedCard card={card} conv={conv} onChanged={onChanged} />;
   if (card.type === "task") return <TaskCard card={card} conv={conv} onChanged={onChanged} />;
+  if (card.type === "run_failed")
+    return <RetryButton conv={conv} runId={String(card["runId"])} onChanged={onChanged} />;
   if (card.type === "requisition")
     return (
       <Link
@@ -554,6 +569,14 @@ function RankedCard({
   );
 }
 
+const TASK_STATUS: Record<string, string> = {
+  open: "Waiting for you",
+  approved: "Approved",
+  rejected: "Declined",
+  answered: "Answered",
+  cancelled: "Cancelled",
+};
+
 function TaskCard({
   card,
   conv,
@@ -580,17 +603,36 @@ function TaskCard({
     }
   }
   return (
-    <div className="rounded-lg border border-border p-3 text-sm">
+    <div
+      className={`rounded-lg border p-3 text-sm ${status === "open" ? "border-primary/40" : "border-border bg-muted/30"}`}
+    >
+      {card["step"] ? (
+        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-primary">
+          {String(card["step"])}
+        </p>
+      ) : null}
       <div className="flex flex-wrap items-center gap-2">
         <p className="font-medium">{String(card["title"])}</p>
         <Badge variant={status === "open" ? "default" : "outline"} className="ml-auto">
-          {status === "open" ? "Waiting for you" : status}
+          {TASK_STATUS[status] ?? status}
         </Badge>
       </div>
       {card["body"] ? (
-        <p className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">
-          {String(card["body"])}
-        </p>
+        // Decided cards and a brief repeated from the previous step stay collapsed.
+        status !== "open" || card["repeated"] ? (
+          <details className="mt-1 text-xs text-muted-foreground">
+            <summary className="cursor-pointer select-none">
+              {card["repeated"] && status === "open"
+                ? "Show brief (same as the previous step)"
+                : "Show details"}
+            </summary>
+            <p className="mt-1 whitespace-pre-wrap">{String(card["body"])}</p>
+          </details>
+        ) : (
+          <p className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">
+            {String(card["body"])}
+          </p>
+        )
       ) : null}
       {status === "open" ? (
         kind === "clarification" ? (
@@ -629,6 +671,123 @@ function TaskCard({
           </div>
         )
       ) : null}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------ progress */
+
+function RetryButton({
+  conv,
+  runId,
+  onChanged,
+  label = "Try again",
+}: {
+  conv: DeskConversationView;
+  runId: string;
+  onChanged: () => void;
+  label?: string;
+}) {
+  const [busy, setBusy] = useState(false);
+  async function retry() {
+    setBusy(true);
+    try {
+      await retryDeskRun({ data: { id: conv.id, runId } });
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not try again");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Button size="sm" variant="outline" disabled={busy} onClick={retry}>
+      {busy ? <Loader2 className="size-4 animate-spin" /> : <RotateCcw className="size-4" />}
+      {label}
+    </Button>
+  );
+}
+
+/** Where the hire stands and what happens next — the answer to "what now?". */
+function ProgressPanel({ conv, onChanged }: { conv: DeskConversationView; onChanged: () => void }) {
+  const p = conv.progress;
+  const n = p.next;
+  const runState =
+    n?.run?.status === "failed"
+      ? "stopped"
+      : n?.run && ["queued", "running"].includes(n.run.status)
+        ? "working"
+        : n?.run?.status === "awaiting_human"
+          ? "waiting"
+          : null;
+  return (
+    <div className="border-b border-border bg-muted/30 px-4 py-3">
+      <ol
+        className="flex flex-wrap items-center gap-x-1 gap-y-1 text-xs"
+        aria-label="Hiring progress"
+      >
+        {p.stages.map((s, i) => (
+          <li key={s.key} className="flex items-center gap-1">
+            {s.state === "done" ? (
+              <CheckCircle2 className="size-3.5 text-primary" aria-label="done" />
+            ) : s.state === "current" ? (
+              <CircleDot className="size-3.5 text-primary" aria-label="current" />
+            ) : (
+              <Circle className="size-3.5 text-muted-foreground/50" aria-label="to do" />
+            )}
+            <span
+              className={
+                s.state === "current"
+                  ? "font-semibold text-foreground"
+                  : s.state === "done"
+                    ? "text-foreground"
+                    : "text-muted-foreground"
+              }
+            >
+              {s.label}
+            </span>
+            {i < p.stages.length - 1 ? (
+              <span className="px-1 text-muted-foreground/40">›</span>
+            ) : null}
+          </li>
+        ))}
+      </ol>
+      {n ? (
+        <div className="mt-2 flex flex-wrap items-start gap-2 rounded-md border border-border bg-card p-2.5 text-sm">
+          <div className="min-w-0 flex-1">
+            <p>
+              <span className="font-medium">Next: </span>
+              {n.text}
+            </p>
+            {n.agentName ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {n.agentName}:{" "}
+                {n.agentEnabled === false ? (
+                  <span className="font-medium text-destructive">switched off</span>
+                ) : runState === "stopped" ? (
+                  <span className="font-medium text-destructive">stopped</span>
+                ) : runState === "working" ? (
+                  "working on it"
+                ) : runState === "waiting" ? (
+                  "waiting for a person"
+                ) : (
+                  "on, starts automatically when this step is reached"
+                )}
+                {n.waitingForYou ? ` · ${n.waitingForYou} request(s) waiting for you below` : ""}
+              </p>
+            ) : null}
+          </div>
+          {n.agentEnabled === false ? (
+            <Button asChild size="sm" variant="outline">
+              <Link to="/agents/settings">Switch it on</Link>
+            </Button>
+          ) : runState === "stopped" && n.run ? (
+            <RetryButton conv={conv} runId={n.run.id} onChanged={onChanged} />
+          ) : null}
+        </div>
+      ) : (
+        <p className="mt-2 text-sm text-muted-foreground">All steps are done for this hire.</p>
+      )}
     </div>
   );
 }

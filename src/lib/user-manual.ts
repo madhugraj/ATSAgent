@@ -328,6 +328,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
     summary:
       "Describe who you need in plain words; the hiring agents gather the details, find similar roles, rank candidates and line up screening, and stop at every decision that is yours.",
     steps: [
+      "Use the switch at the top: Agent mode shows the agent pages (Hiring desk, Waiting for you, Agent activity, and agent administration for HR leadership); Manual mode shows the pages for doing each step yourself (requisitions, talent pool, matching, screening, interviews, offers, sourcing, reports). Both work on the same records, the choice is remembered, and opening a page of the other mode (for example from the bell) switches automatically.",
       'Open Hiring desk and type the need, for example "I need a Full stack developer in Chennai". The desk asks one short question at a time until it knows the role, location, experience, number of openings and must-have skills.',
       "It then shows similar roles. Continue with an open role, create a new role, or create a new role that reuses an earlier role's approved job description (no new JD approval is needed; the reuse is recorded in the audit log).",
       "A new role is created as a draft in your name. The Requisition agent adds the pay band and scoring weights and sends it through the usual department head → HR → CBO approval chain.",

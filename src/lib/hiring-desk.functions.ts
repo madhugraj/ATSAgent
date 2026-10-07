@@ -118,6 +118,8 @@ export type DeskConversationView = {
   messages: DeskMessageView[];
   /** Current status of every agent request shown in the thread. */
   tasks: Record<string, string>;
+  /** Where the hire stands and what happens next. */
+  progress: import("../server/desk/desk.server").DeskProgress;
 };
 
 export const getDeskConversation = createServerFn({ method: "GET" })
@@ -145,7 +147,7 @@ export const getDeskConversation = createServerFn({ method: "GET" })
     const taskIds = msgs
       .map((m) => (m.card as { type?: string; taskId?: string } | null)?.taskId)
       .filter((x): x is string => typeof x === "string");
-    const { taskStatuses } = await import("../server/desk/desk.server");
+    const { taskStatuses, deskProgress } = await import("../server/desk/desk.server");
     return {
       id: conv.id,
       title: conv.title,
@@ -161,6 +163,7 @@ export const getDeskConversation = createServerFn({ method: "GET" })
         at: m.createdAt.toISOString(),
       })),
       tasks: await taskStatuses(context.orgId, taskIds),
+      progress: await deskProgress(conv),
     };
   });
 
@@ -251,4 +254,17 @@ export const closeDeskConversation = createServerFn({ method: "POST" })
         and(eq(hiringConversations.id, conv.id), eq(hiringConversations.orgId, context.orgId)),
       );
     return { ok: true as const };
+  });
+
+/** Run a stopped agent of this thread again (same goal and role). */
+export const retryDeskRun = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) =>
+    z.object({ id: z.string().uuid(), runId: z.string().uuid() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    await registered();
+    const { retryRun } = await import("../server/desk/desk.server");
+    return { runId: await retryRun(conv, context.userId, data.runId) };
   });

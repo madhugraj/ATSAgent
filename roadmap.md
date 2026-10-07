@@ -1,5 +1,14 @@
 # Roadmap
 
+## Agent mode / Manual mode (2026-10-07)
+
+- [x] A switch in the top bar separates the two ways of working: Agent mode shows Hiring desk, Waiting for you, Agent activity and agent administration; Manual mode shows the pipeline, sourcing and intelligence pages; dashboard, My interviews, administration and help show in both
+- [x] Remembered per user in the browser; opening a page of the other mode switches the menu; switching away from a page of the other mode goes to that mode's start page (Hiring desk / Requisitions)
+- [x] Hiring desk progress tracker: Need › Requisition approval › Job description › Candidates › Screening › Interviews › Hiring decision › Offer › Pre-onboarding & joining, with the next step, the responsible agent's state (working / waiting / stopped / switched off), **Try again** for a stopped run and **Switch it on** for a switched-off agent
+- [x] Plain, vendor-neutral reasons when a thread's agent stops; a thread message when the next agent is switched off; approval chains labelled "Approval n of 3 · role", decided cards collapsed and a repeated brief hidden
+- [x] Fix: Gemini thinking models — the gateway now keeps each tool call's `thoughtSignature` and sends it back (agents on Gemini failed on their second turn)
+- [x] "Ask the agents" renamed "Give the agents a task" (for existing roles) and points new hiring needs to the Hiring desk; the HR copilot is labelled "Help and questions" with a link to the Hiring desk
+
 ## Agentic platform — Phase 6a: hiring desk (2026-10-07)
 
 - [x] Hiring desk (`/desk`): one chat thread per hiring need; the desk asks one short question at a time until role, location, experience, openings and must-have skills are known, then shows similar roles as cards

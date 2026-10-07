@@ -932,8 +932,27 @@ const SAFE_ERRORS = new Set([
   "No AI model key saved. Add one on the Integrations page.",
 ]);
 
+/**
+ * Why a run stopped, in plain words. Provider text never reaches the browser
+ * (it can name the vendor); known runtime messages pass through.
+ */
+export function failureReason(error: string | null): string {
+  if (error && SAFE_ERRORS.has(error)) return error;
+  const e = error ?? "";
+  if (/api[ _-]?key|unauthori[sz]ed|permission denied|\b40[13]\b/i.test(e))
+    return "the AI model rejected the key. Check Integrations → AI model, then try again.";
+  if (/quota|rate.?limit|resource.?exhausted|\b429\b|overloaded/i.test(e))
+    return "the AI model is busy or out of quota. Try again in a few minutes.";
+  if (/timeout|timed out|ECONN|network|fetch failed/i.test(e))
+    return "the AI model could not be reached. Try again.";
+  if (e)
+    return "the AI model or one of its tools returned an error. Try again; if it repeats, export the run trail from Agent activity.";
+  return "it could not complete this step. Try again.";
+}
+
 /** A run working for a thread finished: post its result (and the ranked list after matching). */
 export async function onRunFinished(run: {
+  id?: string;
   conversationId: string | null;
   orgId: string;
   agentType: string;
@@ -952,19 +971,75 @@ export async function onRunFinished(run: {
     body:
       run.status === "done"
         ? (run.result ?? "Done.").slice(0, 1500)
-        : `The ${name} stopped: ${run.error && SAFE_ERRORS.has(run.error) ? run.error : "it could not complete this step."} You can continue from the requisition page.`,
+        : `The ${name} stopped: ${failureReason(run.error)}`,
+    ...(run.status === "failed" && run.id
+      ? { card: { type: "run_failed", runId: run.id, agentType: run.agentType } }
+      : {}),
   });
   if (run.status === "done" && run.agentType === "intake") await postRankedList(conv);
 }
 
 /** A run working for a thread needs a person: show the request in the thread. */
+const ROLE_NAME: Record<string, string> = {
+  recruiter: "Recruiter",
+  hiring_manager: "Hiring manager",
+  department_head: "Department head",
+  hr_head: "HR head",
+  president_cbo: "CBO",
+};
+
+/** Multi-step approval chains: which step a gate is, so repeated cards read as progress. */
+const CHAIN_STEP: Record<string, Record<string, [number, number]>> = {
+  requisition: { pending_dh: [1, 3], pending_hr: [2, 3], pending_cbo: [3, 3] },
+  offer: { pending_hr: [1, 2], pending_cbo: [2, 2] },
+};
+
+/** "Approval 2 of 3 · HR head" for a chain step, "Decision · Hiring manager" otherwise. */
+export function taskStep(task: {
+  kind: string;
+  assigneeRole?: string | null;
+  proposedAction?: unknown;
+}): string | null {
+  if (task.kind !== "gate") return null;
+  const subject = (
+    task.proposedAction as { args?: { subject?: { type?: string; expects?: string } } } | null
+  )?.args?.subject;
+  const who = task.assigneeRole ? (ROLE_NAME[task.assigneeRole] ?? task.assigneeRole) : null;
+  const step =
+    subject?.type && subject.expects ? CHAIN_STEP[subject.type]?.[subject.expects] : undefined;
+  if (step) return `Approval ${step[0]} of ${step[1]}${who ? ` · ${who}` : ""}`;
+  return who ? `Decision · ${who}` : null;
+}
+
 export async function onTaskOpened(
   run: { conversationId: string | null; orgId: string; agentType: string },
-  task: { id: string; kind: string; title: string; body: string },
+  task: {
+    id: string;
+    kind: string;
+    title: string;
+    body: string;
+    assigneeRole?: string | null;
+    proposedAction?: unknown;
+  },
 ): Promise<void> {
   if (!run.conversationId) return;
   const conv = await loadConversation(run.orgId, run.conversationId).catch(() => null);
   if (!conv) return;
+  const step = taskStep(task);
+  // The same brief again for the next approver: show it collapsed, not twice.
+  const [prev] = await db
+    .select({ card: hiringMessages.card })
+    .from(hiringMessages)
+    .where(
+      and(
+        eq(hiringMessages.conversationId, conv.id),
+        sql`${hiringMessages.card} ->> 'type' = 'task'`,
+      ),
+    )
+    .orderBy(desc(hiringMessages.createdAt))
+    .limit(1);
+  const body = task.body.slice(0, 1500);
+  const repeated = (prev?.card as { body?: string } | null)?.body === body && body.length > 0;
   await postMessage(conv, {
     role: "agent",
     agentType: run.agentType,
@@ -972,14 +1047,18 @@ export async function onTaskOpened(
       task.kind === "clarification"
         ? "I have a question before I continue."
         : task.kind === "gate"
-          ? "This needs a decision."
+          ? step
+            ? `${step.replace(" · ", " — waiting for the ")}.`
+            : "This needs a decision."
           : "May I go ahead with this?",
     card: {
       type: "task",
       taskId: task.id,
       kind: task.kind,
       title: task.title,
-      body: task.body.slice(0, 1500),
+      body,
+      ...(step ? { step } : {}),
+      ...(repeated ? { repeated: true } : {}),
     },
   });
 }
@@ -992,4 +1071,262 @@ export async function taskStatuses(orgId: string, ids: string[]): Promise<Record
     .from(agentTasks)
     .where(and(eq(agentTasks.orgId, orgId), inArray(agentTasks.id, ids)));
   return Object.fromEntries(rows.map((r) => [r.id, r.status]));
+}
+
+/* ------------------------------------------------------------- progress */
+
+export type StageKey =
+  | "need"
+  | "requisition"
+  | "jd"
+  | "candidates"
+  | "screening"
+  | "interviews"
+  | "decision"
+  | "offer"
+  | "joining";
+
+export type DeskProgress = {
+  stages: { key: StageKey; label: string; state: "done" | "current" | "todo" }[];
+  next: {
+    stage: StageKey;
+    /** What happens next, in plain words. */
+    text: string;
+    agentType: string | null;
+    agentName: string | null;
+    /** on = switched on; off = switched off (nothing will happen until it is). */
+    agentEnabled: boolean | null;
+    /** The responsible agent's latest run on this role. */
+    run: { id: string; status: string } | null;
+    /** Open requests from this thread's agents waiting for a person. */
+    waitingForYou: number;
+  } | null;
+};
+
+const STAGES: { key: StageKey; label: string; agent: AgentType | null }[] = [
+  { key: "need", label: "Need", agent: null },
+  { key: "requisition", label: "Requisition approval", agent: "requisition" },
+  { key: "jd", label: "Job description", agent: "jd" },
+  { key: "candidates", label: "Candidates", agent: "intake" },
+  { key: "screening", label: "Screening", agent: "screening" },
+  { key: "interviews", label: "Interviews", agent: "interview" },
+  { key: "decision", label: "Hiring decision", agent: "evaluation" },
+  { key: "offer", label: "Offer", agent: "offer" },
+  { key: "joining", label: "Pre-onboarding & joining", agent: "onboarding" },
+];
+
+const AGENT_TITLE: Record<string, string> = {
+  requisition: "Requisition agent",
+  jd: "JD agent",
+  intake: "Intake & matching agent",
+  screening: "Screening agent",
+  interview: "Interview coordinator",
+  evaluation: "Evaluation agent",
+  offer: "Offer agent",
+  onboarding: "Pre-onboarding & release agent",
+};
+
+const APPROVER: Record<string, string> = {
+  pending_dh: "the department head",
+  pending_hr: "the HR head",
+  pending_cbo: "the CBO",
+};
+
+/** Where this hire stands, and what happens next (the thread's progress tracker). */
+export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
+  const done = new Set<StageKey>();
+  const slotsComplete = !missingSlots(conv.slots as DeskSlots).length;
+  if (conv.requisitionId || slotsComplete) done.add("need");
+
+  let detail: Partial<Record<StageKey, string>> = {};
+  if (conv.requisitionId) {
+    const orgId = conv.orgId;
+    const [req] = await db
+      .select({ code: requisitions.code, status: requisitions.status })
+      .from(requisitions)
+      .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, orgId)))
+      .limit(1);
+    const jd = await latestJdStatus(orgId, conv.requisitionId);
+    const [c] = (await db.execute(sql`
+      select
+        count(*) filter (where m.id is not null)::int scored,
+        count(*) filter (where a.stage in ('l1','l2','l3','offer','offer_pending','offer_released','offer_accepted','hired','joined','joining_deferred'))::int interviewing,
+        count(*) filter (where a.stage = 'joined')::int joined,
+        (select count(*) from evaluations e join applications a2 on a2.id = e.application_id
+          where a2.requisition_id = ${conv.requisitionId} and e.org_id = ${orgId})::int evaluations,
+        (select count(*) from offers o join applications a3 on a3.id = o.application_id
+          where a3.requisition_id = ${conv.requisitionId} and o.org_id = ${orgId})::int offers,
+        (select count(*) from offers o join applications a4 on a4.id = o.application_id
+          where a4.requisition_id = ${conv.requisitionId} and o.org_id = ${orgId}
+            and o.status in ('released','accepted'))::int released
+      from applications a left join match_scores m on m.application_id = a.id
+      where a.requisition_id = ${conv.requisitionId} and a.org_id = ${orgId}`)) as unknown as {
+      scored: number;
+      interviewing: number;
+      joined: number;
+      evaluations: number;
+      offers: number;
+      released: number;
+    }[];
+    if (req?.status === "approved") done.add("requisition");
+    if (jd === "approved") done.add("jd");
+    if ((c?.scored ?? 0) > 0) done.add("candidates");
+    if ((c?.interviewing ?? 0) > 0) done.add("screening");
+    if ((c?.evaluations ?? 0) > 0) done.add("interviews");
+    if ((c?.offers ?? 0) > 0) done.add("decision");
+    if ((c?.released ?? 0) > 0) done.add("offer");
+    if ((c?.joined ?? 0) > 0) done.add("joining");
+    detail = {
+      requisition:
+        req && APPROVER[req.status]
+          ? `${req.code} is waiting for ${APPROVER[req.status]} to approve it — from this thread, Waiting for you, or the requisition page.`
+          : `The Requisition agent completes draft ${req?.code ?? ""} (pay band, scoring weights) and sends it for approval.`,
+      jd:
+        jd === "pending_dh"
+          ? "The job description is waiting for the department head's approval."
+          : "The JD agent drafts the job description; the department head approves it.",
+    };
+  }
+  // Later stages only count once the earlier ones are done (no skipping ahead).
+  let current: StageKey | null = null;
+  const stages = STAGES.map((s) => {
+    if (current === null && !done.has(s.key)) current = s.key;
+    const state: "done" | "current" | "todo" =
+      current === s.key ? "current" : current === null ? "done" : "todo";
+    return { key: s.key, label: s.label, state };
+  });
+  if (current === null) return { stages, next: null };
+  const cur: StageKey = current;
+
+  const TEXT: Record<StageKey, string> = {
+    need: "Answer the desk's questions until the role, location, experience, openings and must-have skills are known.",
+    requisition: detail.requisition ?? "",
+    jd: detail.jd ?? "",
+    candidates:
+      "The Intake & matching agent searches the talent pool and posts a ranked list here.",
+    screening:
+      'Pick candidates from the ranked list (or type "talk to the first 5"); the Screening agent prepares their screening. Move the ones who pass to an interview round (Manual mode → Screening calls or the candidate page).',
+    interviews:
+      "The Interview coordinator books the rounds. After each interview the interviewer submits a scorecard (My interviews).",
+    decision:
+      "Once scorecards are in, the Evaluation agent writes the debrief and sends the hiring decision to the hiring manager — it appears here and in Waiting for you.",
+    offer:
+      "The Offer agent drafts the offer within the band; the HR head and then the CBO approve it.",
+    joining:
+      "The Pre-onboarding agent collects and cross-checks documents; HR validates them and releases the offer.",
+  };
+
+  const agentType = STAGES.find((s) => s.key === cur)!.agent;
+  let agentEnabled: boolean | null = null;
+  let run: { id: string; status: string } | null = null;
+  if (agentType) {
+    agentEnabled = await agentOn(conv.orgId, agentType);
+    if (conv.requisitionId) {
+      const [r] = await db
+        .select({ id: agentRuns.id, status: agentRuns.status })
+        .from(agentRuns)
+        .where(
+          and(
+            eq(agentRuns.orgId, conv.orgId),
+            eq(agentRuns.agentType, agentType),
+            eq(agentRuns.mode, "live"),
+            or(eq(agentRuns.conversationId, conv.id), eq(agentRuns.subjectId, conv.requisitionId)),
+          ),
+        )
+        .orderBy(desc(agentRuns.createdAt))
+        .limit(1);
+      run = r ?? null;
+    }
+  }
+  const [w] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(agentTasks)
+    .innerJoin(agentRuns, eq(agentRuns.id, agentTasks.runId))
+    .where(
+      and(
+        eq(agentTasks.orgId, conv.orgId),
+        eq(agentTasks.status, "open"),
+        eq(agentRuns.conversationId, conv.id),
+      ),
+    );
+  return {
+    stages,
+    next: {
+      stage: cur,
+      text: TEXT[cur],
+      agentType,
+      agentName: agentType ? (AGENT_TITLE[agentType] ?? agentType) : null,
+      agentEnabled,
+      run,
+      waitingForYou: Number(w?.n ?? 0),
+    },
+  };
+}
+
+/** Run a stopped agent again for the thread (same goal, same role). */
+export async function retryRun(conv: Conversation, userId: string, runId: string): Promise<string> {
+  const [r] = await db
+    .select()
+    .from(agentRuns)
+    .where(and(eq(agentRuns.id, runId), eq(agentRuns.orgId, conv.orgId)))
+    .limit(1);
+  if (!r) throw new Error("Run not found.");
+  if (r.status !== "failed" || r.mode !== "live")
+    throw new Error("Only a stopped run can be tried again.");
+  if (r.conversationId !== conv.id && r.subjectId !== conv.requisitionId)
+    throw new Error("That run does not belong to this conversation.");
+  if (!(await agentOn(conv.orgId, r.agentType))) {
+    throw new Error(
+      `The ${AGENT_TITLE[r.agentType] ?? r.agentType} is switched off — switch it on in Agent settings first.`,
+    );
+  }
+  const { startRun } = await import("../agents/runtime.server");
+  const { runId: next } = await startRun({
+    orgId: conv.orgId,
+    agentType: r.agentType,
+    principalUserId: userId,
+    goal: r.goal,
+    subjectType: r.subjectType,
+    subjectId: r.subjectId,
+    conversationId: conv.id,
+  });
+  await writeAudit({
+    actor: `user:${userId}`,
+    actorUserId: userId,
+    orgId: conv.orgId,
+    action: "desk.run_retried",
+    entityType: "agent_run",
+    entityId: next,
+    detail: { retry_of: r.id, conversation_id: conv.id },
+  });
+  await postMessage(conv, {
+    role: "desk",
+    body: `Trying the ${AGENT_TITLE[r.agentType] ?? r.agentType} again.`,
+    agentType: r.agentType,
+  });
+  const { kickAgents } = await import("../agents/orchestrator.server");
+  kickAgents(conv.orgId);
+  return next;
+}
+
+/**
+ * The orchestrator wanted to start an agent for a thread's role but it is
+ * switched off: say so in the thread (once) instead of stalling silently.
+ */
+export async function notifyAgentOff(
+  orgId: string,
+  requisitionId: string,
+  agentType: string,
+): Promise<void> {
+  const conv = await conversationForRequisition(orgId, requisitionId);
+  if (!conv) return;
+  const body = `The next step needs the ${AGENT_TITLE[agentType] ?? agentType}, which is switched off. Switch it on in Agent settings and I'll continue — or do this step yourself in Manual mode.`;
+  const [last] = await db
+    .select({ body: hiringMessages.body })
+    .from(hiringMessages)
+    .where(eq(hiringMessages.conversationId, conv.id))
+    .orderBy(desc(hiringMessages.createdAt))
+    .limit(1);
+  if (last?.body === body) return;
+  await postMessage(conv, { role: "desk", body, agentType });
 }

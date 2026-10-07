@@ -465,3 +465,117 @@ describe("talk to the first N", () => {
     ).rejects.toThrow(/not in this role's pipeline/);
   });
 });
+
+/* ------------------------------------------------- progress and recovery */
+
+describe("what happens next", () => {
+  test("progress shows the current stage and its agent", async () => {
+    const conv = await confirming();
+    let p = await desk.deskProgress(conv);
+    expect(p.stages.find((s) => s.state === "current")?.key).toBe("requisition");
+    // An approved role with an approved JD and scored candidates is at screening.
+    await desk.continueWithRole(conv, recruiter, existingReq);
+    p = await desk.deskProgress(await reload(conv.id));
+    expect(p.stages.filter((s) => s.state === "done").map((s) => s.key)).toEqual([
+      "need",
+      "requisition",
+      "jd",
+      "candidates",
+    ]);
+    expect(p.next).toMatchObject({
+      stage: "screening",
+      agentType: "screening",
+      agentEnabled: true,
+    });
+  });
+
+  test("a stopped run can be tried again from the thread", async () => {
+    const conv = await confirming();
+    await desk.continueWithRole(conv, recruiter, existingReq);
+    agentScript.push({
+      ok: false,
+      status: 400,
+      message: "Function call is missing a thought_signature",
+    } as never);
+    await runAgentTick({ orgId });
+    const [failed] = (await runsOf(conv.id)).filter((r) => r.status === "failed");
+    expect(failed).toBeDefined();
+    const m = await messages(conv.id);
+    const stop = m.find((x) => (x.card as { type?: string } | null)?.type === "run_failed")!;
+    expect(stop.body).toMatch(/AI model or one of its tools returned an error/);
+    expect(stop.body).not.toMatch(/thought_signature/);
+
+    const again = await desk.retryRun(await reload(conv.id), recruiter, failed!.id);
+    const [r] = await db.select().from(agentRuns).where(eq(agentRuns.id, again));
+    expect(r).toMatchObject({ status: "queued", agentType: "intake", conversationId: conv.id });
+    await expect(desk.retryRun(await reload(conv.id), recruiter, again)).rejects.toThrow(
+      /stopped run/,
+    );
+  });
+
+  test("a switched-off next agent is announced once", async () => {
+    const conv = await confirming();
+    await desk.continueWithRole(conv, recruiter, existingReq);
+    await desk.notifyAgentOff(orgId, existingReq, "jd");
+    await desk.notifyAgentOff(orgId, existingReq, "jd");
+    const off = (await messages(conv.id)).filter((x) => /switched off/.test(x.body));
+    expect(off).toHaveLength(1);
+  });
+
+  test("failure reasons are plain and vendor-neutral", () => {
+    expect(desk.failureReason("Invalid API key provided")).toMatch(/rejected the key/);
+    expect(desk.failureReason("429 Resource has been exhausted")).toMatch(/busy or out of quota/);
+    expect(desk.failureReason("The run reached its step or token budget.")).toBe(
+      "The run reached its step or token budget.",
+    );
+  });
+});
+
+describe("approval chains read as progress", () => {
+  test("steps are labelled by chain position and approver", () => {
+    const gate = (type: string, expects: string, role: string) => ({
+      kind: "gate",
+      assigneeRole: role,
+      proposedAction: { args: { subject: { type, expects } } },
+    });
+    expect(desk.taskStep(gate("requisition", "pending_dh", "department_head"))).toBe(
+      "Approval 1 of 3 · Department head",
+    );
+    expect(desk.taskStep(gate("requisition", "pending_cbo", "president_cbo"))).toBe(
+      "Approval 3 of 3 · CBO",
+    );
+    expect(desk.taskStep(gate("offer", "pending_hr", "hr_head"))).toBe("Approval 1 of 2 · HR head");
+    expect(desk.taskStep({ kind: "gate", assigneeRole: "hiring_manager" })).toBe(
+      "Decision · Hiring manager",
+    );
+    expect(desk.taskStep({ kind: "approval" })).toBeNull();
+  });
+
+  test("the next approver's identical brief is flagged as repeated", async () => {
+    const conv = await confirming();
+    const run = { conversationId: conv.id, orgId, agentType: "requisition" };
+    const base = { kind: "gate", title: "Requisition approval", body: "Same brief" };
+    await desk.onTaskOpened(run, {
+      ...base,
+      id: crypto.randomUUID(),
+      assigneeRole: "department_head",
+      proposedAction: { args: { subject: { type: "requisition", expects: "pending_dh" } } },
+    });
+    await desk.onTaskOpened(run, {
+      ...base,
+      id: crypto.randomUUID(),
+      assigneeRole: "hr_head",
+      proposedAction: { args: { subject: { type: "requisition", expects: "pending_hr" } } },
+    });
+    const cards = (await messages(conv.id))
+      .map((m) => m.card as { type?: string; step?: string; repeated?: boolean } | null)
+      .filter((c) => c?.type === "task");
+    expect(cards.map((c) => [c!.step, Boolean(c!.repeated)])).toEqual([
+      ["Approval 1 of 3 · Department head", false],
+      ["Approval 2 of 3 · HR head", true],
+    ]);
+    expect((await messages(conv.id)).at(-1)!.body).toBe(
+      "Approval 2 of 3 — waiting for the HR head.",
+    );
+  });
+});
