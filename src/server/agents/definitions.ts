@@ -128,19 +128,20 @@ export function registerPhase1Agents(): void {
   registerAgent({
     type: "publishing",
     name: "Publishing agent",
-    version: "1.2.0",
+    // 1.3.0: job-board posts requested by anyone, approved (and posted) by the HR head.
+    version: "1.3.0",
     owner: "hr_head",
     responsibility:
       "Makes an approved requisition visible: internal job board first, then reviewed external job-board posts.",
     mustNever: [
-      "Publish anything outside the organisation without a person's review",
+      "Publish anything outside the organisation unless the HR head approved that post or pre-approved that board",
       "Publish a requisition or JD that is not approved",
     ],
     scope: {
       reads: ["requisitions", "approved JD text"],
       writes: ["internal job posting (IJP) flag"],
       external: [
-        "job-board posts (LinkedIn, Indeed, Naukri) — always reviewed, HR-head principal only",
+        "job-board posts (LinkedIn, Indeed, Naukri) — approved and posted by the HR head, or on a board the org pre-approved (Autonomous only)",
       ],
     },
     gates: ["general"],
@@ -222,13 +223,14 @@ export function registerPhase2Agents(): void {
   registerAgent({
     type: "screening",
     name: "Screening agent",
-    version: "1.2.0",
+    // 1.3.0: Autonomous sends every candidate message template without asking.
+    version: "1.3.0",
     owner: "hr_head",
     responsibility:
       "Moves shortlisted candidates through screening: kits, assessments, reminders and proceed / hold notes.",
     mustNever: [
       "Reject a candidate",
-      "Email a candidate without approval unless the assessment email is pre-approved",
+      "Email a candidate without approval unless the assessment email is pre-approved or the agent is set to Autonomous",
     ],
     scope: {
       reads: ["shortlisted applications", "screening kits, calls and assessment results"],
@@ -310,13 +312,14 @@ export function registerPhase3Agents(): void {
   registerAgent({
     type: "interview",
     name: "Interview coordinator",
-    version: "1.1.0",
+    // 1.2.0: Autonomous sends every candidate message template without asking.
+    version: "1.2.0",
     owner: "hr_head",
     responsibility:
       "Books the next interview round for candidates who advanced: panel from organisation members, a proposed slot, a meeting link, and the candidate's invite.",
     mustNever: [
       "Invite an interviewer who is not an active member of the organisation",
-      "Book a slot without a person's review unless the interview invitation is pre-approved",
+      "Book a slot without a person's review unless the interview invitation is pre-approved or the agent is set to Autonomous",
       "Change a candidate's stage except by booking their next round",
     ],
     scope: {

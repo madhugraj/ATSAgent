@@ -1,5 +1,13 @@
 # Roadmap
 
+## Autonomy and job-board posting (2026-10-08)
+
+- [x] Any member can ask the Publishing agent for a LinkedIn / Naukri / Indeed post; the HR head approves it (with its text) and it is published as that HR head (Publishing agent v1.3.0); tools can name an approver role
+- [x] Autonomous now differs from Act and notify: every candidate message template sends on its own (Screening v1.3.0, Interview coordinator v1.2.0), and job-board posts go out on their own on boards the HR head pre-approved (per board, Autonomous only); decisions always stay with people
+- [x] Talk to the agents through the desk: a change asked in chat ("more weight for experience") returns the pending request to its agent as **Changes requested** with the person's words; the agent revises and asks again; answers to agent questions are passed on; approval gates are never decided from chat; a desk reply that took no action says "Nothing was sent to the agents"; the re-proposed request is marked **Revised after your change** with each value before → after (or says plainly that nothing changed); every decision handed to an agent (changes requested, declined, answered, gate approved) is a `decision` step of its run with the exact words the agent was told, shown as "person → agent" in the run trail and in the desk's live activity
+- [x] Hiring desk shows its thinking ("How I read that": understood, still missing, next) and researches what the person delegates ("as per market", "you decide"): skills, experience and pay as a proposal with sources, labelled live web research or estimate; "ok" / **Use these** applies it, editing the details supersedes it; the desk never promises an action it is not taking
+- [x] Hiring desk follows the requisition: closing / rejecting a role (anywhere) stops its agents and ends the thread with who and why; "close this role" in the chat; the desk answers from live facts and the app's real rules; request cards show who they wait for
+
 ## Utilisation & efficiency, smarter matching, deeper JDs (2026-10-08)
 
 - [x] Agent observability → Utilisation & efficiency: day-wise tokens (or cost at the organisation's own token prices — never assumed) by agent, day-wise agent working time vs time waiting for people, per-agent efficiency (tokens and cost per run, agent minutes, median wait, approvals per run, tokens wasted on failed runs, repeated reads), and "How to optimise" recommendations with evidence and estimated weekly savings (wasted spend, rubber-stamp approvals → Act and notify, waiting, long re-sent conversations, repeated lookups, dominant AI skill, slow turns, token growth, budget run-out date); migration `0031` (`agent_cost_rates`)

@@ -34,6 +34,12 @@ export type AgentTool<I = unknown> = {
   skills?: AiFeature[];
   /** One-line description of the call, used as the approval card title. */
   describe?: (input: I) => string;
+  /**
+   * Approval requests for this tool go to this role instead of the person the
+   * agent works for; once approved the tool runs as the approver (e.g. job-board
+   * posts: anyone may ask, the HR head decides and posts).
+   */
+  approverRole?: AppRole;
   run: (ctx: ToolContext, input: I) => Promise<unknown>;
 };
 

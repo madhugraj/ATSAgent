@@ -310,6 +310,41 @@ describe("agent runtime", () => {
     expect((last as { content: string }).content).toContain("wrong tone");
   });
 
+  test("changes requested from the desk ask the model to revise and ask again", async () => {
+    const { runId } = await start();
+    script.push(call({ id: "w1", name: "save_draft", args: { text: "v1" } }));
+    await runAgentTick();
+    const [task] = await openTasks(runId);
+    await resolveTask({
+      orgId,
+      taskId: task!.id,
+      userId: recruiterId,
+      decision: { status: "rejected", reason: "more weight on experience", changes: true },
+    });
+    script.push(call({ id: "w2", name: "save_draft", args: { text: "v2" } }));
+    await runAgentTick();
+    expect(executed).toEqual([]);
+    const last = seen.at(-1)!.messages.at(-1)! as { content: string };
+    expect(last.content).toContain("asked for changes");
+    expect(last.content).toContain("more weight on experience");
+    // What the agent was told is a step of its trail, between the two proposals.
+    const told = await db
+      .select()
+      .from(agentSteps)
+      .where(and(eq(agentSteps.runId, runId), eq(agentSteps.kind, "decision")));
+    expect(told).toHaveLength(1);
+    expect(told[0]).toMatchObject({
+      status: "rejected",
+      toolName: "save_draft",
+      input: { changes: true, reason: "more weight on experience", decidedBy: recruiterId },
+    });
+    expect((told[0]!.output as { told: string }).told).toBe(last.content);
+    // The revised proposal is a new request for the person.
+    const reopened = await openTasks(runId);
+    expect(reopened).toHaveLength(1);
+    expect(reopened[0]!.id).not.toBe(task!.id);
+  });
+
   test("request_approval opens a role-routed gate; only that role (or the owner) decides", async () => {
     const { runId } = await start();
     script.push(
@@ -500,5 +535,106 @@ describe("agent runtime", () => {
     await db.delete(agentPolicies).where(eq(agentPolicies.orgId, orgId));
     expect((await runAgentTick()).claimed).toBe(0);
     expect((await runRow(runId)).status).toBe("queued");
+  });
+});
+
+/* ------------------------------------------- autonomy levels and approvers */
+
+describe("autonomy policy", () => {
+  test("what runs and what asks, per level", async () => {
+    const { decideToolCall } = await import("../src/server/agents/policy");
+    const p = (autonomy: "suggest" | "act_and_notify" | "autonomous", list: string[] = []) => ({
+      autonomy,
+      whitelistedTemplates: list,
+    });
+    // read / write
+    expect(decideToolCall("read", p("suggest"))).toBe("run");
+    expect(decideToolCall("write", p("suggest"))).toBe("approve");
+    expect(decideToolCall("write", p("act_and_notify"))).toBe("run");
+    // candidate messages
+    expect(decideToolCall("external", p("suggest", ["stage_update"]), "stage_update")).toBe(
+      "approve",
+    );
+    expect(decideToolCall("external", p("act_and_notify"), "stage_update")).toBe("approve");
+    expect(decideToolCall("external", p("act_and_notify", ["stage_update"]), "stage_update")).toBe(
+      "run",
+    );
+    expect(decideToolCall("external", p("autonomous"), "stage_update")).toBe("run");
+    // job boards: Autonomous and pre-approved only
+    expect(
+      decideToolCall("external", p("act_and_notify", ["job_board:linkedin"]), "job_board:linkedin"),
+    ).toBe("approve");
+    expect(decideToolCall("external", p("autonomous"), "job_board:linkedin")).toBe("approve");
+    expect(
+      decideToolCall("external", p("autonomous", ["job_board:linkedin"]), "job_board:linkedin"),
+    ).toBe("run");
+    expect(
+      decideToolCall("external", p("autonomous", ["job_board:linkedin"]), "job_board:naukri"),
+    ).toBe("approve");
+    // external with no template always asks
+    expect(decideToolCall("external", p("autonomous"))).toBe("approve");
+  });
+
+  test("a board post requested by a recruiter is approved — and run — by the HR head", async () => {
+    registerTool({
+      name: "post_board",
+      description: "Post on a board",
+      input: z.object({ provider: z.string() }),
+      risk: "external",
+      templateOf: (i) => `job_board:${i.provider}`,
+      approverRole: "hr_head",
+      run: async (ctx, input) => {
+        executed.push({ tool: "post_board", args: input, principal: ctx.principalUserId });
+        return "posted";
+      },
+    });
+    registerAgent({
+      type: "requisition",
+      name: "Test agent",
+      version: "0.0.0-test",
+      owner: "hr_head",
+      responsibility: "Test fixture.",
+      mustNever: [],
+      scope: { reads: [], writes: [], external: [] },
+      gates: ["general"],
+      riskTier: "low",
+      evals: [],
+      feature: "agent_requisition",
+      system: "Test agent.",
+      tools: ["post_board"],
+    });
+    await db
+      .update(agentPolicies)
+      .set({ autonomy: "act_and_notify" })
+      .where(and(eq(agentPolicies.orgId, orgId), eq(agentPolicies.agentType, "requisition")));
+    const { runId } = await start();
+    script.push(
+      call({ id: "b1", name: "post_board", args: { provider: "linkedin" } }),
+      say("Posted."),
+    );
+    await runAgentTick();
+    const [task] = await openTasks(runId);
+    expect(task).toMatchObject({ kind: "approval", assigneeRole: "hr_head", assigneeUserId: null });
+    expect(executed).toEqual([]);
+    // The recruiter who asked cannot approve it; the HR head can.
+    await expect(
+      resolveTask({
+        orgId,
+        taskId: task!.id,
+        userId: recruiterId,
+        decision: { status: "approved" },
+      }),
+    ).rejects.toThrow();
+    await resolveTask({
+      orgId,
+      taskId: task!.id,
+      userId: hrHeadId,
+      decision: { status: "approved" },
+    });
+    await runAgentTick();
+    expect(executed).toEqual([
+      { tool: "post_board", args: { provider: "linkedin" }, principal: hrHeadId },
+    ]);
+    expect((await runRow(runId)).status).toBe("done");
   });
 });

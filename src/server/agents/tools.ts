@@ -466,16 +466,16 @@ export function registerPhase1Tools(): void {
   registerTool({
     name: "publish_to_job_board",
     description:
-      "Publish an approved requisition on a connected job board (LinkedIn, Indeed or Naukri). Always reviewed by a person first; the person the agent works for must be an HR head.",
+      "Publish an approved requisition on a connected job board (LinkedIn, Indeed or Naukri). Anyone the agent works for may request it; the HR head approves the post (with its text) and it is published as the approving HR head — unless the organisation pre-approved this board for an Autonomous agent.",
     input: RequisitionId.extend({
       provider: z.enum(["linkedin", "indeed", "naukri"]),
       postText: z.string().max(3000).optional(),
     }),
     risk: "external",
+    templateOf: (i) => `job_board:${i.provider}`,
+    approverRole: "hr_head",
     describe: (i) => `Publish the requisition on ${i.provider}`,
     run: async (ctx, i) => {
-      const { assertRole } = await import("@/lib/auth.middleware");
-      await assertRole(ctx.principalUserId, ctx.orgId, "hr_head");
       const a = await actor(ctx);
       const { publishToBoardImpl } = await import("../boards/publish.server");
       return publishToBoardImpl({

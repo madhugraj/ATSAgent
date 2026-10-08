@@ -225,6 +225,19 @@ const Command = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("new_role") }),
   z.object({ type: z.literal("use_existing"), code: z.string().max(40).optional() }),
+  z.object({ type: z.literal("close_role") }),
+  /** The person delegated details to market research ("as per market", "you decide"). */
+  z.object({
+    type: z.literal("research"),
+    fields: z
+      .array(z.enum(["skills", "experience", "budget"]))
+      .max(3)
+      .optional(),
+  }),
+  /** The person agreed to the latest proposal ("ok", "yes", "use these"). */
+  z.object({ type: z.literal("accept") }),
+  /** The person wants a pending agent request changed, or answers an agent's question. */
+  z.object({ type: z.literal("feedback"), text: z.string().min(1).max(1000) }),
 ]);
 
 const TurnOutput = z.object({
@@ -242,7 +255,23 @@ const SYSTEM = [
   '- "slots": only the hiring details the LATEST message states or changes (omit the rest). Fields: roleTitle, location, experienceMin, experienceMax (years), openings, mustHaveSkills, goodToHaveSkills (short skill names), budgetLpaMax (lakhs per annum), maxNoticeDays, employmentType (full_time|contract|internship), urgency (immediate|within_a_month|flexible). "a candidate" means openings 1. Expand obvious role shorthands (e.g. "Full stack" → "Full Stack Developer"). Never invent values that were not said.',
   '- JD details (only when the person gives them): responsibilities (their key responsibilities, as text), reportingTo, successMeasures (what success looks like), education. If they ask you to fill these from the market / research / "you decide", set researchRole true.',
   '- "command": {"type":"none"} unless the person asks to act: "talk to / screen / call the first 5" → {"type":"screen","top":5}; "screen 1, 3 and 4" → {"type":"screen","ranks":[1,3,4]}; "create a new role" → {"type":"new_role"}; "use REQ-2026-014" → {"type":"use_existing","code":"REQ-2026-014"}.',
+  '- "command" also: "close / cancel / delete / withdraw this role" → {"type":"close_role"}.',
+  '- When the person delegates a detail to you or to the market ("as per market needs", "you decide", "what does the market say?", "pick it up from research") → {"type":"research","fields":[...]} with the fields they delegated: "skills", "experience" and/or "budget". (JD details are not a research command — for those set researchRole true as above.) When OPEN PROPOSAL is yes and they agree ("ok", "yes", "use these", "go ahead") → {"type":"accept"}.',
+  '- When OPEN REQUESTS lists a request and the person comments on it, objects to it or asks for a change ("give more weight to experience", "budget is too high", "use Pune instead") — or answers an agent\'s question — → {"type":"feedback","text":"<what they want, faithfully, in their words>"}. The system sends it to the agent, which revises and asks again.',
+  '- The reply must never promise an action ("I\'ll benchmark…", "I\'ll check…"): the desk acts only through commands, and the system reports what it did. With a research command the reply can be empty.',
   '- "reply": one short, friendly message. If MISSING lists details, ask for the FIRST missing one only, in one sentence, offering a typical example. Otherwise acknowledge briefly. Never claim that anything was created, approved or sent.',
+  "- Questions about the role, its status, the candidates or how to do something: answer ONLY from FACTS and APP RULES below. Never describe screens, menus, statuses or abilities that are not listed there; if the facts do not answer the question, say you do not know and where to look.",
+].join("\n");
+
+/** How the app really works — the only how-to the desk may describe. */
+export const APP_RULES = [
+  "Requisition statuses: draft → pending department head → pending HR head → pending CBO → approved; also rejected, on hold, closed. There is no 'archived' or 'open' status.",
+  "Delete: only a draft with no applications, by the HR head, CBO or owner (Requisitions list → the requisition's menu). Everything else is rejected or closed so the trail is kept.",
+  "Reject: while in the approval chain, by the approver of the current step (requisition page → Reject, with a reason).",
+  "Close: an approved or on-hold requisition, by the HR head or CBO (requisition page → Close requisition, with a reason). Job-board postings come down with it.",
+  "Reopen: a closed or rejected requisition cannot be reopened. Start a new hiring need; the new role can reuse the closed role's approved job description.",
+  "On hold: the HR head or CBO can put a requisition on hold; from on hold it can be resubmitted or closed.",
+  "In this chat the person can say 'close this role' to get a Close (or Delete for an unused draft) button.",
 ].join("\n");
 
 export async function runTurn(
@@ -251,10 +280,24 @@ export async function runTurn(
   history: { role: string; body: string }[],
 ): Promise<{ ok: true; turn: DeskTurn } | { ok: false; message: string }> {
   const slots = conv.slots as DeskSlots;
+  const open = await latestProposal(conv);
+  const requests = await openRequests(conv);
   const prompt = [
     `CURRENT DETAILS: ${JSON.stringify(slots)}`,
     `MISSING (ask in this order): ${missingSlots(slots).join(", ") || "none"}`,
     `STAGE: ${conv.status}`,
+    `OPEN PROPOSAL: ${open ? `yes — ${JSON.stringify({ ...open.proposal, sources: undefined, reasoning: undefined })} (if the person asks for changes to it, put the changed full lists in "slots")` : "no"}`,
+    `OPEN REQUESTS (from agents in this thread): ${
+      requests.length
+        ? requests
+            .map(
+              (r) => `"${r.title}" by the ${AGENT_TITLE[r.agentType] ?? r.agentType} (${r.kind})`,
+            )
+            .join("; ")
+        : "none"
+    }`,
+    `FACTS (live from the system):\n${await deskFacts(conv)}`,
+    `APP RULES:\n${APP_RULES}`,
     "CONVERSATION (oldest first):",
     untrusted(
       "conversation",
@@ -876,7 +919,8 @@ export async function handleUserMessage(
     return;
   }
   const { turn } = res;
-  const slots = mergeSlots(conv.slots as DeskSlots, turn.slots);
+  const before = conv.slots as DeskSlots;
+  const slots = mergeSlots(before, turn.slots);
   await db
     .update(hiringConversations)
     .set({
@@ -887,9 +931,24 @@ export async function handleUserMessage(
     })
     .where(eq(hiringConversations.id, conv.id));
   conv = { ...conv, slots: slots as never };
+  const understood = changedSlots(before, slots);
+  // The person edited the proposed details themselves: the open proposal is superseded,
+  // so a later "ok" cannot overwrite their edits with it.
+  if (
+    turn.command.type !== "accept" &&
+    understood.some((u) => /skills|Experience|Budget/.test(u.label))
+  )
+    await supersedeProposal(conv);
 
   // Commands the person gave in words.
   const cmd = turn.command;
+  if (conv.status === "closed" && cmd.type !== "none") {
+    await postMessage(conv, {
+      role: "desk",
+      body: "This role is closed, so nothing more can be done on it here. Start a new hiring need to hire for it again — I can reuse this role's approved job description.",
+    });
+    return;
+  }
   if (cmd.type === "screen") {
     if (!conv.requisitionId) {
       await postMessage(conv, {
@@ -909,6 +968,22 @@ export async function handleUserMessage(
     await screenCandidates(conv, userId, ids);
     return;
   }
+  if (cmd.type === "close_role") {
+    await offerCloseRole(conv);
+    return;
+  }
+  if (cmd.type === "research") {
+    await researchRole(conv, cmd.fields?.length ? cmd.fields : ["skills"], understood);
+    return;
+  }
+  if (cmd.type === "feedback") {
+    await sendFeedback(conv, userId, cmd.text, understood);
+    return;
+  }
+  if (cmd.type === "accept" && (await latestProposal(conv))) {
+    await applyProposal(conv);
+    return;
+  }
   if (conv.status === "confirming" && cmd.type === "new_role") {
     await createNewRole(conv, userId);
     return;
@@ -926,42 +1001,13 @@ export async function handleUserMessage(
   }
 
   if (conv.status === "gathering") {
-    const missing = missingSlots(slots);
-    if (missing.length) {
-      await postMessage(conv, {
-        role: "desk",
-        body: turn.reply.trim() || FALLBACK_QUESTION[missing[0]!],
-      });
-      return;
-    }
-    // One question for a deeper JD, asked once; any answer (or "research it") moves on.
-    if (!slots.jdDetailsAsked) {
-      const asked = { ...slots, jdDetailsAsked: true };
-      await db
-        .update(hiringConversations)
-        .set({ slots: asked as never })
-        .where(eq(hiringConversations.id, conv.id));
-      await postMessage(conv, {
-        role: "desk",
-        body: `To write a strong job description for ${slots.roleTitle}: what are the 3–5 key responsibilities, who does this role report to, and what does success look like after 12 months? Any education requirement? Answer in your own words — or say "research it" and I'll draft these from typical market practice for this role.`,
-      });
-      return;
-    }
-    await db
-      .update(hiringConversations)
-      .set({ status: "confirming" })
-      .where(eq(hiringConversations.id, conv.id));
-    const similar = await findSimilarRoles(conv.orgId, slots);
-    await postMessage(conv, {
-      role: "desk",
-      body: similar.length
-        ? `Got it: ${describeNeed(slots)}. I found ${similar.length} similar role(s). Continue with one of them, reuse an approved JD for a new role, or create a new role.`
-        : `Got it: ${describeNeed(slots)}. There is no similar role yet — shall I create a new one?`,
-      card: { type: "similar_roles", slots, items: similar },
-    });
+    await advanceGathering(conv, turn.reply, understood);
     return;
   }
 
+  // No command: the desk only answered. While agents wait on the person, say
+  // plainly that nothing was passed on, so a reply never reads as an action.
+  const waiting = await openRequests(conv);
   await postMessage(conv, {
     role: "desk",
     body:
@@ -969,6 +1015,16 @@ export async function handleUserMessage(
       (conv.status === "confirming"
         ? "Choose one of the options above, or tell me what to change."
         : "Noted."),
+    ...(waiting.length
+      ? {
+          card: {
+            type: "reasoning",
+            understood,
+            missing: [],
+            next: `Nothing was sent to the agents. To change "${waiting[0]!.title}", tell me what to change and I'll send it back to the ${AGENT_TITLE[waiting[0]!.agentType] ?? waiting[0]!.agentType}.`,
+          },
+        }
+      : {}),
   });
 }
 
@@ -1087,6 +1143,7 @@ export async function onTaskOpened(
     .orderBy(desc(hiringMessages.createdAt))
     .limit(1);
   const body = task.body.slice(0, 1500);
+  const revision = task.kind === "approval" ? await revisionOf(conv, task) : null;
   const repeated = (prev?.card as { body?: string } | null)?.body === body && body.length > 0;
   await postMessage(conv, {
     role: "agent",
@@ -1098,7 +1155,15 @@ export async function onTaskOpened(
           ? step
             ? `${step.replace(" · ", " — waiting for the ")}.`
             : "This needs a decision."
-          : "May I go ahead with this?",
+          : revision
+            ? `Revised as you asked ("${revision.reason}")${
+                revision.changes.length
+                  ? `: ${revision.changes.map((c) => `${c.label} ${c.from} → ${c.to}`).join(", ")}`
+                  : " — but nothing in the proposal changed; tell me what to change, or decline it"
+              }. May I go ahead with this?`
+            : task.assigneeRole
+              ? `This needs ${ROLE_TITLE[task.assigneeRole] ?? task.assigneeRole}'s approval.`
+              : "May I go ahead with this?",
     card: {
       type: "task",
       taskId: task.id,
@@ -1107,6 +1172,7 @@ export async function onTaskOpened(
       body,
       ...(step ? { step } : {}),
       ...(repeated ? { repeated: true } : {}),
+      ...(revision ? { revision } : {}),
       ...(task.kind === "approval"
         ? (() => {
             const a = task.proposedAction as { name?: string; args?: unknown } | null;
@@ -1148,14 +1214,75 @@ export async function taskDetails(
   return out;
 }
 
+const ROLE_TITLE: Record<string, string> = {
+  recruiter: "a recruiter",
+  hiring_manager: "the hiring manager",
+  department_head: "the department head",
+  hr_head: "the HR head",
+  president_cbo: "the CBO",
+};
+
+/**
+ * For each open request: whether this person may decide it (same rule as the
+ * runtime: the named assignee, a holder of the assigned role, or the owner),
+ * and who it is waiting for when they may not.
+ */
+export async function taskDeciders(
+  orgId: string,
+  userId: string,
+  isOwner: boolean,
+  ids: string[],
+): Promise<Record<string, { canDecide: boolean; waitingFor: string | null }>> {
+  if (!ids.length) return {};
+  const rows = await db
+    .select({
+      id: agentTasks.id,
+      role: agentTasks.assigneeRole,
+      user: agentTasks.assigneeUserId,
+    })
+    .from(agentTasks)
+    .where(and(eq(agentTasks.orgId, orgId), inArray(agentTasks.id, ids)));
+  const { userRoles } = await import("@db/schema");
+  const mine = (
+    await db
+      .select({ role: userRoles.role })
+      .from(userRoles)
+      .where(and(eq(userRoles.userId, userId), eq(userRoles.orgId, orgId)))
+  ).map((r) => r.role as string);
+  return Object.fromEntries(
+    rows.map((t) => {
+      const canDecide =
+        isOwner || ((!t.user || t.user === userId) && (!t.role || mine.includes(t.role)));
+      return [
+        t.id,
+        {
+          canDecide,
+          waitingFor: canDecide
+            ? null
+            : t.role
+              ? (ROLE_TITLE[t.role] ?? t.role)
+              : "the person it is assigned to",
+        },
+      ];
+    }),
+  );
+}
+
 /** Current status of the tasks shown in a thread (for the cards' buttons). */
 export async function taskStatuses(orgId: string, ids: string[]): Promise<Record<string, string>> {
   if (!ids.length) return {};
   const rows = await db
-    .select({ id: agentTasks.id, status: agentTasks.status })
+    .select({ id: agentTasks.id, status: agentTasks.status, response: agentTasks.response })
     .from(agentTasks)
     .where(and(eq(agentTasks.orgId, orgId), inArray(agentTasks.id, ids)));
-  return Object.fromEntries(rows.map((r) => [r.id, r.status]));
+  return Object.fromEntries(
+    rows.map((r) => [
+      r.id,
+      r.status === "rejected" && (r.response as { changes?: boolean } | null)?.changes
+        ? "changes_requested"
+        : r.status,
+    ]),
+  );
 }
 
 /* ------------------------------------------------------------- progress */
@@ -1172,6 +1299,8 @@ export type StageKey =
   | "joining";
 
 export type DeskProgress = {
+  /** The requisition was closed, rejected or deleted — the journey has ended. */
+  ended?: { status: "closed" | "rejected" | "deleted"; reason: string | null; by: string | null };
   stages: { key: StageKey; label: string; state: "done" | "current" | "todo" }[];
   next: {
     stage: StageKey;
@@ -1238,7 +1367,11 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
   if (conv.requisitionId) {
     const orgId = conv.orgId;
     const [req] = await db
-      .select({ code: requisitions.code, status: requisitions.status })
+      .select({
+        code: requisitions.code,
+        status: requisitions.status,
+        approvalTrail: requisitions.approvalTrail,
+      })
       .from(requisitions)
       .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, orgId)))
       .limit(1);
@@ -1264,6 +1397,27 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
       offers: number;
       released: number;
     }[];
+    if (!req || req.status === "closed" || req.status === "rejected") {
+      const trail = Array.isArray(req?.approvalTrail)
+        ? (req!.approvalTrail as { actor?: string; comment?: string | null }[])
+        : [];
+      const stages = STAGES.map((st) => ({
+        key: st.key,
+        label: st.label,
+        state: (st.key === "need" || (st.key === "requisition" && req?.status === "closed")
+          ? "done"
+          : "todo") as "done" | "todo",
+      }));
+      return {
+        stages,
+        next: null,
+        ended: {
+          status: !req ? "deleted" : (req.status as "closed" | "rejected"),
+          reason: trail.at(-1)?.comment ?? null,
+          by: trail.at(-1)?.actor ?? null,
+        },
+      };
+    }
     if (req?.status === "approved") done.add("requisition");
     if (jd === "approved") done.add("jd");
     if ((c?.scored ?? 0) > 0) done.add("candidates");
@@ -1547,7 +1701,12 @@ export async function deskActivity(conv: Conversation): Promise<DeskActivity> {
   if (!run) return null;
   const { agentSteps } = await import("@db/schema");
   const rows = await db
-    .select({ kind: agentSteps.kind, tool: agentSteps.toolName, status: agentSteps.status })
+    .select({
+      kind: agentSteps.kind,
+      tool: agentSteps.toolName,
+      status: agentSteps.status,
+      input: agentSteps.input,
+    })
     .from(agentSteps)
     .where(and(eq(agentSteps.runId, run.id), eq(agentSteps.orgId, conv.orgId)))
     .orderBy(desc(agentSteps.seq))
@@ -1557,8 +1716,11 @@ export async function deskActivity(conv: Conversation): Promise<DeskActivity> {
   // same tool has a later result. Rows are newest first.
   const resolved = new Set<string>();
   const steps = rows
-    .filter((s) => s.kind === "tool" && s.tool)
+    .filter(
+      (s) => (s.kind === "tool" && s.tool) || (s.kind === "decision" && s.status !== "approved"),
+    )
     .filter((s) => {
+      if (s.kind === "decision") return true;
       if (s.status === "awaiting") return !resolved.has(s.tool!);
       resolved.add(s.tool!);
       return true;
@@ -1566,7 +1728,7 @@ export async function deskActivity(conv: Conversation): Promise<DeskActivity> {
     .slice(0, 6)
     .reverse()
     .map((s) => ({
-      label: stepLabel(s.tool),
+      label: s.kind === "decision" ? decisionLabel(s.status, s.input) : stepLabel(s.tool),
       state: (s.status === "error" ? "error" : s.status === "awaiting" ? "waiting" : "done") as
         "done" | "error" | "waiting",
     }));
@@ -1783,7 +1945,7 @@ export async function publishRole(conv: Conversation, userId: string): Promise<s
     userId,
     `Requisition ${req.code} "${req.title}" needs candidates. Publish it internally and prepare the external posts (LinkedIn and job boards) for review.`,
     conv.requisitionId,
-    "I've asked the Publishing agent to post the role internally and prepare the LinkedIn and job-board posts; each external post comes back here for your approval.",
+    "I've asked the Publishing agent to post the role internally and prepare the LinkedIn and job-board posts. Each job-board post goes to the HR head for approval and is published as them — unless your organisation pre-approved that board for an Autonomous agent.",
   );
 }
 
@@ -1809,4 +1971,677 @@ export async function noteJdTemplate(
       ? `Drafted JD version ${version} with the template "${template.name}" (${template.reason}).`
       : `Drafted JD version ${version} in the built-in format — you have no JD template yet. Add one under Content templates (and mark it default) to control sections and wording.`,
   });
+}
+
+/* ----------------------------------------- grounding and the role's end */
+
+const STATUS_WORDS: Record<string, string> = {
+  draft: "draft (not yet submitted)",
+  pending_dh: "waiting for the department head's approval",
+  pending_hr: "waiting for the HR head's approval",
+  pending_cbo: "waiting for the CBO's approval",
+  approved: "approved and open",
+  rejected: "rejected",
+  on_hold: "on hold",
+  closed: "closed",
+};
+
+/** What is actually true for this thread right now, for the desk's answers. */
+export async function deskFacts(conv: Conversation): Promise<string> {
+  if (!conv.requisitionId) return "No requisition yet — the role is still being described.";
+  const [req] = await db
+    .select({
+      code: requisitions.code,
+      title: requisitions.title,
+      status: requisitions.status,
+      location: requisitions.location,
+      openings: requisitions.openings,
+      trail: requisitions.approvalTrail,
+    })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, conv.orgId)))
+    .limit(1);
+  if (!req) return "The requisition this thread was for no longer exists (it was deleted).";
+  const jd = await latestJdStatus(conv.orgId, conv.requisitionId);
+  const [c] = (await db.execute(sql`
+    select count(*)::int total,
+      count(*) filter (where m.id is not null)::int scored,
+      count(*) filter (where a.stage = 'shortlisted')::int shortlisted
+    from applications a left join match_scores m on m.application_id = a.id
+    where a.requisition_id = ${conv.requisitionId} and a.org_id = ${conv.orgId}`)) as unknown as {
+    total: number;
+    scored: number;
+    shortlisted: number;
+  }[];
+  const trail = Array.isArray(req.trail)
+    ? (req.trail as { to?: string; comment?: string | null; at?: string }[])
+    : [];
+  const last = trail.at(-1);
+  const progress = await deskProgress(conv);
+  return [
+    `${req.code} "${req.title}" (${req.location ?? "—"}, ${req.openings} opening(s)) is ${STATUS_WORDS[req.status] ?? req.status}.`,
+    last?.to && ["closed", "rejected", "on_hold"].includes(last.to)
+      ? `It became ${last.to.replace("_", " ")}${last.at ? ` on ${last.at.slice(0, 10)}` : ""}${last.comment ? ` — reason: "${last.comment}"` : ""}.`
+      : "",
+    `Job description: ${jd ? jd.replace("_", " ") : "none yet"}.`,
+    `Candidates in its pipeline: ${c?.total ?? 0} (${c?.scored ?? 0} scored, ${c?.shortlisted ?? 0} shortlisted).`,
+    progress.next ? `Current journey step: ${progress.next.stage} — ${progress.next.text}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** "Close this role": the right action for its status, as a card with a button. */
+export async function offerCloseRole(conv: Conversation): Promise<void> {
+  if (!conv.requisitionId) {
+    await postMessage(conv, {
+      role: "desk",
+      body: "There is no requisition yet, so there is nothing to close. You can simply leave this conversation.",
+    });
+    return;
+  }
+  const [req] = await db
+    .select({ code: requisitions.code, status: requisitions.status })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, conv.orgId)))
+    .limit(1);
+  if (!req) return;
+  const [apps] = (await db.execute(sql`
+    select count(*)::int n from applications
+    where requisition_id = ${conv.requisitionId} and org_id = ${conv.orgId}`)) as unknown as {
+    n: number;
+  }[];
+  const action: "delete" | "reject" | "close" | null =
+    req.status === "draft" && !(apps?.n ?? 0)
+      ? "delete"
+      : ["pending_dh", "pending_hr", "pending_cbo"].includes(req.status)
+        ? "reject"
+        : ["approved", "on_hold"].includes(req.status)
+          ? "close"
+          : null;
+  if (!action) {
+    await postMessage(conv, {
+      role: "desk",
+      body: `${req.code} is already ${STATUS_WORDS[req.status] ?? req.status}. A closed or rejected requisition cannot be reopened — start a new hiring need instead (it can reuse this role's approved job description).`,
+    });
+    return;
+  }
+  const who =
+    action === "reject" ? "the approver of the current step" : "the HR head, CBO or owner";
+  await postMessage(conv, {
+    role: "desk",
+    body:
+      action === "delete"
+        ? `${req.code} is an unused draft, so it can be deleted. Give a reason and confirm below (${who}).`
+        : action === "reject"
+          ? `${req.code} is still in the approval chain, so it is rejected rather than closed. Give a reason and confirm below (${who}).`
+          : `${req.code} will be closed: agents stop working on it and its job-board postings come down. It cannot be reopened. Give a reason and confirm below (${who}).`,
+    card: { type: "close_role", requisitionId: conv.requisitionId, code: req.code, action },
+  });
+}
+
+/** Perform the close / reject / delete from the thread, as the person (role-checked, audited). */
+export async function closeRole(
+  conv: Conversation,
+  userId: string,
+  reason: string,
+): Promise<{ action: "delete" | "reject" | "close" }> {
+  if (!conv.requisitionId) throw new Error("There is no requisition to close.");
+  const [req] = await db
+    .select({ id: requisitions.id, code: requisitions.code, status: requisitions.status })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, conv.orgId)))
+    .limit(1);
+  if (!req) throw new Error("Requisition not found.");
+  const { activeOrgOf, assertRole } = await import("@/lib/auth.middleware");
+  const org = await activeOrgOf(userId);
+  if (!org || org.orgId !== conv.orgId)
+    throw new Error("You are not a member of this organisation.");
+  const actor = { orgId: conv.orgId, userId, memberEmail: org.memberEmail };
+  const { advanceRequisitionCore } = await import("@/lib/requisitions.server");
+  if (req.status === "draft") {
+    // The same rule as the Requisitions list: unused drafts only, HR leadership.
+    await assertRole(userId, conv.orgId, ["hr_head", "president_cbo"]);
+    const [apps] = (await db.execute(sql`
+      select count(*)::int n from applications where requisition_id = ${req.id} and org_id = ${conv.orgId}`)) as unknown as {
+      n: number;
+    }[];
+    if ((apps?.n ?? 0) > 0)
+      throw new Error(
+        "This draft already has applications — it can be closed only after approval.",
+      );
+    await db
+      .delete(requisitions)
+      .where(and(eq(requisitions.id, req.id), eq(requisitions.orgId, conv.orgId)));
+    await writeAudit({
+      actor: org.memberEmail,
+      actorUserId: userId,
+      orgId: conv.orgId,
+      action: "requisition.delete",
+      entityType: "requisition",
+      entityId: req.id,
+      detail: { code: req.code, reason, via: "hiring_desk", conversation_id: conv.id },
+    });
+    await endThread(conv, `${req.code} was deleted. Reason: ${reason}`);
+    return { action: "delete" };
+  }
+  const to = ["pending_dh", "pending_hr", "pending_cbo"].includes(req.status)
+    ? "rejected"
+    : "closed";
+  // Role checks and the trail live in the lifecycle core (same as the requisition page);
+  // the requisition.status_changed event then ends the thread.
+  await advanceRequisitionCore(actor, { id: req.id, status: to, comment: reason });
+  await onRequisitionEnded(conv.orgId, req.id, to, userId, reason);
+  return { action: to === "rejected" ? "reject" : "close" };
+}
+
+/** Mark the thread closed and say why (once). */
+async function endThread(conv: Conversation, body: string): Promise<void> {
+  await db
+    .update(hiringConversations)
+    .set({ status: "closed", updatedAt: new Date() })
+    .where(eq(hiringConversations.id, conv.id));
+  const [last] = await db
+    .select({ body: hiringMessages.body })
+    .from(hiringMessages)
+    .where(eq(hiringMessages.conversationId, conv.id))
+    .orderBy(desc(hiringMessages.createdAt))
+    .limit(1);
+  if (last?.body !== body)
+    await postMessage(conv, { role: "desk", body, card: { type: "role_ended" } });
+}
+
+/**
+ * A requisition was closed or rejected (anywhere — this thread, the requisition
+ * page, an approver): stop its agents, cancel their open requests, and end the
+ * thread with who and why. Idempotent.
+ */
+export async function onRequisitionEnded(
+  orgId: string,
+  requisitionId: string,
+  to: string,
+  actorUserId: string | null,
+  comment?: string | null,
+): Promise<void> {
+  if (!["closed", "rejected"].includes(to)) return;
+  const conv = await conversationForRequisition(orgId, requisitionId);
+  const [req] = await db
+    .select({
+      code: requisitions.code,
+      trail: requisitions.approvalTrail,
+      createdBy: requisitions.createdBy,
+    })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, requisitionId), eq(requisitions.orgId, orgId)))
+    .limit(1);
+  const stopper = actorUserId ?? req?.createdBy ?? conv?.createdBy ?? null;
+  // Stop the agents still working on this role (the role and its candidates).
+  const active = await db
+    .select({ id: agentRuns.id })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.orgId, orgId),
+        inArray(agentRuns.status, ["queued", "running", "awaiting_human"]),
+        or(
+          eq(agentRuns.subjectId, requisitionId),
+          sql`${agentRuns.subjectId} in (select id from applications where requisition_id = ${requisitionId} and org_id = ${orgId})`,
+        ),
+      ),
+    );
+  if (active.length && stopper) {
+    const { cancelRun } = await import("../agents/runtime.server");
+    for (const r of active) await cancelRun({ orgId, runId: r.id, userId: stopper });
+  }
+  // Closed threads are skipped by conversationForRequisition, so this runs once.
+  if (!conv) return;
+  const trail = Array.isArray(req?.trail)
+    ? (req!.trail as { actor?: string; comment?: string | null }[])
+    : [];
+  const last = trail.at(-1);
+  const reason = comment ?? last?.comment ?? null;
+  await endThread(
+    conv,
+    `${req?.code ?? "The requisition"} was ${to}${last?.actor ? ` by ${last.actor}` : ""}${reason ? ` — reason: "${reason}"` : ""}. ${active.length ? `${active.length} agent run(s) working on it were stopped. ` : ""}A ${to} requisition cannot be reopened; start a new hiring need to hire for this again.`,
+  );
+}
+
+/* ---------------------------------------- thinking, research, proposals */
+
+const SLOT_LABEL: Record<string, string> = {
+  roleTitle: "Role",
+  location: "Location",
+  experienceMin: "Experience from",
+  experienceMax: "Experience up to",
+  openings: "Openings",
+  mustHaveSkills: "Must-have skills",
+  goodToHaveSkills: "Good-to-have skills",
+  budgetLpaMax: "Budget (LPA, up to)",
+  maxNoticeDays: "Notice period (days, max)",
+  employmentType: "Employment type",
+  urgency: "Urgency",
+  responsibilities: "Responsibilities",
+  reportingTo: "Reports to",
+  successMeasures: "Success after 12 months",
+  education: "Education",
+};
+const REQUIRED_LABEL: Record<RequiredSlot, string> = {
+  roleTitle: "role",
+  location: "location",
+  experience: "experience",
+  openings: "number of openings",
+  mustHaveSkills: "must-have skills",
+};
+
+/** What the latest message changed, as label / value lines (the desk's "understood"). */
+export function changedSlots(
+  before: DeskSlots,
+  after: DeskSlots,
+): { label: string; value: string }[] {
+  return (Object.keys(SLOT_LABEL) as (keyof DeskSlots)[])
+    .filter((k) => JSON.stringify(before[k]) !== JSON.stringify(after[k]) && after[k] !== undefined)
+    .map((k) => {
+      const v = after[k];
+      return { label: SLOT_LABEL[k]!, value: Array.isArray(v) ? v.join(", ") : String(v) };
+    });
+}
+
+/** "How I read that": what was understood, what is still missing, what happens next. */
+function thinking(
+  understood: { label: string; value: string }[],
+  slots: DeskSlots,
+  next: string,
+): DeskCard {
+  return {
+    type: "reasoning",
+    understood,
+    missing: missingSlots(slots).map((m) => REQUIRED_LABEL[m]),
+    next,
+  };
+}
+
+/** Continue gathering: ask the next missing detail, the JD question once, then similar roles. */
+async function advanceGathering(
+  conv: Conversation,
+  reply: string,
+  understood: { label: string; value: string }[],
+): Promise<void> {
+  const slots = conv.slots as DeskSlots;
+  const missing = missingSlots(slots);
+  if (missing.length) {
+    await postMessage(conv, {
+      role: "desk",
+      body: reply.trim() || FALLBACK_QUESTION[missing[0]!],
+      card: thinking(
+        understood,
+        slots,
+        `Asking for the ${REQUIRED_LABEL[missing[0]!]}. You can also say "as per market" and I'll research it.`,
+      ),
+    });
+    return;
+  }
+  // One question for a deeper JD, asked once; any answer (or "research it") moves on.
+  if (!slots.jdDetailsAsked) {
+    const asked = { ...slots, jdDetailsAsked: true };
+    await db
+      .update(hiringConversations)
+      .set({ slots: asked as never })
+      .where(eq(hiringConversations.id, conv.id));
+    await postMessage(conv, {
+      role: "desk",
+      body: `To write a strong job description for ${slots.roleTitle}: what are the 3–5 key responsibilities, who does this role report to, and what does success look like after 12 months? Any education requirement? Answer in your own words — or say "research it" and I'll draft these from typical market practice for this role.`,
+      card: thinking(
+        understood,
+        slots,
+        "All required details are in. One optional question for a deeper job description.",
+      ),
+    });
+    return;
+  }
+  await db
+    .update(hiringConversations)
+    .set({ status: "confirming" })
+    .where(eq(hiringConversations.id, conv.id));
+  const similar = await findSimilarRoles(conv.orgId, slots);
+  await postMessage(conv, {
+    role: "desk",
+    body: similar.length
+      ? `Got it: ${describeNeed(slots)}. I found ${similar.length} similar role(s). Continue with one of them, reuse an approved JD for a new role, or create a new role.`
+      : `Got it: ${describeNeed(slots)}. There is no similar role yet — shall I create a new one?`,
+    card: {
+      type: "similar_roles",
+      slots,
+      items: similar,
+      why: {
+        understood,
+        missing: [],
+        next: `Checked your requisitions for roles similar to "${slots.roleTitle}": ${similar.length} found.`,
+      },
+    },
+  });
+}
+
+const Proposal = z.object({
+  mustHaveSkills: z.array(z.string().min(1).max(60)).max(10).default([]),
+  goodToHaveSkills: z.array(z.string().min(1).max(60)).max(10).default([]),
+  experienceMin: z.number().min(0).max(40).nullable().default(null),
+  experienceMax: z.number().min(0).max(50).nullable().default(null),
+  budgetLpaMin: z.number().min(0).max(1000).nullable().default(null),
+  budgetLpaMax: z.number().min(0).max(1000).nullable().default(null),
+  reasoning: z.string().max(1200).default(""),
+  sources: z
+    .array(z.object({ title: z.string().max(200), url: z.string().max(500) }))
+    .max(8)
+    .default([]),
+});
+export type RoleProposal = z.infer<typeof Proposal>;
+
+/**
+ * The person delegated details to the market: research them (live web research
+ * when the organisation's AI model supports it, else the model's knowledge —
+ * labelled as such) and post a proposal they can accept or change.
+ */
+export async function researchRole(
+  conv: Conversation,
+  fields: ("skills" | "experience" | "budget")[],
+  understood: { label: string; value: string }[] = [],
+): Promise<void> {
+  const s = conv.slots as DeskSlots;
+  if (!s.roleTitle) {
+    await postMessage(conv, {
+      role: "desk",
+      body: "Which role should I research? Tell me the role first.",
+    });
+    return;
+  }
+  const { aiResearchJson } = await import("@/lib/ai-gateway.server");
+  const res = await aiResearchJson<RoleProposal>({
+    orgId: conv.orgId,
+    feature: "role_research",
+    system:
+      "You research current hiring-market expectations for a role, for a recruiter in India unless the location says otherwise. " +
+      "Use live web sources when available (job postings, salary surveys, skills reports) and cite them. Be concrete and current: " +
+      "skills as short names (tools, frameworks, methods), experience as a year range, budget as annual CTC in lakhs (LPA) for the location. " +
+      "Only fill the fields asked for; leave the others empty / null. " +
+      'Return ONLY JSON: {"mustHaveSkills":[],"goodToHaveSkills":[],"experienceMin":null,"experienceMax":null,' +
+      '"budgetLpaMin":null,"budgetLpaMax":null,"reasoning":"2-4 sentences: why these, what the market shows","sources":[{"title","url"}]}',
+    prompt: JSON.stringify({
+      role: s.roleTitle,
+      location: s.location ?? null,
+      experience: s.experienceMin !== undefined ? [s.experienceMin, s.experienceMax ?? null] : null,
+      known: { mustHaveSkills: s.mustHaveSkills ?? [], goodToHaveSkills: s.goodToHaveSkills ?? [] },
+      research: fields,
+    }),
+  });
+  if (!res.ok) {
+    await postMessage(conv, {
+      role: "desk",
+      body: "I couldn't research that just now. Tell me the details yourself, or try again in a moment.",
+    });
+    return;
+  }
+  const parsed = Proposal.safeParse(res.data);
+  if (!parsed.success) {
+    await postMessage(conv, {
+      role: "desk",
+      body: "The research came back incomplete. Tell me the details yourself, or ask again.",
+    });
+    return;
+  }
+  const p = parsed.data;
+  // Keep only http(s) links; never render anything else as a link.
+  p.sources = p.sources.filter((x) => /^https?:\/\//i.test(x.url));
+  await postMessage(conv, {
+    role: "desk",
+    body: `Here is what the market expects for a ${s.roleTitle}${s.location ? ` (${s.location})` : ""}. Use these, or tell me what to change.`,
+    card: {
+      type: "proposal",
+      fields,
+      proposal: p as never,
+      grounded: res.grounded,
+      accepted: false,
+      why: {
+        understood,
+        missing: missingSlots(s).map((m) => REQUIRED_LABEL[m]),
+        next: res.grounded
+          ? `Researched ${fields.join(", ")} from live web sources (${p.sources.length}).`
+          : `Estimated ${fields.join(", ")} from the AI model's knowledge — no live web sources were available.`,
+      },
+    },
+  });
+}
+
+/** The newest proposal in the thread that has not been accepted yet. */
+export async function latestProposal(
+  conv: Conversation,
+): Promise<{ messageId: string; proposal: RoleProposal; fields: string[] } | null> {
+  const [m] = await db
+    .select({ id: hiringMessages.id, card: hiringMessages.card })
+    .from(hiringMessages)
+    .where(
+      and(
+        eq(hiringMessages.conversationId, conv.id),
+        sql`${hiringMessages.card} ->> 'type' = 'proposal'`,
+      ),
+    )
+    .orderBy(desc(hiringMessages.createdAt))
+    .limit(1);
+  const card = m?.card as {
+    proposal?: RoleProposal;
+    fields?: string[];
+    accepted?: boolean;
+    superseded?: boolean;
+  } | null;
+  if (!m || !card?.proposal || card.accepted || card.superseded) return null;
+  return { messageId: m.id, proposal: card.proposal, fields: card.fields ?? [] };
+}
+
+/** Accept the latest proposal: fill the details it covers, then carry on. */
+export async function applyProposal(conv: Conversation): Promise<void> {
+  const open = await latestProposal(conv);
+  if (!open) throw new Error("There is no proposal to accept.");
+  const p = open.proposal;
+  const before = conv.slots as DeskSlots;
+  const patch: DeskSlots = {
+    ...(p.mustHaveSkills.length ? { mustHaveSkills: p.mustHaveSkills } : {}),
+    ...(p.goodToHaveSkills.length ? { goodToHaveSkills: p.goodToHaveSkills } : {}),
+    ...(p.experienceMin != null ? { experienceMin: p.experienceMin } : {}),
+    ...(p.experienceMax != null ? { experienceMax: p.experienceMax } : {}),
+    ...(p.budgetLpaMax != null ? { budgetLpaMax: p.budgetLpaMax } : {}),
+  };
+  const slots = mergeSlots(before, patch);
+  await db
+    .update(hiringConversations)
+    .set({ slots: slots as never })
+    .where(eq(hiringConversations.id, conv.id));
+  const [msg] = await db
+    .select({ card: hiringMessages.card })
+    .from(hiringMessages)
+    .where(eq(hiringMessages.id, open.messageId))
+    .limit(1);
+  await db
+    .update(hiringMessages)
+    .set({ card: { ...(msg?.card as object), accepted: true } as never })
+    .where(eq(hiringMessages.id, open.messageId));
+  conv = { ...conv, slots: slots as never };
+  if (conv.status === "gathering") {
+    await advanceGathering(conv, "", changedSlots(before, slots));
+    return;
+  }
+  await postMessage(conv, {
+    role: "desk",
+    body: `Updated: ${describeNeed(slots)}.`,
+    card: thinking(changedSlots(before, slots), slots, "Applied the researched details."),
+  });
+}
+
+async function supersedeProposal(conv: Conversation): Promise<void> {
+  const open = await latestProposal(conv);
+  if (!open) return;
+  await db
+    .update(hiringMessages)
+    .set({
+      card: sql`${hiringMessages.card} || '{"superseded":true}'::jsonb`,
+    })
+    .where(eq(hiringMessages.id, open.messageId));
+}
+
+/* ------------------------------------------- person → agent feedback */
+
+export type OpenRequest = {
+  id: string;
+  kind: string;
+  title: string;
+  agentType: string;
+};
+
+/** Requests from this thread's agents still waiting on a person, newest first. */
+export async function openRequests(conv: Conversation): Promise<OpenRequest[]> {
+  return db
+    .select({
+      id: agentTasks.id,
+      kind: agentTasks.kind,
+      title: agentTasks.title,
+      agentType: agentRuns.agentType,
+    })
+    .from(agentTasks)
+    .innerJoin(agentRuns, eq(agentRuns.id, agentTasks.runId))
+    .where(
+      and(
+        eq(agentTasks.orgId, conv.orgId),
+        eq(agentTasks.status, "open"),
+        eq(agentRuns.conversationId, conv.id),
+      ),
+    )
+    .orderBy(desc(agentTasks.createdAt))
+    .limit(5);
+}
+
+/**
+ * The person asked, in the chat, for a pending agent request to change (or
+ * answered an agent's question). Hand it to that agent as a decision on its
+ * request — "changes requested" with their words — so the agent revises and
+ * asks again. Gates (real approval steps such as a requisition or JD sign-off)
+ * are never decided from chat; the person uses the card.
+ */
+export async function sendFeedback(
+  conv: Conversation,
+  userId: string,
+  text: string,
+  understood: { label: string; value: string }[] = [],
+): Promise<void> {
+  understood = [...understood, { label: "Your change", value: text }];
+  const requests = await openRequests(conv);
+  const target = requests.find((r) => r.kind === "approval" || r.kind === "clarification") ?? null;
+  const agent = (r: OpenRequest) => AGENT_TITLE[r.agentType] ?? `${r.agentType} agent`;
+  if (!target) {
+    await postMessage(conv, {
+      role: "desk",
+      body: requests.length
+        ? `"${requests[0]!.title}" is an approval step, so it is decided on its card (Approve, or Decline with a reason), not from the chat.`
+        : "No agent is waiting on you in this thread, so there is nothing to send back. Tell me what you want done and I'll start the right agent.",
+      card: { type: "reasoning", understood, missing: [], next: "Nothing was sent to the agents." },
+    });
+    return;
+  }
+  const { resolveTask } = await import("../agents/runtime.server");
+  try {
+    await resolveTask({
+      orgId: conv.orgId,
+      taskId: target.id,
+      userId,
+      decision:
+        target.kind === "clarification"
+          ? { status: "answered", answer: text }
+          : { status: "rejected", reason: text, changes: true },
+    });
+  } catch (e) {
+    await postMessage(conv, {
+      role: "desk",
+      body: `I couldn't pass that on: ${e instanceof Error ? e.message : "the request could not be updated."}`,
+    });
+    return;
+  }
+  const { kickAgents } = await import("../agents/orchestrator.server");
+  kickAgents(conv.orgId);
+  await postMessage(conv, {
+    role: "desk",
+    body:
+      target.kind === "clarification"
+        ? `Sent your answer to the ${agent(target)}. It continues from here.`
+        : `Sent back to the ${agent(target)}: "${text}". It will revise "${target.title}" and ask you again.`,
+    card: {
+      type: "reasoning",
+      understood,
+      missing: [],
+      next:
+        target.kind === "clarification"
+          ? `Answered "${target.title}" for you.`
+          : `Returned "${target.title}" to the ${agent(target)} with your change. The old request is closed, so it cannot be approved by mistake.`,
+    },
+  });
+}
+
+/** Live-activity wording for a person's decision handed back to an agent. */
+function decisionLabel(status: string, input: unknown): string {
+  const i = (input ?? {}) as { changes?: boolean; reason?: string };
+  if (status === "rejected" && i.changes)
+    return `You asked for changes${i.reason ? `: "${i.reason.slice(0, 80)}"` : ""}`;
+  if (status === "rejected") return "You declined";
+  if (status === "answered") return "You answered its question";
+  return "Request cancelled";
+}
+
+export type Revision = {
+  reason: string;
+  changes: { label: string; from: string; to: string }[];
+};
+
+/**
+ * A request the agent re-proposed after the person asked for changes: the
+ * reason and what actually changed, so the person sees the effect of their
+ * words (and sees it plainly when nothing changed).
+ */
+export async function revisionOf(
+  conv: Conversation,
+  task: { title: string; proposedAction?: unknown },
+): Promise<Revision | null> {
+  const [prev] = await db
+    .select({ action: agentTasks.proposedAction, response: agentTasks.response })
+    .from(agentTasks)
+    .innerJoin(agentRuns, eq(agentRuns.id, agentTasks.runId))
+    .where(
+      and(
+        eq(agentTasks.orgId, conv.orgId),
+        eq(agentRuns.conversationId, conv.id),
+        eq(agentTasks.title, task.title),
+        eq(agentTasks.status, "rejected"),
+        sql`(${agentTasks.response} ->> 'changes')::boolean is true`,
+      ),
+    )
+    .orderBy(desc(agentTasks.decidedAt))
+    .limit(1);
+  if (!prev) return null;
+  const before = (prev.action as { name?: string; args?: Record<string, unknown> } | null) ?? {};
+  const after = (task.proposedAction as { args?: Record<string, unknown> } | null) ?? {};
+  const a = before.args ?? {};
+  const b = after.args ?? {};
+  const pct = before.name === "save_weights";
+  const show = (k: string, v: unknown) =>
+    v === undefined || v === null ? "—" : pct ? `${String(v)}%` : fmtValue(k, v).slice(0, 80);
+  const changes = [...new Set([...Object.keys(a), ...Object.keys(b)])]
+    .filter((k) => !HIDDEN_ARG.test(k) && JSON.stringify(a[k]) !== JSON.stringify(b[k]))
+    .slice(0, 8)
+    .map((k) => ({
+      label: k
+        .replace(/([a-z])([A-Z])/g, "$1 $2")
+        .replace(/_/g, " ")
+        .replace(/^./, (c) => c.toUpperCase()),
+      from: show(k, a[k]),
+      to: show(k, b[k]),
+    }));
+  return {
+    reason: String((prev.response as { reason?: string } | null)?.reason ?? "").slice(0, 200),
+    changes,
+  };
 }

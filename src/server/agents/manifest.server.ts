@@ -62,6 +62,7 @@ export function canonicalManifest(def: AgentDefinition): Record<string, unknown>
             skills: t.skills ?? [],
             untrustedOutput: Boolean(t.untrustedOutput),
             preApprovable: Boolean(t.templateOf),
+            ...(t.approverRole ? { approverRole: t.approverRole } : {}),
             input: toolParameters(t.input),
           }
         : { name, missing: true };

@@ -16,8 +16,8 @@
     "hash": "37d85fe2e2e9d2b6cd34805135f2aee980c0ea80cf3a23df67398eb7dcd2860b"
   },
   "interview": {
-    "version": "1.1.0",
-    "hash": "f7c62a22fcffa7b743374659beb46f82c8782c6e0802cd3da7e6c6967aa3b6d3"
+    "version": "1.2.0",
+    "hash": "2b9739a8f7c9d7dfc14621b1164c0fd65be0de575b9a195453644b54220a132c"
   },
   "jd": {
     "version": "1.2.0",
@@ -32,15 +32,15 @@
     "hash": "7cc8c9638d48f9f852c309b649a3ef5385b0a76e1aa7dee1b3065aabac14dcb1"
   },
   "publishing": {
-    "version": "1.2.0",
-    "hash": "58942c3219c082e9ac2c5d7911e434603f21744d50d181f9666f2b594005a84f"
+    "version": "1.3.0",
+    "hash": "749154285ded9288610edb94cdcf2cc8e69d0f6a3626c407692ab4d13ee21dd4"
   },
   "requisition": {
     "version": "1.2.0",
     "hash": "a21805c38bf18c472d47054f89440d727c362acc4611c6d1f4449f2e07572441"
   },
   "screening": {
-    "version": "1.2.0",
-    "hash": "8f08ec25c3e1bfb2879f15823f14b5458c7920036ac7785877fccfcbac317c43"
+    "version": "1.3.0",
+    "hash": "a7dffbf19bc30fae9164804ef4f7ca85d16e04b24212a1f89ddd02dee10a8532"
   }
 }

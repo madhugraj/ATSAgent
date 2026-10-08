@@ -429,7 +429,7 @@ function RunSteps({ runId }: { runId: string }) {
         {q.data.steps.map((s) => (
           <li key={s.seq} className="text-xs">
             <span className="num text-muted-foreground">#{s.seq}</span>{" "}
-            <span className="font-medium">{s.kind}</span>
+            <span className="font-medium">{s.kind === "decision" ? "person → agent" : s.kind}</span>
             {s.tool ? (
               <>
                 {" "}

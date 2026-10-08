@@ -665,7 +665,12 @@ export async function startReplay(input: {
 
 export type TaskDecision =
   | { status: "approved"; args?: unknown; comment?: string | undefined }
-  | { status: "rejected"; reason?: string | undefined }
+  | {
+      status: "rejected";
+      reason?: string | undefined;
+      /** Sent back with changes to make (from the hiring desk), not refused outright. */
+      changes?: boolean | undefined;
+    }
   | { status: "answered"; answer: string };
 
 /**
@@ -1232,7 +1237,10 @@ async function handleCall(
       kind: "approval",
       title: tool.describe?.(parsed.data) ?? `Allow the agent to run ${tool.name}`,
       body: "",
-      assigneeRole: null,
+      // Most approvals go to the person the agent works for; some tools name
+      // the role that must approve them (e.g. job-board posts → HR head).
+      assigneeRole: tool.approverRole ?? null,
+      ...(tool.approverRole ? { assigneeUserId: null } : {}),
       proposedAction: { toolCallId: call.id, name: call.name, args: parsed.data },
     });
     await recordStep(run, seq, {
@@ -1378,18 +1386,41 @@ async function applyDecision(
   if (!task) return reply("The decision for this request could not be found.", true);
   const response = (task.response ?? {}) as Record<string, unknown>;
   const [run] = await db.select().from(agentRuns).where(eq(agentRuns.id, ctx.runId)).limit(1);
+  // What the person decided — and exactly what the agent was told — is a step
+  // of the run, so the trail shows why the agent did what it did next.
+  // (An approved tool call is recorded by the tool step it runs.)
+  const told = async (content: string, isError = false): Promise<AgentMessage> => {
+    if (run)
+      await recordStep(run, seq, {
+        kind: "decision",
+        status: task.status,
+        toolName: call.name,
+        toolCallId: call.id,
+        input: { taskId: task.id, decidedBy: task.decidedBy, ...response },
+        output: { told: content },
+      });
+    return reply(content, isError);
+  };
 
-  if (task.status === "answered") return reply(String(response["answer"] ?? ""));
+  if (task.status === "answered") return told(String(response["answer"] ?? ""));
+  if (task.status === "rejected" && response["changes"]) {
+    return told(
+      `The person did not approve this yet and asked for changes: "${String(response["reason"] ?? "")}". ` +
+        "Revise the proposal to reflect their request and ask for approval again with the revised values. " +
+        "If the change is not possible within your rules, explain why in your reply.",
+      true,
+    );
+  }
   if (task.status === "rejected") {
     const reason = response["reason"] ? ` Reason: ${String(response["reason"])}` : "";
-    return reply(`A person declined this request.${reason}`, true);
+    return told(`A person declined this request.${reason}`, true);
   }
-  if (task.status !== "approved") return reply("This request was cancelled.", true);
+  if (task.status !== "approved") return told("This request was cancelled.", true);
 
   // Gate approvals carry no tool to run — the human acted in the app.
   if (isHitl(call.name)) {
     const comment = response["comment"] ? ` Comment: ${String(response["comment"])}` : "";
-    return reply(`Approved.${comment}`);
+    return told(`Approved.${comment}`);
   }
   // An approved tool call runs with the (possibly edited) arguments, re-validated.
   const tool = getTool(call.name);
@@ -1398,7 +1429,11 @@ async function applyDecision(
   const parsed = tool.input.safeParse(edited);
   if (!parsed.success)
     return reply(`The approved arguments are invalid: ${parsed.error.message}`, true);
-  return execute(run, ctx, tool.name, call, parsed.data, seq);
+  // A tool approved by a named role runs as the approver, who authorised it
+  // (their own permissions apply and the audit names them).
+  const asApprover =
+    tool.approverRole && task.decidedBy ? { ...ctx, principalUserId: task.decidedBy } : ctx;
+  return execute(run, asApprover, tool.name, call, parsed.data, seq);
 }
 
 async function openTask(
@@ -1409,7 +1444,8 @@ async function openTask(
     body: string;
     assigneeRole: AppRole | null;
     proposedAction: unknown;
-    assigneeUserId?: string;
+    /** A specific person; null = whoever holds `assigneeRole`; omitted = the default. */
+    assigneeUserId?: string | null;
   },
 ): Promise<string> {
   const [row] = await db
@@ -1422,7 +1458,12 @@ async function openTask(
       body: t.body.slice(0, 8000),
       assigneeRole: t.assigneeRole,
       // Action approvals default to the person the agent works for.
-      assigneeUserId: t.assigneeUserId ?? (t.kind === "approval" ? run.principalUserId : null),
+      assigneeUserId:
+        t.assigneeUserId !== undefined
+          ? t.assigneeUserId
+          : t.kind === "approval"
+            ? run.principalUserId
+            : null,
       proposedAction: t.proposedAction as never,
     })
     .returning({ id: agentTasks.id });

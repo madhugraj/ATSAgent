@@ -118,6 +118,8 @@ export type DeskConversationView = {
   messages: DeskMessageView[];
   /** Current status of every agent request shown in the thread. */
   tasks: Record<string, string>;
+  /** Whether the viewer may decide each request, and who it waits for otherwise. */
+  deciders: Record<string, { canDecide: boolean; waitingFor: string | null }>;
   /** What each approval request would do, as label / value lines. */
   taskDetails: Record<string, { label: string; value: string }[]>;
   /** Why each ranked candidate scored as they did (live from their match score). */
@@ -134,7 +136,21 @@ export const getDeskConversation = createServerFn({ method: "GET" })
   .middleware([requireOrg])
   .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<DeskConversationView> => {
-    const conv = await accessible(context, data.id);
+    let conv = await accessible(context, data.id);
+    // Self-heal: the role ended (closed / rejected elsewhere, perhaps before this
+    // thread followed it) but the thread did not — sync it now.
+    if (conv.requisitionId && conv.status !== "closed") {
+      const [r] = await db
+        .select({ status: requisitions.status })
+        .from(requisitions)
+        .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, context.orgId)))
+        .limit(1);
+      if (r && (r.status === "closed" || r.status === "rejected")) {
+        const { onRequisitionEnded } = await import("../server/desk/desk.server");
+        await onRequisitionEnded(context.orgId, conv.requisitionId, r.status, null);
+        conv = await accessible(context, data.id);
+      }
+    }
     const msgs = await db
       .select()
       .from(hiringMessages)
@@ -187,6 +203,9 @@ export const getDeskConversation = createServerFn({ method: "GET" })
       })),
       tasks: await taskStatuses(context.orgId, taskIds),
       taskDetails: await taskDetails(context.orgId, taskIds),
+      deciders: await (
+        await import("../server/desk/desk.server")
+      ).taskDeciders(context.orgId, context.userId, context.isOwner, taskIds),
       reasoning: await candidateReasoning(context.orgId, [...new Set(rankedIds)]),
       progress: await deskProgress(conv),
       activity: await deskActivity(conv),
@@ -216,7 +235,6 @@ export const sendDeskMessage = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ id: z.string().uuid(), message: Text }).parse(d))
   .handler(async ({ data, context }) => {
     const conv = await accessible(context, data.id);
-    if (conv.status === "closed") throw new Error("This conversation is closed.");
     await needsAiKey(context.orgId);
     await registered();
     const { handleUserMessage } = await import("../server/desk/desk.server");
@@ -329,4 +347,50 @@ export const publishDeskRole = createServerFn({ method: "POST" })
     await registered();
     const { publishRole } = await import("../server/desk/desk.server");
     return { runId: await publishRole(conv, context.userId) };
+  });
+
+/** Close / reject / delete the thread's role from the chat (role-checked by the lifecycle). */
+export const closeDeskRole = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) =>
+    z.object({ id: z.string().uuid(), reason: z.string().trim().min(3).max(500) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    const { closeRole } = await import("../server/desk/desk.server");
+    return closeRole(conv, context.userId, data.reason);
+  });
+
+/** Accept the desk's latest researched proposal (skills / experience / budget). */
+export const acceptDeskProposal = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    await needsAiKey(context.orgId);
+    const { applyProposal } = await import("../server/desk/desk.server");
+    await applyProposal(conv);
+    return { ok: true as const };
+  });
+
+/** Ask the desk to research details from the market instead of typing them. */
+export const researchDeskRole = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        fields: z
+          .array(z.enum(["skills", "experience", "budget"]))
+          .min(1)
+          .max(3),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    await needsAiKey(context.orgId);
+    const { researchRole } = await import("../server/desk/desk.server");
+    await researchRole(conv, data.fields);
+    return { ok: true as const };
   });

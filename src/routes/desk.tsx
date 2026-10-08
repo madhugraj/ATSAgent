@@ -24,10 +24,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { AGENT_LABEL } from "@/lib/agents.catalog";
 import { decideAgentTask, type AgentDecisionInput } from "@/lib/agents.functions";
 import {
+  acceptDeskProposal,
   chooseDeskRole,
+  closeDeskRole,
   getDeskConversation,
   listDeskConversations,
   publishDeskRole,
+  researchDeskRole,
   retryDeskRun,
   scoreDeskCandidates,
   startDeskStage,
@@ -168,19 +171,21 @@ function Composer({
   onSend,
   busy,
   disabled,
+  placeholder,
 }: {
   value: string;
   onChange: (v: string) => void;
   onSend: () => void;
   busy: boolean;
   disabled?: boolean;
+  placeholder?: string | undefined;
 }) {
   return (
     <div className="flex w-full items-end gap-2">
       <Textarea
         value={value}
         disabled={busy || disabled}
-        placeholder={disabled ? "This conversation is closed." : "Type a message…"}
+        placeholder={placeholder ?? "Type a message…"}
         className="min-h-12 flex-1 resize-none"
         rows={2}
         onChange={(e) => onChange(e.target.value)}
@@ -288,7 +293,9 @@ function Thread({ id }: { id: string }) {
             onChange={setText}
             onSend={send}
             busy={pending !== null}
-            disabled={d.status === "closed"}
+            placeholder={
+              d.status === "closed" ? "This role is closed — you can still ask about it" : undefined
+            }
           />
         </footer>
       </section>
@@ -347,8 +354,11 @@ function Message({
     <div className="space-y-2">
       {m.body ? <Bubble role={m.role} body={m.body} {...(who ? { who } : {})} /> : null}
       {m.card ? (
-        <div className="ml-9">
+        <div className="ml-9 space-y-2">
           <Card card={m.card} conv={conv} onChanged={onChanged} />
+          {m.card.type !== "reasoning" && m.card["why"] ? (
+            <Thinking why={m.card["why"] as Why} />
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -371,6 +381,20 @@ function Card({
   if (card.type === "ranked_candidates")
     return <RankedCard card={card} conv={conv} onChanged={onChanged} />;
   if (card.type === "task") return <TaskCard card={card} conv={conv} onChanged={onChanged} />;
+  if (card.type === "reasoning")
+    return <Thinking why={card as unknown as Why} conv={conv} onChanged={onChanged} />;
+  if (card.type === "proposal")
+    return <ProposalCard card={card} conv={conv} onChanged={onChanged} />;
+  if (card.type === "close_role")
+    return <CloseRoleCard card={card} conv={conv} onChanged={onChanged} />;
+  if (card.type === "role_ended")
+    return (
+      <Button asChild size="sm" variant="outline">
+        <Link to="/desk" search={{}}>
+          Start a new hiring need
+        </Link>
+      </Button>
+    );
   if (card.type === "bring_candidates")
     return <BringCandidatesCard conv={conv} onChanged={onChanged} />;
   if (card.type === "run_failed")
@@ -606,6 +630,7 @@ const TASK_STATUS: Record<string, string> = {
   open: "Waiting for you",
   approved: "Approved",
   rejected: "Declined",
+  changes_requested: "Changes requested",
   answered: "Answered",
   cancelled: "Cancelled",
 };
@@ -653,6 +678,7 @@ function TaskCard({
           {TASK_STATUS[status] ?? status}
         </Badge>
       </div>
+      {card["revision"] ? <RevisionNote revision={card["revision"] as Revision} /> : null}
       {details.length ? (
         <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 rounded-md bg-muted/40 p-2 text-xs">
           {details.map((d) => (
@@ -680,7 +706,11 @@ function TaskCard({
           </p>
         )
       ) : null}
-      {status === "open" ? (
+      {status === "open" && conv.deciders[taskId]?.canDecide === false ? (
+        <p className="mt-2 text-xs font-medium text-primary">
+          Waiting for {conv.deciders[taskId]?.waitingFor} to decide.
+        </p>
+      ) : status === "open" ? (
         kind === "clarification" ? (
           <div className="mt-2 flex gap-2">
             <Textarea
@@ -867,7 +897,23 @@ function JourneyPanel({ conv, onChanged }: { conv: DeskConversationView; onChang
           );
         })}
       </ol>
-      {!n ? (
+      {p.ended ? (
+        <div className="mt-1 rounded-md border border-destructive/40 bg-destructive/5 p-2.5 text-xs">
+          <p className="font-semibold text-destructive">
+            This role was {p.ended.status}
+            {p.ended.by ? ` by ${p.ended.by}` : ""}.
+          </p>
+          {p.ended.reason ? <p className="mt-0.5">Reason: {p.ended.reason}</p> : null}
+          <p className="mt-1 text-muted-foreground">
+            Agents have stopped. A {p.ended.status} role cannot be reopened.
+          </p>
+          <Button asChild size="sm" variant="outline" className="mt-2 h-7">
+            <Link to="/desk" search={{}}>
+              Start a new hiring need
+            </Link>
+          </Button>
+        </div>
+      ) : !n ? (
         <p className="text-sm text-muted-foreground">All steps are done for this hire.</p>
       ) : null}
     </aside>
@@ -1155,6 +1201,257 @@ function BringCandidatesCard({
           <Loader2 className="size-3 animate-spin" /> {progress}
         </p>
       ) : null}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------ close role */
+
+/** Close / reject / delete the role from the thread — as the person, with a reason. */
+function CloseRoleCard({
+  card,
+  conv,
+  onChanged,
+}: {
+  card: DeskCardView;
+  conv: DeskConversationView;
+  onChanged: () => void;
+}) {
+  const action = String(card["action"]) as "close" | "reject" | "delete";
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const ended = Boolean(conv.progress.ended) || conv.status === "closed";
+  const label = action === "delete" ? "Delete" : action === "reject" ? "Reject" : "Close";
+  async function go() {
+    setBusy(true);
+    try {
+      await closeDeskRole({ data: { id: conv.id, reason: reason.trim() } });
+      toast.success(`${String(card["code"])}: done`);
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not complete this");
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (ended) return <p className="text-xs text-muted-foreground">Done — the role has ended.</p>;
+  return (
+    <div className="flex flex-wrap items-end gap-2 rounded-lg border border-destructive/40 p-3 text-sm">
+      <label className="min-w-0 flex-1 text-xs">
+        Reason (goes on the requisition's trail)
+        <Textarea
+          className="mt-1 min-h-10"
+          rows={2}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="e.g. Position filled internally"
+        />
+      </label>
+      <Button
+        size="sm"
+        variant="destructive"
+        disabled={busy || reason.trim().length < 3}
+        onClick={go}
+      >
+        {busy ? <Loader2 className="size-4 animate-spin" /> : null}
+        {label} {String(card["code"])}
+      </Button>
+    </div>
+  );
+}
+
+/* ------------------------------------------------- thinking & proposals */
+
+type Why = { understood?: { label: string; value: string }[]; missing?: string[]; next?: string };
+
+/** "How I read that": what the desk understood, what is missing, what it does next. */
+function Thinking({
+  why,
+  conv,
+  onChanged,
+}: {
+  why: Why;
+  conv?: DeskConversationView;
+  onChanged?: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const understood = why.understood ?? [];
+  const missing = why.missing ?? [];
+  const canResearch =
+    conv?.status === "gathering" &&
+    missing.some((m) => m === "must-have skills" || m === "experience");
+  async function research() {
+    if (!conv) return;
+    setBusy(true);
+    try {
+      await researchDeskRole({
+        data: {
+          id: conv.id,
+          fields: missing.includes("experience") ? ["skills", "experience"] : ["skills"],
+        },
+      });
+      onChanged?.();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not research this");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <details
+      className="group rounded-md border border-dashed border-border bg-muted/30 px-3 py-2 text-xs"
+      open
+    >
+      <summary className="cursor-pointer select-none font-medium text-muted-foreground">
+        How I read that
+      </summary>
+      <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+        <dt className="text-muted-foreground">Understood</dt>
+        <dd>
+          {understood.length
+            ? understood.map((u) => `${u.label}: ${u.value}`).join(" · ")
+            : "Nothing new in that message"}
+        </dd>
+        <dt className="text-muted-foreground">Still missing</dt>
+        <dd>{missing.length ? missing.join(", ") : "Nothing — all required details are in"}</dd>
+        {why.next ? (
+          <>
+            <dt className="text-muted-foreground">Next</dt>
+            <dd>{why.next}</dd>
+          </>
+        ) : null}
+      </dl>
+      {canResearch ? (
+        <Button size="sm" variant="outline" className="mt-2" disabled={busy} onClick={research}>
+          {busy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+          Research it from the market
+        </Button>
+      ) : null}
+    </details>
+  );
+}
+
+type Proposal = {
+  mustHaveSkills: string[];
+  goodToHaveSkills: string[];
+  experienceMin: number | null;
+  experienceMax: number | null;
+  budgetLpaMin: number | null;
+  budgetLpaMax: number | null;
+  reasoning: string;
+  sources: { title: string; url: string }[];
+};
+
+function ProposalCard({
+  card,
+  conv,
+  onChanged,
+}: {
+  card: DeskCardView;
+  conv: DeskConversationView;
+  onChanged: () => void;
+}) {
+  const p = card["proposal"] as Proposal;
+  const grounded = Boolean(card["grounded"]);
+  const accepted = Boolean(card["accepted"]);
+  const superseded = Boolean(card["superseded"]);
+  const [busy, setBusy] = useState(false);
+  async function accept() {
+    setBusy(true);
+    try {
+      await acceptDeskProposal({ data: { id: conv.id } });
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not apply this");
+    } finally {
+      setBusy(false);
+    }
+  }
+  const row = (label: string, value: string | null) =>
+    value ? (
+      <>
+        <dt className="text-muted-foreground">{label}</dt>
+        <dd>{value}</dd>
+      </>
+    ) : null;
+  return (
+    <div className="space-y-2 rounded-lg border border-border p-3 text-sm">
+      <div className="flex items-center gap-2">
+        <Badge variant={grounded ? "default" : "secondary"}>
+          {grounded ? "Live web research" : "Estimate — no live sources"}
+        </Badge>
+        {accepted ? <Badge variant="outline">Applied</Badge> : null}
+        {superseded ? <Badge variant="outline">Replaced by your edits</Badge> : null}
+      </div>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+        {row("Must-have", p.mustHaveSkills.join(", ") || null)}
+        {row("Good to have", p.goodToHaveSkills.join(", ") || null)}
+        {row(
+          "Experience",
+          p.experienceMin != null ? `${p.experienceMin}–${p.experienceMax ?? "+"} years` : null,
+        )}
+        {row(
+          "Budget",
+          p.budgetLpaMax != null ? `${p.budgetLpaMin ?? "?"}–${p.budgetLpaMax} LPA` : null,
+        )}
+      </dl>
+      {p.reasoning ? <p className="text-xs text-muted-foreground">{p.reasoning}</p> : null}
+      {p.sources.length ? (
+        <ul className="list-disc pl-5 text-xs">
+          {p.sources.map((s) => (
+            <li key={s.url}>
+              <a
+                href={s.url}
+                target="_blank"
+                rel="noopener noreferrer nofollow"
+                className="text-primary hover:underline"
+              >
+                {s.title || s.url}
+              </a>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {accepted || superseded ? null : (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" disabled={busy} onClick={accept}>
+            {busy ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <CheckCircle2 className="size-4" />
+            )}
+            Use these
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            …or reply with what to change (e.g. "drop Figma, add accessibility").
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+type Revision = { reason: string; changes: { label: string; from: string; to: string }[] };
+
+/** On a re-proposed request: the person's change and what the agent actually changed. */
+function RevisionNote({ revision }: { revision: Revision }) {
+  return (
+    <div className="mt-2 rounded-md border border-primary/30 bg-primary/5 p-2 text-xs">
+      <p className="font-medium">Revised after your change: &ldquo;{revision.reason}&rdquo;</p>
+      {revision.changes.length ? (
+        <ul className="mt-1 space-y-0.5">
+          {revision.changes.map((c) => (
+            <li key={c.label} className="num">
+              {c.label}: <span className="text-muted-foreground line-through">{c.from}</span> →{" "}
+              <span className="font-semibold">{c.to}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-1 text-destructive">
+          Nothing in the proposal changed. Tell the desk what to change, or decline it.
+        </p>
+      )}
     </div>
   );
 }

@@ -99,26 +99,30 @@ export const AUTONOMY_OPTIONS: { value: AgentAutonomy; label: string; hint: stri
   {
     value: "act_and_notify",
     label: "Act and notify",
-    hint: "Internal changes run and you are told about each one (bell and Agent activity) until you mark them seen; messages outside the organisation still wait for approval unless the template is pre-approved.",
+    hint: "Internal changes run and you are told about each one. Candidate messages send on their own only for the templates ticked below; job-board posts wait for the HR head.",
   },
   {
     value: "autonomous",
     label: "Autonomous",
-    hint: "Internal changes run without a notification (they stay in Agent activity and the audit trail); pre-approved templates send on their own; everything else waits for approval.",
+    hint: "Internal changes run silently (still in activity and the audit trail). Every candidate message template sends on its own. Job-board posts go out on their own only on the boards ticked below; otherwise the HR head approves them. Decisions always stay with people.",
   },
 ];
 
 /**
- * Candidate emails an organisation may pre-approve for agents. The offer
- * release mail is deliberately absent: releasing an offer is always a human
- * decision.
+ * What an organisation may pre-approve for agents. Candidate emails apply from
+ * Act and notify (at Autonomous every template is allowed); job boards apply
+ * at Autonomous only. The offer release mail is deliberately absent: releasing
+ * an offer is always a human decision.
  */
-export const WHITELISTABLE_TEMPLATES: { id: string; label: string }[] = [
-  { id: "application_ack", label: "Application acknowledgement" },
-  { id: "stage_update", label: "Stage update" },
-  { id: "interview_invite", label: "Interview invitation" },
-  { id: "assessment_invite", label: "Assessment invitation (and reminder)" },
-  { id: "document_request", label: "Pre-onboarding document request" },
+export const WHITELISTABLE_TEMPLATES: { id: string; label: string; group: "email" | "board" }[] = [
+  { id: "application_ack", label: "Application acknowledgement", group: "email" },
+  { id: "stage_update", label: "Stage update", group: "email" },
+  { id: "interview_invite", label: "Interview invitation", group: "email" },
+  { id: "assessment_invite", label: "Assessment invitation (and reminder)", group: "email" },
+  { id: "document_request", label: "Pre-onboarding document request", group: "email" },
+  { id: "job_board:linkedin", label: "LinkedIn post", group: "board" },
+  { id: "job_board:naukri", label: "Naukri posting", group: "board" },
+  { id: "job_board:indeed", label: "Indeed posting", group: "board" },
 ];
 
 export const AGENT_LABEL: Record<string, string> = Object.fromEntries(
