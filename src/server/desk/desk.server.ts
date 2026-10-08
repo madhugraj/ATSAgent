@@ -19,6 +19,7 @@ import { INJECTION_RULES, aiJson, untrusted } from "@/lib/ai-gateway.server";
 import { db } from "../db";
 import { writeAudit } from "../audit";
 import { log } from "../log";
+import { getTool } from "../agents/registry";
 import {
   agentRuns,
   agentTasks,
@@ -49,6 +50,15 @@ export const DeskSlots = z.object({
   maxNoticeDays: z.number().int().min(0).max(365).optional(),
   employmentType: z.enum(["full_time", "contract", "internship"]).optional(),
   urgency: z.enum(["immediate", "within_a_month", "flexible"]).optional(),
+  // For a deeper JD (asked once, after the required details):
+  responsibilities: z.string().trim().max(3000).optional(),
+  reportingTo: z.string().trim().max(200).optional(),
+  successMeasures: z.string().trim().max(2000).optional(),
+  education: z.string().trim().max(500).optional(),
+  /** The person asked the JD to fill responsibilities / success from typical market practice. */
+  researchRole: z.boolean().optional(),
+  /** Set by the desk once the JD-detail question has been asked. */
+  jdDetailsAsked: z.boolean().optional(),
 });
 export type DeskSlots = z.infer<typeof DeskSlots>;
 
@@ -94,6 +104,19 @@ export function mergeSlots(prev: DeskSlots, next: DeskSlots): DeskSlots {
     [out.experienceMin, out.experienceMax] = [out.experienceMax, out.experienceMin];
   }
   return out;
+}
+
+/** The JD-relevant details as the requisition's responsibilities text (the JD generator builds on it). */
+export function jdBrief(s: DeskSlots): string | null {
+  const parts = [
+    s.responsibilities ? `Key responsibilities:\n${s.responsibilities}` : "",
+    s.reportingTo ? `Reports to: ${s.reportingTo}` : "",
+    s.successMeasures ? `Success after 12 months: ${s.successMeasures}` : "",
+    s.researchRole && (!s.responsibilities || !s.successMeasures)
+      ? `Draft the key responsibilities${s.successMeasures ? "" : " and the 6- and 12-month success measures"} from typical market practice for a ${s.roleTitle ?? "role"} at this seniority.`
+      : "",
+  ].filter(Boolean);
+  return parts.length ? parts.join("\n\n") : null;
 }
 
 export function describeNeed(s: DeskSlots): string {
@@ -217,6 +240,7 @@ const SYSTEM = [
   "You are the hiring desk of an applicant tracking system. A recruiter describes a hiring need in a chat.",
   "Each turn, return JSON with:",
   '- "slots": only the hiring details the LATEST message states or changes (omit the rest). Fields: roleTitle, location, experienceMin, experienceMax (years), openings, mustHaveSkills, goodToHaveSkills (short skill names), budgetLpaMax (lakhs per annum), maxNoticeDays, employmentType (full_time|contract|internship), urgency (immediate|within_a_month|flexible). "a candidate" means openings 1. Expand obvious role shorthands (e.g. "Full stack" → "Full Stack Developer"). Never invent values that were not said.',
+  '- JD details (only when the person gives them): responsibilities (their key responsibilities, as text), reportingTo, successMeasures (what success looks like), education. If they ask you to fill these from the market / research / "you decide", set researchRole true.',
   '- "command": {"type":"none"} unless the person asks to act: "talk to / screen / call the first 5" → {"type":"screen","top":5}; "screen 1, 3 and 4" → {"type":"screen","ranks":[1,3,4]}; "create a new role" → {"type":"new_role"}; "use REQ-2026-014" → {"type":"use_existing","code":"REQ-2026-014"}.',
   '- "reply": one short, friendly message. If MISSING lists details, ask for the FIRST missing one only, in one sentence, offering a typical example. Otherwise acknowledge briefly. Never claim that anything was created, approved or sent.',
 ].join("\n");
@@ -325,6 +349,7 @@ async function agentOn(orgId: string, type: AgentType): Promise<boolean> {
 }
 
 const AGENT_NAME: Record<string, string> = {
+  publishing: "Publishing agent",
   requisition: "Requisition agent",
   jd: "JD agent",
   intake: "Intake & matching agent",
@@ -483,8 +508,8 @@ export async function createNewRole(
       hiringManager: null,
       mustHaveSkills: s.mustHaveSkills ?? [],
       goodToHaveSkills: s.goodToHaveSkills ?? [],
-      responsibilities: null,
-      educationRequirement: null,
+      responsibilities: jdBrief(s),
+      educationRequirement: s.education ?? null,
       billingType: "Non-billable",
       engagementType: s.employmentType === "contract" ? "Contract" : "Internal / Corporate",
       clientName: null,
@@ -721,11 +746,21 @@ export async function rankedCandidates(
 export async function postRankedList(conv: Conversation): Promise<void> {
   if (!conv.requisitionId) return;
   const items = await rankedCandidates(conv.orgId, conv.requisitionId);
-  if (!items.length) {
+  if (items.length < 3) {
+    // Too few to choose from: ask for candidates instead of stopping quietly.
+    if (items.length)
+      await postMessage(conv, {
+        role: "agent",
+        agentType: "intake",
+        body: `Only ${items.length} candidate(s) so far, best first.`,
+        card: { type: "ranked_candidates", requisitionId: conv.requisitionId, items },
+      });
     await postMessage(conv, {
-      role: "agent",
-      agentType: "intake",
-      body: "No matching candidates are in the pipeline or the talent pool yet. New applications will be scored as they arrive.",
+      role: "desk",
+      body: items.length
+        ? "That is too few to choose from. Let's bring more candidates in:"
+        : "No matching candidates are in this role's pipeline or your talent pool yet. Let's bring candidates in:",
+      card: { type: "bring_candidates", requisitionId: conv.requisitionId, found: items.length },
     });
     return;
   }
@@ -899,6 +934,19 @@ export async function handleUserMessage(
       });
       return;
     }
+    // One question for a deeper JD, asked once; any answer (or "research it") moves on.
+    if (!slots.jdDetailsAsked) {
+      const asked = { ...slots, jdDetailsAsked: true };
+      await db
+        .update(hiringConversations)
+        .set({ slots: asked as never })
+        .where(eq(hiringConversations.id, conv.id));
+      await postMessage(conv, {
+        role: "desk",
+        body: `To write a strong job description for ${slots.roleTitle}: what are the 3–5 key responsibilities, who does this role report to, and what does success look like after 12 months? Any education requirement? Answer in your own words — or say "research it" and I'll draft these from typical market practice for this role.`,
+      });
+      return;
+    }
     await db
       .update(hiringConversations)
       .set({ status: "confirming" })
@@ -1059,8 +1107,45 @@ export async function onTaskOpened(
       body,
       ...(step ? { step } : {}),
       ...(repeated ? { repeated: true } : {}),
+      ...(task.kind === "approval"
+        ? (() => {
+            const a = task.proposedAction as { name?: string; args?: unknown } | null;
+            const details = argDetails(a?.name ?? null, a?.args);
+            return details.length ? { details } : {};
+          })()
+        : {}),
     },
   });
+}
+
+async function getToolDescription(name: string): Promise<string | null> {
+  const { ensureAgentsRegistered } = await import("../agents");
+  ensureAgentsRegistered();
+  return getTool(name)?.description ?? null;
+}
+
+/** Readable details of the action each approval card asks about (old cards included). */
+export async function taskDetails(
+  orgId: string,
+  ids: string[],
+): Promise<Record<string, { label: string; value: string }[]>> {
+  if (!ids.length) return {};
+  const rows = await db
+    .select({ id: agentTasks.id, kind: agentTasks.kind, action: agentTasks.proposedAction })
+    .from(agentTasks)
+    .where(and(eq(agentTasks.orgId, orgId), inArray(agentTasks.id, ids)));
+  const out: Record<string, { label: string; value: string }[]> = {};
+  for (const r of rows) {
+    if (r.kind !== "approval") continue;
+    const a = r.action as { name?: string; args?: unknown } | null;
+    const d = argDetails(a?.name ?? null, a?.args);
+    // Nothing to show (the tool works it out itself): say what it does instead.
+    const what = a?.name ? await getToolDescription(a.name) : null;
+    if (d.length) out[r.id] = d;
+    // First sentence only: the rest is guidance written for the model.
+    else if (what) out[r.id] = [{ label: "What it does", value: what.split(/(?<=\.)\s/)[0]! }];
+  }
+  return out;
 }
 
 /** Current status of the tasks shown in a thread (for the cards' buttons). */
@@ -1096,8 +1181,8 @@ export type DeskProgress = {
     agentName: string | null;
     /** on = switched on; off = switched off (nothing will happen until it is). */
     agentEnabled: boolean | null;
-    /** The responsible agent's latest run on this role. */
-    run: { id: string; status: string } | null;
+    /** The responsible agent's latest run on this role (`paused` = at its monthly token budget). */
+    run: { id: string; status: string; paused?: boolean } | null;
     /** Open requests from this thread's agents waiting for a person. */
     waitingForYou: number;
   } | null;
@@ -1124,6 +1209,17 @@ const AGENT_TITLE: Record<string, string> = {
   evaluation: "Evaluation agent",
   offer: "Offer agent",
   onboarding: "Pre-onboarding & release agent",
+  publishing: "Publishing agent",
+  followup: "Follow-up agent",
+  copilot: "Copilot",
+};
+
+/** Agents that work alongside the journey rather than being a step of it. */
+const SIDE_STEP: Record<string, string> = {
+  publishing:
+    "The Publishing agent is switched off, so this role will not be posted internally or to job boards automatically. Switch it on in Agent settings, or post it yourself in Manual mode.",
+  followup:
+    "The Follow-up agent is switched off, so overdue approvals and interviews will not be chased automatically.",
 };
 
 const APPROVER: Record<string, string> = {
@@ -1218,12 +1314,12 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
 
   const agentType = STAGES.find((s) => s.key === cur)!.agent;
   let agentEnabled: boolean | null = null;
-  let run: { id: string; status: string } | null = null;
+  let run: { id: string; status: string; paused?: boolean } | null = null;
   if (agentType) {
     agentEnabled = await agentOn(conv.orgId, agentType);
     if (conv.requisitionId) {
       const [r] = await db
-        .select({ id: agentRuns.id, status: agentRuns.status })
+        .select({ id: agentRuns.id, status: agentRuns.status, lastError: agentRuns.lastError })
         .from(agentRuns)
         .where(
           and(
@@ -1235,7 +1331,13 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
         )
         .orderBy(desc(agentRuns.createdAt))
         .limit(1);
-      run = r ?? null;
+      run = r
+        ? {
+            id: r.id,
+            status: r.status,
+            ...(r.status === "queued" && r.lastError === BUDGET_PAUSED ? { paused: true } : {}),
+          }
+        : null;
     }
   }
   const [w] = await db
@@ -1249,6 +1351,12 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
         eq(agentRuns.conversationId, conv.id),
       ),
     );
+  // The responsible agent already ran for this step and it is still not done:
+  // say what came of it instead of "not started yet".
+  if (cur === "candidates" && run?.status === "done") {
+    TEXT.candidates =
+      "The Intake & matching agent searched the pipeline and the talent pool and found no matching candidates yet. Add candidates (Manual mode → Talent pool or Careers inbox), then search again.";
+  }
   return {
     stages,
     next: {
@@ -1320,7 +1428,9 @@ export async function notifyAgentOff(
 ): Promise<void> {
   const conv = await conversationForRequisition(orgId, requisitionId);
   if (!conv) return;
-  const body = `The next step needs the ${AGENT_TITLE[agentType] ?? agentType}, which is switched off. Switch it on in Agent settings and I'll continue — or do this step yourself in Manual mode.`;
+  const body =
+    SIDE_STEP[agentType] ??
+    `The next step needs the ${AGENT_TITLE[agentType] ?? agentType}, which is switched off. Switch it on in Agent settings and I'll continue — or do this step yourself in Manual mode.`;
   const [last] = await db
     .select({ body: hiringMessages.body })
     .from(hiringMessages)
@@ -1329,4 +1439,374 @@ export async function notifyAgentOff(
     .limit(1);
   if (last?.body === body) return;
   await postMessage(conv, { role: "desk", body, agentType });
+}
+
+/* ------------------------------------------- live activity and details */
+
+/** What an agent step means, in plain words (for the live activity list). */
+const STEP_LABEL: Record<string, string> = {
+  get_requisition: "Read the requisition",
+  find_similar_requisitions: "Checked similar roles",
+  list_requisitions: "Looked through open roles",
+  list_departments: "Looked up departments",
+  research_compensation: "Researched market pay",
+  set_compensation: "Set the pay band",
+  suggest_weights: "Worked out scoring weights",
+  save_weights: "Saved scoring weights",
+  draft_requisition: "Drafted the requisition",
+  update_requisition_draft: "Updated the draft",
+  submit_requisition_for_approval: "Submitted for approval",
+  request_approval: "Asked for a decision",
+  ask_human: "Asked you a question",
+  submit_jd_version: "Filed the job description",
+  pipeline_summary: "Reviewed the pipeline",
+  list_applications: "Read the applications",
+  score_new_applications: "Scored applications",
+  search_talent_pool: "Searched the talent pool",
+  add_to_pipeline: "Added candidates to the pipeline",
+  move_candidate: "Moved a candidate",
+  prepare_screening_kit: "Prepared a screening kit",
+  get_screening_status: "Checked screening status",
+  send_assessment: "Sent an assessment",
+  schedule_interview: "Booked an interview",
+  draft_offer: "Drafted the offer",
+  generate_offer_letter: "Wrote the offer letter",
+  request_documents: "Requested documents",
+};
+
+export function stepLabel(tool: string | null): string {
+  if (!tool) return "Thinking";
+  if (STEP_LABEL[tool]) return STEP_LABEL[tool]!;
+  const words = tool.replace(/_/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+const HIDDEN_ARG = /(^|_)id$|Id$|^subject$/;
+const MONEY_ARG = /ctc|budget|band|salary|compensation/i;
+
+const fmtValue = (k: string, v: unknown): string => {
+  if (typeof v === "number" && MONEY_ARG.test(k))
+    return `₹${v.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+  if (Array.isArray(v)) return v.map((x) => String(x)).join(", ");
+  if (v && typeof v === "object") return JSON.stringify(v);
+  return String(v);
+};
+
+/** A proposed tool call's arguments as label/value lines a person can read. */
+export function argDetails(tool: string | null, args: unknown): { label: string; value: string }[] {
+  if (!args || typeof args !== "object") return [];
+  const entries = Object.entries(args as Record<string, unknown>).filter(
+    ([k, v]) => !HIDDEN_ARG.test(k) && v !== null && v !== undefined && v !== "",
+  );
+  // Scoring weights read best as one line of percentages.
+  if (tool === "save_weights") {
+    const line = entries
+      .map(([k, v]) => `${k.charAt(0).toUpperCase()}${k.slice(1)} ${v}%`)
+      .join(" · ");
+    return line ? [{ label: "Weights", value: line }] : [];
+  }
+  return entries.slice(0, 12).map(([k, v]) => ({
+    label: k
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .replace(/_/g, " ")
+      .replace(/^./, (c) => c.toUpperCase()),
+    value: fmtValue(k, v).slice(0, 400),
+  }));
+}
+
+/** Mirrors the runtime's budget-pause message (runtime.server BUDGET_PAUSE_MESSAGE). */
+const BUDGET_PAUSED = "Paused: this agent reached its monthly token budget.";
+
+export type DeskActivity = {
+  agentType: string;
+  agentName: string;
+  status: string;
+  steps: { label: string; state: "done" | "error" | "waiting" | "working" }[];
+} | null;
+
+/** The thread's agent working right now (or most recently), with its latest steps. */
+export async function deskActivity(conv: Conversation): Promise<DeskActivity> {
+  const [run] = await db
+    .select({
+      id: agentRuns.id,
+      agentType: agentRuns.agentType,
+      status: agentRuns.status,
+      lastError: agentRuns.lastError,
+    })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.orgId, conv.orgId),
+        eq(agentRuns.conversationId, conv.id),
+        eq(agentRuns.mode, "live"),
+        inArray(agentRuns.status, ["queued", "running", "awaiting_human"]),
+      ),
+    )
+    .orderBy(desc(agentRuns.updatedAt))
+    .limit(1);
+  if (!run) return null;
+  const { agentSteps } = await import("@db/schema");
+  const rows = await db
+    .select({ kind: agentSteps.kind, tool: agentSteps.toolName, status: agentSteps.status })
+    .from(agentSteps)
+    .where(and(eq(agentSteps.runId, run.id), eq(agentSteps.orgId, conv.orgId)))
+    .orderBy(desc(agentSteps.seq))
+    .limit(30);
+  // Tool steps only (model turns are "thinking"). An approved call appears
+  // twice — "awaiting", then "ok" later — so drop the waiting entry once the
+  // same tool has a later result. Rows are newest first.
+  const resolved = new Set<string>();
+  const steps = rows
+    .filter((s) => s.kind === "tool" && s.tool)
+    .filter((s) => {
+      if (s.status === "awaiting") return !resolved.has(s.tool!);
+      resolved.add(s.tool!);
+      return true;
+    })
+    .slice(0, 6)
+    .reverse()
+    .map((s) => ({
+      label: stepLabel(s.tool),
+      state: (s.status === "error" ? "error" : s.status === "awaiting" ? "waiting" : "done") as
+        "done" | "error" | "waiting",
+    }));
+  const paused = run.status === "queued" && run.lastError === BUDGET_PAUSED;
+  const working = !paused && (run.status === "running" || run.status === "queued");
+  return {
+    agentType: run.agentType,
+    agentName: AGENT_TITLE[run.agentType] ?? run.agentType,
+    status: paused ? "paused" : run.status,
+    steps: working
+      ? [...steps, { label: run.status === "queued" ? "Starting" : "Thinking", state: "working" }]
+      : steps,
+  };
+}
+
+/** Stages an agent can start on its own once reached (the others wait for a person or an event). */
+const STARTABLE: Partial<Record<StageKey, AgentType>> = {
+  requisition: "requisition",
+  jd: "jd",
+  candidates: "intake",
+};
+
+/**
+ * Start the agent for the thread's current stage when the stage is reached,
+ * the agent is on, and nothing is running for it. Returns the run id or null.
+ */
+export async function startStage(
+  conv: Conversation,
+  userId: string,
+  opts: { dryRun?: boolean } = {},
+): Promise<string | null> {
+  if (!conv.requisitionId) return null;
+  const progress = await deskProgress(conv);
+  const next = progress.next;
+  const agentType = next ? STARTABLE[next.stage] : undefined;
+  if (!next || !agentType || next.agentEnabled !== true) return null;
+  if (next.run && ["queued", "running", "awaiting_human"].includes(next.run.status)) return null;
+  const [req] = await db
+    .select({ code: requisitions.code, title: requisitions.title, status: requisitions.status })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, conv.orgId)))
+    .limit(1);
+  if (!req) return null;
+  if (next.stage === "requisition") {
+    if (req.status !== "draft") return null; // waiting for an approver, not for the agent
+    if (opts.dryRun) return "requisition";
+    return startForThread(
+      conv,
+      "requisition",
+      userId,
+      `Complete draft requisition ${req.code} "${req.title}": find the department, research the market pay band, set the scoring weights, then submit it for approval and prepare the approval brief.`,
+      conv.requisitionId,
+      "I've asked the Requisition agent to complete the draft and send it for approval.",
+    );
+  }
+  if (next.stage === "jd") {
+    const jd = await latestJdStatus(conv.orgId, conv.requisitionId);
+    if (jd === "pending_dh") return null; // waiting for the department head
+    if (opts.dryRun) return "jd";
+    if (await reuseJdIfChosen(conv.orgId, conv.requisitionId)) return null;
+    return startForThread(
+      conv,
+      "jd",
+      userId,
+      `Requisition ${req.code} "${req.title}" is approved. Draft its job description and get it approved by the department head.`,
+      conv.requisitionId,
+      "I've asked the JD agent to draft the job description; it will come back here for approval.",
+    );
+  }
+  if (opts.dryRun) return "intake";
+  return startForThread(
+    conv,
+    "intake",
+    userId,
+    INTAKE_GOAL(req.code, req.title),
+    conv.requisitionId,
+    "I've asked the Intake & matching agent to search the talent pool and rank the best matches.",
+  );
+}
+
+/** An agent was switched on: continue every thread that was waiting for it. */
+export async function resumeThreadsForAgent(
+  orgId: string,
+  agentType: string | "*",
+): Promise<number> {
+  const threads = await db
+    .select()
+    .from(hiringConversations)
+    .where(
+      and(
+        eq(hiringConversations.orgId, orgId),
+        eq(hiringConversations.status, "active"),
+        sql`${hiringConversations.requisitionId} is not null`,
+      ),
+    )
+    .limit(200);
+  let started = 0;
+  for (const conv of threads) {
+    const p = await deskProgress(conv);
+    if (!p.next?.agentType || (agentType !== "*" && p.next.agentType !== agentType)) continue;
+    if (await startStage(conv, conv.createdBy)) started++;
+  }
+  return started;
+}
+
+/* ------------------------------------------------------- the reasoning */
+
+export type CandidateReasoning = {
+  rationale: string | null;
+  recommendation: string | null;
+  overall: number | null;
+  /** Score per dimension (0-100) with the requisition's weight, highest weight first. */
+  breakdown: { label: string; score: number; weight: number | null }[];
+  matched: string[];
+  missing: string[];
+  risks: string[];
+  highlights: string[];
+};
+
+/** Why each ranked candidate scored as they did — read live from their match score. */
+export async function candidateReasoning(
+  orgId: string,
+  applicationIds: string[],
+): Promise<Record<string, CandidateReasoning>> {
+  if (!applicationIds.length) return {};
+  const rows = await db
+    .select({
+      applicationId: matchScores.applicationId,
+      overall: matchScores.overallScore,
+      rationale: matchScores.rationale,
+      recommendation: matchScores.recommendation,
+      skills: matchScores.skillsScore,
+      experience: matchScores.experienceScore,
+      career: matchScores.careerScore,
+      impact: matchScores.impactScore,
+      education: matchScores.educationScore,
+      social: matchScores.socialScore,
+      weights: matchScores.weights,
+      matched: matchScores.matchedSkills,
+      missing: matchScores.missingSkills,
+      risks: matchScores.riskFlags,
+      highlights: matchScores.impactHighlights,
+    })
+    .from(matchScores)
+    .innerJoin(applications, eq(applications.id, matchScores.applicationId))
+    .where(and(eq(applications.orgId, orgId), inArray(matchScores.applicationId, applicationIds)));
+  const out: Record<string, CandidateReasoning> = {};
+  for (const r of rows) {
+    const w = (r.weights ?? {}) as Record<string, number>;
+    const dims: [string, string, number][] = [
+      ["skills", "Skills", r.skills],
+      ["experience", "Experience", r.experience],
+      ["career", "Career", r.career],
+      ["impact", "Impact", r.impact],
+      ["education", "Education", r.education],
+      ["social", "Profile & signals", r.social],
+    ];
+    out[r.applicationId] = {
+      rationale: r.rationale,
+      recommendation: r.recommendation,
+      overall: r.overall,
+      breakdown: dims
+        .map(([k, label, score]) => ({
+          label,
+          score,
+          weight: typeof w[k] === "number" ? w[k]! : null,
+        }))
+        .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0)),
+      matched: r.matched ?? [],
+      missing: r.missing ?? [],
+      risks: r.risks ?? [],
+      highlights: (r.highlights ?? []).slice(0, 4),
+    };
+  }
+  return out;
+}
+
+/* ----------------------------------------------------- bring candidates in */
+
+/** Score the role's new applications (e.g. CVs uploaded in the thread) and post the ranked list. */
+export async function scoreAndRank(conv: Conversation, userId: string): Promise<number> {
+  if (!conv.requisitionId) throw new Error("Choose or create the role first.");
+  const { scoreUnscored } = await import("@/lib/autoscore.server");
+  const r = await scoreUnscored({
+    orgId: conv.orgId,
+    requisitionId: conv.requisitionId,
+    limit: 25,
+  });
+  await writeAudit({
+    actor: `user:${userId}`,
+    actorUserId: userId,
+    orgId: conv.orgId,
+    action: "desk.candidates_scored",
+    entityType: "requisition",
+    entityId: conv.requisitionId,
+    detail: { conversation_id: conv.id, scored: r.scored, errors: r.errors },
+  });
+  await postRankedList(conv);
+  return r.scored;
+}
+
+/** Ask the Publishing agent to post the role (internal posting and job boards, reviewed). */
+export async function publishRole(conv: Conversation, userId: string): Promise<string | null> {
+  if (!conv.requisitionId) throw new Error("Choose or create the role first.");
+  const [req] = await db
+    .select({ code: requisitions.code, title: requisitions.title, status: requisitions.status })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, conv.orgId)))
+    .limit(1);
+  if (req?.status !== "approved") throw new Error("Only an approved role can be published.");
+  return startForThread(
+    conv,
+    "publishing",
+    userId,
+    `Requisition ${req.code} "${req.title}" needs candidates. Publish it internally and prepare the external posts (LinkedIn and job boards) for review.`,
+    conv.requisitionId,
+    "I've asked the Publishing agent to post the role internally and prepare the LinkedIn and job-board posts; each external post comes back here for your approval.",
+  );
+}
+
+/** After the JD agent files a draft: say in the thread which template shaped it. */
+export async function noteJdTemplate(
+  orgId: string,
+  runId: string,
+  version: number,
+  template: { name: string; reason: string } | null,
+): Promise<void> {
+  const [run] = await db
+    .select({ conversationId: agentRuns.conversationId })
+    .from(agentRuns)
+    .where(and(eq(agentRuns.id, runId), eq(agentRuns.orgId, orgId)))
+    .limit(1);
+  if (!run?.conversationId) return;
+  const conv = await loadConversation(orgId, run.conversationId).catch(() => null);
+  if (!conv) return;
+  await postMessage(conv, {
+    role: "agent",
+    agentType: "jd",
+    body: template
+      ? `Drafted JD version ${version} with the template "${template.name}" (${template.reason}).`
+      : `Drafted JD version ${version} in the built-in format — you have no JD template yet. Add one under Content templates (and mark it default) to control sections and wording.`,
+  });
 }

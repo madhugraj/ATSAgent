@@ -80,3 +80,6 @@ jobs:
 
       - name: Agents Phase 6a (hiring desk)
         run: bun test scripts/agent-phase6a.test.ts
+
+      - name: Agent utilisation & efficiency
+        run: bun test scripts/agent-utilisation.test.ts

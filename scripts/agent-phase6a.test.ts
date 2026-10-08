@@ -274,6 +274,10 @@ describe("slot filling", () => {
       slots: { experienceMin: 3, experienceMax: 6, mustHaveSkills: ["React", "Node.js"] },
     });
     await desk.handleUserMessage(await reload(conv.id), recruiter, "3 to 6 years, React and Node");
+    // Then one question for a deeper JD; any answer moves on.
+    expect((await messages(conv.id)).at(-1)!.body).toMatch(/key responsibilities/);
+    deskScript.push({ slots: { responsibilities: "Own the product end to end" } });
+    await desk.handleUserMessage(await reload(conv.id), recruiter, "own the product end to end");
     const c = await reload(conv.id);
     expect(c.status).toBe("confirming");
     m = await messages(conv.id);
@@ -577,5 +581,186 @@ describe("approval chains read as progress", () => {
     expect((await messages(conv.id)).at(-1)!.body).toBe(
       "Approval 2 of 3 — waiting for the HR head.",
     );
+  });
+});
+
+describe("keep the person informed", () => {
+  test("approval details are readable (money, weights) and hide ids", () => {
+    expect(
+      desk.argDetails("set_compensation", {
+        requisitionId: "x",
+        budgetCtc: 9000000,
+        bandMin: 7500000,
+        bandMax: 11000000,
+      }),
+    ).toEqual([
+      { label: "Budget Ctc", value: "₹90,00,000" },
+      { label: "Band Min", value: "₹75,00,000" },
+      { label: "Band Max", value: "₹1,10,00,000" },
+    ]);
+    expect(
+      desk.argDetails("save_weights", { requisitionId: "x", skills: 30, experience: 25 }),
+    ).toEqual([{ label: "Weights", value: "Skills 30% · Experience 25%" }]);
+    expect(desk.stepLabel("research_compensation")).toBe("Researched market pay");
+    expect(desk.stepLabel("some_new_tool")).toBe("Some new tool");
+  });
+
+  test("switching the next agent on continues a thread that was waiting for it", async () => {
+    // An approved role without a JD, with the JD agent off: the thread is stuck at "jd".
+    const [r] = await db
+      .insert(requisitions)
+      .values({
+        orgId,
+        code: `REQ-J-${stamp}`,
+        title: "Data Engineer",
+        location: "Chennai",
+        status: "approved",
+        createdBy: recruiter,
+      })
+      .returning({ id: requisitions.id });
+    await db
+      .update(agentPolicies)
+      .set({ enabled: false })
+      .where(and(eq(agentPolicies.orgId, orgId), eq(agentPolicies.agentType, "jd")));
+    const conv = await confirming();
+    await db
+      .update(hiringConversations)
+      .set({ requisitionId: r!.id, status: "active" })
+      .where(eq(hiringConversations.id, conv.id));
+    let c = await reload(conv.id);
+    expect((await desk.deskProgress(c)).next).toMatchObject({ stage: "jd", agentEnabled: false });
+    expect(await desk.startStage(c, recruiter, { dryRun: true })).toBeNull();
+
+    await db
+      .update(agentPolicies)
+      .set({ enabled: true })
+      .where(and(eq(agentPolicies.orgId, orgId), eq(agentPolicies.agentType, "jd")));
+    c = await reload(conv.id);
+    expect(await desk.startStage(c, recruiter, { dryRun: true })).toBe("jd");
+    expect(await desk.resumeThreadsForAgent(orgId, "jd")).toBe(1);
+    const runs = await runsOf(conv.id);
+    expect(runs.map((x) => [x.agentType, x.status])).toEqual([["jd", "queued"]]);
+    // Nothing more to start while it is running; activity shows it starting.
+    expect(await desk.startStage(await reload(conv.id), recruiter, { dryRun: true })).toBeNull();
+    const act = await desk.deskActivity(await reload(conv.id));
+    expect(act).toMatchObject({ agentType: "jd", status: "queued" });
+    expect(act!.steps.at(-1)).toEqual({ label: "Starting", state: "working" });
+  });
+});
+
+describe("deeper JDs, smarter search, reasoning", () => {
+  test("the desk asks once for JD details, then moves on (any answer or 'research it')", async () => {
+    const conv = await newConversation();
+    await db
+      .update(hiringConversations)
+      .set({ slots: { ...complete } as never })
+      .where(eq(hiringConversations.id, conv.id));
+    deskScript.push({ reply: "" });
+    await desk.handleUserMessage(await reload(conv.id), recruiter, "that's all");
+    expect((await messages(conv.id)).at(-1)!.body).toMatch(/key responsibilities/);
+    expect((await reload(conv.id)).status).toBe("gathering");
+    deskScript.push({ slots: { researchRole: true, reportingTo: "CTO" } });
+    await desk.handleUserMessage(
+      await reload(conv.id),
+      recruiter,
+      "research it, reports to the CTO",
+    );
+    const c = await reload(conv.id);
+    expect(c.status).toBe("confirming");
+    const brief = desk.jdBrief(c.slots as never)!;
+    expect(brief).toContain("Reports to: CTO");
+    expect(brief).toMatch(/from typical market practice/);
+  });
+
+  test("templates: default first, else the only one, else the closest name", async () => {
+    const { contentTemplates } = await import("../drizzle/schema");
+    const { pickTemplate } = await import("../src/lib/templates.server");
+    expect(await pickTemplate(orgId, "jd", "Data Engineer")).toBeNull();
+    const add = (name: string, isDefault = false) =>
+      db
+        .insert(contentTemplates)
+        .values({ orgId, kind: "jd", name, isDefault, config: {} } as never)
+        .returning({ id: contentTemplates.id });
+    await add("Sales roles");
+    expect((await pickTemplate(orgId, "jd", "Data Engineer"))?.reason).toMatch(/only template/);
+    await add("Engineering leadership");
+    expect((await pickTemplate(orgId, "jd", "VP Engineering"))?.name).toBe(
+      "Engineering leadership",
+    );
+    await add("House style", true);
+    expect(await pickTemplate(orgId, "jd", "VP Engineering")).toMatchObject({
+      name: "House style",
+      reason: "your default template",
+    });
+    await db.delete(contentTemplates).where(eq(contentTemplates.orgId, orgId));
+  });
+
+  test("pool search matches by meaning and whole words, and says why", async () => {
+    const { rankPool } = await import("../src/server/agents/talent-search.server");
+    const groups = [
+      { skill: "LLM", terms: ["LLM", "large language models", "GenAI"] },
+      { skill: "Go", terms: ["Go", "Golang"] },
+    ];
+    const person = (name: string, skills: string[], cv: string, exp = 20) => ({
+      candidateId: name,
+      name,
+      experienceYears: exp,
+      location: "Chennai",
+      skills,
+      resumeText: cv,
+      currentEmployer: null,
+    });
+    const ranked = rankPool(
+      [
+        person("Asha", ["Large Language Models", "Golang"], ""),
+        person("Bala", [], "Led GenAI research; a good team player"),
+        person("Chitra", ["Excel"], "Very good at reporting"), // "good" is not "Go"
+      ],
+      groups,
+      { experienceMin: 15, experienceMax: 25, location: "Chennai" },
+    );
+    expect(ranked.map((r) => r.name)).toEqual(["Asha", "Bala"]);
+    expect(ranked[0]).toMatchObject({ skillHits: ["LLM", "Go"] });
+    expect(ranked[1]).toMatchObject({ skillHits: [], textHits: ["LLM"] });
+    expect(ranked[1]!.why).toMatch(/in CV: LLM/);
+  });
+
+  test("too few candidates asks for more; reasoning is read from the match score", async () => {
+    const [r] = await db
+      .insert(requisitions)
+      .values({
+        orgId,
+        code: `REQ-E-${stamp}`,
+        title: "Empty role",
+        location: "Pune",
+        status: "approved",
+        createdBy: recruiter,
+      })
+      .returning({ id: requisitions.id });
+    const conv = await confirming();
+    await db
+      .update(hiringConversations)
+      .set({ requisitionId: r!.id, status: "active" })
+      .where(eq(hiringConversations.id, conv.id));
+    await desk.postRankedList(await reload(conv.id));
+    const last = (await messages(conv.id)).at(-1)!;
+    expect(last.card).toMatchObject({ type: "bring_candidates", found: 0 });
+
+    await db
+      .update(matchScores)
+      .set({
+        rationale: "Strong React evidence.",
+        skillsScore: 88,
+        riskFlags: ["short tenures"],
+      } as never)
+      .where(eq(matchScores.applicationId, apps[1]!));
+    const why = await desk.candidateReasoning(orgId, [apps[1]!]);
+    expect(why[apps[1]!]).toMatchObject({
+      rationale: "Strong React evidence.",
+      risks: ["short tenures"],
+    });
+    expect(why[apps[1]!]!.breakdown.find((b) => b.label === "Skills")?.score).toBe(88);
+    // Another organisation's applications are never read.
+    expect(await desk.candidateReasoning(otherOrgId, [apps[1]!])).toEqual({});
   });
 });

@@ -1,5 +1,13 @@
 # Roadmap
 
+## Utilisation & efficiency, smarter matching, deeper JDs (2026-10-08)
+
+- [x] Agent observability → Utilisation & efficiency: day-wise tokens (or cost at the organisation's own token prices — never assumed) by agent, day-wise agent working time vs time waiting for people, per-agent efficiency (tokens and cost per run, agent minutes, median wait, approvals per run, tokens wasted on failed runs, repeated reads), and "How to optimise" recommendations with evidence and estimated weekly savings (wasted spend, rubber-stamp approvals → Act and notify, waiting, long re-sent conversations, repeated lookups, dominant AI skill, slow turns, token growth, budget run-out date); migration `0031` (`agent_cost_rates`)
+- [x] Hiring desk: one question for a deeper JD (responsibilities, reporting line, 12-month success, education — or "research it"); the JD agent picks the default / only / closest-named template and says which in the thread; a seniority-aware JD prompt
+- [x] Talent-pool search by meaning (equivalent terms, CV text, whole words, experience band, location) with a reason per match; Intake agent v1.3.0
+- [x] "Bring candidates in" when fewer than 3 match: upload CVs in the thread (parsed, added, scored), publish the role, or open the inbox / pool; "Why this score?" on every ranked candidate
+- [x] Fixes: approving a JD no longer erases its full text; budget-paused agents are shown as paused in the journey; Send works with a one-character answer; switching an agent on resumes waiting threads; live agent activity and approval details in the thread
+
 ## Agent mode / Manual mode (2026-10-07)
 
 - [x] A switch in the top bar separates the two ways of working: Agent mode shows Hiring desk, Waiting for you, Agent activity and agent administration; Manual mode shows the pipeline, sourcing and intelligence pages; dashboard, My interviews, administration and help show in both

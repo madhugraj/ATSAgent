@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
 import {
@@ -27,7 +27,10 @@ import {
   chooseDeskRole,
   getDeskConversation,
   listDeskConversations,
+  publishDeskRole,
   retryDeskRun,
+  scoreDeskCandidates,
+  startDeskStage,
   screenDeskCandidates,
   sendDeskMessage,
   startDeskConversation,
@@ -126,7 +129,7 @@ function NewThread({ onStarted }: { onStarted: (id: string) => void }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   async function start(message: string) {
-    if (message.trim().length < 2) return;
+    if (!message.trim()) return;
     setBusy(true);
     try {
       const { id } = await startDeskConversation({ data: { message: message.trim() } });
@@ -188,7 +191,7 @@ function Composer({
           }
         }}
       />
-      <Button onClick={onSend} disabled={busy || disabled || value.trim().length < 2}>
+      <Button onClick={onSend} disabled={busy || disabled || !value.trim()}>
         {busy ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
         Send
       </Button>
@@ -207,10 +210,12 @@ function Thread({ id }: { id: string }) {
   });
   const [text, setText] = useState("");
   const [pending, setPending] = useState<string | null>(null);
-  const bottom = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLDivElement>(null);
   const count = q.data?.messages.length ?? 0;
   useEffect(() => {
-    bottom.current?.scrollIntoView({ block: "end" });
+    // Scroll the conversation itself, never the page.
+    const el = list.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [count, pending]);
 
   const refresh = () => {
@@ -220,7 +225,7 @@ function Thread({ id }: { id: string }) {
 
   async function send() {
     const message = text.trim();
-    if (message.length < 2) return;
+    if (!message) return;
     setPending(message);
     setText("");
     try {
@@ -244,45 +249,50 @@ function Thread({ id }: { id: string }) {
     );
   const d = q.data;
   return (
-    <section className="panel flex min-h-[70vh] flex-col">
-      <header className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
-        <h2 className="font-semibold">{d.title}</h2>
-        <Badge variant="outline">{STATUS_LABEL[d.status] ?? d.status}</Badge>
-        {d.requisition ? (
-          <Link
-            to="/requisitions/$id"
-            params={{ id: d.requisition.id }}
-            className="ml-auto text-xs text-primary underline"
-          >
-            {d.requisition.code} · {d.requisition.status.replace(/_/g, " ")}
-          </Link>
-        ) : null}
-      </header>
-      <ProgressPanel conv={d} onChanged={refresh} />
-      <div className="flex-1 space-y-3 overflow-y-auto p-4">
-        {d.messages.map((m) => (
-          <Message key={m.id} m={m} conv={d} onChanged={refresh} />
-        ))}
-        {pending ? (
-          <>
-            <Bubble role="user" body={pending} />
-            <p className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Loader2 className="size-3 animate-spin" /> The desk is thinking…
-            </p>
-          </>
-        ) : null}
-        <div ref={bottom} />
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+      {/* The journey: first on small screens, a sticky column on wide ones. */}
+      <div className="xl:order-2">
+        <JourneyPanel conv={d} onChanged={refresh} />
       </div>
-      <footer className="border-t border-border p-3">
-        <Composer
-          value={text}
-          onChange={setText}
-          onSend={send}
-          busy={pending !== null}
-          disabled={d.status === "closed"}
-        />
-      </footer>
-    </section>
+      {/* The conversation: fixed height, scrolls inside, composer always visible. */}
+      <section className="panel flex h-[calc(100vh-13rem)] min-h-[460px] flex-col xl:order-1">
+        <header className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
+          <h2 className="font-semibold">{d.title}</h2>
+          <Badge variant="outline">{STATUS_LABEL[d.status] ?? d.status}</Badge>
+          {d.requisition ? (
+            <Link
+              to="/requisitions/$id"
+              params={{ id: d.requisition.id }}
+              className="ml-auto text-xs text-primary underline"
+            >
+              {d.requisition.code} · {d.requisition.status.replace(/_/g, " ")}
+            </Link>
+          ) : null}
+        </header>
+        <div ref={list} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+          {d.messages.map((m) => (
+            <Message key={m.id} m={m} conv={d} onChanged={refresh} />
+          ))}
+          {pending ? (
+            <>
+              <Bubble role="user" body={pending} />
+              <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="size-3 animate-spin" /> The desk is thinking…
+              </p>
+            </>
+          ) : null}
+        </div>
+        <footer className="border-t border-border p-3">
+          <Composer
+            value={text}
+            onChange={setText}
+            onSend={send}
+            busy={pending !== null}
+            disabled={d.status === "closed"}
+          />
+        </footer>
+      </section>
+    </div>
   );
 }
 
@@ -307,7 +317,7 @@ function Bubble({
         className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${mine ? "bg-primary text-primary-foreground" : "bg-muted"}`}
       >
         {who ? <p className="mb-0.5 text-[11px] font-medium opacity-70">{who}</p> : null}
-        <p className="whitespace-pre-wrap">{body}</p>
+        <div className="whitespace-pre-wrap">{renderMarkdown(body)}</div>
       </div>
       {mine ? (
         <span className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-full bg-muted">
@@ -361,6 +371,8 @@ function Card({
   if (card.type === "ranked_candidates")
     return <RankedCard card={card} conv={conv} onChanged={onChanged} />;
   if (card.type === "task") return <TaskCard card={card} conv={conv} onChanged={onChanged} />;
+  if (card.type === "bring_candidates")
+    return <BringCandidatesCard conv={conv} onChanged={onChanged} />;
   if (card.type === "run_failed")
     return <RetryButton conv={conv} runId={String(card["runId"])} onChanged={onChanged} />;
   if (card.type === "requisition")
@@ -488,6 +500,7 @@ function RankedCard({
 }) {
   const items = (card["items"] as unknown as RankedItem[]) ?? [];
   const [picked, setPicked] = useState<string[]>([]);
+  const [openWhy, setOpenWhy] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const toggle = (id: string, on: boolean) =>
     setPicked((p) => (on ? [...p, id] : p.filter((x) => x !== id)));
@@ -519,36 +532,56 @@ function RankedCard({
         </thead>
         <tbody>
           {items.map((r) => (
-            <tr key={r.applicationId} className="border-b border-border/60 align-top last:border-0">
-              <td className="px-2 py-2">
-                <Checkbox
-                  checked={picked.includes(r.applicationId)}
-                  onCheckedChange={(v) => toggle(r.applicationId, Boolean(v))}
-                  aria-label={`Select ${r.name}`}
-                />
-              </td>
-              <td className="num px-2 py-2 text-muted-foreground">{r.rank}</td>
-              <td className="px-2 py-2">
-                <p className="font-medium">{r.name}</p>
-                <p className="text-xs text-muted-foreground">
-                  {r.experienceYears} yrs{r.location ? ` · ${r.location}` : ""} ·{" "}
-                  {r.stage.replace(/_/g, " ")}
-                </p>
-              </td>
-              <td className="num px-2 py-2 text-right font-semibold">{r.score ?? "—"}</td>
-              <td className="px-2 py-2">
-                {r.recommendation ? <Badge variant="outline">{r.recommendation}</Badge> : "—"}
-                {r.risks ? (
-                  <p className="mt-1 text-xs text-muted-foreground">{r.risks} risk flag(s)</p>
-                ) : null}
-              </td>
-              <td className="px-2 py-2 text-xs">
-                {r.matched.length ? <p>✓ {r.matched.join(", ")}</p> : null}
-                {r.missing.length ? (
-                  <p className="text-muted-foreground">✗ {r.missing.join(", ")}</p>
-                ) : null}
-              </td>
-            </tr>
+            <Fragment key={r.applicationId}>
+              <tr className="border-b border-border/60 align-top">
+                <td className="px-2 py-2">
+                  <Checkbox
+                    checked={picked.includes(r.applicationId)}
+                    onCheckedChange={(v) => toggle(r.applicationId, Boolean(v))}
+                    aria-label={`Select ${r.name}`}
+                  />
+                </td>
+                <td className="num px-2 py-2 text-muted-foreground">{r.rank}</td>
+                <td className="px-2 py-2">
+                  <p className="font-medium">{r.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {r.experienceYears} yrs{r.location ? ` · ${r.location}` : ""} ·{" "}
+                    {r.stage.replace(/_/g, " ")}
+                  </p>
+                </td>
+                <td className="num px-2 py-2 text-right font-semibold">{r.score ?? "—"}</td>
+                <td className="px-2 py-2">
+                  {r.recommendation ? <Badge variant="outline">{r.recommendation}</Badge> : "—"}
+                  {r.risks ? (
+                    <p className="mt-1 text-xs text-muted-foreground">{r.risks} risk flag(s)</p>
+                  ) : null}
+                </td>
+                <td className="px-2 py-2 text-xs">
+                  {r.matched.length ? <p>✓ {r.matched.join(", ")}</p> : null}
+                  {r.missing.length ? (
+                    <p className="text-muted-foreground">✗ {r.missing.join(", ")}</p>
+                  ) : null}
+                  {conv.reasoning[r.applicationId] ? (
+                    <button
+                      type="button"
+                      className="mt-1 text-primary underline"
+                      onClick={() =>
+                        setOpenWhy(openWhy === r.applicationId ? null : r.applicationId)
+                      }
+                    >
+                      {openWhy === r.applicationId ? "Hide reasoning" : "Why this score?"}
+                    </button>
+                  ) : null}
+                </td>
+              </tr>
+              {openWhy === r.applicationId && conv.reasoning[r.applicationId] ? (
+                <tr className="border-b border-border/60 bg-muted/30">
+                  <td colSpan={6} className="px-3 py-3">
+                    <Reasoning why={conv.reasoning[r.applicationId]!} />
+                  </td>
+                </tr>
+              ) : null}
+            </Fragment>
           ))}
         </tbody>
       </table>
@@ -589,6 +622,9 @@ function TaskCard({
   const taskId = String(card["taskId"]);
   const kind = String(card["kind"]);
   const status = conv.tasks[taskId] ?? "open";
+  const details =
+    conv.taskDetails[taskId] ??
+    (Array.isArray(card["details"]) ? (card["details"] as { label: string; value: string }[]) : []);
   const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState(false);
   async function decide(decision: AgentDecisionInput) {
@@ -617,6 +653,16 @@ function TaskCard({
           {TASK_STATUS[status] ?? status}
         </Badge>
       </div>
+      {details.length ? (
+        <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 rounded-md bg-muted/40 p-2 text-xs">
+          {details.map((d) => (
+            <div key={d.label} className="contents">
+              <dt className="text-muted-foreground">{d.label}</dt>
+              <dd className={d.label === "What it does" ? "" : "num font-medium"}>{d.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
       {card["body"] ? (
         // Decided cards and a brief repeated from the previous step stay collapsed.
         status !== "open" || card["repeated"] ? (
@@ -708,86 +754,407 @@ function RetryButton({
   );
 }
 
-/** Where the hire stands and what happens next — the answer to "what now?". */
-function ProgressPanel({ conv, onChanged }: { conv: DeskConversationView; onChanged: () => void }) {
+/** The hiring journey, top to bottom: done, now (with what happens next), to come. */
+function JourneyPanel({ conv, onChanged }: { conv: DeskConversationView; onChanged: () => void }) {
   const p = conv.progress;
   const n = p.next;
   const runState =
     n?.run?.status === "failed"
       ? "stopped"
-      : n?.run && ["queued", "running"].includes(n.run.status)
-        ? "working"
-        : n?.run?.status === "awaiting_human"
-          ? "waiting"
-          : null;
+      : n?.run?.paused
+        ? "paused"
+        : n?.run && ["queued", "running"].includes(n.run.status)
+          ? "working"
+          : n?.run?.status === "awaiting_human"
+            ? "waiting"
+            : n?.run?.status === "done"
+              ? "finished"
+              : null;
   return (
-    <div className="border-b border-border bg-muted/30 px-4 py-3">
-      <ol
-        className="flex flex-wrap items-center gap-x-1 gap-y-1 text-xs"
-        aria-label="Hiring progress"
-      >
-        {p.stages.map((s, i) => (
-          <li key={s.key} className="flex items-center gap-1">
-            {s.state === "done" ? (
-              <CheckCircle2 className="size-3.5 text-primary" aria-label="done" />
-            ) : s.state === "current" ? (
-              <CircleDot className="size-3.5 text-primary" aria-label="current" />
+    <aside className="panel p-4 xl:sticky xl:top-4 xl:max-h-[calc(100vh-13rem)] xl:overflow-y-auto">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Hiring journey
+      </h3>
+      <ol className="mt-3" aria-label="Hiring progress">
+        {p.stages.map((s, i) => {
+          const last = i === p.stages.length - 1;
+          const isNow = s.state === "current";
+          return (
+            <li key={s.key} className="relative flex gap-3 pb-3">
+              {!last ? (
+                <span
+                  aria-hidden
+                  className={`absolute left-[9px] top-6 bottom-0 w-px ${s.state === "done" ? "bg-primary/50" : "bg-border"}`}
+                />
+              ) : null}
+              <span className="relative z-10 mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-card">
+                {s.state === "done" ? (
+                  <CheckCircle2 className="size-5 text-primary" aria-label="done" />
+                ) : isNow ? (
+                  <CircleDot className="size-5 text-primary" aria-label="current step" />
+                ) : (
+                  <Circle className="size-5 text-muted-foreground/40" aria-label="to come" />
+                )}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p
+                  className={`text-sm ${isNow ? "font-semibold" : s.state === "done" ? "" : "text-muted-foreground"}`}
+                >
+                  <span className="num mr-1 text-xs text-muted-foreground">{i + 1}.</span>
+                  {s.label}
+                </p>
+                {isNow && n ? (
+                  <div className="mt-1.5 space-y-2 rounded-md border border-primary/30 bg-primary/5 p-2.5 text-xs">
+                    <p className="text-foreground">
+                      <span className="font-medium">Next: </span>
+                      {n.text}
+                    </p>
+                    {n.agentName ? (
+                      <p className="text-muted-foreground">
+                        {n.agentName}:{" "}
+                        {n.agentEnabled === false ? (
+                          <span className="font-medium text-destructive">switched off</span>
+                        ) : runState === "stopped" ? (
+                          <span className="font-medium text-destructive">stopped</span>
+                        ) : runState === "paused" ? (
+                          <span className="font-medium text-destructive">
+                            paused — it reached its monthly token budget
+                          </span>
+                        ) : runState === "working" ? (
+                          "working on it"
+                        ) : runState === "waiting" ? (
+                          "waiting for a person"
+                        ) : runState === "finished" ? (
+                          "finished its last run"
+                        ) : conv.canStart ? (
+                          "on, not started yet"
+                        ) : (
+                          "on, starts automatically when this step is reached"
+                        )}
+                      </p>
+                    ) : null}
+                    {n.waitingForYou ? (
+                      <p className="font-medium text-primary">
+                        {n.waitingForYou} request(s) waiting for you in the conversation
+                      </p>
+                    ) : null}
+                    {n.agentEnabled === false || runState === "paused" ? (
+                      <Button asChild size="sm" variant="outline" className="h-7">
+                        <Link to="/agents/settings">
+                          {runState === "paused" ? "Raise the budget" : "Switch it on"}
+                        </Link>
+                      </Button>
+                    ) : runState === "stopped" && n.run ? (
+                      <RetryButton conv={conv} runId={n.run.id} onChanged={onChanged} />
+                    ) : conv.canStart ? (
+                      <StartButton
+                        conv={conv}
+                        onChanged={onChanged}
+                        label={
+                          runState === "finished"
+                            ? n.stage === "candidates"
+                              ? "Search again"
+                              : "Run again"
+                            : "Start now"
+                        }
+                      />
+                    ) : null}
+                    {conv.activity ? <ActivityList a={conv.activity} /> : null}
+                  </div>
+                ) : null}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+      {!n ? (
+        <p className="text-sm text-muted-foreground">All steps are done for this hire.</p>
+      ) : null}
+    </aside>
+  );
+}
+
+/** The agent at work: its latest steps, so a long run never looks like nothing is happening. */
+function ActivityList({ a }: { a: NonNullable<DeskConversationView["activity"]> }) {
+  const working = a.status === "running" || a.status === "queued";
+  return (
+    <div className="rounded-md border border-dashed border-border bg-card p-2 text-xs">
+      <p className="mb-1 flex items-center gap-1.5 font-medium">
+        {working ? <Loader2 className="size-3.5 animate-spin text-primary" /> : null}
+        {a.agentName}
+        {working
+          ? " is working"
+          : a.status === "awaiting_human"
+            ? " is waiting for you"
+            : a.status === "paused"
+              ? " is paused at its monthly token budget"
+              : ""}
+      </p>
+      <ol className="space-y-0.5">
+        {a.steps.map((st, i) => (
+          <li key={i} className="flex items-center gap-1.5 text-muted-foreground">
+            {st.state === "done" ? (
+              <CheckCircle2 className="size-3 text-primary" aria-label="done" />
+            ) : st.state === "working" ? (
+              <Loader2 className="size-3 animate-spin" aria-label="in progress" />
+            ) : st.state === "waiting" ? (
+              <CircleDot className="size-3 text-primary" aria-label="waiting for you" />
             ) : (
-              <Circle className="size-3.5 text-muted-foreground/50" aria-label="to do" />
+              <Circle className="size-3 text-destructive" aria-label="failed" />
             )}
-            <span
-              className={
-                s.state === "current"
-                  ? "font-semibold text-foreground"
-                  : s.state === "done"
-                    ? "text-foreground"
-                    : "text-muted-foreground"
-              }
-            >
-              {s.label}
+            <span className={st.state === "working" ? "text-foreground" : ""}>
+              {st.label}
+              {st.state === "working" ? "…" : st.state === "waiting" ? " — waiting for you" : ""}
             </span>
-            {i < p.stages.length - 1 ? (
-              <span className="px-1 text-muted-foreground/40">›</span>
-            ) : null}
           </li>
         ))}
       </ol>
-      {n ? (
-        <div className="mt-2 flex flex-wrap items-start gap-2 rounded-md border border-border bg-card p-2.5 text-sm">
-          <div className="min-w-0 flex-1">
-            <p>
-              <span className="font-medium">Next: </span>
-              {n.text}
-            </p>
-            {n.agentName ? (
-              <p className="mt-1 text-xs text-muted-foreground">
-                {n.agentName}:{" "}
-                {n.agentEnabled === false ? (
-                  <span className="font-medium text-destructive">switched off</span>
-                ) : runState === "stopped" ? (
-                  <span className="font-medium text-destructive">stopped</span>
-                ) : runState === "working" ? (
-                  "working on it"
-                ) : runState === "waiting" ? (
-                  "waiting for a person"
-                ) : (
-                  "on, starts automatically when this step is reached"
-                )}
-                {n.waitingForYou ? ` · ${n.waitingForYou} request(s) waiting for you below` : ""}
-              </p>
-            ) : null}
+    </div>
+  );
+}
+
+function StartButton({
+  conv,
+  onChanged,
+  label = "Start now",
+}: {
+  conv: DeskConversationView;
+  onChanged: () => void;
+  label?: string;
+}) {
+  const [busy, setBusy] = useState(false);
+  async function start() {
+    setBusy(true);
+    try {
+      await startDeskStage({ data: { id: conv.id } });
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not start");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Button size="sm" disabled={busy} onClick={start}>
+      {busy ? <Loader2 className="size-4 animate-spin" /> : null}
+      {label}
+    </Button>
+  );
+}
+
+/**
+ * Agents write a little markdown (**bold**, `code`). Render just those as
+ * React nodes — never as HTML — so text stays escaped.
+ */
+function inlineMarkdown(text: string): React.ReactNode[] {
+  return text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((part, i) =>
+    part.startsWith("**") && part.endsWith("**") && part.length > 4 ? (
+      <strong key={i}>{part.slice(2, -2)}</strong>
+    ) : part.startsWith("`") && part.endsWith("`") && part.length > 2 ? (
+      <code key={i} className="rounded bg-background/60 px-1 text-[0.9em]">
+        {part.slice(1, -1)}
+      </code>
+    ) : (
+      part
+    ),
+  );
+}
+
+/** Lines starting with #, ## or ### become bold lines; the rest gets inline markdown. */
+function renderMarkdown(text: string): React.ReactNode[] {
+  return text.split("\n").map((line, i, all) => {
+    const heading = /^#{1,6}\s+(.*)$/.exec(line);
+    const nl = i < all.length - 1 ? "\n" : "";
+    return heading ? (
+      <strong key={i} className="block">
+        {inlineMarkdown(heading[1]!)}
+      </strong>
+    ) : (
+      <span key={i}>
+        {inlineMarkdown(line)}
+        {nl}
+      </span>
+    );
+  });
+}
+
+/* ------------------------------------------------------------ reasoning */
+
+/** The AI's reasoning for one candidate: rationale, score per dimension, evidence, risks. */
+function Reasoning({ why }: { why: DeskConversationView["reasoning"][string] }) {
+  return (
+    <div className="grid gap-3 text-xs md:grid-cols-[1fr_240px]">
+      <div className="space-y-2">
+        {why.rationale ? <p className="text-foreground">{why.rationale}</p> : null}
+        {why.highlights.length ? (
+          <div>
+            <p className="font-medium">Evidence from the CV</p>
+            <ul className="mt-0.5 list-disc pl-4 text-muted-foreground">
+              {why.highlights.map((h) => (
+                <li key={h}>{h}</li>
+              ))}
+            </ul>
           </div>
-          {n.agentEnabled === false ? (
-            <Button asChild size="sm" variant="outline">
-              <Link to="/agents/settings">Switch it on</Link>
-            </Button>
-          ) : runState === "stopped" && n.run ? (
-            <RetryButton conv={conv} runId={n.run.id} onChanged={onChanged} />
-          ) : null}
+        ) : null}
+        {why.risks.length ? (
+          <div>
+            <p className="font-medium">Risk flags</p>
+            <ul className="mt-0.5 list-disc pl-4 text-muted-foreground">
+              {why.risks.map((h) => (
+                <li key={h}>{h}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+      <div>
+        <p className="font-medium">
+          Score breakdown{why.overall != null ? ` · overall ${why.overall}` : ""}
+        </p>
+        <ul className="mt-1 space-y-1">
+          {why.breakdown.map((b) => (
+            <li key={b.label}>
+              <div className="flex justify-between">
+                <span>
+                  {b.label}
+                  {b.weight != null ? (
+                    <span className="text-muted-foreground"> · weight {b.weight}%</span>
+                  ) : null}
+                </span>
+                <span className="num font-medium">{b.score}</span>
+              </div>
+              <div className="mt-0.5 h-1.5 rounded-full bg-muted">
+                <div
+                  className="h-1.5 rounded-full bg-primary"
+                  style={{ width: `${Math.max(0, Math.min(100, b.score))}%` }}
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+/* --------------------------------------------------- bring candidates in */
+
+/** Too few candidates: upload CVs here, publish the role, or check the inbox. */
+function BringCandidatesCard({
+  conv,
+  onChanged,
+}: {
+  conv: DeskConversationView;
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState<null | "upload" | "publish">(null);
+  const [progress, setProgress] = useState<string | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const reqId = conv.requisition?.id ?? null;
+
+  async function upload(files: File[]) {
+    if (!files.length || !reqId) return;
+    setBusy("upload");
+    try {
+      const { intakeCvs } = await import("@/lib/cv-intake");
+      let done = 0;
+      await intakeCvs({
+        files,
+        source: "hiring_desk",
+        requisitionId: reqId,
+        onUpdate: (_i, patch) => {
+          if (patch.state === "ok" || patch.state === "error") done++;
+          setProgress(`Reading CVs… ${done} of ${files.length}`);
+        },
+      });
+      setProgress("Scoring against the job description…");
+      const r = await scoreDeskCandidates({ data: { id: conv.id } });
+      toast.success(`${r.scored} candidate(s) scored`);
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not add the CVs");
+    } finally {
+      setBusy(null);
+      setProgress(null);
+      if (input.current) input.current.value = "";
+    }
+  }
+
+  async function publish() {
+    setBusy("publish");
+    try {
+      await publishDeskRole({ data: { id: conv.id } });
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not publish");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="space-y-2 rounded-lg border border-primary/40 p-3 text-sm">
+      <p className="font-medium">Bring candidates in</p>
+      <div className="grid gap-2 sm:grid-cols-3">
+        <div className="rounded-md border border-border p-2.5">
+          <p className="font-medium">Upload CVs</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            PDF, Word or text. They are read, added to your talent pool and this role, then scored.
+          </p>
+          <input
+            ref={input}
+            type="file"
+            multiple
+            accept=".pdf,.doc,.docx,.txt"
+            className="hidden"
+            onChange={(e) => void upload([...(e.target.files ?? [])])}
+          />
+          <Button
+            size="sm"
+            className="mt-2"
+            disabled={busy !== null || !reqId}
+            onClick={() => input.current?.click()}
+          >
+            {busy === "upload" ? <Loader2 className="size-4 animate-spin" /> : null}
+            Choose CVs
+          </Button>
         </div>
-      ) : (
-        <p className="mt-2 text-sm text-muted-foreground">All steps are done for this hire.</p>
-      )}
+        <div className="rounded-md border border-border p-2.5">
+          <p className="font-medium">Publish the role</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Internal posting now; LinkedIn and job-board posts come back here for your approval.
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            className="mt-2"
+            disabled={busy !== null}
+            onClick={publish}
+          >
+            {busy === "publish" ? <Loader2 className="size-4 animate-spin" /> : null}
+            Publish
+          </Button>
+        </div>
+        <div className="rounded-md border border-border p-2.5">
+          <p className="font-medium">Check other sources</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Applications by email land in the Careers inbox; the talent pool has everyone you know.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button asChild size="sm" variant="outline">
+              <Link to="/inbox">Careers inbox</Link>
+            </Button>
+            <Button asChild size="sm" variant="outline">
+              <Link to="/candidates">Talent pool</Link>
+            </Button>
+          </div>
+        </div>
+      </div>
+      {progress ? (
+        <p className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Loader2 className="size-3 animate-spin" /> {progress}
+        </p>
+      ) : null}
     </div>
   );
 }

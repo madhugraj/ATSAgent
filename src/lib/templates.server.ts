@@ -239,6 +239,56 @@ export async function resolveTemplate<K extends TemplateKind>(
   } as ResolvedTemplate<K>;
 }
 
+/**
+ * Choose a template for a generation when none is pinned, and say why: the
+ * org's default for the kind; else its only template; else the one whose name
+ * best matches the hint (role title, department); else the oldest. Null when
+ * the org has no template of this kind.
+ */
+export async function pickTemplate(
+  orgId: string,
+  kind: TemplateKind,
+  hint: string,
+): Promise<{ id: string; name: string; reason: string } | null> {
+  const rows = await db
+    .select({
+      id: contentTemplates.id,
+      name: contentTemplates.name,
+      isDefault: contentTemplates.isDefault,
+      createdAt: contentTemplates.createdAt,
+    })
+    .from(contentTemplates)
+    .where(and(eq(contentTemplates.orgId, orgId), eq(contentTemplates.kind, kind)));
+  if (!rows.length) return null;
+  const def = rows.find((r) => r.isDefault);
+  if (def) return { id: def.id, name: def.name, reason: "your default template" };
+  if (rows.length === 1)
+    return { id: rows[0]!.id, name: rows[0]!.name, reason: "your only template of this kind" };
+  const words = new Set(
+    hint
+      .toLowerCase()
+      .split(/[^a-z0-9+#]+/)
+      .filter((w) => w.length >= 3),
+  );
+  const scored = rows
+    .map((r) => ({
+      r,
+      hits: r.name
+        .toLowerCase()
+        .split(/[^a-z0-9+#]+/)
+        .filter((w) => words.has(w)).length,
+    }))
+    .sort((a, b) => b.hits - a.hits || a.r.createdAt.getTime() - b.r.createdAt.getTime());
+  const best = scored[0]!;
+  return {
+    id: best.r.id,
+    name: best.r.name,
+    reason: best.hits
+      ? "the closest match to this role by name"
+      : "your oldest template (none is marked default)",
+  };
+}
+
 /* ------------------------------------------------------- prompt building */
 
 type PromptTemplate = ResolvedTemplate<"linkedin_post"> | ResolvedTemplate<"jd">;

@@ -2089,3 +2089,21 @@ export const hiringMessages = pgTable(
   },
   (t) => [index("hiring_messages_conv_idx").on(t.conversationId, t.createdAt)],
 );
+
+/* ------------------------------------------------- agent cost rates (0031) */
+
+/**
+ * The organisation's own AI token prices (it brings its own key, so the price
+ * is its model's and plan's). Used only for cost estimates on Agent
+ * observability; with no row, the app shows tokens and never guesses a price.
+ */
+export const agentCostRates = pgTable("agent_cost_rates", {
+  orgId: uuid("org_id")
+    .primaryKey()
+    .references(() => organizations.id, { onDelete: "cascade" }),
+  currency: text("currency").notNull().default("USD"),
+  inputPerMillion: numeric("input_per_million", { precision: 12, scale: 4 }).notNull(),
+  outputPerMillion: numeric("output_per_million", { precision: 12, scale: 4 }).notNull(),
+  updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});

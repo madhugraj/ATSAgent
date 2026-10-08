@@ -822,3 +822,60 @@ async function buildDetail(org: string, agentType: string): Promise<AgentDetail>
     },
   };
 }
+
+/* ------------------------------------------------ utilisation & efficiency */
+
+export type UtilisationView = import("../server/agents/utilisation.server").Utilisation;
+
+/** Day-wise tokens / cost / time, per-agent efficiency and recommendations. Governance roles. */
+export const agentUtilisation = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) =>
+    z.object({ days: z.union([z.literal(14), z.literal(30)]).default(30) }).parse(d ?? {}),
+  )
+  .handler(async ({ data, context }): Promise<UtilisationView> => {
+    const { assertRole } = await import("./auth.middleware");
+    await assertRole(context.userId, context.orgId, [...GOVERNANCE_ROLES]);
+    try {
+      const { agentUtilisation: load } = await import("../server/agents/utilisation.server");
+      return await load(context.orgId, data.days);
+    } catch (e) {
+      const { log } = await import("../server/log");
+      log.error("agent.utilisation.failed", { org_id: context.orgId, error: e as Error });
+      throw new Error("Utilisation data could not be loaded. The error has been logged.");
+    }
+  });
+
+/** Save or clear the organisation's AI token prices (for cost estimates). Governance roles. */
+export const saveAgentCostRate = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        rate: z
+          .object({
+            currency: z.string().trim().length(3).toUpperCase(),
+            inputPerMillion: z.number().min(0).max(100_000),
+            outputPerMillion: z.number().min(0).max(100_000),
+          })
+          .nullable(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { assertRole } = await import("./auth.middleware");
+    await assertRole(context.userId, context.orgId, [...GOVERNANCE_ROLES]);
+    const { saveCostRate } = await import("../server/agents/utilisation.server");
+    await saveCostRate(context.orgId, context.userId, data.rate);
+    const { writeAudit } = await import("../server/audit");
+    await writeAudit({
+      actor: `user:${context.userId}`,
+      actorUserId: context.userId,
+      orgId: context.orgId,
+      action: "agent.cost_rate.updated",
+      entityType: "agent_cost_rates",
+      entityId: context.orgId,
+      detail: data.rate ?? { cleared: true },
+    });
+    return { ok: true as const };
+  });
