@@ -399,12 +399,12 @@ describe("intake & matching agent", () => {
       subjectType: "requisition",
       subjectId: reqId,
     });
-    let found: { candidateId: string; overlap: string[] }[] = [];
+    let found: { candidateId: string; skillHits: string[]; why: string }[] = [];
     script.push(
       call({ id: "p", name: "search_talent_pool", args: { requisitionId: reqId } }),
       (m) => {
         const raw = lastTool(m);
-        found = JSON.parse(raw.slice(raw.indexOf("\n") + 1, raw.lastIndexOf("\n")));
+        found = JSON.parse(raw.slice(raw.indexOf("\n") + 1, raw.lastIndexOf("\n"))).matches;
         return call({
           id: "a",
           name: "add_to_pipeline",
@@ -420,7 +420,9 @@ describe("intake & matching agent", () => {
     );
     await runAgentTick({ orgId });
     expect(found.map((c) => c.candidateId)).toEqual([poolMatch]);
-    expect(found[0]!.overlap.length).toBe(2);
+    // No AI key in tests: the search falls back to the must-haves as written.
+    expect(found[0]!.skillHits).toEqual(["Kubernetes", "Go"]);
+    expect(found[0]!.why).toMatch(/skills: Kubernetes, Go/);
     const inReq = await db
       .select({ c: applications.candidateId, source: applications.source })
       .from(applications)

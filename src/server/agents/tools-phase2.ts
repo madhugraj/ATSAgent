@@ -184,50 +184,18 @@ export function registerPhase2Tools(): void {
   registerTool({
     name: "search_talent_pool",
     description:
-      "Find people already in the organisation's talent pool whose skills overlap the requisition's must-haves and who are not yet in its pipeline.",
-    input: ReqId.extend({ limit: z.number().int().min(1).max(20).default(10) }),
+      "Find people already in the organisation's talent pool who match the requisition's must-haves by meaning (equivalent terms, e.g. LLM = large language models), in their skills or CV text, and who are not yet in its pipeline. Ranked by evidence, experience band and location; each result says why it matched.",
+    input: ReqId.extend({ limit: z.number().int().min(1).max(20).default(15) }),
     risk: "read",
     untrustedOutput: true,
+    skills: ["talent_search"],
     run: async (ctx, i) => {
-      const [req] = await db
-        .select({ mustHave: requisitions.mustHaveSkills })
-        .from(requisitions)
-        .where(and(eq(requisitions.id, i.requisitionId), eq(requisitions.orgId, ctx.orgId)))
-        .limit(1);
-      if (!req) throw new Error("Requisition not found.");
-      const want = (req.mustHave ?? []).map((s) => s.toLowerCase());
-      if (!want.length) return [];
-      const inPipeline = db
-        .select({ id: applications.candidateId })
-        .from(applications)
-        .where(eq(applications.requisitionId, i.requisitionId));
-      const pool = await db
-        .select({
-          candidateId: candidates.id,
-          name: candidates.fullName,
-          experienceYears: candidates.experienceYears,
-          location: candidates.location,
-          skills: candidates.skills,
-        })
-        .from(candidates)
-        .where(
-          and(
-            eq(candidates.orgId, ctx.orgId),
-            sql`${candidates.id} not in (${inPipeline})`,
-            sql`exists (select 1 from unnest(${candidates.skills}) s where lower(s) in (${sql.join(
-              want.map((w) => sql`${w}`),
-              sql`, `,
-            )}))`,
-          ),
-        )
-        .limit(200);
-      return pool
-        .map((c) => ({
-          ...c,
-          overlap: (c.skills ?? []).filter((s) => want.includes(s.toLowerCase())),
-        }))
-        .sort((a, b) => b.overlap.length - a.overlap.length)
-        .slice(0, i.limit);
+      const { searchTalentPool } = await import("../agents/talent-search.server");
+      const r = await searchTalentPool(ctx.orgId, i.requisitionId, i.limit);
+      return {
+        searchedFor: r.searchedFor.map((g) => `${g.skill}: ${g.terms.join(", ")}`),
+        matches: r.matches,
+      };
     },
   });
 

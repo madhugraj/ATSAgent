@@ -1003,7 +1003,17 @@ export type AgentToolSpec = {
   parameters: Record<string, unknown>;
 };
 
-export type AgentToolCall = { id: string; name: string; args: unknown };
+export type AgentToolCall = {
+  id: string;
+  name: string;
+  args: unknown;
+  /**
+   * Provider-opaque state that must be sent back with this call on the next
+   * turn (Gemini's `thoughtSignature`: thinking models reject a follow-up turn
+   * whose function call lacks it). Kept in the run transcript; never shown.
+   */
+  signature?: string;
+};
 
 export type AgentMessage =
   | { role: "user"; content: string }
@@ -1232,7 +1242,10 @@ function googleAgentBody(system: string, messages: AgentMessage[], tools: AgentT
     else if (m.role === "assistant") {
       if (m.content) push("model", { text: m.content });
       for (const c of m.toolCalls ?? []) {
-        push("model", { functionCall: { id: c.id, name: c.name, args: c.args ?? {} } });
+        push("model", {
+          functionCall: { id: c.id, name: c.name, args: c.args ?? {} },
+          ...(c.signature ? { thoughtSignature: c.signature } : {}),
+        });
       }
     } else {
       push("user", {
@@ -1277,6 +1290,7 @@ function parseGoogleAgent(json: Loose): Omit<Extract<AgentStepResult, { ok: true
       id: String(p.functionCall.id ?? `call_${i}`),
       name: String(p.functionCall.name ?? ""),
       args: p.functionCall.args ?? {},
+      ...(typeof p.thoughtSignature === "string" ? { signature: p.thoughtSignature } : {}),
     }));
   const finish = candidate?.finishReason;
   const stopReason: AgentStopReason = toolCalls.length

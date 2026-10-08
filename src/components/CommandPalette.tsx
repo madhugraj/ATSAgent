@@ -82,16 +82,21 @@ export function CommandPalette({
           <CommandList className="max-h-[70vh]">
             {navItems.length ? (
               <CommandGroup heading="Go to">
-                {navItems.map((item) => (
-                  <CommandItem
-                    key={item.to}
-                    value={`nav ${item.label} ${item.to}`}
-                    onSelect={() => go(item.to)}
-                  >
-                    <item.icon className="text-muted-foreground" />
-                    {item.label}
-                  </CommandItem>
-                ))}
+                {navItems.map((item) => {
+                  const dest = item.search
+                    ? `${item.to}?${new URLSearchParams(item.search)}`
+                    : item.to;
+                  return (
+                    <CommandItem
+                      key={dest}
+                      value={`nav ${item.label} ${dest}`}
+                      onSelect={() => go(dest)}
+                    >
+                      <item.icon className="text-muted-foreground" />
+                      {item.label}
+                    </CommandItem>
+                  );
+                })}
               </CommandGroup>
             ) : null}
 

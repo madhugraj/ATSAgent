@@ -124,7 +124,15 @@ export function Copilot() {
           <span className="flex size-6 items-center justify-center rounded-full bg-primary/90 shadow-[inset_0_1px_0_color-mix(in_oklab,white_45%,transparent)]">
             <BrainCircuit className="size-3.5 text-primary-foreground" />
           </span>
-          <span className="text-sm font-semibold tracking-tight">HR copilot</span>
+          <span className="leading-tight">
+            <span className="block text-sm font-semibold tracking-tight">HR copilot</span>
+            <span className="block text-[11px] text-muted-foreground">
+              Help and questions ·{" "}
+              <Link to="/desk" className="text-primary underline" onClick={() => setOpen(false)}>
+                hire with agents
+              </Link>
+            </span>
+          </span>
         </div>
         <div className="flex items-center gap-1">
           <Button

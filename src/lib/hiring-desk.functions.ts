@@ -118,6 +118,16 @@ export type DeskConversationView = {
   messages: DeskMessageView[];
   /** Current status of every agent request shown in the thread. */
   tasks: Record<string, string>;
+  /** What each approval request would do, as label / value lines. */
+  taskDetails: Record<string, { label: string; value: string }[]>;
+  /** Why each ranked candidate scored as they did (live from their match score). */
+  reasoning: Record<string, import("../server/desk/desk.server").CandidateReasoning>;
+  /** Where the hire stands and what happens next. */
+  progress: import("../server/desk/desk.server").DeskProgress;
+  /** The agent working for this thread right now, with its latest steps. */
+  activity: import("../server/desk/desk.server").DeskActivity;
+  /** The current step can be started now (its agent is on and idle). */
+  canStart: boolean;
 };
 
 export const getDeskConversation = createServerFn({ method: "GET" })
@@ -145,7 +155,22 @@ export const getDeskConversation = createServerFn({ method: "GET" })
     const taskIds = msgs
       .map((m) => (m.card as { type?: string; taskId?: string } | null)?.taskId)
       .filter((x): x is string => typeof x === "string");
-    const { taskStatuses } = await import("../server/desk/desk.server");
+    const {
+      taskStatuses,
+      taskDetails,
+      deskProgress,
+      deskActivity,
+      startStage,
+      candidateReasoning,
+    } = await import("../server/desk/desk.server");
+    const rankedIds = msgs.flatMap((m) => {
+      const c = m.card as { type?: string; items?: { applicationId?: string }[] } | null;
+      return c?.type === "ranked_candidates"
+        ? (c.items ?? [])
+            .map((i) => i.applicationId)
+            .filter((x): x is string => typeof x === "string")
+        : [];
+    });
     return {
       id: conv.id,
       title: conv.title,
@@ -161,10 +186,15 @@ export const getDeskConversation = createServerFn({ method: "GET" })
         at: m.createdAt.toISOString(),
       })),
       tasks: await taskStatuses(context.orgId, taskIds),
+      taskDetails: await taskDetails(context.orgId, taskIds),
+      reasoning: await candidateReasoning(context.orgId, [...new Set(rankedIds)]),
+      progress: await deskProgress(conv),
+      activity: await deskActivity(conv),
+      canStart: Boolean(await startStage(conv, context.userId, { dryRun: true })),
     };
   });
 
-const Text = z.string().trim().min(2).max(2000);
+const Text = z.string().trim().min(1).max(2000);
 
 export const startDeskConversation = createServerFn({ method: "POST" })
   .middleware([requireOrg])
@@ -251,4 +281,52 @@ export const closeDeskConversation = createServerFn({ method: "POST" })
         and(eq(hiringConversations.id, conv.id), eq(hiringConversations.orgId, context.orgId)),
       );
     return { ok: true as const };
+  });
+
+/** Run a stopped agent of this thread again (same goal and role). */
+export const retryDeskRun = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) =>
+    z.object({ id: z.string().uuid(), runId: z.string().uuid() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    await registered();
+    const { retryRun } = await import("../server/desk/desk.server");
+    return { runId: await retryRun(conv, context.userId, data.runId) };
+  });
+
+/** Start the agent for the thread's current step (when it is on and idle). */
+export const startDeskStage = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    await registered();
+    const { startStage } = await import("../server/desk/desk.server");
+    const runId = await startStage(conv, context.userId);
+    if (!runId) throw new Error("Nothing to start for this step right now.");
+    return { runId };
+  });
+
+/** Score the role's new applications (e.g. CVs just uploaded here) and post the ranked list. */
+export const scoreDeskCandidates = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    await needsAiKey(context.orgId);
+    const { scoreAndRank } = await import("../server/desk/desk.server");
+    return { scored: await scoreAndRank(conv, context.userId) };
+  });
+
+/** Ask the Publishing agent to post the thread's role. */
+export const publishDeskRole = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    await registered();
+    const { publishRole } = await import("../server/desk/desk.server");
+    return { runId: await publishRole(conv, context.userId) };
   });

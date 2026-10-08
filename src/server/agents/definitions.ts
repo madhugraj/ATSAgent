@@ -170,7 +170,8 @@ export function registerPhase2Agents(): void {
   registerAgent({
     type: "intake",
     name: "Intake & matching agent",
-    version: "1.2.0",
+    // 1.3.0: talent-pool search by meaning (equivalent terms, CV text), with reasons.
+    version: "1.3.0",
     owner: "hr_head",
     responsibility:
       "Keeps an approved requisition's pipeline scored, reviewed and full; proposes rejections for a person to decide.",

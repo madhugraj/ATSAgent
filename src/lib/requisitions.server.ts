@@ -410,7 +410,12 @@ export async function approveJobDescriptionCore(
   const jd = await jdForReview(actor, input.id);
   await db
     .update(jobDescriptions)
-    .set({ status: "approved", fullText: input.fullText ?? null })
+    // Keep the drafted text unless the approver supplied an edited version
+    // (approving from an agent card or without edits used to erase it).
+    .set({
+      status: "approved",
+      ...(input.fullText?.trim() ? { fullText: input.fullText } : {}),
+    })
     .where(and(eq(jobDescriptions.id, input.id), eq(jobDescriptions.orgId, actor.orgId)));
   await emitAgentEvent({
     orgId: actor.orgId,

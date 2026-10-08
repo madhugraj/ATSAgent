@@ -429,9 +429,14 @@ describe("orchestrator hand-offs", () => {
     expect(jd).toMatchObject({ status: "pending_dh", version: 1, mustHave: ["Kubernetes", "Go"] });
     const gate = await openGate(run!.id);
     await resolveTask({ orgId, taskId: gate!.id, userId: dh, decision: { status: "approved" } });
-    expect(
-      (await db.select().from(jobDescriptions).where(eq(jobDescriptions.id, jd!.id)))[0]!.status,
-    ).toBe("approved");
+    const [approved] = await db
+      .select()
+      .from(jobDescriptions)
+      .where(eq(jobDescriptions.id, jd!.id));
+    expect(approved!.status).toBe("approved");
+    // Approving without edits keeps the drafted text (it used to be erased).
+    expect(approved!.fullText).toBe(jd!.fullText);
+    expect(approved!.fullText).toBeTruthy();
   });
 
   test("JD changes requested restarts the JD agent; JD approval starts publishing once", async () => {

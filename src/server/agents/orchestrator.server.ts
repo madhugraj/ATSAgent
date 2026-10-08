@@ -174,7 +174,12 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
   ) => {
     if (!getAgent(agent)) return;
     const policy = await loadPolicy(e.orgId, agent);
-    if (!policy.enabled) return;
+    if (!policy.enabled) {
+      // A hiring-desk thread waiting on this role hears why nothing happens.
+      const { notifyAgentOff } = await import("../desk/desk.server");
+      await notifyAgentOff(e.orgId, req.id, agent);
+      return;
+    }
     if (await activeRunFor(e.orgId, agent, subject.id)) return;
     await startRun({
       orgId: e.orgId,

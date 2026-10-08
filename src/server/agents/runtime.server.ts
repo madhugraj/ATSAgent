@@ -1429,7 +1429,14 @@ async function openTask(
   if (run.conversationId) {
     try {
       const { onTaskOpened } = await import("../desk/desk.server");
-      await onTaskOpened(run, { id: row!.id, kind: t.kind, title: t.title, body: t.body });
+      await onTaskOpened(run, {
+        id: row!.id,
+        kind: t.kind,
+        title: t.title,
+        body: t.body,
+        assigneeRole: t.assigneeRole,
+        proposedAction: t.proposedAction,
+      });
     } catch (e) {
       log.warn("desk.post_failed", { run_id: run.id, error: e as Error });
     }

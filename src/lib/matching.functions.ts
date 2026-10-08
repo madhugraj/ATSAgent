@@ -38,10 +38,20 @@ const JdInput = z.object({
 });
 
 const BASE_JD_SYSTEM =
-  "You are an expert talent-acquisition writer. Draft a complete, specific job description. " +
-  "Return ONLY JSON with keys: purpose (2 sentences), responsibilities (markdown bullet list), " +
-  "must_have (string array), good_to_have (string array), qualifications, success_factors, " +
-  "reporting_to, full_text (the full JD as markdown). No fluff, no buzzwords, no emojis.";
+  "You are an expert talent-acquisition writer. Draft a complete, specific job description that a strong " +
+  "candidate would recognise as written by someone who understands the role. Calibrate depth to seniority: " +
+  "for senior and leadership roles (10+ years, Director, VP, Head, Principal) cover strategy, scope " +
+  "(teams, budget, stakeholders), the decisions the person owns and how success is measured; for other roles " +
+  "focus on the work, the stack and the standards. Build on the responsibilities, reporting line, success " +
+  "measures and education given in the data — keep their substance, make them concrete; where the data asks " +
+  "you to draft them from typical market practice, do so for this exact role and seniority. Never invent " +
+  "company facts (products, revenue, team names) or a salary. " +
+  "Return ONLY JSON with keys: purpose (2-3 sentences: why the role exists and its impact), " +
+  "responsibilities (markdown bullet list — 8 to 12 specific bullets for senior roles, 6 to 8 otherwise), " +
+  "must_have (string array), good_to_have (string array), qualifications, " +
+  "success_factors (what good looks like at 6 and 12 months), reporting_to, " +
+  "full_text (the full JD as markdown with sections: About the role, What you will do, What you will bring, " +
+  "Nice to have, What success looks like, Reporting line). No fluff, no buzzwords, no emojis.";
 
 const stripAll = <T>(value: T): T => {
   if (typeof value === "string") return stripUnreplacedPlaceholders(value) as T;

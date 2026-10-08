@@ -274,6 +274,10 @@ describe("slot filling", () => {
       slots: { experienceMin: 3, experienceMax: 6, mustHaveSkills: ["React", "Node.js"] },
     });
     await desk.handleUserMessage(await reload(conv.id), recruiter, "3 to 6 years, React and Node");
+    // Then one question for a deeper JD; any answer moves on.
+    expect((await messages(conv.id)).at(-1)!.body).toMatch(/key responsibilities/);
+    deskScript.push({ slots: { responsibilities: "Own the product end to end" } });
+    await desk.handleUserMessage(await reload(conv.id), recruiter, "own the product end to end");
     const c = await reload(conv.id);
     expect(c.status).toBe("confirming");
     m = await messages(conv.id);
@@ -463,5 +467,300 @@ describe("talk to the first N", () => {
     await expect(
       desk.screenCandidates(await reload(conv.id), recruiter, [foreignApp]),
     ).rejects.toThrow(/not in this role's pipeline/);
+  });
+});
+
+/* ------------------------------------------------- progress and recovery */
+
+describe("what happens next", () => {
+  test("progress shows the current stage and its agent", async () => {
+    const conv = await confirming();
+    let p = await desk.deskProgress(conv);
+    expect(p.stages.find((s) => s.state === "current")?.key).toBe("requisition");
+    // An approved role with an approved JD and scored candidates is at screening.
+    await desk.continueWithRole(conv, recruiter, existingReq);
+    p = await desk.deskProgress(await reload(conv.id));
+    expect(p.stages.filter((s) => s.state === "done").map((s) => s.key)).toEqual([
+      "need",
+      "requisition",
+      "jd",
+      "candidates",
+    ]);
+    expect(p.next).toMatchObject({
+      stage: "screening",
+      agentType: "screening",
+      agentEnabled: true,
+    });
+  });
+
+  test("a stopped run can be tried again from the thread", async () => {
+    const conv = await confirming();
+    await desk.continueWithRole(conv, recruiter, existingReq);
+    agentScript.push({
+      ok: false,
+      status: 400,
+      message: "Function call is missing a thought_signature",
+    } as never);
+    await runAgentTick({ orgId });
+    const [failed] = (await runsOf(conv.id)).filter((r) => r.status === "failed");
+    expect(failed).toBeDefined();
+    const m = await messages(conv.id);
+    const stop = m.find((x) => (x.card as { type?: string } | null)?.type === "run_failed")!;
+    expect(stop.body).toMatch(/AI model or one of its tools returned an error/);
+    expect(stop.body).not.toMatch(/thought_signature/);
+
+    const again = await desk.retryRun(await reload(conv.id), recruiter, failed!.id);
+    const [r] = await db.select().from(agentRuns).where(eq(agentRuns.id, again));
+    expect(r).toMatchObject({ status: "queued", agentType: "intake", conversationId: conv.id });
+    await expect(desk.retryRun(await reload(conv.id), recruiter, again)).rejects.toThrow(
+      /stopped run/,
+    );
+  });
+
+  test("a switched-off next agent is announced once", async () => {
+    const conv = await confirming();
+    await desk.continueWithRole(conv, recruiter, existingReq);
+    await desk.notifyAgentOff(orgId, existingReq, "jd");
+    await desk.notifyAgentOff(orgId, existingReq, "jd");
+    const off = (await messages(conv.id)).filter((x) => /switched off/.test(x.body));
+    expect(off).toHaveLength(1);
+  });
+
+  test("failure reasons are plain and vendor-neutral", () => {
+    expect(desk.failureReason("Invalid API key provided")).toMatch(/rejected the key/);
+    expect(desk.failureReason("429 Resource has been exhausted")).toMatch(/busy or out of quota/);
+    expect(desk.failureReason("The run reached its step or token budget.")).toBe(
+      "The run reached its step or token budget.",
+    );
+  });
+});
+
+describe("approval chains read as progress", () => {
+  test("steps are labelled by chain position and approver", () => {
+    const gate = (type: string, expects: string, role: string) => ({
+      kind: "gate",
+      assigneeRole: role,
+      proposedAction: { args: { subject: { type, expects } } },
+    });
+    expect(desk.taskStep(gate("requisition", "pending_dh", "department_head"))).toBe(
+      "Approval 1 of 3 · Department head",
+    );
+    expect(desk.taskStep(gate("requisition", "pending_cbo", "president_cbo"))).toBe(
+      "Approval 3 of 3 · CBO",
+    );
+    expect(desk.taskStep(gate("offer", "pending_hr", "hr_head"))).toBe("Approval 1 of 2 · HR head");
+    expect(desk.taskStep({ kind: "gate", assigneeRole: "hiring_manager" })).toBe(
+      "Decision · Hiring manager",
+    );
+    expect(desk.taskStep({ kind: "approval" })).toBeNull();
+  });
+
+  test("the next approver's identical brief is flagged as repeated", async () => {
+    const conv = await confirming();
+    const run = { conversationId: conv.id, orgId, agentType: "requisition" };
+    const base = { kind: "gate", title: "Requisition approval", body: "Same brief" };
+    await desk.onTaskOpened(run, {
+      ...base,
+      id: crypto.randomUUID(),
+      assigneeRole: "department_head",
+      proposedAction: { args: { subject: { type: "requisition", expects: "pending_dh" } } },
+    });
+    await desk.onTaskOpened(run, {
+      ...base,
+      id: crypto.randomUUID(),
+      assigneeRole: "hr_head",
+      proposedAction: { args: { subject: { type: "requisition", expects: "pending_hr" } } },
+    });
+    const cards = (await messages(conv.id))
+      .map((m) => m.card as { type?: string; step?: string; repeated?: boolean } | null)
+      .filter((c) => c?.type === "task");
+    expect(cards.map((c) => [c!.step, Boolean(c!.repeated)])).toEqual([
+      ["Approval 1 of 3 · Department head", false],
+      ["Approval 2 of 3 · HR head", true],
+    ]);
+    expect((await messages(conv.id)).at(-1)!.body).toBe(
+      "Approval 2 of 3 — waiting for the HR head.",
+    );
+  });
+});
+
+describe("keep the person informed", () => {
+  test("approval details are readable (money, weights) and hide ids", () => {
+    expect(
+      desk.argDetails("set_compensation", {
+        requisitionId: "x",
+        budgetCtc: 9000000,
+        bandMin: 7500000,
+        bandMax: 11000000,
+      }),
+    ).toEqual([
+      { label: "Budget Ctc", value: "₹90,00,000" },
+      { label: "Band Min", value: "₹75,00,000" },
+      { label: "Band Max", value: "₹1,10,00,000" },
+    ]);
+    expect(
+      desk.argDetails("save_weights", { requisitionId: "x", skills: 30, experience: 25 }),
+    ).toEqual([{ label: "Weights", value: "Skills 30% · Experience 25%" }]);
+    expect(desk.stepLabel("research_compensation")).toBe("Researched market pay");
+    expect(desk.stepLabel("some_new_tool")).toBe("Some new tool");
+  });
+
+  test("switching the next agent on continues a thread that was waiting for it", async () => {
+    // An approved role without a JD, with the JD agent off: the thread is stuck at "jd".
+    const [r] = await db
+      .insert(requisitions)
+      .values({
+        orgId,
+        code: `REQ-J-${stamp}`,
+        title: "Data Engineer",
+        location: "Chennai",
+        status: "approved",
+        createdBy: recruiter,
+      })
+      .returning({ id: requisitions.id });
+    await db
+      .update(agentPolicies)
+      .set({ enabled: false })
+      .where(and(eq(agentPolicies.orgId, orgId), eq(agentPolicies.agentType, "jd")));
+    const conv = await confirming();
+    await db
+      .update(hiringConversations)
+      .set({ requisitionId: r!.id, status: "active" })
+      .where(eq(hiringConversations.id, conv.id));
+    let c = await reload(conv.id);
+    expect((await desk.deskProgress(c)).next).toMatchObject({ stage: "jd", agentEnabled: false });
+    expect(await desk.startStage(c, recruiter, { dryRun: true })).toBeNull();
+
+    await db
+      .update(agentPolicies)
+      .set({ enabled: true })
+      .where(and(eq(agentPolicies.orgId, orgId), eq(agentPolicies.agentType, "jd")));
+    c = await reload(conv.id);
+    expect(await desk.startStage(c, recruiter, { dryRun: true })).toBe("jd");
+    expect(await desk.resumeThreadsForAgent(orgId, "jd")).toBe(1);
+    const runs = await runsOf(conv.id);
+    expect(runs.map((x) => [x.agentType, x.status])).toEqual([["jd", "queued"]]);
+    // Nothing more to start while it is running; activity shows it starting.
+    expect(await desk.startStage(await reload(conv.id), recruiter, { dryRun: true })).toBeNull();
+    const act = await desk.deskActivity(await reload(conv.id));
+    expect(act).toMatchObject({ agentType: "jd", status: "queued" });
+    expect(act!.steps.at(-1)).toEqual({ label: "Starting", state: "working" });
+  });
+});
+
+describe("deeper JDs, smarter search, reasoning", () => {
+  test("the desk asks once for JD details, then moves on (any answer or 'research it')", async () => {
+    const conv = await newConversation();
+    await db
+      .update(hiringConversations)
+      .set({ slots: { ...complete } as never })
+      .where(eq(hiringConversations.id, conv.id));
+    deskScript.push({ reply: "" });
+    await desk.handleUserMessage(await reload(conv.id), recruiter, "that's all");
+    expect((await messages(conv.id)).at(-1)!.body).toMatch(/key responsibilities/);
+    expect((await reload(conv.id)).status).toBe("gathering");
+    deskScript.push({ slots: { researchRole: true, reportingTo: "CTO" } });
+    await desk.handleUserMessage(
+      await reload(conv.id),
+      recruiter,
+      "research it, reports to the CTO",
+    );
+    const c = await reload(conv.id);
+    expect(c.status).toBe("confirming");
+    const brief = desk.jdBrief(c.slots as never)!;
+    expect(brief).toContain("Reports to: CTO");
+    expect(brief).toMatch(/from typical market practice/);
+  });
+
+  test("templates: default first, else the only one, else the closest name", async () => {
+    const { contentTemplates } = await import("../drizzle/schema");
+    const { pickTemplate } = await import("../src/lib/templates.server");
+    expect(await pickTemplate(orgId, "jd", "Data Engineer")).toBeNull();
+    const add = (name: string, isDefault = false) =>
+      db
+        .insert(contentTemplates)
+        .values({ orgId, kind: "jd", name, isDefault, config: {} } as never)
+        .returning({ id: contentTemplates.id });
+    await add("Sales roles");
+    expect((await pickTemplate(orgId, "jd", "Data Engineer"))?.reason).toMatch(/only template/);
+    await add("Engineering leadership");
+    expect((await pickTemplate(orgId, "jd", "VP Engineering"))?.name).toBe(
+      "Engineering leadership",
+    );
+    await add("House style", true);
+    expect(await pickTemplate(orgId, "jd", "VP Engineering")).toMatchObject({
+      name: "House style",
+      reason: "your default template",
+    });
+    await db.delete(contentTemplates).where(eq(contentTemplates.orgId, orgId));
+  });
+
+  test("pool search matches by meaning and whole words, and says why", async () => {
+    const { rankPool } = await import("../src/server/agents/talent-search.server");
+    const groups = [
+      { skill: "LLM", terms: ["LLM", "large language models", "GenAI"] },
+      { skill: "Go", terms: ["Go", "Golang"] },
+    ];
+    const person = (name: string, skills: string[], cv: string, exp = 20) => ({
+      candidateId: name,
+      name,
+      experienceYears: exp,
+      location: "Chennai",
+      skills,
+      resumeText: cv,
+      currentEmployer: null,
+    });
+    const ranked = rankPool(
+      [
+        person("Asha", ["Large Language Models", "Golang"], ""),
+        person("Bala", [], "Led GenAI research; a good team player"),
+        person("Chitra", ["Excel"], "Very good at reporting"), // "good" is not "Go"
+      ],
+      groups,
+      { experienceMin: 15, experienceMax: 25, location: "Chennai" },
+    );
+    expect(ranked.map((r) => r.name)).toEqual(["Asha", "Bala"]);
+    expect(ranked[0]).toMatchObject({ skillHits: ["LLM", "Go"] });
+    expect(ranked[1]).toMatchObject({ skillHits: [], textHits: ["LLM"] });
+    expect(ranked[1]!.why).toMatch(/in CV: LLM/);
+  });
+
+  test("too few candidates asks for more; reasoning is read from the match score", async () => {
+    const [r] = await db
+      .insert(requisitions)
+      .values({
+        orgId,
+        code: `REQ-E-${stamp}`,
+        title: "Empty role",
+        location: "Pune",
+        status: "approved",
+        createdBy: recruiter,
+      })
+      .returning({ id: requisitions.id });
+    const conv = await confirming();
+    await db
+      .update(hiringConversations)
+      .set({ requisitionId: r!.id, status: "active" })
+      .where(eq(hiringConversations.id, conv.id));
+    await desk.postRankedList(await reload(conv.id));
+    const last = (await messages(conv.id)).at(-1)!;
+    expect(last.card).toMatchObject({ type: "bring_candidates", found: 0 });
+
+    await db
+      .update(matchScores)
+      .set({
+        rationale: "Strong React evidence.",
+        skillsScore: 88,
+        riskFlags: ["short tenures"],
+      } as never)
+      .where(eq(matchScores.applicationId, apps[1]!));
+    const why = await desk.candidateReasoning(orgId, [apps[1]!]);
+    expect(why[apps[1]!]).toMatchObject({
+      rationale: "Strong React evidence.",
+      risks: ["short tenures"],
+    });
+    expect(why[apps[1]!]!.breakdown.find((b) => b.label === "Skills")?.score).toBe(88);
+    // Another organisation's applications are never read.
+    expect(await desk.candidateReasoning(otherOrgId, [apps[1]!])).toEqual({});
   });
 });

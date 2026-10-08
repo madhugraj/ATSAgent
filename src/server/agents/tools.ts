@@ -407,8 +407,11 @@ export function registerPhase1Tools(): void {
             .where(and(eq(departments.id, r.departmentId), eq(departments.orgId, ctx.orgId)))
             .limit(1)
         : [];
+      const { pickTemplate } = await import("@/lib/templates.server");
+      const template = await pickTemplate(ctx.orgId, "jd", `${r.title} ${dept?.name ?? ""}`);
       const { generateJdCore } = await import("@/lib/matching.functions");
       const jd = await generateJdCore(ctx.orgId, {
+        templateId: template?.id ?? null,
         title: r.title,
         department: dept?.name ?? null,
         location: r.location,
@@ -426,10 +429,19 @@ export function registerPhase1Tools(): void {
         reportingTo: r.hiringManager,
       });
       const { saveJobDescriptionCore } = await import("@/lib/requisitions.server");
-      const saved = await saveJobDescriptionCore(await actor(ctx), { requisitionId: r.id, jd });
+      const saved = await saveJobDescriptionCore(await actor(ctx), {
+        requisitionId: r.id,
+        jd,
+        templateId: template?.id ?? null,
+        templateName: template?.name ?? null,
+      });
+      // Tell the hiring-desk thread (if any) which template shaped this draft.
+      const { noteJdTemplate } = await import("../desk/desk.server");
+      await noteJdTemplate(ctx.orgId, ctx.runId, saved.version, template);
       return {
         jdId: saved.id,
         version: saved.version,
+        template: template ? `${template.name} (${template.reason})` : "none — built-in format",
         purpose: jd.purpose,
         mustHave: jd.must_have,
       };

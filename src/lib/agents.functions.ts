@@ -306,6 +306,19 @@ export const saveAgentPolicy = createServerFn({ method: "POST" })
       entityId: null,
       detail: data,
     });
+    // Switching an agent on (or un-pausing all) continues the hiring-desk
+    // threads that were waiting for it.
+    if (data.enabled) {
+      try {
+        const { ensureAgentsRegistered } = await import("../server/agents");
+        ensureAgentsRegistered();
+        const { resumeThreadsForAgent } = await import("../server/desk/desk.server");
+        await resumeThreadsForAgent(context.orgId, data.agentType);
+      } catch (e) {
+        const { log } = await import("../server/log");
+        log.warn("desk.resume_failed", { org_id: context.orgId, error: e as Error });
+      }
+    }
     return { ok: true as const };
   });
 

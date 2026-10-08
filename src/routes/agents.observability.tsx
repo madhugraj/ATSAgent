@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   Activity,
@@ -43,10 +43,29 @@ import {
   type ObservabilityView,
   type TrendDay,
 } from "@/lib/agents-observability.functions";
-import { AGENT_LABEL, AUTONOMY_OPTIONS } from "@/lib/agents.catalog";
+import { AGENT_CATALOG, AGENT_LABEL, AUTONOMY_OPTIONS } from "@/lib/agents.catalog";
 import { AgentDetailDrawer, type DrawerTab } from "@/components/AgentDetailDrawer";
+import { AgentUtilisation } from "@/components/AgentUtilisation";
+
+const DRAWER_TABS = [
+  "identity",
+  "tools",
+  "skills",
+  "harness",
+  "hitl",
+  "evals",
+  "audit",
+  "issues",
+] as const satisfies readonly DrawerTab[];
 
 export const Route = createFileRoute("/agents/observability")({
+  // The open agent panel lives in the URL: Back closes it, links can point at it.
+  validateSearch: (s: Record<string, unknown>): { agent?: string; tab?: DrawerTab } => ({
+    ...(typeof s["agent"] === "string" && /^[a-z_]{2,30}$/.test(s["agent"])
+      ? { agent: s["agent"] }
+      : {}),
+    ...(DRAWER_TABS.includes(s["tab"] as DrawerTab) ? { tab: s["tab"] as DrawerTab } : {}),
+  }),
   head: () => ({
     meta: [
       { title: "Agent observability — ATSIQ" },
@@ -160,7 +179,48 @@ const compact = (v: number) =>
 /* --------------------------------------------------------------- page */
 
 function ObservabilityPage() {
-  const [open, setOpen] = useState<{ agent: string; tab: DrawerTab } | null>(null);
+  const search = Route.useSearch();
+  const navigate = Route.useNavigate();
+  const open = search.agent ? { agent: search.agent, tab: search.tab ?? "identity" } : null;
+  // Opened from this page (a history entry was pushed): closing goes Back, so the
+  // browser's Back button and the panel's close behave the same.
+  const pushed = useRef(false);
+  const lastTrigger = useRef<HTMLElement | null>(null);
+  const openPanel = (agent: string, tab: DrawerTab) => {
+    lastTrigger.current = document.activeElement as HTMLElement | null;
+    pushed.current = true;
+    void navigate({ search: { agent, tab } });
+  };
+  const closePanel = () => {
+    if (pushed.current) {
+      pushed.current = false;
+      window.history.back();
+    } else {
+      void navigate({ search: {}, replace: true });
+    }
+  };
+  // When the panel closes (by any route), bring its agent card back into view.
+  const lastAgent = useRef<string | null>(null);
+  useEffect(() => {
+    if (search.agent) {
+      lastAgent.current = search.agent;
+      return;
+    }
+    const agent = lastAgent.current;
+    if (!agent) return;
+    lastAgent.current = null;
+    // After the panel's close animation and scroll restore, so neither undoes this.
+    const timer = window.setTimeout(() => {
+      const card = document.getElementById(`agent-card-${agent}`);
+      if (!card) return;
+      card.scrollIntoView({ block: "center" });
+      card.classList.add("ring-2", "ring-primary");
+      window.setTimeout(() => card.classList.remove("ring-2", "ring-primary"), 1600);
+      const back = lastTrigger.current;
+      if (back && document.contains(back)) back.focus({ preventScroll: true });
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [search.agent]);
   const q = useQuery({
     queryKey: ["agent_observability"],
     queryFn: () => agentObservability(),
@@ -198,16 +258,19 @@ function ObservabilityPage() {
           <HealthSummary d={d} />
           <KpiRow d={d} />
           <Trends d={d} />
+          <AgentUtilisation />
           <IssuesPanel
             issues={[...d.orgIssues, ...d.agents.flatMap((a) => a.issues)]}
             rules={d.rules}
           />
-          <AgentGrid d={d} onOpen={(agent, tab) => setOpen({ agent, tab })} />
+          <AgentGrid d={d} onOpen={openPanel} />
           <AgentDetailDrawer
             agentType={open?.agent ?? null}
             tab={open?.tab ?? "identity"}
-            onTab={(tab) => setOpen((o) => (o ? { ...o, tab } : o))}
-            onClose={() => setOpen(null)}
+            onTab={(tab) =>
+              open && void navigate({ search: { agent: open.agent, tab }, replace: true })
+            }
+            onClose={closePanel}
           />
         </div>
       )}
@@ -810,17 +873,33 @@ function AgentGrid({
   d: ObservabilityView;
   onOpen: (agent: string, tab: DrawerTab) => void;
 }) {
+  // A fixed order (switched-on first, then the pipeline order) so a card never
+  // moves while you look at it; health is shown on the card, not by position.
+  const order = AGENT_CATALOG.map((c) => c.type as string);
+  const pos = (t: string) => (order.indexOf(t) === -1 ? order.length : order.indexOf(t));
   const sorted = [...d.agents].sort(
-    (x, y) =>
-      Number(y.enabled) - Number(x.enabled) ||
-      RANK[overallOf(y)] - RANK[overallOf(x)] ||
-      y.harness.runs7d - x.harness.runs7d,
+    (x, y) => Number(y.enabled) - Number(x.enabled) || pos(x.type) - pos(y.type),
   );
   return (
     <section>
       <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         Agents · click a card or an element for tools, harness, skills, evals and audit
       </p>
+      <nav aria-label="Jump to agent" className="mb-3 flex flex-wrap gap-1.5">
+        {sorted.map((a) => {
+          const st = overallOf(a);
+          return (
+            <a
+              key={a.type}
+              href={`#agent-card-${a.type}`}
+              className="inline-flex items-center gap-1 rounded-full border border-border px-2.5 py-1 text-xs hover:bg-muted"
+            >
+              <ElementDot status={st} />
+              {a.name.replace(/ agent$/i, "")}
+            </a>
+          );
+        })}
+      </nav>
       <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
         {sorted.map((a) => (
           <AgentCard
@@ -867,7 +946,8 @@ function AgentCard({
   ];
   return (
     <article
-      className={`panel flex flex-col p-4 ${a.enabled ? "" : "opacity-75"}`}
+      id={`agent-card-${a.type}`}
+      className={`panel flex scroll-mt-20 flex-col p-4 transition-shadow ${a.enabled ? "" : "opacity-75"}`}
       style={{
         borderTop: `3px solid ${overall === "idle" ? "var(--border)" : STATUS[overall].color}`,
       }}
