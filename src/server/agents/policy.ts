@@ -32,8 +32,18 @@ export const DEFAULT_POLICY: EffectivePolicy = {
 
 /**
  * Decide whether a tool call runs now or waits for a person.
- * `templateId` is the content template an external action would send, when it
- * has one — only whitelisted templates may skip approval.
+ * `templateId` names what an external action would send: a candidate message
+ * template (e.g. "interview_invite") or a job board ("job_board:linkedin").
+ *
+ *   read      always runs
+ *   write     Suggest asks; Act and notify / Autonomous run
+ *   external  Suggest asks;
+ *             candidate messages — Act and notify runs pre-approved templates,
+ *               Autonomous runs every template;
+ *             job-board posts — run only at Autonomous on a board the org
+ *               pre-approved, otherwise they go to the approver;
+ *             anything else asks.
+ * Decisions (gates) are never tools, so no level can make them.
  */
 export function decideToolCall(
   risk: ToolRisk,
@@ -42,10 +52,11 @@ export function decideToolCall(
 ): "run" | "approve" {
   if (risk === "read") return "run";
   if (risk === "write") return policy.autonomy === "suggest" ? "approve" : "run";
-  // external: leaves the organisation (candidate mail, board posts, invites)
-  const whitelisted = !!templateId && policy.whitelistedTemplates.includes(templateId);
-  if (policy.autonomy === "suggest") return "approve";
-  return whitelisted ? "run" : "approve";
+  if (policy.autonomy === "suggest" || !templateId) return "approve";
+  const preApproved = policy.whitelistedTemplates.includes(templateId);
+  if (templateId.startsWith("job_board:"))
+    return policy.autonomy === "autonomous" && preApproved ? "run" : "approve";
+  return policy.autonomy === "autonomous" || preApproved ? "run" : "approve";
 }
 
 /** The org-wide switch ('*') and the agent's own row (opt-in), merged over the defaults. */

@@ -21,7 +21,10 @@ import type { AgentStepResult } from "../src/lib/ai-gateway.server";
 
 type Turn = { slots?: Record<string, unknown>; command?: Record<string, unknown>; reply?: string };
 const deskScript: Turn[] = [];
+let lastDeskPrompt = "";
 const agentScript: AgentStepResult[] = [];
+let researchCalls = 0;
+let researchResult: unknown = { ok: false, message: "no research scripted" };
 const say = (text: string): AgentStepResult => ({
   ok: true,
   text,
@@ -33,12 +36,17 @@ const say = (text: string): AgentStepResult => ({
 const realGateway = await import("../src/lib/ai-gateway.server");
 mock.module("../src/lib/ai-gateway.server", () => ({
   ...realGateway,
-  aiJson: async (opts: { schema?: { parse: (v: unknown) => unknown } }) => {
+  aiJson: async (opts: { prompt?: string; schema?: { parse: (v: unknown) => unknown } }) => {
+    lastDeskPrompt = opts.prompt ?? "";
     const t = deskScript.shift() ?? { reply: "" };
     const data = opts.schema ? opts.schema.parse(t) : t;
     return { ok: true, data, usage: null };
   },
   aiAgentStep: async () => agentScript.shift() ?? say("(done)"),
+  aiResearchJson: async () => {
+    researchCalls++;
+    return researchResult;
+  },
 }));
 
 const { db } = await import("../src/server/db");
@@ -762,5 +770,329 @@ describe("deeper JDs, smarter search, reasoning", () => {
     expect(why[apps[1]!]!.breakdown.find((b) => b.label === "Skills")?.score).toBe(88);
     // Another organisation's applications are never read.
     expect(await desk.candidateReasoning(otherOrgId, [apps[1]!])).toEqual({});
+  });
+});
+
+describe("the thread follows the requisition", () => {
+  async function approvedRoleThread() {
+    const [r] = await db
+      .insert(requisitions)
+      .values({
+        orgId,
+        code: `REQ-C-${Math.random().toString(36).slice(2, 7)}`,
+        title: "Closing role",
+        location: "Chennai",
+        status: "approved",
+        createdBy: recruiter,
+      })
+      .returning({ id: requisitions.id });
+    const conv = await confirming();
+    await db
+      .update(hiringConversations)
+      .set({ requisitionId: r!.id, status: "active" })
+      .where(eq(hiringConversations.id, conv.id));
+    return { reqId: r!.id, conv: await reload(conv.id) };
+  }
+
+  test("the desk answers from live facts and the app's real rules", async () => {
+    const { reqId, conv } = await approvedRoleThread();
+    await db
+      .update(requisitions)
+      .set({
+        status: "closed",
+        approvalTrail: [
+          {
+            to: "closed",
+            actor: "hr@x",
+            comment: "Filled internally",
+            at: new Date().toISOString(),
+          },
+        ] as never,
+      })
+      .where(eq(requisitions.id, reqId));
+    deskScript.push({ reply: "It is closed." });
+    await desk.handleUserMessage(conv, recruiter, "where do we stand?");
+    expect(lastDeskPrompt).toMatch(/is closed\./);
+    expect(lastDeskPrompt).toMatch(/Filled internally/);
+    expect(lastDeskPrompt).toMatch(/cannot be reopened/);
+    expect(lastDeskPrompt).not.toMatch(/archived" status\b/);
+  });
+
+  test("closing a role (anywhere) stops its agents and ends the thread once", async () => {
+    const { reqId, conv } = await approvedRoleThread();
+    const { startRun } = await import("../src/server/agents/runtime.server");
+    const { runId } = await startRun({
+      orgId,
+      agentType: "intake",
+      principalUserId: recruiter,
+      goal: "g",
+      subjectType: "requisition",
+      subjectId: reqId,
+    });
+    await db
+      .update(requisitions)
+      .set({
+        status: "closed",
+        approvalTrail: [{ to: "closed", actor: "hr@x", comment: "Budget cut" }] as never,
+      })
+      .where(eq(requisitions.id, reqId));
+    await desk.onRequisitionEnded(orgId, reqId, "closed", null);
+    await desk.onRequisitionEnded(orgId, reqId, "closed", null);
+    const [run] = await db.select().from(agentRuns).where(eq(agentRuns.id, runId));
+    expect(run!.status).toBe("cancelled");
+    const c = await reload(conv.id);
+    expect(c.status).toBe("closed");
+    const ended = (await messages(conv.id)).filter((m) => /was closed/.test(m.body));
+    expect(ended).toHaveLength(1);
+    expect(ended[0]!.body).toMatch(/Budget cut/);
+    expect(ended[0]!.body).toMatch(/1 agent run\(s\) working on it were stopped/);
+    const p = await desk.deskProgress(c);
+    expect(p.next).toBeNull();
+    expect(p.ended).toMatchObject({ status: "closed", reason: "Budget cut", by: "hr@x" });
+    // A closed thread still answers questions but refuses actions.
+    deskScript.push({ command: { type: "screen", top: 2 } });
+    await desk.handleUserMessage(c, recruiter, "talk to the first 2");
+    expect((await messages(conv.id)).at(-1)!.body).toMatch(/This role is closed/);
+  });
+
+  test("'close this role' offers the right action; the role check applies", async () => {
+    const { reqId, conv } = await approvedRoleThread();
+    deskScript.push({ command: { type: "close_role" } });
+    await desk.handleUserMessage(conv, recruiter, "close this role");
+    const card = (await messages(conv.id)).at(-1)!.card as { type: string; action: string };
+    expect(card).toMatchObject({ type: "close_role", action: "close" });
+    // A recruiter may not close an approved role (HR head / CBO only).
+    await expect(
+      desk.closeRole(await reload(conv.id), recruiter, "No longer needed"),
+    ).rejects.toThrow();
+    await db.insert(userRoles).values({ userId: recruiter, orgId, role: "hr_head" });
+    try {
+      expect(await desk.closeRole(await reload(conv.id), recruiter, "No longer needed")).toEqual({
+        action: "close",
+      });
+      const [r] = await db.select().from(requisitions).where(eq(requisitions.id, reqId));
+      expect(r!.status).toBe("closed");
+      expect((await reload(conv.id)).status).toBe("closed");
+    } finally {
+      await db
+        .delete(userRoles)
+        .where(
+          and(
+            eq(userRoles.userId, recruiter),
+            eq(userRoles.orgId, orgId),
+            eq(userRoles.role, "hr_head"),
+          ),
+        );
+    }
+  });
+});
+
+describe("delegating to the market, and showing the desk's thinking", () => {
+  const proposal = {
+    mustHaveSkills: ["Figma", "Design systems", "User research"],
+    goodToHaveSkills: ["Prototyping"],
+    experienceMin: null,
+    experienceMax: null,
+    budgetLpaMin: 12,
+    budgetLpaMax: 22,
+    reasoning: "Current UI/UX postings ask for Figma and design-system work.",
+    sources: [
+      { title: "Postings", url: "https://example.com/jobs" },
+      { title: "bad", url: "javascript:alert(1)" },
+    ],
+  };
+  const uiux = {
+    roleTitle: "UI/UX Engineer",
+    location: "Remote",
+    experienceMin: 3,
+    experienceMax: 6,
+    openings: 1,
+  };
+
+  test("each question carries what was understood, what is missing and what is next", async () => {
+    const conv = await newConversation();
+    deskScript.push({ slots: { roleTitle: "UI/UX Engineer", location: "Remote" }, reply: "" });
+    await desk.handleUserMessage(conv, recruiter, "UI/UX engineer, remote");
+    const card = (await messages(conv.id)).at(-1)!.card as {
+      type: string;
+      understood: { label: string; value: string }[];
+      missing: string[];
+      next: string;
+    };
+    expect(card.type).toBe("reasoning");
+    expect(card.understood).toEqual(
+      expect.arrayContaining([{ label: "Role", value: "UI/UX Engineer" }]),
+    );
+    expect(card.missing).toEqual(["experience", "number of openings", "must-have skills"]);
+    expect(card.next).toMatch(/experience/);
+  });
+
+  test("'as per market' researches; 'ok' applies the proposal and moves on", async () => {
+    const conv = await newConversation();
+    await db
+      .update(hiringConversations)
+      .set({ slots: uiux as never })
+      .where(eq(hiringConversations.id, conv.id));
+    researchResult = { ok: true, data: proposal, grounded: true, usage: null };
+    const before = researchCalls;
+    {
+      deskScript.push({ command: { type: "research", fields: ["skills", "budget"] } });
+      await desk.handleUserMessage(await reload(conv.id), recruiter, "as per market needs");
+      expect(researchCalls).toBe(before + 1);
+      let card = (await messages(conv.id)).at(-1)!.card as Record<string, unknown>;
+      expect(card).toMatchObject({ type: "proposal", grounded: true, accepted: false });
+      // Only http(s) sources survive.
+      expect((card["proposal"] as typeof proposal).sources).toHaveLength(1);
+      // The next turn sees the open proposal.
+      deskScript.push({ command: { type: "accept" } });
+      await desk.handleUserMessage(await reload(conv.id), recruiter, "ok");
+      expect(lastDeskPrompt).toMatch(/OPEN PROPOSAL: yes/);
+      const s = (await reload(conv.id)).slots as Record<string, unknown>;
+      expect(s["mustHaveSkills"]).toEqual(proposal.mustHaveSkills);
+      expect(s["budgetLpaMax"]).toBe(22);
+      // Moves on (the one JD question) instead of asking for skills again.
+      const m = await messages(conv.id);
+      expect(m.at(-1)!.body).toMatch(/key responsibilities/);
+      card = m.find((x) => (x.card as { type?: string } | null)?.type === "proposal")!
+        .card as Record<string, unknown>;
+      expect(card["accepted"]).toBe(true);
+      expect(await desk.latestProposal(await reload(conv.id))).toBeNull();
+    }
+  });
+
+  test("editing the details yourself supersedes the proposal; a later 'ok' cannot overwrite", async () => {
+    const conv = await newConversation();
+    await db
+      .update(hiringConversations)
+      .set({ slots: uiux as never })
+      .where(eq(hiringConversations.id, conv.id));
+    await desk.postMessage(conv, {
+      role: "desk",
+      body: "proposal",
+      card: { type: "proposal", fields: ["skills"], proposal, grounded: false, accepted: false },
+    });
+    expect(await desk.latestProposal(conv)).not.toBeNull();
+    deskScript.push({ slots: { mustHaveSkills: ["Figma", "Accessibility"] } });
+    await desk.handleUserMessage(await reload(conv.id), recruiter, "Figma and accessibility only");
+    expect(await desk.latestProposal(await reload(conv.id))).toBeNull();
+    expect(((await reload(conv.id)).slots as { mustHaveSkills: string[] }).mustHaveSkills).toEqual([
+      "Figma",
+      "Accessibility",
+    ]);
+  });
+});
+
+describe("the person talks to the agents through the desk", () => {
+  async function threadWithRequest(kind: "approval" | "clarification" | "gate") {
+    const conv = await confirming();
+    await db
+      .update(hiringConversations)
+      .set({ status: "active", requisitionId: existingReq })
+      .where(eq(hiringConversations.id, conv.id));
+    const [run] = await db
+      .insert(agentRuns)
+      .values({
+        orgId,
+        agentType: "requisition",
+        principalUserId: recruiter,
+        goal: "g",
+        status: "awaiting_human",
+        conversationId: conv.id,
+      })
+      .returning();
+    const [task] = await db
+      .insert(agentTasks)
+      .values({
+        orgId,
+        runId: run!.id,
+        kind,
+        status: "open",
+        title: "Save candidate-scoring weights",
+        assigneeUserId: recruiter,
+      })
+      .returning();
+    return { conv: await reload(conv.id), runId: run!.id, taskId: task!.id };
+  }
+
+  test("a change asked in chat goes back to the agent, which revises and asks again", async () => {
+    const { conv, runId, taskId } = await threadWithRequest("approval");
+    deskScript.push({
+      command: { type: "feedback", text: "more weight for experience and skills" },
+      reply: "Noted, I will ensure extra weight.",
+    });
+    await desk.handleUserMessage(
+      conv,
+      recruiter,
+      "I think we can give more weightage for experience and skills",
+    );
+    expect(lastDeskPrompt).toMatch(/OPEN REQUESTS[^\n]*Save candidate-scoring weights/);
+    const [t] = await db.select().from(agentTasks).where(eq(agentTasks.id, taskId));
+    expect(t).toMatchObject({ status: "rejected", decidedBy: recruiter });
+    expect(t!.response).toMatchObject({
+      changes: true,
+      reason: "more weight for experience and skills",
+    });
+    expect(await desk.taskStatuses(orgId, [taskId])).toEqual({ [taskId]: "changes_requested" });
+    const [r] = await db.select().from(agentRuns).where(eq(agentRuns.id, runId));
+    expect(r!.status).toBe("queued");
+    const last = (await messages(conv.id)).at(-1)!;
+    // The model's promise is not what is posted; what was done is.
+    expect(last.body).toMatch(/^Sent back to the .* agent/);
+    expect((last.card as { type: string }).type).toBe("reasoning");
+  });
+
+  test("the re-proposed request says it is a revision and what changed", async () => {
+    const { conv, runId, taskId } = await threadWithRequest("approval");
+    const v1 = { career: 10, skills: 35, experience: 15, requisitionId: existingReq };
+    await db
+      .update(agentTasks)
+      .set({ proposedAction: { name: "save_weights", args: v1 } as never })
+      .where(eq(agentTasks.id, taskId));
+    deskScript.push({ command: { type: "feedback", text: "more weight for experience" } });
+    await desk.handleUserMessage(conv, recruiter, "more weight for experience");
+    const v2 = { career: 10, skills: 30, experience: 25, requisitionId: existingReq };
+    await desk.onTaskOpened(
+      { conversationId: conv.id, orgId, agentType: "requisition" },
+      {
+        id: crypto.randomUUID(),
+        kind: "approval",
+        title: "Save candidate-scoring weights",
+        body: "",
+        proposedAction: { name: "save_weights", args: v2 },
+      },
+    );
+    const last = (await messages(conv.id)).at(-1)!;
+    expect(last.body).toMatch(/^Revised as you asked \("more weight for experience"\)/);
+    expect(last.body).toContain("Experience 15% → 25%");
+    expect(last.body).not.toMatch(/Requisition id|Career/);
+    expect((last.card as { revision: unknown }).revision).toEqual({
+      reason: "more weight for experience",
+      changes: [
+        { label: "Skills", from: "35%", to: "30%" },
+        { label: "Experience", from: "15%", to: "25%" },
+      ],
+    });
+    expect(runId).toBeTruthy();
+  });
+
+  test("an agent's question can be answered in chat", async () => {
+    const { conv, taskId } = await threadWithRequest("clarification");
+    deskScript.push({ command: { type: "feedback", text: "Yes, remote is fine" } });
+    await desk.handleUserMessage(conv, recruiter, "yes remote is fine");
+    const [t] = await db.select().from(agentTasks).where(eq(agentTasks.id, taskId));
+    expect(t).toMatchObject({ status: "answered", response: { answer: "Yes, remote is fine" } });
+  });
+
+  test("approval steps are never decided from chat; a plain reply says nothing was sent", async () => {
+    const { conv, taskId } = await threadWithRequest("gate");
+    deskScript.push({ command: { type: "feedback", text: "looks fine" } });
+    await desk.handleUserMessage(conv, recruiter, "looks fine");
+    const [t] = await db.select().from(agentTasks).where(eq(agentTasks.id, taskId));
+    expect(t!.status).toBe("open");
+    expect((await messages(conv.id)).at(-1)!.body).toMatch(/decided on its card/);
+    deskScript.push({ reply: "Sure." });
+    await desk.handleUserMessage(await reload(conv.id), recruiter, "thanks");
+    const card = (await messages(conv.id)).at(-1)!.card as { next: string };
+    expect(card.next).toMatch(/Nothing was sent to the agents/);
   });
 });

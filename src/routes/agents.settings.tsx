@@ -193,32 +193,42 @@ function AgentRow({
         </div>
 
         <div>
-          <Label className="text-xs">Pre-approved candidate emails</Label>
-          <div className="mt-2 space-y-1.5">
-            {WHITELISTABLE_TEMPLATES.map((t) => {
-              const on = row.whitelistedTemplates.includes(t.id);
-              return (
-                <label key={t.id} className="flex items-center gap-2 text-sm">
-                  <Checkbox
-                    checked={on}
-                    disabled={!canEdit}
-                    onCheckedChange={(v) =>
-                      onSave({
-                        ...base,
-                        whitelistedTemplates: v
-                          ? [...row.whitelistedTemplates, t.id]
-                          : row.whitelistedTemplates.filter((x) => x !== t.id),
-                      })
-                    }
-                  />
-                  {t.label}
-                </label>
-              );
-            })}
-          </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Used only when autonomy is above Suggest.
-          </p>
+          {(["email", "board"] as const)
+            .filter((g) => g === "email" || row.type === "publishing")
+            .map((group) => (
+              <div key={group} className={group === "board" ? "mt-3" : ""}>
+                <Label className="text-xs">
+                  {group === "email" ? "Pre-approved candidate emails" : "Pre-approved job boards"}
+                </Label>
+                <div className="mt-2 space-y-1.5">
+                  {WHITELISTABLE_TEMPLATES.filter((t) => t.group === group).map((t) => {
+                    const on = row.whitelistedTemplates.includes(t.id);
+                    return (
+                      <label key={t.id} className="flex items-center gap-2 text-sm">
+                        <Checkbox
+                          checked={on}
+                          disabled={!canEdit}
+                          onCheckedChange={(v) =>
+                            onSave({
+                              ...base,
+                              whitelistedTemplates: v
+                                ? [...row.whitelistedTemplates, t.id]
+                                : row.whitelistedTemplates.filter((x) => x !== t.id),
+                            })
+                          }
+                        />
+                        {t.label}
+                      </label>
+                    );
+                  })}
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {group === "email"
+                    ? "Used at Act and notify. At Autonomous every candidate email template sends on its own."
+                    : "Used at Autonomous only. Otherwise every post goes to the HR head for approval, and is published as that HR head."}
+                </p>
+              </div>
+            ))}
         </div>
 
         <div>

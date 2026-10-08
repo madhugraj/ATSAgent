@@ -326,11 +326,15 @@ Mostly deterministic; uses the model only to draft messages.
 
 ### 5.2 Autonomy dial (per org, per agent) ✅
 
-| Level            | `write` tools                                                               | `external` tools (leave the org)                |
-| ---------------- | --------------------------------------------------------------------------- | ----------------------------------------------- |
-| `suggest`        | proposal → approve                                                          | proposal → approve                              |
-| `act_and_notify` | run; the principal is told (bell + "Acted for you") until they mark it seen | proposal → approve, unless template whitelisted |
-| `autonomous`     | run (no notification; still in activity and audit)                          | run for whitelisted templates; else approve     |
+| Level            | `write` tools (internal changes)                                            | Candidate messages                           | Job-board posts (LinkedIn, Naukri, Indeed)                |
+| ---------------- | --------------------------------------------------------------------------- | -------------------------------------------- | --------------------------------------------------------- |
+| `suggest`        | proposal → approve                                                          | proposal → approve                           | HR head approves, post goes out as them                   |
+| `act_and_notify` | run; the principal is told (bell + "Acted for you") until they mark it seen | run for pre-approved templates; else approve | HR head approves, post goes out as them                   |
+| `autonomous`     | run (no notification; still in activity and audit)                          | run (every template)                         | run on boards the org pre-approved; else HR head approves |
+
+Any member may ask for a job-board post; the approval card goes to the **HR
+head** (not to the requester) and, once approved, the post is published as
+that HR head, who is named in the audit trail.
 
 Gates (§5.1) ignore the dial. Agents are **opt-in**: every agent is off
 until the organisation switches it on, and starts at `suggest`, so value is
@@ -849,6 +853,30 @@ the person's explicit choice, applied when the new requisition is approved
 approved the Intake & matching agent ranks candidates; "talk to the first N"
 or ticked candidates start the Screening agent (`desk.candidates_selected`).
 Visible to the thread's creator and HR leadership.
+
+When the person delegates a detail ("as per market", "you decide"), the model
+returns a `research` command and the desk calls the research gateway
+(`role_research` slug) for skills / experience / pay; the result is a proposal
+card labelled live web research (grounded, with http(s) sources only) or an
+estimate. `accept` ("ok", **Use these**) merges it into the slots; editing
+those details in words supersedes it so a later "ok" cannot overwrite them.
+The reply may never promise an action the code is not taking. Every desk
+question carries a "How I read that" card (understood / still missing / next),
+derived in code from the slot diff, not from the model.
+
+Person → agent through the desk: open requests of the thread's runs are in the
+desk prompt; a `feedback` command decides the newest approval as
+`rejected` with `{changes: true, reason}` (or answers a clarification) via
+`resolveTask` — the same role checks as the card — and re-queues the run. The
+runtime hands the agent "asked for changes: …, revise and ask again", so the
+revised proposal is a new request; the card shows **Changes requested**.
+Gates are never decided from chat.
+Every decision the runtime hands back to a model (other than an approved
+tool call, which its tool step records) is written as a `decision` step —
+input: the task, decider and response; output: the exact text the agent was
+told — so the run trail explains the agent's next move. When the agent
+re-proposes a request whose predecessor had changes requested, the desk card
+carries `revision` (the reason and an argument-level before → after diff).
 
 ### 13.7 Assumptions to confirm
 

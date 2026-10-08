@@ -203,6 +203,15 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
         .limit(1)
     )[0];
 
+  // A closed or rejected role: stop its agents and end its hiring-desk thread.
+  if (
+    e.type === "requisition.status_changed" &&
+    (payload.to === "closed" || payload.to === "rejected")
+  ) {
+    const { onRequisitionEnded } = await import("../desk/desk.server");
+    await onRequisitionEnded(e.orgId, req.id, payload.to, e.actorUserId);
+  }
+
   if (e.type === "requisition.status_changed" && payload.to === "approved") {
     // Hiring desk: the person chose to reuse an earlier role's approved JD.
     const { reuseJdIfChosen } = await import("../desk/desk.server");

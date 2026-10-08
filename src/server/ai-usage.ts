@@ -48,6 +48,8 @@ export const AI_FEATURES = [
   "hiring_desk",
   // Talent-pool search: expanding must-haves into equivalent terms.
   "talent_search",
+  // Hiring desk: researching skills / experience / pay for a role the person delegated.
+  "role_research",
 ] as const;
 
 export type AiFeature = (typeof AI_FEATURES)[number];
