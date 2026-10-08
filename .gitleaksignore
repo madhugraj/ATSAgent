@@ -1,0 +1,7 @@
+# Reviewed false positives only — one exact finding per line, with the reason.
+# a486589, agents.observability.tsx line 667: a recharts series field name
+# (the p95 latency series) matched generic-api-key; renamed in 0cf5675.
+a4865892586a907e3c086f8731639327ffb56fe0:src/routes/agents.observability.tsx:generic-api-key:667
+# e875597, this file line 2: the first version of this comment quoted that
+# field name and matched the same rule.
+e8755979037c87a5f65ad66fdd2be21a893cb1c6:.gitleaksignore:generic-api-key:2
