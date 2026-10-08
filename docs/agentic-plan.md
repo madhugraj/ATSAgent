@@ -870,7 +870,12 @@ desk prompt; a `feedback` command decides the newest approval as
 `resolveTask` — the same role checks as the card — and re-queues the run. The
 runtime hands the agent "asked for changes: …, revise and ask again", so the
 revised proposal is a new request; the card shows **Changes requested**.
-Gates are never decided from chat.
+Gates are never approved from chat; the one exception to deciding them there
+is a JD gate sent back for changes (`requestJdChangesCore`, non-terminal,
+role-checked). `feedback.template` is checked against the org's JD templates
+before anything is sent; `submit_jd_version.templateName` makes the JD agent use
+it. Budget pauses show used / limit in the journey; raising the budget (desk
+or Agent settings) clears the parked runs' lease so they re-check at once.
 Every decision the runtime hands back to a model (other than an approved
 tool call, which its tool step records) is written as a `decision` step —
 input: the task, decider and response; output: the exact text the agent was

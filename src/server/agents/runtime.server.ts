@@ -1003,6 +1003,14 @@ async function driveRun(run: AgentRun): Promise<"done" | "awaiting" | "yielded" 
     run.definitionHash = d.hash;
   }
 
+  // Back under budget: the pause is over, so it must not read as paused later.
+  if (
+    run.lastError === BUDGET_PAUSE_MESSAGE &&
+    !(await overBudget(run, policy.monthlyTokenBudget))
+  ) {
+    await db.update(agentRuns).set({ lastError: null }).where(eq(agentRuns.id, run.id));
+    run.lastError = null;
+  }
   for (let turn = 0; turn < TURNS_PER_TICK; turn++) {
     if (await overBudget(run, policy.monthlyTokenBudget)) {
       await save(run, transcript, null, stepCount, tokensUsed);
@@ -1600,6 +1608,23 @@ export async function monthTokens(orgId: string, agentType: string): Promise<num
       ),
     );
   return Number(r?.n ?? 0);
+}
+
+/** The budget changed: let this agent's budget-paused runs be re-checked now, not in an hour. */
+export async function releaseBudgetPaused(orgId: string, agentType: string): Promise<number> {
+  const rows = await db
+    .update(agentRuns)
+    .set({ leaseUntil: null, updatedAt: new Date() })
+    .where(
+      and(
+        eq(agentRuns.orgId, orgId),
+        eq(agentRuns.agentType, agentType as never),
+        eq(agentRuns.status, "queued"),
+        eq(agentRuns.lastError, BUDGET_PAUSE_MESSAGE),
+      ),
+    )
+    .returning({ id: agentRuns.id });
+  return rows.length;
 }
 
 async function overBudget(run: AgentRun, budget: number | null): Promise<boolean> {

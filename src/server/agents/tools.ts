@@ -385,8 +385,11 @@ export function registerPhase1Tools(): void {
   registerTool({
     name: "submit_jd_version",
     description:
-      "Draft the job description for the requisition with the organisation's JD template and file it as the next version for Department Head review. Pass revisionNotes to address reviewer feedback.",
-    input: RequisitionId.extend({ revisionNotes: z.string().max(4000).optional() }),
+      "Draft the job description for the requisition with the organisation's JD template and file it as the next version for Department Head review. Pass revisionNotes to address reviewer feedback, and templateName when the reviewer asked for a specific JD template by name.",
+    input: RequisitionId.extend({
+      revisionNotes: z.string().max(4000).optional(),
+      templateName: z.string().min(1).max(200).optional(),
+    }),
     risk: "write",
     skills: ["jd_generate"],
     describe: (i) =>
@@ -408,7 +411,12 @@ export function registerPhase1Tools(): void {
             .limit(1)
         : [];
       const { pickTemplate } = await import("@/lib/templates.server");
-      const template = await pickTemplate(ctx.orgId, "jd", `${r.title} ${dept?.name ?? ""}`);
+      const template = await pickTemplate(
+        ctx.orgId,
+        "jd",
+        `${r.title} ${dept?.name ?? ""}`,
+        i.templateName,
+      );
       const { generateJdCore } = await import("@/lib/matching.functions");
       const jd = await generateJdCore(ctx.orgId, {
         templateId: template?.id ?? null,

@@ -1096,3 +1096,166 @@ describe("the person talks to the agents through the desk", () => {
     expect(card.next).toMatch(/Nothing was sent to the agents/);
   });
 });
+
+describe("JD changes, templates, budget pauses and readable agent text", () => {
+  async function jdGateThread() {
+    const conv = await confirming();
+    await db
+      .update(hiringConversations)
+      .set({ status: "active", requisitionId: existingReq })
+      .where(eq(hiringConversations.id, conv.id));
+    const [jd] = await db
+      .insert(jobDescriptions)
+      .values({
+        orgId,
+        requisitionId: existingReq,
+        version: 9,
+        status: "pending_dh",
+        purpose: "p",
+        fullText: "draft",
+      } as never)
+      .returning({ id: jobDescriptions.id });
+    const [run] = await db
+      .insert(agentRuns)
+      .values({
+        orgId,
+        agentType: "jd",
+        principalUserId: recruiter,
+        goal: "g",
+        status: "awaiting_human",
+        conversationId: conv.id,
+      })
+      .returning();
+    const [task] = await db
+      .insert(agentTasks)
+      .values({
+        orgId,
+        runId: run!.id,
+        kind: "gate",
+        status: "open",
+        title: "Approval Request: Job Description",
+        assigneeRole: "department_head",
+        proposedAction: {
+          name: "request_approval",
+          args: { subject: { type: "jd", id: jd!.id } },
+        } as never,
+      })
+      .returning();
+    return { conv: await reload(conv.id), jdId: jd!.id, taskId: task!.id };
+  }
+  const asReviewer = async <T>(fn: () => Promise<T>) => {
+    await db.insert(userRoles).values({ userId: recruiter, orgId, role: "department_head" });
+    try {
+      return await fn();
+    } finally {
+      await db
+        .delete(userRoles)
+        .where(
+          and(
+            eq(userRoles.userId, recruiter),
+            eq(userRoles.orgId, orgId),
+            eq(userRoles.role, "department_head"),
+          ),
+        );
+    }
+  };
+
+  test("a template that does not exist is said plainly; nothing is sent", async () => {
+    const { contentTemplates } = await import("../drizzle/schema");
+    await db
+      .insert(contentTemplates)
+      .values({ orgId, kind: "jd", name: "Standard Product Job Description", config: {} } as never);
+    try {
+      const { conv, taskId } = await jdGateThread();
+      deskScript.push({
+        command: { type: "feedback", text: "use the Yavar template", template: "Yavar" },
+      });
+      await desk.handleUserMessage(conv, recruiter, "Can u use Yavar template?");
+      const last = (await messages(conv.id)).at(-1)!;
+      expect(last.body).toMatch(/no job-description template called "Yavar"/);
+      expect(last.body).toContain('"Standard Product Job Description"');
+      const [t] = await db.select().from(agentTasks).where(eq(agentTasks.id, taskId));
+      expect(t!.status).toBe("open");
+    } finally {
+      await db.delete(contentTemplates).where(eq(contentTemplates.orgId, orgId));
+    }
+  });
+
+  test("changing a JD under review from chat requests changes (not a rejection), with the template", async () => {
+    const { contentTemplates } = await import("../drizzle/schema");
+    await db
+      .insert(contentTemplates)
+      .values({ orgId, kind: "jd", name: "Yavar House Style", config: {} } as never);
+    try {
+      const { conv, jdId, taskId } = await jdGateThread();
+      deskScript.push({
+        command: { type: "feedback", text: "use the Yavar template", template: "yavar" },
+      });
+      await asReviewer(() => desk.handleUserMessage(conv, recruiter, "Can u use Yavar template?"));
+      const [jd] = await db.select().from(jobDescriptions).where(eq(jobDescriptions.id, jdId));
+      expect(jd!.status).toBe("changes_requested");
+      expect(jd!.approverComment).toContain('Use the JD template "Yavar House Style"');
+      const [t] = await db.select().from(agentTasks).where(eq(agentTasks.id, taskId));
+      expect(t!.response).toMatchObject({ changes: true });
+      expect((await messages(conv.id)).at(-1)!.body).toMatch(/^Sent the job description back/);
+      const { pickTemplate } = await import("../src/lib/templates.server");
+      expect(await pickTemplate(orgId, "jd", "UI/UX", "Yavar")).toMatchObject({
+        name: "Yavar House Style",
+        reason: "the template the reviewer asked for",
+      });
+      await expect(pickTemplate(orgId, "jd", "UI/UX", "Acme")).rejects.toThrow(/Yavar House Style/);
+    } finally {
+      await db.delete(contentTemplates).where(eq(contentTemplates.orgId, orgId));
+      await db.delete(jobDescriptions).where(eq(jobDescriptions.version, 9));
+    }
+  });
+
+  test("a budget-paused run shows its usage and is released when the budget changes", async () => {
+    const { releaseBudgetPaused, BUDGET_PAUSE_MESSAGE } =
+      await import("../src/server/agents/runtime.server");
+    await db
+      .update(agentPolicies)
+      .set({ monthlyTokenBudget: 1000 })
+      .where(and(eq(agentPolicies.orgId, orgId), eq(agentPolicies.agentType, "intake")));
+    const [run] = await db
+      .insert(agentRuns)
+      .values({
+        orgId,
+        agentType: "intake",
+        principalUserId: recruiter,
+        goal: "g",
+        status: "queued",
+        lastError: BUDGET_PAUSE_MESSAGE,
+        leaseUntil: new Date(Date.now() + 3600_000),
+      })
+      .returning();
+    const b = await desk.budgetOf(orgId, "intake");
+    expect(b).toMatchObject({ limit: 1000, suggested: 50_000 });
+    expect(await releaseBudgetPaused(orgId, "intake")).toBe(1);
+    const [r] = await db.select().from(agentRuns).where(eq(agentRuns.id, run!.id));
+    expect(r!.leaseUntil).toBeNull();
+    // Under the raised budget it runs, and is no longer marked paused.
+    await db
+      .update(agentPolicies)
+      .set({ monthlyTokenBudget: 1_000_000 })
+      .where(and(eq(agentPolicies.orgId, orgId), eq(agentPolicies.agentType, "intake")));
+    agentScript.push(say("Nothing to do."));
+    await runAgentTick({ orgId });
+    const [after] = await db.select().from(agentRuns).where(eq(agentRuns.id, run!.id));
+    expect(after!.lastError).toBeNull();
+  });
+
+  test("agent text in the thread hides internal ids", () => {
+    const text = [
+      "The job description for REQ-2026-106 has been approved.",
+      "",
+      "- **Requisition ID:** `52d7079d-e471-4968-bee4-8773ced5fd68`",
+      "- **JD ID:** `3ce4fb38-04c2-40d0-a3df-cddf7f3d787b` (Version 1)",
+      "- Status: approved (run 3ce4fb38-04c2-40d0-a3df-cddf7f3d787b)",
+    ].join("\n");
+    const out = desk.readableAgentText(text);
+    expect(out).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}/);
+    expect(out).toContain("REQ-2026-106");
+    expect(out).toContain("- Status: approved (run)");
+  });
+});

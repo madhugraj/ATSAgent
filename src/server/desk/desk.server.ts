@@ -21,6 +21,7 @@ import { writeAudit } from "../audit";
 import { log } from "../log";
 import { getTool } from "../agents/registry";
 import {
+  agentPolicies,
   agentRuns,
   agentTasks,
   applications,
@@ -237,7 +238,12 @@ const Command = z.discriminatedUnion("type", [
   /** The person agreed to the latest proposal ("ok", "yes", "use these"). */
   z.object({ type: z.literal("accept") }),
   /** The person wants a pending agent request changed, or answers an agent's question. */
-  z.object({ type: z.literal("feedback"), text: z.string().min(1).max(1000) }),
+  z.object({
+    type: z.literal("feedback"),
+    text: z.string().min(1).max(1000),
+    /** A template the person asked for by name ("use the Yavar template"). */
+    template: z.string().min(1).max(200).optional(),
+  }),
 ]);
 
 const TurnOutput = z.object({
@@ -257,7 +263,7 @@ const SYSTEM = [
   '- "command": {"type":"none"} unless the person asks to act: "talk to / screen / call the first 5" → {"type":"screen","top":5}; "screen 1, 3 and 4" → {"type":"screen","ranks":[1,3,4]}; "create a new role" → {"type":"new_role"}; "use REQ-2026-014" → {"type":"use_existing","code":"REQ-2026-014"}.',
   '- "command" also: "close / cancel / delete / withdraw this role" → {"type":"close_role"}.',
   '- When the person delegates a detail to you or to the market ("as per market needs", "you decide", "what does the market say?", "pick it up from research") → {"type":"research","fields":[...]} with the fields they delegated: "skills", "experience" and/or "budget". (JD details are not a research command — for those set researchRole true as above.) When OPEN PROPOSAL is yes and they agree ("ok", "yes", "use these", "go ahead") → {"type":"accept"}.',
-  '- When OPEN REQUESTS lists a request and the person comments on it, objects to it or asks for a change ("give more weight to experience", "budget is too high", "use Pune instead") — or answers an agent\'s question — → {"type":"feedback","text":"<what they want, faithfully, in their words>"}. The system sends it to the agent, which revises and asks again.',
+  '- When OPEN REQUESTS lists a request and the person comments on it, objects to it or asks for a change ("give more weight to experience", "budget is too high", "use Pune instead") — or answers an agent\'s question — → {"type":"feedback","text":"<what they want, faithfully, in their words>"}. The system sends it to the agent, which revises and asks again. This includes a job description waiting for approval: "use the X template", "make it shorter", "add a section on Y" are feedback (changes to the JD), not an approval decision; when they name a template add "template":"<the name as they said it>".',
   '- The reply must never promise an action ("I\'ll benchmark…", "I\'ll check…"): the desk acts only through commands, and the system reports what it did. With a research command the reply can be empty.',
   '- "reply": one short, friendly message. If MISSING lists details, ask for the FIRST missing one only, in one sentence, offering a typical example. Otherwise acknowledge briefly. Never claim that anything was created, approved or sent.',
   "- Questions about the role, its status, the candidates or how to do something: answer ONLY from FACTS and APP RULES below. Never describe screens, menus, statuses or abilities that are not listed there; if the facts do not answer the question, say you do not know and where to look.",
@@ -977,7 +983,7 @@ export async function handleUserMessage(
     return;
   }
   if (cmd.type === "feedback") {
-    await sendFeedback(conv, userId, cmd.text, understood);
+    await sendFeedback(conv, userId, cmd.text, understood, cmd.template);
     return;
   }
   if (cmd.type === "accept" && (await latestProposal(conv))) {
@@ -1074,7 +1080,7 @@ export async function onRunFinished(run: {
     agentType: run.agentType,
     body:
       run.status === "done"
-        ? (run.result ?? "Done.").slice(0, 1500)
+        ? readableAgentText(run.result ?? "Done.").slice(0, 1500)
         : `The ${name} stopped: ${failureReason(run.error)}`,
     ...(run.status === "failed" && run.id
       ? { card: { type: "run_failed", runId: run.id, agentType: run.agentType } }
@@ -1311,7 +1317,13 @@ export type DeskProgress = {
     /** on = switched on; off = switched off (nothing will happen until it is). */
     agentEnabled: boolean | null;
     /** The responsible agent's latest run on this role (`paused` = at its monthly token budget). */
-    run: { id: string; status: string; paused?: boolean } | null;
+    run: {
+      id: string;
+      status: string;
+      paused?: boolean;
+      /** Month-to-date tokens against the monthly budget, when paused on it. */
+      budget?: { used: number; limit: number; suggested: number };
+    } | null;
     /** Open requests from this thread's agents waiting for a person. */
     waitingForYou: number;
   } | null;
@@ -1468,7 +1480,7 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
 
   const agentType = STAGES.find((s) => s.key === cur)!.agent;
   let agentEnabled: boolean | null = null;
-  let run: { id: string; status: string; paused?: boolean } | null = null;
+  let run: NonNullable<DeskProgress["next"]>["run"] = null;
   if (agentType) {
     agentEnabled = await agentOn(conv.orgId, agentType);
     if (conv.requisitionId) {
@@ -1485,11 +1497,12 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
         )
         .orderBy(desc(agentRuns.createdAt))
         .limit(1);
+      const paused = r?.status === "queued" && r.lastError === BUDGET_PAUSED;
       run = r
         ? {
             id: r.id,
             status: r.status,
-            ...(r.status === "queued" && r.lastError === BUDGET_PAUSED ? { paused: true } : {}),
+            ...(paused ? { paused: true, budget: await budgetOf(conv.orgId, agentType) } : {}),
           }
         : null;
     }
@@ -2493,16 +2506,19 @@ export type OpenRequest = {
   kind: string;
   title: string;
   agentType: string;
+  /** For gates: what the approval is about (requisition, jd, offer…). */
+  subjectType: string | null;
 };
 
 /** Requests from this thread's agents still waiting on a person, newest first. */
 export async function openRequests(conv: Conversation): Promise<OpenRequest[]> {
-  return db
+  const rows = await db
     .select({
       id: agentTasks.id,
       kind: agentTasks.kind,
       title: agentTasks.title,
       agentType: agentRuns.agentType,
+      action: agentTasks.proposedAction,
     })
     .from(agentTasks)
     .innerJoin(agentRuns, eq(agentRuns.id, agentTasks.runId))
@@ -2515,34 +2531,71 @@ export async function openRequests(conv: Conversation): Promise<OpenRequest[]> {
     )
     .orderBy(desc(agentTasks.createdAt))
     .limit(5);
+  return rows.map(({ action, ...r }) => ({
+    ...r,
+    subjectType:
+      (action as { args?: { subject?: { type?: string } } } | null)?.args?.subject?.type ?? null,
+  }));
 }
 
 /**
  * The person asked, in the chat, for a pending agent request to change (or
  * answered an agent's question). Hand it to that agent as a decision on its
  * request — "changes requested" with their words — so the agent revises and
- * asks again. Gates (real approval steps such as a requisition or JD sign-off)
- * are never decided from chat; the person uses the card.
+ * asks again. A job description under review can be sent back for changes
+ * too (the real "request changes" step, role-checked); other approval steps
+ * (requisition, offer) are never decided from chat — Decline there is final.
  */
 export async function sendFeedback(
   conv: Conversation,
   userId: string,
   text: string,
   understood: { label: string; value: string }[] = [],
+  template?: string,
 ): Promise<void> {
   understood = [...understood, { label: "Your change", value: text }];
   const requests = await openRequests(conv);
-  const target = requests.find((r) => r.kind === "approval" || r.kind === "clarification") ?? null;
+  const target =
+    requests.find(
+      (r) =>
+        r.kind === "approval" ||
+        r.kind === "clarification" ||
+        (r.kind === "gate" && r.subjectType === "jd"),
+    ) ?? null;
   const agent = (r: OpenRequest) => AGENT_TITLE[r.agentType] ?? `${r.agentType} agent`;
   if (!target) {
     await postMessage(conv, {
       role: "desk",
       body: requests.length
-        ? `"${requests[0]!.title}" is an approval step, so it is decided on its card (Approve, or Decline with a reason), not from the chat.`
+        ? `"${requests[0]!.title}" is an approval step where Decline is final, so it is decided on its card (Approve, or Decline with a reason), not from the chat.`
         : "No agent is waiting on you in this thread, so there is nothing to send back. Tell me what you want done and I'll start the right agent.",
       card: { type: "reasoning", understood, missing: [], next: "Nothing was sent to the agents." },
     });
     return;
+  }
+  // A template asked for by name must exist — say so instead of sending a
+  // request the agent cannot carry out.
+  let reason = text;
+  if (template?.trim()) {
+    const { findTemplateByName } = await import("@/lib/templates.server");
+    const { match, names } = await findTemplateByName(conv.orgId, "jd", template);
+    if (!match) {
+      await postMessage(conv, {
+        role: "desk",
+        body: names.length
+          ? `There is no job-description template called "${template}". Your JD templates: ${names.map((n) => `"${n}"`).join(", ")}. Tell me which one to use, or add a "${template}" template under Content templates (Manual mode) and ask again.`
+          : `There are no job-description templates yet, so I can't use "${template}". Add one under Content templates (Manual mode) and ask again.`,
+        card: {
+          type: "reasoning",
+          understood: [...understood, { label: "Template asked for", value: template }],
+          missing: [],
+          next: `Nothing was sent: no JD template matches "${template}". "${target.title}" is still waiting for you.`,
+        },
+      });
+      return;
+    }
+    reason = `${text}\nUse the JD template "${match.name}".`;
+    understood = [...understood, { label: "Template", value: match.name }];
   }
   const { resolveTask } = await import("../agents/runtime.server");
   try {
@@ -2552,8 +2605,8 @@ export async function sendFeedback(
       userId,
       decision:
         target.kind === "clarification"
-          ? { status: "answered", answer: text }
-          : { status: "rejected", reason: text, changes: true },
+          ? { status: "answered", answer: reason }
+          : { status: "rejected", reason, changes: true },
     });
   } catch (e) {
     await postMessage(conv, {
@@ -2564,12 +2617,15 @@ export async function sendFeedback(
   }
   const { kickAgents } = await import("../agents/orchestrator.server");
   kickAgents(conv.orgId);
+  const isJd = target.kind === "gate";
   await postMessage(conv, {
     role: "desk",
     body:
       target.kind === "clarification"
         ? `Sent your answer to the ${agent(target)}. It continues from here.`
-        : `Sent back to the ${agent(target)}: "${text}". It will revise "${target.title}" and ask you again.`,
+        : isJd
+          ? `Sent the job description back to the ${agent(target)} for changes: "${text}". It will redraft${template ? " with that template" : ""} and send the new version for approval.`
+          : `Sent back to the ${agent(target)}: "${text}". It will revise "${target.title}" and ask you again.`,
     card: {
       type: "reasoning",
       understood,
@@ -2577,7 +2633,9 @@ export async function sendFeedback(
       next:
         target.kind === "clarification"
           ? `Answered "${target.title}" for you.`
-          : `Returned "${target.title}" to the ${agent(target)} with your change. The old request is closed, so it cannot be approved by mistake.`,
+          : isJd
+            ? `Requested changes on the job description (it is now "changes requested", not rejected) and returned it to the ${agent(target)}.`
+            : `Returned "${target.title}" to the ${agent(target)} with your change. The old request is closed, so it cannot be approved by mistake.`,
     },
   });
 }
@@ -2644,4 +2702,34 @@ export async function revisionOf(
     reason: String((prev.response as { reason?: string } | null)?.reason ?? "").slice(0, 200),
     changes,
   };
+}
+
+const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+/** Agent text shown to people: drop "… ID: <uuid>" lines and any stray internal ids. */
+export function readableAgentText(text: string): string {
+  return text
+    .split("\n")
+    .filter((line) => !(UUID.test(line) && /\bid\b/i.test(line)))
+    .join("\n")
+    .replace(new RegExp(`\\s*\`?${UUID.source}\`?`, "gi"), "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/** Where an agent stands against its monthly token budget, with a suggested new budget. */
+export async function budgetOf(
+  orgId: string,
+  agentType: string,
+): Promise<{ used: number; limit: number; suggested: number }> {
+  const { monthTokens } = await import("../agents/runtime.server");
+  const [p] = await db
+    .select({ limit: agentPolicies.monthlyTokenBudget })
+    .from(agentPolicies)
+    .where(and(eq(agentPolicies.orgId, orgId), eq(agentPolicies.agentType, agentType as never)))
+    .limit(1);
+  const used = await monthTokens(orgId, agentType);
+  const limit = Number(p?.limit ?? 0);
+  // Room for this month's work so far again, rounded up to 50k.
+  const suggested = Math.ceil(Math.max(limit * 2, used * 2) / 50_000) * 50_000;
+  return { used, limit, suggested };
 }

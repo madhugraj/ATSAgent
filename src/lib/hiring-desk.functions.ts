@@ -130,6 +130,8 @@ export type DeskConversationView = {
   activity: import("../server/desk/desk.server").DeskActivity;
   /** The current step can be started now (its agent is on and idle). */
   canStart: boolean;
+  /** The viewer may change agent settings (budget, autonomy) — HR head / CBO / owner. */
+  canEditAgents: boolean;
 };
 
 export const getDeskConversation = createServerFn({ method: "GET" })
@@ -210,6 +212,7 @@ export const getDeskConversation = createServerFn({ method: "GET" })
       progress: await deskProgress(conv),
       activity: await deskActivity(conv),
       canStart: Boolean(await startStage(conv, context.userId, { dryRun: true })),
+      canEditAgents: await canEditAgents(context.userId, context.orgId),
     };
   });
 
@@ -393,4 +396,64 @@ export const researchDeskRole = createServerFn({ method: "POST" })
     const { researchRole } = await import("../server/desk/desk.server");
     await researchRole(conv, data.fields);
     return { ok: true as const };
+  });
+
+const AGENT_SETTINGS_ROLES = ["hr_head", "president_cbo"] as const;
+
+async function canEditAgents(userId: string, orgId: string): Promise<boolean> {
+  const { assertRole } = await import("./auth.middleware");
+  return assertRole(userId, orgId, [...AGENT_SETTINGS_ROLES]).then(
+    () => true,
+    () => false,
+  );
+}
+
+/**
+ * Raise the monthly token budget of the agent this thread is paused on, to
+ * the suggested amount, and continue its parked run now. HR head / CBO /
+ * owner only (as on Agent settings); audited.
+ */
+export const raiseDeskAgentBudget = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    const { assertRole } = await import("./auth.middleware");
+    await assertRole(
+      context.userId,
+      context.orgId,
+      [...AGENT_SETTINGS_ROLES],
+      "Only the HR head, the CBO or the organisation owner can change an agent's budget.",
+    );
+    const desk = await import("../server/desk/desk.server");
+    const progress = await desk.deskProgress(conv);
+    const agentType = progress.next?.agentType;
+    if (!agentType || !progress.next?.run?.paused)
+      throw new Error("No agent here is paused on its budget.");
+    const { suggested, limit } = await desk.budgetOf(context.orgId, agentType);
+    const { agentPolicies } = await import("@db/schema");
+    await db
+      .update(agentPolicies)
+      .set({ monthlyTokenBudget: suggested, updatedBy: context.userId, updatedAt: new Date() })
+      .where(
+        and(
+          eq(agentPolicies.orgId, context.orgId),
+          eq(agentPolicies.agentType, agentType as never),
+        ),
+      );
+    const { writeAudit } = await import("../server/audit");
+    await writeAudit({
+      actor: `user:${context.userId}`,
+      actorUserId: context.userId,
+      orgId: context.orgId,
+      action: "agent.policy.updated",
+      entityType: "agent_policy",
+      entityId: null,
+      detail: { agentType, monthlyTokenBudget: suggested, previous: limit, via: "hiring_desk" },
+    });
+    const { releaseBudgetPaused } = await import("../server/agents/runtime.server");
+    await releaseBudgetPaused(context.orgId, agentType);
+    const { kickAgents } = await import("../server/agents/orchestrator.server");
+    kickAgents(context.orgId);
+    return { monthlyTokenBudget: suggested };
   });

@@ -25,6 +25,7 @@ import { AGENT_LABEL } from "@/lib/agents.catalog";
 import { decideAgentTask, type AgentDecisionInput } from "@/lib/agents.functions";
 import {
   acceptDeskProposal,
+  raiseDeskAgentBudget,
   chooseDeskRole,
   closeDeskRole,
   getDeskConversation,
@@ -868,7 +869,9 @@ function JourneyPanel({ conv, onChanged }: { conv: DeskConversationView; onChang
                         {n.waitingForYou} request(s) waiting for you in the conversation
                       </p>
                     ) : null}
-                    {n.agentEnabled === false || runState === "paused" ? (
+                    {runState === "paused" && n.run?.budget ? (
+                      <BudgetPaused conv={conv} budget={n.run.budget} onChanged={onChanged} />
+                    ) : n.agentEnabled === false || runState === "paused" ? (
                       <Button asChild size="sm" variant="outline" className="h-7">
                         <Link to="/agents/settings">
                           {runState === "paused" ? "Raise the budget" : "Switch it on"}
@@ -1450,6 +1453,56 @@ function RevisionNote({ revision }: { revision: Revision }) {
       ) : (
         <p className="mt-1 text-destructive">
           Nothing in the proposal changed. Tell the desk what to change, or decline it.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Paused on its monthly budget: how much was used, and what to do about it. */
+function BudgetPaused({
+  conv,
+  budget,
+  onChanged,
+}: {
+  conv: DeskConversationView;
+  budget: { used: number; limit: number; suggested: number };
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  async function raise() {
+    setBusy(true);
+    try {
+      const r = await raiseDeskAgentBudget({ data: { id: conv.id } });
+      toast.success(
+        `Budget raised to ${r.monthlyTokenBudget.toLocaleString()} tokens — continuing`,
+      );
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not raise the budget");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="space-y-1.5 text-xs">
+      <p>
+        Used {budget.used.toLocaleString()} of its {budget.limit.toLocaleString()} tokens this
+        month. It continues on its own when the budget is raised, or on the 1st of next month.
+      </p>
+      {conv.canEditAgents ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" className="h-7" disabled={busy} onClick={raise}>
+            {busy ? <Loader2 className="size-4 animate-spin" /> : null}
+            Raise to {budget.suggested.toLocaleString()} and continue
+          </Button>
+          <Link to="/agents/settings" className="text-primary hover:underline">
+            Set another amount
+          </Link>
+        </div>
+      ) : (
+        <p className="font-medium text-primary">
+          Ask your HR head or CBO to raise it (Agent settings → monthly token budget).
         </p>
       )}
     </div>

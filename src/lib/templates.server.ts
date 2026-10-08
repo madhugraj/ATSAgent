@@ -245,11 +245,52 @@ export async function resolveTemplate<K extends TemplateKind>(
  * best matches the hint (role title, department); else the oldest. Null when
  * the org has no template of this kind.
  */
+/**
+ * A template the person asked for by name ("the Yavar template"): exact name,
+ * else a name containing the words asked for. Also returns the names that
+ * exist, so a miss can be answered honestly.
+ */
+export async function findTemplateByName(
+  orgId: string,
+  kind: TemplateKind,
+  asked: string,
+): Promise<{ match: { id: string; name: string } | null; names: string[] }> {
+  const rows = await db
+    .select({ id: contentTemplates.id, name: contentTemplates.name })
+    .from(contentTemplates)
+    .where(and(eq(contentTemplates.orgId, orgId), eq(contentTemplates.kind, kind)));
+  const words = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/\btemplates?\b/g, " ")
+      .split(/[^a-z0-9+#]+/)
+      .filter((w) => w.length >= 2);
+  const q = words(asked);
+  const exact = rows.find((r) => r.name.trim().toLowerCase() === asked.trim().toLowerCase());
+  const partial = q.length
+    ? rows.find((r) => {
+        const n = new Set(words(r.name));
+        return q.every((w) => n.has(w));
+      })
+    : undefined;
+  return { match: exact ?? partial ?? null, names: rows.map((r) => r.name) };
+}
+
 export async function pickTemplate(
   orgId: string,
   kind: TemplateKind,
   hint: string,
+  /** A template the reviewer asked for by name; wins when it exists. */
+  preferred?: string,
 ): Promise<{ id: string; name: string; reason: string } | null> {
+  if (preferred?.trim()) {
+    const { match, names } = await findTemplateByName(orgId, kind, preferred);
+    if (!match)
+      throw new Error(
+        `There is no template named "${preferred}". Templates of this kind: ${names.join(", ") || "none"}.`,
+      );
+    return { id: match.id, name: match.name, reason: "the template the reviewer asked for" };
+  }
   const rows = await db
     .select({
       id: contentTemplates.id,

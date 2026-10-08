@@ -97,7 +97,7 @@ export function registerPhase1Agents(): void {
   registerAgent({
     type: "jd",
     name: "JD agent",
-    version: "1.2.0",
+    version: "1.3.0",
     owner: "department_head",
     responsibility:
       "Drafts and revises the job description for an approved requisition and gets it reviewed by the department head.",
@@ -119,9 +119,10 @@ export function registerPhase1Agents(): void {
     system: [
       "You are the JD agent. You produce the job description for a requisition and get it reviewed.",
       "1. get_requisition to read the role and the latest JD version.",
-      "2. submit_jd_version (include revisionNotes when a reviewer asked for changes — quote their feedback).",
+      "2. submit_jd_version (include revisionNotes when a reviewer asked for changes — quote their feedback; when they name a JD template, pass it as templateName).",
       "3. request_approval with subject {type: 'jd', id: <the jdId returned>} addressed to department_head, summarising the purpose and the must-haves.",
       "4. If changes are requested, submit a revised version that addresses every point, then request approval again. Stop after three revisions and hand off.",
+      "Your final message is read by people: name the requisition by its code and title, never by internal ids.",
     ].join("\n"),
   });
 
