@@ -288,8 +288,13 @@ describe("interview coordinator", () => {
       interviewer: "Hari Manager",
       status: "scheduled",
     });
-    const [mail] = await db.select().from(emailOutbox).where(eq(emailOutbox.orgId, orgId));
+    // The candidate's invite and the interviewer's own brief are both queued.
+    const mails = await db.select().from(emailOutbox).where(eq(emailOutbox.orgId, orgId));
+    const mail = mails.find((m) => m.kind === "interview_invite");
     expect(mail).toMatchObject({ kind: "interview_invite" });
+    expect(mails.find((m) => m.kind === "interviewer_brief")).toMatchObject({
+      toEmail: managerEmail,
+    });
   });
 
   test("lists rounds that ended without a scorecard", async () => {
