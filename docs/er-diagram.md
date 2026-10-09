@@ -303,6 +303,7 @@ erDiagram
     text x_url "nullable"
     boolean consent_given
     timestamptz created_at
+    timestamptz role_match_checked_at "nullable"
     text external_id "nullable"
     text external_provider "nullable"
     text resume_file_path "nullable"
@@ -1123,7 +1124,7 @@ erDiagram
 | `candidate_ownership_events` | Candidates & pipeline | 8 | — |
 | `candidate_referrals` | Candidates & pipeline | 11 | — |
 | `candidate_verifications` | Candidates & pipeline | 11 | — |
-| `candidates` | Candidates & pipeline | 39 | — |
+| `candidates` | Candidates & pipeline | 40 | — |
 | `capture_events` | Sourcing & integrations | 10 | — |
 | `comp_knowledge` | Intelligence | 17 | — |
 | `content_templates` | Requisitions & job content | 16 | — |

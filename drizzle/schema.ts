@@ -451,6 +451,8 @@ export const candidates = pgTable(
     xUrl: text("x_url"),
     consentGiven: boolean("consent_given").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** When this person was last checked against the open roles (new CV → open roles). */
+    roleMatchCheckedAt: timestamp("role_match_checked_at", { withTimezone: true }),
     externalId: text("external_id"),
     externalProvider: text("external_provider"),
     /** Path inside the private CV vault bucket: <org_id>/<candidate_id>/<file>. */
@@ -483,6 +485,9 @@ export const candidates = pgTable(
     uniqueIndex("candidates_external_unique")
       .on(t.externalProvider, t.externalId)
       .where(sql`${t.externalId} is not null`),
+    index("candidates_role_match_pending_idx")
+      .on(t.orgId, t.createdAt)
+      .where(sql`${t.roleMatchCheckedAt} is null`),
   ],
 );
 

@@ -475,10 +475,17 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
       }
     }
   }
-  // Starving roles get the Sourcing agent (once a day per role at most).
+  // Starving roles get the Sourcing agent (once a day per role at most), and
+  // new CVs in the pool are checked against the open roles (plain code).
   if (getAgent("sourcing")) {
     const { starvingRoles } = await import("./sourcing.server");
+    const { matchNewCvsToRoles } = await import("./pool-match.server");
     for (const orgId of await enabledOrgs("sourcing", opts.orgId)) {
+      try {
+        await matchNewCvsToRoles(orgId);
+      } catch (err) {
+        log.warn("pool.match_failed", { org_id: orgId, error: err as Error });
+      }
       for (const r of await starvingRoles(orgId)) {
         const principal = r.createdBy ?? (await ownerOf(orgId));
         if (!principal) continue;

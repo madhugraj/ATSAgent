@@ -204,6 +204,37 @@ describe("channels and supply", () => {
   });
 });
 
+describe("new CV → open roles", () => {
+  test("a new CV that fits an open role joins its pipeline once (audited); others are left alone", async () => {
+    const { matchNewCvsToRoles } = await import("../src/server/agents/pool-match.server");
+    const fits = await candidate("Meera", { skills: ["Figma", "Prototyping"] });
+    await candidate("Ravi", { skills: ["Excel"] });
+    await candidate("Staff", { skills: ["Figma"], isInternal: true });
+    const old = await candidate("Old", { skills: ["Figma"] });
+    await db
+      .update(candidates)
+      .set({ createdAt: new Date(Date.now() - 30 * 864e5) })
+      .where(eq(candidates.id, old));
+    const r = await matchNewCvsToRoles(orgId);
+    // Employees (internal candidates) apply through the internal job board; not checked.
+    expect(r.checked).toBe(2);
+    expect(r.added.map((a) => a.name)).toEqual(["Meera"]);
+    const [app] = await db
+      .select()
+      .from(applications)
+      .where(and(eq(applications.candidateId, fits), eq(applications.requisitionId, role)));
+    expect(app!.source).toBe("pool_match");
+    expect((await matchNewCvsToRoles(orgId)).checked).toBe(0);
+    const [audit] = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.orgId, orgId), eq(auditLog.action, "pool.matched_to_role")));
+    expect(audit!.entityId).toBe(role);
+    // A pool match is not channel traction.
+    expect((await sourcing.roleTraction(orgId, role)).applicants.last7Days).toBe(0);
+  });
+});
+
 describe("desk: after the JD, and new applicants", () => {
   async function thread() {
     const [c] = await db

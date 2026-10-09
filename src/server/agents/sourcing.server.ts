@@ -40,7 +40,8 @@ export const SOURCING = {
 } as const;
 
 /** Sources added by agents themselves (reported by the agent, not announced as arrivals). */
-export const AGENT_SOURCES = ["agent_talent_pool"] as const;
+/** Not channel traction: agent additions and pool matches (a role's own channels must still bring people). */
+export const AGENT_SOURCES = ["agent_talent_pool", "pool_match"] as const;
 
 const BOARDS = ["linkedin", "naukri", "indeed"] as const;
 

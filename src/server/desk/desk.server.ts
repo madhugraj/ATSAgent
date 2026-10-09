@@ -3104,6 +3104,7 @@ const SOURCE_LABEL: Record<string, string> = {
   direct: "the apply page",
   ijp: "internal job board",
   talent_pool: "talent pool upload",
+  pool_match: "talent pool match (a new CV that fits this role)",
   linkedin: "LinkedIn",
   naukri: "Naukri",
   indeed: "Indeed",
