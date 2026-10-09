@@ -228,7 +228,7 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
   // Hiring desk: once a thread's JD is approved, rank candidates for it.
   if (e.type === "jd.approved") {
     const { onJdApproved } = await import("../desk/desk.server");
-    await onJdApproved(e.orgId, req.id);
+    await onJdApproved(e.orgId, req.id, e.subjectType === "jd" ? e.subjectId : null);
   }
 
   if (e.type === "application.shortlisted") {
@@ -367,6 +367,8 @@ export async function pendingEventCount(orgId: string): Promise<number> {
 /* ------------------------------------------------------------------ sweeps */
 
 const INTAKE_COOLDOWN_HOURS = 6;
+/** New applicants wait at most this long for an intake run (minutes between runs per role). */
+const FRESH_INTAKE_MINUTES = 10;
 const FOLLOWUP_COOLDOWN_HOURS = 20;
 
 async function enabledOrgs(agentType: string, orgId?: string): Promise<string[]> {
@@ -429,6 +431,76 @@ async function recentRun(
  */
 export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<number> {
   let started = 0;
+  // Applicants who just arrived (any channel) are scored within minutes, not
+  // at the next 6-hourly pass; agent-added ones are scored by the run that added them.
+  if (getAgent("intake")) {
+    for (const orgId of await enabledOrgs("intake", opts.orgId)) {
+      const fresh = (await db.execute(sql`
+        select a.requisition_id id, count(*)::int n, string_agg(distinct a.source, ', ') sources
+        from ${applications} a
+        join ${requisitions} r on r.id = a.requisition_id and r.status = 'approved'
+        where a.org_id = ${orgId}
+          and a.applied_at >= now() - interval '2 hours'
+          and a.source not like 'agent%'
+          and not exists (select 1 from ${matchScores} m where m.application_id = a.id)
+        group by a.requisition_id
+        limit 10`)) as unknown as { id: string; n: number; sources: string }[];
+      for (const f of fresh) {
+        const [busy] = (await db.execute(sql`
+          select 1 from agent_runs where org_id = ${orgId} and agent_type = 'intake'
+            and subject_id = ${f.id} and mode = 'live'
+            and (status in ('queued','running','awaiting_human') or created_at >= now() - interval '${sql.raw(String(FRESH_INTAKE_MINUTES))} minutes')
+          limit 1`)) as unknown as unknown[];
+        if (busy) continue;
+        const [r] = await db
+          .select({
+            code: requisitions.code,
+            title: requisitions.title,
+            createdBy: requisitions.createdBy,
+          })
+          .from(requisitions)
+          .where(and(eq(requisitions.id, f.id), eq(requisitions.orgId, orgId)))
+          .limit(1);
+        const principal = r?.createdBy ?? (await ownerOf(orgId));
+        if (!r || !principal) continue;
+        await startRun({
+          orgId,
+          agentType: "intake",
+          principalUserId: principal,
+          goal: `${f.n} new application(s) arrived for ${r.code} "${r.title}" (via ${f.sources}). Score them and review who should be shortlisted.\n\nRequisition id: ${f.id}`,
+          subjectType: "requisition",
+          subjectId: f.id,
+        });
+        started++;
+      }
+    }
+  }
+  // Starving roles get the Sourcing agent (once a day per role at most).
+  if (getAgent("sourcing")) {
+    const { starvingRoles } = await import("./sourcing.server");
+    for (const orgId of await enabledOrgs("sourcing", opts.orgId)) {
+      for (const r of await starvingRoles(orgId)) {
+        const principal = r.createdBy ?? (await ownerOf(orgId));
+        if (!principal) continue;
+        await startRun({
+          orgId,
+          agentType: "sourcing",
+          principalUserId: principal,
+          goal: `${r.code} "${r.title}" needs more candidates. Check its supply, top it up from the talent pool and past candidates, and recommend what to change.\n\nRequisition id: ${r.id}`,
+          subjectType: "requisition",
+          subjectId: r.id,
+        });
+        started++;
+      }
+    }
+  }
+  // Hiring-desk threads hear about new applicants.
+  try {
+    const { announceNewApplicants } = await import("../desk/desk.server");
+    await announceNewApplicants(opts.orgId);
+  } catch (err) {
+    log.warn("desk.announce_failed", { error: err as Error });
+  }
   if (getAgent("intake")) {
     for (const orgId of await enabledOrgs("intake", opts.orgId)) {
       const reqs = await db

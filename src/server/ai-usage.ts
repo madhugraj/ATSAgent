@@ -43,6 +43,7 @@ export const AI_FEATURES = [
   "agent_evaluation",
   "agent_offer",
   "agent_onboarding",
+  "agent_sourcing",
   "agent_followup",
   // Hiring desk conversation turns (docs/agentic-plan.md §13.2).
   "hiring_desk",

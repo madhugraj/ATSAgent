@@ -227,6 +227,8 @@ const Command = z.discriminatedUnion("type", [
   z.object({ type: z.literal("new_role") }),
   z.object({ type: z.literal("use_existing"), code: z.string().max(40).optional() }),
   z.object({ type: z.literal("close_role") }),
+  /** "Show me the JD": post the role's latest job description into the thread. */
+  z.object({ type: z.literal("show_jd") }),
   /** The person delegated details to market research ("as per market", "you decide"). */
   z.object({
     type: z.literal("research"),
@@ -263,6 +265,8 @@ const SYSTEM = [
   '- "command": {"type":"none"} unless the person asks to act: "talk to / screen / call the first 5" → {"type":"screen","top":5}; "screen 1, 3 and 4" → {"type":"screen","ranks":[1,3,4]}; "create a new role" → {"type":"new_role"}; "use REQ-2026-014" → {"type":"use_existing","code":"REQ-2026-014"}.',
   '- "command" also: "close / cancel / delete / withdraw this role" → {"type":"close_role"}.',
   '- When the person delegates a detail to you or to the market ("as per market needs", "you decide", "what does the market say?", "pick it up from research") → {"type":"research","fields":[...]} with the fields they delegated: "skills", "experience" and/or "budget". (JD details are not a research command — for those set researchRole true as above.) When OPEN PROPOSAL is yes and they agree ("ok", "yes", "use these", "go ahead") → {"type":"accept"}.',
+  '- "show / see / open / read the JD (job description)" → {"type":"show_jd"}; the system posts the full text. Never summarise the JD instead or send the person elsewhere to read it.',
+  '- Templates: whenever the person names or asks about a template ("use the Yavar template", "which template did you use?"), return {"type":"feedback","text":"<their words>","template":"<the name as they said it>"} — even when no request is open. The system checks the templates (by name and by content) and answers. Never state from memory or from earlier messages which templates exist; FACTS lists them.',
   '- When OPEN REQUESTS lists a request and the person comments on it, objects to it or asks for a change ("give more weight to experience", "budget is too high", "use Pune instead") — or answers an agent\'s question — → {"type":"feedback","text":"<what they want, faithfully, in their words>"}. The system sends it to the agent, which revises and asks again. This includes a job description waiting for approval: "use the X template", "make it shorter", "add a section on Y" are feedback (changes to the JD), not an approval decision; when they name a template add "template":"<the name as they said it>".',
   '- The reply must never promise an action ("I\'ll benchmark…", "I\'ll check…"): the desk acts only through commands, and the system reports what it did. With a research command the reply can be empty.',
   '- "reply": one short, friendly message. If MISSING lists details, ask for the FIRST missing one only, in one sentence, offering a typical example. Otherwise acknowledge briefly. Never claim that anything was created, approved or sent.',
@@ -403,6 +407,7 @@ const AGENT_NAME: Record<string, string> = {
   jd: "JD agent",
   intake: "Intake & matching agent",
   screening: "Screening agent",
+  sourcing: "Sourcing agent",
 };
 
 /** Start an agent for the thread, or tell the person why it cannot start. */
@@ -696,10 +701,15 @@ export async function reuseJdIfChosen(orgId: string, requisitionId: string): Pro
   return true;
 }
 
-/** After a thread's JD is approved: rank candidates for it. */
-export async function onJdApproved(orgId: string, requisitionId: string): Promise<void> {
+/** After a thread's JD is approved: say what happens next, then rank candidates for it. */
+export async function onJdApproved(
+  orgId: string,
+  requisitionId: string,
+  jdId: string | null = null,
+): Promise<void> {
   const conv = await conversationForRequisition(orgId, requisitionId);
   if (!conv) return;
+  await explainAfterJd(conv, jdId);
   const [req] = await db
     .select({ code: requisitions.code, title: requisitions.title, status: requisitions.status })
     .from(requisitions)
@@ -972,6 +982,10 @@ export async function handleUserMessage(
       return;
     }
     await screenCandidates(conv, userId, ids);
+    return;
+  }
+  if (cmd.type === "show_jd") {
+    await showJd(conv, understood);
     return;
   }
   if (cmd.type === "close_role") {
@@ -1352,6 +1366,7 @@ const AGENT_TITLE: Record<string, string> = {
   onboarding: "Pre-onboarding & release agent",
   publishing: "Publishing agent",
   followup: "Follow-up agent",
+  sourcing: "Sourcing agent",
   copilot: "Copilot",
 };
 
@@ -1361,6 +1376,8 @@ const SIDE_STEP: Record<string, string> = {
     "The Publishing agent is switched off, so this role will not be posted internally or to job boards automatically. Switch it on in Agent settings, or post it yourself in Manual mode.",
   followup:
     "The Follow-up agent is switched off, so overdue approvals and interviews will not be chased automatically.",
+  sourcing:
+    "The Sourcing agent is switched off, so nobody watches whether this role gets enough applicants or tops it up from past candidates. Switch it on in Agent settings.",
 };
 
 const APPROVER: Record<string, string> = {
@@ -2001,7 +2018,8 @@ const STATUS_WORDS: Record<string, string> = {
 
 /** What is actually true for this thread right now, for the desk's answers. */
 export async function deskFacts(conv: Conversation): Promise<string> {
-  if (!conv.requisitionId) return "No requisition yet — the role is still being described.";
+  if (!conv.requisitionId)
+    return `No requisition yet — the role is still being described.\n${await jdTemplateFacts(conv.orgId, null)}`;
   const [req] = await db
     .select({
       code: requisitions.code,
@@ -2037,6 +2055,7 @@ export async function deskFacts(conv: Conversation): Promise<string> {
       ? `It became ${last.to.replace("_", " ")}${last.at ? ` on ${last.at.slice(0, 10)}` : ""}${last.comment ? ` — reason: "${last.comment}"` : ""}.`
       : "",
     `Job description: ${jd ? jd.replace("_", " ") : "none yet"}.`,
+    await jdTemplateFacts(conv.orgId, conv.requisitionId),
     `Candidates in its pipeline: ${c?.total ?? 0} (${c?.scored ?? 0} scored, ${c?.shortlisted ?? 0} shortlisted).`,
     progress.next ? `Current journey step: ${progress.next.stage} — ${progress.next.text}` : "",
   ]
@@ -2508,6 +2527,7 @@ export type OpenRequest = {
   agentType: string;
   /** For gates: what the approval is about (requisition, jd, offer…). */
   subjectType: string | null;
+  subjectId: string | null;
 };
 
 /** Requests from this thread's agents still waiting on a person, newest first. */
@@ -2531,11 +2551,11 @@ export async function openRequests(conv: Conversation): Promise<OpenRequest[]> {
     )
     .orderBy(desc(agentTasks.createdAt))
     .limit(5);
-  return rows.map(({ action, ...r }) => ({
-    ...r,
-    subjectType:
-      (action as { args?: { subject?: { type?: string } } } | null)?.args?.subject?.type ?? null,
-  }));
+  return rows.map(({ action, ...r }) => {
+    const subject = (action as { args?: { subject?: { type?: string; id?: string } } } | null)?.args
+      ?.subject;
+    return { ...r, subjectType: subject?.type ?? null, subjectId: subject?.id ?? null };
+  });
 }
 
 /**
@@ -2553,16 +2573,64 @@ export async function sendFeedback(
   understood: { label: string; value: string }[] = [],
   template?: string,
 ): Promise<void> {
+  // "the Yavar template" → "Yavar", so replies don't read "Yavar template template".
+  template =
+    template
+      ?.replace(/\b(the|templates?)\b/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim() || undefined;
   understood = [...understood, { label: "Your change", value: text }];
   const requests = await openRequests(conv);
+  const asksTemplate = Boolean(template?.trim());
   const target =
-    requests.find(
-      (r) =>
-        r.kind === "approval" ||
-        r.kind === "clarification" ||
-        (r.kind === "gate" && r.subjectType === "jd"),
+    requests.find((r) =>
+      // A template request is about the job description: only the JD agent's
+      // requests can take it, never another agent's.
+      asksTemplate
+        ? r.agentType === "jd" && (r.kind !== "gate" || r.subjectType === "jd")
+        : r.kind === "approval" ||
+          r.kind === "clarification" ||
+          (r.kind === "gate" && r.subjectType === "jd"),
     ) ?? null;
   const agent = (r: OpenRequest) => AGENT_TITLE[r.agentType] ?? `${r.agentType} agent`;
+  if (!target && template?.trim() && conv.requisitionId) {
+    // Nothing to send back, but the question deserves an answer: which
+    // template shaped the current job description?
+    const { findTemplateByName } = await import("@/lib/templates.server");
+    const { match } = await findTemplateByName(conv.orgId, "jd", template);
+    const [jd] = await db
+      .select({
+        version: jobDescriptions.version,
+        status: jobDescriptions.status,
+        templateId: jobDescriptions.templateId,
+        templateName: jobDescriptions.templateName,
+      })
+      .from(jobDescriptions)
+      .where(
+        and(
+          eq(jobDescriptions.requisitionId, conv.requisitionId),
+          eq(jobDescriptions.orgId, conv.orgId),
+        ),
+      )
+      .orderBy(desc(jobDescriptions.version))
+      .limit(1);
+    const already = jd && match && jd.templateId === match.id;
+    await postMessage(conv, {
+      role: "desk",
+      body: already
+        ? `The job description (version ${jd.version}, ${jd.status.replace("_", " ")}) was already drafted with "${match.name}" — your ${template} template${match.evidence ? ` (${match.evidence})` : ""}.`
+        : jd
+          ? `The job description (version ${jd.version}, ${jd.status.replace("_", " ")}) used ${jd.templateName ? `"${jd.templateName}"` : "the built-in format"}${match ? `, not "${match.name}"` : ""}. To use ${match ? `"${match.name}"` : "another template"}, open the requisition, pick the template and press Redraft with AI — that makes version ${jd.version + 1}, which goes to the department head for approval.`
+          : "There is no job description for this role yet; the JD agent will pick the template when it drafts one.",
+      card: {
+        type: "reasoning",
+        understood,
+        missing: [],
+        next: "Answered from the job description's record; nothing was sent.",
+      },
+    });
+    return;
+  }
   if (!target) {
     await postMessage(conv, {
       role: "desk",
@@ -2578,24 +2646,50 @@ export async function sendFeedback(
   let reason = text;
   if (template?.trim()) {
     const { findTemplateByName } = await import("@/lib/templates.server");
-    const { match, names } = await findTemplateByName(conv.orgId, "jd", template);
-    if (!match) {
-      await postMessage(conv, {
+    const { match, names, ambiguous } = await findTemplateByName(conv.orgId, "jd", template);
+    const nothingSent = (next: string, body: string) =>
+      postMessage(conv, {
         role: "desk",
-        body: names.length
-          ? `There is no job-description template called "${template}". Your JD templates: ${names.map((n) => `"${n}"`).join(", ")}. Tell me which one to use, or add a "${template}" template under Content templates (Manual mode) and ask again.`
-          : `There are no job-description templates yet, so I can't use "${template}". Add one under Content templates (Manual mode) and ask again.`,
+        body,
         card: {
           type: "reasoning",
           understood: [...understood, { label: "Template asked for", value: template }],
           missing: [],
-          next: `Nothing was sent: no JD template matches "${template}". "${target.title}" is still waiting for you.`,
+          next,
         },
       });
+    if (!match) {
+      await nothingSent(
+        `Nothing was sent: ${ambiguous.length ? "several" : "no"} JD templates match "${template}". "${target.title}" is still waiting for you.`,
+        ambiguous.length
+          ? `More than one JD template mentions "${template}": ${ambiguous.map((n) => `"${n}"`).join(", ")}. Which one should I use?`
+          : names.length
+            ? `I checked your JD templates — names and content — and none mentions "${template}". Your JD templates: ${names.map((n) => `"${n}"`).join(", ")}. Tell me which one to use, or add a "${template}" template under Content templates (Manual mode) and ask again.`
+            : `There are no job-description templates yet, so I can't use "${template}". Add one under Content templates (Manual mode) and ask again.`,
+      );
       return;
     }
+    const found =
+      match.by === "content"
+        ? `"${match.name}" — your ${template} template (${match.evidence})`
+        : `"${match.name}"`;
+    // Already drafted with it: say so instead of sending the JD back for nothing.
+    if (target.subjectType === "jd" && target.subjectId) {
+      const [jd] = await db
+        .select({ templateId: jobDescriptions.templateId, version: jobDescriptions.version })
+        .from(jobDescriptions)
+        .where(and(eq(jobDescriptions.id, target.subjectId), eq(jobDescriptions.orgId, conv.orgId)))
+        .limit(1);
+      if (jd?.templateId === match.id) {
+        await nothingSent(
+          `Nothing was sent: version ${jd.version} already uses "${match.name}".`,
+          `This job description (version ${jd.version}) was already drafted with ${found}. Approve it, or tell me what else to change.`,
+        );
+        return;
+      }
+    }
     reason = `${text}\nUse the JD template "${match.name}".`;
-    understood = [...understood, { label: "Template", value: match.name }];
+    understood = [...understood, { label: "Template", value: found }];
   }
   const { resolveTask } = await import("../agents/runtime.server");
   try {
@@ -2732,4 +2826,337 @@ export async function budgetOf(
   // Room for this month's work so far again, rounded up to 50k.
   const suggested = Math.ceil(Math.max(limit * 2, used * 2) / 50_000) * 50_000;
   return { used, limit, suggested };
+}
+
+/** The org's JD templates (with what they contain) and the one the current JD used — desk facts. */
+async function jdTemplateFacts(orgId: string, requisitionId: string | null): Promise<string> {
+  const { contentTemplates } = await import("@db/schema");
+  const rows = await db
+    .select({
+      name: contentTemplates.name,
+      isDefault: contentTemplates.isDefault,
+      config: contentTemplates.config,
+    })
+    .from(contentTemplates)
+    .where(and(eq(contentTemplates.orgId, orgId), eq(contentTemplates.kind, "jd")));
+  const list = rows.length
+    ? rows
+        .map((r) => {
+          const cfg = (r.config ?? {}) as {
+            sections?: { heading?: string }[];
+            boilerplate?: string;
+          };
+          const sections = (cfg.sections ?? [])
+            .map((x) => x.heading)
+            .filter(Boolean)
+            .join(", ");
+          return `"${r.name}"${r.isDefault ? " (default)" : ""}${sections ? ` — sections: ${sections}` : ""}${cfg.boilerplate ? ` — standard wording: "${cfg.boilerplate.slice(0, 120)}"` : ""}`;
+        })
+        .join("; ")
+    : "none";
+  let used = "";
+  if (requisitionId) {
+    const [jd] = await db
+      .select({ version: jobDescriptions.version, templateName: jobDescriptions.templateName })
+      .from(jobDescriptions)
+      .where(
+        and(eq(jobDescriptions.requisitionId, requisitionId), eq(jobDescriptions.orgId, orgId)),
+      )
+      .orderBy(desc(jobDescriptions.version))
+      .limit(1);
+    if (jd)
+      used = ` The current JD (version ${jd.version}) was drafted with ${jd.templateName ? `"${jd.templateName}"` : "the built-in format"}.`;
+  }
+  return `JD templates:\n${untrusted("jd_templates", list)}${used}`;
+}
+
+/** Post the role's latest job description (full text) into the thread. */
+export async function showJd(
+  conv: Conversation,
+  understood: { label: string; value: string }[] = [],
+): Promise<void> {
+  if (!conv.requisitionId) {
+    await postMessage(conv, {
+      role: "desk",
+      body: "There is no job description yet — the role is still being described. The JD agent drafts one once the requisition is submitted.",
+    });
+    return;
+  }
+  const [jd] = await db
+    .select({
+      version: jobDescriptions.version,
+      status: jobDescriptions.status,
+      fullText: jobDescriptions.fullText,
+      templateName: jobDescriptions.templateName,
+      code: requisitions.code,
+    })
+    .from(jobDescriptions)
+    .innerJoin(requisitions, eq(requisitions.id, jobDescriptions.requisitionId))
+    .where(
+      and(
+        eq(jobDescriptions.requisitionId, conv.requisitionId),
+        eq(jobDescriptions.orgId, conv.orgId),
+      ),
+    )
+    .orderBy(desc(jobDescriptions.version))
+    .limit(1);
+  if (!jd?.fullText?.trim()) {
+    await postMessage(conv, {
+      role: "desk",
+      body: jd
+        ? `Version ${jd.version} of the job description has no text yet.`
+        : "There is no job description for this role yet; the JD agent drafts one once the requisition is submitted.",
+    });
+    return;
+  }
+  const status = jd.status.replace("_", " ");
+  await postMessage(conv, {
+    role: "desk",
+    body: `Here is the job description for ${jd.code} — version ${jd.version}, ${status}${jd.templateName ? `, drafted with "${jd.templateName}"` : ""}.`,
+    card: {
+      type: "jd",
+      requisitionId: conv.requisitionId,
+      code: jd.code,
+      version: jd.version,
+      status,
+      templateName: jd.templateName,
+      text: jd.fullText.slice(0, 20_000),
+      why: {
+        understood,
+        missing: [],
+        next: `Showing JD version ${jd.version} as it is saved now.`,
+      },
+    },
+  });
+}
+
+/* ------------------------------------- after the JD: next steps, supply */
+
+const NEXT_AFTER_JD: { agentType: AgentType; text: string }[] = [
+  {
+    agentType: "intake",
+    text: "Scores everyone in the pipeline against the JD, searches your talent pool and posts a ranked list here.",
+  },
+  {
+    agentType: "publishing",
+    text: "Posts the role on the internal job board and on every job board that is connected (the HR head approves external posts); where no board can post, it gives you a ready post and the apply link to share.",
+  },
+  {
+    agentType: "sourcing",
+    text: "Watches how many applicants arrive by channel and, when the role runs dry, tops it up from the talent pool and invites strong past candidates (with your approval).",
+  },
+];
+
+/**
+ * The JD was approved: tell the thread what happens next (which agents work
+ * now, which are switched off — with a switch), and when a later version
+ * replaces one candidates were scored against, offer to re-score them.
+ */
+async function explainAfterJd(conv: Conversation, jdId: string | null): Promise<void> {
+  const orgId = conv.orgId;
+  const requisitionId = conv.requisitionId!;
+  const [jd] = await db
+    .select({ version: jobDescriptions.version })
+    .from(jobDescriptions)
+    .where(
+      and(
+        jdId ? eq(jobDescriptions.id, jdId) : eq(jobDescriptions.requisitionId, requisitionId),
+        eq(jobDescriptions.orgId, orgId),
+      ),
+    )
+    .orderBy(desc(jobDescriptions.version))
+    .limit(1);
+  const version = jd?.version ?? 1;
+  const items = [];
+  for (const n of NEXT_AFTER_JD)
+    items.push({
+      agentType: n.agentType,
+      name: AGENT_TITLE[n.agentType] ?? n.agentType,
+      text: n.text,
+      enabled: await agentOn(orgId, n.agentType),
+    });
+  const off = items.filter((i) => !i.enabled);
+  await postMessage(conv, {
+    role: "desk",
+    body: `The job description (version ${version}) is approved. Here is what happens next${off.length ? ` — ${off.map((o) => o.name).join(" and ")} ${off.length === 1 ? "is" : "are"} switched off, so ${off.length === 1 ? "that step waits" : "those steps wait"} until you switch ${off.length === 1 ? "it" : "them"} on` : ""}.`,
+    card: { type: "next_steps", items },
+  });
+  if (version <= 1) return;
+  const [s] = (await db.execute(sql`
+    select count(*)::int n from applications a
+    where a.requisition_id = ${requisitionId} and a.org_id = ${orgId}
+      and a.stage in (${sql.join(
+        RESCORABLE.map((x) => sql`${x}`),
+        sql`, `,
+      )})
+      and exists (select 1 from match_scores m where m.application_id = a.id)`)) as unknown as {
+    n: number;
+  }[];
+  if (!s?.n) return;
+  await postMessage(conv, {
+    role: "desk",
+    body: `${s.n} candidate(s) were scored against an earlier version of the JD. Their scores and ranking may no longer fit version ${version}.`,
+    card: { type: "rescore", count: s.n, version },
+  });
+}
+
+/** Stages whose scores still steer decisions (later stages are past scoring). */
+const RESCORABLE = [
+  "sourced",
+  "applied",
+  "ai_screened",
+  "shortlisted",
+  "reserve",
+  "on_hold",
+] as const;
+
+/**
+ * Re-score the role's active candidates against the current JD: their old
+ * scores go (audited with the count), then they are scored again and the
+ * ranked list is re-posted. Stages are not changed — scoring only moves
+ * people who are still "applied".
+ */
+export async function rescoreThread(conv: Conversation, userId: string): Promise<number> {
+  if (!conv.requisitionId) throw new Error("This thread has no role yet.");
+  const removed = (await db.execute(sql`
+    delete from match_scores m using applications a
+    where m.application_id = a.id and a.requisition_id = ${conv.requisitionId}
+      and a.org_id = ${conv.orgId}
+      and a.stage in (${sql.join(
+        RESCORABLE.map((x) => sql`${x}`),
+        sql`, `,
+      )})
+    returning m.id`)) as unknown as unknown[];
+  await writeAudit({
+    actor: `user:${userId}`,
+    actorUserId: userId,
+    orgId: conv.orgId,
+    action: "desk.candidates_rescored",
+    entityType: "requisition",
+    entityId: conv.requisitionId,
+    detail: { scoresReplaced: removed.length },
+  });
+  let total = 0;
+  for (let i = 0; i < 4; i++) {
+    const n = await scoreAndRank(conv, userId);
+    total += n;
+    if (n < 25) break;
+  }
+  return total;
+}
+
+/**
+ * Switch an agent on from the thread and start what it would have done: the
+ * Publishing agent publishes this role, the Sourcing agent checks its
+ * supply, the others continue the journey. HR head / CBO / owner (checked by
+ * the caller); audited like the Agent settings switch.
+ */
+export async function enableAgentForThread(
+  conv: Conversation,
+  userId: string,
+  agentType: "intake" | "publishing" | "sourcing",
+): Promise<string | null> {
+  const { agentPolicies } = await import("@db/schema");
+  await db
+    .insert(agentPolicies)
+    .values({ orgId: conv.orgId, agentType, enabled: true, updatedBy: userId })
+    .onConflictDoUpdate({
+      target: [agentPolicies.orgId, agentPolicies.agentType],
+      set: { enabled: true, updatedBy: userId, updatedAt: new Date() },
+    });
+  await writeAudit({
+    actor: `user:${userId}`,
+    actorUserId: userId,
+    orgId: conv.orgId,
+    action: "agent.policy.updated",
+    entityType: "agent_policy",
+    entityId: null,
+    detail: { agentType, enabled: true, via: "hiring_desk" },
+  });
+  if (agentType === "publishing") return publishRole(conv, userId);
+  if (agentType === "sourcing") return startSourcing(conv, userId);
+  await resumeThreadsForAgent(conv.orgId, agentType);
+  return null;
+}
+
+/** Ask the Sourcing agent to check this role's supply now. */
+export async function startSourcing(conv: Conversation, userId: string): Promise<string | null> {
+  if (!conv.requisitionId) throw new Error("Choose or create the role first.");
+  const [req] = await db
+    .select({ code: requisitions.code, title: requisitions.title, status: requisitions.status })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, conv.orgId)))
+    .limit(1);
+  if (req?.status !== "approved") throw new Error("Sourcing works on approved roles.");
+  return startForThread(
+    conv,
+    "sourcing",
+    userId,
+    `${req.code} "${req.title}": check its supply of candidates, top it up from the talent pool and past candidates, and recommend what to change.`,
+    conv.requisitionId,
+    "I've asked the Sourcing agent to check this role's supply and find more candidates.",
+  );
+}
+
+const SOURCE_LABEL: Record<string, string> = {
+  careers_inbox: "careers inbox",
+  linkedin_post: "the apply page",
+  direct: "the apply page",
+  ijp: "internal job board",
+  talent_pool: "talent pool upload",
+  linkedin: "LinkedIn",
+  naukri: "Naukri",
+  indeed: "Indeed",
+};
+
+/**
+ * New applicants (any channel; not the ones agents added themselves) are
+ * announced in their role's thread, once — the cut-off is the thread's last
+ * announcement. Runs from the scheduler's sweep.
+ */
+export async function announceNewApplicants(orgId?: string): Promise<number> {
+  const threads = await db
+    .select()
+    .from(hiringConversations)
+    .where(
+      and(
+        orgId ? eq(hiringConversations.orgId, orgId) : undefined,
+        eq(hiringConversations.status, "active"),
+        sql`${hiringConversations.requisitionId} is not null`,
+        sql`${hiringConversations.updatedAt} >= now() - interval '60 days'`,
+      ),
+    )
+    .limit(200);
+  let posted = 0;
+  for (const conv of threads) {
+    const rows = (await db.execute(sql`
+      select c.full_name name, a.source
+      from applications a join candidates c on c.id = a.candidate_id
+      where a.requisition_id = ${conv.requisitionId} and a.org_id = ${conv.orgId}
+        and a.source not like 'agent%'
+        and a.applied_at > greatest(
+          ${conv.createdAt.toISOString()}::timestamptz,
+          coalesce((
+            select max(m.created_at) from hiring_messages m
+            where m.conversation_id = ${conv.id} and m.card ->> 'type' = 'applicants'
+          ), '-infinity'::timestamptz)
+        )
+      order by a.applied_at
+      limit 50`)) as unknown as { name: string; source: string }[];
+    if (!rows.length) continue;
+    const bySource = new Map<string, number>();
+    for (const r of rows) {
+      const k = SOURCE_LABEL[r.source] ?? r.source.replace(/_/g, " ");
+      bySource.set(k, (bySource.get(k) ?? 0) + 1);
+    }
+    const via = [...bySource].map(([k, n]) => `${n} via ${k}`).join(", ");
+    const names = rows.slice(0, 5).map((r) => r.name);
+    await postMessage(conv, {
+      role: "desk",
+      body: `${rows.length} new applicant(s): ${via} — ${names.join(", ")}${rows.length > 5 ? ` and ${rows.length - 5} more` : ""}. The Intake & matching agent scores new applicants within minutes when it is on.`,
+      card: { type: "applicants", count: rows.length, bySource: Object.fromEntries(bySource) },
+    });
+    posted++;
+  }
+  return posted;
 }

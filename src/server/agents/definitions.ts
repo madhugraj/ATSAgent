@@ -130,7 +130,9 @@ export function registerPhase1Agents(): void {
     type: "publishing",
     name: "Publishing agent",
     // 1.3.0: job-board posts requested by anyone, approved (and posted) by the HR head.
-    version: "1.3.0",
+    // 1.4.0: checks every channel first; posts only where a board can post; the
+    // apply link goes in every post; an honest fallback where no board can.
+    version: "1.4.0",
     owner: "hr_head",
     responsibility:
       "Makes an approved requisition visible: internal job board first, then reviewed external job-board posts.",
@@ -139,7 +141,7 @@ export function registerPhase1Agents(): void {
       "Publish a requisition or JD that is not approved",
     ],
     scope: {
-      reads: ["requisitions", "approved JD text"],
+      reads: ["requisitions", "approved JD text", "publishing channels and their state"],
       writes: ["internal job posting (IJP) flag"],
       external: [
         "job-board posts (LinkedIn, Indeed, Naukri) — approved and posted by the HR head, or on a board the org pre-approved (Autonomous only)",
@@ -152,17 +154,20 @@ export function registerPhase1Agents(): void {
     maxSteps: 10,
     tools: [
       "get_requisition",
+      "list_publish_channels",
       "draft_linkedin_post",
       "enable_internal_posting",
       "publish_to_job_board",
     ],
     system: [
-      "You are the publishing agent. You make an approved requisition visible.",
+      "You are the publishing agent. You make an approved requisition visible where it can actually be seen.",
       "1. get_requisition; only continue if it is approved and its latest JD is approved.",
-      "2. enable_internal_posting so employees see it first.",
-      "3. draft_linkedin_post, then publish_to_job_board for linkedin with that text. A person reviews every external post.",
-      "If a board is not connected or the publish fails, report it plainly and continue with what worked.",
-      "Finish with what is now live and where.",
+      "2. list_publish_channels — the real state of every channel. Never publish to a board it does not mark canPost, and never re-post where a post is already live.",
+      "3. enable_internal_posting unless the internal posting is already live.",
+      '4. draft_linkedin_post, then end the text with the apply link from list_publish_channels ("Apply: <applyUrl>").',
+      "5. For each board with canPost true and nothing live: publish_to_job_board with that text. A person (the HR head) approves every external post unless the board is pre-approved.",
+      "6. For boards that cannot post, do not call publish_to_job_board. In your final message give the person what they can do themselves: the drafted post (to share from the company page), the apply link, the careers inbox address for emailed CVs, and for each board the one-line reason it could not be used.",
+      "Finish with: live now (where), waiting for approval (where), and what the person can share themselves.",
     ].join("\n"),
   });
 }
@@ -478,6 +483,61 @@ export function registerPhase4Agents(): void {
       "3. For documents received and pending review: compensation_cross_check, then request_approval with subject {type: 'document_validation', applicationId, documentIds} addressed to hr_head. In the summary, list for each document what it shows and any conflict with the candidate's declared details or the offer.",
       "4. When every required document is verified, request_approval with subject {type: 'offer_release', offerId} addressed to hr_head.",
       "Finish with what is still missing, what is waiting for HR, or that the release was requested.",
+    ].join("\n"),
+  });
+}
+
+/** Phase 6 agents (docs/agentic-plan.md §13.4). */
+export function registerPhase6Agents(): void {
+  registerAgent({
+    type: "sourcing",
+    name: "Sourcing agent",
+    version: "1.0.0",
+    owner: "hr_head",
+    responsibility:
+      "Keeps an approved, published role supplied with candidates: watches applicants by channel, tops up the pipeline from the talent pool, invites strong past candidates to apply, and says what to change when a role is starving.",
+    mustNever: [
+      "Contact a candidate who has not consented, is already in the role's pipeline or was invited for it in the last 30 days",
+      "Email a candidate without a person's approval unless the invitation template is pre-approved",
+      "Publish to a job board or spend money — publishing is the Publishing agent's job; recommend it instead",
+      "Score, shortlist, reject or move candidates — the Intake & matching agent and people decide",
+    ],
+    scope: {
+      reads: [
+        "requisitions",
+        "applications and their sources",
+        "the talent pool",
+        "past candidates' outcomes for other roles",
+        "publishing channels and their state",
+      ],
+      writes: ["applications added from the talent pool (then scored by Intake & matching)"],
+      external: [
+        "invitations to apply, emailed to consented past candidates — approved by a person",
+      ],
+    },
+    gates: ["general"],
+    riskTier: "medium",
+    evals: [
+      "sourcing: tops up a starving role from the pool and invites past candidates after approval",
+    ],
+    feature: "agent_sourcing",
+    maxSteps: 14,
+    tools: [
+      "get_requisition",
+      "get_role_traction",
+      "list_publish_channels",
+      "search_talent_pool",
+      "add_to_pipeline",
+      "find_past_candidates",
+      "invite_to_apply",
+    ],
+    system: [
+      "You are the sourcing agent for one approved requisition. You keep it supplied with candidates; you never judge them.",
+      "1. get_role_traction. If it is not starving, finish with one line: applicants by source and the shortlist against its target.",
+      "2. search_talent_pool and add_to_pipeline the strongest overlaps (at most 10). The Intake & matching agent scores them; do not score or move anyone.",
+      "3. find_past_candidates. Invite the strongest (at most 5) with invite_to_apply in ONE call — only people with hasEmail true whose earlier stage shows they did well.",
+      "4. list_publish_channels. Note channels not in use (internal posting off, a board not connected or not live) as recommendations; never publish yourself.",
+      "Finish with: the supply verdict, who you added from the pool, who you invited (or asked to invite), and at most three concrete recommendations (for example: switch on the Publishing agent, connect Naukri, widen a must-have that no applicant has).",
     ].join("\n"),
   });
 }

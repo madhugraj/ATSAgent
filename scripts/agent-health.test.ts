@@ -131,6 +131,36 @@ describe("rules", () => {
     expect((await open())[0]!.severity).toBe("serious");
   });
 
+  test("sourcing that finds nobody for a role, run after run, is flagged", async () => {
+    const { requisitions } = await import("../drizzle/schema");
+    const [q] = await db
+      .insert(requisitions)
+      .values({ orgId, code: `REQ-H-${stamp}`, title: "SRE", status: "approved" } as never)
+      .returning({ id: requisitions.id });
+    const fruitless = () =>
+      run("sourcing", { status: "done", subjectType: "requisition", subjectId: q!.id });
+    await fruitless();
+    await evaluate();
+    expect(await open()).toHaveLength(0);
+    await fruitless();
+    await evaluate();
+    expect((await open())[0]).toMatchObject({ rule: "sourcing.no_supply", agentType: "sourcing" });
+    // A run that added someone means the supply is not exhausted.
+    await db.delete(agentRuns).where(eq(agentRuns.orgId, orgId));
+    const ok = await fruitless();
+    await fruitless();
+    await db.insert(agentSteps).values({
+      runId: ok,
+      orgId,
+      seq: 1,
+      kind: "tool",
+      toolName: "add_to_pipeline",
+      status: "ok",
+    });
+    await evaluate();
+    expect((await open()).filter((i) => i.rule === "sourcing.no_supply")).toHaveLength(0);
+  });
+
   test("tool error rate fires above the threshold only", async () => {
     const id = await run("screening", { status: "done" });
     const steps = (errors: number) =>

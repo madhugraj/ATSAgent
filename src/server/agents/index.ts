@@ -8,11 +8,13 @@ import {
   registerPhase2Agents,
   registerPhase3Agents,
   registerPhase4Agents,
+  registerPhase6Agents,
 } from "./definitions";
 import { registerPhase1Tools } from "./tools";
 import { registerPhase2Tools } from "./tools-phase2";
 import { registerPhase3Tools } from "./tools-phase3";
 import { registerPhase4Tools } from "./tools-phase4";
+import { registerSourcingTools } from "./tools-sourcing";
 import type { AgentType } from "@db/schema";
 
 let registered = false;
@@ -25,10 +27,12 @@ export function ensureAgentsRegistered(): void {
   registerPhase2Tools();
   registerPhase3Tools();
   registerPhase4Tools();
+  registerSourcingTools();
   registerPhase1Agents();
   registerPhase2Agents();
   registerPhase3Agents();
   registerPhase4Agents();
+  registerPhase6Agents();
 }
 
 ensureAgentsRegistered();

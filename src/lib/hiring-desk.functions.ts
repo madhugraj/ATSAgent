@@ -457,3 +457,53 @@ export const raiseDeskAgentBudget = createServerFn({ method: "POST" })
     kickAgents(context.orgId);
     return { monthlyTokenBudget: suggested };
   });
+
+/**
+ * Switch an agent on from the thread (HR head / CBO / owner, as on Agent
+ * settings; audited) and start what it would have done for this role.
+ */
+export const enableDeskAgent = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        agentType: z.enum(["intake", "publishing", "sourcing"]),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    const { assertRole } = await import("./auth.middleware");
+    await assertRole(
+      context.userId,
+      context.orgId,
+      [...AGENT_SETTINGS_ROLES],
+      "Only the HR head, the CBO or the organisation owner can switch agents on.",
+    );
+    await registered();
+    const { enableAgentForThread } = await import("../server/desk/desk.server");
+    return { runId: await enableAgentForThread(conv, context.userId, data.agentType) };
+  });
+
+/** Re-score the role's active candidates against its current (approved) JD. */
+export const rescoreDeskCandidates = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    await needsAiKey(context.orgId);
+    const { rescoreThread } = await import("../server/desk/desk.server");
+    return { scored: await rescoreThread(conv, context.userId) };
+  });
+
+/** Ask the Sourcing agent to check this role's supply and find more candidates. */
+export const startDeskSourcing = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    await registered();
+    const { startSourcing } = await import("../server/desk/desk.server");
+    return { runId: await startSourcing(conv, context.userId) };
+  });

@@ -982,38 +982,38 @@ describe("delegating to the market, and showing the desk's thinking", () => {
   });
 });
 
-describe("the person talks to the agents through the desk", () => {
-  async function threadWithRequest(kind: "approval" | "clarification" | "gate") {
-    const conv = await confirming();
-    await db
-      .update(hiringConversations)
-      .set({ status: "active", requisitionId: existingReq })
-      .where(eq(hiringConversations.id, conv.id));
-    const [run] = await db
-      .insert(agentRuns)
-      .values({
-        orgId,
-        agentType: "requisition",
-        principalUserId: recruiter,
-        goal: "g",
-        status: "awaiting_human",
-        conversationId: conv.id,
-      })
-      .returning();
-    const [task] = await db
-      .insert(agentTasks)
-      .values({
-        orgId,
-        runId: run!.id,
-        kind,
-        status: "open",
-        title: "Save candidate-scoring weights",
-        assigneeUserId: recruiter,
-      })
-      .returning();
-    return { conv: await reload(conv.id), runId: run!.id, taskId: task!.id };
-  }
+async function threadWithRequest(kind: "approval" | "clarification" | "gate") {
+  const conv = await confirming();
+  await db
+    .update(hiringConversations)
+    .set({ status: "active", requisitionId: existingReq })
+    .where(eq(hiringConversations.id, conv.id));
+  const [run] = await db
+    .insert(agentRuns)
+    .values({
+      orgId,
+      agentType: "requisition",
+      principalUserId: recruiter,
+      goal: "g",
+      status: "awaiting_human",
+      conversationId: conv.id,
+    })
+    .returning();
+  const [task] = await db
+    .insert(agentTasks)
+    .values({
+      orgId,
+      runId: run!.id,
+      kind,
+      status: "open",
+      title: "Save candidate-scoring weights",
+      assigneeUserId: recruiter,
+    })
+    .returning();
+  return { conv: await reload(conv.id), runId: run!.id, taskId: task!.id };
+}
 
+describe("the person talks to the agents through the desk", () => {
   test("a change asked in chat goes back to the agent, which revises and asks again", async () => {
     const { conv, runId, taskId } = await threadWithRequest("approval");
     deskScript.push({
@@ -1172,7 +1172,7 @@ describe("JD changes, templates, budget pauses and readable agent text", () => {
       });
       await desk.handleUserMessage(conv, recruiter, "Can u use Yavar template?");
       const last = (await messages(conv.id)).at(-1)!;
-      expect(last.body).toMatch(/no job-description template called "Yavar"/);
+      expect(last.body).toMatch(/none mentions "Yavar"/);
       expect(last.body).toContain('"Standard Product Job Description"');
       const [t] = await db.select().from(agentTasks).where(eq(agentTasks.id, taskId));
       expect(t!.status).toBe("open");
@@ -1204,6 +1204,59 @@ describe("JD changes, templates, budget pauses and readable agent text", () => {
         reason: "the template the reviewer asked for",
       });
       await expect(pickTemplate(orgId, "jd", "UI/UX", "Acme")).rejects.toThrow(/Yavar House Style/);
+    } finally {
+      await db.delete(contentTemplates).where(eq(contentTemplates.orgId, orgId));
+      await db.delete(jobDescriptions).where(eq(jobDescriptions.version, 9));
+    }
+  });
+
+  test("a template is found by what it contains, and one already in use is not re-requested", async () => {
+    const { contentTemplates } = await import("../drizzle/schema");
+    const [tpl] = await db
+      .insert(contentTemplates)
+      .values({
+        orgId,
+        kind: "jd",
+        name: "Standard Product Job Description",
+        config: {
+          sections: [
+            { key: "s2", heading: "About Yavar" },
+            { key: "s6", heading: "Why Join Yavar?" },
+          ],
+        },
+      } as never)
+      .returning({ id: contentTemplates.id });
+    try {
+      const { findTemplateByName } = await import("../src/lib/templates.server");
+      expect((await findTemplateByName(orgId, "jd", "Yavar")).match).toMatchObject({
+        name: "Standard Product Job Description",
+        by: "content",
+        evidence: 'its sections "About Yavar", "Why Join Yavar?"',
+      });
+      const { conv, jdId, taskId } = await jdGateThread();
+      await db
+        .update(jobDescriptions)
+        .set({ templateId: tpl!.id } as never)
+        .where(eq(jobDescriptions.id, jdId));
+      deskScript.push({
+        command: { type: "feedback", text: "use Yavar template", template: "Yavar" },
+      });
+      await desk.handleUserMessage(conv, recruiter, "Can u use Yavar template?");
+      const last = (await messages(conv.id)).at(-1)!;
+      expect(last.body).toMatch(
+        /already drafted with "Standard Product Job Description" — your Yavar template/,
+      );
+      const [t] = await db.select().from(agentTasks).where(eq(agentTasks.id, taskId));
+      expect(t!.status).toBe("open");
+      // Another agent's open request never receives a template change.
+      const other = await threadWithRequest("approval");
+      deskScript.push({
+        command: { type: "feedback", text: "use Yavar template", template: "Yavar" },
+      });
+      await desk.handleUserMessage(other.conv, recruiter, "use the Yavar template");
+      const [o] = await db.select().from(agentTasks).where(eq(agentTasks.id, other.taskId));
+      expect(o!.status).toBe("open");
+      expect((await messages(other.conv.id)).at(-1)!.body).toMatch(/^The job description/);
     } finally {
       await db.delete(contentTemplates).where(eq(contentTemplates.orgId, orgId));
       await db.delete(jobDescriptions).where(eq(jobDescriptions.version, 9));
@@ -1243,6 +1296,22 @@ describe("JD changes, templates, budget pauses and readable agent text", () => {
     await runAgentTick({ orgId });
     const [after] = await db.select().from(agentRuns).where(eq(agentRuns.id, run!.id));
     expect(after!.lastError).toBeNull();
+  });
+
+  test("'show the JD' posts the saved job description into the thread", async () => {
+    const conv = await confirming();
+    await db
+      .update(hiringConversations)
+      .set({ status: "active", requisitionId: existingReq })
+      .where(eq(hiringConversations.id, conv.id));
+    deskScript.push({
+      command: { type: "show_jd" },
+      reply: "You can view it on the requisition page.",
+    });
+    await desk.handleUserMessage(await reload(conv.id), recruiter, "show the JD");
+    const last = (await messages(conv.id)).at(-1)!;
+    expect(last.body).toMatch(/^Here is the job description for .* version 1, approved/);
+    expect(last.card).toMatchObject({ type: "jd", version: 1, text: "Full stack JD text" });
   });
 
   test("agent text in the thread hides internal ids", () => {

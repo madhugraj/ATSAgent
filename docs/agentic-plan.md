@@ -243,6 +243,14 @@ the autonomy dial.
   publishes to connected boards (capability-gated as today).
 - **HITL:** `external` — first post per requisition needs approval unless
   whitelisted.
+- **Channels first (v1.4.0):** `list_publish_channels` returns the real state
+  of every channel — internal posting, the public apply link, the careers
+  inbox address, and per board (LinkedIn, Naukri, Indeed) connected / switched
+  on / may post on this connection (the adapter's own capability verdict, with
+  the reason) / already live. The agent posts only where `canPost` is true and
+  nothing is live, ends every post with the apply link, and where no board can
+  post hands the person the drafted post, the apply link and the inbox address
+  to share themselves.
 
 ### 4.4 Intake & matching agent
 
@@ -817,6 +825,32 @@ arrives):
   to the levels and pre-approved templates above; the measured
   recommendations still decide when the three trust checkpoints go.
 
+- **Supply after publishing (built):**
+  - _Arrivals:_ applications from every channel (apply page, careers inbox,
+    board webhooks / board sync, IJP, uploads) are picked up by the scheduler
+    sweep — any unscored applicant from the last 2 hours starts an Intake &
+    matching run for its role (at most one per role every 10 minutes), and the
+    role's desk thread gets "N new applicant(s): 2 via careers inbox — …" once
+    (cut-off: the thread's last announcement; agent-added people excluded).
+  - _Sourcing agent (`sourcing`, v1.0.0, owner HR head, risk medium):_ started
+    by the sweep for approved roles with an approved JD that are **starving**
+    (`SOURCING` in `sourcing.server.ts`: live ≥ 3 days with < 5 applicants in
+    7 days, or fewer than 3 shortlisted per opening, or not published at all),
+    at most once a day per role, or from the desk ("Ask the Sourcing agent").
+    Tools: `get_role_traction`, `list_publish_channels`, `search_talent_pool`,
+    `add_to_pipeline`, `find_past_candidates` (did well for another role —
+    shortlisted, interviewed, reserve, declined an offer — consented, not an
+    employee, not in this pipeline, not invited for it in 30 days) and
+    `invite_to_apply` (`external`, template `role_invite`, pre-approvable;
+    emails the apply link — nobody is added without applying). It never
+    scores, moves, rejects or publishes; it recommends. Health rule
+    `sourcing.no_supply`: 2+ fruitless runs on a role in 7 days.
+  - _Desk:_ when a JD is approved the thread lists what happens next (Intake,
+    Publishing, Sourcing — on / switched off, with **Switch on and start** for
+    HR head / CBO / owner, audited); when a later JD version is approved and
+    candidates were scored against an earlier one, **Re-score** replaces their
+    scores (audited `desk.candidates_rescored`; stages are not changed).
+
 ### 13.5 Observability additions
 
 - Voice: calls placed / answered / completed / opted out / asked for human,
@@ -921,6 +955,7 @@ P6 hiring desk + voice (planned).
 | 10  | Offer agent                    | selection confirmed                                   | pay within band, offer draft and letter, approval brief                                          | HR head and CBO offer approvals           | P4    |
 | 11  | Pre-onboarding & release agent | offer approved                                        | requests and cross-checks documents, prepares release                                            | document validation and release (HR head) | P4    |
 | 12  | Follow-up agent                | anything past its deadline                            | nudges approvers / interviewers, drafts candidate follow-ups                                     | candidate messages (unless whitelisted)   | P2    |
+| 13  | Sourcing agent                 | approved role starving for applicants                 | supply by channel, tops up from the talent pool, invites strong past candidates, recommends      | invitations (unless whitelisted)          | P6    |
 
 ### A.2 Tools
 

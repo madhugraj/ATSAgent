@@ -254,11 +254,21 @@ export async function findTemplateByName(
   orgId: string,
   kind: TemplateKind,
   asked: string,
-): Promise<{ match: { id: string; name: string } | null; names: string[] }> {
+): Promise<{
+  match: { id: string; name: string; by: "name" | "content"; evidence: string | null } | null;
+  names: string[];
+  /** Several templates mention what was asked for in their content: ask which. */
+  ambiguous: string[];
+}> {
   const rows = await db
-    .select({ id: contentTemplates.id, name: contentTemplates.name })
+    .select({
+      id: contentTemplates.id,
+      name: contentTemplates.name,
+      config: contentTemplates.config,
+    })
     .from(contentTemplates)
     .where(and(eq(contentTemplates.orgId, orgId), eq(contentTemplates.kind, kind)));
+  const names = rows.map((r) => r.name);
   const words = (s: string) =>
     s
       .toLowerCase()
@@ -273,7 +283,39 @@ export async function findTemplateByName(
         return q.every((w) => n.has(w));
       })
     : undefined;
-  return { match: exact ?? partial ?? null, names: rows.map((r) => r.name) };
+  const byName = exact ?? partial;
+  if (byName)
+    return {
+      match: { id: byName.id, name: byName.name, by: "name", evidence: null },
+      names,
+      ambiguous: [],
+    };
+  if (!q.length) return { match: null, names, ambiguous: [] };
+  // People name a template by what it is ("the Yavar one"), not by its title:
+  // look inside — section headings, standard wording, instructions.
+  const inContent = rows.filter((r) => {
+    const n = new Set(words(JSON.stringify(r.config ?? {})));
+    return q.every((w) => n.has(w));
+  });
+  if (inContent.length > 1) return { match: null, names, ambiguous: inContent.map((r) => r.name) };
+  const hit = inContent[0];
+  if (!hit) return { match: null, names, ambiguous: [] };
+  const cfg = (hit.config ?? {}) as { sections?: { heading?: string }[] };
+  const headings = (cfg.sections ?? [])
+    .map((x) => x.heading ?? "")
+    .filter((h) => q.every((w) => new Set(words(h)).has(w)));
+  return {
+    match: {
+      id: hit.id,
+      name: hit.name,
+      by: "content",
+      evidence: headings.length
+        ? `its sections ${headings.map((h) => `"${h}"`).join(", ")}`
+        : `its standard wording mentions "${asked}"`,
+    },
+    names,
+    ambiguous: [],
+  };
 }
 
 export async function pickTemplate(

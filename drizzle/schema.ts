@@ -871,7 +871,8 @@ export type EmailOutboxKind =
   | "offer_released"
   | "assessment_invite"
   | "member_reminder"
-  | "document_request";
+  | "document_request"
+  | "role_invite";
 export type EmailOutboxStatus = "queued" | "sent" | "failed" | "suppressed";
 export type EmailOutboxAttachment = {
   filename: string;
@@ -1716,7 +1717,8 @@ export type AgentType =
   | "evaluation"
   | "offer"
   | "onboarding"
-  | "followup";
+  | "followup"
+  | "sourcing";
 export type AgentAutonomy = "suggest" | "act_and_notify" | "autonomous";
 export type AgentRunStatus =
   "queued" | "running" | "awaiting_human" | "done" | "failed" | "cancelled";

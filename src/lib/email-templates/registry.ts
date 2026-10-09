@@ -13,6 +13,7 @@ import { template as offerReleasedTemplate } from "./offer-released";
 import { template as assessmentInviteTemplate } from "./assessment-invite";
 import { template as memberReminderTemplate } from "./member-reminder";
 import { template as documentRequestTemplate } from "./document-request";
+import { template as roleInviteTemplate } from "./role-invite";
 
 /**
  * Dynamic template-data bag passed to every template renderer and subject
@@ -63,4 +64,5 @@ export const TEMPLATES: Record<string, TemplateEntry> = {
   assessment_invite: assessmentInviteTemplate,
   member_reminder: memberReminderTemplate,
   document_request: documentRequestTemplate,
+  role_invite: roleInviteTemplate,
 };

@@ -25,7 +25,10 @@ import { AGENT_LABEL } from "@/lib/agents.catalog";
 import { decideAgentTask, type AgentDecisionInput } from "@/lib/agents.functions";
 import {
   acceptDeskProposal,
+  enableDeskAgent,
   raiseDeskAgentBudget,
+  rescoreDeskCandidates,
+  startDeskSourcing,
   chooseDeskRole,
   closeDeskRole,
   getDeskConversation,
@@ -384,6 +387,10 @@ function Card({
   if (card.type === "task") return <TaskCard card={card} conv={conv} onChanged={onChanged} />;
   if (card.type === "reasoning")
     return <Thinking why={card as unknown as Why} conv={conv} onChanged={onChanged} />;
+  if (card.type === "jd") return <JdCard card={card} />;
+  if (card.type === "next_steps")
+    return <NextStepsCard card={card} conv={conv} onChanged={onChanged} />;
+  if (card.type === "rescore") return <RescoreCard card={card} conv={conv} onChanged={onChanged} />;
   if (card.type === "proposal")
     return <ProposalCard card={card} conv={conv} onChanged={onChanged} />;
   if (card.type === "close_role")
@@ -1096,7 +1103,7 @@ function BringCandidatesCard({
   conv: DeskConversationView;
   onChanged: () => void;
 }) {
-  const [busy, setBusy] = useState<null | "upload" | "publish">(null);
+  const [busy, setBusy] = useState<null | "upload" | "publish" | "source">(null);
   const [progress, setProgress] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const reqId = conv.requisition?.id ?? null;
@@ -1136,6 +1143,18 @@ function BringCandidatesCard({
       onChanged();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not publish");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function source() {
+    setBusy("source");
+    try {
+      await startDeskSourcing({ data: { id: conv.id } });
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not start sourcing");
     } finally {
       setBusy(null);
     }
@@ -1185,11 +1204,16 @@ function BringCandidatesCard({
           </Button>
         </div>
         <div className="rounded-md border border-border p-2.5">
-          <p className="font-medium">Check other sources</p>
+          <p className="font-medium">Find more candidates</p>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Applications by email land in the Careers inbox; the talent pool has everyone you know.
+            The Sourcing agent searches your talent pool and past candidates, and invites the best
+            to apply with your approval. Emailed CVs land in the Careers inbox.
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" disabled={busy !== null} onClick={source}>
+              {busy === "source" ? <Loader2 className="size-4 animate-spin" /> : null}
+              Ask the Sourcing agent
+            </Button>
             <Button asChild size="sm" variant="outline">
               <Link to="/inbox">Careers inbox</Link>
             </Button>
@@ -1505,6 +1529,151 @@ function BudgetPaused({
           Ask your HR head or CBO to raise it (Agent settings → monthly token budget).
         </p>
       )}
+    </div>
+  );
+}
+
+/** A job description shown in the thread: the saved text of one version. */
+function JdCard({ card }: { card: DeskCardView }) {
+  return (
+    <div className="rounded-lg border border-border text-sm">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
+        <p className="font-medium">
+          {String(card["code"])} · version {String(card["version"])}
+        </p>
+        <Badge variant="outline">{String(card["status"])}</Badge>
+        {card["templateName"] ? (
+          <span className="text-xs text-muted-foreground">
+            Template: {String(card["templateName"])}
+          </span>
+        ) : null}
+        <Link
+          to="/requisitions/$id"
+          params={{ id: String(card["requisitionId"]) }}
+          className="ml-auto text-xs text-primary hover:underline"
+        >
+          Open the requisition
+        </Link>
+      </div>
+      <div className="max-h-96 overflow-y-auto whitespace-pre-wrap px-3 py-2 text-[13px] leading-relaxed">
+        {renderMarkdown(String(card["text"] ?? ""))}
+      </div>
+    </div>
+  );
+}
+
+type NextItem = {
+  agentType: "intake" | "publishing" | "sourcing";
+  name: string;
+  text: string;
+  enabled: boolean;
+};
+
+/** After JD approval: who works next, and a switch for the ones that are off. */
+function NextStepsCard({
+  card,
+  conv,
+  onChanged,
+}: {
+  card: DeskCardView;
+  conv: DeskConversationView;
+  onChanged: () => void;
+}) {
+  const items = (card["items"] as NextItem[] | undefined) ?? [];
+  const [busy, setBusy] = useState<string | null>(null);
+  const [turnedOn, setTurnedOn] = useState<Set<string>>(new Set());
+  async function enable(agentType: NextItem["agentType"]) {
+    setBusy(agentType);
+    try {
+      await enableDeskAgent({ data: { id: conv.id, agentType } });
+      setTurnedOn((s) => new Set(s).add(agentType));
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not switch it on");
+    } finally {
+      setBusy(null);
+    }
+  }
+  return (
+    <ol className="space-y-2 rounded-lg border border-border p-3 text-sm">
+      {items.map((it, i) => {
+        const on = it.enabled || turnedOn.has(it.agentType);
+        return (
+          <li key={it.agentType} className="flex gap-2">
+            <span className="num text-muted-foreground">{i + 1}.</span>
+            <div className="min-w-0 flex-1">
+              <p className="font-medium">
+                {it.name}{" "}
+                <Badge variant={on ? "outline" : "secondary"} className="ml-1">
+                  {on ? "on" : "switched off"}
+                </Badge>
+              </p>
+              <p className="text-xs text-muted-foreground">{it.text}</p>
+              {!on ? (
+                conv.canEditAgents ? (
+                  <Button
+                    size="sm"
+                    className="mt-1 h-7"
+                    disabled={busy !== null}
+                    onClick={() => enable(it.agentType)}
+                  >
+                    {busy === it.agentType ? <Loader2 className="size-4 animate-spin" /> : null}
+                    Switch on and start
+                  </Button>
+                ) : (
+                  <p className="mt-1 text-xs font-medium text-primary">
+                    Ask your HR head or CBO to switch it on.
+                  </p>
+                )
+              ) : null}
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/** The JD changed after candidates were scored: offer to score them again. */
+function RescoreCard({
+  card,
+  conv,
+  onChanged,
+}: {
+  card: DeskCardView;
+  conv: DeskConversationView;
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<number | null>(null);
+  async function go() {
+    setBusy(true);
+    try {
+      const r = await rescoreDeskCandidates({ data: { id: conv.id } });
+      setDone(r.scored);
+      toast.success(`${r.scored} candidate(s) re-scored`);
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not re-score");
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (done !== null)
+    return (
+      <p className="text-xs text-muted-foreground">
+        Re-scored {done} candidate(s); the ranked list above is updated.
+      </p>
+    );
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/40 p-3 text-sm">
+      <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+        Their old scores are replaced; nobody's stage changes.
+      </p>
+      <Button size="sm" disabled={busy} onClick={go}>
+        {busy ? <Loader2 className="size-4 animate-spin" /> : null}
+        Re-score {String(card["count"])} against version {String(card["version"])}
+      </Button>
     </div>
   );
 }

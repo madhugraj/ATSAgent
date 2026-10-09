@@ -83,3 +83,6 @@ jobs:
 
       - name: Agent utilisation & efficiency
         run: bun test scripts/agent-utilisation.test.ts
+
+      - name: Publishing channels, supply and the Sourcing agent
+        run: bun test scripts/agent-sourcing.test.ts

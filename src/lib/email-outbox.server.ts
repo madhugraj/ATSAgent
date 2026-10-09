@@ -36,6 +36,7 @@ const KIND_TOGGLE: Record<
   assessment_invite: "stageEnabled",
   member_reminder: null,
   document_request: "offerEnabled",
+  role_invite: "stageEnabled",
 };
 
 export async function getOrgEmailSettings(orgId: string): Promise<EmailSettingsEffective> {
