@@ -9,6 +9,7 @@ export function isPublicPath(pathname: string): boolean {
     PUBLIC_PATHS.has(pathname) ||
     pathname.startsWith("/apply/") ||
     pathname.startsWith("/assess/") ||
-    pathname.startsWith("/schedule/")
+    pathname.startsWith("/schedule/") ||
+    pathname.startsWith("/offer/")
   );
 }

@@ -188,6 +188,9 @@ function MyInterviewsPage() {
                       >
                         {round.candidate_name}
                       </Link>
+                      {round.stage !== `l${round.level}` ? (
+                        <span className="text-xs text-muted-foreground">now</span>
+                      ) : null}
                       <StageBadge stage={round.stage} />
                     </div>
                     <p className="text-xs text-muted-foreground">

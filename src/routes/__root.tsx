@@ -131,6 +131,7 @@ function RootComponent() {
   const isPublic =
     pathname.startsWith("/assess/") ||
     pathname.startsWith("/schedule/") ||
+    pathname.startsWith("/offer/") ||
     pathname.startsWith("/apply/") ||
     pathname === "/privacy" ||
     pathname === "/cookies";

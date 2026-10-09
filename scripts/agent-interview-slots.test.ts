@@ -89,7 +89,8 @@ beforeEach(async () => {
   await db.delete(emailOutbox).where(eq(emailOutbox.orgId, orgId));
   await db.delete(hiringConversations).where(eq(hiringConversations.orgId, orgId));
   await db.delete(agentIssues).where(eq(agentIssues.orgId, orgId));
-  await db.update(applications).set({ stage: "shortlisted" }).where(eq(applications.id, app));
+  // In an interview round already (time offers need screening on record or an L-stage).
+  await db.update(applications).set({ stage: "l1" }).where(eq(applications.id, app));
 });
 
 const day = (n: number) => new Date(Date.now() + n * 864e5);
@@ -181,6 +182,72 @@ describe("free slots", () => {
       timeZone: TZ,
     });
     for (const s of r1.slots) expect(r2.slots).not.toContain(s);
+  });
+
+  test("a round already scored (completed) still occupies its time", async () => {
+    const r1 = await cal.findFreeSlots(orgId, {
+      interviewerEmail: interviewer,
+      durationMins: 60,
+      count: 3,
+      timeZone: TZ,
+    });
+    await db.insert(interviews).values({
+      orgId,
+      applicationId: app,
+      level: 1,
+      status: "completed",
+      interviewerEmail: interviewer,
+      scheduledAt: new Date(r1.slots[0]!),
+      durationMins: 60,
+    });
+    const r2 = await cal.findFreeSlots(orgId, {
+      interviewerEmail: interviewer,
+      durationMins: 60,
+      count: 5,
+      timeZone: TZ,
+    });
+    expect(r2.slots).not.toContain(r1.slots[0]);
+    expect((await cal.isFree(orgId, interviewer, r1.slots[0]!, 60)).free).toBe(false);
+  });
+
+  test("a next round's times start after the candidate's earlier round ends", async () => {
+    const l1 = weekdayAt(6);
+    await db.insert(interviews).values({
+      orgId,
+      applicationId: app,
+      level: 1,
+      status: "completed",
+      interviewerEmail: interviewer,
+      scheduledAt: l1,
+      durationMins: 60,
+    });
+    const nb = await cal.roundNotBefore(orgId, app, 2);
+    expect(nb!.getTime()).toBe(l1.getTime() + 3600_000);
+    expect(await cal.roundNotBefore(orgId, app, 1)).toBeNull();
+    const r = await cal.findFreeSlots(orgId, {
+      interviewerEmail: interviewer,
+      durationMins: 60,
+      count: 3,
+      timeZone: TZ,
+      notBefore: nb,
+    });
+    expect(r.slots.length).toBeGreaterThan(0);
+    for (const s of r.slots) expect(Date.parse(s)).toBeGreaterThanOrEqual(nb!.getTime());
+    // Offering L2 before L1 has happened is refused.
+    await expect(
+      offers.offerSlotsCore(
+        orgId,
+        { userId, runId: null },
+        {
+          applicationId: app,
+          level: 2,
+          interviewerEmail: interviewer,
+          slots: [weekdayAt(3), weekdayAt(4)].map((d) => d.toISOString()),
+          durationMins: 60,
+          mode: "online",
+        },
+      ),
+    ).rejects.toThrow(/must start after the candidate's earlier round ends/);
   });
 });
 

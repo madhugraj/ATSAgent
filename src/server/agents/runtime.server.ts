@@ -1241,6 +1241,11 @@ async function handleCall(
   const parsed = tool.input.safeParse(call.args);
   if (!parsed.success) return toolError(`Invalid arguments: ${parsed.error.message}`);
 
+  if (tool.precheck && tool.risk !== "read") {
+    const refusal = await tool.precheck(ctx, parsed.data);
+    if (refusal) return toolError(refusal);
+  }
+
   const verdict = decideToolCall(tool.risk, policy, tool.templateOf?.(parsed.data) ?? null);
   if (run.mode === "replay" && tool.risk !== "read") {
     return simulated(
@@ -1321,7 +1326,16 @@ async function execute(
   const tool = getTool(name)!;
   const started = Date.now();
   try {
-    const result = await tool.run(ctx, args);
+    // A tool working on one candidate / role: its AI calls count towards them.
+    const a = (args ?? {}) as { applicationId?: unknown; requisitionId?: unknown };
+    const { withAiSubject } = await import("./context");
+    const result = await withAiSubject(
+      {
+        applicationId: typeof a.applicationId === "string" ? a.applicationId : null,
+        requisitionId: typeof a.requisitionId === "string" ? a.requisitionId : null,
+      },
+      () => tool.run(ctx, args),
+    );
     const raw = typeof result === "string" ? result : JSON.stringify(result ?? null);
     const content = tool.untrustedOutput ? untrusted(`${name} result`, raw) : raw;
     const injection = Boolean(tool.untrustedOutput) && looksLikeInjection(raw);

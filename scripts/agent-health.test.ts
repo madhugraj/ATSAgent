@@ -161,6 +161,34 @@ describe("rules", () => {
     expect((await open()).filter((i) => i.rule === "sourcing.no_supply")).toHaveLength(0);
   });
 
+  test("an offer going back and forth (3+ revisions, still open) is flagged", async () => {
+    const { offers, applications, candidates, requisitions } = await import("../drizzle/schema");
+    const [q] = await db
+      .insert(requisitions)
+      .values({ orgId, code: `REQ-O-${stamp}`, title: "VP", status: "approved" } as never)
+      .returning({ id: requisitions.id });
+    const [c] = await db
+      .insert(candidates)
+      .values({ orgId, fullName: "Asha", email: `asha-${stamp}@x.local` })
+      .returning({ id: candidates.id });
+    const [a] = await db
+      .insert(applications)
+      .values({ orgId, requisitionId: q!.id, candidateId: c!.id, stage: "offer_released" })
+      .returning({ id: applications.id });
+    await db
+      .insert(offers)
+      .values({ orgId, applicationId: a!.id, status: "countered", revision: 2 } as never);
+    await evaluate();
+    expect((await open()).filter((i) => i.rule === "offer.negotiation_loop")).toHaveLength(0);
+    await db.update(offers).set({ revision: 3 }).where(eq(offers.applicationId, a!.id));
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "offer.negotiation_loop")).toMatchObject({
+      agentType: "offer",
+    });
+    // Leave no open offer behind for the other rules' tests.
+    await db.delete(requisitions).where(eq(requisitions.id, q!.id));
+  });
+
   test("tool error rate fires above the threshold only", async () => {
     const id = await run("screening", { status: "done" });
     const steps = (errors: number) =>

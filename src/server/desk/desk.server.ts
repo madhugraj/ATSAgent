@@ -917,6 +917,18 @@ export async function handleUserMessage(
   userId: string,
   text: string,
 ): Promise<void> {
+  // The desk's AI work for a role counts towards that role's hiring cost.
+  const { withAiSubject } = await import("../agents/context");
+  return withAiSubject({ requisitionId: conv.requisitionId }, () =>
+    handleUserMessageInner(conv, userId, text),
+  );
+}
+
+async function handleUserMessageInner(
+  conv: Conversation,
+  userId: string,
+  text: string,
+): Promise<void> {
   await postMessage(conv, { role: "user", body: text });
   const history = await db
     .select({ role: hiringMessages.role, body: hiringMessages.body })

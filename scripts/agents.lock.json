@@ -16,20 +16,20 @@
     "hash": "ac3ae9c71e25253be4e896a03e3241e8d4ac82dee76b0548097be437ea61bd9f"
   },
   "interview": {
-    "version": "1.4.0",
-    "hash": "b6c32c17a3e13aa3223f209703fa15242b18538cbafcb1ec56217f0f7a83cfb2"
+    "version": "1.6.0",
+    "hash": "5052c692816e55821b5c758c2ce89b4c20ae4c9cdcba41bc8131a4745aab16d1"
   },
   "jd": {
     "version": "1.3.0",
     "hash": "b765846302e40c10f1851ec0bb7d8f41f5edac874eded97ab2ac756353dc4fb3"
   },
   "offer": {
-    "version": "1.0.0",
-    "hash": "5467d547dc6bbe2090e25f42c93edd70cb7d5c69b4c5267af7b5d0e1a750e01f"
+    "version": "1.1.0",
+    "hash": "6f7a6ae8d69acb2d216af733b8de18d1d7a2623d935cdefcd75f253a863fd7f8"
   },
   "onboarding": {
-    "version": "1.0.0",
-    "hash": "7cc8c9638d48f9f852c309b649a3ef5385b0a76e1aa7dee1b3065aabac14dcb1"
+    "version": "1.1.0",
+    "hash": "6e53f47cd8231ee486bc246b1e4d18b670a90120a1c41d50fa5d725ffcc2f663"
   },
   "publishing": {
     "version": "1.4.0",

@@ -9,7 +9,8 @@
  * WORKING.startHour and WORKING.endHour, on a 30-minute grid, at least
  * WORKING.leadHours ahead, avoiding (1) calendar busy time, (2) rounds already
  * booked in ATSIQ for the interviewer and (3) times already offered to another
- * candidate and not yet answered.
+ * candidate and not yet answered. A candidate's next round starts only after
+ * their earlier rounds end (roundNotBefore).
  */
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
 
@@ -227,6 +228,42 @@ export function workingSlots(opts: {
 const overlaps = (a: Interval, b: Interval) => a.start < b.end && b.start < a.end;
 
 /** Free slots for an interviewer (and the rest of the panel), spread over different days. */
+/**
+ * The earliest a candidate's round at `level` may start: when their latest
+ * earlier round (booked, not cancelled or missed) ends. Null = no constraint.
+ */
+export async function roundNotBefore(
+  orgId: string,
+  applicationId: string,
+  level: number,
+): Promise<Date | null> {
+  const [r] = (await db.execute(sql`
+    select max(scheduled_at + make_interval(mins => duration_mins)) as ends
+    from interviews
+    where org_id = ${orgId} and application_id = ${applicationId}
+      and level < ${level} and scheduled_at is not null
+      and status not in ('cancelled','no_show')`)) as unknown as { ends: string | Date | null }[];
+  return r?.ends ? new Date(r.ends) : null;
+}
+
+/** Refuse times that start before the candidate's earlier rounds end. */
+export async function assertAfterEarlierRounds(
+  orgId: string,
+  applicationId: string,
+  level: number,
+  times: Date[],
+): Promise<void> {
+  const nb = await roundNotBefore(orgId, applicationId, level);
+  if (!nb) return;
+  const early = times.filter((t) => t.getTime() < nb.getTime());
+  if (early.length)
+    throw new Error(
+      `L${level} must start after the candidate's earlier round ends (${nb.toISOString()}); too early: ${early
+        .map((t) => t.toISOString())
+        .join(", ")}. Use find_interview_slots with the applicationId and level.`,
+    );
+}
+
 export async function findFreeSlots(
   orgId: string,
   input: {
@@ -235,6 +272,8 @@ export async function findFreeSlots(
     durationMins: number;
     count: number;
     timeZone: string;
+    /** Only times starting at or after this (e.g. the end of the previous round). */
+    notBefore?: Date | null;
   },
 ): Promise<{ slots: string[]; checkedWith: "google" | "microsoft" | null; note: string | null }> {
   const emails = [input.interviewerEmail, ...(input.panelEmails ?? [])]
@@ -244,7 +283,7 @@ export async function findFreeSlots(
     now: Date.now(),
     timeZone: input.timeZone,
     durationMins: input.durationMins,
-  });
+  }).filter((at) => !input.notBefore || at >= input.notBefore.getTime());
   if (!candidates.length) return { slots: [], checkedWith: null, note: "No working-hour slots." };
   const from = new Date(candidates[0]!);
   const to = new Date(candidates.at(-1)! + input.durationMins * 60_000);
@@ -258,7 +297,7 @@ export async function findFreeSlots(
         eq(interviews.orgId, orgId),
         involves(emails),
         gte(interviews.scheduledAt, new Date(Date.now() - 864e5)),
-        sql`${interviews.status} not in ('cancelled','completed','no_show')`,
+        sql`${interviews.status} not in ('cancelled','no_show')`,
       ),
     );
   for (const b of booked)
@@ -344,7 +383,7 @@ export async function isFree(
       and(
         eq(interviews.orgId, orgId),
         involves([email]),
-        sql`${interviews.status} not in ('cancelled','completed','no_show')`,
+        sql`${interviews.status} not in ('cancelled','no_show')`,
         sql`${interviews.scheduledAt} < ${new Date(slot.end).toISOString()}::timestamptz`,
         sql`${interviews.scheduledAt} + make_interval(mins => ${interviews.durationMins}) > ${new Date(slot.start).toISOString()}::timestamptz`,
       ),

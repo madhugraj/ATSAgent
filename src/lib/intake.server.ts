@@ -3,7 +3,7 @@
  * automatic careers-inbox import: parse a CV, upsert the talent-pool record by
  * email, and raise the application against a requisition.
  */
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { createHash } from "crypto";
 import { z } from "zod";
 
@@ -162,8 +162,58 @@ export async function storeResumeFile(input: {
   }
 }
 
-/** Upsert the candidate and attach them to the requisition. Admin client only. */
-export async function ingestCandidate(input: {
+/**
+ * Upsert the candidate and attach them to the requisition. Admin client only.
+ * The AI work of reading the CV counts towards this candidate's hiring cost:
+ * the calls are collected while the candidate is still unknown and labelled
+ * once they are saved (together with any parse done by the caller in the
+ * same scope).
+ */
+export async function ingestCandidate(
+  input: Parameters<typeof ingestCandidateInner>[0],
+): Promise<IngestResult> {
+  const { withAiSubject, currentAiSubject } = await import("../server/agents/context");
+  const events = currentAiSubject()?.events ?? [];
+  const res = await withAiSubject({ requisitionId: input.requisitionId, events }, () =>
+    ingestCandidateInner(input),
+  );
+  await labelCvCost(events, res.candidateId, input.requisitionId);
+  return res;
+}
+
+/** Label the CV-reading AI calls with the candidate (and their application to this role). */
+export async function labelCvCost(
+  eventIds: string[],
+  candidateId: string | null | undefined,
+  requisitionId: string | null | undefined,
+): Promise<void> {
+  if (!eventIds.length || !candidateId) return;
+  try {
+    const { aiUsageEvents } = await import("@db/schema");
+    let applicationId: string | null = null;
+    if (requisitionId) {
+      const [a] = await db
+        .select({ id: applications.id })
+        .from(applications)
+        .where(
+          and(
+            eq(applications.candidateId, candidateId),
+            eq(applications.requisitionId, requisitionId),
+          ),
+        )
+        .limit(1);
+      applicationId = a?.id ?? null;
+    }
+    await db
+      .update(aiUsageEvents)
+      .set({ candidateId, applicationId, requisitionId: requisitionId ?? null })
+      .where(inArray(aiUsageEvents.id, eventIds));
+  } catch (e) {
+    console.error("[intake] could not attribute CV cost:", e);
+  }
+}
+
+async function ingestCandidateInner(input: {
   resumeText: string;
   fileName: string;
   requisitionId: string | null;

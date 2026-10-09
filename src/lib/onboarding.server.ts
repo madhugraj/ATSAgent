@@ -295,6 +295,9 @@ export async function extractDocument(input: {
   docType: string;
   fileName: string;
   bytes: Uint8Array;
+  /** Whose document it is — the read is counted in that candidate's hiring cost. */
+  applicationId?: string | null;
+  candidateId?: string | null;
 }): Promise<{
   status: "extracted" | "failed";
   extracted: ExtractedDoc | null;
@@ -424,16 +427,21 @@ export async function extractDocument(input: {
   }
 
   const cfg = await resolveAiConfig(input.orgId);
-  const result = await aiJson<ExtractedDoc>({
-    orgId: input.orgId,
-    config: cfg,
-    feature: "doc_extract",
-    schema: ExtractedDoc,
-    system,
-    ...(images.length ? { images } : {}),
-    ...(docs.length ? { docs } : {}),
-    prompt: `File name: ${safeFileName(input.fileName)}\n\n${untrusted("pre_onboarding_document", text ?? "(photographed document — read the attached image)")}`,
-  });
+  const { withAiSubject } = await import("../server/agents/context");
+  const result = await withAiSubject(
+    { applicationId: input.applicationId ?? null, candidateId: input.candidateId ?? null },
+    () =>
+      aiJson<ExtractedDoc>({
+        orgId: input.orgId,
+        config: cfg,
+        feature: "doc_extract",
+        schema: ExtractedDoc,
+        system,
+        ...(images.length ? { images } : {}),
+        ...(docs.length ? { docs } : {}),
+        prompt: `File name: ${safeFileName(input.fileName)}\n\n${untrusted("pre_onboarding_document", text ?? "(photographed document — read the attached image)")}`,
+      }),
+  );
   if (!result.ok) {
     return { status: "failed", extracted: null, text, model: null, note: result.message };
   }
@@ -471,6 +479,8 @@ export async function storeOnboardingDocument(input: {
     docType: input.docType,
     fileName: input.fileName,
     bytes: input.bytes,
+    applicationId: input.applicationId,
+    candidateId: input.candidateId,
   });
 
   const [row] = await db

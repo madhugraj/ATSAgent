@@ -43,6 +43,7 @@ import { Route as CandidatesIndexRouteImport } from './routes/candidates.index'
 import { Route as CandidatesIdRouteImport } from './routes/candidates.$id'
 import { Route as InterviewsIndexRouteImport } from './routes/interviews.index'
 import { Route as InterviewsMineRouteImport } from './routes/interviews.mine'
+import { Route as OfferTokenRouteImport } from './routes/offer.$token'
 import { Route as RequisitionsIndexRouteImport } from './routes/requisitions.index'
 import { Route as RequisitionsIdRouteImport } from './routes/requisitions.$id'
 import { Route as ScheduleTokenRouteImport } from './routes/schedule.$token'
@@ -239,6 +240,11 @@ const InterviewsMineRoute = InterviewsMineRouteImport.update({
   path: '/interviews/mine',
   getParentRoute: () => rootRouteImport,
 } as any)
+const OfferTokenRoute = OfferTokenRouteImport.update({
+  id: '/offer/$token',
+  path: '/offer/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const RequisitionsIndexRoute = RequisitionsIndexRouteImport.update({
   id: '/requisitions/',
   path: '/requisitions/',
@@ -403,6 +409,7 @@ export interface FileRoutesByFullPath {
   '/auth/reset': typeof AuthResetRoute
   '/candidates/$id': typeof CandidatesIdRoute
   '/interviews/mine': typeof InterviewsMineRoute
+  '/offer/$token': typeof OfferTokenRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
   '/schedule/$token': typeof ScheduleTokenRoute
   '/agents/': typeof AgentsIndexRoute
@@ -464,6 +471,7 @@ export interface FileRoutesByTo {
   '/auth/reset': typeof AuthResetRoute
   '/candidates/$id': typeof CandidatesIdRoute
   '/interviews/mine': typeof InterviewsMineRoute
+  '/offer/$token': typeof OfferTokenRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
   '/schedule/$token': typeof ScheduleTokenRoute
   '/agents': typeof AgentsIndexRoute
@@ -526,6 +534,7 @@ export interface FileRoutesById {
   '/auth/reset': typeof AuthResetRoute
   '/candidates/$id': typeof CandidatesIdRoute
   '/interviews/mine': typeof InterviewsMineRoute
+  '/offer/$token': typeof OfferTokenRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
   '/schedule/$token': typeof ScheduleTokenRoute
   '/agents/': typeof AgentsIndexRoute
@@ -589,6 +598,7 @@ export interface FileRouteTypes {
     | '/auth/reset'
     | '/candidates/$id'
     | '/interviews/mine'
+    | '/offer/$token'
     | '/requisitions/$id'
     | '/schedule/$token'
     | '/agents/'
@@ -650,6 +660,7 @@ export interface FileRouteTypes {
     | '/auth/reset'
     | '/candidates/$id'
     | '/interviews/mine'
+    | '/offer/$token'
     | '/requisitions/$id'
     | '/schedule/$token'
     | '/agents'
@@ -711,6 +722,7 @@ export interface FileRouteTypes {
     | '/auth/reset'
     | '/candidates/$id'
     | '/interviews/mine'
+    | '/offer/$token'
     | '/requisitions/$id'
     | '/schedule/$token'
     | '/agents/'
@@ -773,6 +785,7 @@ export interface RootRouteChildren {
   AuthResetRoute: typeof AuthResetRoute
   CandidatesIdRoute: typeof CandidatesIdRoute
   InterviewsMineRoute: typeof InterviewsMineRoute
+  OfferTokenRoute: typeof OfferTokenRoute
   RequisitionsIdRoute: typeof RequisitionsIdRoute
   ScheduleTokenRoute: typeof ScheduleTokenRoute
   AgentsIndexRoute: typeof AgentsIndexRoute
@@ -1043,6 +1056,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InterviewsMineRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/offer/$token': {
+      id: '/offer/$token'
+      path: '/offer/$token'
+      fullPath: '/offer/$token'
+      preLoaderRoute: typeof OfferTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/requisitions/': {
       id: '/requisitions/'
       path: '/requisitions'
@@ -1253,6 +1273,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthResetRoute: AuthResetRoute,
   CandidatesIdRoute: CandidatesIdRoute,
   InterviewsMineRoute: InterviewsMineRoute,
+  OfferTokenRoute: OfferTokenRoute,
   RequisitionsIdRoute: RequisitionsIdRoute,
   ScheduleTokenRoute: ScheduleTokenRoute,
   AgentsIndexRoute: AgentsIndexRoute,

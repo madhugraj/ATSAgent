@@ -139,6 +139,7 @@ export const submitAssessment = createServerFn({ method: "POST" })
         questions: candidateAssessments.questions,
         requisitionId: candidateAssessments.requisitionId,
         orgId: candidateAssessments.orgId,
+        candidateId: candidateAssessments.candidateId,
       })
       .from(candidateAssessments)
       .where(eq(candidateAssessments.token, data.token))
@@ -158,12 +159,18 @@ export const submitAssessment = createServerFn({ method: "POST" })
       if (req?.title) title = req.title;
     }
 
-    const result = await scoreAnswers({
-      orgId: row.orgId,
-      title,
-      questions,
-      answers: data.answers,
-    });
+    // Grading counts towards this candidate's hiring cost.
+    const { withAiSubject } = await import("../server/agents/context");
+    const result = await withAiSubject(
+      { candidateId: row.candidateId, requisitionId: row.requisitionId },
+      () =>
+        scoreAnswers({
+          orgId: row.orgId!,
+          title,
+          questions,
+          answers: data.answers,
+        }),
+    );
 
     // Atomic lock: the status guard lives in the UPDATE itself, so two
     // concurrent submissions cannot both write (TOCTOU).

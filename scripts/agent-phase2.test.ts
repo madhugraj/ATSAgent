@@ -518,7 +518,7 @@ describe("screening agent", () => {
     // A person moves her into an interview round before anyone approves the assessment.
     await moveStageCore(
       { orgId, userId: recruiter, memberEmail: recruiterEmail },
-      { applicationId: apps["Gita"]!.appId, toStage: "l1" },
+      { applicationId: apps["Gita"]!.appId, toStage: "l1", note: "Strong referral; screen in L1" },
     );
     const [closed] = await db.select().from(agentTasks).where(eq(agentTasks.id, task!.id));
     expect(closed).toMatchObject({ status: "cancelled" });
@@ -529,6 +529,43 @@ describe("screening agent", () => {
     expect(await stageOf(apps["Gita"]!.appId)).toBe("l1");
     const [run] = await db.select().from(agentRuns).where(eq(agentRuns.id, runId));
     expect(run!.status).toBe("done");
+  });
+
+  test("moving into an interview with no screening on record needs a reason, recorded as skipped", async () => {
+    const id = await application("Hari", "shortlisted", 88, ["Kubernetes"]);
+    const actor = { orgId, userId: recruiter, memberEmail: recruiterEmail };
+    await expect(moveStageCore(actor, { applicationId: id, toStage: "l1" })).rejects.toThrow(
+      /No screening is on record/,
+    );
+    await moveStageCore(actor, {
+      applicationId: id,
+      toStage: "l1",
+      note: "Ex-colleague, known well",
+    });
+    expect(await stageOf(id)).toBe("l1");
+    const [ev] = await db
+      .select()
+      .from(stageEvents)
+      .where(and(eq(stageEvents.applicationId, id), eq(stageEvents.toStage, "l1")));
+    expect(ev!.reason).toBe("Screening skipped: Ex-colleague, known well");
+  });
+
+  test("with screening on record, moving into an interview needs no reason", async () => {
+    const id = await application("Indu", "shortlisted", 88, ["Kubernetes"]);
+    const [cand] = await db.select().from(applications).where(eq(applications.id, id));
+    await db.insert(candidateAssessments).values({
+      orgId,
+      candidateId: cand!.candidateId,
+      requisitionId: reqId,
+      token: `t${Date.now()}`,
+      status: "completed",
+      questions: [],
+    } as never);
+    await moveStageCore(
+      { orgId, userId: recruiter, memberEmail: recruiterEmail },
+      { applicationId: id, toStage: "l1" },
+    );
+    expect(await stageOf(id)).toBe("l1");
   });
 
   test("send_assessment waits for approval under suggest, then creates the assessment and queues the email", async () => {

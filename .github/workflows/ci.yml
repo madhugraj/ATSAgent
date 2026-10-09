@@ -92,3 +92,6 @@ jobs:
 
       - name: Interview plans, panels and the hiring decision
         run: bun test scripts/agent-interview-panel.test.ts
+
+      - name: Cost per candidate, offer answers and negotiation
+        run: bun test scripts/agent-hiring-cost-offer.test.ts

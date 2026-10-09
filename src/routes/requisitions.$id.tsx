@@ -39,6 +39,7 @@ import {
 } from "@/lib/matching.functions";
 import { balanceWeights, extractResumeText } from "@/lib/cv-extract";
 import { InterviewPlanCard } from "@/components/InterviewPlanCard";
+import { RoleCostCard } from "@/components/HiringCost";
 import { intakeCvs, type IntakeStatus } from "@/lib/cv-intake";
 import { rankPool } from "@/lib/shortlist";
 import { publishToLinkedIn } from "@/lib/linkedin.functions";
@@ -1587,6 +1588,13 @@ function RequisitionDetail() {
         </div>
 
         <div className="space-y-6">
+          <section className="panel p-5">
+            <h2 className="font-semibold">Hiring cost</h2>
+            <p className="mb-3 text-xs text-muted-foreground">
+              AI tokens spent on this role so far — shared work, each candidate, and cost per hire.
+            </p>
+            <RoleCostCard requisitionId={r.id} />
+          </section>
           <section className="panel p-5">
             <h2 className="font-semibold">Interview plan</h2>
             <p className="mb-3 text-xs text-muted-foreground">

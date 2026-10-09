@@ -85,6 +85,7 @@ export const offerStatusEnum = pgEnum("offer_status", [
   "accepted",
   "declined",
   "revoked",
+  "countered",
 ]);
 
 export const appRoleEnum = pgEnum("app_role", [
@@ -741,23 +742,43 @@ export const evaluations = pgTable(
   ],
 );
 
-export const offers = pgTable("offers", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  applicationId: uuid("application_id")
-    .notNull()
-    .references(() => applications.id, { onDelete: "cascade" }),
-  orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
-  offeredCtc: numeric("offered_ctc", { precision: 14, scale: 2 }).notNull().default("0"),
-  joiningDate: date("joining_date"),
-  status: offerStatusEnum("status").notNull().default("draft"),
-  approvalTrail: jsonb("approval_trail")
-    .notNull()
-    .default(sql`'[]'::jsonb`),
-  /** Generated offer letter payload — see generateOfferLetter. Not FK'd: templates hard-delete. */
-  letter: jsonb("letter"),
-  letterTemplateId: uuid("letter_template_id"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const offers = pgTable(
+  "offers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+    offeredCtc: numeric("offered_ctc", { precision: 14, scale: 2 }).notNull().default("0"),
+    joiningDate: date("joining_date"),
+    status: offerStatusEnum("status").notNull().default("draft"),
+    approvalTrail: jsonb("approval_trail")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /** Generated offer letter payload — see generateOfferLetter. Not FK'd: templates hard-delete. */
+    letter: jsonb("letter"),
+    letterTemplateId: uuid("letter_template_id"),
+    /** The candidate's private accept / decline / ask-for-changes link (set on release). */
+    responseToken: text("response_token"),
+    /** What the candidate asked for: { expectedCtc, joiningDate, note, at }. */
+    counter: jsonb("counter").$type<{
+      expectedCtc: number | null;
+      joiningDate: string | null;
+      note: string | null;
+      at: string;
+    }>(),
+    /** Version of this offer (1, then +1 per revision after a counter). */
+    revision: integer("revision").notNull().default(1),
+    respondedAt: timestamp("responded_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("offers_response_token_key")
+      .on(t.responseToken)
+      .where(sql`${t.responseToken} is not null`),
+  ],
+);
 
 export const candidateVerifications = pgTable(
   "candidate_verifications",
@@ -921,6 +942,10 @@ export const aiUsageEvents = pgTable(
     errorMessage: text("error_message"),
     /** The agent run that caused this request (model turn or AI call inside a tool). */
     agentRunId: uuid("agent_run_id"),
+    /** The role / candidate this request was made for (cost per candidate). */
+    requisitionId: uuid("requisition_id"),
+    applicationId: uuid("application_id"),
+    candidateId: uuid("candidate_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -928,6 +953,12 @@ export const aiUsageEvents = pgTable(
     index("ai_usage_events_feature_created_idx").on(t.feature, t.createdAt),
     index("ai_usage_events_model_idx").on(t.model),
     index("ai_usage_events_created_idx").on(t.createdAt),
+    index("ai_usage_events_application_idx")
+      .on(t.applicationId)
+      .where(sql`${t.applicationId} is not null`),
+    index("ai_usage_events_requisition_idx")
+      .on(t.requisitionId)
+      .where(sql`${t.requisitionId} is not null`),
   ],
 );
 

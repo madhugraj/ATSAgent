@@ -1,4 +1,4 @@
-import jsPDF from "jspdf";
+import { jsPDF } from "jspdf";
 
 import type { OfferLetterPayload } from "./offers.functions";
 import { fmtLetterDate } from "./offers.functions";

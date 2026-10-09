@@ -89,7 +89,7 @@ export function registerPhase3Tools(): void {
   registerTool({
     name: "get_interview_plan",
     description:
-      "For one application: the role's interview plan (rounds with name, focus, competencies and panel size; the verdict policy), every round so far (level, interviewers, time, status, who has and has not scored, the round's verdict, and rounds that did not happen), and which level to schedule next with how many interviewers.",
+      "For one application: whether screening is on record (a shortlisted candidate is interviewed only after screening), the role's interview plan (rounds with name, focus, competencies and panel size; the verdict policy), every round so far (level, interviewers, time, status, who has and has not scored, the round's verdict, and rounds that did not happen), and which level to schedule next with how many interviewers.",
     input: AppId,
     risk: "read",
     run: async (ctx, i) => {
@@ -98,7 +98,15 @@ export function registerPhase3Tools(): void {
       const { progressOf } = await import("@/lib/interview-plan.server");
       const p = await progressOf(ctx.orgId, app.id);
       const match = app.stage.match(/^l([123])$/);
-      const nextLevel = match ? Number(match[1]) : app.stage === "shortlisted" ? 1 : null;
+      const { screeningOnRecord } = await import("@/lib/pipeline.server");
+      // A shortlisted candidate is interviewed only after screening (a person can
+      // still move them on with a reason).
+      const screened = match ? true : await screeningOnRecord(ctx.orgId, app.id);
+      const nextLevel = match
+        ? Number(match[1])
+        : app.stage === "shortlisted" && screened
+          ? 1
+          : null;
       const alreadyBooked = rounds.some(
         (r) =>
           r.level === nextLevel && ["scheduled", "rescheduled", "completed"].includes(r.status),
@@ -126,6 +134,9 @@ export function registerPhase3Tools(): void {
         }),
         nextLevelToSchedule: next ? next.level : null,
         nextRound: next,
+        ...(!screened
+          ? { waitingFor: "screening — no screening call, assessment or AI screen yet" }
+          : {}),
       };
     },
   });
@@ -234,6 +245,8 @@ export function registerPhase3Tools(): void {
         .limit(1);
       if (!member) throw new Error("Interviewers must be active members of the organisation.");
       const app = await loadApplication(ctx.orgId, i.applicationId);
+      const { assertAfterEarlierRounds } = await import("@/lib/calendar-availability.server");
+      await assertAfterEarlierRounds(ctx.orgId, i.applicationId, i.level, [when]);
 
       let meetingLink: string | null = null;
       if (i.mode === "online" && i.meetingProvider) {
@@ -293,8 +306,11 @@ export function registerPhase3Tools(): void {
   registerTool({
     name: "find_interview_slots",
     description:
-      "Free interview times for an interviewer and the rest of the panel (times that suit everyone): weekdays 10:00–17:00 in the organisation's time zone, at least 18 hours ahead, spread over different days, avoiding their calendar's busy time (when Google or Microsoft 365 calendar is connected), rounds already booked in ATSIQ and times already offered to another candidate. Says whether the calendar was actually checked.",
+      "Free interview times for an interviewer and the rest of the panel (times that suit everyone): weekdays 10:00–17:00 in the organisation's time zone, at least 18 hours ahead, spread over different days, avoiding their calendar's busy time (when Google or Microsoft 365 calendar is connected), rounds already booked in ATSIQ and times already offered to another candidate. Pass the applicationId and level of the round being booked so its times start after the candidate's earlier rounds end. Says whether the calendar was actually checked.",
     input: z.object({
+      /** The candidate's application and round: times start after their earlier rounds end. */
+      applicationId: z.string().uuid().optional(),
+      level: z.number().int().min(1).max(3).optional(),
       interviewerEmail: z.string().email(),
       /** The rest of the panel: times must suit everyone. */
       panelEmails: z.array(z.string().email()).max(2).optional(),
@@ -304,9 +320,15 @@ export function registerPhase3Tools(): void {
     risk: "read",
     run: async (ctx, i) => {
       const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
-      const { findFreeSlots } = await import("@/lib/calendar-availability.server");
+      const { findFreeSlots, roundNotBefore } = await import("@/lib/calendar-availability.server");
       const timeZone = (await getOrgEmailSettings(ctx.orgId)).timezone;
+      if (i.applicationId) await loadApplication(ctx.orgId, i.applicationId);
+      const notBefore =
+        i.applicationId && i.level
+          ? await roundNotBefore(ctx.orgId, i.applicationId, i.level)
+          : null;
       const r = await findFreeSlots(ctx.orgId, {
+        notBefore,
         interviewerEmail: i.interviewerEmail,
         panelEmails: i.panelEmails ?? [],
         durationMins: i.durationMins,

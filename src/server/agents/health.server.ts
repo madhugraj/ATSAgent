@@ -55,6 +55,8 @@ export const HEALTH = {
   slotOffersUnansweredShare: 0.5,
   /** Rounds the candidate did not join, in 7 days, before it is flagged. */
   interviewNoShows7d: 3,
+  /** An open offer on its this-many-th revision is going back and forth. */
+  offerRevisions: 3,
   /** Re-evaluate at most this often (minutes). */
   evaluateEveryMinutes: 5,
 } as const;
@@ -405,6 +407,27 @@ export const RULES: Rule[] = [
           agentType: "interview",
           title: `${n} interview rounds in 7 days where the candidate did not join`,
           detail: { noShows: n },
+        },
+      ];
+    },
+  },
+  {
+    id: "offer.negotiation_loop",
+    element: "hitl",
+    severity: "warning",
+    description: `An offer is on its ${HEALTH.offerRevisions}rd revision or later and still open — the candidate and the band may not meet; a person should talk to the candidate rather than another revision.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number; max_rev: number }>(sql`
+        select count(*)::int n, coalesce(max(revision), 0)::int max_rev from offers
+        where org_id = ${orgId} and revision >= ${HEALTH.offerRevisions}
+          and status in ('draft','pending_hr','pending_cbo','approved','released','countered')`);
+      const x = r[0];
+      if (!x?.n) return [];
+      return [
+        {
+          agentType: "offer",
+          title: `${x.n} offer(s) still open after ${x.max_rev} revisions`,
+          detail: { offers: x.n, maxRevision: x.max_rev },
         },
       ];
     },

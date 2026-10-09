@@ -172,7 +172,16 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
       id: req.id,
     },
   ) => {
-    if (!getAgent(agent)) return;
+    if (!getAgent(agent) && process.env["NODE_ENV"] !== "test") {
+      // A reloaded module graph can start with an empty registry; never drop
+      // an event silently because of it.
+      const { ensureAgentsRegistered } = await import("./index");
+      ensureAgentsRegistered();
+    }
+    if (!getAgent(agent)) {
+      log.warn("agent.orchestrator.agent_missing", { org_id: e.orgId, agent, type: e.type });
+      return;
+    }
     const policy = await loadPolicy(e.orgId, agent);
     if (!policy.enabled) {
       // A hiring-desk thread waiting on this role hears why nothing happens.
@@ -244,6 +253,8 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
     await dispatch(
       "interview",
       `${ids.length} candidate(s) advanced to an interview round for ${req.code} "${req.title}". Book their next rounds.`,
+      // One candidate: the run is theirs, so its cost counts in their hiring cost.
+      ids.length === 1 ? { type: "application", id: ids[0]! } : undefined,
     );
   }
 
@@ -271,6 +282,7 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
     await dispatch(
       "interview",
       `The L${p.level ?? "?"} interview for candidate application ${applicationId} (${req.code} "${req.title}") did not happen (${(p.outcome ?? "").replace(/_/g, " ")}). Offer new times for that round.`,
+      { type: "application", id: applicationId },
     );
   }
 
@@ -278,6 +290,14 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
     await dispatch(
       "offer",
       `The hiring manager selected candidate application ${applicationId} for ${req.code} "${req.title}". Prepare the offer within the approved band and take it through approval.`,
+      { type: "application", id: applicationId },
+    );
+  }
+
+  if (applicationId && e.type === "offer.status_changed" && payload.to === "countered") {
+    await dispatch(
+      "offer",
+      `The candidate for application ${applicationId} (${req.code} "${req.title}") asked for changes to their offer. Read what they asked for, propose a revision inside the band with your reasoning, regenerate the letter and take it through approval again.`,
       { type: "application", id: applicationId },
     );
   }

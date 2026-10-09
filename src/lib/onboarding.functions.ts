@@ -257,6 +257,8 @@ export const reextractOnboardingDoc = createServerFn({ method: "POST" })
       docType: row.docType,
       fileName: row.fileName,
       bytes: file.bytes,
+      applicationId: row.applicationId,
+      candidateId: row.candidateId,
     });
     await db
       .update(onboardingDocuments)

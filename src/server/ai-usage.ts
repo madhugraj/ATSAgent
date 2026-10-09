@@ -1,4 +1,4 @@
-import { currentAgentRun } from "./agents/context";
+import { currentAgentRun, currentAiSubject } from "./agents/context";
 import { db } from "./db";
 import { aiUsageEvents, type AiUsageStatus } from "@db/schema";
 
@@ -77,26 +77,35 @@ export async function recordAiUsage(input: {
   try {
     const clamp = (n: number | null | undefined) =>
       Math.max(0, Math.round(Number.isFinite(n ?? NaN) ? (n as number) : 0));
-    await db.insert(aiUsageEvents).values({
-      orgId: input.orgId ?? null,
-      userId: input.userId ?? null,
-      feature: input.feature,
-      provider: input.provider,
-      model: input.model,
-      status: input.status,
-      promptTokens: clamp(input.promptTokens),
-      completionTokens: clamp(input.completionTokens),
-      totalTokens: clamp(input.totalTokens),
-      attempt: Math.max(1, Math.round(input.attempt ?? 1)),
-      durationMs:
-        input.durationMs == null || !Number.isFinite(input.durationMs)
-          ? null
-          : Math.max(0, Math.round(input.durationMs)),
-      grounded: input.grounded ?? null,
-      errorMessage: input.errorMessage ? input.errorMessage.slice(0, 500) : null,
-      // Attribute requests made inside an agent run (incl. AI calls within tools).
-      agentRunId: currentAgentRun()?.runId ?? null,
-    });
+    const subject = currentAiSubject();
+    const [row] = await db
+      .insert(aiUsageEvents)
+      .values({
+        orgId: input.orgId ?? null,
+        userId: input.userId ?? null,
+        feature: input.feature,
+        provider: input.provider,
+        model: input.model,
+        status: input.status,
+        promptTokens: clamp(input.promptTokens),
+        completionTokens: clamp(input.completionTokens),
+        totalTokens: clamp(input.totalTokens),
+        attempt: Math.max(1, Math.round(input.attempt ?? 1)),
+        durationMs:
+          input.durationMs == null || !Number.isFinite(input.durationMs)
+            ? null
+            : Math.max(0, Math.round(input.durationMs)),
+        grounded: input.grounded ?? null,
+        errorMessage: input.errorMessage ? input.errorMessage.slice(0, 500) : null,
+        // Attribute requests made inside an agent run (incl. AI calls within tools).
+        agentRunId: currentAgentRun()?.runId ?? null,
+        // …and to the role / candidate it was made for (cost per candidate).
+        requisitionId: subject?.requisitionId ?? null,
+        applicationId: subject?.applicationId ?? null,
+        candidateId: subject?.candidateId ?? null,
+      })
+      .returning({ id: aiUsageEvents.id });
+    if (row && subject?.events) subject.events.push(row.id);
   } catch (e) {
     console.error("[ai-usage] failed to record", input.feature, e);
   }

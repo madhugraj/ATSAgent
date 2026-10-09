@@ -119,9 +119,24 @@ export async function offerSlotsCore(
     .limit(1);
   if (!app) throw new Error("Application not found.");
   if (!app.candidateEmail) throw new Error("The candidate has no email address.");
+  {
+    const [st] = await db
+      .select({ stage: applications.stage })
+      .from(applications)
+      .where(eq(applications.id, app.id))
+      .limit(1);
+    const { screeningOnRecord } = await import("./pipeline.server");
+    if (st && !/^l[123]$/.test(st.stage) && !(await screeningOnRecord(orgId, app.id)))
+      throw new Error(
+        "No screening is on record for this candidate. Screen them first, or a person moves them into the interview round with a reason.",
+      );
+  }
 
-  // Every offered time must still be free for the interviewer.
-  const { isFree, busyFor } = await import("./calendar-availability.server");
+  // Every offered time must still be free for the interviewer, and after the
+  // candidate's earlier rounds.
+  const { isFree, busyFor, assertAfterEarlierRounds } =
+    await import("./calendar-availability.server");
+  await assertAfterEarlierRounds(orgId, app.id, input.level, slots);
   const taken: string[] = [];
   for (const d of slots) {
     for (const who of [member.email, ...panel.map((p) => p.email)]) {

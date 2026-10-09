@@ -156,6 +156,13 @@ A worker (cron route `/api/public/agent-tick`, lease/claim exactly like
 
 Long waits (approvals that take days) cost nothing: the run is just a row.
 
+A tool may declare a read-only `precheck`: before a person is asked to
+approve a call, it says why the call is pointless now (it would repeat, or is
+already done), and that reason goes back to the agent instead of an approval
+card. The orchestrator re-registers agents if a reloaded module graph finds
+the registry empty, and logs `agent.orchestrator.agent_missing` rather than
+dropping an event silently.
+
 ### 3.3 Gateway extension (`aiAgentStep`)
 
 Add one function next to `aiJson` in `src/lib/ai-gateway.server.ts`:
@@ -312,6 +319,11 @@ the autonomy dial.
   unavailable, cancelled) is recorded with a note, the desk thread is told
   and `interview.missed` has the coordinator offer new times; health rule
   `interview.no_shows`.
+- **Round order (v1.6.0):** a round's times start only after the candidate's
+  earlier round ends (`roundNotBefore`): `find_interview_slots` takes the
+  application and level, and offering or booking an earlier time is refused.
+  When one candidate advances or misses a round, the coordinator's run is
+  theirs (subject = application), so its cost counts in their hiring cost.
 
 ### 4.7 Evaluation agent
 
@@ -337,6 +349,16 @@ the autonomy dial.
 - **Gate:** **HR head and CBO approvals**; the agent never edits an offer
   after submission except through the `draft` path.
 
+- **Answers and negotiation (1.1.0, migration `0035`):** release sets a
+  private `offers.response_token`; the offer email links to `/offer/<token>`
+  where the candidate accepts, declines (reason) or asks for changes
+  (`counter`: expected CTC, joining date, note → status `countered`). The
+  Offer agent revises a countered offer inside the band (`revise_offer`:
+  `revision` + 1, back to draft, letter cleared, trail entry with the ask and
+  the reasoning), regenerates the letter and takes it through HR head → CBO
+  approval and release again. Health rule `offer.negotiation_loop` (3+
+  revisions, still open).
+
 ### 4.9 Pre-onboarding & release agent
 
 - **Trigger:** offer `approved`.
@@ -345,6 +367,13 @@ the autonomy dial.
   `readinessFor` is green prepares the release.
 - **Gate:** **document validation** and **offer release** stay with the HR
   head (existing release gate).
+- **No chasing (v1.1.0):** `request_documents` refuses, before anyone is
+  asked and again at send time, documents already received (not rejected) or
+  requested and not yet due. `onboarding_status` names the offer
+  (`offerId`, status, revision) that the release request needs.
+- **Release email:** releasing (each revision) emails the candidate the letter
+  PDF and the private answer link (`emailReleasedOffer`); a failure is logged
+  (`offer.release_email_failed`) and never blocks the release.
 
 ### 4.10 Copilot (orchestrator front door)
 
@@ -636,6 +665,20 @@ configured in Agent settings → Trace export and alerts. Each push is audited
   10 minutes; runs older than 7 days are not back-filled.
 
 ---
+
+### 9.4 Cost per candidate
+
+Every AI request records the role / candidate it was made for
+(`ai_usage_events.requisition_id`, `application_id`, `candidate_id`; set by
+an attribution scope around candidate work — scoring, agent tools that name a
+candidate, screening kits, assessment grading — and backfilled for CV reads
+once the candidate is saved; pre-onboarding document reads carry the
+application and candidate). `hiring-cost.server.ts` splits a role's spend
+into shared work (requisition, JD, publishing, sourcing, desk) and each
+candidate's direct cost by hiring stage (CV, matching, screening, interviews,
+evaluation, offer, pre-onboarding — including every request of an agent run
+whose subject is their application), and reports cost per hire = role total
+÷ hires. Money only at the organisation's own token prices.
 
 ## 10. Phased delivery
 

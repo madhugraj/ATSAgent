@@ -645,6 +645,10 @@ erDiagram
     jsonb approval_trail
     jsonb letter "nullable"
     uuid letter_template_id "nullable"
+    text response_token "nullable"
+    jsonb counter "nullable"
+    integer revision
+    timestamptz responded_at "nullable"
     timestamptz created_at
   }
   hr_incentive_schemes {
@@ -918,6 +922,9 @@ erDiagram
     boolean grounded "nullable"
     text error_message "nullable"
     uuid agent_run_id "nullable"
+    uuid requisition_id "nullable"
+    uuid application_id "nullable"
+    uuid candidate_id "nullable"
     timestamptz created_at
   }
   email_outbox {
@@ -1120,7 +1127,7 @@ erDiagram
 | `ai_interviews` | Screening & interviews | 8 | — |
 | `ai_provider_credentials` | Communications & AI settings | 4 | (orgId+provider) |
 | `ai_settings` | Communications & AI settings | 9 | (org_id) |
-| `ai_usage_events` | Communications & AI settings | 16 | — |
+| `ai_usage_events` | Communications & AI settings | 19 | — |
 | `applications` | Candidates & pipeline | 10 | (requisitionId+candidateId) |
 | `audit_log` | Identity & access | 10 | — |
 | `board_sync_state` | — | 11 | (integration_id) |
@@ -1152,7 +1159,7 @@ erDiagram
 | `job_descriptions` | Requisitions & job content | 17 | — |
 | `master_items` | Organisations & masters | 8 | — |
 | `match_scores` | Candidates & pipeline | 26 | — |
-| `offers` | Offers & onboarding | 10 | — |
+| `offers` | Offers & onboarding | 14 | — |
 | `onboarding_documents` | Offers & onboarding | 23 | — |
 | `ontology_snapshots` | Intelligence | 11 | — |
 | `org_linkedin_connections` | Organisations & masters | 11 | — |

@@ -209,6 +209,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
       "Reschedule from the same row; a reason is mandatory and the change is audited.",
       "Each role has an interview plan on its requisition page: up to three rounds, what each one rates (built from the must-haves — edit freely), how many interviewers sit on it, and whether interviewers' holds and rejects are recommendations (the default) or move the candidate at once.",
       "Panels: every interviewer on a round gets the brief and the rubric and submits their own scorecard. The round completes when all of them have scored; a select before the last round opens the next one, and the hiring decision comes from the hiring manager after the final round.",
+      "Moving a candidate into an interview round with no screening on record (no screening call, assessment or AI screen) asks you to write why; it is recorded as “Screening skipped”.",
       "If a round does not happen, the interviewer marks it in My interviews (candidate did not join, could not make it, cancelled). Nothing about the candidate changes; the hiring desk is told and new times are offered.",
       "Interviewers open My interviews (/interviews/mine) and submit a competency scorecard with rating, comments and a recommendation. Submissions lock.",
       "Select advances the candidate to the next level, hold pauses the pipeline, reject closes it with a required reason.",

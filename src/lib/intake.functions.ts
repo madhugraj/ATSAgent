@@ -33,23 +33,35 @@ export const saveCv = createServerFn({ method: "POST" })
     // Parse here (with the caller's org for AI routing) rather than inside
     // ingestCandidate so a failed parse surfaces as a clear error, exactly as
     // the old browser-side parse did.
-    const parsed = await parseCv(data.resumeText, context.orgId);
-    if (!parsed)
-      throw new Error("Could not read the CV — export a text-based PDF or paste the resume text.");
+    // Both the parse and the intake count towards this candidate's cost.
+    const { withAiSubject } = await import("../server/agents/context");
+    const res = await withAiSubject(
+      { requisitionId: data.requisitionId ?? null, events: [] },
+      async () => {
+        const parsed = await parseCv(data.resumeText, context.orgId);
+        if (!parsed)
+          throw new Error(
+            "Could not read the CV — export a text-based PDF or paste the resume text.",
+          );
 
-    const res = await ingestCandidate({
-      resumeText: data.resumeText,
-      fileName: data.fileName,
-      requisitionId: data.requisitionId ?? null,
-      orgId: context.orgId,
-      source: data.source,
-      fullName: data.fullName ?? null,
-      phone: data.phone ?? null,
-      parsed,
-      resumeFile: data.fileBase64
-        ? { filename: data.fileName, bytes: new Uint8Array(Buffer.from(data.fileBase64, "base64")) }
-        : null,
-    });
+        return ingestCandidate({
+          resumeText: data.resumeText,
+          fileName: data.fileName,
+          requisitionId: data.requisitionId ?? null,
+          orgId: context.orgId,
+          source: data.source,
+          fullName: data.fullName ?? null,
+          phone: data.phone ?? null,
+          parsed,
+          resumeFile: data.fileBase64
+            ? {
+                filename: data.fileName,
+                bytes: new Uint8Array(Buffer.from(data.fileBase64, "base64")),
+              }
+            : null,
+        });
+      },
+    );
 
     return {
       candidateId: res.candidateId,
