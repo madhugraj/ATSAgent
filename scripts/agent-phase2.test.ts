@@ -65,6 +65,7 @@ const {
   agentEvents,
   agentPolicies,
   agentRuns,
+  agentSteps,
   agentTasks,
   applications,
   candidateAssessments,
@@ -383,6 +384,38 @@ describe("intake & matching agent", () => {
     );
     await runAgentTick({ orgId });
     expect(await stageOf(apps["Dan"]!.appId)).toBe("ai_screened");
+  });
+
+  test("agents never move a candidate out of an interview round (regression: L1 → reserve → shortlisted)", async () => {
+    await enable("intake", "autonomous");
+    await application("Esha", "l1", 94, []);
+    await startRun({
+      orgId,
+      agentType: "intake",
+      principalUserId: recruiter,
+      goal: "x",
+      subjectType: "requisition",
+      subjectId: reqId,
+    });
+    script.push(
+      call({
+        id: "r",
+        name: "move_candidate",
+        args: {
+          applicationId: apps["Esha"]!.appId,
+          toStage: "reserve",
+          reason: "to send an assessment",
+        },
+      }),
+      say("Stopped: she is in L1."),
+    );
+    await runAgentTick({ orgId });
+    expect(await stageOf(apps["Esha"]!.appId)).toBe("l1");
+    const [step] = await db
+      .select()
+      .from(agentSteps)
+      .where(and(eq(agentSteps.orgId, orgId), eq(agentSteps.toolName, "move_candidate")));
+    expect(JSON.stringify(step!.output)).toMatch(/never move candidates out of an interview round/);
   });
 
   test("talent pool search excludes the pipeline; add_to_pipeline refuses other organisations' candidates", async () => {

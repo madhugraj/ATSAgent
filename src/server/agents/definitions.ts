@@ -178,7 +178,8 @@ export function registerPhase2Agents(): void {
     type: "intake",
     name: "Intake & matching agent",
     // 1.3.0: talent-pool search by meaning (equivalent terms, CV text), with reasons.
-    version: "1.3.0",
+    // 1.4.0: never moves a candidate out of an interview round / offer / closed stage.
+    version: "1.4.0",
     owner: "hr_head",
     responsibility:
       "Keeps an approved requisition's pipeline scored, reviewed and full; proposes rejections for a person to decide.",
@@ -186,6 +187,7 @@ export function registerPhase2Agents(): void {
       "Reject a candidate — rejections are proposed, a person decides",
       "Use anything but the requisition's stated requirements as a rejection reason",
       "Move a candidate flagged for prompt injection",
+      "Move a candidate out of an interview round, an offer or a closed stage — or move anyone just to make another tool possible; if a tool refuses because of a candidate's stage, report it and stop",
     ],
     scope: {
       reads: [
@@ -230,13 +232,16 @@ export function registerPhase2Agents(): void {
     type: "screening",
     name: "Screening agent",
     // 1.3.0: Autonomous sends every candidate message template without asking.
-    version: "1.3.0",
+    // 1.4.0: a stage refusal ends the attempt — never moves a candidate to get around it
+    // (it once moved an L1 candidate back to shortlisted to send an assessment).
+    version: "1.4.0",
     owner: "hr_head",
     responsibility:
       "Moves shortlisted candidates through screening: kits, assessments, reminders and proceed / hold notes.",
     mustNever: [
       "Reject a candidate",
       "Email a candidate without approval unless the assessment email is pre-approved or the agent is set to Autonomous",
+      "Move a candidate out of an interview round, an offer or a closed stage — or move anyone just to make another tool possible; if a tool refuses because of a candidate's stage, report it and stop",
     ],
     scope: {
       reads: ["shortlisted applications", "screening kits, calls and assessment results"],
@@ -264,6 +269,7 @@ export function registerPhase2Agents(): void {
       "2. For each: get_screening_status. If the screening kit is missing, prepare_screening_kit.",
       "3. If no assessment was sent, send_assessment (due in 3 days). If one was sent more than 3 days ago and is not completed, remind_assessment once.",
       "4. When an assessment is completed or a screening call is graded, add_candidate_note with a two-sentence proceed / hold recommendation that cites the scores. If the evidence is clearly weak, move_candidate to on_hold with the reason; never reject.",
+      "5. Candidates who moved on to an interview round since you were asked are past screening: skip them. If a tool refuses because of a candidate's stage, note it in your summary and stop for that candidate — never move them to make it work.",
       "Finish with a summary table in plain text: candidate, kit, assessment status, recommendation.",
     ].join("\n"),
   });
