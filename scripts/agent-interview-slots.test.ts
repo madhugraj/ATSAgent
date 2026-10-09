@@ -239,6 +239,18 @@ describe("the candidate chooses the time", () => {
     ).rejects.toThrow(/not free: .*another interview is booked then/);
   });
 
+  test("names fall back to the email; a booking without a meeting provider says so", async () => {
+    expect(offers.displayName(null, "madhu.r@yavar.ai")).toBe("Madhu");
+    expect(offers.displayName("  Priya N ", "x@y.z")).toBe("Priya N");
+    const o = await offer();
+    const r = await offers.chooseSlot(o.token, o.slots[0]!);
+    expect(r).toMatchObject({ booked: true, hasMeetingLink: false });
+    expect((await offers.publicOffer(o.token))!).toMatchObject({
+      status: "booked",
+      hasMeetingLink: false,
+    });
+  });
+
   test("the public view shows the round and times, nothing about the candidate", async () => {
     const o = await offer();
     const p = (await offers.publicOffer(o.token))!;
@@ -258,7 +270,7 @@ describe("the candidate chooses the time", () => {
     const conv = await thread();
     const o = await offer();
     const r = await offers.chooseSlot(o.token, o.slots[1]!);
-    expect(r).toEqual({ booked: true, at: o.slots[1] });
+    expect(r).toMatchObject({ booked: true, at: o.slots[1] });
     const [iv] = await db.select().from(interviews).where(eq(interviews.applicationId, app));
     expect(iv).toMatchObject({
       level: 1,

@@ -79,6 +79,16 @@ export async function recordStageTransitions(inputs: RecordStageTransitionInput[
     .returning({ id: stageEvents.id });
 
   await emitAgentStageEvents(inputs);
+  // Agent requests that assumed the old stage no longer apply: close them.
+  for (const i of inputs) {
+    if (!i.fromStage || i.fromStage === i.toStage) continue;
+    try {
+      const { cancelStaleRequests } = await import("../server/agents/runtime.server");
+      await cancelStaleRequests(i.orgId, i.applicationId, i.fromStage, i.toStage);
+    } catch (e) {
+      console.error("[stage-events] stale request check failed (stage move unaffected):", e);
+    }
+  }
   // Multi-row INSERT ... RETURNING preserves insertion order.
   const eligible = inputs
     .map((input, i) => ({ input, eventId: events[i]?.id }))

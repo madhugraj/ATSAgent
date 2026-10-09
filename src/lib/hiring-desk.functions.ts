@@ -124,6 +124,8 @@ export type DeskConversationView = {
   taskDetails: Record<string, { label: string; value: string }[]>;
   /** Why each ranked candidate scored as they did (live from their match score). */
   reasoning: Record<string, import("../server/desk/desk.server").CandidateReasoning>;
+  /** Each ranked candidate's current stage (the list is a snapshot; this is live). */
+  stages: Record<string, string>;
   /** Where the hire stands and what happens next. */
   progress: import("../server/desk/desk.server").DeskProgress;
   /** The agent working for this thread right now, with its latest steps. */
@@ -209,6 +211,7 @@ export const getDeskConversation = createServerFn({ method: "GET" })
         await import("../server/desk/desk.server")
       ).taskDeciders(context.orgId, context.userId, context.isOwner, taskIds),
       reasoning: await candidateReasoning(context.orgId, [...new Set(rankedIds)]),
+      stages: await liveStages(context.orgId, [...new Set(rankedIds)]),
       progress: await deskProgress(conv),
       activity: await deskActivity(conv),
       canStart: Boolean(await startStage(conv, context.userId, { dryRun: true })),
@@ -507,3 +510,13 @@ export const startDeskSourcing = createServerFn({ method: "POST" })
     const { startSourcing } = await import("../server/desk/desk.server");
     return { runId: await startSourcing(conv, context.userId) };
   });
+
+async function liveStages(orgId: string, ids: string[]): Promise<Record<string, string>> {
+  if (!ids.length) return {};
+  const { applications } = await import("@db/schema");
+  const rows = await db
+    .select({ id: applications.id, stage: applications.stage })
+    .from(applications)
+    .where(and(eq(applications.orgId, orgId), inArray(applications.id, ids)));
+  return Object.fromEntries(rows.map((r) => [r.id, r.stage]));
+}

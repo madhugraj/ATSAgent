@@ -1150,6 +1150,7 @@ export async function onTaskOpened(
   const conv = await loadConversation(run.orgId, run.conversationId).catch(() => null);
   if (!conv) return;
   const step = taskStep(task);
+  const tz = await orgTimeZone(conv.orgId);
   // The same brief again for the next approver: show it collapsed, not twice.
   const [prev] = await db
     .select({ card: hiringMessages.card })
@@ -1196,7 +1197,7 @@ export async function onTaskOpened(
       ...(task.kind === "approval"
         ? (() => {
             const a = task.proposedAction as { name?: string; args?: unknown } | null;
-            const details = argDetails(a?.name ?? null, a?.args);
+            const details = argDetails(a?.name ?? null, a?.args, tz);
             return details.length ? { details } : {};
           })()
         : {}),
@@ -1221,10 +1222,11 @@ export async function taskDetails(
     .from(agentTasks)
     .where(and(eq(agentTasks.orgId, orgId), inArray(agentTasks.id, ids)));
   const out: Record<string, { label: string; value: string }[]> = {};
+  const tz = await orgTimeZone(orgId);
   for (const r of rows) {
     if (r.kind !== "approval") continue;
     const a = r.action as { name?: string; args?: unknown } | null;
-    const d = argDetails(a?.name ?? null, a?.args);
+    const d = argDetails(a?.name ?? null, a?.args, tz);
     // Nothing to show (the tool works it out itself): say what it does instead.
     const what = a?.name ? await getToolDescription(a.name) : null;
     if (d.length) out[r.id] = d;
@@ -1300,7 +1302,10 @@ export async function taskStatuses(orgId: string, ids: string[]): Promise<Record
       r.id,
       r.status === "rejected" && (r.response as { changes?: boolean } | null)?.changes
         ? "changes_requested"
-        : r.status,
+        : r.status === "cancelled" &&
+            /moved from/.test(String((r.response as { reason?: string } | null)?.reason ?? ""))
+          ? "stale"
+          : r.status,
     ]),
   );
 }
@@ -1537,7 +1542,12 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
     );
   // The responsible agent already ran for this step and it is still not done:
   // say what came of it instead of "not started yet".
-  if (cur === "candidates" && run?.status === "done") {
+  if (
+    cur === "candidates" &&
+    run?.status === "done" &&
+    conv.requisitionId &&
+    !(await pipelineSize(conv.orgId, conv.requisitionId))
+  ) {
     TEXT.candidates =
       "The Intake & matching agent searched the pipeline and the talent pool and found no matching candidates yet. Add candidates (Manual mode → Talent pool or Careers inbox), then search again.";
   }
@@ -1668,16 +1678,46 @@ export function stepLabel(tool: string | null): string {
 const HIDDEN_ARG = /(^|_)id$|Id$|^subject$/;
 const MONEY_ARG = /ctc|budget|band|salary|compensation/i;
 
-const fmtValue = (k: string, v: unknown): string => {
+const ISO_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+/** An ISO date-time as a person reads it, in the organisation's time zone. */
+function fmtWhen(v: string, timeZone?: string): string {
+  try {
+    return new Intl.DateTimeFormat("en-GB", {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZoneName: "short",
+      ...(timeZone ? { timeZone } : {}),
+    }).format(new Date(v));
+  } catch {
+    return v;
+  }
+}
+
+const fmtValue = (k: string, v: unknown, timeZone?: string): string => {
   if (typeof v === "number" && MONEY_ARG.test(k))
     return `₹${v.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
-  if (Array.isArray(v)) return v.map((x) => String(x)).join(", ");
+  if (typeof v === "string" && ISO_DATETIME.test(v)) return fmtWhen(v, timeZone);
+  if (Array.isArray(v))
+    return v
+      .map((x) =>
+        typeof x === "string" && ISO_DATETIME.test(x) ? fmtWhen(x, timeZone) : String(x),
+      )
+      .join(
+        timeZone && v.some((x) => typeof x === "string" && ISO_DATETIME.test(x)) ? " · " : ", ",
+      );
   if (v && typeof v === "object") return JSON.stringify(v);
   return String(v);
 };
 
 /** A proposed tool call's arguments as label/value lines a person can read. */
-export function argDetails(tool: string | null, args: unknown): { label: string; value: string }[] {
+export function argDetails(
+  tool: string | null,
+  args: unknown,
+  timeZone?: string,
+): { label: string; value: string }[] {
   if (!args || typeof args !== "object") return [];
   const entries = Object.entries(args as Record<string, unknown>).filter(
     ([k, v]) => !HIDDEN_ARG.test(k) && v !== null && v !== undefined && v !== "",
@@ -1694,7 +1734,7 @@ export function argDetails(tool: string | null, args: unknown): { label: string;
       .replace(/([a-z])([A-Z])/g, "$1 $2")
       .replace(/_/g, " ")
       .replace(/^./, (c) => c.toUpperCase()),
-    value: fmtValue(k, v).slice(0, 400),
+    value: fmtValue(k, v, timeZone).slice(0, 400),
   }));
 }
 
@@ -2801,13 +2841,17 @@ export async function revisionOf(
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 /** Agent text shown to people: drop "… ID: <uuid>" lines and any stray internal ids. */
 export function readableAgentText(text: string): string {
-  return text
-    .split("\n")
-    .filter((line) => !(UUID.test(line) && /\bid\b/i.test(line)))
-    .join("\n")
-    .replace(new RegExp(`\\s*\`?${UUID.source}\`?`, "gi"), "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  return (
+    text
+      .split("\n")
+      .filter((line) => !(UUID.test(line) && /\bid\b/i.test(line)))
+      .join("\n")
+      .replace(new RegExp(`\\s*\`?${UUID.source}\`?`, "gi"), "")
+      // "(<id>)" leaves "()" behind.
+      .replace(/\s*\(\s*\)/g, "")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
+  );
 }
 
 /** Where an agent stands against its monthly token budget, with a suggested new budget. */
@@ -2823,9 +2867,7 @@ export async function budgetOf(
     .limit(1);
   const used = await monthTokens(orgId, agentType);
   const limit = Number(p?.limit ?? 0);
-  // Room for this month's work so far again, rounded up to 50k.
-  const suggested = Math.ceil(Math.max(limit * 2, used * 2) / 50_000) * 50_000;
-  return { used, limit, suggested };
+  return { used, limit, suggested: suggestBudget(used, limit, new Date()) };
 }
 
 /** The org's JD templates (with what they contain) and the one the current JD used — desk facts. */
@@ -3160,4 +3202,39 @@ export async function announceNewApplicants(orgId?: string): Promise<number> {
     posted++;
   }
   return posted;
+}
+
+async function orgTimeZone(orgId: string): Promise<string> {
+  const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+  return (await getOrgEmailSettings(orgId)).timezone;
+}
+
+/** Applicants in a role's pipeline (any stage but closed ones). */
+async function pipelineSize(orgId: string, requisitionId: string): Promise<number> {
+  const [r] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(applications)
+    .where(
+      and(
+        eq(applications.orgId, orgId),
+        eq(applications.requisitionId, requisitionId),
+        sql`${applications.stage} not in ('rejected','withdrawn')`,
+      ),
+    );
+  return Number(r?.n ?? 0);
+}
+
+/**
+ * A budget that lasts the month: this month's spend projected to its end
+ * (pace so far, at least two days of it), plus 25% headroom — never less than
+ * double the old limit — rounded up to 50k. Doubling alone ran out again the
+ * same day in a live test.
+ */
+export function suggestBudget(used: number, limit: number, now: Date): number {
+  const day = now.getUTCDate();
+  const daysInMonth = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+  const projected = (used / Math.max(day, 2)) * daysInMonth * 1.25;
+  return Math.ceil(Math.max(limit * 2, used * 2, projected) / 50_000) * 50_000;
 }

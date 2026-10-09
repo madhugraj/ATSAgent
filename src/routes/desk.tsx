@@ -563,58 +563,71 @@ function RankedCard({
           </tr>
         </thead>
         <tbody>
-          {items.map((r) => (
-            <Fragment key={r.applicationId}>
-              <tr className="border-b border-border/60 align-top">
-                <td className="px-2 py-2">
-                  <Checkbox
-                    checked={picked.includes(r.applicationId)}
-                    onCheckedChange={(v) => toggle(r.applicationId, Boolean(v))}
-                    aria-label={`Select ${r.name}`}
-                  />
-                </td>
-                <td className="num px-2 py-2 text-muted-foreground">{r.rank}</td>
-                <td className="px-2 py-2">
-                  <p className="font-medium">{r.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {r.experienceYears} yrs{r.location ? ` · ${r.location}` : ""} ·{" "}
-                    {r.stage.replace(/_/g, " ")}
-                  </p>
-                </td>
-                <td className="num px-2 py-2 text-right font-semibold">{r.score ?? "—"}</td>
-                <td className="px-2 py-2">
-                  {r.recommendation ? <Badge variant="outline">{r.recommendation}</Badge> : "—"}
-                  {r.risks ? (
-                    <p className="mt-1 text-xs text-muted-foreground">{r.risks} risk flag(s)</p>
-                  ) : null}
-                </td>
-                <td className="px-2 py-2 text-xs">
-                  {r.matched.length ? <p>✓ {r.matched.join(", ")}</p> : null}
-                  {r.missing.length ? (
-                    <p className="text-muted-foreground">✗ {r.missing.join(", ")}</p>
-                  ) : null}
-                  {conv.reasoning[r.applicationId] ? (
-                    <button
-                      type="button"
-                      className="mt-1 text-primary underline"
-                      onClick={() =>
-                        setOpenWhy(openWhy === r.applicationId ? null : r.applicationId)
-                      }
-                    >
-                      {openWhy === r.applicationId ? "Hide reasoning" : "Why this score?"}
-                    </button>
-                  ) : null}
-                </td>
-              </tr>
-              {openWhy === r.applicationId && conv.reasoning[r.applicationId] ? (
-                <tr className="border-b border-border/60 bg-muted/30">
-                  <td colSpan={6} className="px-3 py-3">
-                    <Reasoning why={conv.reasoning[r.applicationId]!} />
+          {items.map((snap) => {
+            // The list is a snapshot from when it was posted; score, fit and stage are live.
+            const live = conv.reasoning[snap.applicationId];
+            const r = {
+              ...snap,
+              score: live?.overall ?? snap.score,
+              recommendation: live?.recommendation ?? snap.recommendation,
+              matched: live?.matched ?? snap.matched,
+              missing: live?.missing ?? snap.missing,
+              risks: live ? live.risks.length : snap.risks,
+              stage: conv.stages[snap.applicationId] ?? snap.stage,
+            };
+            return (
+              <Fragment key={r.applicationId}>
+                <tr className="border-b border-border/60 align-top">
+                  <td className="px-2 py-2">
+                    <Checkbox
+                      checked={picked.includes(r.applicationId)}
+                      onCheckedChange={(v) => toggle(r.applicationId, Boolean(v))}
+                      aria-label={`Select ${r.name}`}
+                    />
+                  </td>
+                  <td className="num px-2 py-2 text-muted-foreground">{r.rank}</td>
+                  <td className="px-2 py-2">
+                    <p className="font-medium">{r.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {r.experienceYears} yrs{r.location ? ` · ${r.location}` : ""} ·{" "}
+                      {r.stage.replace(/_/g, " ")}
+                    </p>
+                  </td>
+                  <td className="num px-2 py-2 text-right font-semibold">{r.score ?? "—"}</td>
+                  <td className="px-2 py-2">
+                    {r.recommendation ? <Badge variant="outline">{r.recommendation}</Badge> : "—"}
+                    {r.risks ? (
+                      <p className="mt-1 text-xs text-muted-foreground">{r.risks} risk flag(s)</p>
+                    ) : null}
+                  </td>
+                  <td className="px-2 py-2 text-xs">
+                    {r.matched.length ? <p>✓ {r.matched.join(", ")}</p> : null}
+                    {r.missing.length ? (
+                      <p className="text-muted-foreground">✗ {r.missing.join(", ")}</p>
+                    ) : null}
+                    {conv.reasoning[r.applicationId] ? (
+                      <button
+                        type="button"
+                        className="mt-1 text-primary underline"
+                        onClick={() =>
+                          setOpenWhy(openWhy === r.applicationId ? null : r.applicationId)
+                        }
+                      >
+                        {openWhy === r.applicationId ? "Hide reasoning" : "Why this score?"}
+                      </button>
+                    ) : null}
                   </td>
                 </tr>
-              ) : null}
-            </Fragment>
-          ))}
+                {openWhy === r.applicationId && conv.reasoning[r.applicationId] ? (
+                  <tr className="border-b border-border/60 bg-muted/30">
+                    <td colSpan={6} className="px-3 py-3">
+                      <Reasoning why={conv.reasoning[r.applicationId]!} />
+                    </td>
+                  </tr>
+                ) : null}
+              </Fragment>
+            );
+          })}
         </tbody>
       </table>
       <div className="flex flex-wrap gap-2 border-t border-border p-2">
@@ -639,6 +652,7 @@ const TASK_STATUS: Record<string, string> = {
   approved: "Approved",
   rejected: "Declined",
   changes_requested: "Changes requested",
+  stale: "No longer applies — the candidate moved on",
   answered: "Answered",
   cancelled: "Cancelled",
 };

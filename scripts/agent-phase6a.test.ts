@@ -1314,6 +1314,45 @@ describe("JD changes, templates, budget pauses and readable agent text", () => {
     expect(last.card).toMatchObject({ type: "jd", version: 1, text: "Full stack JD text" });
   });
 
+  test("live-test fixes: no empty brackets, times in the org's zone, budgets that last the month", () => {
+    expect(
+      desk.readableAgentText("Candidate: ASHA (`3ce4fb38-04c2-40d0-a3df-cddf7f3d787b`) is ready"),
+    ).toBe("Candidate: ASHA is ready");
+    const d = desk.argDetails(
+      "offer_interview_slots",
+      { slots: ["2026-10-12T04:30:00.000Z", "2026-10-13T06:00:00.000Z"], level: 1 },
+      "Asia/Kolkata",
+    );
+    // 04:30Z and 06:00Z are 10:00 and 11:30 in India — shown there, not as raw UTC.
+    const slots = d.find((x) => x.label === "Slots")!.value;
+    expect(slots).toMatch(/Mon 12 Oct.*10:00.*·.*Tue 13 Oct.*11:30/);
+    expect(slots).not.toMatch(/Z\b|T0/);
+    // Day 9 of a 31-day month, 150k used: doubling (300k) would run out; the projection lasts.
+    expect(desk.suggestBudget(150_000, 150_000, new Date("2026-10-09T12:00:00Z"))).toBe(650_000);
+    expect(desk.suggestBudget(1_000, 60_000, new Date("2026-10-20T12:00:00Z"))).toBe(150_000);
+  });
+
+  test("the journey says 'no matching candidates' only when the pipeline is empty", async () => {
+    const conv = await confirming();
+    await db
+      .update(hiringConversations)
+      .set({ status: "active", requisitionId: existingReq })
+      .where(eq(hiringConversations.id, conv.id));
+    await db.insert(agentRuns).values({
+      orgId,
+      agentType: "intake",
+      principalUserId: recruiter,
+      goal: "g",
+      status: "done",
+      conversationId: conv.id,
+      subjectType: "requisition",
+      subjectId: existingReq,
+    });
+    const p = await desk.deskProgress(await reload(conv.id));
+    // existingReq has applicants (Asha, Bala, Chitra): the stale wording must not appear.
+    expect(p.next?.text ?? "").not.toMatch(/found no matching candidates/);
+  });
+
   test("agent text in the thread hides internal ids", () => {
     const text = [
       "The job description for REQ-2026-106 has been approved.",

@@ -1434,7 +1434,13 @@ async function applyDecision(
     const reason = response["reason"] ? ` Reason: ${String(response["reason"])}` : "";
     return told(`A person declined this request.${reason}`, true);
   }
-  if (task.status !== "approved") return told("This request was cancelled.", true);
+  if (task.status !== "approved")
+    return told(
+      response["reason"]
+        ? `This request was cancelled: ${String(response["reason"])} Do not retry it or work around it.`
+        : "This request was cancelled.",
+      true,
+    );
 
   // Gate approvals carry no tool to run — the human acted in the app.
   if (isHitl(call.name)) {
@@ -1680,4 +1686,63 @@ function preview(text: string): string {
 function redactArgs(args: unknown): unknown {
   const raw = JSON.stringify(args ?? null);
   return raw.length > 2000 ? { truncated: preview(raw) } : args;
+}
+
+/** Tools whose request depends on the candidate's stage when it was asked. */
+const STAGE_SENSITIVE_TOOLS = [
+  "send_assessment",
+  "remind_assessment",
+  "move_candidate",
+  "schedule_interview",
+  "offer_interview_slots",
+  "request_documents",
+];
+
+/**
+ * A candidate moved (by a person or an agent): open requests to act on them
+ * that depended on their old stage are closed as stale — nobody can approve
+ * an assessment for someone already in an interview round — and the agent is
+ * told why, so it does not try again. Audited; the run carries on.
+ */
+export async function cancelStaleRequests(
+  orgId: string,
+  applicationId: string,
+  fromStage: string,
+  toStage: string,
+): Promise<number> {
+  const now = new Date();
+  const reason = `the candidate moved from ${fromStage} to ${toStage} after this was asked, so it no longer applies.`;
+  const closed = await db
+    .update(agentTasks)
+    .set({
+      status: "cancelled",
+      response: { status: "cancelled", reason } as never,
+      decidedAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(agentTasks.orgId, orgId),
+        eq(agentTasks.status, "open"),
+        eq(agentTasks.kind, "approval"),
+        sql`${agentTasks.proposedAction} ->> 'name' in (${sql.join(
+          STAGE_SENSITIVE_TOOLS.map((t) => sql`${t}`),
+          sql`, `,
+        )})`,
+        sql`${agentTasks.proposedAction} -> 'args' ->> 'applicationId' = ${applicationId}`,
+      ),
+    )
+    .returning({ id: agentTasks.id, runId: agentTasks.runId });
+  for (const t of closed) {
+    await writeAudit({
+      actor: "system:stage-change",
+      orgId,
+      action: "agent.task.stale",
+      entityType: "agent_task",
+      entityId: t.id,
+      detail: { run_id: t.runId, applicationId, fromStage, toStage },
+    });
+    await requeueIfUnblocked(t.runId);
+  }
+  return closed.length;
 }

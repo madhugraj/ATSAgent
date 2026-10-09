@@ -497,6 +497,40 @@ describe("screening agent", () => {
     });
   });
 
+  test("a request that assumed the old stage closes itself when the candidate moves on (stale)", async () => {
+    await enable("screening", "suggest");
+    await application("Gita", "shortlisted", 90, ["Kubernetes"]);
+    const { runId } = await startRun({
+      orgId,
+      agentType: "screening",
+      principalUserId: recruiter,
+      goal: "x",
+    });
+    script.push(
+      call({ id: "a", name: "send_assessment", args: { applicationId: apps["Gita"]!.appId } }),
+    );
+    await runAgentTick({ orgId });
+    const [task] = await db
+      .select()
+      .from(agentTasks)
+      .where(and(eq(agentTasks.runId, runId), eq(agentTasks.status, "open")));
+    expect(task).toBeTruthy();
+    // A person moves her into an interview round before anyone approves the assessment.
+    await moveStageCore(
+      { orgId, userId: recruiter, memberEmail: recruiterEmail },
+      { applicationId: apps["Gita"]!.appId, toStage: "l1" },
+    );
+    const [closed] = await db.select().from(agentTasks).where(eq(agentTasks.id, task!.id));
+    expect(closed).toMatchObject({ status: "cancelled" });
+    expect(JSON.stringify(closed!.response)).toMatch(/moved from shortlisted to l1/);
+    // The agent is told why, and the candidate stays where the person put her.
+    script.push(say("Skipped: she is in an interview round."));
+    await runAgentTick({ orgId });
+    expect(await stageOf(apps["Gita"]!.appId)).toBe("l1");
+    const [run] = await db.select().from(agentRuns).where(eq(agentRuns.id, runId));
+    expect(run!.status).toBe("done");
+  });
+
   test("send_assessment waits for approval under suggest, then creates the assessment and queues the email", async () => {
     await enable("screening", "suggest");
     await application("Fay", "shortlisted", 82, ["Kubernetes"]);

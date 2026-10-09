@@ -49,6 +49,7 @@ function SchedulePage() {
   const [picked, setPicked] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [booked, setBooked] = useState<string | null>(null);
+  const [bookedLink, setBookedLink] = useState(false);
   const [noneOpen, setNoneOpen] = useState(false);
   const [note, setNote] = useState("");
   const [declined, setDeclined] = useState(false);
@@ -83,8 +84,13 @@ function SchedulePage() {
           <p className="mt-1 text-sm text-muted-foreground">
             {o.roundLabel} for {o.jobTitle} with {o.orgName}
             {booked || o.bookedAt ? ` — ${fmt((booked ?? o.bookedAt)!)}` : ""}. Your invite, with a
-            calendar file{o.mode === "online" ? " and the meeting link" : ""}, is on its way by
-            email.
+            calendar file
+            {bookedLink || o.hasMeetingLink
+              ? " and the meeting link"
+              : o.mode === "online"
+                ? " (the hiring team sends the meeting link)"
+                : ""}
+            , is on its way by email.
           </p>
         </div>
       </Shell>
@@ -113,8 +119,10 @@ function SchedulePage() {
     setBusy(true);
     try {
       const r = await choose({ data: { token, slot: picked } });
-      if (r.booked) setBooked(r.at);
-      else {
+      if (r.booked) {
+        setBookedLink(r.hasMeetingLink);
+        setBooked(r.at);
+      } else {
         toast.error(r.reason);
         await q.refetch();
         setPicked(null);

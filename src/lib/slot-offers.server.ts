@@ -234,6 +234,13 @@ async function byToken(token: string) {
   return o ?? null;
 }
 
+/** A person's name for candidates: the member's name, else the first part of their email. */
+export function displayName(name: string | null | undefined, email: string): string {
+  if (name?.trim()) return name.trim();
+  const first = email.split("@")[0]!.split(/[._-]/)[0] ?? email;
+  return first.charAt(0).toUpperCase() + first.slice(1);
+}
+
 export type PublicOffer = {
   orgName: string;
   jobTitle: string;
@@ -245,6 +252,8 @@ export type PublicOffer = {
   status: "offered" | "booked" | "declined" | "expired" | "cancelled";
   slots: string[];
   bookedAt: string | null;
+  /** The booked round has a meeting link (sent with the invite). */
+  hasMeetingLink: boolean;
 };
 
 export async function publicOffer(token: string): Promise<PublicOffer | null> {
@@ -262,11 +271,13 @@ export async function publicOffer(token: string): Promise<PublicOffer | null> {
     durationMins: o.offer.durationMins,
     mode: o.offer.mode,
     // First name only on the public page.
-    interviewerName: o.offer.interviewerName?.split(/\s+/)[0] ?? null,
+    interviewerName:
+      displayName(o.offer.interviewerName, o.offer.interviewerEmail).split(/\s+/)[0] ?? null,
     timeZone: (await getOrgEmailSettings(o.offer.orgId)).timezone,
     status: expired ? "expired" : (o.offer.status as PublicOffer["status"]),
     slots: o.offer.status === "offered" && !expired ? pickable : [],
     bookedAt: o.offer.status === "booked" ? (o.offer.chosenAt?.toISOString() ?? null) : null,
+    hasMeetingLink: o.offer.interviewId ? await roundHasLink(o.offer.interviewId) : false,
   };
 }
 
@@ -274,7 +285,9 @@ export async function publicOffer(token: string): Promise<PublicOffer | null> {
 export async function chooseSlot(
   token: string,
   slot: string,
-): Promise<{ booked: true; at: string } | { booked: false; reason: string }> {
+): Promise<
+  { booked: true; at: string; hasMeetingLink: boolean } | { booked: false; reason: string }
+> {
   const o = await byToken(token);
   if (!o) return { booked: false, reason: "This link is not valid." };
   const offer = o.offer;
@@ -359,7 +372,7 @@ export async function chooseSlot(
       o.requisitionId,
       `${o.candidateName} chose ${await whenText(offer.orgId, at)} for their L${offer.level} interview with ${offer.interviewerName ?? offer.interviewerEmail}. It is booked${meetingLink ? " with a meeting link" : ""}, and both of them have their invites.`,
     );
-    return { booked: true, at: at.toISOString() };
+    return { booked: true, at: at.toISOString(), hasMeetingLink: Boolean(meetingLink) };
   } catch (e) {
     // Booking failed after the claim: reopen the offer so the candidate can retry.
     await db
@@ -444,4 +457,14 @@ async function tellThread(orgId: string, requisitionId: string, body: string) {
   } catch {
     /* the thread is a courtesy; the audit trail has the record */
   }
+}
+
+async function roundHasLink(interviewId: string): Promise<boolean> {
+  const { interviews } = await import("@db/schema");
+  const [r] = await db
+    .select({ link: interviews.teamsLink })
+    .from(interviews)
+    .where(eq(interviews.id, interviewId))
+    .limit(1);
+  return Boolean(r?.link);
 }
