@@ -501,6 +501,13 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
       }
     }
   }
+  // Interview times nobody chose in time close, and the team hears about it.
+  try {
+    const { expireOffers } = await import("@/lib/slot-offers.server");
+    await expireOffers(opts.orgId);
+  } catch (err) {
+    log.warn("interview.slot_expiry_failed", { error: err as Error });
+  }
   // Hiring-desk threads hear about new applicants.
   try {
     const { announceNewApplicants } = await import("../desk/desk.server");

@@ -277,6 +277,24 @@ the autonomy dial.
   slots, creates Meet/Teams/Zoom invites, sends candidate invites, reminds
   interviewers, chases missing scorecards.
 - **HITL:** candidate invite → approval or whitelisted; panel choice → dial.
+- **Candidate chooses the time (v1.3.0):** `find_interview_slots` reads the
+  interviewer's free/busy from the connected Google Calendar (`freeBusy`) or
+  Microsoft 365 calendar (`getSchedule`) — never event details — and proposes
+  weekday 10:00–17:00 times in the organisation's time zone, ≥ 18 h ahead,
+  spread over days, avoiding rounds already booked and times already offered
+  to someone else (it says when no calendar could be checked).
+  `offer_interview_slots` (`external`, template `interview_slots`) emails the
+  candidate a private `/schedule/<token>` link (`interview_slot_offers`,
+  migration `0033`); every time is re-checked as free when offered and when
+  picked. Picking books the round through the shared scheduling core (meeting
+  link, candidate invite, interviewer brief, stage), once — the offer is
+  claimed before booking. "None of these work" records the candidate's words
+  and tells the desk thread; unanswered offers expire (72 h at most, never
+  past the first time). Health rule `interview.slots_unanswered`.
+- **Interviewer brief:** every booking or re-schedule (agent, Interviews page
+  or the candidate's pick) emails the interviewer a calendar file, the
+  meeting link, a candidate summary, match and screening highlights, and links
+  to the profile and the scorecard (internal mail, master switch only).
 
 ### 4.7 Evaluation agent
 

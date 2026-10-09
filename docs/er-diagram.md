@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-71 tables across 9 domains.
+72 tables across 9 domains.
 
 ## Identity & access
 
@@ -1038,6 +1038,9 @@ erDiagram
 | `inbox_messages` | `org_id` | `organizations` | cascade |
 | `integration_credentials` | `integration_id` | `source_integrations` | cascade |
 | `integration_credentials` | `org_id` | `organizations` | cascade |
+| `interview_slot_offers` | `application_id` | `applications` | cascade |
+| `interview_slot_offers` | `interview_id` | `interviews` | no action |
+| `interview_slot_offers` | `org_id` | `organizations` | cascade |
 | `interviews` | `application_id` | `applications` | cascade |
 | `interviews` | `org_id` | `organizations` | cascade |
 | `job_descriptions` | `org_id` | `organizations` | cascade |
@@ -1141,6 +1144,7 @@ erDiagram
 | `hrms_sync_state` | — | 12 | (integrationId+entity) |
 | `inbox_messages` | Sourcing & integrations | 16 | — |
 | `integration_credentials` | Sourcing & integrations | 4 | — |
+| `interview_slot_offers` | — | 21 | (token) |
 | `interviews` | Screening & interviews | 14 | — |
 | `job_descriptions` | Requisitions & job content | 17 | — |
 | `master_items` | Organisations & masters | 8 | — |

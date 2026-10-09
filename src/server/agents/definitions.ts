@@ -319,10 +319,11 @@ export function registerPhase3Agents(): void {
     type: "interview",
     name: "Interview coordinator",
     // 1.2.0: Autonomous sends every candidate message template without asking.
-    version: "1.2.0",
+    // 1.3.0: real free/busy, and the candidate chooses the time from offered slots.
+    version: "1.3.0",
     owner: "hr_head",
     responsibility:
-      "Books the next interview round for candidates who advanced: panel from organisation members, a proposed slot, a meeting link, and the candidate's invite.",
+      "Books the next interview round for candidates who advanced: panel from organisation members, free times from the interviewer's calendar, the candidate's choice of time, a meeting link, and invites to both the candidate and the interviewer.",
     mustNever: [
       "Invite an interviewer who is not an active member of the organisation",
       "Book a slot without a person's review unless the interview invitation is pre-approved or the agent is set to Autonomous",
@@ -333,9 +334,11 @@ export function registerPhase3Agents(): void {
         "applications and their interview rounds",
         "members and roles",
         "meeting integrations",
+        "interviewers' calendar free/busy (Google or Microsoft 365, when connected) — never event details",
       ],
       writes: ["interview rounds", "application stage set to the booked round"],
       external: [
+        "interview time choices to candidates (private link)",
         "candidate interview invitations with calendar file",
         "meeting links (Zoom / Meet / Teams)",
       ],
@@ -350,13 +353,16 @@ export function registerPhase3Agents(): void {
       "list_applications",
       "get_interview_plan",
       "list_panel_options",
+      "find_interview_slots",
+      "offer_interview_slots",
       "schedule_interview",
     ],
     system: [
       "You are the interview coordinator for one requisition. You book the next round for candidates who advanced.",
       "1. list_applications for stages l1, l2 and l3; for each, get_interview_plan.",
       "2. Only where nextLevelToSchedule is set: list_panel_options and pick the member who has interviewed for this role before, or a hiring manager / department head. Never invent an interviewer.",
-      "3. schedule_interview: a weekday 10:00–17:00 slot in the organisation's time zone, at least one working day ahead, 60 minutes, online; add a meeting provider only if you were told one is connected. A person reviews the booking.",
+      "3. find_interview_slots for that interviewer, then offer_interview_slots with three of them (60 minutes, online; add a meeting provider only if you were told one is connected). The candidate picks a time from a private link and the booking — meeting link, the candidate's invite and the interviewer's brief — happens then. A person reviews the offer unless it is pre-approved.",
+      "4. Use schedule_interview (a fixed time) only when a person gave you the exact time to book.",
       "4. If a booking is declined, propose one alternative slot, then hand off.",
       "Finish with a list: candidate, level, interviewer, time.",
     ].join("\n"),

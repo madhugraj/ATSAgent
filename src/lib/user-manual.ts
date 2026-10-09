@@ -204,7 +204,8 @@ export const MANUAL_SECTIONS: ManualSection[] = [
     summary: "Multi-level interviews with calendar invites, scorecards and automatic progression.",
     steps: [
       "Schedule from Interviews (/interviews): level, interviewer and email, mode, duration and agenda. The candidate's stored email is used for the invite.",
-      "A meeting link is created with your configured provider and an .ics invite is issued to interviewer and candidate.",
+      "A meeting link is created with your configured provider. The candidate gets an invite with an .ics file, and the interviewer gets their own invite and brief: the .ics, the meeting link, a short candidate summary with match and screening highlights, and links to the profile and the scorecard.",
+      "With the Interview coordinator on, the candidate chooses the time: it reads the interviewer's free/busy from your connected Google or Microsoft 365 calendar (never event details), offers three free times, and the candidate picks one from a private link — then the round is booked and both invites go out. If none of the times work, or the link expires, the hiring desk thread tells you.",
       "Reschedule from the same row; a reason is mandatory and the change is audited.",
       "Interviewers open My interviews (/interviews/mine) and submit a competency scorecard with rating, comments and a recommendation. Submissions lock.",
       "Select advances the candidate to the next level, hold pauses the pipeline, reject closes it with a required reason.",

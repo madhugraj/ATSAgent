@@ -650,6 +650,50 @@ export const interviews = pgTable(
   (t) => [index("interviews_interviewer_email_idx").on(sql`lower(${t.interviewerEmail})`)],
 );
 
+/**
+ * Interview times offered to a candidate, who picks one from a private link
+ * (/schedule/<token>). Booking happens only when they pick: the round, the
+ * meeting link and both invites are created then (migration 0033).
+ */
+export const interviewSlotOffers = pgTable(
+  "interview_slot_offers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    level: integer("level").notNull(),
+    interviewerName: text("interviewer_name"),
+    interviewerEmail: text("interviewer_email").notNull(),
+    durationMins: integer("duration_mins").notNull().default(60),
+    mode: text("mode").notNull().default("online"),
+    meetingProvider: text("meeting_provider"),
+    agenda: text("agenda"),
+    /** ISO start times offered. */
+    slots: jsonb("slots").$type<string[]>().notNull(),
+    token: text("token").notNull(),
+    /** offered | booked | declined | expired | cancelled */
+    status: text("status").notNull().default("offered"),
+    chosenAt: timestamp("chosen_at", { withTimezone: true }),
+    interviewId: uuid("interview_id").references(() => interviews.id, { onDelete: "set null" }),
+    /** The candidate's own words when none of the times work (untrusted). */
+    candidateNote: text("candidate_note"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdBy: uuid("created_by"),
+    agentRunId: uuid("agent_run_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("interview_slot_offers_token_key").on(t.token),
+    index("interview_slot_offers_open_idx").on(t.orgId, t.status, t.expiresAt),
+    index("interview_slot_offers_application_idx").on(t.applicationId),
+  ],
+);
+
 export const evaluations = pgTable(
   "evaluations",
   {
@@ -877,7 +921,9 @@ export type EmailOutboxKind =
   | "assessment_invite"
   | "member_reminder"
   | "document_request"
-  | "role_invite";
+  | "role_invite"
+  | "interviewer_brief"
+  | "interview_slots";
 export type EmailOutboxStatus = "queued" | "sent" | "failed" | "suppressed";
 export type EmailOutboxAttachment = {
   filename: string;

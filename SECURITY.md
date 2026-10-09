@@ -53,6 +53,12 @@ PostgreSQL is the operational system of record. Authentication, files, AI provid
 email and job boards are external trust boundaries with narrowly scoped credentials. Public capture,
 webhook, OAuth callback and scheduler endpoints validate callers, validate payloads and are rate limited.
 
+The candidate's interview-time page (`/schedule/<token>`) is public: the token is 64 random hex
+characters, it returns only the round, role, organisation, the interviewer's first name and the
+offered times, it can book one of those times once (the offer is claimed before booking and every
+time is re-checked as free), and its server functions are rate-limited with all other RPCs.
+Calendar access for availability is free/busy only — event titles and details are never read.
+
 Job-board application webhooks (`/api/public/boards/<provider>/<token>`) authenticate on two
 factors: a per-connection delivery token (24 random bytes, stored encrypted with a SHA-256 hash
 lookup — the capture-token precedent) and, where the board's contract defines one, a signature

@@ -270,6 +270,68 @@ export function registerPhase3Tools(): void {
   });
 
   registerTool({
+    name: "find_interview_slots",
+    description:
+      "Free interview times for one interviewer: weekdays 10:00–17:00 in the organisation's time zone, at least 18 hours ahead, spread over different days, avoiding their calendar's busy time (when Google or Microsoft 365 calendar is connected), rounds already booked in ATSIQ and times already offered to another candidate. Says whether the calendar was actually checked.",
+    input: z.object({
+      interviewerEmail: z.string().email(),
+      durationMins: z.number().int().min(15).max(240).default(60),
+      count: z.number().int().min(2).max(5).default(3),
+    }),
+    risk: "read",
+    run: async (ctx, i) => {
+      const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+      const { findFreeSlots } = await import("@/lib/calendar-availability.server");
+      const timeZone = (await getOrgEmailSettings(ctx.orgId)).timezone;
+      const r = await findFreeSlots(ctx.orgId, {
+        interviewerEmail: i.interviewerEmail,
+        durationMins: i.durationMins,
+        count: i.count,
+        timeZone,
+      });
+      return { ...r, timeZone };
+    },
+  });
+
+  registerTool({
+    name: "offer_interview_slots",
+    description:
+      "Email the candidate 2–5 interview times to choose from, through a private link. Nothing is booked yet: when they pick a time, the round is booked with a meeting link (if a provider is given and connected) and both the candidate and the interviewer get their invites; if none work, the team is told. Every time is re-checked as free. Leaves the organisation, so a person approves it unless the interview time-choice email is pre-approved.",
+    input: AppId.extend({
+      level: z.number().int().min(1).max(3),
+      interviewerEmail: z.string().email(),
+      slots: z.array(z.string()).min(2).max(5),
+      durationMins: z.number().int().min(15).max(240).default(60),
+      mode: z.enum(["online", "onsite", "phone"]).default("online"),
+      meetingProvider: z.enum(["zoom", "google_meet", "teams"]).optional(),
+      agenda: z.string().max(2000).optional(),
+    }),
+    risk: "external",
+    templateOf: () => "interview_slots",
+    describe: (i) =>
+      `Offer ${i.slots.length} L${i.level} interview times with ${i.interviewerEmail}`,
+    run: async (ctx, i) => {
+      const app = await loadApplication(ctx.orgId, i.applicationId);
+      const { offerSlotsCore } = await import("@/lib/slot-offers.server");
+      const r = await offerSlotsCore(
+        ctx.orgId,
+        { userId: ctx.principalUserId, runId: ctx.runId },
+        {
+          applicationId: app.id,
+          level: i.level,
+          interviewerEmail: i.interviewerEmail,
+          slots: i.slots,
+          durationMins: i.durationMins,
+          mode: i.mode,
+          meetingProvider: i.meetingProvider,
+          agenda: i.agenda,
+        },
+      );
+      return { offered: r.slots.length, slots: r.slots, expiresAt: r.expiresAt };
+    },
+  });
+
+  registerTool({
     name: "list_pending_scorecards",
     description:
       "Interview rounds that finished at least two hours ago without a scorecard (optionally for one requisition), with the interviewer to chase.",

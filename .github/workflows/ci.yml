@@ -86,3 +86,6 @@ jobs:
 
       - name: Publishing channels, supply and the Sourcing agent
         run: bun test scripts/agent-sourcing.test.ts
+
+      - name: Interview scheduling (free slots, candidate choice, interviewer brief)
+        run: bun test scripts/agent-interview-slots.test.ts

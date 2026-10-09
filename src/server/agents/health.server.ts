@@ -49,6 +49,10 @@ export const HEALTH = {
   injectionSerious24h: 3,
   /** Sourcing runs in 7 days on one role that added and invited nobody before it counts as exhausted. */
   sourcingFruitlessRuns: 2,
+  /** Interview-time offers answered with "none work" or left to expire, in 7 days… */
+  slotOffersUnanswered7d: 3,
+  /** …and as a share of all offers that closed. */
+  slotOffersUnansweredShare: 0.5,
   /** Re-evaluate at most this often (minutes). */
   evaluateEveryMinutes: 5,
 } as const;
@@ -350,6 +354,34 @@ export const RULES: Rule[] = [
             .map((x) => `${x.code} (${x.runs} runs)`)
             .join(", ")}`,
           detail: { roles: r.length, codes: r.slice(0, 5).map((x) => x.code) },
+        },
+      ];
+    },
+  },
+  {
+    id: "interview.slots_unanswered",
+    element: "hitl",
+    severity: "warning",
+    description: `Candidates did not pick any of the offered interview times (they said none work, or the link expired) at least ${HEALTH.slotOffersUnanswered7d} times in 7 days and for more than half of the offers — the times offered may not suit candidates, or the emails are not reaching them.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ closed: number; missed: number }>(sql`
+        select count(*)::int closed,
+          count(*) filter (where status in ('declined','expired'))::int missed
+        from interview_slot_offers
+        where org_id = ${orgId} and status in ('booked','declined','expired')
+          and updated_at >= now() - interval '7 days'`);
+      const x = r[0];
+      if (
+        !x ||
+        x.missed < HEALTH.slotOffersUnanswered7d ||
+        x.missed / x.closed <= HEALTH.slotOffersUnansweredShare
+      )
+        return [];
+      return [
+        {
+          agentType: "interview",
+          title: `${x.missed} of ${x.closed} interview-time offers in 7 days were not taken up`,
+          detail: { closed: x.closed, missed: x.missed },
         },
       ];
     },

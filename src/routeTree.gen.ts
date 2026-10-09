@@ -45,6 +45,7 @@ import { Route as InterviewsIndexRouteImport } from './routes/interviews.index'
 import { Route as InterviewsMineRouteImport } from './routes/interviews.mine'
 import { Route as RequisitionsIndexRouteImport } from './routes/requisitions.index'
 import { Route as RequisitionsIdRouteImport } from './routes/requisitions.$id'
+import { Route as ScheduleTokenRouteImport } from './routes/schedule.$token'
 import { Route as ApiAuthChangePasswordRouteImport } from './routes/api/auth/change-password'
 import { Route as ApiAuthConfirmRouteImport } from './routes/api/auth/confirm'
 import { Route as ApiAuthLoginRouteImport } from './routes/api/auth/login'
@@ -248,6 +249,11 @@ const RequisitionsIdRoute = RequisitionsIdRouteImport.update({
   path: '/requisitions/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ScheduleTokenRoute = ScheduleTokenRouteImport.update({
+  id: '/schedule/$token',
+  path: '/schedule/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAuthChangePasswordRoute = ApiAuthChangePasswordRouteImport.update({
   id: '/api/auth/change-password',
   path: '/api/auth/change-password',
@@ -398,6 +404,7 @@ export interface FileRoutesByFullPath {
   '/candidates/$id': typeof CandidatesIdRoute
   '/interviews/mine': typeof InterviewsMineRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
+  '/schedule/$token': typeof ScheduleTokenRoute
   '/agents/': typeof AgentsIndexRoute
   '/candidates/': typeof CandidatesIndexRoute
   '/interviews/': typeof InterviewsIndexRoute
@@ -458,6 +465,7 @@ export interface FileRoutesByTo {
   '/candidates/$id': typeof CandidatesIdRoute
   '/interviews/mine': typeof InterviewsMineRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
+  '/schedule/$token': typeof ScheduleTokenRoute
   '/agents': typeof AgentsIndexRoute
   '/candidates': typeof CandidatesIndexRoute
   '/interviews': typeof InterviewsIndexRoute
@@ -519,6 +527,7 @@ export interface FileRoutesById {
   '/candidates/$id': typeof CandidatesIdRoute
   '/interviews/mine': typeof InterviewsMineRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
+  '/schedule/$token': typeof ScheduleTokenRoute
   '/agents/': typeof AgentsIndexRoute
   '/candidates/': typeof CandidatesIndexRoute
   '/interviews/': typeof InterviewsIndexRoute
@@ -581,6 +590,7 @@ export interface FileRouteTypes {
     | '/candidates/$id'
     | '/interviews/mine'
     | '/requisitions/$id'
+    | '/schedule/$token'
     | '/agents/'
     | '/candidates/'
     | '/interviews/'
@@ -641,6 +651,7 @@ export interface FileRouteTypes {
     | '/candidates/$id'
     | '/interviews/mine'
     | '/requisitions/$id'
+    | '/schedule/$token'
     | '/agents'
     | '/candidates'
     | '/interviews'
@@ -701,6 +712,7 @@ export interface FileRouteTypes {
     | '/candidates/$id'
     | '/interviews/mine'
     | '/requisitions/$id'
+    | '/schedule/$token'
     | '/agents/'
     | '/candidates/'
     | '/interviews/'
@@ -762,6 +774,7 @@ export interface RootRouteChildren {
   CandidatesIdRoute: typeof CandidatesIdRoute
   InterviewsMineRoute: typeof InterviewsMineRoute
   RequisitionsIdRoute: typeof RequisitionsIdRoute
+  ScheduleTokenRoute: typeof ScheduleTokenRoute
   AgentsIndexRoute: typeof AgentsIndexRoute
   CandidatesIndexRoute: typeof CandidatesIndexRoute
   InterviewsIndexRoute: typeof InterviewsIndexRoute
@@ -1044,6 +1057,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RequisitionsIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/schedule/$token': {
+      id: '/schedule/$token'
+      path: '/schedule/$token'
+      fullPath: '/schedule/$token'
+      preLoaderRoute: typeof ScheduleTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/auth/change-password': {
       id: '/api/auth/change-password'
       path: '/api/auth/change-password'
@@ -1234,6 +1254,7 @@ const rootRouteChildren: RootRouteChildren = {
   CandidatesIdRoute: CandidatesIdRoute,
   InterviewsMineRoute: InterviewsMineRoute,
   RequisitionsIdRoute: RequisitionsIdRoute,
+  ScheduleTokenRoute: ScheduleTokenRoute,
   AgentsIndexRoute: AgentsIndexRoute,
   CandidatesIndexRoute: CandidatesIndexRoute,
   InterviewsIndexRoute: InterviewsIndexRoute,

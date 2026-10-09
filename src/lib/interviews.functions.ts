@@ -555,7 +555,29 @@ export async function scheduleInterviewCore(
     /* best-effort: scheduling must succeed even if the invite cannot be queued */
   }
 
-  return { ok: true as const, rescheduled, candidateEmail };
+  /* The interviewer's own invite and brief — best-effort too. */
+  if (interviewId && row.interviewerEmail) {
+    try {
+      const { sendInterviewerBrief } = await import("./interviewer-brief.server");
+      await sendInterviewerBrief(ctx.orgId, {
+        interviewId,
+        applicationId: app.id,
+        candidateId: app.candidateId,
+        level: data.level,
+        interviewerName: row.interviewer,
+        interviewerEmail: row.interviewerEmail,
+        scheduledAt,
+        durationMins: data.durationMins,
+        mode: data.mode,
+        meetingLink: row.teamsLink,
+        agenda: row.agenda,
+      });
+    } catch {
+      /* the round stands even if the brief cannot be queued */
+    }
+  }
+
+  return { ok: true as const, rescheduled, candidateEmail, interviewId };
 }
 
 export const scheduleInterview = createServerFn({ method: "POST" })

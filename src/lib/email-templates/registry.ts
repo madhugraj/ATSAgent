@@ -14,6 +14,8 @@ import { template as assessmentInviteTemplate } from "./assessment-invite";
 import { template as memberReminderTemplate } from "./member-reminder";
 import { template as documentRequestTemplate } from "./document-request";
 import { template as roleInviteTemplate } from "./role-invite";
+import { template as interviewerBriefTemplate } from "./interviewer-brief";
+import { template as interviewSlotsTemplate } from "./interview-slots";
 
 /**
  * Dynamic template-data bag passed to every template renderer and subject
@@ -65,4 +67,6 @@ export const TEMPLATES: Record<string, TemplateEntry> = {
   member_reminder: memberReminderTemplate,
   document_request: documentRequestTemplate,
   role_invite: roleInviteTemplate,
+  interviewer_brief: interviewerBriefTemplate,
+  interview_slots: interviewSlotsTemplate,
 };

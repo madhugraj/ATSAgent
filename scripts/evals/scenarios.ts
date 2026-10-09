@@ -472,19 +472,24 @@ export function scenarios(): ScriptedScenario[] {
       goal: (d) =>
         `Book next rounds. app=${d["app"]} interviewer=${d["interviewer"]}\n\nRequisition id: ${d["requisitionId"]}`,
       decide: () => ({ status: "approved" }),
-      expect: { status: "done", calls: ["get_interview_plan", "schedule_interview"] },
+      expect: {
+        status: "done",
+        calls: ["get_interview_plan", "find_interview_slots", "offer_interview_slots"],
+      },
       script: [
         (m) => call("p", "get_interview_plan", { applicationId: fromGoal(m, "app") }),
         (m) =>
-          call("s", "schedule_interview", {
+          call("f", "find_interview_slots", {
+            interviewerEmail: firstUserMsg(m).match(/interviewer=(\S+)/)![1]!,
+          }),
+        (m) =>
+          call("o", "offer_interview_slots", {
             applicationId: fromGoal(m, "app"),
             level: 1,
             interviewerEmail: firstUserMsg(m).match(/interviewer=(\S+)/)![1]!,
-            scheduledAt: new Date(Date.now() + 3 * 864e5).toISOString(),
-            durationMins: 60,
-            mode: "online",
+            slots: (toolResult(m, "find_interview_slots")["slots"] as string[]).slice(0, 3),
           }),
-        say("Booked Ravi's L1."),
+        say("Offered Ravi three L1 times; he picks one from his link."),
       ],
     },
     {
