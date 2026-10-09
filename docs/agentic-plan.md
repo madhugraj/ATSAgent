@@ -845,6 +845,17 @@ arrives):
     emails the apply link — nobody is added without applying). It never
     scores, moves, rejects or publishes; it recommends. Health rule
     `sourcing.no_supply`: 2+ fruitless runs on a role in 7 days.
+  - _New CV → open roles:_ someone who joins the pool without a role (an
+    inbox mail that named no role, an upload, a capture, an HRMS import) is
+    checked once by the scheduler (`pool-match.server.ts`, migration `0032`
+    `candidates.role_match_checked_at`) against every approved role with an
+    approved JD, with the pool search's evidence ranking (≥ 75% of must-haves
+    or equivalents, inside the experience band; employees and hired people
+    excluded; CVs from the last 7 days only). A match joins that role's
+    pipeline as `pool_match` (audited `pool.matched_to_role`, at most 5 per
+    role per sweep), is scored by Intake & matching within minutes and is
+    announced in the desk thread. Runs for organisations that switched the
+    Sourcing agent on; pool matches do not count as channel traction.
   - _Desk:_ when a JD is approved the thread lists what happens next (Intake,
     Publishing, Sourcing — on / switched off, with **Switch on and start** for
     HR head / CBO / owner, audited); when a later JD version is approved and
