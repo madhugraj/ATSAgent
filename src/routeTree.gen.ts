@@ -16,6 +16,7 @@ import { Route as CollaborationRouteImport } from './routes/collaboration'
 import { Route as CookiesRouteImport } from './routes/cookies'
 import { Route as DeskRouteImport } from './routes/desk'
 import { Route as HelpRouteImport } from './routes/help'
+import { Route as HiringCostRouteImport } from './routes/hiring-cost'
 import { Route as IjpRouteImport } from './routes/ijp'
 import { Route as InboxRouteImport } from './routes/inbox'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
@@ -103,6 +104,11 @@ const DeskRoute = DeskRouteImport.update({
 const HelpRoute = HelpRouteImport.update({
   id: '/help',
   path: '/help',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HiringCostRoute = HiringCostRouteImport.update({
+  id: '/hiring-cost',
+  path: '/hiring-cost',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IjpRoute = IjpRouteImport.update({
@@ -385,6 +391,7 @@ export interface FileRoutesByFullPath {
   '/cookies': typeof CookiesRoute
   '/desk': typeof DeskRoute
   '/help': typeof HelpRoute
+  '/hiring-cost': typeof HiringCostRoute
   '/ijp': typeof IjpRoute
   '/inbox': typeof InboxRoute
   '/integrations': typeof IntegrationsRoute
@@ -447,6 +454,7 @@ export interface FileRoutesByTo {
   '/cookies': typeof CookiesRoute
   '/desk': typeof DeskRoute
   '/help': typeof HelpRoute
+  '/hiring-cost': typeof HiringCostRoute
   '/ijp': typeof IjpRoute
   '/inbox': typeof InboxRoute
   '/integrations': typeof IntegrationsRoute
@@ -510,6 +518,7 @@ export interface FileRoutesById {
   '/cookies': typeof CookiesRoute
   '/desk': typeof DeskRoute
   '/help': typeof HelpRoute
+  '/hiring-cost': typeof HiringCostRoute
   '/ijp': typeof IjpRoute
   '/inbox': typeof InboxRoute
   '/integrations': typeof IntegrationsRoute
@@ -574,6 +583,7 @@ export interface FileRouteTypes {
     | '/cookies'
     | '/desk'
     | '/help'
+    | '/hiring-cost'
     | '/ijp'
     | '/inbox'
     | '/integrations'
@@ -636,6 +646,7 @@ export interface FileRouteTypes {
     | '/cookies'
     | '/desk'
     | '/help'
+    | '/hiring-cost'
     | '/ijp'
     | '/inbox'
     | '/integrations'
@@ -698,6 +709,7 @@ export interface FileRouteTypes {
     | '/cookies'
     | '/desk'
     | '/help'
+    | '/hiring-cost'
     | '/ijp'
     | '/inbox'
     | '/integrations'
@@ -761,6 +773,7 @@ export interface RootRouteChildren {
   CookiesRoute: typeof CookiesRoute
   DeskRoute: typeof DeskRoute
   HelpRoute: typeof HelpRoute
+  HiringCostRoute: typeof HiringCostRoute
   IjpRoute: typeof IjpRoute
   InboxRoute: typeof InboxRoute
   IntegrationsRoute: typeof IntegrationsRoute
@@ -865,6 +878,13 @@ declare module '@tanstack/react-router' {
       path: '/help'
       fullPath: '/help'
       preLoaderRoute: typeof HelpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/hiring-cost': {
+      id: '/hiring-cost'
+      path: '/hiring-cost'
+      fullPath: '/hiring-cost'
+      preLoaderRoute: typeof HiringCostRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/ijp': {
@@ -1249,6 +1269,7 @@ const rootRouteChildren: RootRouteChildren = {
   CookiesRoute: CookiesRoute,
   DeskRoute: DeskRoute,
   HelpRoute: HelpRoute,
+  HiringCostRoute: HiringCostRoute,
   IjpRoute: IjpRoute,
   InboxRoute: InboxRoute,
   IntegrationsRoute: IntegrationsRoute,

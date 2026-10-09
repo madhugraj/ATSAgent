@@ -95,3 +95,5 @@ jobs:
 
       - name: Cost per candidate, offer answers and negotiation
         run: bun test scripts/agent-hiring-cost-offer.test.ts
+      - name: Agent unhappy paths (declines, rejections, closed roles, pricing)
+        run: bun test scripts/agent-unhappy-paths.test.ts

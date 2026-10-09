@@ -40,6 +40,11 @@ const STAGE_EMAIL_COPY: Partial<Record<Stage, { heading: string; body: string }>
     heading: "You have advanced to the final interview round",
     body: "Congratulations — you have advanced to the final interview round. The team will share the details shortly.",
   },
+  // The internal reason is never sent; the candidate hears the outcome, kindly.
+  rejected: {
+    heading: "An update on your application",
+    body: "Thank you for the time you gave us. After careful consideration, we will not be taking your application further for this role. We will keep your profile and may reach out about future roles that fit.",
+  },
 };
 
 export interface RecordStageTransitionInput {
@@ -139,6 +144,7 @@ export async function recordStageTransitions(inputs: RecordStageTransitionInput[
         jobTitle: c.jobTitle,
         stageHeading: copy.heading,
         stageBody: copy.body,
+        ...(input.toStage === "rejected" ? { final: "yes" } : {}),
       },
     });
     byOrg.set(input.orgId, rows);

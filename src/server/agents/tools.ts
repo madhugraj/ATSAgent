@@ -7,6 +7,7 @@
  * Gate actions (approving, releasing, rejecting) are not tools — agents ask
  * for them with request_approval (registry gate guard).
  */
+import { rupees } from "@/lib/money";
 import { and, desc, eq, ilike, inArray, or } from "drizzle-orm";
 import { z } from "zod/v4";
 
@@ -327,7 +328,7 @@ export function registerPhase1Tools(): void {
     }),
     risk: "write",
     describe: (i) =>
-      `Set budget ${i.budgetCtc.toLocaleString()} (band ${i.bandMin.toLocaleString()}–${i.bandMax.toLocaleString()})`,
+      `Set budget ${rupees(i.budgetCtc)} (band ${rupees(i.bandMin)}–${rupees(i.bandMax)})`,
     run: async (ctx, i) => {
       if (i.bandMin > i.bandMax) throw new Error("bandMin must not exceed bandMax.");
       const { updateRequisitionCompensationCore } = await import("@/lib/requisitions.server");

@@ -5,6 +5,7 @@
  * (request_approval with an offer / document_validation / offer_release
  * subject) — never tools.
  */
+import { rupees } from "@/lib/money";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod/v4";
 
@@ -51,6 +52,8 @@ async function documentsNotNeeded(
   const received = types.filter((t) =>
     have.some((d) => d.docType === t && d.status !== "rejected"),
   );
+  // Every copy HR rejected: a new request (with the reason) is due now.
+  const rejected = types.filter((t) => have.some((d) => d.docType === t) && !received.includes(t));
   const asked = await db
     .select({ data: emailOutbox.templateData })
     .from(emailOutbox)
@@ -65,6 +68,7 @@ async function documentsNotNeeded(
   const pending = types.filter(
     (t) =>
       !received.includes(t) &&
+      !rejected.includes(t) &&
       asked.some((a) => {
         const d = (a.data ?? {}) as { documents?: string; dueDate?: string };
         const due = d.dueDate ? Date.parse(d.dueDate) + 864e5 : 0;
@@ -155,6 +159,7 @@ export function registerPhase4Tools(): void {
           joiningDate: offers.joiningDate,
           revision: offers.revision,
           counter: offers.counter,
+          approvalTrail: offers.approvalTrail,
           hasLetter: sql<boolean>`${offers.letter} is not null`,
         })
         .from(offers)
@@ -182,7 +187,19 @@ export function registerPhase4Tools(): void {
         noticePeriodDays: app.noticePeriodDays,
         band: { min: num(app.bandMin), max: num(app.bandMax), budget: num(app.budget) },
         hiringDecision: decision[0]?.body ?? null,
-        existingOffers: existing.map((o) => ({ ...o, offeredCtc: num(o.offeredCtc) })),
+        existingOffers: existing.map(({ approvalTrail, ...o }) => {
+          // An approver who sent it back: their step and reason.
+          const last = (Array.isArray(approvalTrail) ? approvalTrail : []).at(-1) as
+            { decision?: string; from?: string; comment?: string; actor?: string } | undefined;
+          return {
+            ...o,
+            offeredCtc: num(o.offeredCtc),
+            sentBack:
+              o.status === "draft" && last?.decision === "sent_back"
+                ? { atStep: last.from ?? null, reason: last.comment ?? null }
+                : null,
+          };
+        }),
         internalParity: {
           offers12m: Number(parity?.["n"] ?? 0),
           median: num(parity?.["median"]),
@@ -205,10 +222,15 @@ export function registerPhase4Tools(): void {
         .optional(),
     }),
     risk: "write",
-    describe: (i) => `Draft an offer at ${i.offeredCtc.toLocaleString()} CTC`,
+    describe: (i) => `Draft an offer at ${rupees(i.offeredCtc)} CTC`,
     run: async (ctx, i) => {
       const app = await loadApplication(ctx.orgId, i.applicationId);
-      if (!OFFER_STAGES.has(app.stage)) {
+      // After the role's final round — which is L1 or L2 when its plan has fewer rounds.
+      const finalDone =
+        /^l[123]$/.test(app.stage) &&
+        (await (await import("@/lib/interview-plan.server")).progressOf(ctx.orgId, app.id))
+          .finalComplete;
+      if (!OFFER_STAGES.has(app.stage) && !finalDone) {
         throw new Error(
           `Offers are drafted after the final round; this candidate is ${app.stage}.`,
         );
@@ -217,7 +239,7 @@ export function registerPhase4Tools(): void {
       const max = num(app.bandMax);
       if (min != null && max != null && (i.offeredCtc < min || i.offeredCtc > max)) {
         throw new Error(
-          `${i.offeredCtc.toLocaleString()} is outside the approved band ${min.toLocaleString()}–${max.toLocaleString()}. Ask a person (ask_human) before going outside the band.`,
+          `${rupees(i.offeredCtc)} is outside the approved band ${rupees(min)}–${rupees(max)}. Ask a person (ask_human) before going outside the band.`,
         );
       }
       const open = await db
@@ -256,7 +278,7 @@ export function registerPhase4Tools(): void {
   registerTool({
     name: "revise_offer",
     description:
-      "Revise an offer the candidate asked to change (status countered): set the new CTC (inside the requisition's approved band — if the ask is above it, offer the band maximum or ask a person) and joining date, with the reasoning. The offer goes back to draft as the next revision; then generate_offer_letter and submit_offer_for_approval so it is approved again before release.",
+      "Revise an offer the candidate asked to change (status countered) or an approver sent back (draft with sentBack): set the new CTC (inside the requisition's approved band — if the ask is above it, offer the band maximum or ask a person) and joining date, with the reasoning. The offer goes back to draft as the next revision; then generate_offer_letter and submit_offer_for_approval so it is approved again before release.",
     input: OfferId.extend({
       offeredCtc: z.number().positive(),
       joiningDate: z
@@ -266,19 +288,19 @@ export function registerPhase4Tools(): void {
       rationale: z.string().min(10).max(1500),
     }),
     risk: "write",
-    describe: (i) => `Revise the offer to ${i.offeredCtc.toLocaleString()} CTC`,
+    describe: (i) => `Revise the offer to ${rupees(i.offeredCtc)} CTC`,
     run: async (ctx, i) => {
       const o = await offerApplication(ctx.orgId, i.offerId);
-      if (o.status !== "countered")
+      if (o.status !== "countered" && o.status !== "draft")
         throw new Error(
-          `Only an offer the candidate asked to change can be revised; this one is ${o.status}.`,
+          `Only an offer the candidate asked to change, or one an approver sent back, can be revised; this one is ${o.status}.`,
         );
       const app = await loadApplication(ctx.orgId, o.applicationId);
       const min = num(app.bandMin);
       const max = num(app.bandMax);
       if (min != null && max != null && (i.offeredCtc < min || i.offeredCtc > max)) {
         throw new Error(
-          `${i.offeredCtc.toLocaleString()} is outside the approved band ${min.toLocaleString()}–${max.toLocaleString()}. Offer within the band, or ask a person (ask_human) before going outside it.`,
+          `${rupees(i.offeredCtc)} is outside the approved band ${rupees(min)}–${rupees(max)}. Offer within the band, or ask a person (ask_human) before going outside it.`,
         );
       }
       const { reviseOfferCore } = await import("@/lib/offers.functions");
@@ -396,10 +418,12 @@ export function registerPhase4Tools(): void {
   registerTool({
     name: "request_documents",
     description:
-      "Email the candidate the list of pre-onboarding documents still needed, asking them to reply with the files (they are filed automatically). Leaves the organisation, so a person approves it unless the document request email is pre-approved.",
+      "Email the candidate the list of pre-onboarding documents still needed (with `note` saying why an earlier copy was not accepted, when HR rejected one), asking them to reply with the files (they are filed automatically). Leaves the organisation, so a person approves it unless the document request email is pre-approved.",
     input: AppId.extend({
       documentTypes: z.array(z.string().min(2).max(60)).min(1).max(12),
       dueInDays: z.number().int().min(1).max(21).default(5),
+      /** Why an earlier copy was not accepted (HR's reason, in plain words). */
+      note: z.string().max(600).optional(),
     }),
     risk: "external",
     templateOf: () => "document_request",
@@ -438,6 +462,7 @@ export function registerPhase4Tools(): void {
           documents: i.documentTypes.map(docTypeLabel).join("\n"),
           replyTo: org?.careersEmail ?? undefined,
           dueDate: due.toDateString(),
+          ...(i.note ? { note: i.note } : {}),
         },
       });
       return { requested: i.documentTypes.length, due: due.toISOString().slice(0, 10) };

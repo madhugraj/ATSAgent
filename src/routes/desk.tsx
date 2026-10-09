@@ -257,6 +257,10 @@ function Thread({ id }: { id: string }) {
       </section>
     );
   const d = q.data;
+  const openTasks = d.messages.filter((m) => {
+    const t = (m.card as { taskId?: string } | null)?.taskId;
+    return t && (d.tasks[t] ?? "open") === "open";
+  }).length;
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
       {/* The journey: first on small screens, a sticky column on wide ones. */}
@@ -292,6 +296,22 @@ function Thread({ id }: { id: string }) {
           ) : null}
         </div>
         <footer className="border-t border-border p-3">
+          {/* Requests can be posted while other agents keep writing; never let
+              one scroll out of sight unnoticed. */}
+          {openTasks > 0 ? (
+            <button
+              type="button"
+              className="mb-2 w-full rounded-md border border-primary/40 bg-primary/5 px-3 py-1.5 text-left text-xs font-medium text-primary"
+              onClick={() =>
+                list.current
+                  ?.querySelector("[data-open-task]")
+                  ?.scrollIntoView({ block: "center", behavior: "smooth" })
+              }
+            >
+              {openTasks} request{openTasks === 1 ? "" : "s"} waiting for you in this conversation —
+              show
+            </button>
+          ) : null}
           <Composer
             value={text}
             onChange={setText}
@@ -673,6 +693,8 @@ function TaskCard({
     conv.taskDetails[taskId] ??
     (Array.isArray(card["details"]) ? (card["details"] as { label: string; value: string }[]) : []);
   const [answer, setAnswer] = useState("");
+  const [declining, setDeclining] = useState(false);
+  const [why, setWhy] = useState("");
   const [busy, setBusy] = useState(false);
   async function decide(decision: AgentDecisionInput) {
     setBusy(true);
@@ -687,6 +709,7 @@ function TaskCard({
   }
   return (
     <div
+      data-open-task={status === "open" ? taskId : undefined}
       className={`rounded-lg border p-3 text-sm ${status === "open" ? "border-primary/40" : "border-border bg-muted/30"}`}
     >
       {card["step"] ? (
@@ -750,17 +773,45 @@ function TaskCard({
               Answer
             </Button>
           </div>
+        ) : declining ? (
+          // A decision people (and the agent) act on: say why. Required for gates.
+          <div className="mt-2 space-y-2">
+            <Textarea
+              value={why}
+              rows={2}
+              maxLength={1000}
+              placeholder={
+                kind === "gate"
+                  ? "Why are you declining? (required — the agent and the team act on it)"
+                  : "Why? (optional — tells the agent what to change)"
+              }
+              onChange={(e) => setWhy(e.target.value)}
+            />
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={busy || (kind === "gate" && why.trim().length < 3)}
+                onClick={() =>
+                  decide({
+                    status: "rejected",
+                    ...(why.trim() ? { reason: why.trim() } : {}),
+                  })
+                }
+              >
+                Decline
+              </Button>
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => setDeclining(false)}>
+                Back
+              </Button>
+            </div>
+          </div>
         ) : (
           <div className="mt-2 flex flex-wrap gap-2">
             <Button size="sm" disabled={busy} onClick={() => decide({ status: "approved" })}>
               Approve
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={busy}
-              onClick={() => decide({ status: "rejected" })}
-            >
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => setDeclining(true)}>
               Decline
             </Button>
             <Link to="/agents" className="self-center text-xs text-primary underline">

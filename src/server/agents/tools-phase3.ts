@@ -358,6 +358,18 @@ export function registerPhase3Tools(): void {
     templateOf: () => "interview_slots",
     describe: (i) =>
       `Offer ${i.slots.length} L${i.level} interview times with ${i.interviewerEmail}`,
+    // Three offers for this round not taken up: a person calls the candidate.
+    precheck: async (ctx, i) => {
+      const [r] = (await db.execute(sql`
+        select count(*)::int n from interview_slot_offers
+        where org_id = ${ctx.orgId} and application_id = ${i.applicationId}
+          and level = ${i.level} and status in ('declined','expired')`)) as unknown as {
+        n: number;
+      }[];
+      return (r?.n ?? 0) >= 3
+        ? `${r!.n} offers of times for this L${i.level} round were not taken up. Do not offer again: ask_human so a person calls the candidate and books it.`
+        : null;
+    },
     run: async (ctx, i) => {
       const app = await loadApplication(ctx.orgId, i.applicationId);
       const { offerSlotsCore } = await import("@/lib/slot-offers.server");

@@ -218,6 +218,7 @@ export const uploadOnboardingDoc = createServerFn({ method: "POST" })
         uploadedBy: context.userId,
       });
       results.push(filed);
+      if (filed.duplicate) continue;
       await writeAudit({
         actor: context.memberEmail,
         actorUserId: context.userId,
@@ -298,7 +299,11 @@ export async function reviewOnboardingDocCore(
     "Only TA or HR can validate pre-onboarding documents.",
   );
   const [row] = await db
-    .select({ id: onboardingDocuments.id, docType: onboardingDocuments.docType })
+    .select({
+      id: onboardingDocuments.id,
+      docType: onboardingDocuments.docType,
+      applicationId: onboardingDocuments.applicationId,
+    })
     .from(onboardingDocuments)
     .where(and(eq(onboardingDocuments.id, data.id), eq(onboardingDocuments.orgId, actor.orgId)))
     .limit(1);
@@ -328,6 +333,18 @@ export async function reviewOnboardingDocCore(
     entityId: row.id,
     detail: { docType: row.docType, note: data.note?.trim() || null },
   });
+  if (data.decision === "rejected") {
+    // The candidate must be asked for a new copy, with the reason.
+    const { emitAgentEvent } = await import("../server/agents/events");
+    await emitAgentEvent({
+      orgId: actor.orgId,
+      type: "onboarding.document_rejected",
+      subjectType: "application",
+      subjectId: row.applicationId,
+      actorUserId: actor.userId,
+      payload: { documentId: row.id, docType: row.docType, reason: data.note?.trim() ?? "" },
+    });
+  }
   return { ok: true as const };
 }
 

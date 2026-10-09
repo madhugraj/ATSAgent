@@ -1700,6 +1700,39 @@ function AiModelCard() {
           </div>
         )}
 
+        {s && activeModel === s.model ? (
+          <div className="rounded-md border border-border p-2 text-xs text-muted-foreground sm:col-span-2">
+            {s.list_price ? (
+              <>
+                <span className="font-medium text-foreground">Price on file for {s.model}</span> (
+                {s.list_price.basis}, per 1M tokens):{" "}
+                {s.list_price.periods
+                  .map(
+                    (p) =>
+                      `${p.from ? `from ${p.from}` : "now"} ${s.list_price!.currency} ${p.inputPerMillion} input / ${p.outputPerMillion} output`,
+                  )
+                  .join("; ")}
+                . Checked {s.list_price.checkedOn} on{" "}
+                <a
+                  href={s.list_price.source}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-primary underline"
+                >
+                  the provider's pricing page
+                </a>
+                . Hiring cost uses it unless you set your own prices under Agent observability →
+                Utilisation.
+              </>
+            ) : (
+              <>
+                No published price is on file for {s.model}, so hiring cost shows tokens only until
+                you set your own prices under Agent observability → Utilisation.
+              </>
+            )}
+          </div>
+        ) : null}
+
         {
           <div className="space-y-1.5 sm:col-span-2">
             <Label className="flex items-center gap-1.5">

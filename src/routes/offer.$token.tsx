@@ -50,7 +50,7 @@ function OfferPage() {
     queryFn: () => load({ data: { token } }),
     retry: false,
   });
-  const [mode, setMode] = useState<null | "decline" | "changes">(null);
+  const [mode, setMode] = useState<null | "accept" | "decline" | "changes">(null);
   const [reason, setReason] = useState("");
   const [ctc, setCtc] = useState("");
   const [joining, setJoining] = useState("");
@@ -104,7 +104,7 @@ function OfferPage() {
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {status === "accepted"
-              ? `${o.orgName} will be in touch about your joining and the documents needed.`
+              ? `${o.orgName} will be in touch about your joining.`
               : status === "countered"
                 ? `${o.orgName} will review your request and send you a revised offer.`
                 : `The hiring team at ${o.orgName} has your answer.`}
@@ -152,8 +152,8 @@ function OfferPage() {
 
       {mode === null ? (
         <div className="mt-6 flex flex-wrap gap-2">
-          <Button disabled={busy} onClick={() => void send({ action: "accept" })}>
-            {busy ? <Loader2 className="size-4 animate-spin" /> : null} Accept the offer
+          <Button disabled={busy} onClick={() => setMode("accept")}>
+            Accept the offer
           </Button>
           <Button variant="outline" disabled={busy} onClick={() => setMode("changes")}>
             Ask for changes
@@ -161,6 +161,23 @@ function OfferPage() {
           <Button variant="ghost" disabled={busy} onClick={() => setMode("decline")}>
             Decline
           </Button>
+        </div>
+      ) : mode === "accept" ? (
+        <div className="mt-6 space-y-3 rounded-md border border-border p-3 text-sm">
+          <p>
+            You are accepting the offer for <span className="font-medium">{o.jobTitle}</span> at{" "}
+            <span className="num font-medium">{inr(o.offeredCtc)}</span> a year
+            {o.joiningDate ? `, joining on ${o.joiningDate}` : ""}. This is your final answer to
+            this offer.
+          </p>
+          <div className="flex gap-2">
+            <Button disabled={busy} onClick={() => void send({ action: "accept" })}>
+              {busy ? <Loader2 className="size-4 animate-spin" /> : null} Yes, accept the offer
+            </Button>
+            <Button variant="ghost" disabled={busy} onClick={() => setMode(null)}>
+              Back
+            </Button>
+          </div>
         </div>
       ) : mode === "decline" ? (
         <div className="mt-6 space-y-2">

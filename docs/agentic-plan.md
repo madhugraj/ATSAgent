@@ -319,6 +319,11 @@ the autonomy dial.
   unavailable, cancelled) is recorded with a note, the desk thread is told
   and `interview.missed` has the coordinator offer new times; health rule
   `interview.no_shows`.
+- **Times not taken (v1.7.0):** when a candidate says none of the offered
+  times work, or the link expires, `interview.slots_unanswered` has the
+  coordinator offer different times honouring their note; after three offers
+  for a round go unanswered, `offer_interview_slots` refuses and a person
+  calls the candidate.
 - **Round order (v1.6.0):** a round's times start only after the candidate's
   earlier round ends (`roundNotBefore`): `find_interview_slots` takes the
   application and level, and offering or booking an earlier time is refused.
@@ -358,6 +363,15 @@ the autonomy dial.
   the reasoning), regenerates the letter and takes it through HR head → CBO
   approval and release again. Health rule `offer.negotiation_loop` (3+
   revisions, still open).
+- **Sent back (1.2.0):** an HR head or CBO who declines an offer at their
+  step (Decline in the inbox — a reason is required — or **Send back** on the
+  Offers page) returns it to draft with the reason on the trail
+  (`offer.sent_back`); the thread is told and the Offer agent revises it for
+  that reason inside the band (`revise_offer` also takes a sent-back draft),
+  or asks a person when it cannot — never resubmitting unchanged. Approval
+  cards state, from the system, where the CTC sits against the role's budget
+  and band. `draft_offer` follows the role's interview plan: a one- or
+  two-round role is ready for an offer once its final round is complete.
 
 ### 4.9 Pre-onboarding & release agent
 
@@ -371,6 +385,11 @@ the autonomy dial.
   asked and again at send time, documents already received (not rejected) or
   requested and not yet due. `onboarding_status` names the offer
   (`offerId`, status, revision) that the release request needs.
+- **Rejected documents (1.2.0):** a document HR rejects raises
+  `onboarding.document_rejected`; the agent asks the candidate for a new copy
+  at once (the due-date rule does not block a rejected type) with HR's reason
+  in the email (`note`). The same file uploaded twice is not filed or read
+  again.
 - **Release email:** releasing (each revision) emails the candidate the letter
   PDF and the private answer link (`emailReleasedOffer`); a failure is logged
   (`offer.release_email_failed`) and never blocks the release.
@@ -679,6 +698,38 @@ candidate's direct cost by hiring stage (CV, matching, screening, interviews,
 evaluation, offer, pre-onboarding — including every request of an agent run
 whose subject is their application), and reports cost per hire = role total
 ÷ hires. Money only at the organisation's own token prices.
+
+**Money.** Each request is priced by the model it ran on and the day it ran:
+the organisation's own rates (`agent_cost_rates`) when set, else the model's
+published list price (`src/server/ai-pricing.ts` — only prices read from the
+provider's own pricing page, with source and date; a model with no price on
+file is reported as unpriced tokens, never guessed). Web-search grounding is
+counted separately (billed per 1,000 beyond the provider's monthly
+allowance). The model and vendor are named only on the organisation's AI
+model settings, which also show the price on file.
+
+**Across the organisation** (`/hiring-cost`, HR head / CBO / owner): spend
+for the last 3, 6 or 12 months; cost per hire (spend ÷ offers accepted in the
+period, and per month); spend not tied to a role; every role (spend, shared,
+average per candidate, per hire); candidate spend by hiring stage; and
+candidate spend by outcome — hired, not hired, still in progress — so a high
+share on people not hired shows that screening or interviews reach too many.
+
+### 9.5 When things do not go to plan
+
+- A role closed, rejected or put **on hold** starts no agent; closing or
+  pausing stops running agents, withdraws open interview-time links and tells
+  the thread what a person must still settle (booked rounds, open offers,
+  people in the pipeline). On hold pauses the thread; agents resume once the
+  role is approved again.
+- A rejected candidate is told kindly and finally (stage email, never the
+  internal reason), subject to the organisation's stage-email switch.
+- Assessments not completed within 14 days close on the daily sweep and the
+  thread is told.
+- Under the **immediate** verdict policy the round's verdict moves the
+  candidate and the Evaluation agent only debriefs.
+- A gate the person declines records their decision (and reason) even when
+  the record's own event closed the task first.
 
 ## 10. Phased delivery
 

@@ -331,7 +331,8 @@ export function registerPhase3Agents(): void {
     // re-offers times for rounds that did not happen.
     // 1.5.0: shortlisted candidates are interviewed only once screening is on record.
     // 1.6.0: a round's times start after the candidate's earlier round ends.
-    version: "1.6.0",
+    // 1.7.0: re-offers times a candidate declined or let expire (capped; then a person).
+    version: "1.7.0",
     owner: "hr_head",
     responsibility:
       "Books the next interview round for candidates who advanced: panel from organisation members, free times from the interviewer's calendar, the candidate's choice of time, a meeting link, and invites to both the candidate and the interviewer.",
@@ -373,6 +374,7 @@ export function registerPhase3Agents(): void {
       "1. list_applications for stages shortlisted, l1, l2 and l3; for each, get_interview_plan.",
       "2. Only where nextLevelToSchedule is set: list_panel_options and pick nextRound.panelSize interviewers — first those who interviewed for this role before, then hiring managers / department heads; never the same person twice for one candidate if others are available. Never invent an interviewer.",
       "3. find_interview_slots with the applicationId and the round's level (so times start after the candidate's earlier round ends) for the first interviewer with the rest as panelEmails, then offer_interview_slots with three of them, the same panelEmails, and nextRound.focus as the agenda (60 minutes, online; add a meeting provider only if you were told one is connected). The candidate picks a time from a private link and the booking — meeting link, the candidate's invite and every interviewer's brief with the round's rubric — happens then. A person reviews the offer unless it is pre-approved.",
+      "When the candidate did not take offered times (declined or expired): offer three different times — other days and times of day, honouring any note they gave. If offering again is refused or impossible, ask_human so a person calls them.",
       "4. A round that did not happen (status no_show or cancelled) is scheduled again the same way.",
       "5. Use schedule_interview (a fixed time) only when a person gave you the exact time to book.",
       "6. If an offer is declined, propose other times once, then hand off.",
@@ -425,7 +427,8 @@ export function registerPhase4Agents(): void {
     type: "offer",
     name: "Offer agent",
     // 1.1.0: negotiation — revises a countered offer inside the band and re-routes it.
-    version: "1.1.0",
+    // 1.2.0: an offer an approver sent back is revised for their reason (or a person asked).
+    version: "1.2.0",
     owner: "hr_head",
     responsibility:
       "Turns a hiring decision into a draft offer inside the approved band, with its letter and an approval brief, and walks it through HR head and CBO approval.",
@@ -469,7 +472,7 @@ export function registerPhase4Agents(): void {
       "3. draft_offer (joining date: notice period from today, rounded to the next Monday, if known).",
       "4. generate_offer_letter, then submit_offer_for_approval.",
       "5. request_approval with subject {type: 'offer', id: <offerId>} and a brief: CTC and where it sits in the band, internal parity, the candidate's expectation and hike, risks. When the HR head approves, request the CBO's approval the same way.",
-      "If an approval is declined, stop and summarise the reason; do not change the offer yourself.",
+      "If an approver sent the offer back (an existing offer is draft with sentBack): read their reason. If it can be met inside the band (pay, joining date), revise_offer with your reasoning, generate_offer_letter, submit_offer_for_approval and request approval again with a brief that states what was asked and what changed. If it cannot be met inside the band or is not about the offer's terms, ask_human. Never resubmit an unchanged offer.",
       "When the candidate asked for changes (an existing offer is countered): read their counter (expected CTC, joining date, note). Meet the ask if it sits inside the band and within reason of internal parity; otherwise propose the highest defensible figure inside the band and say why. revise_offer with that CTC and your reasoning, then generate_offer_letter, submit_offer_for_approval, and request the HR head's (then the CBO's) approval with a brief that states what the candidate asked for, what you propose and why. Never exceed the band — ask_human instead.",
     ].join("\n"),
   });
@@ -479,7 +482,8 @@ export function registerPhase4Agents(): void {
     name: "Pre-onboarding & release agent",
     // 1.1.0: never re-requests documents already received or requested and not yet due;
     // onboarding_status names the offer (offerId) a release request needs.
-    version: "1.1.0",
+    // 1.2.0: asks again for a document HR rejected, telling the candidate why.
+    version: "1.2.0",
     owner: "hr_head",
     responsibility:
       "Collects and cross-checks the pre-onboarding documents for an approved offer, asks HR to validate them, and asks the HR head to release the offer once everything is verified.",
@@ -506,6 +510,7 @@ export function registerPhase4Agents(): void {
       "You are the pre-onboarding agent for one approved offer.",
       "1. onboarding_status.",
       "2. If required documents are missing and were never requested (or their due date has passed), request_documents for exactly those types. Documents already received or requested and not yet due are not asked for again — wait for the candidate.",
+      "2b. A document HR rejected (status rejected, with HR's reviewNote) and no newer copy: request_documents for that type again with note giving HR's reason in plain words for the candidate.",
       "3. For documents received and pending review: compensation_cross_check, then request_approval with subject {type: 'document_validation', applicationId, documentIds} addressed to hr_head. In the summary, list for each document what it shows and any conflict with the candidate's declared details or the offer.",
       "4. When every required document is verified, request_approval with subject {type: 'offer_release', offerId} (offer.offerId from onboarding_status) addressed to hr_head.",
       "Finish with what is still missing, what is waiting for HR, or that the release was requested.",

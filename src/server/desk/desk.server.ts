@@ -1175,7 +1175,7 @@ export async function onTaskOpened(
     )
     .orderBy(desc(hiringMessages.createdAt))
     .limit(1);
-  const body = task.body.slice(0, 1500);
+  const body = readableAgentText(task.body).slice(0, 1500);
   const revision = task.kind === "approval" ? await revisionOf(conv, task) : null;
   const repeated = (prev?.card as { body?: string } | null)?.body === body && body.length > 0;
   await postMessage(conv, {
@@ -2247,7 +2247,7 @@ export async function onRequisitionEnded(
   actorUserId: string | null,
   comment?: string | null,
 ): Promise<void> {
-  if (!["closed", "rejected"].includes(to)) return;
+  if (!["closed", "rejected", "on_hold"].includes(to)) return;
   const conv = await conversationForRequisition(orgId, requisitionId);
   const [req] = await db
     .select({
@@ -2277,16 +2277,51 @@ export async function onRequisitionEnded(
     const { cancelRun } = await import("../agents/runtime.server");
     for (const r of active) await cancelRun({ orgId, runId: r.id, userId: stopper });
   }
-  // Closed threads are skipped by conversationForRequisition, so this runs once.
+  // Interview-time links still open for this role's candidates are withdrawn.
+  const withdrawn = (await db.execute(sql`
+    update interview_slot_offers set status = 'cancelled'
+    where org_id = ${orgId} and status = 'offered'
+      and application_id in (select id from applications where requisition_id = ${requisitionId} and org_id = ${orgId})
+    returning id`)) as unknown as { id: string }[];
+  // What still needs a person: rounds booked ahead, offers out, people in play.
+  const [open] = (await db.execute(sql`
+    select
+      (select count(*) from interviews i join applications a on a.id = i.application_id
+        where a.requisition_id = ${requisitionId} and i.org_id = ${orgId}
+          and i.status = 'scheduled' and i.scheduled_at > now())::int as rounds,
+      (select count(*) from offers o join applications a on a.id = o.application_id
+        where a.requisition_id = ${requisitionId} and o.org_id = ${orgId}
+          and o.status in ('draft','pending_hr','pending_cbo','approved','released','countered'))::int as offers,
+      (select count(*) from applications a where a.requisition_id = ${requisitionId} and a.org_id = ${orgId}
+          and a.stage not in ('rejected','withdrawn','offer_declined','offer_accepted','hired','joined'))::int as people
+  `)) as unknown as { rounds: number; offers: number; people: number }[];
   if (!conv) return;
   const trail = Array.isArray(req?.trail)
     ? (req!.trail as { actor?: string; comment?: string | null }[])
     : [];
   const last = trail.at(-1);
   const reason = comment ?? last?.comment ?? null;
+  const loose = [
+    open?.rounds ? `${open.rounds} interview round(s) still booked` : "",
+    open?.offers ? `${open.offers} offer(s) still open` : "",
+    open?.people ? `${open.people} candidate(s) still in the pipeline` : "",
+  ].filter(Boolean);
+  const head = `${req?.code ?? "The requisition"} was ${to === "on_hold" ? "put on hold" : to}${last?.actor ? ` by ${last.actor}` : ""}${reason ? ` — reason: "${reason}"` : ""}. ${active.length ? `${active.length} agent run(s) working on it were stopped. ` : ""}${withdrawn.length ? `${withdrawn.length} open interview-time link(s) were withdrawn. ` : ""}${loose.length ? `Still to settle by a person: ${loose.join(", ")} — tell the candidates and cancel or keep them on the Interviews and Offers pages. ` : ""}`;
+  if (to === "on_hold") {
+    // Paused, not ended: agents start again once the role is approved again.
+    await postMessage(conv, {
+      role: "desk",
+      body: `${head}No agent works on it while it is on hold.`,
+    });
+    return;
+  }
   await endThread(
     conv,
-    `${req?.code ?? "The requisition"} was ${to}${last?.actor ? ` by ${last.actor}` : ""}${reason ? ` — reason: "${reason}"` : ""}. ${active.length ? `${active.length} agent run(s) working on it were stopped. ` : ""}A ${to} requisition cannot be reopened; start a new hiring need to hire for this again.`,
+    `${head}${
+      to === "rejected"
+        ? "It can be revised and resubmitted from the requisition page; this thread ends here."
+        : "A closed requisition stays closed; start a new hiring need to hire for this again."
+    }`,
   );
 }
 
@@ -2853,14 +2888,21 @@ export async function revisionOf(
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 /** Agent text shown to people: drop "… ID: <uuid>" lines and any stray internal ids. */
 export function readableAgentText(text: string): string {
+  const id = `\`?${UUID.source}\`?`;
   return (
     text
       .split("\n")
-      .filter((line) => !(UUID.test(line) && /\bid\b/i.test(line)))
+      // A line that is only "<label> id: <id>" says nothing to a person.
+      .filter(
+        (line) => !new RegExp(`^[\\s*\\-•]*[\\w ]{0,30}:?\\s*${id}[\\s.,)]*$`, "i").test(line),
+      )
       .join("\n")
-      .replace(new RegExp(`\\s*\`?${UUID.source}\`?`, "gi"), "")
-      // "(<id>)" leaves "()" behind.
+      // "Application ID: <id>", "(ID: <id>)", "Requisition: <id>": the label goes with the id.
+      .replace(new RegExp(`,?\\s*\\b[A-Za-z]+(?:\\s(?:ID|Id|id))?\\s*[:=]\\s*${id}`, "g"), "")
+      .replace(new RegExp(`\\s*${id}`, "gi"), "")
+      // "(<id>)" leaves "()" behind; "(<id>, x)" leaves "(, x)".
       .replace(/\s*\(\s*\)/g, "")
+      .replace(/\(\s*,\s*/g, "(")
       .replace(/\n{3,}/g, "\n\n")
       .trim()
   );

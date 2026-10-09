@@ -373,6 +373,8 @@ export async function submitScorecardCore(
         verdict,
         roundComplete: true,
         finalRound: data.level >= progress.finalLevel,
+        // "immediate": the round's verdict moves the candidate itself.
+        policy: progress.plan.verdictPolicy,
       },
     });
   }

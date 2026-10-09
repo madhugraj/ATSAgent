@@ -399,6 +399,25 @@ export async function chooseSlot(
 }
 
 /** None of the times work: record the candidate's words and tell the team. */
+/** The candidate did not take an offer of times: the coordinator tries again (capped). */
+async function raiseUnanswered(
+  orgId: string,
+  applicationId: string,
+  level: number,
+  why: "declined" | "expired",
+  note: string | null,
+): Promise<void> {
+  const { emitAgentEvent } = await import("../server/agents/events");
+  await emitAgentEvent({
+    orgId,
+    type: "interview.slots_unanswered",
+    subjectType: "application",
+    subjectId: applicationId,
+    actorUserId: null,
+    payload: { applicationId, level, why, note },
+  });
+}
+
 export async function declineSlots(token: string, note: string): Promise<boolean> {
   const o = await byToken(token);
   if (!o || o.offer.status !== "offered") return false;
@@ -420,7 +439,14 @@ export async function declineSlots(token: string, note: string): Promise<boolean
   await tellThread(
     o.offer.orgId,
     o.requisitionId,
-    `${o.candidateName} said none of the offered times for their L${o.offer.level} interview work${clean ? `: "${clean}"` : "."} Offer other times, or book a time with them directly on the Interviews page.`,
+    `${o.candidateName} said none of the offered times for their L${o.offer.level} interview work${clean ? `: "${clean}"` : "."} The Interview coordinator offers other times; or book a time with them directly on the Interviews page.`,
+  );
+  await raiseUnanswered(
+    o.offer.orgId,
+    o.offer.applicationId,
+    o.offer.level,
+    "declined",
+    clean || null,
   );
   return true;
 }
@@ -453,8 +479,9 @@ export async function expireOffers(orgId?: string): Promise<number> {
       await tellThread(
         r.orgId,
         a.requisitionId,
-        `${a.name} did not choose a time for their L${r.level} interview before the link expired. Offer new times, or call them and book it on the Interviews page.`,
+        `${a.name} did not choose a time for their L${r.level} interview before the link expired. The Interview coordinator offers new times; or call them and book it on the Interviews page.`,
       );
+    await raiseUnanswered(r.orgId, r.applicationId, r.level, "expired", null);
   }
   return rows.length;
 }

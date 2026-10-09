@@ -182,6 +182,17 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
       log.warn("agent.orchestrator.agent_missing", { org_id: e.orgId, agent, type: e.type });
       return;
     }
+    // Nothing starts for a role that is closed, rejected or on hold; late
+    // events (a scorecard, a no-show, an offer change) wait for a person.
+    if (["closed", "rejected", "on_hold"].includes(req.status)) {
+      log.info("agent.orchestrator.role_inactive", {
+        org_id: e.orgId,
+        agent,
+        type: e.type,
+        status: req.status,
+      });
+      return;
+    }
     const policy = await loadPolicy(e.orgId, agent);
     if (!policy.enabled) {
       // A hiring-desk thread waiting on this role hears why nothing happens.
@@ -212,10 +223,10 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
         .limit(1)
     )[0];
 
-  // A closed or rejected role: stop its agents and end its hiring-desk thread.
+  // A closed, rejected or paused role: stop its agents (and end or pause its thread).
   if (
     e.type === "requisition.status_changed" &&
-    (payload.to === "closed" || payload.to === "rejected")
+    (payload.to === "closed" || payload.to === "rejected" || payload.to === "on_hold")
   ) {
     const { onRequisitionEnded } = await import("../desk/desk.server");
     await onRequisitionEnded(e.orgId, req.id, payload.to, e.actorUserId);
@@ -264,14 +275,21 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
       level?: number;
       verdict?: string;
       finalRound?: boolean;
+      policy?: string;
     };
-    const due = p.finalRound !== false || p.verdict === "hold" || p.verdict === "reject";
+    // Under the "immediate" policy the round's verdict already moved the
+    // candidate: nobody is asked for a hiring decision.
+    const due =
+      p.policy !== "immediate" &&
+      (p.finalRound !== false || p.verdict === "hold" || p.verdict === "reject");
     await dispatch(
       "evaluation",
       `Interview round L${p.level ?? "?"} is complete (round verdict: ${p.verdict ?? "?"}) for ${req.code} "${req.title}". Debrief candidate application ${p.applicationId}${
         due
           ? " and ask the hiring manager for the hiring decision."
-          : ". This is not the final round and the verdict is select: write the debrief only — do not request a hiring decision."
+          : p.policy === "immediate"
+            ? ". The role's verdict policy is immediate, so the round's verdict has already moved the candidate: write the debrief only — do not request a hiring decision."
+            : ". This is not the final round and the verdict is select: write the debrief only — do not request a hiring decision."
       }`,
       p.applicationId ? { type: "application", id: p.applicationId } : undefined,
     );
@@ -286,10 +304,32 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
     );
   }
 
+  if (applicationId && e.type === "interview.slots_unanswered") {
+    const p = e.payload as { level?: number; why?: string; note?: string | null };
+    await dispatch(
+      "interview",
+      `Candidate application ${applicationId} (${req.code} "${req.title}") did not take the offered L${p.level ?? "?"} interview times (${p.why === "expired" ? "the link expired unanswered" : "none of them work"}${p.note ? `: "${String(p.note).slice(0, 300)}"` : ""}). Offer different times — other days and times of day, honouring what they said — or ask a person if that is not possible.`,
+      { type: "application", id: applicationId },
+    );
+  }
+
   if (applicationId && e.type === "hiring.selected") {
     await dispatch(
       "offer",
       `The hiring manager selected candidate application ${applicationId} for ${req.code} "${req.title}". Prepare the offer within the approved band and take it through approval.`,
+      { type: "application", id: applicationId },
+    );
+  }
+
+  if (
+    applicationId &&
+    e.type === "offer.status_changed" &&
+    payload.to === "draft" &&
+    (e.payload as { sentBack?: boolean }).sentBack
+  ) {
+    await dispatch(
+      "offer",
+      `An approver sent the offer for candidate application ${applicationId} (${req.code} "${req.title}") back to draft: "${String(payload.comment ?? "").slice(0, 500)}". Address their reason inside the band and take it through approval again, or ask a person.`,
       { type: "application", id: applicationId },
     );
   }
@@ -329,6 +369,15 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
         `A pre-onboarding document arrived for candidate application ${applicationId} (${req.code} "${req.title}"). Check readiness and ask HR to validate what is pending.`,
         { type: "application", id: applicationId },
       );
+  }
+
+  if (applicationId && e.type === "onboarding.document_rejected") {
+    const p = e.payload as { docType?: string; reason?: string };
+    await dispatch(
+      "onboarding",
+      `HR rejected the ${String(p.docType ?? "document").replace(/_/g, " ")} for candidate application ${applicationId} (${req.code} "${req.title}"): "${String(p.reason ?? "").slice(0, 300)}". Ask the candidate for a new copy, telling them why.`,
+      { type: "application", id: applicationId },
+    );
   }
 
   if (e.type === "jd.changes_requested") {
@@ -545,6 +594,32 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
     await expireOffers(opts.orgId);
   } catch (err) {
     log.warn("interview.slot_expiry_failed", { error: err as Error });
+  }
+  // Assessments not completed within their 14 days close, and the team hears about it.
+  try {
+    const expired = (await db.execute(sql`
+      update candidate_assessments ca set status = 'expired'
+      from candidates c
+      where c.id = ca.candidate_id and ca.status = 'sent'
+        and ca.created_at < now() - interval '14 days'
+        ${opts.orgId ? sql`and ca.org_id = ${opts.orgId}` : sql``}
+      returning ca.org_id, ca.requisition_id, c.full_name`)) as unknown as {
+      org_id: string;
+      requisition_id: string | null;
+      full_name: string;
+    }[];
+    const desk = await import("../desk/desk.server");
+    for (const x of expired) {
+      if (!x.requisition_id) continue;
+      const conv = await desk.conversationForRequisition(x.org_id, x.requisition_id);
+      if (conv)
+        await desk.postMessage(conv, {
+          role: "desk",
+          body: `${x.full_name} did not complete the written assessment within 14 days, so the link has closed. Send a new one, screen them by phone, or decide without it.`,
+        });
+    }
+  } catch (err) {
+    log.warn("assessment.expiry_failed", { error: err as Error });
   }
   // Hiring-desk threads hear about new applicants.
   try {

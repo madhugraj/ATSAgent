@@ -340,6 +340,114 @@ export const advanceOffer = createServerFn({ method: "POST" })
     ),
   );
 
+/** Who may send an offer back from each approval step. */
+const SEND_BACK_ROLE: Record<string, AppRole> = {
+  pending_hr: "hr_head",
+  pending_cbo: "president_cbo",
+};
+
+/**
+ * An approver declines an offer: it goes back to draft with their reason on
+ * the trail (never stuck at an approval step), the desk thread hears it, and
+ * offer.status_changed (to "draft", sentBack) has the Offer agent revise it
+ * inside the band or ask a person.
+ */
+export async function sendBackOfferCore(
+  actor: { orgId: string; userId: string; memberEmail: string; via?: "agent" },
+  input: { id: string; reason: string },
+): Promise<{ ok: true }> {
+  const reason = input.reason.replace(/\s+/g, " ").trim().slice(0, 1000);
+  if (reason.length < 3) throw new Error("Say why the offer is sent back.");
+  const [o] = await db
+    .select({
+      status: offers.status,
+      approvalTrail: offers.approvalTrail,
+      applicationId: offers.applicationId,
+    })
+    .from(offers)
+    .where(and(eq(offers.id, input.id), eq(offers.orgId, actor.orgId)))
+    .limit(1);
+  if (!o) throw new Error("Offer not found");
+  const role = SEND_BACK_ROLE[o.status];
+  if (!role) throw new Error(`An offer that is ${o.status} is not waiting for an approval.`);
+  await assertRole(actor.userId, actor.orgId, role);
+  const trail = [
+    ...(Array.isArray(o.approvalTrail) ? (o.approvalTrail as unknown[]) : []),
+    {
+      from: o.status,
+      to: "draft",
+      actor: actor.memberEmail,
+      decision: "sent_back",
+      comment: reason,
+      ...(actor.via ? { via: actor.via } : {}),
+      at: new Date().toISOString(),
+    },
+  ];
+  const done = await db
+    .update(offers)
+    .set({ status: "draft", approvalTrail: trail as never })
+    .where(and(eq(offers.id, input.id), eq(offers.orgId, actor.orgId), eq(offers.status, o.status)))
+    .returning({ id: offers.id });
+  if (!done.length) throw new Error("This offer has already moved on; refresh to see it.");
+  const { writeAudit } = await import("../server/audit");
+  await writeAudit({
+    actor: actor.memberEmail,
+    actorUserId: actor.userId,
+    orgId: actor.orgId,
+    action: "offer.sent_back",
+    entityType: "offer",
+    entityId: input.id,
+    detail: { from: o.status, reason },
+  });
+  const { emitAgentEvent } = await import("../server/agents/events");
+  await emitAgentEvent({
+    orgId: actor.orgId,
+    type: "offer.status_changed",
+    subjectType: "offer",
+    subjectId: input.id,
+    actorUserId: actor.userId,
+    payload: {
+      from: o.status,
+      to: "draft",
+      applicationId: o.applicationId,
+      sentBack: true,
+      comment: reason,
+    },
+  });
+  try {
+    const [a] = await db
+      .select({ requisitionId: applications.requisitionId, name: candidates.fullName })
+      .from(applications)
+      .innerJoin(candidates, eq(candidates.id, applications.candidateId))
+      .where(eq(applications.id, o.applicationId))
+      .limit(1);
+    const desk = await import("../server/desk/desk.server");
+    const conv = a ? await desk.conversationForRequisition(actor.orgId, a.requisitionId) : null;
+    if (conv)
+      await desk.postMessage(conv, {
+        role: "desk",
+        body: `${actor.memberEmail} sent ${a!.name}'s offer back to draft at the ${
+          o.status === "pending_hr" ? "HR head" : "CBO"
+        } step: "${reason}". The Offer agent revises it inside the band or asks a person.`,
+      });
+  } catch {
+    /* the trail and audit are the record */
+  }
+  return { ok: true };
+}
+
+export const sendBackOffer = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((data: unknown) =>
+    z.object({ id: z.string().uuid(), reason: z.string().min(3).max(1000) }).parse(data),
+  )
+  .handler(async ({ data, context }) =>
+    sendBackOfferCore(
+      { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
+      data,
+    ),
+  );
+
 /* --------------------------------------------------------- offer letter */
 
 /** What the model composes. Legal boilerplate never passes through it. */
@@ -753,12 +861,14 @@ export async function reviseOfferCore(
     .where(and(eq(offers.id, input.offerId), eq(offers.orgId, actor.orgId)))
     .limit(1);
   if (!o) throw new Error("Offer not found.");
-  if (o.status !== "countered") throw new Error(`An offer that is ${o.status} cannot be revised.`);
+  // A candidate's counter, or a draft an approver sent back, can be revised.
+  if (o.status !== "countered" && o.status !== "draft")
+    throw new Error(`An offer that is ${o.status} cannot be revised.`);
   const revision = o.revision + 1;
   const trail = [
     ...(Array.isArray(o.approvalTrail) ? (o.approvalTrail as unknown[]) : []),
     {
-      from: "countered",
+      from: o.status,
       to: "draft",
       actor: actor.memberEmail,
       decision: "revised",

@@ -14,6 +14,7 @@
  *  - third-party text in tool output is fenced with untrusted();
  *  - every write/external action and every human decision is audited.
  */
+import { rupees } from "@/lib/money";
 import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import { z } from "zod/v4";
 
@@ -146,6 +147,9 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
         ctc: offers.offeredCtc,
         name: candidates.fullName,
         title: requisitions.title,
+        budget: requisitions.budgetCtc,
+        bandMin: requisitions.ctcBandMin,
+        bandMax: requisitions.ctcBandMax,
       })
       .from(offers)
       .innerJoin(applications, eq(applications.id, offers.applicationId))
@@ -157,10 +161,27 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
     if (subject.type === "offer") {
       const role = OFFER_APPROVER[o.status];
       if (!role) return { error: `The offer is ${o.status}, not waiting for an approval.` };
+      // Stated by the system, not left to the agent: where the CTC sits
+      // against the role's approved budget and band.
+      const ctc = Number(o.ctc);
+      const budget = Number(o.budget ?? 0);
+      const [lo, hi] = [Number(o.bandMin ?? 0), Number(o.bandMax ?? 0)];
+      const vsBudget =
+        budget > 0
+          ? ctc > budget
+            ? ` Above the role's budget of ${rupees(budget)} by ${rupees(ctc - budget)} (${Math.round(((ctc - budget) / budget) * 100)}%).`
+            : ` Within the role's budget of ${rupees(budget)}.`
+          : "";
+      const vsBand =
+        hi > 0
+          ? ctc > hi || ctc < lo
+            ? ` Outside the approved band ${rupees(lo)}–${rupees(hi)}.`
+            : ` Inside the approved band ${rupees(lo)}–${rupees(hi)}.`
+          : "";
       return {
         role,
         status: o.status,
-        detail: `Offer for ${o.name} (${o.title}): ${Number(o.ctc).toLocaleString()} CTC — ${o.status}.`,
+        detail: `Offer for ${o.name} (${o.title}): ${rupees(ctc)} CTC — ${o.status}.${vsBudget}${vsBand}`,
       };
     }
     if (o.status !== "approved")
@@ -321,8 +342,19 @@ async function performGate(
   if (!org || org.orgId !== orgId) throw new Error("You are not a member of this organisation.");
   const actor = { orgId, userId, memberEmail: org.memberEmail };
   if (subject.type === "offer" || subject.type === "offer_release") {
-    if (decision.status !== "approved") return; // declining leaves the offer where it is
     const offerId = "offerId" in subject ? subject.offerId : subject.id;
+    if (decision.status !== "approved") {
+      // A declined approval step sends the offer back to draft with the
+      // reason (never stuck at pending); a declined release holds it.
+      if (subject.type === "offer" && decision.status === "rejected") {
+        const { sendBackOfferCore } = await import("@/lib/offers.functions");
+        await sendBackOfferCore(actor, {
+          id: offerId,
+          reason: decision.reason?.trim() || "Declined at approval — no reason given.",
+        });
+      }
+      return;
+    }
     const [o] = await db
       .select({ status: offers.status })
       .from(offers)
@@ -509,7 +541,11 @@ export async function syncGateTasks(
                 .limit(1)
             )[0]?.status;
     if (expects !== fromStatus || !current || current === expects) continue;
-    const declined = current === "rejected" || current === "changes_requested";
+    // An offer sent back from an approval step returns to draft: that is a decline.
+    const declined =
+      current === "rejected" ||
+      current === "changes_requested" ||
+      (subject.type === "offer" && current === "draft");
     const now = new Date();
     const done = await db
       .update(agentTasks)
@@ -734,7 +770,31 @@ export async function resolveTask(input: {
     })
     .where(and(eq(agentTasks.id, task.id), eq(agentTasks.status, "open")))
     .returning({ id: agentTasks.id });
-  if (!updated.length) throw new Error("This task has already been decided.");
+  if (!updated.length) {
+    // The gate's own event can close the task first ("decided outside the
+    // inbox") while this decision is being applied: the person's decision —
+    // their status and reason — is the record, so it takes the task over.
+    const takenOver =
+      task.kind === "gate" && gateSubject
+        ? await db
+            .update(agentTasks)
+            .set({
+              status: decision.status,
+              response: decision as never,
+              decidedBy: input.userId,
+              decidedAt: now,
+              updatedAt: now,
+            })
+            .where(
+              and(
+                eq(agentTasks.id, task.id),
+                sql`coalesce(${agentTasks.response} ->> 'comment', ${agentTasks.response} ->> 'reason') like 'Decided outside the inbox%'`,
+              ),
+            )
+            .returning({ id: agentTasks.id })
+        : [];
+    if (!takenOver.length) throw new Error("This task has already been decided.");
+  }
 
   await writeAudit({
     actor: `user:${input.userId}`,

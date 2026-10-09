@@ -11,7 +11,7 @@
  * Tenant isolation: every query here takes an explicit orgId from the verified
  * caller context and predicates on it.
  */
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../server/db";
@@ -469,7 +469,36 @@ export async function storeOnboardingDocument(input: {
   source: "upload" | "careers_inbox";
   inboxMessageId?: string | null;
   uploadedBy?: string | null;
-}): Promise<{ id: string; extractionStatus: string; note: string | null }> {
+}): Promise<{ id: string; extractionStatus: string; note: string | null; duplicate?: boolean }> {
+  // The same file twice (a resend, a double upload) is not filed or read again.
+  const twins = await db
+    .select({
+      id: onboardingDocuments.id,
+      filePath: onboardingDocuments.filePath,
+      extractionStatus: onboardingDocuments.extractionStatus,
+      createdAt: onboardingDocuments.createdAt,
+    })
+    .from(onboardingDocuments)
+    .where(
+      and(
+        eq(onboardingDocuments.orgId, input.orgId),
+        eq(onboardingDocuments.applicationId, input.applicationId),
+        eq(onboardingDocuments.docType, input.docType),
+        eq(onboardingDocuments.fileBytes, input.bytes.byteLength),
+        sql`${onboardingDocuments.status} <> 'rejected'`,
+      ),
+    );
+  for (const t of twins) {
+    const prior = await readOnboardingFile(input.orgId, t.filePath);
+    if (prior && Buffer.from(prior.bytes).equals(Buffer.from(input.bytes)))
+      return {
+        id: t.id,
+        extractionStatus: t.extractionStatus,
+        note: `This file is already filed (received ${t.createdAt.toISOString().slice(0, 10)}).`,
+        duplicate: true,
+      };
+  }
+
   const filePath = documentObjectPath(input.orgId, input.candidateId, input.fileName);
   const contentType = contentTypeFor(input.fileName);
   await putObject(filePath, input.bytes, contentType);

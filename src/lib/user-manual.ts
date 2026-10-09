@@ -312,6 +312,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
     steps: [
       "Dashboard (/) changes with the signed-in role. Recruiters see operational priorities; CHROs, HR heads and owners see decisions and prescriptions such as approval aging, weak pipeline coverage, screening gaps, SLA breaches, offer health, budget risk and funnel drop-off.",
       "Reports (/reports) adds filters by department, requisition, location, skill, source and date, plus funnel conversion, score distribution, drop-off, interviewer load and CSV export.",
+      "Hiring cost (/hiring-cost, HR head, CBO or owner) shows what hiring costs in AI across every role for the last 3, 6 or 12 months: total spend, cost per hire, month by month, each role (spend, shared work, per candidate, per hire), spend by hiring stage, and how much went on candidates who were not hired. Money is at your AI provider's published list price for the model you use, or your own token prices if you set them; each requisition and candidate page shows its own figure.",
       "Leadership-only HR performance compares recruiter activity, quality, conversion, speed and target attainment. Configure incentive bands and caps, inspect the calculation and export the result; recruiters cannot see the team-governance view.",
       "Platform super admins receive a cross-organisation aggregate view, while organisation records remain separated by access controls.",
     ],
