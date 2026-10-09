@@ -60,6 +60,8 @@ async function roundsOf(orgId: string, applicationId: string) {
       interviewerEmail: interviews.interviewerEmail,
       scheduledAt: interviews.scheduledAt,
       status: interviews.status,
+      panel: interviews.panel,
+      outcomeNote: interviews.outcomeNote,
     })
     .from(interviews)
     .where(and(eq(interviews.orgId, orgId), eq(interviews.applicationId, applicationId)))
@@ -73,6 +75,7 @@ async function roundsOf(orgId: string, applicationId: string) {
       competencies: evaluations.competencies,
       comments: evaluations.comments,
       evaluator: evaluations.evaluator,
+      evaluatorEmail: evaluations.evaluatorEmail,
     })
     .from(evaluations)
     .where(and(eq(evaluations.orgId, orgId), eq(evaluations.applicationId, applicationId)))
@@ -86,28 +89,43 @@ export function registerPhase3Tools(): void {
   registerTool({
     name: "get_interview_plan",
     description:
-      "For one application: current stage, every interview round so far (level, interviewer, time, status) with its scorecard verdict, and which level should be scheduled next.",
+      "For one application: the role's interview plan (rounds with name, focus, competencies and panel size; the verdict policy), every round so far (level, interviewers, time, status, who has and has not scored, the round's verdict, and rounds that did not happen), and which level to schedule next with how many interviewers.",
     input: AppId,
     risk: "read",
     run: async (ctx, i) => {
       const app = await loadApplication(ctx.orgId, i.applicationId);
-      const { rounds, cards } = await roundsOf(ctx.orgId, app.id);
-      const scored = new Set(cards.map((c) => c.interviewId));
+      const { rounds } = await roundsOf(ctx.orgId, app.id);
+      const { progressOf } = await import("@/lib/interview-plan.server");
+      const p = await progressOf(ctx.orgId, app.id);
       const match = app.stage.match(/^l([123])$/);
       const nextLevel = match ? Number(match[1]) : app.stage === "shortlisted" ? 1 : null;
       const alreadyBooked = rounds.some(
-        (r) => r.level === nextLevel && ["scheduled", "rescheduled"].includes(r.status),
+        (r) =>
+          r.level === nextLevel && ["scheduled", "rescheduled", "completed"].includes(r.status),
       );
+      const next =
+        nextLevel && !alreadyBooked && nextLevel <= p.finalLevel
+          ? (p.plan.rounds.find((r) => r.level === nextLevel) ?? null)
+          : null;
       return {
         candidate: app.candidateName,
         job: app.jobTitle,
         stage: app.stage,
-        rounds: rounds.map((r) => ({
-          ...r,
-          scored: scored.has(r.interviewId),
-          verdict: cards.find((c) => c.interviewId === r.interviewId)?.verdict ?? null,
-        })),
-        nextLevelToSchedule: alreadyBooked ? null : nextLevel,
+        plan: p.plan,
+        finalLevel: p.finalLevel,
+        rounds: rounds.map((r) => {
+          const pr = p.rounds.find((x) => x.interviewId === r.interviewId);
+          return {
+            ...r,
+            interviewers: pr?.panel ?? [],
+            scoredBy: pr?.submitted ?? [],
+            waitingFor: pr?.missing ?? [],
+            complete: pr?.complete ?? false,
+            verdict: pr?.verdict ?? null,
+          };
+        }),
+        nextLevelToSchedule: next ? next.level : null,
+        nextRound: next,
       };
     },
   });
@@ -190,6 +208,8 @@ export function registerPhase3Tools(): void {
       mode: z.enum(["online", "onsite", "phone"]).default("online"),
       meetingProvider: z.enum(["zoom", "google_meet", "teams"]).optional(),
       agenda: z.string().max(2000).optional(),
+      /** Further interviewers on the panel (active members). */
+      panelEmails: z.array(z.string().email()).max(2).optional(),
     }),
     risk: "external",
     templateOf: () => "interview_invite",
@@ -257,6 +277,7 @@ export function registerPhase3Tools(): void {
           mode: i.mode,
           meetingLink,
           agenda: i.agenda ?? null,
+          panel: (i.panelEmails ?? []).map((email) => ({ email })),
         },
       );
       return {
@@ -272,9 +293,11 @@ export function registerPhase3Tools(): void {
   registerTool({
     name: "find_interview_slots",
     description:
-      "Free interview times for one interviewer: weekdays 10:00–17:00 in the organisation's time zone, at least 18 hours ahead, spread over different days, avoiding their calendar's busy time (when Google or Microsoft 365 calendar is connected), rounds already booked in ATSIQ and times already offered to another candidate. Says whether the calendar was actually checked.",
+      "Free interview times for an interviewer and the rest of the panel (times that suit everyone): weekdays 10:00–17:00 in the organisation's time zone, at least 18 hours ahead, spread over different days, avoiding their calendar's busy time (when Google or Microsoft 365 calendar is connected), rounds already booked in ATSIQ and times already offered to another candidate. Says whether the calendar was actually checked.",
     input: z.object({
       interviewerEmail: z.string().email(),
+      /** The rest of the panel: times must suit everyone. */
+      panelEmails: z.array(z.string().email()).max(2).optional(),
       durationMins: z.number().int().min(15).max(240).default(60),
       count: z.number().int().min(2).max(5).default(3),
     }),
@@ -285,6 +308,7 @@ export function registerPhase3Tools(): void {
       const timeZone = (await getOrgEmailSettings(ctx.orgId)).timezone;
       const r = await findFreeSlots(ctx.orgId, {
         interviewerEmail: i.interviewerEmail,
+        panelEmails: i.panelEmails ?? [],
         durationMins: i.durationMins,
         count: i.count,
         timeZone,
@@ -296,11 +320,13 @@ export function registerPhase3Tools(): void {
   registerTool({
     name: "offer_interview_slots",
     description:
-      "Email the candidate 2–5 interview times to choose from, through a private link. Nothing is booked yet: when they pick a time, the round is booked with a meeting link (if a provider is given and connected) and both the candidate and the interviewer get their invites; if none work, the team is told. Every time is re-checked as free. Leaves the organisation, so a person approves it unless the interview time-choice email is pre-approved.",
+      "Email the candidate 2–5 interview times (for the interviewer and any further panel members) to choose from, through a private link. Nothing is booked yet: when they pick a time, the round is booked with a meeting link (if a provider is given and connected) and both the candidate and the interviewer get their invites; if none work, the team is told. Every time is re-checked as free. Leaves the organisation, so a person approves it unless the interview time-choice email is pre-approved.",
     input: AppId.extend({
       level: z.number().int().min(1).max(3),
       interviewerEmail: z.string().email(),
       slots: z.array(z.string()).min(2).max(5),
+      /** Further interviewers on the panel (active members). */
+      panelEmails: z.array(z.string().email()).max(2).optional(),
       durationMins: z.number().int().min(15).max(240).default(60),
       mode: z.enum(["online", "onsite", "phone"]).default("online"),
       meetingProvider: z.enum(["zoom", "google_meet", "teams"]).optional(),
@@ -325,6 +351,7 @@ export function registerPhase3Tools(): void {
           mode: i.mode,
           meetingProvider: i.meetingProvider,
           agenda: i.agenda,
+          panelEmails: i.panelEmails ?? [],
         },
       );
       return { offered: r.slots.length, slots: r.slots, expiresAt: r.expiresAt };
@@ -334,7 +361,7 @@ export function registerPhase3Tools(): void {
   registerTool({
     name: "list_pending_scorecards",
     description:
-      "Interview rounds that finished at least two hours ago without a scorecard (optionally for one requisition), with the interviewer to chase.",
+      "Interview rounds that finished at least two hours ago where an interviewer on the panel has not submitted their scorecard (optionally for one requisition) — one row per interviewer to chase.",
     input: z.object({ requisitionId: z.string().uuid().optional() }),
     risk: "read",
     run: async (ctx, i) => {
@@ -345,6 +372,7 @@ export function registerPhase3Tools(): void {
           level: interviews.level,
           interviewer: interviews.interviewer,
           interviewerEmail: interviews.interviewerEmail,
+          panel: interviews.panel,
           scheduledAt: interviews.scheduledAt,
           candidate: candidates.fullName,
           requisitionId: applications.requisitionId,
@@ -352,13 +380,11 @@ export function registerPhase3Tools(): void {
         .from(interviews)
         .innerJoin(applications, eq(applications.id, interviews.applicationId))
         .innerJoin(candidates, eq(candidates.id, applications.candidateId))
-        .leftJoin(evaluations, eq(evaluations.interviewId, interviews.id))
         .where(
           and(
             eq(interviews.orgId, ctx.orgId),
             i.requisitionId ? eq(applications.requisitionId, i.requisitionId) : undefined,
-            isNull(evaluations.id),
-            inArray(interviews.status, ["scheduled", "rescheduled", "completed"]),
+            inArray(interviews.status, ["scheduled", "rescheduled"]),
             lt(
               sql`${interviews.scheduledAt} + make_interval(mins => ${interviews.durationMins})`,
               sql`now() - interval '2 hours'`,
@@ -367,16 +393,47 @@ export function registerPhase3Tools(): void {
         )
         .orderBy(asc(interviews.scheduledAt))
         .limit(50);
+      if (!rows.length) return [];
+      const cards = await db
+        .select({
+          interviewId: evaluations.interviewId,
+          by: sql<string>`lower(coalesce(${evaluations.evaluatorEmail}, ${evaluations.evaluator}, ''))`,
+        })
+        .from(evaluations)
+        .where(
+          and(
+            eq(evaluations.orgId, ctx.orgId),
+            inArray(
+              evaluations.interviewId,
+              rows.map((r) => r.interviewId),
+            ),
+          ),
+        );
       const members = await db
-        .select({ userId: orgMembers.userId, email: orgMembers.email })
+        .select({ userId: orgMembers.userId, email: orgMembers.email, name: orgMembers.fullName })
         .from(orgMembers)
         .where(and(eq(orgMembers.orgId, ctx.orgId), eq(orgMembers.status, "active")));
-      return rows.map((r) => ({
-        ...r,
-        interviewerUserId:
-          members.find((m) => m.email.toLowerCase() === (r.interviewerEmail ?? "").toLowerCase())
-            ?.userId ?? null,
-      }));
+      const { emailsOf } = await import("@/lib/interview-plan.server");
+      return rows.flatMap((r) => {
+        const scored = cards.filter((c) => c.interviewId === r.interviewId).map((c) => c.by);
+        return emailsOf(r)
+          .filter((e) => !scored.includes(e))
+          .map((e) => {
+            const m = members.find((x) => x.email.toLowerCase() === e);
+            return {
+              interviewId: r.interviewId,
+              applicationId: r.applicationId,
+              level: r.level,
+              candidate: r.candidate,
+              requisitionId: r.requisitionId,
+              scheduledAt: r.scheduledAt,
+              interviewer:
+                m?.name ?? (e === r.interviewerEmail?.toLowerCase() ? r.interviewer : null),
+              interviewerEmail: e,
+              interviewerUserId: m?.userId ?? null,
+            };
+          });
+      });
     },
   });
 
@@ -385,7 +442,7 @@ export function registerPhase3Tools(): void {
   registerTool({
     name: "get_candidate_dossier",
     description:
-      "Everything the hiring team knows about one application: match score and gaps, screening-call and assessment results, and every interview scorecard (ratings, competencies, comments, verdicts).",
+      "Everything the hiring team knows about one application: match score and gaps, screening-call and assessment results, the role's interview plan and rubric, every round (who interviewed, complete or still waiting for scorecards, the round's verdict, rounds that did not happen), every scorecard (interviewer, ratings per competency, comments, verdict), and whether the final round is complete — a hiring decision to select may only be requested then.",
     input: AppId,
     risk: "read",
     untrustedOutput: true,
@@ -428,6 +485,8 @@ export function registerPhase3Tools(): void {
         .orderBy(desc(candidateAssessments.createdAt))
         .limit(1);
       const { rounds, cards } = await roundsOf(ctx.orgId, app.id);
+      const { progressOf } = await import("@/lib/interview-plan.server");
+      const p = await progressOf(ctx.orgId, app.id);
       return {
         candidateId: app.candidateId,
         candidate: app.candidateName,
@@ -436,7 +495,18 @@ export function registerPhase3Tools(): void {
         match: score ?? null,
         screening: screen ?? null,
         assessment: assessment ?? null,
-        rounds,
+        plan: p.plan,
+        finalLevel: p.finalLevel,
+        finalComplete: p.finalComplete,
+        rounds: rounds.map((r) => {
+          const pr = p.rounds.find((x) => x.interviewId === r.interviewId);
+          return {
+            ...r,
+            complete: pr?.complete ?? false,
+            waitingFor: pr?.missing ?? [],
+            verdict: pr?.verdict ?? null,
+          };
+        }),
         scorecards: cards,
       };
     },

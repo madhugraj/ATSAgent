@@ -296,6 +296,23 @@ the autonomy dial.
   meeting link, a candidate summary, match and screening highlights, and links
   to the profile and the scorecard (internal mail, master switch only).
 
+- **Plan, panels and outcomes (v1.4.0, migration `0034`):** each role has an
+  interview plan (`requisitions.interview_plan`; null = the default from its
+  must-haves): 1–3 rounds, each with a name, focus, competencies (the
+  rubric interviewers rate) and panel size (1–3), plus a verdict policy.
+  The coordinator books `panelSize` interviewers (`interviews.panel`), times
+  that suit them all, and every interviewer gets the brief with the rubric.
+  Scorecards are one per interviewer per round
+  (`evaluations.evaluator_email`, unique per round); a round completes when
+  every panel member has scored, and only then does anything move: a select
+  before the final round opens the next one; under `recommend` (default) a
+  hold or reject — and the final select — wait for the hiring manager; under
+  `immediate` the round's verdict (the most cautious on the panel) moves the
+  candidate. A round that did not happen (candidate no-show, interviewer
+  unavailable, cancelled) is recorded with a note, the desk thread is told
+  and `interview.missed` has the coordinator offer new times; health rule
+  `interview.no_shows`.
+
 ### 4.7 Evaluation agent
 
 - **Trigger:** all scorecards in for a round.
@@ -304,6 +321,12 @@ the autonomy dial.
   recommendation with reasons, and a bias check (`scripts/bias-report.ts`
   logic) across the requisition's funnel.
 - **Gate:** the **hiring decision** is the hiring manager's.
+- **Decision timing (v1.2.0):** the agent debriefs every completed round but
+  asks for the hiring decision only when it is due — the role's final round
+  is complete, or a round's verdict is hold / reject. The runtime enforces
+  it: a `hiring_decision` gate recommending select is refused until the final
+  round is complete (`hiringDecisionBlocked`), so an offer can never start
+  after round 1.
 
 ### 4.8 Offer agent
 

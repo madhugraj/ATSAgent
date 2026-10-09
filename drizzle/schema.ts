@@ -346,6 +346,9 @@ export const requisitions = pgTable(
     ijpEnabled: boolean("ijp_enabled").notNull().default(false),
     ijpPostedAt: timestamp("ijp_posted_at", { withTimezone: true }),
     ijpNotes: text("ijp_notes"),
+    /** Interview rounds, rubric and verdict policy for this role (null = the default from its must-haves). */
+    interviewPlan:
+      jsonb("interview_plan").$type<import("../src/lib/interview-plan").InterviewPlan>(),
     ctcBandMin: numeric("ctc_band_min", { precision: 14, scale: 2 }),
     ctcBandMax: numeric("ctc_band_max", { precision: 14, scale: 2 }),
     /** Ladder key the budget CTC was benchmarked against (see career-ladder.ts). */
@@ -645,6 +648,13 @@ export const interviews = pgTable(
     durationMins: integer("duration_mins").notNull().default(60),
     mode: text("mode").notNull().default("online"),
     agenda: text("agenda"),
+    /** Further interviewers on the panel (the first is `interviewer`): [{ name, email }]. */
+    panel: jsonb("panel")
+      .$type<{ name: string | null; email: string }[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /** Why a round did not happen (no-show / cancelled), in a person's words. */
+    outcomeNote: text("outcome_note"),
     completedAt: timestamp("completed_at", { withTimezone: true }),
   },
   (t) => [index("interviews_interviewer_email_idx").on(sql`lower(${t.interviewerEmail})`)],
@@ -684,6 +694,11 @@ export const interviewSlotOffers = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     createdBy: uuid("created_by"),
     agentRunId: uuid("agent_run_id"),
+    /** Further interviewers on the panel: [{ name, email }]. */
+    panel: jsonb("panel")
+      .$type<{ name: string | null; email: string }[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -715,10 +730,13 @@ export const evaluations = pgTable(
       .default(sql`'[]'::jsonb`),
     submittedBy: text("submitted_by"),
     submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    /** Who submitted (lower-case email) — one scorecard per panel member per round. */
+    evaluatorEmail: text("evaluator_email"),
   },
   (t) => [
-    uniqueIndex("evaluations_interview_id_key")
-      .on(t.interviewId)
+    // One scorecard per interviewer per round (panels have several per round).
+    uniqueIndex("evaluations_interview_evaluator_key")
+      .on(t.interviewId, sql`coalesce(lower(${t.evaluatorEmail}), '')`)
       .where(sql`${t.interviewId} is not null`),
   ],
 );

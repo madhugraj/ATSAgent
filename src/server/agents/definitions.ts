@@ -271,7 +271,8 @@ export function registerPhase2Agents(): void {
   registerAgent({
     type: "followup",
     name: "Follow-up agent",
-    version: "1.2.0",
+    // 1.3.0: pending scorecards are listed per panel member.
+    version: "1.3.0",
     owner: "hr_head",
     responsibility: "Once a day, finds work that is overdue and reminds the right person.",
     mustNever: [
@@ -306,7 +307,7 @@ export function registerPhase2Agents(): void {
       "2. For each requisition or JD waiting on an approver: list_members, pick the member(s) holding the waiting role, and remind_member with a one-line heading naming the requisition and how long it has waited, and the path /requisitions/<requisitionId>.",
       "3. For agent requests nobody answered: remind the assignee (or the role holders) with path /agents.",
       "4. For assessments not completed: remind_assessment only if the application is known; otherwise skip.",
-      "5. list_pending_scorecards; remind each interviewer who is a member (path /interviews/mine).",
+      "5. list_pending_scorecards (one row per interviewer still to score a round); remind each of them once (path /interviews/mine), naming the candidate and the round.",
       "Never remind the same person about the same item twice in one run. Keep messages short, specific and polite.",
       "Finish with who was reminded about what.",
     ].join("\n"),
@@ -320,7 +321,9 @@ export function registerPhase3Agents(): void {
     name: "Interview coordinator",
     // 1.2.0: Autonomous sends every candidate message template without asking.
     // 1.3.0: real free/busy, and the candidate chooses the time from offered slots.
-    version: "1.3.0",
+    // 1.4.0: follows the role's interview plan (rounds, rubric, panel size); books panels;
+    // re-offers times for rounds that did not happen.
+    version: "1.4.0",
     owner: "hr_head",
     responsibility:
       "Books the next interview round for candidates who advanced: panel from organisation members, free times from the interviewer's calendar, the candidate's choice of time, a meeting link, and invites to both the candidate and the interviewer.",
@@ -358,20 +361,23 @@ export function registerPhase3Agents(): void {
       "schedule_interview",
     ],
     system: [
-      "You are the interview coordinator for one requisition. You book the next round for candidates who advanced.",
-      "1. list_applications for stages l1, l2 and l3; for each, get_interview_plan.",
-      "2. Only where nextLevelToSchedule is set: list_panel_options and pick the member who has interviewed for this role before, or a hiring manager / department head. Never invent an interviewer.",
-      "3. find_interview_slots for that interviewer, then offer_interview_slots with three of them (60 minutes, online; add a meeting provider only if you were told one is connected). The candidate picks a time from a private link and the booking — meeting link, the candidate's invite and the interviewer's brief — happens then. A person reviews the offer unless it is pre-approved.",
-      "4. Use schedule_interview (a fixed time) only when a person gave you the exact time to book.",
-      "4. If a booking is declined, propose one alternative slot, then hand off.",
-      "Finish with a list: candidate, level, interviewer, time.",
+      "You are the interview coordinator for one requisition. You book the next round for candidates who advanced, following the role's interview plan.",
+      "1. list_applications for stages shortlisted, l1, l2 and l3; for each, get_interview_plan.",
+      "2. Only where nextLevelToSchedule is set: list_panel_options and pick nextRound.panelSize interviewers — first those who interviewed for this role before, then hiring managers / department heads; never the same person twice for one candidate if others are available. Never invent an interviewer.",
+      "3. find_interview_slots for the first interviewer with the rest as panelEmails, then offer_interview_slots with three of them, the same panelEmails, and nextRound.focus as the agenda (60 minutes, online; add a meeting provider only if you were told one is connected). The candidate picks a time from a private link and the booking — meeting link, the candidate's invite and every interviewer's brief with the round's rubric — happens then. A person reviews the offer unless it is pre-approved.",
+      "4. A round that did not happen (status no_show or cancelled) is scheduled again the same way.",
+      "5. Use schedule_interview (a fixed time) only when a person gave you the exact time to book.",
+      "6. If an offer is declined, propose other times once, then hand off.",
+      "Finish with a list: candidate, level, interviewers, what was offered or booked.",
     ].join("\n"),
   });
 
   registerAgent({
     type: "evaluation",
     name: "Evaluation agent",
-    version: "1.1.0",
+    // 1.2.0: debriefs every completed round; asks for the hiring decision only after the
+    // final round of the role's plan (or when a round's verdict is hold / reject).
+    version: "1.2.0",
     owner: "hiring_manager",
     responsibility:
       "After interview rounds, writes the debrief across all evidence, surfaces disagreements and fairness signals, and asks the hiring manager for the hiring decision.",
@@ -398,8 +404,9 @@ export function registerPhase3Agents(): void {
       "1. get_candidate_dossier for the candidate named in the goal.",
       "2. Write a debrief with add_candidate_note: strengths and gaps per competency, where interviewers disagree (ratings two or more apart, or opposite verdicts), and open questions. Cite scores.",
       "3. selection_parity; if any source breaches four-fifths, say so in the debrief as a pipeline-level signal (never as a reason about this candidate).",
-      "4. request_approval with subject {type: 'hiring_decision', applicationId, recommendation: select | hold | reject, rationale} addressed to hiring_manager. The rationale must rest on job-relevant evidence only.",
-      "Finish with the recommendation and the person who decides.",
+      "4. Ask for the hiring decision only when it is due: when finalComplete is true (recommendation select, hold or reject), or when the round just completed has the verdict hold or reject (recommendation hold or reject). Then request_approval with subject {type: 'hiring_decision', applicationId, recommendation, rationale} addressed to hiring_manager; the rationale must rest on job-relevant evidence only, rated against the role's rubric.",
+      "5. Otherwise (an earlier round completed with select), do NOT request a decision: the next round is being arranged. Finish with the debrief.",
+      "Finish with the recommendation (or 'debrief only — next round L<n>') and the person who decides.",
     ].join("\n"),
   });
 }

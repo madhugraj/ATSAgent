@@ -405,6 +405,7 @@ erDiagram
     jsonb competencies
     text submitted_by "nullable"
     timestamptz submitted_at "nullable"
+    text evaluator_email "nullable"
   }
   candidate_verifications {
     uuid id PK
@@ -555,6 +556,8 @@ erDiagram
     integer duration_mins
     text mode
     text agenda "nullable"
+    jsonb panel
+    text outcome_note "nullable"
     timestamptz completed_at "nullable"
   }
   screening_kits {
@@ -1135,7 +1138,7 @@ erDiagram
 | `departments` | Organisations & masters | 8 | (orgId+name) |
 | `email_outbox` | Communications & AI settings | 16 | (idempotency_key) |
 | `email_settings` | Communications & AI settings | 11 | (org_id) |
-| `evaluations` | Candidates & pipeline | 14 | — |
+| `evaluations` | Candidates & pipeline | 15 | — |
 | `hiring_conversations` | — | 10 | — |
 | `hiring_messages` | — | 8 | — |
 | `hr_incentive_schemes` | Offers & onboarding | 9 | — |
@@ -1144,8 +1147,8 @@ erDiagram
 | `hrms_sync_state` | — | 12 | (integrationId+entity) |
 | `inbox_messages` | Sourcing & integrations | 16 | — |
 | `integration_credentials` | Sourcing & integrations | 4 | — |
-| `interview_slot_offers` | — | 21 | (token) |
-| `interviews` | Screening & interviews | 14 | — |
+| `interview_slot_offers` | — | 22 | (token) |
+| `interviews` | Screening & interviews | 16 | — |
 | `job_descriptions` | Requisitions & job content | 17 | — |
 | `master_items` | Organisations & masters | 8 | — |
 | `match_scores` | Candidates & pipeline | 26 | — |

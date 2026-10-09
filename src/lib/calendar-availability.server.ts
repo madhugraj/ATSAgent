@@ -226,12 +226,20 @@ export function workingSlots(opts: {
 
 const overlaps = (a: Interval, b: Interval) => a.start < b.end && b.start < a.end;
 
-/** Free slots for one interviewer, spread over different days. */
+/** Free slots for an interviewer (and the rest of the panel), spread over different days. */
 export async function findFreeSlots(
   orgId: string,
-  input: { interviewerEmail: string; durationMins: number; count: number; timeZone: string },
+  input: {
+    interviewerEmail: string;
+    panelEmails?: string[];
+    durationMins: number;
+    count: number;
+    timeZone: string;
+  },
 ): Promise<{ slots: string[]; checkedWith: "google" | "microsoft" | null; note: string | null }> {
-  const email = input.interviewerEmail.toLowerCase();
+  const emails = [input.interviewerEmail, ...(input.panelEmails ?? [])]
+    .map((e) => e.toLowerCase())
+    .filter((e, i, all) => all.indexOf(e) === i);
   const candidates = workingSlots({
     now: Date.now(),
     timeZone: input.timeZone,
@@ -240,17 +248,17 @@ export async function findFreeSlots(
   if (!candidates.length) return { slots: [], checkedWith: null, note: "No working-hour slots." };
   const from = new Date(candidates[0]!);
   const to = new Date(candidates.at(-1)! + input.durationMins * 60_000);
-  const cal = await busyFor(orgId, [email], from, to);
-  const blocked: Interval[] = [...(cal.busy[email] ?? [])];
+  const cal = await busyFor(orgId, emails, from, to);
+  const blocked: Interval[] = emails.flatMap((e) => cal.busy[e] ?? []);
   const booked = await db
     .select({ at: interviews.scheduledAt, mins: interviews.durationMins })
     .from(interviews)
     .where(
       and(
         eq(interviews.orgId, orgId),
-        sql`lower(${interviews.interviewerEmail}) = ${email}`,
+        involves(emails),
         gte(interviews.scheduledAt, new Date(Date.now() - 864e5)),
-        sql`${interviews.status} not in ('cancelled','completed')`,
+        sql`${interviews.status} not in ('cancelled','completed','no_show')`,
       ),
     );
   for (const b of booked)
@@ -262,7 +270,15 @@ export async function findFreeSlots(
       and(
         eq(interviewSlotOffers.orgId, orgId),
         eq(interviewSlotOffers.status, "offered"),
-        sql`lower(${interviewSlotOffers.interviewerEmail}) = ${email}`,
+        sql`(lower(${interviewSlotOffers.interviewerEmail}) in (${sql.join(
+          emails.map((e) => sql`${e}`),
+          sql`, `,
+        )}) or ${sql.join(
+          emails.map(
+            (e) => sql`${interviewSlotOffers.panel} @> ${JSON.stringify([{ email: e }])}::jsonb`,
+          ),
+          sql` or `,
+        )})`,
       ),
     );
   for (const o of offered)
@@ -296,9 +312,20 @@ export async function findFreeSlots(
   picked.sort((a, b) => a - b);
   return {
     slots: picked.map((at) => new Date(at).toISOString()),
-    checkedWith: cal.source && !cal.unknown.includes(email) ? cal.source : null,
+    checkedWith: cal.source && !emails.some((e) => cal.unknown.includes(e)) ? cal.source : null,
     note: cal.note,
   };
+}
+
+/** Rounds where any of these people interview (primary or on the panel). */
+function involves(emails: string[]) {
+  return sql`(lower(${interviews.interviewerEmail}) in (${sql.join(
+    emails.map((e) => sql`${e}`),
+    sql`, `,
+  )}) or ${sql.join(
+    emails.map((e) => sql`${interviews.panel} @> ${JSON.stringify([{ email: e }])}::jsonb`),
+    sql` or `,
+  )})`;
 }
 
 /** Is this one interval free for the interviewer (calendar + ATSIQ rounds)? */
@@ -316,8 +343,8 @@ export async function isFree(
     .where(
       and(
         eq(interviews.orgId, orgId),
-        sql`lower(${interviews.interviewerEmail}) = ${email}`,
-        sql`${interviews.status} not in ('cancelled','completed')`,
+        involves([email]),
+        sql`${interviews.status} not in ('cancelled','completed','no_show')`,
         sql`${interviews.scheduledAt} < ${new Date(slot.end).toISOString()}::timestamptz`,
         sql`${interviews.scheduledAt} + make_interval(mins => ${interviews.durationMins}) > ${new Date(slot.start).toISOString()}::timestamptz`,
       ),

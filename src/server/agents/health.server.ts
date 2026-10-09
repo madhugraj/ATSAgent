@@ -53,6 +53,8 @@ export const HEALTH = {
   slotOffersUnanswered7d: 3,
   /** …and as a share of all offers that closed. */
   slotOffersUnansweredShare: 0.5,
+  /** Rounds the candidate did not join, in 7 days, before it is flagged. */
+  interviewNoShows7d: 3,
   /** Re-evaluate at most this often (minutes). */
   evaluateEveryMinutes: 5,
 } as const;
@@ -382,6 +384,27 @@ export const RULES: Rule[] = [
           agentType: "interview",
           title: `${x.missed} of ${x.closed} interview-time offers in 7 days were not taken up`,
           detail: { closed: x.closed, missed: x.missed },
+        },
+      ];
+    },
+  },
+  {
+    id: "interview.no_shows",
+    element: "hitl",
+    severity: "warning",
+    description: `Candidates did not join ${HEALTH.interviewNoShows7d} or more booked interview rounds in 7 days — check that invites and reminders reach them, and that the times suit them.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number }>(sql`
+        select count(*)::int n from interviews
+        where org_id = ${orgId} and status = 'no_show'
+          and scheduled_at >= now() - interval '7 days'`);
+      const n = r[0]?.n ?? 0;
+      if (n < HEALTH.interviewNoShows7d) return [];
+      return [
+        {
+          agentType: "interview",
+          title: `${n} interview rounds in 7 days where the candidate did not join`,
+          detail: { noShows: n },
         },
       ];
     },

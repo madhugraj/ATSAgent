@@ -44,6 +44,8 @@ export type OfferInput = {
   mode: "online" | "onsite" | "phone";
   meetingProvider?: "zoom" | "google_meet" | "teams" | undefined;
   agenda?: string | undefined;
+  /** Further interviewers on the panel (active members). */
+  panelEmails?: string[] | undefined;
 };
 
 const site = () => env.PUBLIC_SITE_URL.replace(/\/$/, "");
@@ -83,6 +85,24 @@ export async function offerSlotsCore(
     )
     .limit(1);
   if (!member) throw new Error("Interviewers must be active members of the organisation.");
+  const panel: { name: string | null; email: string }[] = [];
+  for (const e of [...new Set((input.panelEmails ?? []).map((x) => x.trim().toLowerCase()))]) {
+    if (e === member.email.toLowerCase()) continue;
+    const [m] = await db
+      .select({ name: orgMembers.fullName, email: orgMembers.email })
+      .from(orgMembers)
+      .where(
+        and(
+          eq(orgMembers.orgId, orgId),
+          eq(orgMembers.status, "active"),
+          sql`lower(${orgMembers.email}) = ${e}`,
+        ),
+      )
+      .limit(1);
+    if (!m) throw new Error(`Panel members must be active members of the organisation: ${e}.`);
+    panel.push({ name: m.name ?? null, email: m.email.toLowerCase() });
+  }
+  if (panel.length > 2) throw new Error("A panel has at most three interviewers.");
   const [app] = await db
     .select({
       id: applications.id,
@@ -104,8 +124,13 @@ export async function offerSlotsCore(
   const { isFree, busyFor } = await import("./calendar-availability.server");
   const taken: string[] = [];
   for (const d of slots) {
-    const f = await isFree(orgId, member.email, d.toISOString(), input.durationMins);
-    if (!f.free) taken.push(`${d.toISOString()} (${f.reason})`);
+    for (const who of [member.email, ...panel.map((p) => p.email)]) {
+      const f = await isFree(orgId, who, d.toISOString(), input.durationMins);
+      if (!f.free) {
+        taken.push(`${d.toISOString()} (${who}: ${f.reason})`);
+        break;
+      }
+    }
   }
   if (taken.length)
     throw new Error(`These times are not free: ${taken.join("; ")}. Use find_interview_slots.`);
@@ -142,6 +167,7 @@ export async function offerSlotsCore(
       mode: input.mode,
       meetingProvider: input.meetingProvider ?? null,
       agenda: input.agenda?.trim() || null,
+      panel,
       slots: slots.map((d) => d.toISOString()),
       token,
       expiresAt,
@@ -263,12 +289,11 @@ export async function chooseSlot(
   if (at.getTime() < Date.now() + SLOT_OFFER.pickLeadHours * 3600_000)
     return { booked: false, reason: "That time is too soon now — please choose a later one." };
   const { isFree } = await import("./calendar-availability.server");
-  const free = await isFree(
-    offer.orgId,
-    offer.interviewerEmail,
-    at.toISOString(),
-    offer.durationMins,
-  );
+  let free: { free: boolean; reason: string | null } = { free: true, reason: null };
+  for (const who of [offer.interviewerEmail, ...(offer.panel ?? []).map((p) => p.email)]) {
+    free = await isFree(offer.orgId, who, at.toISOString(), offer.durationMins);
+    if (!free.free) break;
+  }
   if (!free.free)
     return {
       booked: false,
@@ -293,7 +318,7 @@ export async function chooseSlot(
             topic: `L${offer.level} interview: ${o.jobTitle}`,
             startIso: at.toISOString(),
             durationMins: offer.durationMins,
-            attendees: [offer.interviewerEmail],
+            attendees: [offer.interviewerEmail, ...(offer.panel ?? []).map((p) => p.email)],
             agenda: offer.agenda,
           })
         ).joinUrl;
@@ -314,6 +339,7 @@ export async function chooseSlot(
         mode: offer.mode as "online" | "onsite" | "phone",
         meetingLink,
         agenda: offer.agenda,
+        panel: offer.panel ?? [],
       },
     );
     await db

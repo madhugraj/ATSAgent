@@ -37,6 +37,8 @@ export async function sendInterviewerBrief(
     mode: string;
     meetingLink: string | null;
     agenda: string | null;
+    /** Everyone on the panel (names or emails), when more than one. */
+    panelNames?: (string | null)[];
   },
 ): Promise<void> {
   const [ctx] = await db
@@ -100,7 +102,7 @@ export async function sendInterviewerBrief(
     templateName: "interviewer_brief",
     toEmail: r.interviewerEmail,
     applicationId: r.applicationId,
-    idempotencyKey: `interviewer-brief:${r.interviewId}:${r.scheduledAt.toISOString()}`,
+    idempotencyKey: `interviewer-brief:${r.interviewId}:${r.interviewerEmail.toLowerCase()}:${r.scheduledAt.toISOString()}`,
     templateData: {
       interviewerName: r.interviewerName ?? undefined,
       orgName: ctx.orgName,
@@ -120,6 +122,10 @@ export async function sendInterviewerBrief(
         ? `${screen.recommendation}${screen.reason ? ` — ${clip(screen.reason, 220)}` : ""}`
         : undefined,
       agenda: r.agenda ?? undefined,
+      ...(r.panelNames && r.panelNames.length > 1
+        ? { panelText: r.panelNames.filter(Boolean).join(", ") }
+        : {}),
+      ...(await rubricFor(orgId, r.applicationId, r.level)),
       candidateUrl: `${site}/candidates/${r.candidateId}`,
       scorecardUrl: `${site}/interviews/mine`,
     },
@@ -131,4 +137,25 @@ export async function sendInterviewerBrief(
       },
     ],
   });
+}
+
+/** The round's focus and competencies from the role's interview plan. */
+async function rubricFor(
+  orgId: string,
+  applicationId: string,
+  level: number,
+): Promise<{ roundFocus?: string; competencies?: string }> {
+  try {
+    const { progressOf } = await import("./interview-plan.server");
+    const { roundOf } = await import("./interview-plan");
+    const { plan } = await progressOf(orgId, applicationId);
+    const round = roundOf(plan, level);
+    if (!round) return {};
+    return {
+      roundFocus: `${round.name}${round.focus ? ` — ${round.focus}` : ""}`,
+      competencies: round.competencies.join(", "),
+    };
+  } catch {
+    return {};
+  }
 }

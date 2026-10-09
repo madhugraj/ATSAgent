@@ -248,11 +248,29 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
   }
 
   if (e.type === "scorecard.submitted") {
-    const p = e.payload as { applicationId?: string; level?: number; verdict?: string };
+    const p = e.payload as {
+      applicationId?: string;
+      level?: number;
+      verdict?: string;
+      finalRound?: boolean;
+    };
+    const due = p.finalRound !== false || p.verdict === "hold" || p.verdict === "reject";
     await dispatch(
       "evaluation",
-      `A level ${p.level ?? "?"} scorecard (${p.verdict ?? "?"}) was submitted for ${req.code} "${req.title}". Debrief candidate application ${p.applicationId} and ask the hiring manager for the hiring decision.`,
+      `Interview round L${p.level ?? "?"} is complete (round verdict: ${p.verdict ?? "?"}) for ${req.code} "${req.title}". Debrief candidate application ${p.applicationId}${
+        due
+          ? " and ask the hiring manager for the hiring decision."
+          : ". This is not the final round and the verdict is select: write the debrief only — do not request a hiring decision."
+      }`,
       p.applicationId ? { type: "application", id: p.applicationId } : undefined,
+    );
+  }
+
+  if (e.type === "interview.missed" && applicationId) {
+    const p = e.payload as { level?: number; outcome?: string };
+    await dispatch(
+      "interview",
+      `The L${p.level ?? "?"} interview for candidate application ${applicationId} (${req.code} "${req.title}") did not happen (${(p.outcome ?? "").replace(/_/g, " ")}). Offer new times for that round.`,
     );
   }
 

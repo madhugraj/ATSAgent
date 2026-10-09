@@ -5,7 +5,12 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { CalendarPlus, Loader2, Lock, Video } from "lucide-react";
 
-import { myInterviews, submitScorecard, type MyInterview } from "@/lib/interviews.functions";
+import {
+  markInterviewOutcome,
+  myInterviews,
+  submitScorecard,
+  type MyInterview,
+} from "@/lib/interviews.functions";
 import { buildIcs, downloadIcs } from "@/lib/ics";
 import { STAGE_LABEL } from "@/lib/lifecycle";
 import { EmptyState, PageHeader, StageBadge } from "@/components/ats";
@@ -72,8 +77,25 @@ function MyInterviewsPage() {
     setForm({ ratings: {}, verdict: "select", focus: "", comments: "", reason: "" });
   }
 
+  const outcome = useServerFn(markInterviewOutcome);
+  async function didNotHappen(
+    round: MyInterview,
+    kind: "candidate_no_show" | "interviewer_unavailable" | "cancelled",
+  ) {
+    const note = window.prompt("Anything to add for the team? (optional)") ?? "";
+    try {
+      await outcome({ data: { interviewId: round.id, outcome: kind, note } });
+      toast.success("Recorded — the team is told and new times will be offered");
+      qc.invalidateQueries({ queryKey: ["my_interviews"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not record this");
+    }
+  }
+
   async function send(round: MyInterview) {
-    const names = COMPETENCIES_BY_LEVEL[round.level] ?? [];
+    const names = round.competencies.length
+      ? round.competencies
+      : (COMPETENCIES_BY_LEVEL[round.level] ?? []);
     const competencies = names
       .filter((n) => form.ratings[n])
       .map((n) => ({ name: n, rating: form.ratings[n]! }));
@@ -103,10 +125,13 @@ function MyInterviewsPage() {
         },
       });
       toast.success(
-        res.movedTo
-          ? `Scorecard locked — candidate moved to ${STAGE_LABEL[res.movedTo]}`
-          : "Scorecard locked",
+        !res.roundComplete
+          ? `Scorecard locked — waiting for ${res.waitingFor.join(", ")} to score this round`
+          : res.movedTo
+            ? `Scorecard locked — candidate moved to ${STAGE_LABEL[res.movedTo]}`
+            : "Scorecard locked",
       );
+      if (res.decisionPending) toast.info(res.decisionPending);
       if (res.blocked) toast.warning(res.blocked);
       if (res.nextInterviewCreated) toast.info("Next round queued for scheduling");
       setOpenId(null);
@@ -126,7 +151,7 @@ function MyInterviewsPage() {
       <PageHeader
         eyebrow="Interviewer"
         title="My interviews"
-        description="Your assigned rounds only. Submit the scorecard once — it locks, is attributed to you, and moves the candidate forward automatically."
+        description="Your rounds, including panels you sit on. Rate the role's own competencies and give your verdict once — it locks and is attributed to you. When everyone on the panel has scored, the round completes; the hiring manager makes the hiring decision."
         actions={
           <Button variant="outline" asChild>
             <Link to="/interviews">Recruiter view</Link>
@@ -148,7 +173,9 @@ function MyInterviewsPage() {
           {rounds.map((round) => {
             const when = round.scheduled_at ? new Date(round.scheduled_at) : null;
             const isOpen = openId === round.id;
-            const names = COMPETENCIES_BY_LEVEL[round.level] ?? [];
+            const names = round.competencies.length
+              ? round.competencies
+              : (COMPETENCIES_BY_LEVEL[round.level] ?? []);
             return (
               <article key={round.id} className="panel overflow-hidden">
                 <div className="flex flex-wrap items-center gap-4 p-5">
@@ -168,8 +195,24 @@ function MyInterviewsPage() {
                       {when ? when.toLocaleString() : "not scheduled yet"} · {round.duration_mins}{" "}
                       min · {round.mode}
                     </p>
+                    {round.round_name ? (
+                      <p className="mt-1 text-xs">
+                        <span className="font-medium">{round.round_name}</span>
+                        {round.panel.length > 1 ? ` · panel: ${round.panel.join(", ")}` : ""}
+                      </p>
+                    ) : null}
                     {round.agenda ? (
                       <p className="mt-1 text-xs text-muted-foreground">{round.agenda}</p>
+                    ) : null}
+                    {round.submitted && round.waiting_for.length ? (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Waiting for {round.waiting_for.join(", ")} to score this round.
+                      </p>
+                    ) : null}
+                    {["cancelled", "no_show"].includes(round.status) ? (
+                      <p className="mt-1 text-xs font-medium text-destructive">
+                        Did not happen ({round.status.replace("_", " ")}).
+                      </p>
                     ) : null}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -201,7 +244,21 @@ function MyInterviewsPage() {
                         <CalendarPlus className="size-4" /> Add to calendar
                       </Button>
                     ) : null}
-                    {round.submitted ? (
+                    {!round.submitted && ["scheduled", "rescheduled"].includes(round.status) ? (
+                      <Select value="" onValueChange={(v) => void didNotHappen(round, v as never)}>
+                        <SelectTrigger className="h-8 w-auto text-xs">
+                          <SelectValue placeholder="Didn't happen?" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="candidate_no_show">Candidate did not join</SelectItem>
+                          <SelectItem value="interviewer_unavailable">
+                            I could not make it
+                          </SelectItem>
+                          <SelectItem value="cancelled">Cancelled</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : null}
+                    {["cancelled", "no_show"].includes(round.status) ? null : round.submitted ? (
                       <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                         <Lock className="size-3.5" /> Scored
                       </span>
@@ -267,12 +324,11 @@ function MyInterviewsPage() {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="select">
-                              Select —{" "}
-                              {round.level >= 3 ? "raise offer" : `move to L${round.level + 1}`}
+                            <SelectItem value="select">Select — recommend going ahead</SelectItem>
+                            <SelectItem value="hold">Hold — not sure yet</SelectItem>
+                            <SelectItem value="reject">
+                              Reject — recommend not going ahead
                             </SelectItem>
-                            <SelectItem value="hold">Hold — park on hold</SelectItem>
-                            <SelectItem value="reject">Reject — close the candidate</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>

@@ -227,6 +227,17 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
         error: `The candidate is ${row.stage}; a hiring decision follows the interview rounds.`,
       };
     }
+    // A select (→ offer) only after the role's final round is complete; a hold
+    // or reject may come after any completed round.
+    {
+      const { hiringDecisionBlocked } = await import("@/lib/interview-plan.server");
+      const blocked = await hiringDecisionBlocked(
+        orgId,
+        subject.applicationId,
+        subject.recommendation,
+      );
+      if (blocked) return { error: blocked };
+    }
     return {
       role: "hiring_manager",
       status: row.stage,

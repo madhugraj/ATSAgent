@@ -89,3 +89,6 @@ jobs:
 
       - name: Interview scheduling (free slots, candidate choice, interviewer brief)
         run: bun test scripts/agent-interview-slots.test.ts
+
+      - name: Interview plans, panels and the hiring decision
+        run: bun test scripts/agent-interview-panel.test.ts

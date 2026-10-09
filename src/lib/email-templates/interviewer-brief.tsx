@@ -23,6 +23,12 @@ interface Props {
   /** Screening recommendation and reason, when screened. */
   screeningText?: string;
   agenda?: string;
+  /** Everyone on the panel, when more than one. */
+  panelText?: string;
+  /** This round's purpose from the role's interview plan. */
+  roundFocus?: string;
+  /** What to rate, comma separated. */
+  competencies?: string;
   candidateUrl?: string;
   scorecardUrl?: string;
 }
@@ -45,6 +51,9 @@ const Email = ({
   matchText,
   screeningText,
   agenda,
+  panelText,
+  roundFocus,
+  competencies,
   candidateUrl,
   scorecardUrl,
 }: Props) => (
@@ -72,6 +81,11 @@ const Email = ({
           whereText
         )}
       </p>
+    ) : null}
+    {panelText ? <p style={detail}>Panel: {panelText}</p> : null}
+    {roundFocus ? <p style={text}>This round: {roundFocus}</p> : null}
+    {competencies ? (
+      <p style={text}>You will rate: {competencies} (1–5 each), then select, hold or reject.</p>
     ) : null}
     <p style={text}>
       <strong>About the candidate</strong>
