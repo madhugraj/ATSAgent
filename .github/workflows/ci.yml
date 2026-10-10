@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        image: postgres:14  # same major as production (Cloud SQL POSTGRES_14)
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -97,3 +97,5 @@ jobs:
         run: bun test scripts/agent-hiring-cost-offer.test.ts
       - name: Agent unhappy paths (declines, rejections, closed roles, pricing)
         run: bun test scripts/agent-unhappy-paths.test.ts
+      - name: Duplicates, races and exceptions
+        run: bun test scripts/agent-edge-cases.test.ts
