@@ -40,6 +40,12 @@ export type AgentTool<I = unknown> = {
    * posts: anyone may ask, the HR head decides and posts).
    */
   approverRole?: AppRole;
+  /**
+   * Checked before a person is asked (and before the tool runs): a reason the
+   * call is pointless now (e.g. it would repeat or is already done). The reason
+   * goes back to the agent instead of an approval card. Must only read.
+   */
+  precheck?: (ctx: ToolContext, input: I) => Promise<string | null>;
   run: (ctx: ToolContext, input: I) => Promise<unknown>;
 };
 

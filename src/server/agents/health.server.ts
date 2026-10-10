@@ -47,6 +47,16 @@ export const HEALTH = {
   heartbeatMinutes: 5,
   /** Suspected prompt injections in tool results over 24 h: warning from 1, serious from this many. */
   injectionSerious24h: 3,
+  /** Sourcing runs in 7 days on one role that added and invited nobody before it counts as exhausted. */
+  sourcingFruitlessRuns: 2,
+  /** Interview-time offers answered with "none work" or left to expire, in 7 days… */
+  slotOffersUnanswered7d: 3,
+  /** …and as a share of all offers that closed. */
+  slotOffersUnansweredShare: 0.5,
+  /** Rounds the candidate did not join, in 7 days, before it is flagged. */
+  interviewNoShows7d: 3,
+  /** An open offer on its this-many-th revision is going back and forth. */
+  offerRevisions: 3,
   /** Re-evaluate at most this often (minutes). */
   evaluateEveryMinutes: 5,
 } as const;
@@ -319,6 +329,107 @@ export const RULES: Rule[] = [
         title: `${x.n} change(s) made without an audit entry`,
         detail: { unaudited: x.n },
       }));
+    },
+  },
+  {
+    id: "sourcing.no_supply",
+    element: "tools",
+    severity: "warning",
+    description: `The Sourcing agent ran ${HEALTH.sourcingFruitlessRuns}+ times in 7 days on a role and found nobody to add or invite — the talent pool and past candidates are exhausted for it. Publish it more widely or revisit its must-haves.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ code: string; runs: number }>(sql`
+        select q.code, count(*)::int runs
+        from agent_runs r join requisitions q on q.id = r.subject_id
+        where r.org_id = ${orgId} and r.agent_type = 'sourcing' and r.mode = 'live'
+          and r.status = 'done' and r.created_at >= now() - interval '7 days'
+          and q.status = 'approved'
+          and not exists (
+            select 1 from agent_steps s where s.run_id = r.id and s.kind = 'tool' and s.status = 'ok'
+              and s.tool_name in ('add_to_pipeline', 'invite_to_apply')
+          )
+        group by q.code having count(*) >= ${HEALTH.sourcingFruitlessRuns}
+        order by count(*) desc`);
+      if (!r.length) return [];
+      return [
+        {
+          agentType: "sourcing",
+          title: `Sourcing found nobody for ${r.length} role(s): ${r
+            .slice(0, 5)
+            .map((x) => `${x.code} (${x.runs} runs)`)
+            .join(", ")}`,
+          detail: { roles: r.length, codes: r.slice(0, 5).map((x) => x.code) },
+        },
+      ];
+    },
+  },
+  {
+    id: "interview.slots_unanswered",
+    element: "hitl",
+    severity: "warning",
+    description: `Candidates did not pick any of the offered interview times (they said none work, or the link expired) at least ${HEALTH.slotOffersUnanswered7d} times in 7 days and for more than half of the offers — the times offered may not suit candidates, or the emails are not reaching them.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ closed: number; missed: number }>(sql`
+        select count(*)::int closed,
+          count(*) filter (where status in ('declined','expired'))::int missed
+        from interview_slot_offers
+        where org_id = ${orgId} and status in ('booked','declined','expired')
+          and updated_at >= now() - interval '7 days'`);
+      const x = r[0];
+      if (
+        !x ||
+        x.missed < HEALTH.slotOffersUnanswered7d ||
+        x.missed / x.closed <= HEALTH.slotOffersUnansweredShare
+      )
+        return [];
+      return [
+        {
+          agentType: "interview",
+          title: `${x.missed} of ${x.closed} interview-time offers in 7 days were not taken up`,
+          detail: { closed: x.closed, missed: x.missed },
+        },
+      ];
+    },
+  },
+  {
+    id: "interview.no_shows",
+    element: "hitl",
+    severity: "warning",
+    description: `Candidates did not join ${HEALTH.interviewNoShows7d} or more booked interview rounds in 7 days — check that invites and reminders reach them, and that the times suit them.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number }>(sql`
+        select count(*)::int n from interviews
+        where org_id = ${orgId} and status = 'no_show'
+          and scheduled_at >= now() - interval '7 days'`);
+      const n = r[0]?.n ?? 0;
+      if (n < HEALTH.interviewNoShows7d) return [];
+      return [
+        {
+          agentType: "interview",
+          title: `${n} interview rounds in 7 days where the candidate did not join`,
+          detail: { noShows: n },
+        },
+      ];
+    },
+  },
+  {
+    id: "offer.negotiation_loop",
+    element: "hitl",
+    severity: "warning",
+    description: `An offer is on its ${HEALTH.offerRevisions}rd revision or later and still open — the candidate and the band may not meet; a person should talk to the candidate rather than another revision.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number; max_rev: number }>(sql`
+        select count(*)::int n, coalesce(max(revision), 0)::int max_rev from offers
+        where org_id = ${orgId} and revision >= ${HEALTH.offerRevisions}
+          and status in ('draft','pending_hr','pending_cbo','approved','released','countered')`);
+      const x = r[0];
+      if (!x?.n) return [];
+      return [
+        {
+          agentType: "offer",
+          title: `${x.n} offer(s) still open after ${x.max_rev} revisions`,
+          detail: { offers: x.n, maxRevision: x.max_rev },
+        },
+      ];
     },
   },
   {

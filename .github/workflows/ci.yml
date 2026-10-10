@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        image: postgres:14  # same major as production (Cloud SQL POSTGRES_14)
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -83,3 +83,19 @@ jobs:
 
       - name: Agent utilisation & efficiency
         run: bun test scripts/agent-utilisation.test.ts
+
+      - name: Publishing channels, supply and the Sourcing agent
+        run: bun test scripts/agent-sourcing.test.ts
+
+      - name: Interview scheduling (free slots, candidate choice, interviewer brief)
+        run: bun test scripts/agent-interview-slots.test.ts
+
+      - name: Interview plans, panels and the hiring decision
+        run: bun test scripts/agent-interview-panel.test.ts
+
+      - name: Cost per candidate, offer answers and negotiation
+        run: bun test scripts/agent-hiring-cost-offer.test.ts
+      - name: Agent unhappy paths (declines, rejections, closed roles, pricing)
+        run: bun test scripts/agent-unhappy-paths.test.ts
+      - name: Duplicates, races and exceptions
+        run: bun test scripts/agent-edge-cases.test.ts

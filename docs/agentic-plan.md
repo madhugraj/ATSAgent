@@ -156,6 +156,13 @@ A worker (cron route `/api/public/agent-tick`, lease/claim exactly like
 
 Long waits (approvals that take days) cost nothing: the run is just a row.
 
+A tool may declare a read-only `precheck`: before a person is asked to
+approve a call, it says why the call is pointless now (it would repeat, or is
+already done), and that reason goes back to the agent instead of an approval
+card. The orchestrator re-registers agents if a reloaded module graph finds
+the registry empty, and logs `agent.orchestrator.agent_missing` rather than
+dropping an event silently.
+
 ### 3.3 Gateway extension (`aiAgentStep`)
 
 Add one function next to `aiJson` in `src/lib/ai-gateway.server.ts`:
@@ -243,6 +250,14 @@ the autonomy dial.
   publishes to connected boards (capability-gated as today).
 - **HITL:** `external` — first post per requisition needs approval unless
   whitelisted.
+- **Channels first (v1.4.0):** `list_publish_channels` returns the real state
+  of every channel — internal posting, the public apply link, the careers
+  inbox address, and per board (LinkedIn, Naukri, Indeed) connected / switched
+  on / may post on this connection (the adapter's own capability verdict, with
+  the reason) / already live. The agent posts only where `canPost` is true and
+  nothing is live, ends every post with the apply link, and where no board can
+  post hands the person the drafted post, the apply link and the inbox address
+  to share themselves.
 
 ### 4.4 Intake & matching agent
 
@@ -269,6 +284,51 @@ the autonomy dial.
   slots, creates Meet/Teams/Zoom invites, sends candidate invites, reminds
   interviewers, chases missing scorecards.
 - **HITL:** candidate invite → approval or whitelisted; panel choice → dial.
+- **Candidate chooses the time (v1.3.0):** `find_interview_slots` reads the
+  interviewer's free/busy from the connected Google Calendar (`freeBusy`) or
+  Microsoft 365 calendar (`getSchedule`) — never event details — and proposes
+  weekday 10:00–17:00 times in the organisation's time zone, ≥ 18 h ahead,
+  spread over days, avoiding rounds already booked and times already offered
+  to someone else (it says when no calendar could be checked).
+  `offer_interview_slots` (`external`, template `interview_slots`) emails the
+  candidate a private `/schedule/<token>` link (`interview_slot_offers`,
+  migration `0033`); every time is re-checked as free when offered and when
+  picked. Picking books the round through the shared scheduling core (meeting
+  link, candidate invite, interviewer brief, stage), once — the offer is
+  claimed before booking. "None of these work" records the candidate's words
+  and tells the desk thread; unanswered offers expire (72 h at most, never
+  past the first time). Health rule `interview.slots_unanswered`.
+- **Interviewer brief:** every booking or re-schedule (agent, Interviews page
+  or the candidate's pick) emails the interviewer a calendar file, the
+  meeting link, a candidate summary, match and screening highlights, and links
+  to the profile and the scorecard (internal mail, master switch only).
+
+- **Plan, panels and outcomes (v1.4.0, migration `0034`):** each role has an
+  interview plan (`requisitions.interview_plan`; null = the default from its
+  must-haves): 1–3 rounds, each with a name, focus, competencies (the
+  rubric interviewers rate) and panel size (1–3), plus a verdict policy.
+  The coordinator books `panelSize` interviewers (`interviews.panel`), times
+  that suit them all, and every interviewer gets the brief with the rubric.
+  Scorecards are one per interviewer per round
+  (`evaluations.evaluator_email`, unique per round); a round completes when
+  every panel member has scored, and only then does anything move: a select
+  before the final round opens the next one; under `recommend` (default) a
+  hold or reject — and the final select — wait for the hiring manager; under
+  `immediate` the round's verdict (the most cautious on the panel) moves the
+  candidate. A round that did not happen (candidate no-show, interviewer
+  unavailable, cancelled) is recorded with a note, the desk thread is told
+  and `interview.missed` has the coordinator offer new times; health rule
+  `interview.no_shows`.
+- **Times not taken (v1.7.0):** when a candidate says none of the offered
+  times work, or the link expires, `interview.slots_unanswered` has the
+  coordinator offer different times honouring their note; after three offers
+  for a round go unanswered, `offer_interview_slots` refuses and a person
+  calls the candidate.
+- **Round order (v1.6.0):** a round's times start only after the candidate's
+  earlier round ends (`roundNotBefore`): `find_interview_slots` takes the
+  application and level, and offering or booking an earlier time is refused.
+  When one candidate advances or misses a round, the coordinator's run is
+  theirs (subject = application), so its cost counts in their hiring cost.
 
 ### 4.7 Evaluation agent
 
@@ -278,6 +338,12 @@ the autonomy dial.
   recommendation with reasons, and a bias check (`scripts/bias-report.ts`
   logic) across the requisition's funnel.
 - **Gate:** the **hiring decision** is the hiring manager's.
+- **Decision timing (v1.2.0):** the agent debriefs every completed round but
+  asks for the hiring decision only when it is due — the role's final round
+  is complete, or a round's verdict is hold / reject. The runtime enforces
+  it: a `hiring_decision` gate recommending select is refused until the final
+  round is complete (`hiringDecisionBlocked`), so an offer can never start
+  after round 1.
 
 ### 4.8 Offer agent
 
@@ -288,6 +354,25 @@ the autonomy dial.
 - **Gate:** **HR head and CBO approvals**; the agent never edits an offer
   after submission except through the `draft` path.
 
+- **Answers and negotiation (1.1.0, migration `0035`):** release sets a
+  private `offers.response_token`; the offer email links to `/offer/<token>`
+  where the candidate accepts, declines (reason) or asks for changes
+  (`counter`: expected CTC, joining date, note → status `countered`). The
+  Offer agent revises a countered offer inside the band (`revise_offer`:
+  `revision` + 1, back to draft, letter cleared, trail entry with the ask and
+  the reasoning), regenerates the letter and takes it through HR head → CBO
+  approval and release again. Health rule `offer.negotiation_loop` (3+
+  revisions, still open).
+- **Sent back (1.2.0):** an HR head or CBO who declines an offer at their
+  step (Decline in the inbox — a reason is required — or **Send back** on the
+  Offers page) returns it to draft with the reason on the trail
+  (`offer.sent_back`); the thread is told and the Offer agent revises it for
+  that reason inside the band (`revise_offer` also takes a sent-back draft),
+  or asks a person when it cannot — never resubmitting unchanged. Approval
+  cards state, from the system, where the CTC sits against the role's budget
+  and band. `draft_offer` follows the role's interview plan: a one- or
+  two-round role is ready for an offer once its final round is complete.
+
 ### 4.9 Pre-onboarding & release agent
 
 - **Trigger:** offer `approved`.
@@ -296,6 +381,18 @@ the autonomy dial.
   `readinessFor` is green prepares the release.
 - **Gate:** **document validation** and **offer release** stay with the HR
   head (existing release gate).
+- **No chasing (v1.1.0):** `request_documents` refuses, before anyone is
+  asked and again at send time, documents already received (not rejected) or
+  requested and not yet due. `onboarding_status` names the offer
+  (`offerId`, status, revision) that the release request needs.
+- **Rejected documents (1.2.0):** a document HR rejects raises
+  `onboarding.document_rejected`; the agent asks the candidate for a new copy
+  at once (the due-date rule does not block a rejected type) with HR's reason
+  in the email (`note`). The same file uploaded twice is not filed or read
+  again.
+- **Release email:** releasing (each revision) emails the candidate the letter
+  PDF and the private answer link (`emailReleasedOffer`); a failure is logged
+  (`offer.release_email_failed`) and never blocks the release.
 
 ### 4.10 Copilot (orchestrator front door)
 
@@ -588,6 +685,52 @@ configured in Agent settings → Trace export and alerts. Each push is audited
 
 ---
 
+### 9.4 Cost per candidate
+
+Every AI request records the role / candidate it was made for
+(`ai_usage_events.requisition_id`, `application_id`, `candidate_id`; set by
+an attribution scope around candidate work — scoring, agent tools that name a
+candidate, screening kits, assessment grading — and backfilled for CV reads
+once the candidate is saved; pre-onboarding document reads carry the
+application and candidate). `hiring-cost.server.ts` splits a role's spend
+into shared work (requisition, JD, publishing, sourcing, desk) and each
+candidate's direct cost by hiring stage (CV, matching, screening, interviews,
+evaluation, offer, pre-onboarding — including every request of an agent run
+whose subject is their application), and reports cost per hire = role total
+÷ hires. Money only at the organisation's own token prices.
+
+**Money.** Each request is priced by the model it ran on and the day it ran:
+the organisation's own rates (`agent_cost_rates`) when set, else the model's
+published list price (`src/server/ai-pricing.ts` — only prices read from the
+provider's own pricing page, with source and date; a model with no price on
+file is reported as unpriced tokens, never guessed). Web-search grounding is
+counted separately (billed per 1,000 beyond the provider's monthly
+allowance). The model and vendor are named only on the organisation's AI
+model settings, which also show the price on file.
+
+**Across the organisation** (`/hiring-cost`, HR head / CBO / owner): spend
+for the last 3, 6 or 12 months; cost per hire (spend ÷ offers accepted in the
+period, and per month); spend not tied to a role; every role (spend, shared,
+average per candidate, per hire); candidate spend by hiring stage; and
+candidate spend by outcome — hired, not hired, still in progress — so a high
+share on people not hired shows that screening or interviews reach too many.
+
+### 9.5 When things do not go to plan
+
+- A role closed, rejected or put **on hold** starts no agent; closing or
+  pausing stops running agents, withdraws open interview-time links and tells
+  the thread what a person must still settle (booked rounds, open offers,
+  people in the pipeline). On hold pauses the thread; agents resume once the
+  role is approved again.
+- A rejected candidate is told kindly and finally (stage email, never the
+  internal reason), subject to the organisation's stage-email switch.
+- Assessments not completed within 14 days close on the daily sweep and the
+  thread is told.
+- Under the **immediate** verdict policy the round's verdict moves the
+  candidate and the Evaluation agent only debriefs.
+- A gate the person declines records their decision (and reason) even when
+  the record's own event closed the task first.
+
 ## 10. Phased delivery
 
 Each phase ships end-to-end and keeps the app working without agents.
@@ -817,6 +960,43 @@ arrives):
   to the levels and pre-approved templates above; the measured
   recommendations still decide when the three trust checkpoints go.
 
+- **Supply after publishing (built):**
+  - _Arrivals:_ applications from every channel (apply page, careers inbox,
+    board webhooks / board sync, IJP, uploads) are picked up by the scheduler
+    sweep — any unscored applicant from the last 2 hours starts an Intake &
+    matching run for its role (at most one per role every 10 minutes), and the
+    role's desk thread gets "N new applicant(s): 2 via careers inbox — …" once
+    (cut-off: the thread's last announcement; agent-added people excluded).
+  - _Sourcing agent (`sourcing`, v1.0.0, owner HR head, risk medium):_ started
+    by the sweep for approved roles with an approved JD that are **starving**
+    (`SOURCING` in `sourcing.server.ts`: live ≥ 3 days with < 5 applicants in
+    7 days, or fewer than 3 shortlisted per opening, or not published at all),
+    at most once a day per role, or from the desk ("Ask the Sourcing agent").
+    Tools: `get_role_traction`, `list_publish_channels`, `search_talent_pool`,
+    `add_to_pipeline`, `find_past_candidates` (did well for another role —
+    shortlisted, interviewed, reserve, declined an offer — consented, not an
+    employee, not in this pipeline, not invited for it in 30 days) and
+    `invite_to_apply` (`external`, template `role_invite`, pre-approvable;
+    emails the apply link — nobody is added without applying). It never
+    scores, moves, rejects or publishes; it recommends. Health rule
+    `sourcing.no_supply`: 2+ fruitless runs on a role in 7 days.
+  - _New CV → open roles:_ someone who joins the pool without a role (an
+    inbox mail that named no role, an upload, a capture, an HRMS import) is
+    checked once by the scheduler (`pool-match.server.ts`, migration `0032`
+    `candidates.role_match_checked_at`) against every approved role with an
+    approved JD, with the pool search's evidence ranking (≥ 75% of must-haves
+    or equivalents, inside the experience band; employees and hired people
+    excluded; CVs from the last 7 days only). A match joins that role's
+    pipeline as `pool_match` (audited `pool.matched_to_role`, at most 5 per
+    role per sweep), is scored by Intake & matching within minutes and is
+    announced in the desk thread. Runs for organisations that switched the
+    Sourcing agent on; pool matches do not count as channel traction.
+  - _Desk:_ when a JD is approved the thread lists what happens next (Intake,
+    Publishing, Sourcing — on / switched off, with **Switch on and start** for
+    HR head / CBO / owner, audited); when a later JD version is approved and
+    candidates were scored against an earlier one, **Re-score** replaces their
+    scores (audited `desk.candidates_rescored`; stages are not changed).
+
 ### 13.5 Observability additions
 
 - Voice: calls placed / answered / completed / opted out / asked for human,
@@ -870,7 +1050,12 @@ desk prompt; a `feedback` command decides the newest approval as
 `resolveTask` — the same role checks as the card — and re-queues the run. The
 runtime hands the agent "asked for changes: …, revise and ask again", so the
 revised proposal is a new request; the card shows **Changes requested**.
-Gates are never decided from chat.
+Gates are never approved from chat; the one exception to deciding them there
+is a JD gate sent back for changes (`requestJdChangesCore`, non-terminal,
+role-checked). `feedback.template` is checked against the org's JD templates
+before anything is sent; `submit_jd_version.templateName` makes the JD agent use
+it. Budget pauses show used / limit in the journey; raising the budget (desk
+or Agent settings) clears the parked runs' lease so they re-check at once.
 Every decision the runtime hands back to a model (other than an approved
 tool call, which its tool step records) is written as a `decision` step —
 input: the task, decider and response; output: the exact text the agent was
@@ -916,6 +1101,7 @@ P6 hiring desk + voice (planned).
 | 10  | Offer agent                    | selection confirmed                                   | pay within band, offer draft and letter, approval brief                                          | HR head and CBO offer approvals           | P4    |
 | 11  | Pre-onboarding & release agent | offer approved                                        | requests and cross-checks documents, prepares release                                            | document validation and release (HR head) | P4    |
 | 12  | Follow-up agent                | anything past its deadline                            | nudges approvers / interviewers, drafts candidate follow-ups                                     | candidate messages (unless whitelisted)   | P2    |
+| 13  | Sourcing agent                 | approved role starving for applicants                 | supply by channel, tops up from the talent pool, invites strong past candidates, recommends      | invitations (unless whitelisted)          | P6    |
 
 ### A.2 Tools
 

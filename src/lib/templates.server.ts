@@ -245,11 +245,94 @@ export async function resolveTemplate<K extends TemplateKind>(
  * best matches the hint (role title, department); else the oldest. Null when
  * the org has no template of this kind.
  */
+/**
+ * A template the person asked for by name ("the Yavar template"): exact name,
+ * else a name containing the words asked for. Also returns the names that
+ * exist, so a miss can be answered honestly.
+ */
+export async function findTemplateByName(
+  orgId: string,
+  kind: TemplateKind,
+  asked: string,
+): Promise<{
+  match: { id: string; name: string; by: "name" | "content"; evidence: string | null } | null;
+  names: string[];
+  /** Several templates mention what was asked for in their content: ask which. */
+  ambiguous: string[];
+}> {
+  const rows = await db
+    .select({
+      id: contentTemplates.id,
+      name: contentTemplates.name,
+      config: contentTemplates.config,
+    })
+    .from(contentTemplates)
+    .where(and(eq(contentTemplates.orgId, orgId), eq(contentTemplates.kind, kind)));
+  const names = rows.map((r) => r.name);
+  const words = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/\btemplates?\b/g, " ")
+      .split(/[^a-z0-9+#]+/)
+      .filter((w) => w.length >= 2);
+  const q = words(asked);
+  const exact = rows.find((r) => r.name.trim().toLowerCase() === asked.trim().toLowerCase());
+  const partial = q.length
+    ? rows.find((r) => {
+        const n = new Set(words(r.name));
+        return q.every((w) => n.has(w));
+      })
+    : undefined;
+  const byName = exact ?? partial;
+  if (byName)
+    return {
+      match: { id: byName.id, name: byName.name, by: "name", evidence: null },
+      names,
+      ambiguous: [],
+    };
+  if (!q.length) return { match: null, names, ambiguous: [] };
+  // People name a template by what it is ("the Yavar one"), not by its title:
+  // look inside — section headings, standard wording, instructions.
+  const inContent = rows.filter((r) => {
+    const n = new Set(words(JSON.stringify(r.config ?? {})));
+    return q.every((w) => n.has(w));
+  });
+  if (inContent.length > 1) return { match: null, names, ambiguous: inContent.map((r) => r.name) };
+  const hit = inContent[0];
+  if (!hit) return { match: null, names, ambiguous: [] };
+  const cfg = (hit.config ?? {}) as { sections?: { heading?: string }[] };
+  const headings = (cfg.sections ?? [])
+    .map((x) => x.heading ?? "")
+    .filter((h) => q.every((w) => new Set(words(h)).has(w)));
+  return {
+    match: {
+      id: hit.id,
+      name: hit.name,
+      by: "content",
+      evidence: headings.length
+        ? `its sections ${headings.map((h) => `"${h}"`).join(", ")}`
+        : `its standard wording mentions "${asked}"`,
+    },
+    names,
+    ambiguous: [],
+  };
+}
+
 export async function pickTemplate(
   orgId: string,
   kind: TemplateKind,
   hint: string,
+  /** A template the reviewer asked for by name; wins when it exists. */
+  preferred?: string,
 ): Promise<{ id: string; name: string; reason: string } | null> {
+  if (preferred?.trim()) {
+    const { match, names } = await findTemplateByName(orgId, kind, preferred);
+    if (!match)
+      throw new Error(
+        `There is no template named "${preferred}". Templates of this kind: ${names.join(", ") || "none"}.`,
+      );
+    return { id: match.id, name: match.name, reason: "the template the reviewer asked for" };
+  }
   const rows = await db
     .select({
       id: contentTemplates.id,

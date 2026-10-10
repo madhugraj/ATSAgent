@@ -4,7 +4,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { applicationsQuery, candidatesQuery, offersQuery, requisitionsQuery } from "@/lib/data";
-import { advanceOffer, createOffer } from "@/lib/offers.functions";
+import { advanceOffer, createOffer, sendBackOffer } from "@/lib/offers.functions";
 import { EmptyState, PageHeader, StatusBadge, inr } from "@/components/ats";
 import { OfferLetterDialog } from "@/components/OfferLetterDialog";
 import { PreOnboardingDialog } from "@/components/PreOnboardingDialog";
@@ -104,6 +104,21 @@ function Offers() {
     toast.success("Offer raised and sent for HR approval");
     qc.invalidateQueries({ queryKey: ["offers"] });
     qc.invalidateQueries({ queryKey: ["applications"] });
+  }
+
+  async function sendBack(id: string) {
+    const reason = window.prompt(
+      "Why is this offer sent back? (the Offer agent and the team see this)",
+    );
+    if (!reason || reason.trim().length < 3) return;
+    try {
+      await sendBackOffer({ data: { id, reason: reason.trim() } });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not send the offer back");
+      return;
+    }
+    toast.success("Offer sent back to draft with your reason");
+    qc.invalidateQueries({ queryKey: ["offers"] });
   }
 
   async function advance(id: string, status: string, trail: unknown) {
@@ -225,6 +240,11 @@ function Offers() {
                         onClick={() => advance(o.id, o.status, o.approval_trail)}
                       >
                         {step.label}
+                      </Button>
+                    ) : null}
+                    {o.status === "pending_hr" || o.status === "pending_cbo" ? (
+                      <Button size="sm" variant="ghost" onClick={() => void sendBack(o.id)}>
+                        Send back
                       </Button>
                     ) : null}
                   </li>

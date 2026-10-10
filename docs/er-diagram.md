@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-71 tables across 9 domains.
+72 tables across 9 domains.
 
 ## Identity & access
 
@@ -303,6 +303,7 @@ erDiagram
     text x_url "nullable"
     boolean consent_given
     timestamptz created_at
+    timestamptz role_match_checked_at "nullable"
     text external_id "nullable"
     text external_provider "nullable"
     text resume_file_path "nullable"
@@ -404,6 +405,7 @@ erDiagram
     jsonb competencies
     text submitted_by "nullable"
     timestamptz submitted_at "nullable"
+    text evaluator_email "nullable"
   }
   candidate_verifications {
     uuid id PK
@@ -554,6 +556,8 @@ erDiagram
     integer duration_mins
     text mode
     text agenda "nullable"
+    jsonb panel
+    text outcome_note "nullable"
     timestamptz completed_at "nullable"
   }
   screening_kits {
@@ -641,6 +645,10 @@ erDiagram
     jsonb approval_trail
     jsonb letter "nullable"
     uuid letter_template_id "nullable"
+    text response_token "nullable"
+    jsonb counter "nullable"
+    integer revision
+    timestamptz responded_at "nullable"
     timestamptz created_at
   }
   hr_incentive_schemes {
@@ -914,6 +922,9 @@ erDiagram
     boolean grounded "nullable"
     text error_message "nullable"
     uuid agent_run_id "nullable"
+    uuid requisition_id "nullable"
+    uuid application_id "nullable"
+    uuid candidate_id "nullable"
     timestamptz created_at
   }
   email_outbox {
@@ -1037,6 +1048,9 @@ erDiagram
 | `inbox_messages` | `org_id` | `organizations` | cascade |
 | `integration_credentials` | `integration_id` | `source_integrations` | cascade |
 | `integration_credentials` | `org_id` | `organizations` | cascade |
+| `interview_slot_offers` | `application_id` | `applications` | cascade |
+| `interview_slot_offers` | `interview_id` | `interviews` | no action |
+| `interview_slot_offers` | `org_id` | `organizations` | cascade |
 | `interviews` | `application_id` | `applications` | cascade |
 | `interviews` | `org_id` | `organizations` | cascade |
 | `job_descriptions` | `org_id` | `organizations` | cascade |
@@ -1113,7 +1127,7 @@ erDiagram
 | `ai_interviews` | Screening & interviews | 8 | — |
 | `ai_provider_credentials` | Communications & AI settings | 4 | (orgId+provider) |
 | `ai_settings` | Communications & AI settings | 9 | (org_id) |
-| `ai_usage_events` | Communications & AI settings | 16 | — |
+| `ai_usage_events` | Communications & AI settings | 19 | — |
 | `applications` | Candidates & pipeline | 10 | (requisitionId+candidateId) |
 | `audit_log` | Identity & access | 10 | — |
 | `board_sync_state` | — | 11 | (integration_id) |
@@ -1123,7 +1137,7 @@ erDiagram
 | `candidate_ownership_events` | Candidates & pipeline | 8 | — |
 | `candidate_referrals` | Candidates & pipeline | 11 | — |
 | `candidate_verifications` | Candidates & pipeline | 11 | — |
-| `candidates` | Candidates & pipeline | 39 | — |
+| `candidates` | Candidates & pipeline | 40 | — |
 | `capture_events` | Sourcing & integrations | 10 | — |
 | `comp_knowledge` | Intelligence | 17 | — |
 | `content_templates` | Requisitions & job content | 16 | — |
@@ -1131,7 +1145,7 @@ erDiagram
 | `departments` | Organisations & masters | 8 | (orgId+name) |
 | `email_outbox` | Communications & AI settings | 16 | (idempotency_key) |
 | `email_settings` | Communications & AI settings | 11 | (org_id) |
-| `evaluations` | Candidates & pipeline | 14 | — |
+| `evaluations` | Candidates & pipeline | 15 | — |
 | `hiring_conversations` | — | 10 | — |
 | `hiring_messages` | — | 8 | — |
 | `hr_incentive_schemes` | Offers & onboarding | 9 | — |
@@ -1140,11 +1154,12 @@ erDiagram
 | `hrms_sync_state` | — | 12 | (integrationId+entity) |
 | `inbox_messages` | Sourcing & integrations | 16 | — |
 | `integration_credentials` | Sourcing & integrations | 4 | — |
-| `interviews` | Screening & interviews | 14 | — |
+| `interview_slot_offers` | — | 22 | (token) |
+| `interviews` | Screening & interviews | 16 | — |
 | `job_descriptions` | Requisitions & job content | 17 | — |
 | `master_items` | Organisations & masters | 8 | — |
 | `match_scores` | Candidates & pipeline | 26 | — |
-| `offers` | Offers & onboarding | 10 | — |
+| `offers` | Offers & onboarding | 14 | — |
 | `onboarding_documents` | Offers & onboarding | 23 | — |
 | `ontology_snapshots` | Intelligence | 11 | — |
 | `org_linkedin_connections` | Organisations & masters | 11 | — |

@@ -9,6 +9,7 @@ import {
   candidates,
   evaluations,
   interviews,
+  orgMembers,
   organizations,
   requisitions,
 } from "@db/schema";
@@ -28,6 +29,29 @@ export function nextStageFor(level: number, verdict: "select" | "hold" | "reject
   if (verdict === "reject") return "rejected";
   if (verdict === "hold") return "on_hold";
   return level >= 3 ? "offer_pending" : (`l${level + 1}` as Stage);
+}
+
+/**
+ * What a completed round does to the candidate under the role's plan (null =
+ * nothing moves; the hiring manager decides). A select before the final round
+ * opens the next one; after the final round the hiring decision always comes
+ * from the hiring manager under "recommend". Under "immediate" the round's
+ * verdict moves the candidate as it used to.
+ */
+export function progressionFor(
+  level: number,
+  verdict: "select" | "hold" | "reject",
+  final: number,
+  policy: "recommend" | "immediate",
+): Stage | null {
+  if (verdict === "select")
+    return level < final
+      ? (`l${level + 1}` as Stage)
+      : policy === "immediate"
+        ? "offer_pending"
+        : null;
+  if (policy === "recommend") return null;
+  return verdict === "reject" ? "rejected" : "on_hold";
 }
 
 const HR_CONTROLLED_TARGETS = new Set<Stage>([
@@ -56,6 +80,13 @@ export type MyInterview = {
   status: string;
   stage: Stage;
   submitted: boolean;
+  /** This round's name and competencies from the role's interview plan. */
+  round_name: string | null;
+  competencies: string[];
+  /** Everyone on the panel (names or emails). */
+  panel: string[];
+  /** Panel members who have not scored yet (when I have). */
+  waiting_for: string[];
 };
 
 /** Every interview assigned to the signed-in user, newest first. */
@@ -77,6 +108,7 @@ export const myInterviews = createServerFn({ method: "GET" })
         status: interviews.status,
         interviewer: interviews.interviewer,
         interviewerEmail: interviews.interviewerEmail,
+        panel: interviews.panel,
       })
       .from(interviews)
       .where(
@@ -85,6 +117,7 @@ export const myInterviews = createServerFn({ method: "GET" })
           or(
             sql`lower(${interviews.interviewerEmail}) = ${email}`,
             sql`lower(${interviews.interviewer}) = ${email}`,
+            sql`${interviews.panel} @> ${JSON.stringify([{ email }])}::jsonb`,
           ),
         ),
       )
@@ -103,7 +136,10 @@ export const myInterviews = createServerFn({ method: "GET" })
         .from(applications)
         .where(and(eq(applications.orgId, context.orgId), inArray(applications.id, appIds))),
       db
-        .select({ interviewId: evaluations.interviewId })
+        .select({
+          interviewId: evaluations.interviewId,
+          by: sql<string>`lower(coalesce(${evaluations.evaluatorEmail}, ${evaluations.evaluator}, ''))`,
+        })
         .from(evaluations)
         .where(
           and(eq(evaluations.orgId, context.orgId), inArray(evaluations.applicationId, appIds)),
@@ -123,10 +159,21 @@ export const myInterviews = createServerFn({ method: "GET" })
         .where(and(eq(requisitions.orgId, context.orgId), inArray(requisitions.id, reqIds))),
     ]);
 
-    const submitted = new Set(evals.map((e) => e.interviewId).filter(Boolean) as string[]);
+    const { planFor } = await import("./interview-plan.server");
+    const { roundOf } = await import("./interview-plan");
+    const plans = new Map<string, Awaited<ReturnType<typeof planFor>>["plan"]>();
+    for (const id of reqIds) plans.set(id, (await planFor(context.orgId, id)).plan);
+    const scoredBy = (interviewId: string) =>
+      evals.filter((e) => e.interviewId === interviewId).map((e) => e.by);
 
     return mine.map((r) => {
       const app = apps.find((a) => a.id === r.applicationId);
+      const round = app ? roundOf(plans.get(app.requisitionId)!, r.level) : null;
+      const members = [
+        ...(r.interviewerEmail ? [{ name: r.interviewer, email: r.interviewerEmail }] : []),
+        ...(r.panel ?? []),
+      ];
+      const by = scoredBy(r.id);
       return {
         id: r.id,
         application_id: r.applicationId,
@@ -141,7 +188,13 @@ export const myInterviews = createServerFn({ method: "GET" })
         teams_link: r.teamsLink,
         status: r.status,
         stage: (app?.stage ?? "shortlisted") as Stage,
-        submitted: submitted.has(r.id),
+        submitted: by.includes(email),
+        round_name: round?.name ?? null,
+        competencies: round?.competencies ?? [],
+        panel: members.map((m) => m.name ?? m.email),
+        waiting_for: members
+          .filter((m) => !by.includes(m.email.toLowerCase()))
+          .map((m) => m.name ?? m.email),
       };
     });
   });
@@ -169,161 +222,373 @@ export type ScorecardResult = {
   movedTo: Stage | null;
   blocked: string | null;
   nextInterviewCreated: boolean;
+  /** Every interviewer on the round has scored it. */
+  roundComplete: boolean;
+  /** Interviewers still to score the round. */
+  waitingFor: string[];
+  /** Why nothing moved: the hiring manager decides. */
+  decisionPending?: string;
 };
 
 /**
- * Single sanctioned way to submit interview feedback: writes an immutable
- * scorecard, locks the round, then auto-progresses the application (select →
- * next level or offer, hold → on hold, reject → rejected) with a stage_event.
+ * Single sanctioned way to submit interview feedback: one immutable scorecard
+ * per interviewer per round. A round completes when every interviewer on its
+ * panel has submitted; only then does the candidate move — under the role's
+ * plan (see progressionFor): a select before the final round opens the next
+ * round; holds, rejects and the final decision go to the hiring manager unless
+ * the plan says "immediate". The Evaluation agent hears about each completed
+ * round.
  */
+export async function submitScorecardCore(
+  ctx: { orgId: string; userId: string; email: string; actor: string; isOwner?: boolean },
+  data: z.infer<typeof ScorecardInput>,
+): Promise<ScorecardResult> {
+  const actor = ctx.actor;
+  const me = ctx.email.trim().toLowerCase();
+  const now = new Date();
+
+  const [app] = await db
+    .select({
+      id: applications.id,
+      stage: applications.stage,
+      requisitionId: applications.requisitionId,
+    })
+    .from(applications)
+    .where(and(eq(applications.orgId, ctx.orgId), eq(applications.id, data.applicationId)))
+    .limit(1);
+  if (!app) throw new Error("Application not found");
+
+  let round: {
+    id: string;
+    interviewerEmail: string | null;
+    panel: { email: string }[];
+    level: number;
+  } | null = null;
+  if (data.interviewId) {
+    const [r] = await db
+      .select({
+        id: interviews.id,
+        interviewerEmail: interviews.interviewerEmail,
+        panel: interviews.panel,
+        level: interviews.level,
+        status: interviews.status,
+        applicationId: interviews.applicationId,
+      })
+      .from(interviews)
+      .where(and(eq(interviews.orgId, ctx.orgId), eq(interviews.id, data.interviewId)))
+      .limit(1);
+    if (!r || r.applicationId !== app.id) throw new Error("Interview round not found.");
+    if (["cancelled", "no_show"].includes(r.status))
+      throw new Error("This round did not take place, so it cannot be scored.");
+    const { emailsOf } = await import("./interview-plan.server");
+    const panel = emailsOf(r);
+    if (panel.length && !panel.includes(me)) {
+      await assertRole(
+        ctx.userId,
+        ctx.orgId,
+        ["hr_head", "president_cbo"],
+        "Only the interviewers on this round can score it.",
+      );
+    }
+    const [existing] = await db
+      .select({ id: evaluations.id })
+      .from(evaluations)
+      .where(
+        and(
+          eq(evaluations.orgId, ctx.orgId),
+          eq(evaluations.interviewId, data.interviewId),
+          sql`lower(coalesce(${evaluations.evaluatorEmail}, ${evaluations.evaluator})) = ${me}`,
+        ),
+      )
+      .limit(1);
+    if (existing) throw new Error("You have already scored this round — scorecards are final.");
+    round = r;
+  }
+  if (data.verdict !== "select" && !data.reason?.trim() && !data.comments?.trim()) {
+    throw new Error("A hold or reject needs a written reason.");
+  }
+
+  const [evaluation] = await db
+    .insert(evaluations)
+    .values({
+      applicationId: data.applicationId,
+      orgId: ctx.orgId,
+      interviewId: data.interviewId ?? null,
+      level: data.level,
+      evaluator: actor,
+      evaluatorEmail: me,
+      focusArea: data.focusArea?.trim() || null,
+      rating: data.rating,
+      recommendation: data.verdict,
+      comments: [data.comments?.trim(), data.reason?.trim()].filter(Boolean).join("\n\n") || null,
+      competencies: data.competencies,
+      submittedBy: actor,
+      submittedAt: now,
+    })
+    .returning({ id: evaluations.id });
+  if (!evaluation) throw new Error("The scorecard could not be saved.");
+
+  // Is the round complete (every interviewer on it scored)?
+  const { progressOf } = await import("./interview-plan.server");
+  const progress = await progressOf(ctx.orgId, app.id);
+  const thisRound = round
+    ? progress.rounds.find((r) => r.interviewId === round!.id)
+    : progress.rounds.find((r) => r.level === data.level && r.complete);
+  const complete = Boolean(thisRound?.complete);
+  if (round && complete) {
+    await db
+      .update(interviews)
+      .set({ status: "completed", completedAt: now })
+      .where(and(eq(interviews.orgId, ctx.orgId), eq(interviews.id, round.id)));
+  }
+  if (!complete) {
+    await db
+      .update(applications)
+      .set({ lastActivityAt: now })
+      .where(and(eq(applications.orgId, ctx.orgId), eq(applications.id, app.id)));
+    return {
+      ok: true,
+      evaluationId: evaluation.id,
+      movedTo: null,
+      blocked: null,
+      nextInterviewCreated: false,
+      roundComplete: false,
+      waitingFor: thisRound?.missing ?? [],
+    };
+  }
+
+  const verdict = thisRound!.verdict ?? data.verdict;
+  // Tell the orchestrator: a switched-on Evaluation agent debriefs the round.
+  {
+    const { emitAgentEvent } = await import("../server/agents/events");
+    await emitAgentEvent({
+      orgId: ctx.orgId,
+      type: "scorecard.submitted",
+      subjectType: "requisition",
+      subjectId: app.requisitionId,
+      actorUserId: ctx.userId,
+      payload: {
+        applicationId: data.applicationId,
+        level: data.level,
+        verdict,
+        roundComplete: true,
+        finalRound: data.level >= progress.finalLevel,
+        // "immediate": the round's verdict moves the candidate itself.
+        policy: progress.plan.verdictPolicy,
+      },
+    });
+  }
+
+  /* Progression under the plan, audited exactly like a manual stage move. */
+  const from = app.stage as Stage;
+  const target = progressionFor(
+    data.level,
+    verdict,
+    progress.finalLevel,
+    progress.plan.verdictPolicy,
+  );
+  let movedTo: Stage | null = null;
+  let blocked: string | null = null;
+  const reason = data.reason?.trim() || `L${data.level} verdict: ${verdict}`;
+  if (target && HR_CONTROLLED_TARGETS.has(target)) {
+    await assertRole(
+      ctx.userId,
+      ctx.orgId,
+      ["hr_head", "president_cbo"],
+      "Only the HR head or an owner can move a candidate into the offer pipeline.",
+    );
+  }
+  if (target && from !== target && canMove(from, target)) {
+    await db
+      .update(applications)
+      .set({
+        stage: target,
+        stageReason: reason,
+        stageNote: data.comments?.trim() || null,
+        lastActivityAt: now,
+      })
+      .where(and(eq(applications.orgId, ctx.orgId), eq(applications.id, app.id)));
+    const { recordStageTransition } = await import("./stage-events.server");
+    await recordStageTransition({
+      orgId: ctx.orgId,
+      applicationId: app.id,
+      fromStage: from,
+      toStage: target,
+      actor,
+      reason,
+      note: data.comments?.trim() || null,
+    });
+    movedTo = target;
+  } else if (target && from !== target) {
+    blocked = `${STAGE_LABEL[from]} → ${STAGE_LABEL[target]} is not an allowed transition — move the candidate manually.`;
+  }
+  await db
+    .update(applications)
+    .set({ lastActivityAt: now })
+    .where(and(eq(applications.orgId, ctx.orgId), eq(applications.id, app.id)));
+
+  /* A select before the final round queues the next round so nothing stalls. */
+  let nextInterviewCreated = false;
+  if (verdict === "select" && data.level < progress.finalLevel) {
+    const nextLevel = data.level + 1;
+    const [already] = await db
+      .select({ id: interviews.id })
+      .from(interviews)
+      .where(
+        and(
+          eq(interviews.orgId, ctx.orgId),
+          eq(interviews.applicationId, app.id),
+          eq(interviews.level, nextLevel),
+          sql`${interviews.status} not in ('cancelled','no_show')`,
+        ),
+      )
+      .limit(1);
+    if (!already) {
+      await db.insert(interviews).values({
+        applicationId: app.id,
+        orgId: ctx.orgId,
+        level: nextLevel,
+        status: "pending_scheduling",
+        scheduledAt: null,
+      });
+      nextInterviewCreated = true;
+    }
+  }
+
+  return {
+    ok: true,
+    evaluationId: evaluation.id,
+    movedTo,
+    blocked,
+    nextInterviewCreated,
+    roundComplete: true,
+    waitingFor: [],
+    ...(target === null
+      ? {
+          decisionPending:
+            verdict === "select"
+              ? "Final round complete — the hiring manager makes the hiring decision."
+              : `Round verdict ${verdict}: the hiring manager decides; the candidate stays where they are.`,
+        }
+      : {}),
+  };
+}
+
 export const submitScorecard = createServerFn({ method: "POST" })
   .middleware([requireOrg])
   .inputValidator((data: unknown) => ScorecardInput.parse(data))
-  .handler(async ({ data, context }): Promise<ScorecardResult> => {
-    const actor = actorOf(context);
-    const now = new Date();
-
-    if (data.interviewId) {
-      const [existing] = await db
-        .select({ id: evaluations.id })
-        .from(evaluations)
-        .where(
-          and(eq(evaluations.orgId, context.orgId), eq(evaluations.interviewId, data.interviewId)),
-        )
-        .limit(1);
-      if (existing)
-        throw new Error("This interview round has already been scored — scorecards are final.");
-    }
-
-    const [app] = await db
-      .select({ id: applications.id, stage: applications.stage })
-      .from(applications)
-      .where(and(eq(applications.orgId, context.orgId), eq(applications.id, data.applicationId)))
-      .limit(1);
-    if (!app) throw new Error("Application not found");
-
-    const target = nextStageFor(data.level, data.verdict);
-    if (REASON_REQUIRED.includes(target) && !data.reason?.trim() && !data.comments?.trim()) {
-      throw new Error(`A reason is required to move the candidate to ${STAGE_LABEL[target]}.`);
-    }
-    if (HR_CONTROLLED_TARGETS.has(target)) {
-      await assertRole(
-        context.userId,
-        context.orgId,
-        ["hr_head", "president_cbo"],
-        "Only the HR head or an owner can move a candidate into the offer pipeline.",
-      );
-    }
-
-    const [evaluation] = await db
-      .insert(evaluations)
-      .values({
-        applicationId: data.applicationId,
+  .handler(async ({ data, context }): Promise<ScorecardResult> =>
+    submitScorecardCore(
+      {
         orgId: context.orgId,
-        interviewId: data.interviewId ?? null,
-        level: data.level,
-        evaluator: actor,
-        focusArea: data.focusArea?.trim() || null,
-        rating: data.rating,
-        recommendation: data.verdict,
-        comments: data.comments?.trim() || null,
-        competencies: data.competencies,
-        submittedBy: actor,
-        submittedAt: now,
-      })
-      .returning({ id: evaluations.id });
-    if (!evaluation) throw new Error("The scorecard could not be saved.");
-    {
-      // Tell the orchestrator: a switched-on Evaluation agent debriefs the round.
-      const [req] = await db
-        .select({ requisitionId: applications.requisitionId })
-        .from(applications)
-        .where(eq(applications.id, data.applicationId))
-        .limit(1);
-      if (req) {
-        const { emitAgentEvent } = await import("../server/agents/events");
-        await emitAgentEvent({
-          orgId: context.orgId,
-          type: "scorecard.submitted",
-          subjectType: "requisition",
-          subjectId: req.requisitionId,
-          actorUserId: context.userId,
-          payload: { applicationId: data.applicationId, level: data.level, verdict: data.verdict },
-        });
-      }
-    }
+        userId: context.userId,
+        email: actorOf(context),
+        actor: actorOf(context),
+      },
+      data,
+    ),
+  );
 
-    if (data.interviewId) {
-      await db
-        .update(interviews)
-        .set({ status: "completed", completedAt: now })
-        .where(and(eq(interviews.orgId, context.orgId), eq(interviews.id, data.interviewId)));
-    }
+/* ------------------------------------------------------- round outcomes */
 
-    /* Auto-progression, audited exactly like a manual stage move. */
-    const from = app.stage as Stage;
-    let movedTo: Stage | null = null;
-    let blocked: string | null = null;
-    const reason = data.reason?.trim() || `L${data.level} verdict: ${data.verdict}`;
+const OutcomeInput = z.object({
+  interviewId: z.string().uuid(),
+  outcome: z.enum(["candidate_no_show", "interviewer_unavailable", "cancelled"]),
+  note: z.string().trim().max(500).default(""),
+});
 
-    if (from !== target && canMove(from, target)) {
-      await db
-        .update(applications)
-        .set({
-          stage: target,
-          stageReason: reason,
-          stageNote: data.comments?.trim() || null,
-          lastActivityAt: now,
-        })
-        .where(and(eq(applications.orgId, context.orgId), eq(applications.id, app.id)));
-      const { recordStageTransition } = await import("./stage-events.server");
-      await recordStageTransition({
-        orgId: context.orgId,
-        applicationId: app.id,
-        fromStage: from,
-        toStage: target,
-        actor,
-        reason,
-        note: data.comments?.trim() || null,
-      });
-      movedTo = target;
-    } else if (from !== target) {
-      blocked = `${STAGE_LABEL[from]} → ${STAGE_LABEL[target]} is not an allowed transition — move the candidate manually.`;
-      await db
-        .update(applications)
-        .set({ lastActivityAt: now })
-        .where(and(eq(applications.orgId, context.orgId), eq(applications.id, app.id)));
-    }
-
-    /* A select below L3 queues the next round so nothing stalls unassigned. */
-    let nextInterviewCreated = false;
-    if (data.verdict === "select" && data.level < 3) {
-      const nextLevel = data.level + 1;
-      const [already] = await db
-        .select({ id: interviews.id })
-        .from(interviews)
-        .where(
-          and(
-            eq(interviews.orgId, context.orgId),
-            eq(interviews.applicationId, app.id),
-            eq(interviews.level, nextLevel),
-          ),
-        )
-        .limit(1);
-      if (!already) {
-        await db.insert(interviews).values({
-          applicationId: app.id,
-          orgId: context.orgId,
-          level: nextLevel,
-          status: "pending_scheduling",
-          scheduledAt: null,
-        });
-        nextInterviewCreated = true;
-      }
-    }
-
-    return { ok: true, evaluationId: evaluation.id, movedTo, blocked, nextInterviewCreated };
+/**
+ * A round that did not happen: the candidate did not show, the interviewer
+ * could not make it, or it was cancelled. Recorded on the round (audited);
+ * nothing moves the candidate. The hiring desk thread is told, and the
+ * Interview coordinator offers new times (event interview.missed).
+ */
+export async function markInterviewOutcomeCore(
+  ctx: { orgId: string; userId: string; email: string },
+  data: z.infer<typeof OutcomeInput>,
+): Promise<{ ok: true }> {
+  const [r] = await db
+    .select({
+      id: interviews.id,
+      status: interviews.status,
+      level: interviews.level,
+      applicationId: interviews.applicationId,
+      interviewerEmail: interviews.interviewerEmail,
+      panel: interviews.panel,
+      requisitionId: applications.requisitionId,
+      candidateName: candidates.fullName,
+    })
+    .from(interviews)
+    .innerJoin(applications, eq(applications.id, interviews.applicationId))
+    .innerJoin(candidates, eq(candidates.id, applications.candidateId))
+    .where(and(eq(interviews.orgId, ctx.orgId), eq(interviews.id, data.interviewId)))
+    .limit(1);
+  if (!r) throw new Error("Interview round not found.");
+  if (!["scheduled", "rescheduled"].includes(r.status))
+    throw new Error(
+      `This round is ${r.status.replace("_", " ")}; only a booked round can be marked.`,
+    );
+  const { emailsOf } = await import("./interview-plan.server");
+  if (!emailsOf(r).includes(ctx.email.toLowerCase()))
+    await assertRole(
+      ctx.userId,
+      ctx.orgId,
+      ["recruiter", "hiring_manager", "hr_head", "president_cbo"],
+      "Only an interviewer on this round or the hiring team can mark it.",
+    );
+  const status = data.outcome === "candidate_no_show" ? "no_show" : "cancelled";
+  const label =
+    data.outcome === "candidate_no_show"
+      ? "the candidate did not join"
+      : data.outcome === "interviewer_unavailable"
+        ? "the interviewer could not make it"
+        : "it was cancelled";
+  await db
+    .update(interviews)
+    .set({ status, outcomeNote: [label, data.note].filter(Boolean).join(" — ") })
+    .where(and(eq(interviews.orgId, ctx.orgId), eq(interviews.id, r.id)));
+  const { writeAudit } = await import("../server/audit");
+  await writeAudit({
+    actor: ctx.email,
+    actorUserId: ctx.userId,
+    orgId: ctx.orgId,
+    action: `interview.${status}`,
+    entityType: "interview",
+    entityId: r.id,
+    detail: { outcome: data.outcome, note: data.note || null, level: r.level },
   });
+  const { emitAgentEvent } = await import("../server/agents/events");
+  await emitAgentEvent({
+    orgId: ctx.orgId,
+    type: "interview.missed",
+    subjectType: "application",
+    subjectId: r.applicationId,
+    actorUserId: ctx.userId,
+    payload: { requisitionId: r.requisitionId, level: r.level, outcome: data.outcome },
+  });
+  try {
+    const desk = await import("../server/desk/desk.server");
+    const conv = await desk.conversationForRequisition(ctx.orgId, r.requisitionId);
+    if (conv)
+      await desk.postMessage(conv, {
+        role: "desk",
+        body: `${r.candidateName}'s L${r.level} interview did not happen: ${label}${data.note ? ` ("${data.note}")` : ""}. Nothing about the candidate changed; the Interview coordinator offers new times when it is on.`,
+      });
+  } catch {
+    /* the thread is a courtesy; the audit trail has the record */
+  }
+  return { ok: true };
+}
+
+export const markInterviewOutcome = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((data: unknown) => OutcomeInput.parse(data))
+  .handler(async ({ data, context }) =>
+    markInterviewOutcomeCore(
+      { orgId: context.orgId, userId: context.userId, email: actorOf(context) },
+      data,
+    ),
+  );
 
 /* ------------------------------------------------------------- scheduling */
 
@@ -342,6 +607,11 @@ export const ScheduleInput = z.object({
   rescheduleReason: z.string().optional().nullable(),
   /** Recruiter-confirmed candidate email; written back to the candidate record. */
   candidateEmail: z.string().email().optional().nullable(),
+  /** Further interviewers on the panel (active members), besides `interviewerEmail`. */
+  panel: z
+    .array(z.object({ name: z.string().optional().nullable(), email: z.string().email() }))
+    .max(2)
+    .default([]),
 });
 
 /** Create or re-schedule a round and park the application on that interview stage. */
@@ -350,9 +620,13 @@ export const ScheduleInput = z.object({
  * and queue the candidate's invite. Shared by the Interviews page and the
  * Interview coordinator agent (`actor` is the label written to stage events).
  */
+export type ScheduleData = Omit<z.infer<typeof ScheduleInput>, "panel"> & {
+  panel?: { name?: string | null | undefined; email: string }[];
+};
+
 export async function scheduleInterviewCore(
   ctx: { orgId: string; actor: string },
-  data: z.infer<typeof ScheduleInput>,
+  data: ScheduleData,
 ) {
   const actor = ctx.actor;
   const now = new Date();
@@ -371,6 +645,7 @@ export async function scheduleInterviewCore(
     teamsLink: data.meetingLink?.trim() || null,
     agenda: data.agenda?.trim() || null,
     status: "scheduled",
+    panel: await panelOf(ctx.orgId, data.interviewerEmail ?? null, data.panel ?? []),
   };
 
   const { recordStageTransition } = await import("./stage-events.server");
@@ -555,7 +830,36 @@ export async function scheduleInterviewCore(
     /* best-effort: scheduling must succeed even if the invite cannot be queued */
   }
 
-  return { ok: true as const, rescheduled, candidateEmail };
+  /* Every interviewer's own invite and brief — best-effort too. */
+  if (interviewId) {
+    const members = [
+      ...(row.interviewerEmail ? [{ name: row.interviewer, email: row.interviewerEmail }] : []),
+      ...row.panel,
+    ];
+    for (const m of members) {
+      try {
+        const { sendInterviewerBrief } = await import("./interviewer-brief.server");
+        await sendInterviewerBrief(ctx.orgId, {
+          interviewId,
+          applicationId: app.id,
+          candidateId: app.candidateId,
+          level: data.level,
+          interviewerName: m.name,
+          interviewerEmail: m.email,
+          scheduledAt,
+          durationMins: data.durationMins,
+          mode: data.mode,
+          meetingLink: row.teamsLink,
+          agenda: row.agenda,
+          panelNames: members.map((x) => x.name ?? x.email),
+        });
+      } catch {
+        /* the round stands even if a brief cannot be queued */
+      }
+    }
+  }
+
+  return { ok: true as const, rescheduled, candidateEmail, interviewId };
 }
 
 export const scheduleInterview = createServerFn({ method: "POST" })
@@ -624,3 +928,32 @@ export const saveAiInterview = createServerFn({ method: "POST" })
     }
     return { ok: true as const };
   });
+
+/** Validate further panel members: active members of the organisation, no repeats. */
+async function panelOf(
+  orgId: string,
+  primary: string | null,
+  panel: { name?: string | null | undefined; email: string }[],
+): Promise<{ name: string | null; email: string }[]> {
+  const wanted = panel
+    .map((p) => p.email.trim().toLowerCase())
+    .filter((e, i, all) => e && e !== (primary ?? "").toLowerCase() && all.indexOf(e) === i);
+  if (!wanted.length) return [];
+  const rows = await db
+    .select({ name: orgMembers.fullName, email: orgMembers.email })
+    .from(orgMembers)
+    .where(
+      and(
+        eq(orgMembers.orgId, orgId),
+        eq(orgMembers.status, "active"),
+        inArray(sql`lower(${orgMembers.email})`, wanted),
+      ),
+    );
+  const found = rows.map((r) => ({ name: r.name ?? null, email: r.email.toLowerCase() }));
+  const unknown = wanted.filter((e) => !found.some((f) => f.email === e));
+  if (unknown.length)
+    throw new Error(
+      `Panel members must be active members of the organisation: ${unknown.join(", ")}.`,
+    );
+  return found;
+}

@@ -85,6 +85,7 @@ export const offerStatusEnum = pgEnum("offer_status", [
   "accepted",
   "declined",
   "revoked",
+  "countered",
 ]);
 
 export const appRoleEnum = pgEnum("app_role", [
@@ -346,6 +347,9 @@ export const requisitions = pgTable(
     ijpEnabled: boolean("ijp_enabled").notNull().default(false),
     ijpPostedAt: timestamp("ijp_posted_at", { withTimezone: true }),
     ijpNotes: text("ijp_notes"),
+    /** Interview rounds, rubric and verdict policy for this role (null = the default from its must-haves). */
+    interviewPlan:
+      jsonb("interview_plan").$type<import("../src/lib/interview-plan").InterviewPlan>(),
     ctcBandMin: numeric("ctc_band_min", { precision: 14, scale: 2 }),
     ctcBandMax: numeric("ctc_band_max", { precision: 14, scale: 2 }),
     /** Ladder key the budget CTC was benchmarked against (see career-ladder.ts). */
@@ -451,6 +455,8 @@ export const candidates = pgTable(
     xUrl: text("x_url"),
     consentGiven: boolean("consent_given").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** When this person was last checked against the open roles (new CV → open roles). */
+    roleMatchCheckedAt: timestamp("role_match_checked_at", { withTimezone: true }),
     externalId: text("external_id"),
     externalProvider: text("external_provider"),
     /** Path inside the private CV vault bucket: <org_id>/<candidate_id>/<file>. */
@@ -483,6 +489,9 @@ export const candidates = pgTable(
     uniqueIndex("candidates_external_unique")
       .on(t.externalProvider, t.externalId)
       .where(sql`${t.externalId} is not null`),
+    index("candidates_role_match_pending_idx")
+      .on(t.orgId, t.createdAt)
+      .where(sql`${t.roleMatchCheckedAt} is null`),
   ],
 );
 
@@ -640,9 +649,65 @@ export const interviews = pgTable(
     durationMins: integer("duration_mins").notNull().default(60),
     mode: text("mode").notNull().default("online"),
     agenda: text("agenda"),
+    /** Further interviewers on the panel (the first is `interviewer`): [{ name, email }]. */
+    panel: jsonb("panel")
+      .$type<{ name: string | null; email: string }[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /** Why a round did not happen (no-show / cancelled), in a person's words. */
+    outcomeNote: text("outcome_note"),
     completedAt: timestamp("completed_at", { withTimezone: true }),
   },
   (t) => [index("interviews_interviewer_email_idx").on(sql`lower(${t.interviewerEmail})`)],
+);
+
+/**
+ * Interview times offered to a candidate, who picks one from a private link
+ * (/schedule/<token>). Booking happens only when they pick: the round, the
+ * meeting link and both invites are created then (migration 0033).
+ */
+export const interviewSlotOffers = pgTable(
+  "interview_slot_offers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    level: integer("level").notNull(),
+    interviewerName: text("interviewer_name"),
+    interviewerEmail: text("interviewer_email").notNull(),
+    durationMins: integer("duration_mins").notNull().default(60),
+    mode: text("mode").notNull().default("online"),
+    meetingProvider: text("meeting_provider"),
+    agenda: text("agenda"),
+    /** ISO start times offered. */
+    slots: jsonb("slots").$type<string[]>().notNull(),
+    token: text("token").notNull(),
+    /** offered | booked | declined | expired | cancelled */
+    status: text("status").notNull().default("offered"),
+    chosenAt: timestamp("chosen_at", { withTimezone: true }),
+    interviewId: uuid("interview_id").references(() => interviews.id, { onDelete: "set null" }),
+    /** The candidate's own words when none of the times work (untrusted). */
+    candidateNote: text("candidate_note"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdBy: uuid("created_by"),
+    agentRunId: uuid("agent_run_id"),
+    /** Further interviewers on the panel: [{ name, email }]. */
+    panel: jsonb("panel")
+      .$type<{ name: string | null; email: string }[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("interview_slot_offers_token_key").on(t.token),
+    index("interview_slot_offers_open_idx").on(t.orgId, t.status, t.expiresAt),
+    index("interview_slot_offers_application_idx").on(t.applicationId),
+  ],
 );
 
 export const evaluations = pgTable(
@@ -666,31 +731,54 @@ export const evaluations = pgTable(
       .default(sql`'[]'::jsonb`),
     submittedBy: text("submitted_by"),
     submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    /** Who submitted (lower-case email) — one scorecard per panel member per round. */
+    evaluatorEmail: text("evaluator_email"),
   },
   (t) => [
-    uniqueIndex("evaluations_interview_id_key")
-      .on(t.interviewId)
+    // One scorecard per interviewer per round (panels have several per round).
+    uniqueIndex("evaluations_interview_evaluator_key")
+      .on(t.interviewId, sql`coalesce(lower(${t.evaluatorEmail}), '')`)
       .where(sql`${t.interviewId} is not null`),
   ],
 );
 
-export const offers = pgTable("offers", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  applicationId: uuid("application_id")
-    .notNull()
-    .references(() => applications.id, { onDelete: "cascade" }),
-  orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
-  offeredCtc: numeric("offered_ctc", { precision: 14, scale: 2 }).notNull().default("0"),
-  joiningDate: date("joining_date"),
-  status: offerStatusEnum("status").notNull().default("draft"),
-  approvalTrail: jsonb("approval_trail")
-    .notNull()
-    .default(sql`'[]'::jsonb`),
-  /** Generated offer letter payload — see generateOfferLetter. Not FK'd: templates hard-delete. */
-  letter: jsonb("letter"),
-  letterTemplateId: uuid("letter_template_id"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const offers = pgTable(
+  "offers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+    offeredCtc: numeric("offered_ctc", { precision: 14, scale: 2 }).notNull().default("0"),
+    joiningDate: date("joining_date"),
+    status: offerStatusEnum("status").notNull().default("draft"),
+    approvalTrail: jsonb("approval_trail")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /** Generated offer letter payload — see generateOfferLetter. Not FK'd: templates hard-delete. */
+    letter: jsonb("letter"),
+    letterTemplateId: uuid("letter_template_id"),
+    /** The candidate's private accept / decline / ask-for-changes link (set on release). */
+    responseToken: text("response_token"),
+    /** What the candidate asked for: { expectedCtc, joiningDate, note, at }. */
+    counter: jsonb("counter").$type<{
+      expectedCtc: number | null;
+      joiningDate: string | null;
+      note: string | null;
+      at: string;
+    }>(),
+    /** Version of this offer (1, then +1 per revision after a counter). */
+    revision: integer("revision").notNull().default(1),
+    respondedAt: timestamp("responded_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("offers_response_token_key")
+      .on(t.responseToken)
+      .where(sql`${t.responseToken} is not null`),
+  ],
+);
 
 export const candidateVerifications = pgTable(
   "candidate_verifications",
@@ -854,6 +942,10 @@ export const aiUsageEvents = pgTable(
     errorMessage: text("error_message"),
     /** The agent run that caused this request (model turn or AI call inside a tool). */
     agentRunId: uuid("agent_run_id"),
+    /** The role / candidate this request was made for (cost per candidate). */
+    requisitionId: uuid("requisition_id"),
+    applicationId: uuid("application_id"),
+    candidateId: uuid("candidate_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -861,6 +953,12 @@ export const aiUsageEvents = pgTable(
     index("ai_usage_events_feature_created_idx").on(t.feature, t.createdAt),
     index("ai_usage_events_model_idx").on(t.model),
     index("ai_usage_events_created_idx").on(t.createdAt),
+    index("ai_usage_events_application_idx")
+      .on(t.applicationId)
+      .where(sql`${t.applicationId} is not null`),
+    index("ai_usage_events_requisition_idx")
+      .on(t.requisitionId)
+      .where(sql`${t.requisitionId} is not null`),
   ],
 );
 
@@ -871,7 +969,10 @@ export type EmailOutboxKind =
   | "offer_released"
   | "assessment_invite"
   | "member_reminder"
-  | "document_request";
+  | "document_request"
+  | "role_invite"
+  | "interviewer_brief"
+  | "interview_slots";
 export type EmailOutboxStatus = "queued" | "sent" | "failed" | "suppressed";
 export type EmailOutboxAttachment = {
   filename: string;
@@ -1716,7 +1817,8 @@ export type AgentType =
   | "evaluation"
   | "offer"
   | "onboarding"
-  | "followup";
+  | "followup"
+  | "sourcing";
 export type AgentAutonomy = "suggest" | "act_and_notify" | "autonomous";
 export type AgentRunStatus =
   "queued" | "running" | "awaiting_human" | "done" | "failed" | "cancelled";

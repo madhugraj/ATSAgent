@@ -29,6 +29,7 @@ import { getResumeDownloadUrl } from "@/lib/resume.functions";
 import { downloadResume } from "@/lib/resume-download";
 import { normalizeExternalUrl } from "@/lib/external-links";
 import { nextAction, STAGE_LABEL, type Stage } from "@/lib/lifecycle";
+import { CandidateCostLine } from "@/components/HiringCost";
 import { StageMover } from "@/components/StageMover";
 import {
   EmptyState,
@@ -257,6 +258,9 @@ function CandidateDetail() {
                       <p className="mt-2 text-xs text-muted-foreground">
                         Next action: {nextAction(a.stage as Stage)}
                       </p>
+                      <div className="mt-2">
+                        <CandidateCostLine applicationId={a.id} />
+                      </div>
 
                       {s ? (
                         <>

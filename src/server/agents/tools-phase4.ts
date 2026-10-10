@@ -5,6 +5,7 @@
  * (request_approval with an offer / document_validation / offer_release
  * subject) — never tools.
  */
+import { rupees } from "@/lib/money";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod/v4";
 
@@ -26,6 +27,66 @@ const actor = async (ctx: ToolContext) => {
 };
 
 const AppId = z.object({ applicationId: z.string().uuid() });
+
+/**
+ * Document types that need no request now: already received (and not
+ * rejected), or asked for in an earlier request whose due date has not
+ * passed. Null = every type may be requested.
+ */
+async function documentsNotNeeded(
+  orgId: string,
+  applicationId: string,
+  types: string[],
+): Promise<string | null> {
+  const { docTypeLabel } = await import("@/lib/onboarding.server");
+  const { emailOutbox } = await import("@db/schema");
+  const have = await db
+    .select({ docType: onboardingDocuments.docType, status: onboardingDocuments.status })
+    .from(onboardingDocuments)
+    .where(
+      and(
+        eq(onboardingDocuments.orgId, orgId),
+        eq(onboardingDocuments.applicationId, applicationId),
+      ),
+    );
+  const received = types.filter((t) =>
+    have.some((d) => d.docType === t && d.status !== "rejected"),
+  );
+  // Every copy HR rejected: a new request (with the reason) is due now.
+  const rejected = types.filter((t) => have.some((d) => d.docType === t) && !received.includes(t));
+  const asked = await db
+    .select({ data: emailOutbox.templateData })
+    .from(emailOutbox)
+    .where(
+      and(
+        eq(emailOutbox.orgId, orgId),
+        eq(emailOutbox.applicationId, applicationId),
+        eq(emailOutbox.kind, "document_request"),
+      ),
+    );
+  const now = Date.now();
+  const pending = types.filter(
+    (t) =>
+      !received.includes(t) &&
+      !rejected.includes(t) &&
+      asked.some((a) => {
+        const d = (a.data ?? {}) as { documents?: string; dueDate?: string };
+        const due = d.dueDate ? Date.parse(d.dueDate) + 864e5 : 0;
+        return due > now && (d.documents ?? "").split("\n").includes(docTypeLabel(t));
+      }),
+  );
+  if (!received.length && !pending.length) return null;
+  return [
+    received.length
+      ? `Already received (check them with onboarding_status, do not ask again): ${received.join(", ")}.`
+      : "",
+    pending.length
+      ? `Already requested and not yet due — wait for the candidate, do not chase before the due date: ${pending.join(", ")}.`
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
 const OfferId = z.object({ offerId: z.string().uuid() });
 const num = (v: unknown) => (v == null ? null : Number(v));
 const OFFER_STAGES = new Set(["l3", "offer_pending", "on_hold"]);
@@ -72,7 +133,7 @@ export function registerPhase4Tools(): void {
   registerTool({
     name: "get_offer_context",
     description:
-      "Everything needed to propose an offer for one application: candidate's current and expected CTC and notice period, the requisition's approved band and budget, the recorded hiring decision, existing offers for this application, and what the organisation recently offered for the same role (internal parity).",
+      "Everything needed to propose an offer for one application: candidate's current and expected CTC and notice period, the requisition's approved band and budget, the recorded hiring decision, existing offers for this application (with their revision and, when the candidate asked for changes, what they asked for), and what the organisation recently offered for the same role (internal parity).",
     input: AppId,
     risk: "read",
     untrustedOutput: true,
@@ -95,6 +156,10 @@ export function registerPhase4Tools(): void {
           offerId: offers.id,
           status: offers.status,
           offeredCtc: offers.offeredCtc,
+          joiningDate: offers.joiningDate,
+          revision: offers.revision,
+          counter: offers.counter,
+          approvalTrail: offers.approvalTrail,
           hasLetter: sql<boolean>`${offers.letter} is not null`,
         })
         .from(offers)
@@ -122,7 +187,19 @@ export function registerPhase4Tools(): void {
         noticePeriodDays: app.noticePeriodDays,
         band: { min: num(app.bandMin), max: num(app.bandMax), budget: num(app.budget) },
         hiringDecision: decision[0]?.body ?? null,
-        existingOffers: existing.map((o) => ({ ...o, offeredCtc: num(o.offeredCtc) })),
+        existingOffers: existing.map(({ approvalTrail, ...o }) => {
+          // An approver who sent it back: their step and reason.
+          const last = (Array.isArray(approvalTrail) ? approvalTrail : []).at(-1) as
+            { decision?: string; from?: string; comment?: string; actor?: string } | undefined;
+          return {
+            ...o,
+            offeredCtc: num(o.offeredCtc),
+            sentBack:
+              o.status === "draft" && last?.decision === "sent_back"
+                ? { atStep: last.from ?? null, reason: last.comment ?? null }
+                : null,
+          };
+        }),
         internalParity: {
           offers12m: Number(parity?.["n"] ?? 0),
           median: num(parity?.["median"]),
@@ -145,10 +222,15 @@ export function registerPhase4Tools(): void {
         .optional(),
     }),
     risk: "write",
-    describe: (i) => `Draft an offer at ${i.offeredCtc.toLocaleString()} CTC`,
+    describe: (i) => `Draft an offer at ${rupees(i.offeredCtc)} CTC`,
     run: async (ctx, i) => {
       const app = await loadApplication(ctx.orgId, i.applicationId);
-      if (!OFFER_STAGES.has(app.stage)) {
+      // After the role's final round — which is L1 or L2 when its plan has fewer rounds.
+      const finalDone =
+        /^l[123]$/.test(app.stage) &&
+        (await (await import("@/lib/interview-plan.server")).progressOf(ctx.orgId, app.id))
+          .finalComplete;
+      if (!OFFER_STAGES.has(app.stage) && !finalDone) {
         throw new Error(
           `Offers are drafted after the final round; this candidate is ${app.stage}.`,
         );
@@ -157,7 +239,7 @@ export function registerPhase4Tools(): void {
       const max = num(app.bandMax);
       if (min != null && max != null && (i.offeredCtc < min || i.offeredCtc > max)) {
         throw new Error(
-          `${i.offeredCtc.toLocaleString()} is outside the approved band ${min.toLocaleString()}–${max.toLocaleString()}. Ask a person (ask_human) before going outside the band.`,
+          `${rupees(i.offeredCtc)} is outside the approved band ${rupees(min)}–${rupees(max)}. Ask a person (ask_human) before going outside the band.`,
         );
       }
       const open = await db
@@ -167,7 +249,14 @@ export function registerPhase4Tools(): void {
           and(
             eq(offers.orgId, ctx.orgId),
             eq(offers.applicationId, app.id),
-            inArray(offers.status, ["draft", "pending_hr", "pending_cbo", "approved", "released"]),
+            inArray(offers.status, [
+              "draft",
+              "pending_hr",
+              "pending_cbo",
+              "approved",
+              "released",
+              "countered",
+            ]),
           ),
         )
         .limit(1);
@@ -183,6 +272,45 @@ export function registerPhase4Tools(): void {
         "draft",
       );
       return { offerId: r.id, status: "draft" };
+    },
+  });
+
+  registerTool({
+    name: "revise_offer",
+    description:
+      "Revise an offer the candidate asked to change (status countered) or an approver sent back (draft with sentBack): set the new CTC (inside the requisition's approved band — if the ask is above it, offer the band maximum or ask a person) and joining date, with the reasoning. The offer goes back to draft as the next revision; then generate_offer_letter and submit_offer_for_approval so it is approved again before release.",
+    input: OfferId.extend({
+      offeredCtc: z.number().positive(),
+      joiningDate: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/)
+        .optional(),
+      rationale: z.string().min(10).max(1500),
+    }),
+    risk: "write",
+    describe: (i) => `Revise the offer to ${rupees(i.offeredCtc)} CTC`,
+    run: async (ctx, i) => {
+      const o = await offerApplication(ctx.orgId, i.offerId);
+      if (o.status !== "countered" && o.status !== "draft")
+        throw new Error(
+          `Only an offer the candidate asked to change, or one an approver sent back, can be revised; this one is ${o.status}.`,
+        );
+      const app = await loadApplication(ctx.orgId, o.applicationId);
+      const min = num(app.bandMin);
+      const max = num(app.bandMax);
+      if (min != null && max != null && (i.offeredCtc < min || i.offeredCtc > max)) {
+        throw new Error(
+          `${rupees(i.offeredCtc)} is outside the approved band ${rupees(min)}–${rupees(max)}. Offer within the band, or ask a person (ask_human) before going outside it.`,
+        );
+      }
+      const { reviseOfferCore } = await import("@/lib/offers.functions");
+      const r = await reviseOfferCore(await actor(ctx), {
+        offerId: i.offerId,
+        offeredCtc: i.offeredCtc,
+        joiningDate: i.joiningDate ?? null,
+        rationale: i.rationale,
+      });
+      return { offerId: i.offerId, status: "draft", revision: r.revision };
     },
   });
 
@@ -225,7 +353,7 @@ export function registerPhase4Tools(): void {
   registerTool({
     name: "onboarding_status",
     description:
-      "Pre-onboarding readiness for one application: which required documents are missing, and every document received with its type, status and what was extracted from it.",
+      "Pre-onboarding readiness for one application: its current offer (offerId, status, revision), which required documents are missing, and every document received with its type, status and what was extracted from it.",
     input: AppId,
     risk: "read",
     untrustedOutput: true,
@@ -251,8 +379,16 @@ export function registerPhase4Tools(): void {
           ),
         )
         .orderBy(desc(onboardingDocuments.createdAt));
+      // The offer these documents are for (its id is what a release request names).
+      const [offer] = await db
+        .select({ offerId: offers.id, status: offers.status, revision: offers.revision })
+        .from(offers)
+        .where(and(eq(offers.orgId, ctx.orgId), eq(offers.applicationId, app.id)))
+        .orderBy(desc(offers.createdAt))
+        .limit(1);
       return {
         candidate: app.candidateName,
+        offer: offer ?? null,
         ready: readiness.ready,
         missingRequired: readiness.missing.map((m) => ({ type: m, label: docTypeLabel(m) })),
         documents: docs.map((d) => ({
@@ -282,17 +418,23 @@ export function registerPhase4Tools(): void {
   registerTool({
     name: "request_documents",
     description:
-      "Email the candidate the list of pre-onboarding documents still needed, asking them to reply with the files (they are filed automatically). Leaves the organisation, so a person approves it unless the document request email is pre-approved.",
+      "Email the candidate the list of pre-onboarding documents still needed (with `note` saying why an earlier copy was not accepted, when HR rejected one), asking them to reply with the files (they are filed automatically). Leaves the organisation, so a person approves it unless the document request email is pre-approved.",
     input: AppId.extend({
       documentTypes: z.array(z.string().min(2).max(60)).min(1).max(12),
       dueInDays: z.number().int().min(1).max(21).default(5),
+      /** Why an earlier copy was not accepted (HR's reason, in plain words). */
+      note: z.string().max(600).optional(),
     }),
     risk: "external",
     templateOf: () => "document_request",
     describe: (i) => `Email the candidate for ${i.documentTypes.length} document(s)`,
+    precheck: (ctx, i) => documentsNotNeeded(ctx.orgId, i.applicationId, i.documentTypes),
     run: async (ctx, i) => {
       const app = await loadApplication(ctx.orgId, i.applicationId);
       if (!app.candidateEmail) throw new Error("The candidate has no email address.");
+      // Re-checked at send time: documents may have arrived while it waited.
+      const stale = await documentsNotNeeded(ctx.orgId, i.applicationId, i.documentTypes);
+      if (stale) throw new Error(stale);
       const { DOC_TYPE_KEYS, docTypeLabel } = await import("@/lib/onboarding.server");
       const unknown = i.documentTypes.filter((t) => !DOC_TYPE_KEYS.includes(t));
       if (unknown.length)
@@ -320,6 +462,7 @@ export function registerPhase4Tools(): void {
           documents: i.documentTypes.map(docTypeLabel).join("\n"),
           replyTo: org?.careersEmail ?? undefined,
           dueDate: due.toDateString(),
+          ...(i.note ? { note: i.note } : {}),
         },
       });
       return { requested: i.documentTypes.length, due: due.toISOString().slice(0, 10) };

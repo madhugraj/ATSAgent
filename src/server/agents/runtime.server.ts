@@ -14,6 +14,7 @@
  *  - third-party text in tool output is fenced with untrusted();
  *  - every write/external action and every human decision is audited.
  */
+import { rupees } from "@/lib/money";
 import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import { z } from "zod/v4";
 
@@ -146,6 +147,9 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
         ctc: offers.offeredCtc,
         name: candidates.fullName,
         title: requisitions.title,
+        budget: requisitions.budgetCtc,
+        bandMin: requisitions.ctcBandMin,
+        bandMax: requisitions.ctcBandMax,
       })
       .from(offers)
       .innerJoin(applications, eq(applications.id, offers.applicationId))
@@ -157,10 +161,27 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
     if (subject.type === "offer") {
       const role = OFFER_APPROVER[o.status];
       if (!role) return { error: `The offer is ${o.status}, not waiting for an approval.` };
+      // Stated by the system, not left to the agent: where the CTC sits
+      // against the role's approved budget and band.
+      const ctc = Number(o.ctc);
+      const budget = Number(o.budget ?? 0);
+      const [lo, hi] = [Number(o.bandMin ?? 0), Number(o.bandMax ?? 0)];
+      const vsBudget =
+        budget > 0
+          ? ctc > budget
+            ? ` Above the role's budget of ${rupees(budget)} by ${rupees(ctc - budget)} (${Math.round(((ctc - budget) / budget) * 100)}%).`
+            : ` Within the role's budget of ${rupees(budget)}.`
+          : "";
+      const vsBand =
+        hi > 0
+          ? ctc > hi || ctc < lo
+            ? ` Outside the approved band ${rupees(lo)}–${rupees(hi)}.`
+            : ` Inside the approved band ${rupees(lo)}–${rupees(hi)}.`
+          : "";
       return {
         role,
         status: o.status,
-        detail: `Offer for ${o.name} (${o.title}): ${Number(o.ctc).toLocaleString()} CTC — ${o.status}.`,
+        detail: `Offer for ${o.name} (${o.title}): ${rupees(ctc)} CTC — ${o.status}.${vsBudget}${vsBand}`,
       };
     }
     if (o.status !== "approved")
@@ -226,6 +247,17 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
       return {
         error: `The candidate is ${row.stage}; a hiring decision follows the interview rounds.`,
       };
+    }
+    // A select (→ offer) only after the role's final round is complete; a hold
+    // or reject may come after any completed round.
+    {
+      const { hiringDecisionBlocked } = await import("@/lib/interview-plan.server");
+      const blocked = await hiringDecisionBlocked(
+        orgId,
+        subject.applicationId,
+        subject.recommendation,
+      );
+      if (blocked) return { error: blocked };
     }
     return {
       role: "hiring_manager",
@@ -310,8 +342,19 @@ async function performGate(
   if (!org || org.orgId !== orgId) throw new Error("You are not a member of this organisation.");
   const actor = { orgId, userId, memberEmail: org.memberEmail };
   if (subject.type === "offer" || subject.type === "offer_release") {
-    if (decision.status !== "approved") return; // declining leaves the offer where it is
     const offerId = "offerId" in subject ? subject.offerId : subject.id;
+    if (decision.status !== "approved") {
+      // A declined approval step sends the offer back to draft with the
+      // reason (never stuck at pending); a declined release holds it.
+      if (subject.type === "offer" && decision.status === "rejected") {
+        const { sendBackOfferCore } = await import("@/lib/offers.functions");
+        await sendBackOfferCore(actor, {
+          id: offerId,
+          reason: decision.reason?.trim() || "Declined at approval — no reason given.",
+        });
+      }
+      return;
+    }
     const [o] = await db
       .select({ status: offers.status })
       .from(offers)
@@ -498,7 +541,11 @@ export async function syncGateTasks(
                 .limit(1)
             )[0]?.status;
     if (expects !== fromStatus || !current || current === expects) continue;
-    const declined = current === "rejected" || current === "changes_requested";
+    // An offer sent back from an approval step returns to draft: that is a decline.
+    const declined =
+      current === "rejected" ||
+      current === "changes_requested" ||
+      (subject.type === "offer" && current === "draft");
     const now = new Date();
     const done = await db
       .update(agentTasks)
@@ -723,7 +770,31 @@ export async function resolveTask(input: {
     })
     .where(and(eq(agentTasks.id, task.id), eq(agentTasks.status, "open")))
     .returning({ id: agentTasks.id });
-  if (!updated.length) throw new Error("This task has already been decided.");
+  if (!updated.length) {
+    // The gate's own event can close the task first ("decided outside the
+    // inbox") while this decision is being applied: the person's decision —
+    // their status and reason — is the record, so it takes the task over.
+    const takenOver =
+      task.kind === "gate" && gateSubject
+        ? await db
+            .update(agentTasks)
+            .set({
+              status: decision.status,
+              response: decision as never,
+              decidedBy: input.userId,
+              decidedAt: now,
+              updatedAt: now,
+            })
+            .where(
+              and(
+                eq(agentTasks.id, task.id),
+                sql`coalesce(${agentTasks.response} ->> 'comment', ${agentTasks.response} ->> 'reason') like 'Decided outside the inbox%'`,
+              ),
+            )
+            .returning({ id: agentTasks.id })
+        : [];
+    if (!takenOver.length) throw new Error("This task has already been decided.");
+  }
 
   await writeAudit({
     actor: `user:${input.userId}`,
@@ -1003,6 +1074,14 @@ async function driveRun(run: AgentRun): Promise<"done" | "awaiting" | "yielded" 
     run.definitionHash = d.hash;
   }
 
+  // Back under budget: the pause is over, so it must not read as paused later.
+  if (
+    run.lastError === BUDGET_PAUSE_MESSAGE &&
+    !(await overBudget(run, policy.monthlyTokenBudget))
+  ) {
+    await db.update(agentRuns).set({ lastError: null }).where(eq(agentRuns.id, run.id));
+    run.lastError = null;
+  }
   for (let turn = 0; turn < TURNS_PER_TICK; turn++) {
     if (await overBudget(run, policy.monthlyTokenBudget)) {
       await save(run, transcript, null, stepCount, tokensUsed);
@@ -1222,6 +1301,11 @@ async function handleCall(
   const parsed = tool.input.safeParse(call.args);
   if (!parsed.success) return toolError(`Invalid arguments: ${parsed.error.message}`);
 
+  if (tool.precheck && tool.risk !== "read") {
+    const refusal = await tool.precheck(ctx, parsed.data);
+    if (refusal) return toolError(refusal);
+  }
+
   const verdict = decideToolCall(tool.risk, policy, tool.templateOf?.(parsed.data) ?? null);
   if (run.mode === "replay" && tool.risk !== "read") {
     return simulated(
@@ -1302,7 +1386,16 @@ async function execute(
   const tool = getTool(name)!;
   const started = Date.now();
   try {
-    const result = await tool.run(ctx, args);
+    // A tool working on one candidate / role: its AI calls count towards them.
+    const a = (args ?? {}) as { applicationId?: unknown; requisitionId?: unknown };
+    const { withAiSubject } = await import("./context");
+    const result = await withAiSubject(
+      {
+        applicationId: typeof a.applicationId === "string" ? a.applicationId : null,
+        requisitionId: typeof a.requisitionId === "string" ? a.requisitionId : null,
+      },
+      () => tool.run(ctx, args),
+    );
     const raw = typeof result === "string" ? result : JSON.stringify(result ?? null);
     const content = tool.untrustedOutput ? untrusted(`${name} result`, raw) : raw;
     const injection = Boolean(tool.untrustedOutput) && looksLikeInjection(raw);
@@ -1415,7 +1508,13 @@ async function applyDecision(
     const reason = response["reason"] ? ` Reason: ${String(response["reason"])}` : "";
     return told(`A person declined this request.${reason}`, true);
   }
-  if (task.status !== "approved") return told("This request was cancelled.", true);
+  if (task.status !== "approved")
+    return told(
+      response["reason"]
+        ? `This request was cancelled: ${String(response["reason"])} Do not retry it or work around it.`
+        : "This request was cancelled.",
+      true,
+    );
 
   // Gate approvals carry no tool to run — the human acted in the app.
   if (isHitl(call.name)) {
@@ -1602,6 +1701,23 @@ export async function monthTokens(orgId: string, agentType: string): Promise<num
   return Number(r?.n ?? 0);
 }
 
+/** The budget changed: let this agent's budget-paused runs be re-checked now, not in an hour. */
+export async function releaseBudgetPaused(orgId: string, agentType: string): Promise<number> {
+  const rows = await db
+    .update(agentRuns)
+    .set({ leaseUntil: null, updatedAt: new Date() })
+    .where(
+      and(
+        eq(agentRuns.orgId, orgId),
+        eq(agentRuns.agentType, agentType as never),
+        eq(agentRuns.status, "queued"),
+        eq(agentRuns.lastError, BUDGET_PAUSE_MESSAGE),
+      ),
+    )
+    .returning({ id: agentRuns.id });
+  return rows.length;
+}
+
 async function overBudget(run: AgentRun, budget: number | null): Promise<boolean> {
   if (budget == null) return false;
   return (await monthTokens(run.orgId, run.agentType)) >= budget;
@@ -1644,4 +1760,63 @@ function preview(text: string): string {
 function redactArgs(args: unknown): unknown {
   const raw = JSON.stringify(args ?? null);
   return raw.length > 2000 ? { truncated: preview(raw) } : args;
+}
+
+/** Tools whose request depends on the candidate's stage when it was asked. */
+const STAGE_SENSITIVE_TOOLS = [
+  "send_assessment",
+  "remind_assessment",
+  "move_candidate",
+  "schedule_interview",
+  "offer_interview_slots",
+  "request_documents",
+];
+
+/**
+ * A candidate moved (by a person or an agent): open requests to act on them
+ * that depended on their old stage are closed as stale — nobody can approve
+ * an assessment for someone already in an interview round — and the agent is
+ * told why, so it does not try again. Audited; the run carries on.
+ */
+export async function cancelStaleRequests(
+  orgId: string,
+  applicationId: string,
+  fromStage: string,
+  toStage: string,
+): Promise<number> {
+  const now = new Date();
+  const reason = `the candidate moved from ${fromStage} to ${toStage} after this was asked, so it no longer applies.`;
+  const closed = await db
+    .update(agentTasks)
+    .set({
+      status: "cancelled",
+      response: { status: "cancelled", reason } as never,
+      decidedAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(agentTasks.orgId, orgId),
+        eq(agentTasks.status, "open"),
+        eq(agentTasks.kind, "approval"),
+        sql`${agentTasks.proposedAction} ->> 'name' in (${sql.join(
+          STAGE_SENSITIVE_TOOLS.map((t) => sql`${t}`),
+          sql`, `,
+        )})`,
+        sql`${agentTasks.proposedAction} -> 'args' ->> 'applicationId' = ${applicationId}`,
+      ),
+    )
+    .returning({ id: agentTasks.id, runId: agentTasks.runId });
+  for (const t of closed) {
+    await writeAudit({
+      actor: "system:stage-change",
+      orgId,
+      action: "agent.task.stale",
+      entityType: "agent_task",
+      entityId: t.id,
+      detail: { run_id: t.runId, applicationId, fromStage, toStage },
+    });
+    await requeueIfUnblocked(t.runId);
+  }
+  return closed.length;
 }

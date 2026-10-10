@@ -109,7 +109,7 @@ async function zoomMeeting(s: Record<string, string>, req: MeetingRequest): Prom
 
 /* ---------------------------------------------------------- Google / Meet */
 
-async function googleToken(s: Record<string, string>) {
+export async function googleToken(s: Record<string, string>) {
   const clientId =
     s["client_id"] ?? env.GOOGLE_CALENDAR_OAUTH_CLIENT_ID ?? env.GOOGLE_OAUTH_CLIENT_ID;
   const clientSecret =
@@ -201,7 +201,7 @@ async function googleMeeting(
 
 /* ------------------------------------------------------------------ Teams */
 
-async function graphToken(s: Record<string, string>) {
+export async function graphToken(s: Record<string, string>) {
   need(s, ["tenant_id", "client_id", "client_secret", "organizer_email"], "Microsoft Teams");
   const res = await fetch(`https://login.microsoftonline.com/${s["tenant_id"]}/oauth2/v2.0/token`, {
     method: "POST",
@@ -223,7 +223,7 @@ const TEAMS_PERMISSION_HELP =
   "run an application access policy (New-CsApplicationAccessPolicy / Grant-CsApplicationAccessPolicy) for the " +
   "organizer mailbox so the app may create meetings on their behalf.";
 
-async function msDelegatedToken(s: Record<string, string>): Promise<string> {
+export async function msDelegatedToken(s: Record<string, string>): Promise<string> {
   const tenant = s["tenant_id"] || "organizations";
   const res = await fetch(`https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`, {
     method: "POST",

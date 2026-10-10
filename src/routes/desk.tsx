@@ -25,6 +25,10 @@ import { AGENT_LABEL } from "@/lib/agents.catalog";
 import { decideAgentTask, type AgentDecisionInput } from "@/lib/agents.functions";
 import {
   acceptDeskProposal,
+  enableDeskAgent,
+  raiseDeskAgentBudget,
+  rescoreDeskCandidates,
+  startDeskSourcing,
   chooseDeskRole,
   closeDeskRole,
   getDeskConversation,
@@ -253,6 +257,10 @@ function Thread({ id }: { id: string }) {
       </section>
     );
   const d = q.data;
+  const openTasks = d.messages.filter((m) => {
+    const t = (m.card as { taskId?: string } | null)?.taskId;
+    return t && (d.tasks[t] ?? "open") === "open";
+  }).length;
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
       {/* The journey: first on small screens, a sticky column on wide ones. */}
@@ -288,6 +296,22 @@ function Thread({ id }: { id: string }) {
           ) : null}
         </div>
         <footer className="border-t border-border p-3">
+          {/* Requests can be posted while other agents keep writing; never let
+              one scroll out of sight unnoticed. */}
+          {openTasks > 0 ? (
+            <button
+              type="button"
+              className="mb-2 w-full rounded-md border border-primary/40 bg-primary/5 px-3 py-1.5 text-left text-xs font-medium text-primary"
+              onClick={() =>
+                list.current
+                  ?.querySelector("[data-open-task]")
+                  ?.scrollIntoView({ block: "center", behavior: "smooth" })
+              }
+            >
+              {openTasks} request{openTasks === 1 ? "" : "s"} waiting for you in this conversation —
+              show
+            </button>
+          ) : null}
           <Composer
             value={text}
             onChange={setText}
@@ -383,6 +407,10 @@ function Card({
   if (card.type === "task") return <TaskCard card={card} conv={conv} onChanged={onChanged} />;
   if (card.type === "reasoning")
     return <Thinking why={card as unknown as Why} conv={conv} onChanged={onChanged} />;
+  if (card.type === "jd") return <JdCard card={card} />;
+  if (card.type === "next_steps")
+    return <NextStepsCard card={card} conv={conv} onChanged={onChanged} />;
+  if (card.type === "rescore") return <RescoreCard card={card} conv={conv} onChanged={onChanged} />;
   if (card.type === "proposal")
     return <ProposalCard card={card} conv={conv} onChanged={onChanged} />;
   if (card.type === "close_role")
@@ -555,58 +583,71 @@ function RankedCard({
           </tr>
         </thead>
         <tbody>
-          {items.map((r) => (
-            <Fragment key={r.applicationId}>
-              <tr className="border-b border-border/60 align-top">
-                <td className="px-2 py-2">
-                  <Checkbox
-                    checked={picked.includes(r.applicationId)}
-                    onCheckedChange={(v) => toggle(r.applicationId, Boolean(v))}
-                    aria-label={`Select ${r.name}`}
-                  />
-                </td>
-                <td className="num px-2 py-2 text-muted-foreground">{r.rank}</td>
-                <td className="px-2 py-2">
-                  <p className="font-medium">{r.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {r.experienceYears} yrs{r.location ? ` · ${r.location}` : ""} ·{" "}
-                    {r.stage.replace(/_/g, " ")}
-                  </p>
-                </td>
-                <td className="num px-2 py-2 text-right font-semibold">{r.score ?? "—"}</td>
-                <td className="px-2 py-2">
-                  {r.recommendation ? <Badge variant="outline">{r.recommendation}</Badge> : "—"}
-                  {r.risks ? (
-                    <p className="mt-1 text-xs text-muted-foreground">{r.risks} risk flag(s)</p>
-                  ) : null}
-                </td>
-                <td className="px-2 py-2 text-xs">
-                  {r.matched.length ? <p>✓ {r.matched.join(", ")}</p> : null}
-                  {r.missing.length ? (
-                    <p className="text-muted-foreground">✗ {r.missing.join(", ")}</p>
-                  ) : null}
-                  {conv.reasoning[r.applicationId] ? (
-                    <button
-                      type="button"
-                      className="mt-1 text-primary underline"
-                      onClick={() =>
-                        setOpenWhy(openWhy === r.applicationId ? null : r.applicationId)
-                      }
-                    >
-                      {openWhy === r.applicationId ? "Hide reasoning" : "Why this score?"}
-                    </button>
-                  ) : null}
-                </td>
-              </tr>
-              {openWhy === r.applicationId && conv.reasoning[r.applicationId] ? (
-                <tr className="border-b border-border/60 bg-muted/30">
-                  <td colSpan={6} className="px-3 py-3">
-                    <Reasoning why={conv.reasoning[r.applicationId]!} />
+          {items.map((snap) => {
+            // The list is a snapshot from when it was posted; score, fit and stage are live.
+            const live = conv.reasoning[snap.applicationId];
+            const r = {
+              ...snap,
+              score: live?.overall ?? snap.score,
+              recommendation: live?.recommendation ?? snap.recommendation,
+              matched: live?.matched ?? snap.matched,
+              missing: live?.missing ?? snap.missing,
+              risks: live ? live.risks.length : snap.risks,
+              stage: conv.stages[snap.applicationId] ?? snap.stage,
+            };
+            return (
+              <Fragment key={r.applicationId}>
+                <tr className="border-b border-border/60 align-top">
+                  <td className="px-2 py-2">
+                    <Checkbox
+                      checked={picked.includes(r.applicationId)}
+                      onCheckedChange={(v) => toggle(r.applicationId, Boolean(v))}
+                      aria-label={`Select ${r.name}`}
+                    />
+                  </td>
+                  <td className="num px-2 py-2 text-muted-foreground">{r.rank}</td>
+                  <td className="px-2 py-2">
+                    <p className="font-medium">{r.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {r.experienceYears} yrs{r.location ? ` · ${r.location}` : ""} ·{" "}
+                      {r.stage.replace(/_/g, " ")}
+                    </p>
+                  </td>
+                  <td className="num px-2 py-2 text-right font-semibold">{r.score ?? "—"}</td>
+                  <td className="px-2 py-2">
+                    {r.recommendation ? <Badge variant="outline">{r.recommendation}</Badge> : "—"}
+                    {r.risks ? (
+                      <p className="mt-1 text-xs text-muted-foreground">{r.risks} risk flag(s)</p>
+                    ) : null}
+                  </td>
+                  <td className="px-2 py-2 text-xs">
+                    {r.matched.length ? <p>✓ {r.matched.join(", ")}</p> : null}
+                    {r.missing.length ? (
+                      <p className="text-muted-foreground">✗ {r.missing.join(", ")}</p>
+                    ) : null}
+                    {conv.reasoning[r.applicationId] ? (
+                      <button
+                        type="button"
+                        className="mt-1 text-primary underline"
+                        onClick={() =>
+                          setOpenWhy(openWhy === r.applicationId ? null : r.applicationId)
+                        }
+                      >
+                        {openWhy === r.applicationId ? "Hide reasoning" : "Why this score?"}
+                      </button>
+                    ) : null}
                   </td>
                 </tr>
-              ) : null}
-            </Fragment>
-          ))}
+                {openWhy === r.applicationId && conv.reasoning[r.applicationId] ? (
+                  <tr className="border-b border-border/60 bg-muted/30">
+                    <td colSpan={6} className="px-3 py-3">
+                      <Reasoning why={conv.reasoning[r.applicationId]!} />
+                    </td>
+                  </tr>
+                ) : null}
+              </Fragment>
+            );
+          })}
         </tbody>
       </table>
       <div className="flex flex-wrap gap-2 border-t border-border p-2">
@@ -631,6 +672,7 @@ const TASK_STATUS: Record<string, string> = {
   approved: "Approved",
   rejected: "Declined",
   changes_requested: "Changes requested",
+  stale: "No longer applies — the candidate moved on",
   answered: "Answered",
   cancelled: "Cancelled",
 };
@@ -651,6 +693,8 @@ function TaskCard({
     conv.taskDetails[taskId] ??
     (Array.isArray(card["details"]) ? (card["details"] as { label: string; value: string }[]) : []);
   const [answer, setAnswer] = useState("");
+  const [declining, setDeclining] = useState(false);
+  const [why, setWhy] = useState("");
   const [busy, setBusy] = useState(false);
   async function decide(decision: AgentDecisionInput) {
     setBusy(true);
@@ -665,6 +709,7 @@ function TaskCard({
   }
   return (
     <div
+      data-open-task={status === "open" ? taskId : undefined}
       className={`rounded-lg border p-3 text-sm ${status === "open" ? "border-primary/40" : "border-border bg-muted/30"}`}
     >
       {card["step"] ? (
@@ -728,17 +773,45 @@ function TaskCard({
               Answer
             </Button>
           </div>
+        ) : declining ? (
+          // A decision people (and the agent) act on: say why. Required for gates.
+          <div className="mt-2 space-y-2">
+            <Textarea
+              value={why}
+              rows={2}
+              maxLength={1000}
+              placeholder={
+                kind === "gate"
+                  ? "Why are you declining? (required — the agent and the team act on it)"
+                  : "Why? (optional — tells the agent what to change)"
+              }
+              onChange={(e) => setWhy(e.target.value)}
+            />
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={busy || (kind === "gate" && why.trim().length < 3)}
+                onClick={() =>
+                  decide({
+                    status: "rejected",
+                    ...(why.trim() ? { reason: why.trim() } : {}),
+                  })
+                }
+              >
+                Decline
+              </Button>
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => setDeclining(false)}>
+                Back
+              </Button>
+            </div>
+          </div>
         ) : (
           <div className="mt-2 flex flex-wrap gap-2">
             <Button size="sm" disabled={busy} onClick={() => decide({ status: "approved" })}>
               Approve
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={busy}
-              onClick={() => decide({ status: "rejected" })}
-            >
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => setDeclining(true)}>
               Decline
             </Button>
             <Link to="/agents" className="self-center text-xs text-primary underline">
@@ -868,7 +941,9 @@ function JourneyPanel({ conv, onChanged }: { conv: DeskConversationView; onChang
                         {n.waitingForYou} request(s) waiting for you in the conversation
                       </p>
                     ) : null}
-                    {n.agentEnabled === false || runState === "paused" ? (
+                    {runState === "paused" && n.run?.budget ? (
+                      <BudgetPaused conv={conv} budget={n.run.budget} onChanged={onChanged} />
+                    ) : n.agentEnabled === false || runState === "paused" ? (
                       <Button asChild size="sm" variant="outline" className="h-7">
                         <Link to="/agents/settings">
                           {runState === "paused" ? "Raise the budget" : "Switch it on"}
@@ -1093,7 +1168,7 @@ function BringCandidatesCard({
   conv: DeskConversationView;
   onChanged: () => void;
 }) {
-  const [busy, setBusy] = useState<null | "upload" | "publish">(null);
+  const [busy, setBusy] = useState<null | "upload" | "publish" | "source">(null);
   const [progress, setProgress] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const reqId = conv.requisition?.id ?? null;
@@ -1133,6 +1208,18 @@ function BringCandidatesCard({
       onChanged();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not publish");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function source() {
+    setBusy("source");
+    try {
+      await startDeskSourcing({ data: { id: conv.id } });
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not start sourcing");
     } finally {
       setBusy(null);
     }
@@ -1182,11 +1269,16 @@ function BringCandidatesCard({
           </Button>
         </div>
         <div className="rounded-md border border-border p-2.5">
-          <p className="font-medium">Check other sources</p>
+          <p className="font-medium">Find more candidates</p>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Applications by email land in the Careers inbox; the talent pool has everyone you know.
+            The Sourcing agent searches your talent pool and past candidates, and invites the best
+            to apply with your approval. Emailed CVs land in the Careers inbox.
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" disabled={busy !== null} onClick={source}>
+              {busy === "source" ? <Loader2 className="size-4 animate-spin" /> : null}
+              Ask the Sourcing agent
+            </Button>
             <Button asChild size="sm" variant="outline">
               <Link to="/inbox">Careers inbox</Link>
             </Button>
@@ -1452,6 +1544,201 @@ function RevisionNote({ revision }: { revision: Revision }) {
           Nothing in the proposal changed. Tell the desk what to change, or decline it.
         </p>
       )}
+    </div>
+  );
+}
+
+/** Paused on its monthly budget: how much was used, and what to do about it. */
+function BudgetPaused({
+  conv,
+  budget,
+  onChanged,
+}: {
+  conv: DeskConversationView;
+  budget: { used: number; limit: number; suggested: number };
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  async function raise() {
+    setBusy(true);
+    try {
+      const r = await raiseDeskAgentBudget({ data: { id: conv.id } });
+      toast.success(
+        `Budget raised to ${r.monthlyTokenBudget.toLocaleString()} tokens — continuing`,
+      );
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not raise the budget");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="space-y-1.5 text-xs">
+      <p>
+        Used {budget.used.toLocaleString()} of its {budget.limit.toLocaleString()} tokens this
+        month. It continues on its own when the budget is raised, or on the 1st of next month.
+      </p>
+      {conv.canEditAgents ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" className="h-7" disabled={busy} onClick={raise}>
+            {busy ? <Loader2 className="size-4 animate-spin" /> : null}
+            Raise to {budget.suggested.toLocaleString()} and continue
+          </Button>
+          <Link to="/agents/settings" className="text-primary hover:underline">
+            Set another amount
+          </Link>
+        </div>
+      ) : (
+        <p className="font-medium text-primary">
+          Ask your HR head or CBO to raise it (Agent settings → monthly token budget).
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** A job description shown in the thread: the saved text of one version. */
+function JdCard({ card }: { card: DeskCardView }) {
+  return (
+    <div className="rounded-lg border border-border text-sm">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
+        <p className="font-medium">
+          {String(card["code"])} · version {String(card["version"])}
+        </p>
+        <Badge variant="outline">{String(card["status"])}</Badge>
+        {card["templateName"] ? (
+          <span className="text-xs text-muted-foreground">
+            Template: {String(card["templateName"])}
+          </span>
+        ) : null}
+        <Link
+          to="/requisitions/$id"
+          params={{ id: String(card["requisitionId"]) }}
+          className="ml-auto text-xs text-primary hover:underline"
+        >
+          Open the requisition
+        </Link>
+      </div>
+      <div className="max-h-96 overflow-y-auto whitespace-pre-wrap px-3 py-2 text-[13px] leading-relaxed">
+        {renderMarkdown(String(card["text"] ?? ""))}
+      </div>
+    </div>
+  );
+}
+
+type NextItem = {
+  agentType: "intake" | "publishing" | "sourcing";
+  name: string;
+  text: string;
+  enabled: boolean;
+};
+
+/** After JD approval: who works next, and a switch for the ones that are off. */
+function NextStepsCard({
+  card,
+  conv,
+  onChanged,
+}: {
+  card: DeskCardView;
+  conv: DeskConversationView;
+  onChanged: () => void;
+}) {
+  const items = (card["items"] as NextItem[] | undefined) ?? [];
+  const [busy, setBusy] = useState<string | null>(null);
+  const [turnedOn, setTurnedOn] = useState<Set<string>>(new Set());
+  async function enable(agentType: NextItem["agentType"]) {
+    setBusy(agentType);
+    try {
+      await enableDeskAgent({ data: { id: conv.id, agentType } });
+      setTurnedOn((s) => new Set(s).add(agentType));
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not switch it on");
+    } finally {
+      setBusy(null);
+    }
+  }
+  return (
+    <ol className="space-y-2 rounded-lg border border-border p-3 text-sm">
+      {items.map((it, i) => {
+        const on = it.enabled || turnedOn.has(it.agentType);
+        return (
+          <li key={it.agentType} className="flex gap-2">
+            <span className="num text-muted-foreground">{i + 1}.</span>
+            <div className="min-w-0 flex-1">
+              <p className="font-medium">
+                {it.name}{" "}
+                <Badge variant={on ? "outline" : "secondary"} className="ml-1">
+                  {on ? "on" : "switched off"}
+                </Badge>
+              </p>
+              <p className="text-xs text-muted-foreground">{it.text}</p>
+              {!on ? (
+                conv.canEditAgents ? (
+                  <Button
+                    size="sm"
+                    className="mt-1 h-7"
+                    disabled={busy !== null}
+                    onClick={() => enable(it.agentType)}
+                  >
+                    {busy === it.agentType ? <Loader2 className="size-4 animate-spin" /> : null}
+                    Switch on and start
+                  </Button>
+                ) : (
+                  <p className="mt-1 text-xs font-medium text-primary">
+                    Ask your HR head or CBO to switch it on.
+                  </p>
+                )
+              ) : null}
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/** The JD changed after candidates were scored: offer to score them again. */
+function RescoreCard({
+  card,
+  conv,
+  onChanged,
+}: {
+  card: DeskCardView;
+  conv: DeskConversationView;
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<number | null>(null);
+  async function go() {
+    setBusy(true);
+    try {
+      const r = await rescoreDeskCandidates({ data: { id: conv.id } });
+      setDone(r.scored);
+      toast.success(`${r.scored} candidate(s) re-scored`);
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not re-score");
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (done !== null)
+    return (
+      <p className="text-xs text-muted-foreground">
+        Re-scored {done} candidate(s); the ranked list above is updated.
+      </p>
+    );
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/40 p-3 text-sm">
+      <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+        Their old scores are replaced; nobody's stage changes.
+      </p>
+      <Button size="sm" disabled={busy} onClick={go}>
+        {busy ? <Loader2 className="size-4 animate-spin" /> : null}
+        Re-score {String(card["count"])} against version {String(card["version"])}
+      </Button>
     </div>
   );
 }
