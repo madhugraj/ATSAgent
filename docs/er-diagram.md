@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-72 tables across 9 domains.
+76 tables across 9 domains.
 
 ## Identity & access
 
@@ -1106,6 +1106,21 @@ erDiagram
 | `talent_request_suggestions` | `request_id` | `talent_requests` | cascade |
 | `talent_requests` | `org_id` | `organizations` | no action |
 | `talent_requests` | `requisition_id` | `requisitions` | no action |
+| `training_feedback` | `actor_user_id` | `users` | no action |
+| `training_feedback` | `agent_run_id` | `agent_runs` | no action |
+| `training_feedback` | `agent_task_id` | `agent_tasks` | no action |
+| `training_feedback` | `application_id` | `applications` | no action |
+| `training_feedback` | `candidate_id` | `candidates` | cascade |
+| `training_feedback` | `inference_id` | `training_inferences` | cascade |
+| `training_feedback` | `org_id` | `organizations` | cascade |
+| `training_feedback` | `requisition_id` | `requisitions` | no action |
+| `training_inferences` | `agent_run_id` | `agent_runs` | no action |
+| `training_inferences` | `application_id` | `applications` | no action |
+| `training_inferences` | `candidate_id` | `candidates` | cascade |
+| `training_inferences` | `org_id` | `organizations` | cascade |
+| `training_inferences` | `requisition_id` | `requisitions` | no action |
+| `training_settings` | `consented_by` | `users` | no action |
+| `training_settings` | `org_id` | `organizations` | cascade |
 | `user_roles` | `org_id` | `organizations` | cascade |
 | `user_roles` | `user_id` | `users` | cascade |
 
@@ -1183,5 +1198,9 @@ erDiagram
 | `stage_events` | Candidates & pipeline | 9 | — |
 | `talent_request_suggestions` | Candidates & pipeline | 8 | (requestId+candidateId) |
 | `talent_requests` | Candidates & pipeline | 10 | — |
+| `training_eval_results` | — | 13 | — |
+| `training_feedback` | — | 17 | — |
+| `training_inferences` | — | 22 | — |
+| `training_settings` | — | 6 | — |
 | `user_roles` | Identity & access | 4 | — |
 | `users` | Identity & access | 8 | (email) |

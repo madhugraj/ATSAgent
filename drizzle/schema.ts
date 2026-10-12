@@ -2209,3 +2209,149 @@ export const agentCostRates = pgTable("agent_cost_rates", {
   updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/* ------------------------------------------------- training data (0036) */
+
+/**
+ * Training data for a future HR model (docs/agentic-plan.md §14). Off per
+ * organisation until an owner agrees: a customer's candidate data is used to
+ * train a model only with that customer's consent (DPDP Act 2023 / GDPR).
+ */
+export const trainingSettings = pgTable(
+  "training_settings",
+  {
+    orgId: uuid("org_id")
+      .primaryKey()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    enabled: boolean("enabled").notNull().default(false),
+    consentedBy: uuid("consented_by").references(() => users.id, { onDelete: "set null" }),
+    consentedAt: timestamp("consented_at", { withTimezone: true }),
+    retentionDays: integer("retention_days").notNull().default(730),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check("training_settings_retention_days_check", sql`${t.retentionDays} between 30 and 3650`),
+  ],
+);
+
+export type TrainingCallKind = "json" | "research" | "agent_step";
+
+/** One model call: what it was given and what it returned. */
+export const trainingInferences = pgTable(
+  "training_inferences",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    callKind: text("call_kind").$type<TrainingCallKind>().notNull(),
+    feature: text("feature").notNull(),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    request: jsonb("request").notNull(),
+    response: jsonb("response"),
+    status: text("status").notNull(),
+    errorMessage: text("error_message"),
+    stopReason: text("stop_reason"),
+    grounded: boolean("grounded"),
+    promptTokens: integer("prompt_tokens").notNull().default(0),
+    completionTokens: integer("completion_tokens").notNull().default(0),
+    latencyMs: integer("latency_ms"),
+    requestHash: text("request_hash").notNull(),
+    agentRunId: uuid("agent_run_id").references(() => agentRuns.id, { onDelete: "set null" }),
+    requisitionId: uuid("requisition_id").references(() => requisitions.id, {
+      onDelete: "set null",
+    }),
+    applicationId: uuid("application_id").references(() => applications.id, {
+      onDelete: "set null",
+    }),
+    candidateId: uuid("candidate_id").references(() => candidates.id, { onDelete: "cascade" }),
+    usageEventIds: uuid("usage_event_ids")
+      .array()
+      .notNull()
+      .default(sql`'{}'::uuid[]`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("training_inferences_org_created_idx").on(t.orgId, t.createdAt),
+    index("training_inferences_run_idx")
+      .on(t.agentRunId, t.createdAt)
+      .where(sql`${t.agentRunId} is not null`),
+    index("training_inferences_feature_idx").on(t.feature, t.createdAt),
+    index("training_inferences_application_idx")
+      .on(t.applicationId)
+      .where(sql`${t.applicationId} is not null`),
+    index("training_inferences_candidate_idx")
+      .on(t.candidateId)
+      .where(sql`${t.candidateId} is not null`),
+    index("training_inferences_hash_idx").on(t.requestHash),
+  ],
+);
+
+export type TrainingActorKind = "human" | "candidate" | "system" | "eval";
+
+/** A human or real-world judgement on AI work (preference and reward data). */
+export const trainingFeedback = pgTable(
+  "training_feedback",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    source: text("source").notNull(),
+    label: text("label").notNull(),
+    rating: integer("rating"),
+    reason: text("reason"),
+    original: jsonb("original"),
+    corrected: jsonb("corrected"),
+    inferenceId: uuid("inference_id").references(() => trainingInferences.id, {
+      onDelete: "cascade",
+    }),
+    agentRunId: uuid("agent_run_id").references(() => agentRuns.id, { onDelete: "set null" }),
+    agentTaskId: uuid("agent_task_id").references(() => agentTasks.id, { onDelete: "set null" }),
+    requisitionId: uuid("requisition_id").references(() => requisitions.id, {
+      onDelete: "set null",
+    }),
+    applicationId: uuid("application_id").references(() => applications.id, {
+      onDelete: "set null",
+    }),
+    candidateId: uuid("candidate_id").references(() => candidates.id, { onDelete: "cascade" }),
+    actorUserId: uuid("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    actorKind: text("actor_kind").$type<TrainingActorKind>().notNull().default("human"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("training_feedback_org_created_idx").on(t.orgId, t.createdAt),
+    index("training_feedback_inference_idx")
+      .on(t.inferenceId)
+      .where(sql`${t.inferenceId} is not null`),
+    index("training_feedback_run_idx")
+      .on(t.agentRunId)
+      .where(sql`${t.agentRunId} is not null`),
+    index("training_feedback_application_idx")
+      .on(t.applicationId)
+      .where(sql`${t.applicationId} is not null`),
+    index("training_feedback_source_idx").on(t.source, t.label),
+  ],
+);
+
+/** An eval scenario's verdict: benchmark and regression data. */
+export const trainingEvalResults = pgTable(
+  "training_eval_results",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    scenario: text("scenario").notNull(),
+    agentType: text("agent_type").notNull(),
+    agentVersion: text("agent_version"),
+    definitionHash: text("definition_hash"),
+    mode: text("mode").notNull(),
+    provider: text("provider"),
+    model: text("model"),
+    passed: boolean("passed").notNull(),
+    checks: jsonb("checks").notNull(),
+    transcript: jsonb("transcript"),
+    tokens: integer("tokens").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("training_eval_results_scenario_idx").on(t.scenario, t.createdAt)],
+);

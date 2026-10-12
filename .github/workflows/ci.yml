@@ -99,3 +99,5 @@ jobs:
         run: bun test scripts/agent-unhappy-paths.test.ts
       - name: Duplicates, races and exceptions
         run: bun test scripts/agent-edge-cases.test.ts
+      - name: Training-data capture (consent, linking, erasure, export)
+        run: bun test scripts/training-data.test.ts

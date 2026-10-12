@@ -180,6 +180,30 @@ export async function respondToOffer(
       ...(reason ? { reason } : {}),
     },
   });
+  // Training data: the candidate's answer — the real-world result of the offer.
+  {
+    const t = await import("../server/training/capture.server");
+    await t.captureFeedback({
+      orgId: o.offer.orgId!,
+      source: "candidate_offer_answer",
+      label: to,
+      reason,
+      original: {
+        offeredCtc: Number(o.offer.offeredCtc),
+        joiningDate: o.offer.joiningDate ?? null,
+        revision: o.offer.revision,
+      },
+      ...(counter ? { corrected: counter } : {}),
+      inferenceId: await t.latestInferenceFor({
+        orgId: o.offer.orgId!,
+        features: ["agent_offer"],
+        applicationId: o.offer.applicationId,
+      }),
+      applicationId: o.offer.applicationId,
+      requisitionId: o.requisitionId,
+      actorKind: "candidate",
+    });
+  }
   const { emitAgentEvent } = await import("../server/agents/events");
   await emitAgentEvent({
     orgId: o.offer.orgId!,

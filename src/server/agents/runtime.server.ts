@@ -810,6 +810,51 @@ export async function resolveTask(input: {
     },
   });
 
+  // Training data: a person's judgement on what the agent proposed. An edit is
+  // a correction (what the agent should have proposed); a decline carries why.
+  {
+    const proposed = (task.proposedAction as { args?: unknown } | null)?.args;
+    const [run] = await db
+      .select({ subjectType: agentRuns.subjectType, subjectId: agentRuns.subjectId })
+      .from(agentRuns)
+      .where(eq(agentRuns.id, task.runId))
+      .limit(1);
+    const { captureFeedback } = await import("../training/capture.server");
+    await captureFeedback({
+      orgId: input.orgId,
+      source: task.kind === "clarification" ? "clarification" : "task_decision",
+      label:
+        decision.status === "answered"
+          ? "answered"
+          : decision.status === "approved"
+            ? decision.args !== undefined
+              ? "edited"
+              : "approved"
+            : decision.changes
+              ? "changes_requested"
+              : "rejected",
+      reason:
+        decision.status === "rejected"
+          ? (decision.reason ?? null)
+          : decision.status === "approved"
+            ? (decision.comment ?? null)
+            : null,
+      original: { kind: task.kind, title: task.title, body: task.body, proposed: proposed ?? null },
+      corrected:
+        decision.status === "answered"
+          ? { answer: decision.answer }
+          : decision.status === "approved" && decision.args !== undefined
+            ? { args: decision.args }
+            : undefined,
+      agentRunId: task.runId,
+      agentTaskId: task.id,
+      proposedAt: task.createdAt,
+      applicationId: run?.subjectType === "application" ? run.subjectId : null,
+      requisitionId: run?.subjectType === "requisition" ? run.subjectId : null,
+      actorUserId: input.userId,
+    });
+  }
+
   await requeueIfUnblocked(task.runId);
 }
 

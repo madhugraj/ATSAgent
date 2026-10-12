@@ -303,6 +303,9 @@ export async function reviewOnboardingDocCore(
       id: onboardingDocuments.id,
       docType: onboardingDocuments.docType,
       applicationId: onboardingDocuments.applicationId,
+      candidateId: onboardingDocuments.candidateId,
+      extracted: onboardingDocuments.extracted,
+      createdAt: onboardingDocuments.createdAt,
     })
     .from(onboardingDocuments)
     .where(and(eq(onboardingDocuments.id, data.id), eq(onboardingDocuments.orgId, actor.orgId)))
@@ -333,6 +336,26 @@ export async function reviewOnboardingDocCore(
     entityId: row.id,
     detail: { docType: row.docType, note: data.note?.trim() || null },
   });
+  // Training data: HR's verdict on the AI's reading of this document.
+  if (data.decision !== "pending") {
+    const t = await import("../server/training/capture.server");
+    await t.captureFeedback({
+      orgId: actor.orgId,
+      source: "document_review",
+      label: data.decision,
+      reason: data.note?.trim() || null,
+      original: { docType: row.docType, extracted: row.extracted ?? null },
+      inferenceId: await t.latestInferenceFor({
+        orgId: actor.orgId,
+        features: ["doc_extract"],
+        candidateId: row.candidateId,
+        before: row.createdAt,
+      }),
+      applicationId: row.applicationId,
+      candidateId: row.candidateId,
+      actorUserId: actor.userId,
+    });
+  }
   if (data.decision === "rejected") {
     // The candidate must be asked for a new copy, with the reason.
     const { emitAgentEvent } = await import("../server/agents/events");

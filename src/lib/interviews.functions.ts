@@ -328,6 +328,31 @@ export async function submitScorecardCore(
     .returning({ id: evaluations.id });
   if (!evaluation) throw new Error("The scorecard could not be saved.");
 
+  // Training data: an interviewer's verdict, set against the AI's match score.
+  {
+    const t = await import("../server/training/capture.server");
+    await t.captureFeedback({
+      orgId: ctx.orgId,
+      source: "scorecard",
+      label: data.verdict,
+      rating: data.rating,
+      reason: data.comments?.trim() || null,
+      corrected: {
+        level: data.level,
+        competencies: data.competencies,
+        focusArea: data.focusArea ?? null,
+      },
+      inferenceId: await t.latestInferenceFor({
+        orgId: ctx.orgId,
+        features: ["candidate_score"],
+        applicationId: app.id,
+      }),
+      applicationId: app.id,
+      requisitionId: app.requisitionId,
+      actorUserId: ctx.userId ?? null,
+    });
+  }
+
   // Is the round complete (every interviewer on it scored)?
   const { progressOf } = await import("./interview-plan.server");
   const progress = await progressOf(ctx.orgId, app.id);

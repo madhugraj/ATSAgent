@@ -595,6 +595,13 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
   } catch (err) {
     log.warn("interview.slot_expiry_failed", { error: err as Error });
   }
+  // Training data older than each organisation's retention is deleted.
+  try {
+    const { applyTrainingRetention } = await import("@/lib/training.functions");
+    await applyTrainingRetention(opts.orgId);
+  } catch (err) {
+    log.warn("training.retention_failed", { error: err as Error });
+  }
   // Assessments not completed within their 14 days close, and the team hears about it.
   try {
     const expired = (await db.execute(sql`

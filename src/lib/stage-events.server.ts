@@ -47,6 +47,17 @@ const STAGE_EMAIL_COPY: Partial<Record<Stage, { heading: string; body: string }>
   },
 };
 
+/** Final stages: the outcome a hiring journey is judged by. */
+const OUTCOME_STAGES = new Set<Stage>([
+  "offer_accepted",
+  "hired",
+  "joined",
+  "rejected",
+  "withdrawn",
+  "offer_declined",
+  "no_show",
+]);
+
 export interface RecordStageTransitionInput {
   orgId: string;
   applicationId: string;
@@ -84,6 +95,21 @@ export async function recordStageTransitions(inputs: RecordStageTransitionInput[
     .returning({ id: stageEvents.id });
 
   await emitAgentStageEvents(inputs);
+  // Training data: where a candidate finally ended up — the reward signal
+  // every earlier score, shortlist and decision is later judged against.
+  for (const i of inputs) {
+    if (!OUTCOME_STAGES.has(i.toStage) || i.fromStage === i.toStage) continue;
+    const { captureFeedback } = await import("../server/training/capture.server");
+    await captureFeedback({
+      orgId: i.orgId,
+      source: "outcome",
+      label: i.toStage,
+      reason: i.reason ?? null,
+      original: { fromStage: i.fromStage, by: i.source ?? "human" },
+      applicationId: i.applicationId,
+      actorKind: "system",
+    });
+  }
   // Agent requests that assumed the old stage no longer apply: close them.
   for (const i of inputs) {
     if (!i.fromStage || i.fromStage === i.toStage) continue;

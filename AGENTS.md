@@ -50,6 +50,12 @@
 - AI calls inside agent runs must go through the gateway so they are
   attributed to the run (`ai_usage_events.agent_run_id`); declare the AI
   features a tool calls in its `skills`.
+- Training data (docs/agentic-plan.md §14): every AI call goes through the
+  gateway so it is captured in `training_inferences`; new places where a
+  person or the real world judges AI work record it with `captureFeedback`
+  (src/server/training/capture.server.ts). Capture stays behind the
+  organisation's consent, never blocks the work, and names the candidate so
+  erasure cascades.
 - Security review reports live in SECURITY_AUDIT_REPORT*.md — never commit
   them while the repository is public.
 

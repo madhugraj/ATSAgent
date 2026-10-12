@@ -209,7 +209,7 @@ export async function runScenario(s: Scenario): Promise<EvalReport> {
       failures.push(`used ${run?.stepCount} model steps, budget ${e.maxSteps}`);
     }
 
-    return {
+    const report: EvalReport = {
       name: s.name,
       passed: failures.length === 0,
       failures,
@@ -220,6 +220,28 @@ export async function runScenario(s: Scenario): Promise<EvalReport> {
       humanRequests,
       result: run?.result ?? null,
     };
+    // Training data: the verdict outlives the throwaway organisation. Eval data
+    // is synthetic, so it is kept at platform level (no tenant consent needed).
+    try {
+      const { trainingEvalResults } = await import("@db/schema");
+      const live = Boolean(process.env["EVAL_PROVIDER"]);
+      await db.insert(trainingEvalResults).values({
+        scenario: s.name,
+        agentType: String(run?.agentType ?? s.agentType ?? s.agent?.type ?? "unknown"),
+        agentVersion: run?.definitionVersion ?? null,
+        definitionHash: run?.definitionHash ?? null,
+        mode: live ? "live" : "scripted",
+        provider: live ? (process.env["EVAL_PROVIDER"] ?? null) : null,
+        model: live ? (process.env["EVAL_MODEL"] ?? null) : null,
+        passed: report.passed,
+        checks: { expect: s.expect, failures, calls, status: report.status, humanRequests },
+        transcript: (run?.transcript ?? null) as never,
+        tokens: report.tokens,
+      });
+    } catch {
+      /* the eval's verdict is returned regardless */
+    }
+    return report;
   } finally {
     await db.delete(organizations).where(eq(organizations.id, orgId));
     await db.delete(users).where(inArray(users.id, [userId]));

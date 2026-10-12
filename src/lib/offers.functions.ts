@@ -399,6 +399,33 @@ export async function sendBackOfferCore(
     entityId: input.id,
     detail: { from: o.status, reason },
   });
+  // Training data: an approver's verdict on the terms the Offer agent proposed.
+  {
+    const [terms] = await db
+      .select({
+        ctc: offers.offeredCtc,
+        joiningDate: offers.joiningDate,
+        revision: offers.revision,
+      })
+      .from(offers)
+      .where(eq(offers.id, input.id))
+      .limit(1);
+    const t = await import("../server/training/capture.server");
+    await t.captureFeedback({
+      orgId: actor.orgId,
+      source: "offer_send_back",
+      label: "rejected",
+      reason,
+      original: { step: o.status, ...terms },
+      inferenceId: await t.latestInferenceFor({
+        orgId: actor.orgId,
+        features: ["agent_offer"],
+        applicationId: o.applicationId,
+      }),
+      applicationId: o.applicationId,
+      actorUserId: actor.userId,
+    });
+  }
   const { emitAgentEvent } = await import("../server/agents/events");
   await emitAgentEvent({
     orgId: actor.orgId,

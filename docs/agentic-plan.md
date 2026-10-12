@@ -1079,6 +1079,52 @@ carries `revision` (the reason and an argument-level before → after diff).
 
 ---
 
+## 14. Training data for a dedicated HR model
+
+The long-term goal is an HR model of our own that can think and act, replacing
+the general-purpose LLMs used today. Everything such a model needs to learn
+this work is captured as the work happens, in PostgreSQL (migration `0036`).
+
+### 14.1 What is captured
+
+| Table | Content | Training use |
+| --- | --- | --- |
+| `training_inferences` | Every model call through the gateway (`aiJson`, `aiResearchJson`, `aiAgentStep`): system prompt, prompt or full message history, tools offered (JSON Schema), required output schema, output or text + tool calls, stop reason, grounding, model, tokens, latency, status / error, request hash; linked to the agent run, role, application, candidate and its ledger rows. Images and PDFs are described (type, size, SHA-256), not copied — the files stay in object storage. | SFT / distillation from the current teacher model; tool-use and structured-output training |
+| `agent_runs` / `agent_steps` (existing) | Goal, agent type, definition version and hash, every step, tool input and output | Trajectories for agentic training |
+| `training_feedback` | Judgements on AI work: task decisions (`approved`, `edited` with the corrected arguments, `rejected` with reason, `changes_requested`), clarification answers, HR verifying or rejecting an AI document read, interview scorecards (set against the AI match score), approver send-backs of offers, the candidate's answer to an offer, final outcomes (hired, joined, rejected, withdrawn, declined, no-show), reviewer annotations (rating, label, corrected output) | Preference pairs (DPO / RLHF), reward signals, outcome-based evaluation |
+| `training_eval_results` | Each eval scenario: agent version and hash, mode (scripted / live), checks, verdict, transcript | Regression and benchmark sets |
+
+Each judgement links to the model call it judges (`inference_id`): the run's
+last call before the task, or the latest call of the relevant feature for the
+candidate (document read, match score, offer). Timestamps compare at the end
+of the millisecond (Postgres keeps microseconds, JavaScript milliseconds).
+
+### 14.2 Governance
+
+- **Consent:** off per organisation until an owner agrees (Organisation →
+  Model training data); consent and withdrawal are audited. Using a
+  customer's candidate data to train a model is a separate purpose that needs
+  that customer's agreement (DPDP Act 2023, GDPR).
+- **Never in the way:** capture failures are logged and swallowed.
+- **Erasure:** rows cascade with their organisation and candidate (every row
+  tied to an application also names its candidate); owners can delete
+  everything kept; rows older than the retention period (default 730 days)
+  are deleted daily.
+- **Export:** `scripts/training-export.ts --org <id> --out <dir>` writes
+  `sft.jsonl`, `preferences.jsonl`, `trajectories.jsonl`, `feedback.jsonl`,
+  `evals.jsonl` and `manifest.json`; it refuses organisations without consent,
+  pseudonymises the organisation's candidates and members (stable tokens) and
+  masks other emails and phones, and is audited. Free-text pseudonymisation is
+  best effort — review a sample before data leaves the environment.
+- **Annotation:** `annotateInference` (HR head, CBO, owner) adds a rating,
+  label and corrected output to a kept call; refused when capture is off.
+
+### 14.3 Not yet captured
+
+- An annotation UI (the API exists).
+- Copilot and hiring-desk chat turns made outside the gateway, if any are
+  added — every AI call must go through the gateway (AGENTS.md).
+
 ## Appendix A — Inventory at a glance
 
 Phases: P0 foundations · P1 requisition→JD→publish · P2 intake→match→screen ·

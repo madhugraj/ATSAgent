@@ -81,6 +81,16 @@ alert webhooks are signed with HMAC-SHA256 (`X-ATSAgent-Signature: sha256=<hex>`
 and alerts carry ids, rule names, statuses, timings and token counts only — no goals, prompts,
 candidate content or model names.
 
+## Training data
+
+`training_inferences` and `training_feedback` hold prompts and outputs that
+include candidate personal data, so they are treated like the candidate record:
+written only for organisations whose owner agreed (off by default, audited),
+deleted with the candidate or organisation, after the retention period, or on
+an owner's request, and exported only pseudonymised and audited
+(`scripts/training-export.ts`). Model and vendor names in these tables never
+reach the client. See docs/agentic-plan.md §14.
+
 ## Release evidence
 
 `VERIFICATION_REPORT.md` records the latest automated and browser checks. A fresh application security

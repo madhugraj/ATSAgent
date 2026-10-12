@@ -106,6 +106,13 @@ export async function recordAiUsage(input: {
       })
       .returning({ id: aiUsageEvents.id });
     if (row && subject?.events) subject.events.push(row.id);
+    // Tie the row to the model call being captured as training data, if any.
+    if (row)
+      (await import("./training/capture.server")).noteUsageEvent(
+        row.id,
+        input.provider,
+        input.model,
+      );
   } catch (e) {
     console.error("[ai-usage] failed to record", input.feature, e);
   }
