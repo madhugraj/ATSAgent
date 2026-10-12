@@ -263,6 +263,7 @@ export const inr = (value: number | null | undefined) =>
     : new Intl.NumberFormat("en-IN", {
         style: "currency",
         currency: "INR",
-        maximumFractionDigits: 0,
+        // Compact crores keep two decimals: ₹1.1 Cr must not read as ₹1 Cr.
+        maximumFractionDigits: value >= 10_000_000 ? 2 : 0,
         notation: value >= 10_000_000 ? "compact" : "standard",
       }).format(value);

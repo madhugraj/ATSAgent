@@ -48,6 +48,13 @@ export const AGENT_CATALOG: AgentInfo[] = [
       "Parses, dedupes, verifies and scores applicants, shortlists, and proposes rejections for you to confirm.",
   },
   {
+    type: "sourcing",
+    label: "Sourcing agent",
+    phase: 2,
+    description:
+      "Watches applicants by channel, tops up a starving role from the talent pool, invites strong past candidates to apply (with your approval) and recommends where to publish.",
+  },
+  {
     type: "screening",
     label: "Screening agent",
     phase: 2,
@@ -118,8 +125,10 @@ export const WHITELISTABLE_TEMPLATES: { id: string; label: string; group: "email
   { id: "application_ack", label: "Application acknowledgement", group: "email" },
   { id: "stage_update", label: "Stage update", group: "email" },
   { id: "interview_invite", label: "Interview invitation", group: "email" },
+  { id: "interview_slots", label: "Interview time choice (candidate picks)", group: "email" },
   { id: "assessment_invite", label: "Assessment invitation (and reminder)", group: "email" },
   { id: "document_request", label: "Pre-onboarding document request", group: "email" },
+  { id: "role_invite", label: "Invitation to apply (past candidates)", group: "email" },
   { id: "job_board:linkedin", label: "LinkedIn post", group: "board" },
   { id: "job_board:naukri", label: "Naukri posting", group: "board" },
   { id: "job_board:indeed", label: "Indeed posting", group: "board" },

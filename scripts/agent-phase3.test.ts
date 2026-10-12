@@ -189,14 +189,16 @@ describe("orchestration", () => {
     const { appId } = await application("Ravi", "shortlisted");
     await moveStageCore(
       { ...rec, orgId, userId: recruiter },
-      { applicationId: appId, toStage: "l1" },
+      { applicationId: appId, toStage: "l1", note: "Screened by phone" },
     );
     await processAgentEvents({ orgId });
     const runs = await db.select().from(agentRuns).where(eq(agentRuns.orgId, orgId));
     expect(runs).toHaveLength(1);
+    // One candidate advanced: the run is theirs (its cost counts in their hiring cost).
     expect(runs[0]).toMatchObject({
       agentType: "interview",
-      subjectId: reqId,
+      subjectType: "application",
+      subjectId: appId,
       principalUserId: recruiter,
     });
   });
@@ -288,8 +290,13 @@ describe("interview coordinator", () => {
       interviewer: "Hari Manager",
       status: "scheduled",
     });
-    const [mail] = await db.select().from(emailOutbox).where(eq(emailOutbox.orgId, orgId));
+    // The candidate's invite and the interviewer's own brief are both queued.
+    const mails = await db.select().from(emailOutbox).where(eq(emailOutbox.orgId, orgId));
+    const mail = mails.find((m) => m.kind === "interview_invite");
     expect(mail).toMatchObject({ kind: "interview_invite" });
+    expect(mails.find((m) => m.kind === "interviewer_brief")).toMatchObject({
+      toEmail: managerEmail,
+    });
   });
 
   test("lists rounds that ended without a scorecard", async () => {

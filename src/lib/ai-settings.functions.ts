@@ -38,6 +38,20 @@ export const getAiSettings = createServerFn({ method: "POST" })
       last_test_status: data?.lastTestStatus ?? "untested",
       last_test_message: data?.lastTestMessage ?? null,
       last_tested_at: data?.lastTestedAt ? data.lastTestedAt.toISOString() : null,
+      // The model's published price on file (hiring cost uses it unless your own rates are set).
+      list_price: await (async () => {
+        const { priceEntry } = await import("../server/ai-pricing");
+        const e = priceEntry(data?.provider ?? "openai", data?.model ?? DEFAULT_MODEL.openai);
+        return e
+          ? {
+              currency: e.currency,
+              basis: e.basis,
+              periods: e.periods,
+              source: e.source,
+              checkedOn: e.checkedOn,
+            }
+          : null;
+      })(),
       keys: {
         openai: await hasProviderKey(context.orgId, "openai"),
         anthropic: await hasProviderKey(context.orgId, "anthropic"),

@@ -4,7 +4,7 @@
  * check, attaching talent-pool candidates, and candidate notes. Every core
  * predicates on the organisation and applies the same role rules as the UI.
  */
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "../server/db";
 import { applications, candidateNotes, candidates, requisitions } from "@db/schema";
@@ -44,6 +44,21 @@ export async function moveStageCore(
   if (REASON_REQUIRED.includes(input.toStage) && !input.reason?.trim()) {
     throw new Error(`A reason is required to move a candidate to ${STAGE_LABEL[input.toStage]}.`);
   }
+  // Into an interview round with no screening on record: allowed, but only with
+  // a written reason — it is recorded as "Screening skipped".
+  let skipNote: string | null = null;
+  if (
+    INTERVIEW_STAGES.includes(input.toStage) &&
+    PRE_INTERVIEW.includes(from) &&
+    !(await screeningOnRecord(actor.orgId, app.id))
+  ) {
+    const why = (input.note?.trim() || input.reason?.trim() || "").trim();
+    if (!why)
+      throw new Error(
+        "No screening is on record for this candidate (no screening call, assessment or AI screen). To move them into an interview anyway, write why in the note — it is recorded as “Screening skipped”.",
+      );
+    skipNote = `Screening skipped: ${why}`;
+  }
   if (HR_CONTROLLED_TARGETS.has(input.toStage)) {
     await assertRole(
       actor.userId,
@@ -68,7 +83,7 @@ export async function moveStageCore(
     fromStage: from,
     toStage: input.toStage,
     actor: actorLabel(actor),
-    reason: input.reason?.trim() || null,
+    reason: skipNote ?? (input.reason?.trim() || null),
     note: input.note?.trim() || null,
   });
   return { from, to: input.toStage, unchanged: false };
@@ -124,4 +139,29 @@ export async function addCandidateNoteCore(
     })
     .returning({ id: candidateNotes.id });
   return { id: row!.id };
+}
+
+const INTERVIEW_STAGES: Stage[] = ["l1", "l2", "l3"];
+const PRE_INTERVIEW: Stage[] = [
+  "sourced",
+  "applied",
+  "ai_screened",
+  "shortlisted",
+  "on_hold",
+  "reserve",
+];
+
+/** Screening evidence for an application: a screening call, a completed assessment or an AI screen. */
+export async function screeningOnRecord(orgId: string, applicationId: string): Promise<boolean> {
+  const [r] = (await db.execute(sql`
+    select (
+      exists (select 1 from screening_runs s where s.application_id = ${applicationId} and s.org_id = ${orgId})
+      or exists (select 1 from ai_interviews i where i.application_id = ${applicationId} and i.org_id = ${orgId})
+      or exists (
+        select 1 from candidate_assessments c join applications a
+          on a.candidate_id = c.candidate_id and a.requisition_id = c.requisition_id
+        where a.id = ${applicationId} and c.org_id = ${orgId} and c.status = 'completed'
+      )
+    ) as ok`)) as unknown as { ok: boolean }[];
+  return Boolean(r?.ok);
 }

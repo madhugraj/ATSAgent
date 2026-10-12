@@ -9,6 +9,7 @@ import { Archive, Building2 } from "lucide-react";
 import { archiveOwnOrganization, updateOrganization } from "@/lib/org.functions";
 import { useOrg } from "@/hooks/useOrg";
 import { PageHeader } from "@/components/ats";
+import { TrainingDataCard } from "@/components/TrainingDataCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -166,6 +167,8 @@ function OrganisationSettings() {
           </Button>
         ) : null}
       </section>
+
+      <TrainingDataCard isOwner={Boolean(isOwner)} />
 
       {isOwner ? (
         <section className="panel space-y-2 border-destructive/40 p-4">

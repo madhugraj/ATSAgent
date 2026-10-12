@@ -66,6 +66,19 @@ const ReqId = z.object({ requisitionId: z.string().uuid() });
 
 /** Stages an agent may move a candidate to on its own (never reject, never offer). */
 const AGENT_STAGES = ["shortlisted", "on_hold", "reserve"] as const;
+/**
+ * Stages an agent may move a candidate *from*: before any interview round. A
+ * person's decision to interview, offer, hire or close is never undone by an
+ * agent — not even to make another tool's precondition true.
+ */
+const AGENT_MOVABLE_FROM = [
+  "sourced",
+  "applied",
+  "ai_screened",
+  "shortlisted",
+  "on_hold",
+  "reserve",
+];
 
 export function registerPhase2Tools(): void {
   /* --------------------------------------------------------- intake */
@@ -167,11 +180,17 @@ export function registerPhase2Tools(): void {
   registerTool({
     name: "move_candidate",
     description:
-      "Move a candidate to shortlisted, on_hold or reserve, with a reason. Rejections are never done with this tool — propose them with request_approval.",
+      "Move a candidate who has not reached an interview round (sourced, applied, ai_screened, shortlisted, on_hold or reserve) to shortlisted, on_hold or reserve, with a reason. Candidates in an interview round, an offer stage or a closed stage are never moved by an agent. Rejections are never done with this tool — propose them with request_approval.",
     input: AppId.extend({ toStage: z.enum(AGENT_STAGES), reason: z.string().min(3).max(500) }),
     risk: "write",
     describe: (i) => `Move a candidate to ${i.toStage}: ${i.reason}`,
     run: async (ctx, i) => {
+      const app = await loadApplication(ctx.orgId, i.applicationId);
+      if (!AGENT_MOVABLE_FROM.includes(app.stage)) {
+        throw new Error(
+          `${app.candidateName ?? "This candidate"} is at ${app.stage}, which a person decided — agents never move candidates out of an interview round, an offer or a closed stage. Do not try another route: report it and stop.`,
+        );
+      }
       const { moveStageCore } = await import("@/lib/pipeline.server");
       return moveStageCore(await actor(ctx), {
         applicationId: i.applicationId,

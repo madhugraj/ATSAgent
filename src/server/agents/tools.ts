@@ -7,6 +7,7 @@
  * Gate actions (approving, releasing, rejecting) are not tools — agents ask
  * for them with request_approval (registry gate guard).
  */
+import { rupees } from "@/lib/money";
 import { and, desc, eq, ilike, inArray, or } from "drizzle-orm";
 import { z } from "zod/v4";
 
@@ -327,7 +328,7 @@ export function registerPhase1Tools(): void {
     }),
     risk: "write",
     describe: (i) =>
-      `Set budget ${i.budgetCtc.toLocaleString()} (band ${i.bandMin.toLocaleString()}–${i.bandMax.toLocaleString()})`,
+      `Set budget ${rupees(i.budgetCtc)} (band ${rupees(i.bandMin)}–${rupees(i.bandMax)})`,
     run: async (ctx, i) => {
       if (i.bandMin > i.bandMax) throw new Error("bandMin must not exceed bandMax.");
       const { updateRequisitionCompensationCore } = await import("@/lib/requisitions.server");
@@ -385,8 +386,11 @@ export function registerPhase1Tools(): void {
   registerTool({
     name: "submit_jd_version",
     description:
-      "Draft the job description for the requisition with the organisation's JD template and file it as the next version for Department Head review. Pass revisionNotes to address reviewer feedback.",
-    input: RequisitionId.extend({ revisionNotes: z.string().max(4000).optional() }),
+      "Draft the job description for the requisition with the organisation's JD template and file it as the next version for Department Head review. Pass revisionNotes to address reviewer feedback, and templateName when the reviewer asked for a specific JD template by name.",
+    input: RequisitionId.extend({
+      revisionNotes: z.string().max(4000).optional(),
+      templateName: z.string().min(1).max(200).optional(),
+    }),
     risk: "write",
     skills: ["jd_generate"],
     describe: (i) =>
@@ -408,7 +412,12 @@ export function registerPhase1Tools(): void {
             .limit(1)
         : [];
       const { pickTemplate } = await import("@/lib/templates.server");
-      const template = await pickTemplate(ctx.orgId, "jd", `${r.title} ${dept?.name ?? ""}`);
+      const template = await pickTemplate(
+        ctx.orgId,
+        "jd",
+        `${r.title} ${dept?.name ?? ""}`,
+        i.templateName,
+      );
       const { generateJdCore } = await import("@/lib/matching.functions");
       const jd = await generateJdCore(ctx.orgId, {
         templateId: template?.id ?? null,

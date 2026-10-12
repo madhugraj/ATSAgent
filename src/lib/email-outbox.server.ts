@@ -36,6 +36,10 @@ const KIND_TOGGLE: Record<
   assessment_invite: "stageEnabled",
   member_reminder: null,
   document_request: "offerEnabled",
+  role_invite: "stageEnabled",
+  // Internal mail to a member: governed by the master switch only.
+  interviewer_brief: null,
+  interview_slots: "interviewEnabled",
 };
 
 export async function getOrgEmailSettings(orgId: string): Promise<EmailSettingsEffective> {

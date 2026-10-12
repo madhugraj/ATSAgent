@@ -11,6 +11,8 @@ interface Props {
   stageHeading?: string;
   /** Stage-specific body copy (plain sentences, no HTML). */
   stageBody?: string;
+  /** "yes" when this is the last word (e.g. not taken further): no "we will write again". */
+  final?: string;
 }
 
 const { text } = layoutStyles;
@@ -21,6 +23,7 @@ const Email = ({
   jobTitle = "the role",
   stageHeading = "Update on your application",
   stageBody,
+  final,
 }: Props) => (
   <EmailLayout
     preview={`${stageHeading} — ${jobTitle}`}
@@ -33,7 +36,7 @@ const Email = ({
       <strong>{orgName}</strong>.
     </p>
     {stageBody ? <p style={text}>{stageBody}</p> : null}
-    <p style={text}>We will write again as things progress.</p>
+    {final ? null : <p style={text}>We will write again as things progress.</p>}
   </EmailLayout>
 );
 

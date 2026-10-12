@@ -53,6 +53,17 @@ PostgreSQL is the operational system of record. Authentication, files, AI provid
 email and job boards are external trust boundaries with narrowly scoped credentials. Public capture,
 webhook, OAuth callback and scheduler endpoints validate callers, validate payloads and are rate limited.
 
+The candidate's offer page (`/offer/<token>`) is public in the same way: a 64-hex token set when the
+offer is released (a revision gets a new one), showing only that offer's role, CTC, joining date and
+letter; it records one answer (accept, decline, ask for changes) on a released offer — claimed in the
+update itself — and its server functions are rate-limited with all other RPCs.
+
+The candidate's interview-time page (`/schedule/<token>`) is public: the token is 64 random hex
+characters, it returns only the round, role, organisation, the interviewer's first name and the
+offered times, it can book one of those times once (the offer is claimed before booking and every
+time is re-checked as free), and its server functions are rate-limited with all other RPCs.
+Calendar access for availability is free/busy only — event titles and details are never read.
+
 Job-board application webhooks (`/api/public/boards/<provider>/<token>`) authenticate on two
 factors: a per-connection delivery token (24 random bytes, stored encrypted with a SHA-256 hash
 lookup — the capture-token precedent) and, where the board's contract defines one, a signature
@@ -69,6 +80,16 @@ webhook signing secret are stored with `encryptSecret` and never returned to the
 alert webhooks are signed with HMAC-SHA256 (`X-ATSAgent-Signature: sha256=<hex>`). Exported spans
 and alerts carry ids, rule names, statuses, timings and token counts only — no goals, prompts,
 candidate content or model names.
+
+## Training data
+
+`training_inferences` and `training_feedback` hold prompts and outputs that
+include candidate personal data, so they are treated like the candidate record:
+written only for organisations whose owner agreed (off by default, audited),
+deleted with the candidate or organisation, after the retention period, or on
+an owner's request, and exported only pseudonymised and audited
+(`scripts/training-export.ts`). Model and vendor names in these tables never
+reach the client. See docs/agentic-plan.md §14.
 
 ## Release evidence
 

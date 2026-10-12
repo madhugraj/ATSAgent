@@ -477,6 +477,10 @@ export function PreOnboardingDialog({
       return uploadOnboardingDoc({ data: { applicationId, docType, fileName: file.name, base64 } });
     },
     onSuccess: (res) => {
+      if (res.duplicate) {
+        toast.info(res.note ?? "This file is already filed.");
+        return;
+      }
       toast.success(
         res.extractionStatus === "extracted"
           ? "Document filed and read — validate the extract."

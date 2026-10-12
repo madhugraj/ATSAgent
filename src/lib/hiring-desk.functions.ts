@@ -124,12 +124,16 @@ export type DeskConversationView = {
   taskDetails: Record<string, { label: string; value: string }[]>;
   /** Why each ranked candidate scored as they did (live from their match score). */
   reasoning: Record<string, import("../server/desk/desk.server").CandidateReasoning>;
+  /** Each ranked candidate's current stage (the list is a snapshot; this is live). */
+  stages: Record<string, string>;
   /** Where the hire stands and what happens next. */
   progress: import("../server/desk/desk.server").DeskProgress;
   /** The agent working for this thread right now, with its latest steps. */
   activity: import("../server/desk/desk.server").DeskActivity;
   /** The current step can be started now (its agent is on and idle). */
   canStart: boolean;
+  /** The viewer may change agent settings (budget, autonomy) — HR head / CBO / owner. */
+  canEditAgents: boolean;
 };
 
 export const getDeskConversation = createServerFn({ method: "GET" })
@@ -207,9 +211,11 @@ export const getDeskConversation = createServerFn({ method: "GET" })
         await import("../server/desk/desk.server")
       ).taskDeciders(context.orgId, context.userId, context.isOwner, taskIds),
       reasoning: await candidateReasoning(context.orgId, [...new Set(rankedIds)]),
+      stages: await liveStages(context.orgId, [...new Set(rankedIds)]),
       progress: await deskProgress(conv),
       activity: await deskActivity(conv),
       canStart: Boolean(await startStage(conv, context.userId, { dryRun: true })),
+      canEditAgents: await canEditAgents(context.userId, context.orgId),
     };
   });
 
@@ -394,3 +400,123 @@ export const researchDeskRole = createServerFn({ method: "POST" })
     await researchRole(conv, data.fields);
     return { ok: true as const };
   });
+
+const AGENT_SETTINGS_ROLES = ["hr_head", "president_cbo"] as const;
+
+async function canEditAgents(userId: string, orgId: string): Promise<boolean> {
+  const { assertRole } = await import("./auth.middleware");
+  return assertRole(userId, orgId, [...AGENT_SETTINGS_ROLES]).then(
+    () => true,
+    () => false,
+  );
+}
+
+/**
+ * Raise the monthly token budget of the agent this thread is paused on, to
+ * the suggested amount, and continue its parked run now. HR head / CBO /
+ * owner only (as on Agent settings); audited.
+ */
+export const raiseDeskAgentBudget = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    const { assertRole } = await import("./auth.middleware");
+    await assertRole(
+      context.userId,
+      context.orgId,
+      [...AGENT_SETTINGS_ROLES],
+      "Only the HR head, the CBO or the organisation owner can change an agent's budget.",
+    );
+    const desk = await import("../server/desk/desk.server");
+    const progress = await desk.deskProgress(conv);
+    const agentType = progress.next?.agentType;
+    if (!agentType || !progress.next?.run?.paused)
+      throw new Error("No agent here is paused on its budget.");
+    const { suggested, limit } = await desk.budgetOf(context.orgId, agentType);
+    const { agentPolicies } = await import("@db/schema");
+    await db
+      .update(agentPolicies)
+      .set({ monthlyTokenBudget: suggested, updatedBy: context.userId, updatedAt: new Date() })
+      .where(
+        and(
+          eq(agentPolicies.orgId, context.orgId),
+          eq(agentPolicies.agentType, agentType as never),
+        ),
+      );
+    const { writeAudit } = await import("../server/audit");
+    await writeAudit({
+      actor: `user:${context.userId}`,
+      actorUserId: context.userId,
+      orgId: context.orgId,
+      action: "agent.policy.updated",
+      entityType: "agent_policy",
+      entityId: null,
+      detail: { agentType, monthlyTokenBudget: suggested, previous: limit, via: "hiring_desk" },
+    });
+    const { releaseBudgetPaused } = await import("../server/agents/runtime.server");
+    await releaseBudgetPaused(context.orgId, agentType);
+    const { kickAgents } = await import("../server/agents/orchestrator.server");
+    kickAgents(context.orgId);
+    return { monthlyTokenBudget: suggested };
+  });
+
+/**
+ * Switch an agent on from the thread (HR head / CBO / owner, as on Agent
+ * settings; audited) and start what it would have done for this role.
+ */
+export const enableDeskAgent = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        agentType: z.enum(["intake", "publishing", "sourcing"]),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    const { assertRole } = await import("./auth.middleware");
+    await assertRole(
+      context.userId,
+      context.orgId,
+      [...AGENT_SETTINGS_ROLES],
+      "Only the HR head, the CBO or the organisation owner can switch agents on.",
+    );
+    await registered();
+    const { enableAgentForThread } = await import("../server/desk/desk.server");
+    return { runId: await enableAgentForThread(conv, context.userId, data.agentType) };
+  });
+
+/** Re-score the role's active candidates against its current (approved) JD. */
+export const rescoreDeskCandidates = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    await needsAiKey(context.orgId);
+    const { rescoreThread } = await import("../server/desk/desk.server");
+    return { scored: await rescoreThread(conv, context.userId) };
+  });
+
+/** Ask the Sourcing agent to check this role's supply and find more candidates. */
+export const startDeskSourcing = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    await registered();
+    const { startSourcing } = await import("../server/desk/desk.server");
+    return { runId: await startSourcing(conv, context.userId) };
+  });
+
+async function liveStages(orgId: string, ids: string[]): Promise<Record<string, string>> {
+  if (!ids.length) return {};
+  const { applications } = await import("@db/schema");
+  const rows = await db
+    .select({ id: applications.id, stage: applications.stage })
+    .from(applications)
+    .where(and(eq(applications.orgId, orgId), inArray(applications.id, ids)));
+  return Object.fromEntries(rows.map((r) => [r.id, r.stage]));
+}

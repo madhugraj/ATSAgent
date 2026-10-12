@@ -197,12 +197,15 @@ async function processOne(
       return "skipped";
     }
 
-    await prepareScreeningKitForPairing({
-      orgId: job.orgId!,
-      candidateId: job.candidateId,
-      requisitionId: job.requisitionId,
-      createdBy: null,
-    });
+    const { withAiSubject } = await import("../server/agents/context");
+    await withAiSubject({ candidateId: job.candidateId, requisitionId: job.requisitionId }, () =>
+      prepareScreeningKitForPairing({
+        orgId: job.orgId!,
+        candidateId: job.candidateId,
+        requisitionId: job.requisitionId,
+        createdBy: null,
+      }),
+    );
     await mark(job.id, "ready", null, job.attempts);
     return "ready";
   } catch (e) {

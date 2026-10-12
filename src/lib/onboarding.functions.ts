@@ -218,6 +218,7 @@ export const uploadOnboardingDoc = createServerFn({ method: "POST" })
         uploadedBy: context.userId,
       });
       results.push(filed);
+      if (filed.duplicate) continue;
       await writeAudit({
         actor: context.memberEmail,
         actorUserId: context.userId,
@@ -257,6 +258,8 @@ export const reextractOnboardingDoc = createServerFn({ method: "POST" })
       docType: row.docType,
       fileName: row.fileName,
       bytes: file.bytes,
+      applicationId: row.applicationId,
+      candidateId: row.candidateId,
     });
     await db
       .update(onboardingDocuments)
@@ -296,7 +299,14 @@ export async function reviewOnboardingDocCore(
     "Only TA or HR can validate pre-onboarding documents.",
   );
   const [row] = await db
-    .select({ id: onboardingDocuments.id, docType: onboardingDocuments.docType })
+    .select({
+      id: onboardingDocuments.id,
+      docType: onboardingDocuments.docType,
+      applicationId: onboardingDocuments.applicationId,
+      candidateId: onboardingDocuments.candidateId,
+      extracted: onboardingDocuments.extracted,
+      createdAt: onboardingDocuments.createdAt,
+    })
     .from(onboardingDocuments)
     .where(and(eq(onboardingDocuments.id, data.id), eq(onboardingDocuments.orgId, actor.orgId)))
     .limit(1);
@@ -326,6 +336,38 @@ export async function reviewOnboardingDocCore(
     entityId: row.id,
     detail: { docType: row.docType, note: data.note?.trim() || null },
   });
+  // Training data: HR's verdict on the AI's reading of this document.
+  if (data.decision !== "pending") {
+    const t = await import("../server/training/capture.server");
+    await t.captureFeedback({
+      orgId: actor.orgId,
+      source: "document_review",
+      label: data.decision,
+      reason: data.note?.trim() || null,
+      original: { docType: row.docType, extracted: row.extracted ?? null },
+      inferenceId: await t.latestInferenceFor({
+        orgId: actor.orgId,
+        features: ["doc_extract"],
+        candidateId: row.candidateId,
+        before: row.createdAt,
+      }),
+      applicationId: row.applicationId,
+      candidateId: row.candidateId,
+      actorUserId: actor.userId,
+    });
+  }
+  if (data.decision === "rejected") {
+    // The candidate must be asked for a new copy, with the reason.
+    const { emitAgentEvent } = await import("../server/agents/events");
+    await emitAgentEvent({
+      orgId: actor.orgId,
+      type: "onboarding.document_rejected",
+      subjectType: "application",
+      subjectId: row.applicationId,
+      actorUserId: actor.userId,
+      payload: { documentId: row.id, docType: row.docType, reason: data.note?.trim() ?? "" },
+    });
+  }
   return { ok: true as const };
 }
 

@@ -65,6 +65,7 @@ const {
   agentEvents,
   agentPolicies,
   agentRuns,
+  agentSteps,
   agentTasks,
   applications,
   candidateAssessments,
@@ -385,6 +386,38 @@ describe("intake & matching agent", () => {
     expect(await stageOf(apps["Dan"]!.appId)).toBe("ai_screened");
   });
 
+  test("agents never move a candidate out of an interview round (regression: L1 → reserve → shortlisted)", async () => {
+    await enable("intake", "autonomous");
+    await application("Esha", "l1", 94, []);
+    await startRun({
+      orgId,
+      agentType: "intake",
+      principalUserId: recruiter,
+      goal: "x",
+      subjectType: "requisition",
+      subjectId: reqId,
+    });
+    script.push(
+      call({
+        id: "r",
+        name: "move_candidate",
+        args: {
+          applicationId: apps["Esha"]!.appId,
+          toStage: "reserve",
+          reason: "to send an assessment",
+        },
+      }),
+      say("Stopped: she is in L1."),
+    );
+    await runAgentTick({ orgId });
+    expect(await stageOf(apps["Esha"]!.appId)).toBe("l1");
+    const [step] = await db
+      .select()
+      .from(agentSteps)
+      .where(and(eq(agentSteps.orgId, orgId), eq(agentSteps.toolName, "move_candidate")));
+    expect(JSON.stringify(step!.output)).toMatch(/never move candidates out of an interview round/);
+  });
+
   test("talent pool search excludes the pipeline; add_to_pipeline refuses other organisations' candidates", async () => {
     await enable("intake");
     await application("In Pipeline", "applied", null, ["Kubernetes"]);
@@ -462,6 +495,77 @@ describe("screening agent", () => {
       subjectId: reqId,
       principalUserId: recruiter,
     });
+  });
+
+  test("a request that assumed the old stage closes itself when the candidate moves on (stale)", async () => {
+    await enable("screening", "suggest");
+    await application("Gita", "shortlisted", 90, ["Kubernetes"]);
+    const { runId } = await startRun({
+      orgId,
+      agentType: "screening",
+      principalUserId: recruiter,
+      goal: "x",
+    });
+    script.push(
+      call({ id: "a", name: "send_assessment", args: { applicationId: apps["Gita"]!.appId } }),
+    );
+    await runAgentTick({ orgId });
+    const [task] = await db
+      .select()
+      .from(agentTasks)
+      .where(and(eq(agentTasks.runId, runId), eq(agentTasks.status, "open")));
+    expect(task).toBeTruthy();
+    // A person moves her into an interview round before anyone approves the assessment.
+    await moveStageCore(
+      { orgId, userId: recruiter, memberEmail: recruiterEmail },
+      { applicationId: apps["Gita"]!.appId, toStage: "l1", note: "Strong referral; screen in L1" },
+    );
+    const [closed] = await db.select().from(agentTasks).where(eq(agentTasks.id, task!.id));
+    expect(closed).toMatchObject({ status: "cancelled" });
+    expect(JSON.stringify(closed!.response)).toMatch(/moved from shortlisted to l1/);
+    // The agent is told why, and the candidate stays where the person put her.
+    script.push(say("Skipped: she is in an interview round."));
+    await runAgentTick({ orgId });
+    expect(await stageOf(apps["Gita"]!.appId)).toBe("l1");
+    const [run] = await db.select().from(agentRuns).where(eq(agentRuns.id, runId));
+    expect(run!.status).toBe("done");
+  });
+
+  test("moving into an interview with no screening on record needs a reason, recorded as skipped", async () => {
+    const id = await application("Hari", "shortlisted", 88, ["Kubernetes"]);
+    const actor = { orgId, userId: recruiter, memberEmail: recruiterEmail };
+    await expect(moveStageCore(actor, { applicationId: id, toStage: "l1" })).rejects.toThrow(
+      /No screening is on record/,
+    );
+    await moveStageCore(actor, {
+      applicationId: id,
+      toStage: "l1",
+      note: "Ex-colleague, known well",
+    });
+    expect(await stageOf(id)).toBe("l1");
+    const [ev] = await db
+      .select()
+      .from(stageEvents)
+      .where(and(eq(stageEvents.applicationId, id), eq(stageEvents.toStage, "l1")));
+    expect(ev!.reason).toBe("Screening skipped: Ex-colleague, known well");
+  });
+
+  test("with screening on record, moving into an interview needs no reason", async () => {
+    const id = await application("Indu", "shortlisted", 88, ["Kubernetes"]);
+    const [cand] = await db.select().from(applications).where(eq(applications.id, id));
+    await db.insert(candidateAssessments).values({
+      orgId,
+      candidateId: cand!.candidateId,
+      requisitionId: reqId,
+      token: `t${Date.now()}`,
+      status: "completed",
+      questions: [],
+    } as never);
+    await moveStageCore(
+      { orgId, userId: recruiter, memberEmail: recruiterEmail },
+      { applicationId: id, toStage: "l1" },
+    );
+    expect(await stageOf(id)).toBe("l1");
   });
 
   test("send_assessment waits for approval under suggest, then creates the assessment and queues the email", async () => {

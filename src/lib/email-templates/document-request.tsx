@@ -11,6 +11,8 @@ interface Props {
   documents?: string;
   replyTo?: string;
   dueDate?: string;
+  /** Why an earlier copy was not accepted. */
+  note?: string;
 }
 
 const { text } = layoutStyles;
@@ -22,6 +24,7 @@ const Email = ({
   documents,
   replyTo,
   dueDate,
+  note,
 }: Props) => (
   <EmailLayout
     preview={`Documents for your offer — ${jobTitle}`}
@@ -33,6 +36,11 @@ const Email = ({
       To prepare your offer for <strong>{jobTitle}</strong> with <strong>{orgName}</strong>, please
       send us the following documents:
     </p>
+    {note ? (
+      <p style={text}>
+        <strong>About the copy you sent earlier:</strong> {note}
+      </p>
+    ) : null}
     {documents ? (
       <ul>
         {documents.split("\n").map((d) => (

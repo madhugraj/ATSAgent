@@ -297,6 +297,7 @@ export function scenarios(): ScriptedScenario[] {
         status: "done",
         calls: [
           "get_requisition",
+          "list_publish_channels",
           "enable_internal_posting",
           "draft_linkedin_post",
           "publish_to_job_board",
@@ -304,15 +305,55 @@ export function scenarios(): ScriptedScenario[] {
       },
       script: [
         (m) => call("r", "get_requisition", { requisitionId: idFromGoal(m) }),
+        (m) => call("c", "list_publish_channels", { requisitionId: idFromGoal(m) }),
         (m) => call("i", "enable_internal_posting", { requisitionId: idFromGoal(m) }),
         (m) => call("p", "draft_linkedin_post", { requisitionId: idFromGoal(m) }),
         (m) =>
           call("b", "publish_to_job_board", {
             requisitionId: idFromGoal(m),
             provider: "linkedin",
-            postText: "We are hiring",
+            postText: `We are hiring. Apply: ${String(toolResult(m, "list_publish_channels")["applyUrl"])}`,
           }),
         say("Posted internally; the LinkedIn post was declined for now."),
+      ],
+    },
+    {
+      name: "sourcing: tops up a starving role from the pool and invites past candidates after approval",
+      agentType: "sourcing",
+      autonomy: "act_and_notify",
+      setup: async ({ orgId, userId }) => {
+        const requisitionId = await seedRequisition(orgId, userId, "approved", true);
+        // Someone who reached an interview for another role: a strong past candidate.
+        const earlier = await seedRequisition(orgId, userId, "closed", true);
+        await seedApplication(orgId, earlier, "Priya", "l1", 72);
+        return { requisitionId };
+      },
+      goal: (d) =>
+        `Find candidates for this starving role.\n\nRequisition id: ${d["requisitionId"]}`,
+      decide: () => ({ status: "approved" }),
+      expect: {
+        status: "done",
+        calls: [
+          "get_role_traction",
+          "find_past_candidates",
+          "invite_to_apply",
+          "list_publish_channels",
+        ],
+      },
+      script: [
+        (m) => call("t", "get_role_traction", { requisitionId: idFromGoal(m) }),
+        (m) => call("f", "find_past_candidates", { requisitionId: idFromGoal(m) }),
+        (m) =>
+          call("v", "invite_to_apply", {
+            requisitionId: idFromGoal(m),
+            candidateIds: (
+              toolResult(m, "find_past_candidates")["matches"] as { candidateId: string }[]
+            ).map((x) => x.candidateId),
+          }),
+        (m) => call("c", "list_publish_channels", { requisitionId: idFromGoal(m) }),
+        say(
+          "Starving: 0 applicants. Invited Priya (interviewed for Platform SRE). Switch on publishing.",
+        ),
       ],
     },
     {
@@ -431,19 +472,24 @@ export function scenarios(): ScriptedScenario[] {
       goal: (d) =>
         `Book next rounds. app=${d["app"]} interviewer=${d["interviewer"]}\n\nRequisition id: ${d["requisitionId"]}`,
       decide: () => ({ status: "approved" }),
-      expect: { status: "done", calls: ["get_interview_plan", "schedule_interview"] },
+      expect: {
+        status: "done",
+        calls: ["get_interview_plan", "find_interview_slots", "offer_interview_slots"],
+      },
       script: [
         (m) => call("p", "get_interview_plan", { applicationId: fromGoal(m, "app") }),
         (m) =>
-          call("s", "schedule_interview", {
+          call("f", "find_interview_slots", {
+            interviewerEmail: firstUserMsg(m).match(/interviewer=(\S+)/)![1]!,
+          }),
+        (m) =>
+          call("o", "offer_interview_slots", {
             applicationId: fromGoal(m, "app"),
             level: 1,
             interviewerEmail: firstUserMsg(m).match(/interviewer=(\S+)/)![1]!,
-            scheduledAt: new Date(Date.now() + 3 * 864e5).toISOString(),
-            durationMins: 60,
-            mode: "online",
+            slots: (toolResult(m, "find_interview_slots")["slots"] as string[]).slice(0, 3),
           }),
-        say("Booked Ravi's L1."),
+        say("Offered Ravi three L1 times; he picks one from his link."),
       ],
     },
     {

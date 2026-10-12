@@ -70,8 +70,14 @@ const { registerPhase1Tools } = await import("../src/server/agents/tools");
 const { registerPhase2Tools } = await import("../src/server/agents/tools-phase2");
 const { registerPhase3Tools } = await import("../src/server/agents/tools-phase3");
 const { registerPhase4Tools } = await import("../src/server/agents/tools-phase4");
-const { registerPhase1Agents, registerPhase2Agents, registerPhase3Agents, registerPhase4Agents } =
-  await import("../src/server/agents/definitions");
+const { registerSourcingTools } = await import("../src/server/agents/tools-sourcing");
+const {
+  registerPhase1Agents,
+  registerPhase2Agents,
+  registerPhase3Agents,
+  registerPhase4Agents,
+  registerPhase6Agents,
+} = await import("../src/server/agents/definitions");
 const { runScenario } = await import("../src/server/agents/eval.server");
 const { scenarios } = await import("./evals/scenarios");
 
@@ -81,10 +87,12 @@ const registerReal = () => {
   registerPhase2Tools();
   registerPhase3Tools();
   registerPhase4Tools();
+  registerSourcingTools();
   registerPhase1Agents();
   registerPhase2Agents();
   registerPhase3Agents();
   registerPhase4Agents();
+  registerPhase6Agents();
 };
 
 beforeAll(() => {

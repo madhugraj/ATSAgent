@@ -17,7 +17,10 @@ export type AgentEventType =
   | "scorecard.submitted"
   | "hiring.selected"
   | "offer.status_changed"
-  | "onboarding.document_received";
+  | "onboarding.document_received"
+  | "onboarding.document_rejected"
+  | "interview.missed"
+  | "interview.slots_unanswered";
 
 export async function emitAgentEvent(e: {
   orgId: string;

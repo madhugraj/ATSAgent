@@ -306,6 +306,14 @@ export const saveAgentPolicy = createServerFn({ method: "POST" })
       entityId: null,
       detail: data,
     });
+    // A changed budget re-checks runs parked on the old one right away.
+    if (data.agentType !== "*" && data.monthlyTokenBudget !== undefined) {
+      const { releaseBudgetPaused } = await import("../server/agents/runtime.server");
+      if (await releaseBudgetPaused(context.orgId, data.agentType)) {
+        const { kickAgents } = await import("../server/agents/orchestrator.server");
+        kickAgents(context.orgId);
+      }
+    }
     // Switching an agent on (or un-pausing all) continues the hiring-desk
     // threads that were waiting for it.
     if (data.enabled) {

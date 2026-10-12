@@ -29,7 +29,7 @@ ATSIQ by Yavar AI is an enterprise recruiting intelligence platform. It combines
 - CHRO dashboard, reports, Talent Brain ontology and Return on Individual capability-to-goal planning
 - Guided first-login journey in the HR copilot, mirrored by the in-app manual
 - Hiring desk: describe a hiring need in a chat; agents gather the details, reuse or create the role, rank candidates and line up screening, with every decision shown in the thread
-- Hiring agents (opt-in, human-in-the-loop): Copilot, Requisition, JD, Publishing, Intake & matching, Screening, Follow-up, Interview coordinator, Evaluation, Offer and Pre-onboarding & release agents with a Decisions inbox, agent register, observability and health engine, per-organisation autonomy settings with measured recommendations, dry-run replays, alert e-mail / webhooks, optional OpenTelemetry trace export and agent activity tracing — see `docs/agentic-plan.md`
+- Hiring agents (opt-in, human-in-the-loop): Copilot, Requisition, JD, Publishing, Intake & matching, Screening, Follow-up, Interview coordinator, Evaluation, Offer, Pre-onboarding & release and Sourcing agents with a Decisions inbox, agent register, observability and health engine, per-organisation autonomy settings with measured recommendations, dry-run replays, alert e-mail / webhooks, optional OpenTelemetry trace export and agent activity tracing — see `docs/agentic-plan.md`
 - Product catalogue and organisation oversight for the platform super admin, including an AI usage console (every AI request logged per organisation, module and model with token counts and latency) and a cross-tenant agent console (runs, failures, latency and spend per organisation, agent and model)
 
 ## Architecture
@@ -73,6 +73,8 @@ bun run typecheck
 bun test
 bun run test:e2e
 ```
+
+Local PostgreSQL is managed by `scripts/local-db.sh` (`bun run db:local init`, then `start`, `stop`, `status`, `migrate`, `backup`, `restore`): PostgreSQL 14 like production, data in a durable per-user folder (never `/tmp`), password auth on 127.0.0.1, verified daily backups. See `docs/runbooks/local-database.md`.
 
 Run the database test suites against a **separate, disposable database**, never the one your dev server uses: some suites delete their own records and `scripts/integration.verify.test.ts` truncates every organisation, user and candidate (it refuses unless the database name contains `test`, `ci`, `verify`, `tmp` or `scratch`). For example: create `atsagent_test`, run `DATABASE_URL=postgres://…/atsagent_test bun scripts/migrate-pg.mjs`, then run the suites with that same `DATABASE_URL`.
 

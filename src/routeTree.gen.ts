@@ -16,6 +16,7 @@ import { Route as CollaborationRouteImport } from './routes/collaboration'
 import { Route as CookiesRouteImport } from './routes/cookies'
 import { Route as DeskRouteImport } from './routes/desk'
 import { Route as HelpRouteImport } from './routes/help'
+import { Route as HiringCostRouteImport } from './routes/hiring-cost'
 import { Route as IjpRouteImport } from './routes/ijp'
 import { Route as InboxRouteImport } from './routes/inbox'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
@@ -43,8 +44,10 @@ import { Route as CandidatesIndexRouteImport } from './routes/candidates.index'
 import { Route as CandidatesIdRouteImport } from './routes/candidates.$id'
 import { Route as InterviewsIndexRouteImport } from './routes/interviews.index'
 import { Route as InterviewsMineRouteImport } from './routes/interviews.mine'
+import { Route as OfferTokenRouteImport } from './routes/offer.$token'
 import { Route as RequisitionsIndexRouteImport } from './routes/requisitions.index'
 import { Route as RequisitionsIdRouteImport } from './routes/requisitions.$id'
+import { Route as ScheduleTokenRouteImport } from './routes/schedule.$token'
 import { Route as ApiAuthChangePasswordRouteImport } from './routes/api/auth/change-password'
 import { Route as ApiAuthConfirmRouteImport } from './routes/api/auth/confirm'
 import { Route as ApiAuthLoginRouteImport } from './routes/api/auth/login'
@@ -101,6 +104,11 @@ const DeskRoute = DeskRouteImport.update({
 const HelpRoute = HelpRouteImport.update({
   id: '/help',
   path: '/help',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HiringCostRoute = HiringCostRouteImport.update({
+  id: '/hiring-cost',
+  path: '/hiring-cost',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IjpRoute = IjpRouteImport.update({
@@ -238,6 +246,11 @@ const InterviewsMineRoute = InterviewsMineRouteImport.update({
   path: '/interviews/mine',
   getParentRoute: () => rootRouteImport,
 } as any)
+const OfferTokenRoute = OfferTokenRouteImport.update({
+  id: '/offer/$token',
+  path: '/offer/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const RequisitionsIndexRoute = RequisitionsIndexRouteImport.update({
   id: '/requisitions/',
   path: '/requisitions/',
@@ -246,6 +259,11 @@ const RequisitionsIndexRoute = RequisitionsIndexRouteImport.update({
 const RequisitionsIdRoute = RequisitionsIdRouteImport.update({
   id: '/requisitions/$id',
   path: '/requisitions/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ScheduleTokenRoute = ScheduleTokenRouteImport.update({
+  id: '/schedule/$token',
+  path: '/schedule/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiAuthChangePasswordRoute = ApiAuthChangePasswordRouteImport.update({
@@ -373,6 +391,7 @@ export interface FileRoutesByFullPath {
   '/cookies': typeof CookiesRoute
   '/desk': typeof DeskRoute
   '/help': typeof HelpRoute
+  '/hiring-cost': typeof HiringCostRoute
   '/ijp': typeof IjpRoute
   '/inbox': typeof InboxRoute
   '/integrations': typeof IntegrationsRoute
@@ -397,7 +416,9 @@ export interface FileRoutesByFullPath {
   '/auth/reset': typeof AuthResetRoute
   '/candidates/$id': typeof CandidatesIdRoute
   '/interviews/mine': typeof InterviewsMineRoute
+  '/offer/$token': typeof OfferTokenRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
+  '/schedule/$token': typeof ScheduleTokenRoute
   '/agents/': typeof AgentsIndexRoute
   '/candidates/': typeof CandidatesIndexRoute
   '/interviews/': typeof InterviewsIndexRoute
@@ -433,6 +454,7 @@ export interface FileRoutesByTo {
   '/cookies': typeof CookiesRoute
   '/desk': typeof DeskRoute
   '/help': typeof HelpRoute
+  '/hiring-cost': typeof HiringCostRoute
   '/ijp': typeof IjpRoute
   '/inbox': typeof InboxRoute
   '/integrations': typeof IntegrationsRoute
@@ -457,7 +479,9 @@ export interface FileRoutesByTo {
   '/auth/reset': typeof AuthResetRoute
   '/candidates/$id': typeof CandidatesIdRoute
   '/interviews/mine': typeof InterviewsMineRoute
+  '/offer/$token': typeof OfferTokenRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
+  '/schedule/$token': typeof ScheduleTokenRoute
   '/agents': typeof AgentsIndexRoute
   '/candidates': typeof CandidatesIndexRoute
   '/interviews': typeof InterviewsIndexRoute
@@ -494,6 +518,7 @@ export interface FileRoutesById {
   '/cookies': typeof CookiesRoute
   '/desk': typeof DeskRoute
   '/help': typeof HelpRoute
+  '/hiring-cost': typeof HiringCostRoute
   '/ijp': typeof IjpRoute
   '/inbox': typeof InboxRoute
   '/integrations': typeof IntegrationsRoute
@@ -518,7 +543,9 @@ export interface FileRoutesById {
   '/auth/reset': typeof AuthResetRoute
   '/candidates/$id': typeof CandidatesIdRoute
   '/interviews/mine': typeof InterviewsMineRoute
+  '/offer/$token': typeof OfferTokenRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
+  '/schedule/$token': typeof ScheduleTokenRoute
   '/agents/': typeof AgentsIndexRoute
   '/candidates/': typeof CandidatesIndexRoute
   '/interviews/': typeof InterviewsIndexRoute
@@ -556,6 +583,7 @@ export interface FileRouteTypes {
     | '/cookies'
     | '/desk'
     | '/help'
+    | '/hiring-cost'
     | '/ijp'
     | '/inbox'
     | '/integrations'
@@ -580,7 +608,9 @@ export interface FileRouteTypes {
     | '/auth/reset'
     | '/candidates/$id'
     | '/interviews/mine'
+    | '/offer/$token'
     | '/requisitions/$id'
+    | '/schedule/$token'
     | '/agents/'
     | '/candidates/'
     | '/interviews/'
@@ -616,6 +646,7 @@ export interface FileRouteTypes {
     | '/cookies'
     | '/desk'
     | '/help'
+    | '/hiring-cost'
     | '/ijp'
     | '/inbox'
     | '/integrations'
@@ -640,7 +671,9 @@ export interface FileRouteTypes {
     | '/auth/reset'
     | '/candidates/$id'
     | '/interviews/mine'
+    | '/offer/$token'
     | '/requisitions/$id'
+    | '/schedule/$token'
     | '/agents'
     | '/candidates'
     | '/interviews'
@@ -676,6 +709,7 @@ export interface FileRouteTypes {
     | '/cookies'
     | '/desk'
     | '/help'
+    | '/hiring-cost'
     | '/ijp'
     | '/inbox'
     | '/integrations'
@@ -700,7 +734,9 @@ export interface FileRouteTypes {
     | '/auth/reset'
     | '/candidates/$id'
     | '/interviews/mine'
+    | '/offer/$token'
     | '/requisitions/$id'
+    | '/schedule/$token'
     | '/agents/'
     | '/candidates/'
     | '/interviews/'
@@ -737,6 +773,7 @@ export interface RootRouteChildren {
   CookiesRoute: typeof CookiesRoute
   DeskRoute: typeof DeskRoute
   HelpRoute: typeof HelpRoute
+  HiringCostRoute: typeof HiringCostRoute
   IjpRoute: typeof IjpRoute
   InboxRoute: typeof InboxRoute
   IntegrationsRoute: typeof IntegrationsRoute
@@ -761,7 +798,9 @@ export interface RootRouteChildren {
   AuthResetRoute: typeof AuthResetRoute
   CandidatesIdRoute: typeof CandidatesIdRoute
   InterviewsMineRoute: typeof InterviewsMineRoute
+  OfferTokenRoute: typeof OfferTokenRoute
   RequisitionsIdRoute: typeof RequisitionsIdRoute
+  ScheduleTokenRoute: typeof ScheduleTokenRoute
   AgentsIndexRoute: typeof AgentsIndexRoute
   CandidatesIndexRoute: typeof CandidatesIndexRoute
   InterviewsIndexRoute: typeof InterviewsIndexRoute
@@ -839,6 +878,13 @@ declare module '@tanstack/react-router' {
       path: '/help'
       fullPath: '/help'
       preLoaderRoute: typeof HelpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/hiring-cost': {
+      id: '/hiring-cost'
+      path: '/hiring-cost'
+      fullPath: '/hiring-cost'
+      preLoaderRoute: typeof HiringCostRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/ijp': {
@@ -1030,6 +1076,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InterviewsMineRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/offer/$token': {
+      id: '/offer/$token'
+      path: '/offer/$token'
+      fullPath: '/offer/$token'
+      preLoaderRoute: typeof OfferTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/requisitions/': {
       id: '/requisitions/'
       path: '/requisitions'
@@ -1042,6 +1095,13 @@ declare module '@tanstack/react-router' {
       path: '/requisitions/$id'
       fullPath: '/requisitions/$id'
       preLoaderRoute: typeof RequisitionsIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/schedule/$token': {
+      id: '/schedule/$token'
+      path: '/schedule/$token'
+      fullPath: '/schedule/$token'
+      preLoaderRoute: typeof ScheduleTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/auth/change-password': {
@@ -1209,6 +1269,7 @@ const rootRouteChildren: RootRouteChildren = {
   CookiesRoute: CookiesRoute,
   DeskRoute: DeskRoute,
   HelpRoute: HelpRoute,
+  HiringCostRoute: HiringCostRoute,
   IjpRoute: IjpRoute,
   InboxRoute: InboxRoute,
   IntegrationsRoute: IntegrationsRoute,
@@ -1233,7 +1294,9 @@ const rootRouteChildren: RootRouteChildren = {
   AuthResetRoute: AuthResetRoute,
   CandidatesIdRoute: CandidatesIdRoute,
   InterviewsMineRoute: InterviewsMineRoute,
+  OfferTokenRoute: OfferTokenRoute,
   RequisitionsIdRoute: RequisitionsIdRoute,
+  ScheduleTokenRoute: ScheduleTokenRoute,
   AgentsIndexRoute: AgentsIndexRoute,
   CandidatesIndexRoute: CandidatesIndexRoute,
   InterviewsIndexRoute: InterviewsIndexRoute,

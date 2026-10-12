@@ -192,6 +192,12 @@ export const NAV_GROUPS: NavGroup[] = [
         mode: "manual",
       },
       {
+        to: "/hiring-cost",
+        label: "Hiring cost",
+        icon: Coins,
+        show: (c) => c.governance,
+      },
+      {
         to: "/roi",
         label: "Return on Individual",
         icon: Gauge,

@@ -340,7 +340,7 @@ type SchemaLike<T> = {
     | { success: false; error: { issues: { path: PropertyKey[]; message: string }[] } };
 };
 
-export async function aiJson<T>(opts: {
+async function aiJsonCall<T>(opts: {
   system: string;
   prompt: string;
   images?: AiImage[];
@@ -792,7 +792,7 @@ const NO_KEY_ERROR = {
  * grounds its JSON answer in live pages (salary sites block naive scrapers).
  * Callers that need citations ask the model to embed them in the JSON.
  */
-export async function aiResearchJson<T>(opts: {
+async function aiResearchJsonCall<T>(opts: {
   system: string;
   prompt: string;
   orgId?: string | null | undefined;
@@ -1314,7 +1314,7 @@ function parseGoogleAgent(json: Loose): Omit<Extract<AgentStepResult, { ok: true
  * Run one agent step against the organisation's configured model.
  * `feature` is the ledger slug (`agent_*` in AI_FEATURES).
  */
-export async function aiAgentStep(opts: {
+async function aiAgentStepCall(opts: {
   system: string;
   messages: AgentMessage[];
   tools?: AgentToolSpec[];
@@ -1392,4 +1392,97 @@ export async function aiAgentStep(opts: {
     usage: parsed.usage,
   });
   return { ok: true, ...parsed };
+}
+
+/* ------------------------------------------------- training-data capture */
+
+// Every model call is recorded as training data for a future HR model when the
+// organisation agreed (src/server/training/capture.server.ts). The wrappers
+// never change a call's result; capture failures are logged and swallowed.
+
+const capture = () => import("../server/training/capture.server");
+
+/** The JSON Schema an output had to satisfy, when the schema can describe itself. */
+function outputSchemaOf(schema: unknown): unknown {
+  if (!schema) return null;
+  try {
+    return zodV4.toJSONSchema(schema as never);
+  } catch {
+    return null;
+  }
+}
+
+export async function aiJson<T>(
+  opts: Parameters<typeof aiJsonCall<T>>[0],
+): Promise<AiJsonResult<T>> {
+  const { withInferenceCapture, describeAttachment } = await capture();
+  return withInferenceCapture(
+    () => aiJsonCall<T>(opts),
+    (r, latencyMs) => ({
+      orgId: opts.orgId,
+      callKind: "json",
+      feature: opts.feature,
+      provider: r.ok ? r.provider : null,
+      model: r.ok ? r.model : null,
+      request: {
+        system: opts.system,
+        prompt: opts.prompt,
+        ...(opts.images?.length ? { images: opts.images.map(describeAttachment) } : {}),
+        ...(opts.docs?.length ? { docs: opts.docs.map(describeAttachment) } : {}),
+        outputSchema: outputSchemaOf(opts.schema),
+      },
+      response: r.ok ? { data: r.data } : null,
+      status: r.ok ? "ok" : "error",
+      errorMessage: r.ok ? null : r.message,
+      promptTokens: r.ok ? (r.usage?.promptTokens ?? null) : null,
+      completionTokens: r.ok ? (r.usage?.completionTokens ?? null) : null,
+      latencyMs,
+    }),
+  );
+}
+
+export async function aiResearchJson<T>(
+  opts: Parameters<typeof aiResearchJsonCall<T>>[0],
+): Promise<AiResearchResult<T>> {
+  const { withInferenceCapture } = await capture();
+  return withInferenceCapture(
+    () => aiResearchJsonCall<T>(opts),
+    (r, latencyMs) => ({
+      orgId: opts.orgId,
+      callKind: "research",
+      feature: opts.feature,
+      provider: r.ok ? r.provider : null,
+      model: r.ok ? r.model : null,
+      request: { system: opts.system, prompt: opts.prompt },
+      response: r.ok ? { data: r.data } : null,
+      status: r.ok ? "ok" : "error",
+      errorMessage: r.ok ? null : r.message,
+      grounded: r.ok ? r.grounded : null,
+      promptTokens: r.ok ? (r.usage?.promptTokens ?? null) : null,
+      completionTokens: r.ok ? (r.usage?.completionTokens ?? null) : null,
+      latencyMs,
+    }),
+  );
+}
+
+export async function aiAgentStep(
+  opts: Parameters<typeof aiAgentStepCall>[0],
+): Promise<AgentStepResult> {
+  const { withInferenceCapture } = await capture();
+  return withInferenceCapture(
+    () => aiAgentStepCall(opts),
+    (r, latencyMs) => ({
+      orgId: opts.orgId,
+      callKind: "agent_step",
+      feature: opts.feature,
+      request: { system: opts.system, messages: opts.messages, tools: opts.tools ?? [] },
+      response: r.ok ? { text: r.text, toolCalls: r.toolCalls } : null,
+      status: r.ok ? "ok" : "error",
+      errorMessage: r.ok ? null : r.message,
+      stopReason: r.ok ? r.stopReason : null,
+      promptTokens: r.ok ? (r.usage?.promptTokens ?? null) : null,
+      completionTokens: r.ok ? (r.usage?.completionTokens ?? null) : null,
+      latencyMs,
+    }),
+  );
 }
