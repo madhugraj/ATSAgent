@@ -130,6 +130,7 @@ function RootComponent() {
   // people with no account — and look the same when a signed-in member opens them.
   const isPublic =
     pathname.startsWith("/assess/") ||
+    pathname.startsWith("/pay/") ||
     pathname.startsWith("/schedule/") ||
     pathname.startsWith("/offer/") ||
     pathname.startsWith("/apply/") ||

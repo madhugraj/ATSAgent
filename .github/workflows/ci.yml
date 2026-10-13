@@ -103,6 +103,8 @@ jobs:
         run: bun test scripts/training-data.test.ts
       - name: Assessment timeline and agent pop-ups
         run: bun test scripts/assessment-timeline.test.ts
+      - name: Pay & availability before an offer (form, entry, offer readiness)
+        run: bun test scripts/compensation.test.ts
       - name: Agent markdown rendering (structure and escaping)
         run: bun test scripts/agent-markdown.test.ts
       - name: Career metrics (employers, promotions, dates)

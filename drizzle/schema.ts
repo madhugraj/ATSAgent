@@ -990,7 +990,8 @@ export type EmailOutboxKind =
   | "document_request"
   | "role_invite"
   | "interviewer_brief"
-  | "interview_slots";
+  | "interview_slots"
+  | "compensation_form";
 export type EmailOutboxStatus = "queued" | "sent" | "failed" | "suppressed";
 export type EmailOutboxAttachment = {
   filename: string;
@@ -2421,4 +2422,81 @@ export const notificationStates = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.userId, t.notificationId] })],
+);
+
+/* ------------------------------------------------ compensation details (0038) */
+
+/** A private form link asking the candidate for compensation and availability. */
+export const compensationRequests = pgTable(
+  "compensation_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    candidateId: uuid("candidate_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "cascade" }),
+    token: text("token").notNull(),
+    status: text("status").notNull().default("sent"),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    closesAt: timestamp("closes_at", { withTimezone: true }),
+    remindersSent: integer("reminders_sent").notNull().default(0),
+    lastRemindedAt: timestamp("last_reminded_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("compensation_requests_token_key").on(t.token),
+    index("compensation_requests_open_idx")
+      .on(t.orgId, t.status, t.dueAt)
+      .where(sql`${t.status} = 'sent'`),
+    index("compensation_requests_application_idx").on(t.applicationId),
+  ],
+);
+
+export type CompensationSource = "candidate_form" | "screening_call" | "recruiter";
+
+/** What an offer is built on; the latest row per application is in force. HR roles only. */
+export const compensationDetails = pgTable(
+  "compensation_details",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    candidateId: uuid("candidate_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "cascade" }),
+    currency: text("currency").notNull().default("INR"),
+    currentFixed: numeric("current_fixed", { precision: 14, scale: 2 }),
+    currentVariable: numeric("current_variable", { precision: 14, scale: 2 }),
+    expectedCtc: numeric("expected_ctc", { precision: 14, scale: 2 }),
+    noticePeriodDays: integer("notice_period_days"),
+    earliestJoining: date("earliest_joining"),
+    competingOffers: boolean("competing_offers"),
+    competingNote: text("competing_note"),
+    currentLocation: text("current_location"),
+    openToRelocate: boolean("open_to_relocate"),
+    note: text("note"),
+    source: text("source").$type<CompensationSource>().notNull(),
+    enteredBy: uuid("entered_by").references(() => users.id, { onDelete: "set null" }),
+    requestId: uuid("request_id").references(() => compensationRequests.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("compensation_details_application_idx").on(t.applicationId, t.createdAt),
+    check(
+      "compensation_details_notice_period_days_check",
+      sql`${t.noticePeriodDays} between 0 and 365`,
+    ),
+  ],
 );

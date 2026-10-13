@@ -251,7 +251,7 @@ export function registerPhase2Tools(): void {
   registerTool({
     name: "get_screening_status",
     description:
-      "For one application: the written assessment in full (status, score, each area with its score and the candidate's own words as evidence, strengths, red flags, summary — direct evidence), the screening-call kit (focus and questions), the latest screening-call result, and the CV match (score and its automated risk flags — inferences from the CV, to verify, not facts).",
+      "For one application: the written assessment in full (status, score, each area with its score and the candidate's own words as evidence, strengths, red flags, summary — direct evidence), the screening-call kit (focus and questions), the latest screening-call result, the CV match (score and its automated risk flags — inferences from the CV, to verify, not facts), and whether the candidate's expected CTC and notice period are known (payDetails; never the amounts).",
     input: AppId,
     risk: "read",
     // The assessment evidence quotes the candidate's own answers.
@@ -365,6 +365,17 @@ export function registerPhase2Tools(): void {
               note: "Inferred automatically from the CV — verify; the written assessment is direct evidence.",
             }
           : null,
+        // Whether pay is known — never the amounts (those are for TA, HR and the Offer agent).
+        payDetails: await (async () => {
+          const { detailsFor, latestRequest } = await import("@/lib/compensation.server");
+          const d = await detailsFor(ctx.orgId, app.id);
+          const r = await latestRequest(ctx.orgId, app.id);
+          return {
+            expectedCtcKnown: d.expectedCtc != null,
+            noticePeriodKnown: d.noticePeriodDays != null,
+            form: r ? r.status : "not_sent",
+          };
+        })(),
       };
     },
   });

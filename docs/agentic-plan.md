@@ -313,6 +313,23 @@ the autonomy dial.
   snoozes for 4 hours, × dismisses (`notification_states`, per person); an
   item that escalates gets a new id and pops up again.
 
+- **Pay & availability at screening (1.7.0, migration `0038`):** when
+  `get_screening_status` shows the expected CTC or notice period unknown
+  (`payDetails` — never the amounts), the agent sends
+  `send_compensation_form`: a private `/pay/<token>` link (64 hex) asking
+  current pay (fixed / variable), expected CTC, notice period, earliest
+  joining date, competing offers, location and relocation, with explicit
+  consent. It follows the assessment policy's timeline (due date, reminders —
+  automatic when the Screening or Offer agent may send the
+  `compensation_form` template on its own, otherwise a pop-up — overdue
+  pop-up, closing). Answers land in `compensation_details` (latest value per
+  field wins; the candidate profile's headline figures are kept in step) and
+  are visible to TA, the HR head, the CBO and owners only (candidate page →
+  *Pay & availability*), who can also enter or correct them from a call
+  (`screening_call` / `recruiter`, audited without amounts; an open form
+  closes once complete). Thread messages and nudges never carry amounts.
+  Submitting raises `compensation.submitted`.
+
 ### 4.6 Interview coordinator agent
 
 - **Trigger:** screening "proceed"; each round completed.
@@ -408,6 +425,21 @@ the autonomy dial.
   cards state, from the system, where the CTC sits against the role's budget
   and band. `draft_offer` follows the role's interview plan: a one- or
   two-round role is ready for an offer once its final round is complete.
+- **Expectation before the letter (1.3.0, migration `0038`):** `draft_offer`
+  (and `revise_offer` on a sent-back draft) refuses — before anyone is asked —
+  until the candidate's expected CTC and notice period are known; the agent
+  sends the pay & availability form (or waits while it is open) and finishes.
+  `compensation.submitted` restarts it for a selected candidate whose offer
+  is not already with approvers. If the expectation is above the band
+  maximum, drafting is refused until the HR head (or CBO) answers an
+  `ask_human` in the same run: offer at the band maximum, seek a CBO
+  exception, or stop. A draft above the band needs the CBO's answer in that
+  run; below the band is always refused. `get_offer_context` carries the
+  full compensation record, and every offer approval card states — from the
+  system — the candidate's expectation and its source, the gap in money and
+  %, the change on current CTC, notice and competing offers. Health rule
+  `offer.pay_unknown`: a form closed unanswered while expected CTC or notice
+  is still unknown near an offer.
 
 ### 4.9 Pre-onboarding & release agent
 

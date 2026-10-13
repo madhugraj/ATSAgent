@@ -15,6 +15,7 @@ import {
   decideAfterAssessment,
   setNotificationState,
 } from "@/lib/nudges.functions";
+import { sendCandidateCompensationForm } from "@/lib/compensation.functions";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -193,6 +194,11 @@ function ActionDialog({
       desc: "They get a kind, final email — your reason stays internal.",
       go: "Confirm",
     },
+    pay_remind: {
+      title: `Remind ${who} about the pay & availability form`,
+      desc: "They get the same private link again with the date it is due.",
+      go: "Send the reminder",
+    },
   };
   const c = copy[action.id];
 
@@ -202,6 +208,10 @@ function ActionDialog({
       const assessmentId = n.subject?.assessmentId;
       if (action.id === "extend" && assessmentId)
         await assessmentAction({ data: { action: "extend", assessmentId, dueDate: due, notify } });
+      else if (action.id === "pay_remind" && n.subject?.payRequestId)
+        await sendCandidateCompensationForm({
+          data: { action: "remind", requestId: n.subject.payRequestId },
+        });
       else if (action.id === "remind" && assessmentId)
         await assessmentAction({ data: { action: "remind", assessmentId } });
       else if ((action.id === "phone_screen" || action.id === "decide_without") && assessmentId)
@@ -247,7 +257,7 @@ function ActionDialog({
             </label>
           </div>
         ) : null}
-        {action.id !== "extend" && action.id !== "remind" ? (
+        {action.id !== "extend" && action.id !== "remind" && action.id !== "pay_remind" ? (
           <div className="space-y-1">
             <Label htmlFor="popup-text">
               {needsReason ? "Why? (required)" : "Note (optional)"}

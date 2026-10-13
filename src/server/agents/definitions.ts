@@ -238,19 +238,24 @@ export function registerPhase2Agents(): void {
     // started when a candidate completes the assessment.
     // 1.6.0: reads the full assessment (areas, evidence, strengths, red flags) and labels CV
     // flags as automated; writes a structured, evidence-first recommendation.
-    version: "1.6.0",
+    // 1.7.0: sends the pay & availability form at screening when expected CTC or notice is unknown.
+    version: "1.7.0",
     owner: "hr_head",
     responsibility:
-      "Moves shortlisted candidates through screening: kits, assessments, reminders and proceed / hold notes.",
+      "Moves shortlisted candidates through screening: kits, assessments, the pay & availability form, reminders and proceed / hold notes.",
     mustNever: [
       "Reject a candidate",
       "Email a candidate without approval unless the assessment email is pre-approved or the agent is set to Autonomous",
+      "Read, state or negotiate a candidate's pay",
       "Move a candidate out of an interview round, an offer or a closed stage — or move anyone just to make another tool possible; if a tool refuses because of a candidate's stage, report it and stop",
     ],
     scope: {
       reads: ["shortlisted applications", "screening kits, calls and assessment results"],
       writes: ["screening kits", "assessments", "candidate notes", "stage move to on hold"],
-      external: ["candidate assessment invitations and reminders"],
+      external: [
+        "candidate assessment invitations and reminders",
+        "the pay & availability form (answers go to TA and HR, not to this agent)",
+      ],
     },
     gates: ["general"],
     riskTier: "medium",
@@ -263,6 +268,7 @@ export function registerPhase2Agents(): void {
       "get_screening_status",
       "prepare_screening_kit",
       "send_assessment",
+      "send_compensation_form",
       "remind_assessment",
       "add_candidate_note",
       "move_candidate",
@@ -272,6 +278,7 @@ export function registerPhase2Agents(): void {
       "1. list_applications for stage shortlisted.",
       "2. For each: get_screening_status. If the screening kit is missing, prepare_screening_kit.",
       "3. If no assessment was sent, send_assessment (its due date and closing follow the organisation's policy). Never remind about an assessment yourself: reminders, the overdue follow-up and closing the link are automatic.",
+      "3b. If payDetails shows the expected CTC or notice period is not known and form is not_sent (or expired), send_compensation_form. Never ask about or state pay yourself; reminders are automatic.",
       '4. When an assessment is completed or a screening call is graded: get_screening_status, then add_candidate_note with this structure (plain lines, no tables):\nRecommendation: Proceed / Hold — one sentence why.\nWritten assessment (direct evidence): score; the strongest and the weakest areas with their scores and a short quote of the evidence; strengths; red flags (or "none").\nCV match (automated, from the CV): score; each automated risk flag marked confirmed, contradicted (say by what) or unverified. Never present a CV flag as a concern when the assessment contradicts it; never invent a risk that neither source states.\nProbe in the screening call: 2–3 points tied to the weakest areas or unverified risks, pointing to the kit\'s questions where one already covers it.\nIf the evidence is clearly weak, move_candidate to on_hold with the reason; never reject.',
       "5. Candidates who moved on to an interview round since you were asked are past screening: skip them. If a tool refuses because of a candidate's stage, note it in your summary and stop for that candidate — never move them to make it work.",
       "Finish with a summary table in plain text: candidate, kit, assessment status, recommendation.",
@@ -422,13 +429,17 @@ export function registerPhase4Agents(): void {
     name: "Offer agent",
     // 1.1.0: negotiation — revises a countered offer inside the band and re-routes it.
     // 1.2.0: an offer an approver sent back is revised for their reason (or a person asked).
-    version: "1.2.0",
+    // 1.3.0: never drafts without the candidate's expected CTC and notice period (sends the
+    // pay & availability form); an expectation above the band goes to the HR head first.
+    version: "1.3.0",
     owner: "hr_head",
     responsibility:
-      "Turns a hiring decision into a draft offer inside the approved band, with its letter and an approval brief, and walks it through HR head and CBO approval.",
+      "Turns a hiring decision into a draft offer inside the approved band — built on the candidate's stated expectation and notice period — with its letter and an approval brief, and walks it through HR head and CBO approval.",
     mustNever: [
       "Approve or release an offer",
       "Offer outside the requisition's approved band without a person's explicit go-ahead",
+      "Draft an offer before the candidate's expected CTC and notice period are known",
+      "Draft against an expectation above the band before the HR head has decided how to proceed",
       "Change an offer after it has been submitted for approval",
     ],
     scope: {
@@ -444,16 +455,20 @@ export function registerPhase4Agents(): void {
         "offer letters on draft offers",
         "submission into the approval chain",
       ],
-      external: [],
+      external: ["the pay & availability form to the candidate"],
     },
     gates: ["general"],
     riskTier: "high",
-    evals: ["offer: drafts in band, generates the letter and routes it to the HR head"],
+    evals: [
+      "offer: drafts in band, generates the letter and routes it to the HR head",
+      "offer: sends the pay & availability form instead of drafting blind",
+    ],
     feature: "agent_offer",
     maxSteps: 14,
     tools: [
       "get_offer_context",
       "research_compensation",
+      "send_compensation_form",
       "draft_offer",
       "revise_offer",
       "generate_offer_letter",
@@ -462,10 +477,12 @@ export function registerPhase4Agents(): void {
     system: [
       "You are the offer agent. You turn a hiring decision into an offer that people approve.",
       "1. get_offer_context. Only continue if the hiring decision says SELECT and there is no active offer.",
-      "2. Propose a CTC inside the requisition's band: anchor on the candidate's expected CTC, the internal parity median and the band midpoint; use research_compensation if the band is missing. Never exceed the band — ask_human instead.",
-      "3. draft_offer (joining date: notice period from today, rounded to the next Monday, if known).",
+      "1b. If compensation.complete is false: if compensation.form is open (status sent), finish and say you are waiting for the candidate; otherwise send_compensation_form and finish. Never draft without the candidate's expected CTC and notice period, and never guess them.",
+      "1c. If compensation.expectedCtc is above the band maximum: ask_human with assignee_role hr_head — state the expectation, the band, the gap in money and %, current pay and competing offers — and offer three choices: (a) offer at the band maximum, (b) seek a CBO exception above the band, (c) stop. Follow the answer: (a) draft at the band maximum; (b) ask_human with assignee_role president_cbo for the figure, then draft at the figure they give; (c) finish without drafting.",
+      "2. Propose a CTC inside the requisition's band: anchor on the candidate's expected CTC, the internal parity median and the band midpoint; use research_compensation if the band is missing. Never exceed the band unless the CBO answered 1c(b).",
+      "3. draft_offer (joining date: the candidate's earliest joining date if given, otherwise notice period from today, rounded to the next Monday).",
       "4. generate_offer_letter, then submit_offer_for_approval.",
-      "5. request_approval with subject {type: 'offer', id: <offerId>} and a brief: CTC and where it sits in the band, internal parity, the candidate's expectation and hike, risks. When the HR head approves, request the CBO's approval the same way.",
+      "5. request_approval with subject {type: 'offer', id: <offerId>} and a brief: CTC and where it sits in the band, internal parity, the candidate's expectation and hike, competing offers, risks (the system adds the expectation and gap itself). When the HR head approves, request the CBO's approval the same way.",
       "If an approver sent the offer back (an existing offer is draft with sentBack): read their reason. If it can be met inside the band (pay, joining date), revise_offer with your reasoning, generate_offer_letter, submit_offer_for_approval and request approval again with a brief that states what was asked and what changed. If it cannot be met inside the band or is not about the offer's terms, ask_human. Never resubmit an unchanged offer.",
       "When the candidate asked for changes (an existing offer is countered): read their counter (expected CTC, joining date, note). Meet the ask if it sits inside the band and within reason of internal parity; otherwise propose the highest defensible figure inside the band and say why. revise_offer with that CTC and your reasoning, then generate_offer_letter, submit_offer_for_approval, and request the HR head's (then the CBO's) approval with a brief that states what the candidate asked for, what you propose and why. Never exceed the band — ask_human instead.",
     ].join("\n"),

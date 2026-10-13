@@ -189,6 +189,54 @@ describe("rules", () => {
     await db.delete(requisitions).where(eq(requisitions.id, q!.id));
   });
 
+  test("an offer stalled on unknown pay (form closed unanswered) is flagged until it is known", async () => {
+    const { applications, candidates, requisitions, compensationRequests, compensationDetails } =
+      await import("../drizzle/schema");
+    const [q] = await db
+      .insert(requisitions)
+      .values({ orgId, code: `REQ-PAY-${stamp}`, title: "VP", status: "approved" } as never)
+      .returning({ id: requisitions.id });
+    const [c] = await db
+      .insert(candidates)
+      .values({ orgId, fullName: "Ravi", email: `ravi-${stamp}@x.local` })
+      .returning({ id: candidates.id });
+    const [a] = await db
+      .insert(applications)
+      .values({ orgId, requisitionId: q!.id, candidateId: c!.id, stage: "l3" })
+      .returning({ id: applications.id });
+    const [r] = await db
+      .insert(compensationRequests)
+      .values({
+        orgId,
+        applicationId: a!.id,
+        candidateId: c!.id,
+        token: `p${stamp}`,
+        status: "sent",
+      })
+      .returning({ id: compensationRequests.id });
+    const rule = async () => (await open()).filter((i) => i.rule === "offer.pay_unknown");
+    await evaluate();
+    expect(await rule()).toHaveLength(0); // still open: the candidate may answer
+    await db
+      .update(compensationRequests)
+      .set({ status: "expired" })
+      .where(eq(compensationRequests.id, r!.id));
+    await evaluate();
+    expect((await rule())[0]).toMatchObject({ agentType: "offer", severity: "warning" });
+    // TA enters it from a call: the issue resolves.
+    await db.insert(compensationDetails).values({
+      orgId,
+      applicationId: a!.id,
+      candidateId: c!.id,
+      expectedCtc: "9000000",
+      noticePeriodDays: 30,
+      source: "screening_call",
+    });
+    await evaluate();
+    expect(await rule()).toHaveLength(0);
+    await db.delete(requisitions).where(eq(requisitions.id, q!.id));
+  });
+
   test("tool error rate fires above the threshold only", async () => {
     const id = await run("screening", { status: "done" });
     const steps = (errors: number) =>

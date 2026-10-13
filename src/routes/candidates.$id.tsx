@@ -5,6 +5,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { ScreeningPanel } from "@/components/ScreeningPanel";
 import { CandidateCollab } from "@/components/CandidateCollab";
+import { CompensationPanel } from "@/components/CompensationPanel";
 import { ArrowLeft, Download, ExternalLink, ShieldCheck, Sparkles } from "lucide-react";
 
 import {
@@ -352,6 +353,8 @@ function CandidateDetail() {
               title: (reqs.data ?? []).find((r) => r.id === a.requisition_id)?.title ?? "Role",
             }))}
           />
+
+          <CompensationPanel candidateId={id} />
 
           <CandidateCollab candidateId={id} ownerId={c.owner_id ?? null} />
 

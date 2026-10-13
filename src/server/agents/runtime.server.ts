@@ -137,6 +137,44 @@ type GateInfo = {
   subject?: GateSubject;
 };
 
+/**
+ * The candidate's own numbers against the offer, stated by the system on the
+ * approval card (pure; unit-tested) — never left to the agent's brief.
+ */
+export function expectationLine(
+  ctc: number,
+  pay: {
+    expectedCtc: number | null;
+    currentTotal: number | null;
+    noticePeriodDays: number | null;
+    competingOffers: boolean | null;
+    source: string | null;
+  },
+): string {
+  if (pay.expectedCtc == null)
+    return "\n\nThe candidate's expected CTC is not on record — this offer was not checked against what they asked for.";
+  const gap = ctc - pay.expectedCtc;
+  const where =
+    gap === 0
+      ? "meets it exactly"
+      : gap > 0
+        ? `is ${rupees(gap)} (${Math.round((gap / pay.expectedCtc) * 100)}%) above it`
+        : `is ${rupees(-gap)} (${Math.round((-gap / pay.expectedCtc) * 100)}%) below it`;
+  const from =
+    pay.source === "candidate_form"
+      ? "the candidate's form"
+      : pay.source === "screening_call"
+        ? "the screening call"
+        : pay.source === "recruiter"
+          ? "TA"
+          : "the candidate profile";
+  const hike =
+    pay.currentTotal && pay.currentTotal > 0
+      ? ` Current CTC ${rupees(pay.currentTotal)}; this offer is a ${Math.round(((ctc - pay.currentTotal) / pay.currentTotal) * 100)}% change.`
+      : " Current CTC not on record.";
+  return `\n\nThe candidate expects ${rupees(pay.expectedCtc)} (from ${from}); this offer ${where}.${hike}${pay.noticePeriodDays != null ? ` Notice period ${pay.noticePeriodDays} days.` : ""}${pay.competingOffers ? " They have other offers in hand." : ""}`;
+}
+
 async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | { error: string }> {
   if (subject.type === "offer" || subject.type === "offer_release") {
     const offerId = "offerId" in subject ? subject.offerId : subject.id;
@@ -178,10 +216,11 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
             ? ` Outside the approved band ${rupees(lo)}–${rupees(hi)}.`
             : ` Inside the approved band ${rupees(lo)}–${rupees(hi)}.`
           : "";
+      const { detailsFor } = await import("@/lib/compensation.server");
       return {
         role,
         status: o.status,
-        detail: `Offer for ${o.name} (${o.title}): ${rupees(ctc)} CTC — ${o.status}.${vsBudget}${vsBand}`,
+        detail: `Offer for ${o.name} (${o.title}): ${rupees(ctc)} CTC — ${o.status}.${vsBudget}${vsBand}${expectationLine(ctc, await detailsFor(orgId, o.applicationId))}`,
       };
     }
     if (o.status !== "approved")

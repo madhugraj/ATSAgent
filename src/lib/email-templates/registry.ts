@@ -16,6 +16,7 @@ import { template as documentRequestTemplate } from "./document-request";
 import { template as roleInviteTemplate } from "./role-invite";
 import { template as interviewerBriefTemplate } from "./interviewer-brief";
 import { template as interviewSlotsTemplate } from "./interview-slots";
+import { template as compensationFormTemplate } from "./compensation-form";
 
 /**
  * Dynamic template-data bag passed to every template renderer and subject
@@ -68,5 +69,6 @@ export const TEMPLATES: Record<string, TemplateEntry> = {
   document_request: documentRequestTemplate,
   role_invite: roleInviteTemplate,
   interviewer_brief: interviewerBriefTemplate,
+  compensation_form: compensationFormTemplate,
   interview_slots: interviewSlotsTemplate,
 };

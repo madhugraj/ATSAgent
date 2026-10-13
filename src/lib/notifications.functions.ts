@@ -25,14 +25,30 @@ import {
  */
 
 export type NotificationAction = {
-  id: "extend" | "phone_screen" | "decide_without" | "remind" | "move_l1" | "hold" | "reject";
+  id:
+    | "extend"
+    | "phone_screen"
+    | "decide_without"
+    | "remind"
+    | "move_l1"
+    | "hold"
+    | "reject"
+    | "pay_remind";
   label: string;
 };
 
 export type Notification = {
   id: string;
   kind:
-    "approval" | "interview" | "offer" | "invite" | "platform" | "stale" | "agent" | "assessment";
+    | "approval"
+    | "interview"
+    | "offer"
+    | "invite"
+    | "platform"
+    | "stale"
+    | "agent"
+    | "assessment"
+    | "pay";
   title: string;
   body: string;
   to: string;
@@ -46,6 +62,8 @@ export type Notification = {
   actions?: NotificationAction[];
   subject?: {
     assessmentId?: string;
+    /** A pay & availability form request. */
+    payRequestId?: string;
     applicationId?: string;
     candidate?: string;
     dueAt?: string | null;
@@ -414,7 +432,7 @@ export const myNotifications = createServerFn({ method: "GET" })
         member.isOwner ||
         roles.some((r) => r === "recruiter" || r === "hr_head" || r === "president_cbo")
       )
-        out.push(...(await assessmentNudges(member.orgId)));
+        out.push(...(await assessmentNudges(member.orgId)), ...(await payNudges(member.orgId)));
     }
     // This person's pop-up choices (snoozed / dismissed).
     const states = out.length
@@ -551,6 +569,75 @@ export async function assessmentNudges(orgId: string): Promise<Notification[]> {
         severity: "info",
         agent: "Screening agent",
         actions: [{ id: "extend", label: "Change the due date" }],
+        subject,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Pay & availability forms past due, or a reminder waiting for a person
+ * (TA / HR only — the caller checks). No amounts appear in a nudge.
+ */
+export async function payNudges(orgId: string, now = new Date()): Promise<Notification[]> {
+  const comp = await import("./compensation.server");
+  const tl = await import("./assessment-timeline.server");
+  const { getOrgEmailSettings } = await import("./email-outbox.server");
+  const tz = (await getOrgEmailSettings(orgId)).timezone;
+  const policy = await tl.assessmentPolicyOf(orgId);
+  const auto = await comp.payRemindersAutomatic(orgId);
+  const out: Notification[] = [];
+  for (const { r, name } of await comp.openPayRequests(orgId)) {
+    const subject = {
+      payRequestId: r.id,
+      applicationId: r.applicationId,
+      candidate: name,
+      dueAt: r.dueAt ? r.dueAt.toISOString() : null,
+    };
+    const to = `/candidates/${r.candidateId}`;
+    const due = r.dueAt ? tl.dayText(r.dueAt, tz) : "soon";
+    if (comp.payOverdue(r, policy.overdueAfterDays, now)) {
+      out.push({
+        id: `pay:overdue:${r.id}`,
+        kind: "pay",
+        title: `${name} has not shared their pay and availability`,
+        body: `The form was due ${due}; the link closes ${r.closesAt ? tl.dayText(r.closesAt, tz) : "soon"}. Remind them, or ask on a call and enter it on their page — the offer waits for it.`,
+        to,
+        at: r.dueAt ? r.dueAt.toISOString() : r.createdAt.toISOString(),
+        severity: "warn",
+        popup: true,
+        agent: "Offer agent",
+        actions: [{ id: "pay_remind", label: "Send a reminder" }],
+        subject,
+      });
+    } else if (
+      !auto &&
+      tl.nextStep(
+        {
+          sentAt: r.createdAt,
+          dueAt: r.dueAt ?? new Date(r.createdAt.getTime() + 3 * 864e5),
+          closesAt: r.closesAt ?? new Date(r.createdAt.getTime() + 7 * 864e5),
+          remindersSent: r.remindersSent,
+          lastRemindedAt: r.lastRemindedAt,
+          overdueAt: null,
+        },
+        policy,
+        now,
+        tz,
+      ) === "remind"
+    ) {
+      out.push({
+        id: `pay:remind:${r.id}:${r.remindersSent + 1}`,
+        kind: "pay",
+        title: `Remind ${name} about the pay & availability form?`,
+        body: `It is due ${due}. Agents may not email candidates on their own here, so the reminder waits for you.`,
+        to,
+        at: now.toISOString(),
+        severity: "info",
+        popup: true,
+        agent: "Screening agent",
+        actions: [{ id: "pay_remind", label: "Send the reminder" }],
         subject,
       });
     }

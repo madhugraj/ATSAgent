@@ -58,6 +58,14 @@ offer is released (a revision gets a new one), showing only that offer's role, C
 letter; it records one answer (accept, decline, ask for changes) on a released offer — claimed in the
 update itself — and its server functions are rate-limited with all other RPCs.
 
+The candidate's pay & availability page (`/pay/<token>`) is public in the same way: a 64-hex token per
+request, showing only the candidate's first-party view (name, role, organisation, due date) — never
+any amount, not even their own after submitting. It records one submission (claimed in the update
+itself; expected CTC, notice period and consent are required and range-checked), refuses closed,
+cancelled or expired links, and its server functions are rate-limited with all other RPCs. The
+answers are readable only by TA, the HR head, the CBO and owners (role-checked server-side); audit
+entries and thread messages record that details changed, never the amounts.
+
 The candidate's interview-time page (`/schedule/<token>`) is public: the token is 64 random hex
 characters, it returns only the round, role, organisation, the interviewer's first name and the
 offered times, it can book one of those times once (the offer is claimed before booking and every

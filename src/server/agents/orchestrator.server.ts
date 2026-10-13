@@ -330,6 +330,44 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
       );
   }
 
+  if (applicationId && e.type === "compensation.submitted") {
+    // The offer waits for the candidate's expectation: continue it once known —
+    // only for a selected candidate whose offer is not already with approvers.
+    const [app] = await db
+      .select({ stage: applications.stage })
+      .from(applications)
+      .where(and(eq(applications.id, applicationId), eq(applications.orgId, e.orgId)))
+      .limit(1);
+    const offerRows = await db
+      .select({ status: offers.status })
+      .from(offers)
+      .where(and(eq(offers.orgId, e.orgId), eq(offers.applicationId, applicationId)));
+    const [selected] = await db
+      .select({ id: agentEvents.id })
+      .from(agentEvents)
+      .where(
+        and(
+          eq(agentEvents.orgId, e.orgId),
+          eq(agentEvents.type, "hiring.selected"),
+          eq(agentEvents.subjectId, applicationId),
+        ),
+      )
+      .limit(1);
+    const busy = offerRows.some((o) =>
+      ["pending_hr", "pending_cbo", "approved", "released", "accepted", "countered"].includes(
+        o.status,
+      ),
+    );
+    const wanted =
+      app?.stage === "offer_pending" || !!selected || offerRows.some((o) => o.status === "draft");
+    if (app && wanted && !busy && !["rejected", "hired", "joined", "withdrawn"].includes(app.stage))
+      await dispatch(
+        "offer",
+        `The candidate for application ${applicationId} (${req.code} "${req.title}") has shared their expected CTC and notice period. Continue the offer: read get_offer_context and propose within the band, or ask the HR head first if the expectation is above it.`,
+        { type: "application", id: applicationId },
+      );
+  }
+
   if (applicationId && e.type === "hiring.selected") {
     await dispatch(
       "offer",
@@ -626,6 +664,13 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
     await runAssessmentSweep(opts.orgId);
   } catch (err) {
     log.warn("assessment.sweep_failed", { error: err as Error });
+  }
+  // Pay & availability forms: the same timeline (src/lib/compensation.server.ts).
+  try {
+    const { runCompensationSweep } = await import("@/lib/compensation.server");
+    await runCompensationSweep(opts.orgId);
+  } catch (err) {
+    log.warn("compensation.sweep_failed", { error: err as Error });
   }
   // Hiring-desk threads hear about new applicants.
   try {

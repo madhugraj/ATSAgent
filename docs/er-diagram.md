@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-78 tables across 9 domains.
+80 tables across 9 domains.
 
 ## Identity & access
 
@@ -1034,6 +1034,14 @@ erDiagram
 | `capture_events` | `requisition_id` | `requisitions` | no action |
 | `comp_knowledge` | `org_id` | `organizations` | cascade |
 | `comp_knowledge` | `requisition_id` | `requisitions` | no action |
+| `compensation_details` | `application_id` | `applications` | cascade |
+| `compensation_details` | `candidate_id` | `candidates` | cascade |
+| `compensation_details` | `entered_by` | `users` | no action |
+| `compensation_details` | `org_id` | `organizations` | cascade |
+| `compensation_details` | `request_id` | `compensation_requests` | no action |
+| `compensation_requests` | `application_id` | `applications` | cascade |
+| `compensation_requests` | `candidate_id` | `candidates` | cascade |
+| `compensation_requests` | `org_id` | `organizations` | cascade |
 | `content_templates` | `org_id` | `organizations` | cascade |
 | `copilot_messages` | `org_id` | `organizations` | cascade |
 | `departments` | `org_id` | `organizations` | cascade |
@@ -1169,6 +1177,8 @@ erDiagram
 | `candidates` | Candidates & pipeline | 40 | — |
 | `capture_events` | Sourcing & integrations | 10 | — |
 | `comp_knowledge` | Intelligence | 17 | — |
+| `compensation_details` | — | 19 | — |
+| `compensation_requests` | — | 12 | (token) |
 | `content_templates` | Requisitions & job content | 16 | — |
 | `copilot_messages` | Intelligence | 6 | — |
 | `departments` | Organisations & masters | 8 | (orgId+name) |

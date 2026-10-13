@@ -583,6 +583,12 @@ export function scenarios(): ScriptedScenario[] {
           authorId: userId,
           body: "Hiring decision: SELECT. Strong across rounds.",
         });
+        // The candidate's stated expectation: an offer is never drafted without it.
+        const { candidates } = await import("../../drizzle/schema");
+        await db
+          .update(candidates)
+          .set({ currentCtc: "2600000", expectedCtc: "3000000", noticePeriodDays: 60 })
+          .where(eq(candidates.id, a!.c));
         return { requisitionId, app };
       },
       goal: (d) => `Prepare the offer. app=${d["app"]}\n\nRequisition id: ${d["requisitionId"]}`,
@@ -617,6 +623,46 @@ export function scenarios(): ScriptedScenario[] {
             subject: { type: "offer", id: String(toolResult(m, "draft_offer")["offerId"]) },
           }),
         say("Offer at 30 L approved by the HR head; waiting for the CBO."),
+      ],
+    },
+    {
+      name: "offer: sends the pay & availability form instead of drafting blind",
+      agentType: "offer",
+      setup: async ({ orgId, userId }) => {
+        const requisitionId = await seedRequisition(orgId, userId, "approved");
+        const { db } = await import("../../src/server/db");
+        const { requisitions, candidateNotes, applications } = await import("../../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        await db
+          .update(requisitions)
+          .set({ ctcBandMin: "2500000", ctcBandMax: "3500000", budgetCtc: "3000000" })
+          .where(eq(requisitions.id, requisitionId));
+        const app = await seedApplication(orgId, requisitionId, "Arjun", "l3", 84);
+        const [a] = await db
+          .select({ c: applications.candidateId })
+          .from(applications)
+          .where(eq(applications.id, app));
+        await db.insert(candidateNotes).values({
+          orgId,
+          candidateId: a!.c,
+          authorId: userId,
+          body: "Hiring decision: SELECT. Strong across rounds.",
+        });
+        return { requisitionId, app };
+      },
+      goal: (d) => `Prepare the offer. app=${d["app"]}\n\nRequisition id: ${d["requisitionId"]}`,
+      decide: () => ({ status: "approved" }),
+      expect: {
+        status: "done",
+        calls: ["get_offer_context", "send_compensation_form"],
+        neverCalls: ["draft_offer"],
+      },
+      script: [
+        (m) => call("c", "get_offer_context", { applicationId: fromGoal(m, "app") }),
+        (m) => call("f", "send_compensation_form", { applicationId: fromGoal(m, "app") }),
+        say(
+          "Arjun's expected CTC and notice period are not known; the pay & availability form is sent. I will continue when they answer.",
+        ),
       ],
     },
     {

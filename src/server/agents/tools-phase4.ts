@@ -127,13 +127,70 @@ async function offerApplication(orgId: string, offerId: string) {
   return o;
 }
 
+/**
+ * A person with one of `roles` answered this run's question (ask_human
+ * addressed to that role). The task system checks the answerer holds it.
+ */
+async function answeredInRun(runId: string, roles: string[]): Promise<boolean> {
+  const { agentTasks } = await import("@db/schema");
+  const [t] = await db
+    .select({ id: agentTasks.id })
+    .from(agentTasks)
+    .where(
+      and(
+        eq(agentTasks.runId, runId),
+        eq(agentTasks.kind, "clarification"),
+        eq(agentTasks.status, "answered"),
+        inArray(agentTasks.assigneeRole, roles as never[]),
+      ),
+    )
+    .limit(1);
+  return !!t;
+}
+
+const pct = (a: number, b: number) => Math.round(((a - b) / b) * 100);
+
+/**
+ * Before an offer is drafted or revised: the candidate's expected CTC and
+ * notice period must be known, and an expectation above the band needs the
+ * HR head's (or CBO's) answer in this run. Null = go ahead.
+ */
+export async function offerReadiness(
+  ctx: Pick<ToolContext, "orgId" | "runId">,
+  applicationId: string,
+): Promise<string | null> {
+  const { detailsFor, latestRequest } = await import("@/lib/compensation.server");
+  const app = await loadApplication(ctx.orgId, applicationId);
+  const pay = await detailsFor(ctx.orgId, applicationId);
+  if (!pay.complete) {
+    const missing = [
+      pay.expectedCtc == null ? "expected CTC" : null,
+      pay.noticePeriodDays == null ? "notice period" : null,
+    ].filter(Boolean);
+    const r = await latestRequest(ctx.orgId, applicationId);
+    const waiting = r?.status === "sent" && (r.closesAt?.getTime() ?? Infinity) > Date.now();
+    return waiting
+      ? `The candidate's ${missing.join(" and ")} ${missing.length > 1 ? "are" : "is"} not known yet. The pay & availability form was already sent and is open — do not draft and do not send it again. Finish: you will be started again when the candidate answers (or TA enters it from a call).`
+      : `The candidate's ${missing.join(" and ")} ${missing.length > 1 ? "are" : "is"} not known, so no offer can be drafted yet. send_compensation_form to the candidate, then finish: you will be started again when they answer (or TA enters it from a call).`;
+  }
+  const max = num(app.bandMax);
+  if (
+    max != null &&
+    pay.expectedCtc! > max &&
+    !(await answeredInRun(ctx.runId, ["hr_head", "president_cbo"]))
+  ) {
+    return `The candidate expects ${rupees(pay.expectedCtc)}, ${rupees(pay.expectedCtc! - max)} (${pct(pay.expectedCtc!, max)}%) above the band maximum ${rupees(max)}. Before drafting, ask_human with assignee_role hr_head: offer at the band maximum, seek a CBO exception above the band, or stop. Draft only after they answer, and follow their answer.`;
+  }
+  return null;
+}
+
 export function registerPhase4Tools(): void {
   /* ------------------------------------------------------------- offer */
 
   registerTool({
     name: "get_offer_context",
     description:
-      "Everything needed to propose an offer for one application: candidate's current and expected CTC and notice period, the requisition's approved band and budget, the recorded hiring decision, existing offers for this application (with their revision and, when the candidate asked for changes, what they asked for), and what the organisation recently offered for the same role (internal parity).",
+      "Everything needed to propose an offer for one application: candidate's current and expected CTC and notice period (compensation: fixed / variable split, earliest joining, competing offers, location and where it came from — the candidate's form, a screening call or TA; complete = expected CTC and notice are known; form = the pay & availability form's status), the requisition's approved band and budget, the recorded hiring decision, existing offers for this application (with their revision and, when the candidate asked for changes, what they asked for), and what the organisation recently offered for the same role (internal parity).",
     input: AppId,
     risk: "read",
     untrustedOutput: true,
@@ -186,6 +243,15 @@ export function registerPhase4Tools(): void {
         expectedCtc: num(app.expectedCtc),
         noticePeriodDays: app.noticePeriodDays,
         band: { min: num(app.bandMin), max: num(app.bandMax), budget: num(app.budget) },
+        compensation: await (async () => {
+          const { detailsFor, latestRequest } = await import("@/lib/compensation.server");
+          const d = await detailsFor(ctx.orgId, app.id);
+          const r = await latestRequest(ctx.orgId, app.id);
+          return {
+            ...d,
+            form: r ? { status: r.status, sentAt: r.createdAt, dueAt: r.dueAt } : null,
+          };
+        })(),
         hiringDecision: decision[0]?.body ?? null,
         existingOffers: existing.map(({ approvalTrail, ...o }) => {
           // An approver who sent it back: their step and reason.
@@ -211,6 +277,35 @@ export function registerPhase4Tools(): void {
   });
 
   registerTool({
+    name: "send_compensation_form",
+    description:
+      "Email the candidate a private pay & availability form: current pay (fixed / variable), expected CTC, notice period, earliest joining date, competing offers, location and relocation. Only TA and HR see the answers. Due date, reminders and closing follow the organisation's assessment policy; reminders are automatic. Refused when the details are already known or a form is already open. Leaves the organisation, so a person approves it unless the form is pre-approved.",
+    input: AppId,
+    risk: "external",
+    templateOf: () => "compensation_form",
+    describe: () => "Send the pay & availability form to the candidate",
+    precheck: async (ctx, i) => {
+      const { detailsFor, latestRequest } = await import("@/lib/compensation.server");
+      const d = await detailsFor(ctx.orgId, i.applicationId);
+      if (d.complete)
+        return "The candidate's expected CTC and notice period are already known — do not ask again.";
+      const r = await latestRequest(ctx.orgId, i.applicationId);
+      if (r?.status === "sent" && (r.closesAt?.getTime() ?? Infinity) > Date.now())
+        return "The form was already sent and is still open; reminders are automatic — wait for the candidate.";
+      return null;
+    },
+    run: async (ctx, i) => {
+      const { requestCompensation } = await import("@/lib/compensation.server");
+      const r = await requestCompensation(ctx.orgId, i.applicationId, {
+        userId: ctx.principalUserId,
+        memberEmail: null,
+        label: ctx.actor,
+      });
+      return { emailed: r.emailed, alreadyOpen: r.alreadyOpen, due: r.due };
+    },
+  });
+
+  registerTool({
     name: "draft_offer",
     description:
       "Create a DRAFT offer for a selected candidate. The CTC must sit inside the requisition's approved band; if it cannot, ask a person instead. The person the agent works for must be on the recruiting team.",
@@ -223,6 +318,7 @@ export function registerPhase4Tools(): void {
     }),
     risk: "write",
     describe: (i) => `Draft an offer at ${rupees(i.offeredCtc)} CTC`,
+    precheck: (ctx, i) => offerReadiness(ctx, i.applicationId),
     run: async (ctx, i) => {
       const app = await loadApplication(ctx.orgId, i.applicationId);
       // After the role's final round — which is L1 or L2 when its plan has fewer rounds.
@@ -237,9 +333,18 @@ export function registerPhase4Tools(): void {
       }
       const min = num(app.bandMin);
       const max = num(app.bandMax);
-      if (min != null && max != null && (i.offeredCtc < min || i.offeredCtc > max)) {
+      // Above the band only with the CBO's answer in this run (an exception the
+      // HR head asked for); never below it.
+      const cboException =
+        max != null && i.offeredCtc > max && (await answeredInRun(ctx.runId, ["president_cbo"]));
+      if (
+        min != null &&
+        max != null &&
+        (i.offeredCtc < min || i.offeredCtc > max) &&
+        !cboException
+      ) {
         throw new Error(
-          `${rupees(i.offeredCtc)} is outside the approved band ${rupees(min)}–${rupees(max)}. Ask a person (ask_human) before going outside the band.`,
+          `${rupees(i.offeredCtc)} is outside the approved band ${rupees(min)}–${rupees(max)}. Ask a person (ask_human) before going outside the band; above it needs the CBO's answer (assignee_role president_cbo).`,
         );
       }
       const open = await db
@@ -289,6 +394,12 @@ export function registerPhase4Tools(): void {
     }),
     risk: "write",
     describe: (i) => `Revise the offer to ${rupees(i.offeredCtc)} CTC`,
+    // An offer sent back is revised only once the candidate's expectation is
+    // known (a countered offer carries the candidate's own ask).
+    precheck: async (ctx, i) => {
+      const o = await offerApplication(ctx.orgId, i.offerId);
+      return o.status === "draft" ? offerReadiness(ctx, o.applicationId) : null;
+    },
     run: async (ctx, i) => {
       const o = await offerApplication(ctx.orgId, i.offerId);
       if (o.status !== "countered" && o.status !== "draft")

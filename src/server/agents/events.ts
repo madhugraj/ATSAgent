@@ -21,7 +21,8 @@ export type AgentEventType =
   | "onboarding.document_rejected"
   | "interview.missed"
   | "interview.slots_unanswered"
-  | "assessment.completed";
+  | "assessment.completed"
+  | "compensation.submitted";
 
 export async function emitAgentEvent(e: {
   orgId: string;

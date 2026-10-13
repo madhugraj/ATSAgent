@@ -127,6 +127,7 @@ export const WHITELISTABLE_TEMPLATES: { id: string; label: string; group: "email
   { id: "interview_invite", label: "Interview invitation", group: "email" },
   { id: "interview_slots", label: "Interview time choice (candidate picks)", group: "email" },
   { id: "assessment_invite", label: "Assessment invitation (and reminder)", group: "email" },
+  { id: "compensation_form", label: "Pay & availability form (and reminder)", group: "email" },
   { id: "document_request", label: "Pre-onboarding document request", group: "email" },
   { id: "role_invite", label: "Invitation to apply (past candidates)", group: "email" },
   { id: "job_board:linkedin", label: "LinkedIn post", group: "board" },
