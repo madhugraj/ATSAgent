@@ -286,22 +286,8 @@ export const createOrganization = createServerFn({ method: "POST" })
       );
 
     // The tenant's own careers address: yavar.ai -> yavar@careers.atsiq.yavar.ai
-    let inboxSlug =
-      companyDomain.split(".")[0]?.replace(/[^a-z0-9-]+/g, "-") ||
-      data.name
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .slice(0, 28) ||
-      "org";
-    for (let attempt = 2; attempt < 30; attempt++) {
-      const [taken] = await db
-        .select({ id: organizations.id })
-        .from(organizations)
-        .where(ilike(organizations.inboxSlug, inboxSlug))
-        .limit(1);
-      if (!taken) break;
-      inboxSlug = `${inboxSlug.replace(/-\d+$/, "")}-${attempt}`;
-    }
+    const { uniqueInboxSlug } = await import("../server/org-setup.server");
+    const inboxSlug = await uniqueInboxSlug(companyDomain, data.name);
 
     const [org] = await db
       .insert(organizations)

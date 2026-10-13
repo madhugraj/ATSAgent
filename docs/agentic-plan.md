@@ -163,6 +163,10 @@ card. The orchestrator re-registers agents if a reloaded module graph finds
 the registry empty, and logs `agent.orchestrator.agent_missing` rather than
 dropping an event silently.
 
+Every model call is told today's date at the top of its system prompt
+(`withToday` in the gateway): without it a model reasons from its training
+cutoff, and a role that started this year reads as "future-dated".
+
 ### 3.3 Gateway extension (`aiAgentStep`)
 
 Add one function next to `aiJson` in `src/lib/ai-gateway.server.ts`:
@@ -276,6 +280,38 @@ the autonomy dial.
   assessment, grades answers / transcripts, writes a proceed/hold summary.
 - **HITL:** sending the assessment = candidate contact → approval or
   whitelisted template.
+- **Assessment timeline (1.5.0, migration `0037`):** one policy per
+  organisation (`assessment_settings`; defaults: due at the end of the 3rd
+  working day in the organisation's time zone, first reminder after 2 days and
+  another on the due day — at most 2, never twice within 20 h, working days
+  only — overdue 2 days after the due date, link closes 7 days after sending,
+  never before the due date). The invitation states that date; the link and
+  reminders follow the same record (`due_at`, `closes_at`). A sweep
+  (`src/lib/assessment-timeline.server.ts`) sends reminders when the
+  Screening agent may email candidates on its own (its autonomy), otherwise a
+  pop-up offers "Send the reminder"; flags overdue once (thread + pop-up:
+  give more time, remind, screen by phone, decide without — each recorded and
+  audited); closes the link. Submitting grades at once, refuses closed or
+  waived links, tells the role's thread and raises `assessment.completed`:
+  the Screening agent adds its proceed / hold recommendation and a person
+  decides (interview, hold, not taken further) from the pop-up or the
+  candidate's page. The Follow-up agent (1.4.0) no longer reminds candidates.
+- **Recommendation and call kit (1.6.0):** `get_screening_status` gives the
+  agent the whole written assessment (each area's score with the candidate's
+  own words as evidence, strengths, red flags, summary) and the CV match with
+  its risk flags labelled as automated inferences. The note is structured —
+  recommendation; written assessment (direct evidence); CV match with each
+  flag confirmed, contradicted or unverified; what to probe in the call — and
+  never repeats a CV concern the assessment contradicts. When the assessment
+  is submitted, the screening-call kit is rebuilt on it: it does not re-ask
+  what the assessment established and probes its weakest areas and the CV
+  inferences it left open. A completed assessment starts the agent only while
+  the candidate is still at screening.
+- **Agent pop-ups:** notifications stay derived live; those that need a
+  person pop up (overdue, reminder waiting for approval, completed assessment
+  to decide on) for the people who can act (TA, HR head, CBO, owner). "Later"
+  snoozes for 4 hours, × dismisses (`notification_states`, per person); an
+  item that escalates gets a new id and pops up again.
 
 ### 4.6 Interview coordinator agent
 

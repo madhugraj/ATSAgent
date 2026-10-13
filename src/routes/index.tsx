@@ -9,6 +9,7 @@ import {
   BriefcaseBusiness,
   CalendarClock,
   CheckCircle2,
+  ClipboardCheck,
   Clock,
   Copy,
   FileSignature,
@@ -44,6 +45,7 @@ import { useOrg } from "@/hooks/useOrg";
 import { Bot, Brain } from "lucide-react";
 import { usePlatform } from "@/hooks/usePlatform";
 import { listAgentTasks } from "@/lib/agents.functions";
+import { myNotifications } from "@/lib/notifications.functions";
 import { attachApplication } from "@/lib/candidates.functions";
 import { getHrPerformance } from "@/lib/hr-performance.functions";
 import { readReturnOnIndividual } from "@/lib/roi.functions";
@@ -309,6 +311,20 @@ function Dashboard() {
     enabled: Boolean(org),
   });
   const agentAsks = agentTasksQ.data?.length ?? 0;
+  // Assessment items are already limited to people who can act on them, so
+  // they count here (the same live source as the agent pop-up and the bell).
+  const nudgesQ = useQuery({
+    queryKey: ["notifications"],
+    queryFn: () => myNotifications({}),
+    enabled: Boolean(org),
+    staleTime: 30_000,
+  });
+  const assessmentsOverdue = (nudgesQ.data ?? []).filter((n) =>
+    n.id.startsWith("assessment:overdue:"),
+  ).length;
+  const assessmentsToDecide = (nudgesQ.data ?? []).filter((n) =>
+    n.id.startsWith("assessment:review:"),
+  ).length;
   // Strictly "yours": canApprove mirrors the server's approval-role map, so a
   // recruiter sees only their drafts and a DH only the DH hop. Deliberately not
   // myNotifications — those approval items are org-wide, not role-filtered.
@@ -697,6 +713,22 @@ function Dashboard() {
             to: "/agents",
             tone: "warning",
           });
+        if (assessmentsToDecide)
+          strip.push({
+            icon: ClipboardCheck,
+            label: "Completed assessments to decide on",
+            value: assessmentsToDecide,
+            to: "/candidates",
+            tone: "warning",
+          });
+        if (assessmentsOverdue)
+          strip.push({
+            icon: ClipboardCheck,
+            label: "Candidate assessments overdue",
+            value: assessmentsOverdue,
+            to: "/candidates",
+            tone: "warning",
+          });
         if (isExecutive && offersAwaiting)
           strip.push({
             icon: FileSignature,
@@ -740,7 +772,7 @@ function Dashboard() {
             ) : countsQ.isLoading && org ? null : (
               <p className="flex items-center gap-2 py-2.5 text-sm text-muted-foreground">
                 <CheckCircle2 className="size-4 text-emerald-600" />
-                Approvals, screening calls, scheduling and SLAs are all clear.
+                Approvals, screening calls, assessments, scheduling and SLAs are all clear.
               </p>
             )}
           </section>

@@ -1563,6 +1563,12 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
     TEXT.candidates =
       "The Intake & matching agent searched the pipeline and the talent pool and found no matching candidates yet. Add candidates (Manual mode → Talent pool or Careers inbox), then search again.";
   }
+  // Screening done by the agent: say what it is waiting for — the candidates'
+  // written assessments — instead of the generic instruction.
+  if (cur === "screening" && run?.status === "done" && conv.requisitionId) {
+    const waiting = await assessmentWait(conv.orgId, conv.requisitionId);
+    if (waiting) TEXT.screening = waiting;
+  }
   return {
     stages,
     next: {
@@ -1575,6 +1581,50 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
       waitingForYou: Number(w?.n ?? 0),
     },
   };
+}
+
+/**
+ * Where a role's written assessments stand, in words: who has not answered yet
+ * (and until when the link is open), who has, and whose link closed. Null when
+ * no assessment was sent for the role.
+ */
+async function assessmentWait(orgId: string, requisitionId: string): Promise<string | null> {
+  const rows = (await db.execute(sql`
+    select c.full_name as name, ca.status, ca.created_at, ca.mindset_score as score
+    from candidate_assessments ca join candidates c on c.id = ca.candidate_id
+    where ca.org_id = ${orgId} and ca.requisition_id = ${requisitionId}
+    order by ca.created_at`)) as unknown as {
+    name: string;
+    status: string;
+    created_at: string;
+    score: number | null;
+  }[];
+  if (!rows.length) return null;
+  const tz = await orgTimeZone(orgId);
+  const day = (d: Date) =>
+    d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: tz });
+  const open = rows.filter((r) => r.status === "sent");
+  const done = rows.filter((r) => r.status === "completed");
+  const closed = rows.filter((r) => r.status === "expired");
+  const parts: string[] = [];
+  if (open.length)
+    parts.push(
+      `Waiting for ${open.length} candidate(s) to complete the written assessment: ${open
+        .map((r) => {
+          const sent = new Date(r.created_at);
+          return `${r.name} (sent ${day(sent)}, link open until ${day(new Date(sent.getTime() + 14 * 864e5))})`;
+        })
+        .join(", ")}. Nothing is stuck — the next step starts when they submit.`,
+    );
+  if (done.length)
+    parts.push(
+      `Completed: ${done.map((r) => `${r.name}${r.score != null ? ` (${r.score}/100)` : ""}`).join(", ")} — move those who pass to an interview round.`,
+    );
+  if (closed.length)
+    parts.push(
+      `Link closed without an answer: ${closed.map((r) => r.name).join(", ")} — send a new one, screen by phone, or decide without it.`,
+    );
+  return parts.join(" ");
 }
 
 /** Run a stopped agent again for the thread (same goal, same role). */
@@ -2888,6 +2938,16 @@ export async function revisionOf(
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 /** Agent text shown to people: drop "… ID: <uuid>" lines and any stray internal ids. */
 export function readableAgentText(text: string): string {
+  // Links are kept whole — an id inside a URL (/apply/<id>) is the link itself.
+  const links: string[] = [];
+  const shielded = text.replace(/https?:\/\/[^\s<>()`'"]+/g, (url) => {
+    links.push(url);
+    return `\uE000${links.length - 1}\uE000`;
+  });
+  return stripIds(shielded).replace(/\uE000(\d+)\uE000/g, (_, i) => links[Number(i)]!);
+}
+
+function stripIds(text: string): string {
   const id = `\`?${UUID.source}\`?`;
   return (
     text

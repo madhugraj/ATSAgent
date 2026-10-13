@@ -13,6 +13,7 @@ import {
   offers,
   orgMembers,
   organizations,
+  notificationStates,
   platformAdmins,
   requisitions,
   userRoles,
@@ -23,14 +24,35 @@ import {
  * database, so a notification disappears as soon as the work behind it is done.
  */
 
+export type NotificationAction = {
+  id: "extend" | "phone_screen" | "decide_without" | "remind" | "move_l1" | "hold" | "reject";
+  label: string;
+};
+
 export type Notification = {
   id: string;
-  kind: "approval" | "interview" | "offer" | "invite" | "platform" | "stale" | "agent";
+  kind:
+    "approval" | "interview" | "offer" | "invite" | "platform" | "stale" | "agent" | "assessment";
   title: string;
   body: string;
   to: string;
   at: string | null;
   severity: "info" | "warn" | "urgent";
+  /** Shown as an agent pop-up (unless snoozed or dismissed by this person). */
+  popup?: boolean;
+  /** The agent speaking in the pop-up. */
+  agent?: string;
+  /** What the person can do from the pop-up; each opens a short form. */
+  actions?: NotificationAction[];
+  subject?: {
+    assessmentId?: string;
+    applicationId?: string;
+    candidate?: string;
+    dueAt?: string | null;
+  };
+  /** This person's choice on the pop-up. */
+  snoozedUntil?: string | null;
+  dismissed?: boolean;
 };
 
 export const myNotifications = createServerFn({ method: "GET" })
@@ -380,8 +402,158 @@ export const myNotifications = createServerFn({ method: "GET" })
         });
     }
 
+    // Written assessments: waiting, overdue, reminder due, or waiting on a decision.
+    if (member) {
+      const roles = (
+        await db
+          .select({ role: userRoles.role })
+          .from(userRoles)
+          .where(and(eq(userRoles.userId, context.userId), eq(userRoles.orgId, member.orgId)))
+      ).map((r) => r.role);
+      if (
+        member.isOwner ||
+        roles.some((r) => r === "recruiter" || r === "hr_head" || r === "president_cbo")
+      )
+        out.push(...(await assessmentNudges(member.orgId)));
+    }
+    // This person's pop-up choices (snoozed / dismissed).
+    const states = out.length
+      ? await db
+          .select()
+          .from(notificationStates)
+          .where(
+            and(
+              eq(notificationStates.userId, context.userId),
+              inArray(
+                notificationStates.notificationId,
+                out.map((n) => n.id),
+              ),
+            ),
+          )
+      : [];
+    for (const st of states) {
+      const n = out.find((x) => x.id === st.notificationId);
+      if (!n) continue;
+      n.snoozedUntil = st.snoozedUntil ? st.snoozedUntil.toISOString() : null;
+      n.dismissed = Boolean(st.dismissedAt);
+    }
+
     const rank = { urgent: 0, warn: 1, info: 2 } as const;
     return out.sort(
       (a, b) => rank[a.severity] - rank[b.severity] || (a.at ?? "").localeCompare(b.at ?? ""),
     );
   });
+
+/**
+ * Assessment nudges, derived live (they disappear once acted on). IDs change
+ * as an item escalates, so snoozing "waiting" never hides "overdue".
+ */
+export async function assessmentNudges(orgId: string): Promise<Notification[]> {
+  const { candidateAssessments, candidates, applications } = await import("@db/schema");
+  const tl = await import("./assessment-timeline.server");
+  const { getOrgEmailSettings } = await import("./email-outbox.server");
+  const tz = (await getOrgEmailSettings(orgId)).timezone;
+  const policy = await tl.assessmentPolicyOf(orgId);
+  const { loadPolicy, decideToolCall } = await import("../server/agents/policy");
+  const sp = await loadPolicy(orgId, "screening");
+  const autoRemind = sp.enabled && decideToolCall("external", sp, "assessment_invite") === "run";
+  const rows = await db
+    .select({
+      a: candidateAssessments,
+      name: candidates.fullName,
+      stage: applications.stage,
+    })
+    .from(candidateAssessments)
+    .innerJoin(candidates, eq(candidates.id, candidateAssessments.candidateId))
+    .leftJoin(applications, eq(applications.id, candidateAssessments.applicationId))
+    .where(
+      and(
+        eq(candidateAssessments.orgId, orgId),
+        or(
+          eq(candidateAssessments.status, "sent"),
+          and(eq(candidateAssessments.status, "completed"), eq(applications.stage, "shortlisted")),
+        ),
+      ),
+    );
+  const now = new Date();
+  const out: Notification[] = [];
+  for (const { a, name, stage } of rows) {
+    const subject = {
+      assessmentId: a.id,
+      ...(a.applicationId ? { applicationId: a.applicationId } : {}),
+      candidate: name,
+      dueAt: a.dueAt ? a.dueAt.toISOString() : null,
+    };
+    const to = a.applicationId ? `/candidates/${a.candidateId}` : "/";
+    const due = a.dueAt ? tl.dayText(a.dueAt, tz) : "soon";
+    if (a.status === "completed" && stage === "shortlisted") {
+      out.push({
+        id: `assessment:review:${a.id}`,
+        kind: "assessment",
+        title: `${name} completed the assessment${a.mindsetScore != null ? ` — ${a.mindsetScore}/100` : ""}`,
+        body: "Decide who moves on: an interview round, hold, or not taken further. The Screening agent's recommendation is on the candidate's page.",
+        to,
+        at: a.completedAt ? a.completedAt.toISOString() : null,
+        severity: "urgent",
+        popup: true,
+        agent: "Screening agent",
+        actions: [
+          { id: "move_l1", label: "Move to interview" },
+          { id: "hold", label: "Hold" },
+          { id: "reject", label: "Not taking further" },
+        ],
+        subject,
+      });
+    } else if (a.status === "sent" && a.overdueAt) {
+      out.push({
+        id: `assessment:overdue:${a.id}`,
+        kind: "assessment",
+        title: `${name}'s assessment is overdue`,
+        body: `It was due ${due}; the link closes ${a.closesAt ? tl.dayText(a.closesAt, tz) : "soon"}. Give more time, screen by phone, or decide without it.`,
+        to,
+        at: a.overdueAt.toISOString(),
+        severity: "warn",
+        popup: true,
+        agent: "Screening agent",
+        actions: [
+          { id: "extend", label: "Give more time" },
+          { id: "remind", label: "Send a reminder" },
+          { id: "phone_screen", label: "Screen by phone" },
+          { id: "decide_without", label: "Decide without it" },
+        ],
+        subject,
+      });
+    } else if (a.status === "sent" && !autoRemind && tl.reminderDue(a, policy, now, tz)) {
+      out.push({
+        id: `assessment:remind:${a.id}:${a.remindersSent + 1}`,
+        kind: "assessment",
+        title: `Remind ${name} about the assessment?`,
+        body: `It is due ${due}. Agents may not email candidates on their own here, so the reminder waits for you.`,
+        to,
+        at: now.toISOString(),
+        severity: "info",
+        popup: true,
+        agent: "Screening agent",
+        actions: [
+          { id: "remind", label: "Send the reminder" },
+          { id: "extend", label: "Give more time" },
+        ],
+        subject,
+      });
+    } else if (a.status === "sent") {
+      out.push({
+        id: `assessment:waiting:${a.id}`,
+        kind: "assessment",
+        title: `Waiting for ${name}'s assessment`,
+        body: `Due ${due}. Reminders go out automatically${autoRemind ? "" : " once you approve them"}; nothing is needed from you yet.`,
+        to,
+        at: a.createdAt.toISOString(),
+        severity: "info",
+        agent: "Screening agent",
+        actions: [{ id: "extend", label: "Change the due date" }],
+        subject,
+      });
+    }
+  }
+  return out;
+}

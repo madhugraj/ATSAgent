@@ -26,6 +26,15 @@ const { db, sql } = await import("../src/server/db");
 const { orgMembers, organizations, platformAdmins, userRoles, users } =
   await import("../drizzle/schema");
 const { writeAudit } = await import("../src/server/audit");
+const { registrableDomain, workEmailProblem } = await import("../src/lib/work-email");
+const { uniqueInboxSlug } = await import("../src/server/org-setup.server");
+const { seedSourceIntegrations } = await import("../src/server/integration-seeds.server");
+
+// The same rules as self-service registration: a work address, and one
+// company domain = one organisation.
+const problem = workEmailProblem(email);
+if (problem) throw new Error(problem);
+const companyDomain = registrableDomain(email);
 
 const slug = orgName
   .toLowerCase()
@@ -53,14 +62,39 @@ const [existingOrg] = await db
   .from(organizations)
   .where(eq(organizations.slug, slug))
   .limit(1);
+const [domainTaken] = await db
+  .select({ id: organizations.id, name: organizations.name })
+  .from(organizations)
+  .where(eq(organizations.emailDomain, companyDomain))
+  .limit(1);
+if (domainTaken && domainTaken.id !== existingOrg?.id)
+  throw new Error(`${companyDomain} already belongs to "${domainTaken.name}".`);
 const org =
   existingOrg ??
   (
     await db
       .insert(organizations)
-      .values({ name: orgName, slug, status: "active", createdBy: user.id } as never)
+      .values({
+        name: orgName,
+        slug,
+        emailDomain: companyDomain,
+        inboxSlug: await uniqueInboxSlug(companyDomain, orgName),
+        status: "active",
+        createdBy: user.id,
+      } as never)
       .returning()
   )[0]!;
+// An organisation created before these were set gets them now.
+if (existingOrg && (!existingOrg.emailDomain || !existingOrg.inboxSlug))
+  await db
+    .update(organizations)
+    .set({
+      emailDomain: existingOrg.emailDomain ?? companyDomain,
+      inboxSlug: existingOrg.inboxSlug ?? (await uniqueInboxSlug(companyDomain, orgName)),
+    })
+    .where(eq(organizations.id, org.id));
+// The integration catalogue (sources, meetings) the Integrations page lists.
+await seedSourceIntegrations(org.id);
 
 // Owner, with every approver role so one person can act at each gate.
 const [member] = await db

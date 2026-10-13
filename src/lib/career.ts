@@ -47,73 +47,116 @@ export function titleLevel(title: string) {
   return level;
 }
 
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+
+/** "Mar 2025", "March 2025", "2025-03", "03/2025", "2025" → the first of that month. */
 function toDate(value: string | null | undefined, fallbackToNow = false) {
   if (!value || /present|current|till date|to date|now/i.test(value))
     return fallbackToNow ? new Date() : null;
-  const m = value.match(/(\d{4})(?:[-/](\d{1,2}))?/);
-  if (!m) return null;
-  const year = Number(m[1]);
+  const v = value.toLowerCase();
+  const y = v.match(/(19|20)\d{2}/);
+  if (!y) return null;
+  const year = Number(y[0]);
   if (year < 1950 || year > new Date().getFullYear() + 1) return null;
-  return new Date(year, m[2] ? Math.max(0, Number(m[2]) - 1) : 0, 1);
+  let month = 0;
+  const name = v.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b/);
+  const iso = v.match(/(?:19|20)\d{2}[-/.](\d{1,2})\b/);
+  const us = v.match(/\b(\d{1,2})[-/.](?:19|20)\d{2}/);
+  if (name) month = MONTHS.indexOf(name[1]!.slice(0, 3));
+  else if (iso && Number(iso[1]) >= 1 && Number(iso[1]) <= 12) month = Number(iso[1]) - 1;
+  else if (us && Number(us[1]) >= 1 && Number(us[1]) <= 12) month = Number(us[1]) - 1;
+  return new Date(year, month, 1);
 }
 
 const YEAR_MS = 365.25 * 86_400_000;
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
+/** Company names compared loosely: "Yavar Techworks Pvt. Ltd." = "yavar techworks". */
+const companyKey = (c: string | null | undefined) =>
+  (c ?? "")
+    .toLowerCase()
+    .replace(/\b(private|pvt|limited|ltd|llp|inc|corp|corporation|co|company|plc|gmbh)\b\.?/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+/**
+ * Career metrics measured per EMPLOYER, not per title: consecutive roles at the
+ * same company (gap under 3 months) are one tenure, and a title change inside it
+ * is a promotion — not a job change. "Shortest stint" looks only at finished
+ * tenures (a role still in progress is not short, it is current).
+ */
 export function computeCareerMetrics(
   history: EmploymentRow[],
-  opts?: { skillRecencyYears?: number | null },
+  opts?: { skillRecencyYears?: number | null; now?: Date },
 ): CareerMetrics {
+  const now = opts?.now ?? new Date();
   const rows = (history ?? []).filter((r) => r && (r.company || r.title));
-  const spans = rows
+  const roles = rows
     .map((r) => {
       const start = toDate(r.start);
-      const end = toDate(r.end, true);
+      const ongoing = !r.end || /present|current|till date|to date|now/i.test(r.end);
+      const end = ongoing ? now : toDate(r.end);
       if (!start || !end || end < start) return null;
-      return {
-        start,
-        end,
-        ongoing: !r.end || /present|current/i.test(r.end),
-        title: r.title ?? "",
-      };
+      return { start, end, ongoing, title: r.title ?? "", company: companyKey(r.company) };
     })
     .filter((s): s is NonNullable<typeof s> => s !== null)
     .sort((a, b) => a.start.getTime() - b.start.getTime());
 
-  const tenures = spans.map((s) => (s.end.getTime() - s.start.getTime()) / YEAR_MS);
-  const totalYears = tenures.reduce((sum, t) => sum + t, 0);
+  // Employer tenures: merge consecutive roles at the same company.
+  const MONTH = YEAR_MS / 12;
+  type Tenure = { company: string; start: Date; end: Date; ongoing: boolean };
+  const tenures: Tenure[] = [];
+  for (const r of roles) {
+    const last = tenures[tenures.length - 1];
+    if (
+      last &&
+      r.company &&
+      last.company === r.company &&
+      r.start.getTime() - last.end.getTime() < 3 * MONTH
+    ) {
+      if (r.end > last.end) last.end = r.end;
+      last.ongoing = last.ongoing || r.ongoing;
+    } else tenures.push({ company: r.company, start: r.start, end: r.end, ongoing: r.ongoing });
+  }
 
-  // Gaps between consecutive roles (overlaps count as zero gap).
+  const years = (t: Tenure) => (t.end.getTime() - t.start.getTime()) / YEAR_MS;
+  const lengths = tenures.map(years);
+  const totalYears = lengths.reduce((sum, t) => sum + t, 0);
+  const finished = tenures.filter((t) => !t.ongoing).map(years);
+
+  // Gaps between consecutive tenures (overlaps count as zero gap).
   let longestGap = 0;
   let totalGap = 0;
-  for (let i = 1; i < spans.length; i++) {
-    const gapMonths = (spans[i]!.start.getTime() - spans[i - 1]!.end.getTime()) / (YEAR_MS / 12);
+  for (let i = 1; i < tenures.length; i++) {
+    const gapMonths = (tenures[i]!.start.getTime() - tenures[i - 1]!.end.getTime()) / MONTH;
     if (gapMonths > 1) {
       totalGap += gapMonths;
       longestGap = Math.max(longestGap, gapMonths);
     }
   }
 
-  const fiveYearsAgo = new Date(Date.now() - 5 * YEAR_MS);
-  const jobsLast5y = spans.filter((s) => s.end >= fiveYearsAgo).length;
+  // Distinct employers worked for in the last five years.
+  const fiveYearsAgo = new Date(now.getTime() - 5 * YEAR_MS);
+  const recent = tenures.filter((t) => t.end >= fiveYearsAgo);
+  const jobsLast5y = new Set(recent.map((t, i) => t.company || `#${i}`)).size;
 
-  const levels = spans.map((s) => titleLevel(s.title)).filter((l) => l >= 0);
+  // Promotions: a higher level than the previous role, including within a company.
+  const levels = roles.map((s) => titleLevel(s.title)).filter((l) => l >= 0);
   let promotions = 0;
   for (let i = 1; i < levels.length; i++) if (levels[i]! > levels[i - 1]!) promotions++;
   const progression: CareerMetrics["progression"] =
     levels.length < 2 ? "unclear" : promotions > 0 ? "upward" : "lateral";
 
-  const ongoing = spans.find((s) => s.ongoing) ?? spans[spans.length - 1];
+  const current = tenures.find((t) => t.ongoing) ?? null;
+  const distinctEmployers = new Set(rows.map((r, i) => companyKey(r.company) || `#${i}`)).size;
 
   return {
-    employers: rows.length,
-    dated_employers: spans.length,
+    employers: distinctEmployers,
+    dated_employers: tenures.length,
     total_years: round1(totalYears),
-    avg_tenure_years: spans.length ? round1(totalYears / spans.length) : 0,
-    shortest_stint_years: tenures.length ? round1(Math.min(...tenures)) : null,
-    current_tenure_years: ongoing
-      ? round1((ongoing.end.getTime() - ongoing.start.getTime()) / YEAR_MS)
-      : null,
+    avg_tenure_years: tenures.length ? round1(totalYears / tenures.length) : 0,
+    shortest_stint_years: finished.length ? round1(Math.min(...finished)) : null,
+    current_tenure_years: current ? round1(years(current)) : null,
     jobs_last_5y: jobsLast5y,
     longest_gap_months: Math.round(longestGap),
     total_gap_months: Math.round(totalGap),

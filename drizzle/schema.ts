@@ -22,6 +22,7 @@ import {
   numeric,
   pgEnum,
   pgTable,
+  primaryKey,
   smallint,
   text,
   timestamp,
@@ -840,8 +841,25 @@ export const candidateAssessments = pgTable(
     model: text("model"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     completedAt: timestamp("completed_at", { withTimezone: true }),
+    /** The application it was sent for (reminders and decisions act on it). */
+    applicationId: uuid("application_id").references(() => applications.id, {
+      onDelete: "set null",
+    }),
+    /** What the candidate was told; overdue counts from here. */
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    /** When the link stops working. */
+    closesAt: timestamp("closes_at", { withTimezone: true }),
+    remindersSent: integer("reminders_sent").notNull().default(0),
+    lastRemindedAt: timestamp("last_reminded_at", { withTimezone: true }),
+    /** When it was flagged overdue (the people deciding were told). */
+    overdueAt: timestamp("overdue_at", { withTimezone: true }),
+    /** Why a person chose to go on without it (status 'waived'). */
+    waivedReason: text("waived_reason"),
   },
   (t) => [
+    index("candidate_assessments_open_idx")
+      .on(t.orgId, t.status, t.dueAt)
+      .where(sql`${t.status} = 'sent'`),
     uniqueIndex("candidate_assessments_token_key").on(t.token),
     index("candidate_assessments_candidate_idx").on(t.candidateId, t.createdAt),
   ],
@@ -2354,4 +2372,53 @@ export const trainingEvalResults = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("training_eval_results_scenario_idx").on(t.scenario, t.createdAt)],
+);
+
+/* ----------------------------------- assessment timeline, agent pop-ups (0037) */
+
+/** Per organisation; defaults apply when there is no row. */
+export const assessmentSettings = pgTable(
+  "assessment_settings",
+  {
+    orgId: uuid("org_id")
+      .primaryKey()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    dueWorkingDays: integer("due_working_days").notNull().default(3),
+    firstReminderDays: integer("first_reminder_days").notNull().default(2),
+    maxReminders: integer("max_reminders").notNull().default(2),
+    overdueAfterDays: integer("overdue_after_days").notNull().default(2),
+    closeAfterDays: integer("close_after_days").notNull().default(7),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check("assessment_settings_due_working_days_check", sql`${t.dueWorkingDays} between 1 and 15`),
+    check(
+      "assessment_settings_first_reminder_days_check",
+      sql`${t.firstReminderDays} between 1 and 14`,
+    ),
+    check("assessment_settings_max_reminders_check", sql`${t.maxReminders} between 0 and 3`),
+    check(
+      "assessment_settings_overdue_after_days_check",
+      sql`${t.overdueAfterDays} between 0 and 14`,
+    ),
+    check("assessment_settings_close_after_days_check", sql`${t.closeAfterDays} between 2 and 30`),
+  ],
+);
+
+/** Per person: an agent pop-up seen, snoozed or dismissed. */
+export const notificationStates = pgTable(
+  "notification_states",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    notificationId: text("notification_id").notNull(),
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+    seenAt: timestamp("seen_at", { withTimezone: true }),
+    snoozedUntil: timestamp("snoozed_until", { withTimezone: true }),
+    dismissedAt: timestamp("dismissed_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.notificationId] })],
 );

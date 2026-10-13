@@ -133,7 +133,11 @@ describe("openai dialect", () => {
         parameters: lookupTool.parameters,
       },
     });
-    expect(body.messages[0]).toEqual({ role: "system", content: "You are a test agent." });
+    // Every call is told today's date ahead of the agent's own system prompt.
+    expect(body.messages[0].role).toBe("system");
+    expect(body.messages[0].content).toMatch(
+      /^Today is \w+day, \d{1,2} \w+ \d{4} \(\d{4}-\d{2}-\d{2}, UTC\)\. Dates up to today are in the past[\s\S]*\n\nYou are a test agent\.$/,
+    );
     expect(body.messages[2].tool_calls[1]).toEqual({
       id: "c2",
       type: "function",
@@ -217,7 +221,7 @@ describe("anthropic dialect", () => {
     const { body, headers, url } = calls[0]!;
     expect(url).toContain("api.anthropic.com");
     expect(headers["x-api-key"]).toBe("test-key");
-    expect(body.system).toBe("You are a test agent.");
+    expect(body.system).toMatch(/^Today is [\s\S]*\n\nYou are a test agent\.$/);
     expect(body.tools[0]).toEqual({
       name: "get_requisition",
       description: "Read one requisition",
@@ -361,5 +365,14 @@ describe("google dialect", () => {
         thoughtSignature: "sig-abc",
       },
     ]);
+  });
+});
+
+describe("today's date", () => {
+  test("every system prompt starts with today's date", async () => {
+    const { withToday } = await import("../src/lib/ai-gateway.server");
+    expect(withToday("Score this CV.", new Date("2026-10-12T08:00:00Z"))).toBe(
+      "Today is Monday, 12 October 2026 (2026-10-12, UTC). Dates up to today are in the past; judge tenure, recency and gaps against today.\n\nScore this CV.",
+    );
   });
 });

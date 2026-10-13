@@ -234,7 +234,11 @@ export function registerPhase2Agents(): void {
     // 1.3.0: Autonomous sends every candidate message template without asking.
     // 1.4.0: a stage refusal ends the attempt — never moves a candidate to get around it
     // (it once moved an L1 candidate back to shortlisted to send an assessment).
-    version: "1.4.0",
+    // 1.5.0: due dates follow the organisation's assessment policy; reminders are automatic;
+    // started when a candidate completes the assessment.
+    // 1.6.0: reads the full assessment (areas, evidence, strengths, red flags) and labels CV
+    // flags as automated; writes a structured, evidence-first recommendation.
+    version: "1.6.0",
     owner: "hr_head",
     responsibility:
       "Moves shortlisted candidates through screening: kits, assessments, reminders and proceed / hold notes.",
@@ -267,8 +271,8 @@ export function registerPhase2Agents(): void {
       "You are the screening agent for one requisition. You move shortlisted candidates through screening.",
       "1. list_applications for stage shortlisted.",
       "2. For each: get_screening_status. If the screening kit is missing, prepare_screening_kit.",
-      "3. If no assessment was sent, send_assessment (due in 3 days). If one was sent more than 3 days ago and is not completed, remind_assessment once.",
-      "4. When an assessment is completed or a screening call is graded, add_candidate_note with a two-sentence proceed / hold recommendation that cites the scores. If the evidence is clearly weak, move_candidate to on_hold with the reason; never reject.",
+      "3. If no assessment was sent, send_assessment (its due date and closing follow the organisation's policy). Never remind about an assessment yourself: reminders, the overdue follow-up and closing the link are automatic.",
+      '4. When an assessment is completed or a screening call is graded: get_screening_status, then add_candidate_note with this structure (plain lines, no tables):\nRecommendation: Proceed / Hold — one sentence why.\nWritten assessment (direct evidence): score; the strongest and the weakest areas with their scores and a short quote of the evidence; strengths; red flags (or "none").\nCV match (automated, from the CV): score; each automated risk flag marked confirmed, contradicted (say by what) or unverified. Never present a CV flag as a concern when the assessment contradicts it; never invent a risk that neither source states.\nProbe in the screening call: 2–3 points tied to the weakest areas or unverified risks, pointing to the kit\'s questions where one already covers it.\nIf the evidence is clearly weak, move_candidate to on_hold with the reason; never reject.',
       "5. Candidates who moved on to an interview round since you were asked are past screening: skip them. If a tool refuses because of a candidate's stage, note it in your summary and stop for that candidate — never move them to make it work.",
       "Finish with a summary table in plain text: candidate, kit, assessment status, recommendation.",
     ].join("\n"),
@@ -278,42 +282,32 @@ export function registerPhase2Agents(): void {
     type: "followup",
     name: "Follow-up agent",
     // 1.3.0: pending scorecards are listed per panel member.
-    version: "1.3.0",
+    // 1.4.0: no longer reminds candidates — assessment reminders follow the
+    // organisation's policy automatically (src/lib/assessment-timeline.server.ts).
+    version: "1.4.0",
     owner: "hr_head",
     responsibility: "Once a day, finds work that is overdue and reminds the right person.",
     mustNever: [
-      "Remind anyone outside the organisation except a candidate about their own assessment",
+      "Remind anyone outside the organisation",
       "Remind the same person about the same item more than once a day",
     ],
     scope: {
-      reads: [
-        "pending approvals and JD reviews",
-        "open agent requests",
-        "incomplete assessments",
-        "members and roles",
-      ],
+      reads: ["pending approvals and JD reviews", "open agent requests", "members and roles"],
       writes: ["internal reminder emails to members"],
-      external: ["assessment reminders to candidates"],
+      external: [],
     },
     gates: [],
     riskTier: "low",
     evals: ["followup: reminds the approver of an overdue requisition"],
     feature: "agent_followup",
     maxSteps: 16,
-    tools: [
-      "list_overdue",
-      "list_pending_scorecards",
-      "list_members",
-      "remind_member",
-      "remind_assessment",
-    ],
+    tools: ["list_overdue", "list_pending_scorecards", "list_members", "remind_member"],
     system: [
       "You are the follow-up agent. Once a day you make sure nothing is stuck.",
       "1. list_overdue.",
       "2. For each requisition or JD waiting on an approver: list_members, pick the member(s) holding the waiting role, and remind_member with a one-line heading naming the requisition and how long it has waited, and the path /requisitions/<requisitionId>.",
       "3. For agent requests nobody answered: remind the assignee (or the role holders) with path /agents.",
-      "4. For assessments not completed: remind_assessment only if the application is known; otherwise skip.",
-      "5. list_pending_scorecards (one row per interviewer still to score a round); remind each of them once (path /interviews/mine), naming the candidate and the round.",
+      "4. list_pending_scorecards (one row per interviewer still to score a round); remind each of them once (path /interviews/mine), naming the candidate and the round.",
       "Never remind the same person about the same item twice in one run. Keep messages short, specific and polite.",
       "Finish with who was reminded about what.",
     ].join("\n"),

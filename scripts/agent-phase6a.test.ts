@@ -57,6 +57,7 @@ const {
   agentTasks,
   applications,
   auditLog,
+  candidateAssessments,
   candidates,
   hiringConversations,
   hiringMessages,
@@ -499,6 +500,49 @@ describe("what happens next", () => {
       agentType: "screening",
       agentEnabled: true,
     });
+  });
+
+  test("screening done: the journey says whose assessment it is waiting for, not 'stuck'", async () => {
+    const conv = await confirming();
+    await desk.continueWithRole(conv, recruiter, existingReq);
+    await db.insert(agentRuns).values({
+      orgId,
+      agentType: "screening",
+      principalUserId: recruiter,
+      goal: "screen",
+      status: "done",
+      subjectType: "requisition",
+      subjectId: existingReq,
+      conversationId: conv.id,
+    } as never);
+    const people = await db
+      .select({ id: candidates.id, name: candidates.fullName })
+      .from(candidates)
+      .innerJoin(applications, eq(applications.candidateId, candidates.id))
+      .where(eq(applications.requisitionId, existingReq));
+    const byName = (n: string) => people.find((p) => p.name === n)!.id;
+    const base = { orgId, requisitionId: existingReq, questions: [] };
+    await db.insert(candidateAssessments).values([
+      { ...base, candidateId: byName("Asha"), token: `w-${stamp}-1`, status: "sent" },
+      {
+        ...base,
+        candidateId: byName("Bala"),
+        token: `w-${stamp}-2`,
+        status: "completed",
+        mindsetScore: 82,
+      },
+      { ...base, candidateId: byName("Chitra"), token: `w-${stamp}-3`, status: "expired" },
+    ] as never);
+    const p = await desk.deskProgress(await reload(conv.id));
+    expect(p.next?.stage).toBe("screening");
+    expect(p.next?.text).toMatch(
+      /Waiting for 1 candidate\(s\) to complete the written assessment: Asha \(sent .+, link open until .+\)\. Nothing is stuck/,
+    );
+    expect(p.next?.text).toMatch(/Completed: Bala \(82\/100\)/);
+    expect(p.next?.text).toMatch(/Link closed without an answer: Chitra/);
+    await db
+      .delete(candidateAssessments)
+      .where(eq(candidateAssessments.requisitionId, existingReq));
   });
 
   test("a stopped run can be tried again from the thread", async () => {

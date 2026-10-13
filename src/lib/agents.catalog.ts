@@ -111,7 +111,7 @@ export const AUTONOMY_OPTIONS: { value: AgentAutonomy; label: string; hint: stri
   {
     value: "autonomous",
     label: "Autonomous",
-    hint: "Internal changes run silently (still in activity and the audit trail). Every candidate message template sends on its own. Job-board posts go out on their own only on the boards ticked below; otherwise the HR head approves them. Decisions always stay with people.",
+    hint: "Internal changes run silently (still in activity and the audit trail). Every candidate message template sends on its own. Job-board posts go out on their own only on the boards ticked below; otherwise the HR head approves them. Decisions always stay with people, at every level: approving requisitions and job descriptions, rejecting candidates, the hiring decision, approving and releasing offers, and validating documents.",
   },
 ];
 

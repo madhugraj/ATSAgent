@@ -101,3 +101,9 @@ jobs:
         run: bun test scripts/agent-edge-cases.test.ts
       - name: Training-data capture (consent, linking, erasure, export)
         run: bun test scripts/training-data.test.ts
+      - name: Assessment timeline and agent pop-ups
+        run: bun test scripts/assessment-timeline.test.ts
+      - name: Agent markdown rendering (structure and escaping)
+        run: bun test scripts/agent-markdown.test.ts
+      - name: Career metrics (employers, promotions, dates)
+        run: bun test scripts/career-metrics.test.ts

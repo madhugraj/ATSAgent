@@ -8,8 +8,10 @@ import { Archive, Building2 } from "lucide-react";
 
 import { archiveOwnOrganization, updateOrganization } from "@/lib/org.functions";
 import { useOrg } from "@/hooks/useOrg";
+import { useNavCtx } from "@/hooks/useNavCtx";
 import { PageHeader } from "@/components/ats";
 import { TrainingDataCard } from "@/components/TrainingDataCard";
+import { AssessmentPolicyCard } from "@/components/AssessmentPolicyCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -48,6 +50,7 @@ export const Route = createFileRoute("/organisation")({
 function OrganisationSettings() {
   const qc = useQueryClient();
   const { org, isOwner, isLoading, refetch } = useOrg();
+  const navCtx = useNavCtx();
   const save = useServerFn(updateOrganization);
   const archive = useServerFn(archiveOwnOrganization);
 
@@ -167,6 +170,8 @@ function OrganisationSettings() {
           </Button>
         ) : null}
       </section>
+
+      <AssessmentPolicyCard canEdit={navCtx.governance} />
 
       <TrainingDataCard isOwner={Boolean(isOwner)} />
 
