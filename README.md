@@ -26,6 +26,7 @@ ATSIQ by Yavar AI is an enterprise recruiting intelligence platform. It combines
 - Google Meet, Microsoft Teams and Zoom meeting integrations
 - Talent pool ownership, referrals, deduplication, internal job postings and reusable organisation knowledge
 - Live compensation research with cited evidence and saved organisation corrections
+- Pay & availability collected at screening through a private candidate form (HR-only), so offers are built on the candidate's stated expectation and notice period
 - CHRO dashboard, reports, Talent Brain ontology and Return on Individual capability-to-goal planning
 - Guided first-login journey in the HR copilot, mirrored by the in-app manual
 - Hiring desk: describe a hiring need in a chat; agents gather the details, reuse or create the role, rank candidates and line up screening, with every decision shown in the thread

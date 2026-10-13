@@ -459,7 +459,7 @@ describe("what the candidate hears", () => {
     expect(await tool.precheck!(ctx as never, again as never)).toMatch(/ask_human/);
   });
 
-  test("an assessment not completed in 14 days closes and the thread is told", async () => {
+  test("an assessment not completed before its link closes is closed and the thread is told", async () => {
     const conv = await thread();
     await db.insert(candidateAssessments).values({
       orgId,
@@ -476,7 +476,7 @@ describe("what the candidate hears", () => {
       .where(eq(candidateAssessments.token, `a${stamp}`));
     expect(a!.status).toBe("expired");
     expect(await messages(conv.id)).toContainEqual(
-      expect.stringMatching(/did not complete the written assessment within 14 days/),
+      expect.stringMatching(/did not complete the written assessment, so the link has closed/),
     );
   });
 
@@ -544,5 +544,9 @@ describe("pricing and readable text", () => {
       readableAgentText(`Documents for Asha (Application ID: ${u}, Requisition: REQ-1) verified.`),
     ).toBe("Documents for Asha (Requisition: REQ-1) verified.");
     expect(readableAgentText(`Application ID: ${u}\nAll set.`)).toBe("All set.");
+    // An id inside a link is the link itself: kept whole.
+    expect(readableAgentText(`Share the link (\`http://localhost:9000/apply/${u}\`) widely.`)).toBe(
+      `Share the link (\`http://localhost:9000/apply/${u}\`) widely.`,
+    );
   });
 });

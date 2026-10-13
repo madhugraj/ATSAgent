@@ -433,6 +433,46 @@ export const RULES: Rule[] = [
     },
   },
   {
+    id: "offer.pay_unknown",
+    element: "hitl",
+    severity: "warning",
+    description:
+      "A candidate between interview and offer let the pay & availability form close unanswered, and their expected CTC or notice period is still unknown — the Offer agent cannot draft, so TA should ask them on a call and enter it on the candidate's page.",
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number }>(sql`
+        select count(distinct cr.application_id)::int n
+        from compensation_requests cr
+        join applications a on a.id = cr.application_id and a.org_id = cr.org_id
+        join candidates c on c.id = a.candidate_id
+        where cr.org_id = ${orgId} and cr.status = 'expired'
+          and a.stage in ('l1','l2','l3','offer_pending')
+          and not exists (
+            select 1 from compensation_requests o
+            where o.application_id = cr.application_id and o.status in ('sent','completed')
+              and o.created_at > cr.created_at)
+          and (
+            coalesce(
+              (select d.expected_ctc from compensation_details d
+               where d.application_id = a.id and d.expected_ctc is not null
+               order by d.created_at desc limit 1),
+              c.expected_ctc) is null
+            or coalesce(
+              (select d.notice_period_days from compensation_details d
+               where d.application_id = a.id and d.notice_period_days is not null
+               order by d.created_at desc limit 1),
+              c.notice_period_days) is null)`);
+      const n = r[0]?.n ?? 0;
+      if (!n) return [];
+      return [
+        {
+          agentType: "offer",
+          title: `${n} candidate(s) near an offer never shared their expected pay or notice period`,
+          detail: { candidates: n },
+        },
+      ];
+    },
+  },
+  {
     id: "orchestrator.events",
     element: "orchestrator",
     severity: "serious",

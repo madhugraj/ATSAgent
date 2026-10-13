@@ -251,13 +251,20 @@ export function registerPhase2Tools(): void {
   registerTool({
     name: "get_screening_status",
     description:
-      "For one application: whether a screening kit is ready, the latest screening-call result, and the latest assessment (status, score, completed).",
+      "For one application: the written assessment in full (status, score, each area with its score and the candidate's own words as evidence, strengths, red flags, summary — direct evidence), the screening-call kit (focus and questions), the latest screening-call result, the CV match (score and its automated risk flags — inferences from the CV, to verify, not facts), and whether the candidate's expected CTC and notice period are known (payDetails; never the amounts).",
     input: AppId,
     risk: "read",
+    // The assessment evidence quotes the candidate's own answers.
+    untrustedOutput: true,
     run: async (ctx, i) => {
       const app = await loadApplication(ctx.orgId, i.applicationId);
       const [kit] = await db
-        .select({ id: screeningKits.id, createdAt: screeningKits.createdAt })
+        .select({
+          id: screeningKits.id,
+          createdAt: screeningKits.createdAt,
+          focus: screeningKits.focusSummary,
+          questions: screeningKits.questions,
+        })
         .from(screeningKits)
         .where(
           and(
@@ -283,6 +290,12 @@ export function registerPhase2Tools(): void {
           mindsetScore: candidateAssessments.mindsetScore,
           createdAt: candidateAssessments.createdAt,
           completedAt: candidateAssessments.completedAt,
+          dueAt: candidateAssessments.dueAt,
+          summary: candidateAssessments.summary,
+          strengths: candidateAssessments.strengths,
+          redFlags: candidateAssessments.redFlags,
+          dimensions: candidateAssessments.dimensions,
+          waivedReason: candidateAssessments.waivedReason,
         })
         .from(candidateAssessments)
         .where(
@@ -294,12 +307,75 @@ export function registerPhase2Tools(): void {
         )
         .orderBy(desc(candidateAssessments.createdAt))
         .limit(1);
+      const [match] = await db
+        .select({
+          score: matchScores.overallScore,
+          recommendation: matchScores.recommendation,
+          riskFlags: matchScores.riskFlags,
+          computedAt: matchScores.computedAt,
+        })
+        .from(matchScores)
+        .where(and(eq(matchScores.orgId, ctx.orgId), eq(matchScores.applicationId, app.id)))
+        .orderBy(desc(matchScores.computedAt))
+        .limit(1);
+      const clip = (t: unknown, n: number) => String(t ?? "").slice(0, n);
       return {
         candidate: app.candidateName,
         stage: app.stage,
-        kitReady: Boolean(kit),
+        assessment: assessment
+          ? {
+              status: assessment.status,
+              score: assessment.mindsetScore,
+              dueAt: assessment.dueAt,
+              completedAt: assessment.completedAt,
+              waived: assessment.waivedReason,
+              summary: clip(assessment.summary, 1200),
+              strengths: assessment.strengths ?? [],
+              redFlags: assessment.redFlags ?? [],
+              areas: (Array.isArray(assessment.dimensions)
+                ? (assessment.dimensions as {
+                    dimension?: string;
+                    score?: number;
+                    evidence?: string;
+                  }[])
+                : []
+              ).map((d) => ({
+                area: d.dimension,
+                score: d.score,
+                evidence: clip(d.evidence, 400),
+              })),
+            }
+          : null,
+        screeningCallKit: kit
+          ? {
+              focus: clip(kit.focus, 600),
+              questions: (Array.isArray(kit.questions)
+                ? (kit.questions as { question?: string; focus?: string }[])
+                : []
+              ).map((q) => ({ focus: q.focus, question: clip(q.question, 300) })),
+            }
+          : null,
         screeningCall: run ?? null,
-        assessment: assessment ?? null,
+        cvMatch: match
+          ? {
+              score: match.score,
+              recommendation: match.recommendation,
+              automatedRiskFlags: match.riskFlags ?? [],
+              computedAt: match.computedAt,
+              note: "Inferred automatically from the CV — verify; the written assessment is direct evidence.",
+            }
+          : null,
+        // Whether pay is known — never the amounts (those are for TA, HR and the Offer agent).
+        payDetails: await (async () => {
+          const { detailsFor, latestRequest } = await import("@/lib/compensation.server");
+          const d = await detailsFor(ctx.orgId, app.id);
+          const r = await latestRequest(ctx.orgId, app.id);
+          return {
+            expectedCtcKnown: d.expectedCtc != null,
+            noticePeriodKnown: d.noticePeriodDays != null,
+            form: r ? r.status : "not_sent",
+          };
+        })(),
       };
     },
   });
@@ -328,12 +404,12 @@ export function registerPhase2Tools(): void {
   registerTool({
     name: "send_assessment",
     description:
-      "Create a role-specific written assessment for a shortlisted candidate and email them the private link. Leaves the organisation, so a person approves it unless the assessment email is pre-approved.",
-    input: AppId.extend({ dueInDays: z.number().int().min(1).max(14).default(3) }),
+      "Create a role-specific written assessment for a shortlisted candidate and email them the private link. The due date and when the link closes follow the organisation's assessment policy (default: due in 3 working days, reminders on day 2 and the due day, link closes after 7 days); reminders and the overdue follow-up are automatic. Leaves the organisation, so a person approves it unless the assessment email is pre-approved.",
+    input: AppId,
     risk: "external",
     skills: ["assessment_generate"],
     templateOf: () => "assessment_invite",
-    describe: (i) => `Send a written assessment (due in ${i.dueInDays} days)`,
+    describe: () => "Send a written assessment",
     run: async (ctx, i) => {
       const app = await loadApplication(ctx.orgId, i.applicationId);
       if (!app.candidateEmail) throw new Error("The candidate has no email address.");
@@ -344,9 +420,10 @@ export function registerPhase2Tools(): void {
       const a = await createAssessmentCore(ctx.orgId, {
         candidateId: app.candidateId,
         requisitionId: app.requisitionId,
+        applicationId: app.id,
         count: 6,
       });
-      const due = new Date(Date.now() + i.dueInDays * 864e5);
+      const { dayText } = await import("@/lib/assessment-timeline.server");
       const { enqueueEmail } = await import("@/lib/email-outbox.server");
       await enqueueEmail({
         orgId: ctx.orgId,
@@ -360,10 +437,15 @@ export function registerPhase2Tools(): void {
           orgName: await orgName(ctx.orgId),
           jobTitle: app.jobTitle,
           assessmentUrl: `${env.PUBLIC_SITE_URL.replace(/\/$/, "")}/assess/${a.token}`,
-          dueDate: due.toDateString(),
+          dueDate: `${dayText(a.dueAt, a.timeZone)} (end of day)`,
         },
       });
-      return { assessmentId: a.id, emailed: true, due: due.toISOString().slice(0, 10) };
+      return {
+        assessmentId: a.id,
+        emailed: true,
+        due: dayText(a.dueAt, a.timeZone),
+        linkClosesOn: dayText(a.closesAt, a.timeZone),
+      };
     },
   });
 
@@ -421,7 +503,7 @@ export function registerPhase2Tools(): void {
   registerTool({
     name: "list_overdue",
     description:
-      "Everything overdue in the organisation: requisitions and JDs waiting for approval longer than the SLA, agent requests nobody answered, and assessments candidates have not completed.",
+      "Everything overdue in the organisation: requisitions and JDs waiting for approval longer than the SLA, and agent requests nobody answered. (Candidate assessments are followed up automatically.)",
     input: z.object({ slaDays: z.number().int().min(1).max(30).default(2) }),
     risk: "read",
     run: async (ctx, i) => {
@@ -487,21 +569,7 @@ export function registerPhase2Tools(): void {
             lt(agentTasks.createdAt, cutoff),
           ),
         );
-      const assessments = await db
-        .select({
-          candidateId: candidateAssessments.candidateId,
-          requisitionId: candidateAssessments.requisitionId,
-          sentAt: candidateAssessments.createdAt,
-        })
-        .from(candidateAssessments)
-        .where(
-          and(
-            eq(candidateAssessments.orgId, ctx.orgId),
-            isNull(candidateAssessments.completedAt),
-            lt(candidateAssessments.createdAt, cutoff),
-          ),
-        );
-      return { requisitionApprovals, jdReviews: jds, agentRequests: tasks, assessments };
+      return { requisitionApprovals, jdReviews: jds, agentRequests: tasks };
     },
   });
 

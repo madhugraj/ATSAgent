@@ -45,6 +45,7 @@ import { Route as CandidatesIdRouteImport } from './routes/candidates.$id'
 import { Route as InterviewsIndexRouteImport } from './routes/interviews.index'
 import { Route as InterviewsMineRouteImport } from './routes/interviews.mine'
 import { Route as OfferTokenRouteImport } from './routes/offer.$token'
+import { Route as PayTokenRouteImport } from './routes/pay.$token'
 import { Route as RequisitionsIndexRouteImport } from './routes/requisitions.index'
 import { Route as RequisitionsIdRouteImport } from './routes/requisitions.$id'
 import { Route as ScheduleTokenRouteImport } from './routes/schedule.$token'
@@ -251,6 +252,11 @@ const OfferTokenRoute = OfferTokenRouteImport.update({
   path: '/offer/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PayTokenRoute = PayTokenRouteImport.update({
+  id: '/pay/$token',
+  path: '/pay/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const RequisitionsIndexRoute = RequisitionsIndexRouteImport.update({
   id: '/requisitions/',
   path: '/requisitions/',
@@ -417,6 +423,7 @@ export interface FileRoutesByFullPath {
   '/candidates/$id': typeof CandidatesIdRoute
   '/interviews/mine': typeof InterviewsMineRoute
   '/offer/$token': typeof OfferTokenRoute
+  '/pay/$token': typeof PayTokenRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
   '/schedule/$token': typeof ScheduleTokenRoute
   '/agents/': typeof AgentsIndexRoute
@@ -480,6 +487,7 @@ export interface FileRoutesByTo {
   '/candidates/$id': typeof CandidatesIdRoute
   '/interviews/mine': typeof InterviewsMineRoute
   '/offer/$token': typeof OfferTokenRoute
+  '/pay/$token': typeof PayTokenRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
   '/schedule/$token': typeof ScheduleTokenRoute
   '/agents': typeof AgentsIndexRoute
@@ -544,6 +552,7 @@ export interface FileRoutesById {
   '/candidates/$id': typeof CandidatesIdRoute
   '/interviews/mine': typeof InterviewsMineRoute
   '/offer/$token': typeof OfferTokenRoute
+  '/pay/$token': typeof PayTokenRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
   '/schedule/$token': typeof ScheduleTokenRoute
   '/agents/': typeof AgentsIndexRoute
@@ -609,6 +618,7 @@ export interface FileRouteTypes {
     | '/candidates/$id'
     | '/interviews/mine'
     | '/offer/$token'
+    | '/pay/$token'
     | '/requisitions/$id'
     | '/schedule/$token'
     | '/agents/'
@@ -672,6 +682,7 @@ export interface FileRouteTypes {
     | '/candidates/$id'
     | '/interviews/mine'
     | '/offer/$token'
+    | '/pay/$token'
     | '/requisitions/$id'
     | '/schedule/$token'
     | '/agents'
@@ -735,6 +746,7 @@ export interface FileRouteTypes {
     | '/candidates/$id'
     | '/interviews/mine'
     | '/offer/$token'
+    | '/pay/$token'
     | '/requisitions/$id'
     | '/schedule/$token'
     | '/agents/'
@@ -799,6 +811,7 @@ export interface RootRouteChildren {
   CandidatesIdRoute: typeof CandidatesIdRoute
   InterviewsMineRoute: typeof InterviewsMineRoute
   OfferTokenRoute: typeof OfferTokenRoute
+  PayTokenRoute: typeof PayTokenRoute
   RequisitionsIdRoute: typeof RequisitionsIdRoute
   ScheduleTokenRoute: typeof ScheduleTokenRoute
   AgentsIndexRoute: typeof AgentsIndexRoute
@@ -1083,6 +1096,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OfferTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/pay/$token': {
+      id: '/pay/$token'
+      path: '/pay/$token'
+      fullPath: '/pay/$token'
+      preLoaderRoute: typeof PayTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/requisitions/': {
       id: '/requisitions/'
       path: '/requisitions'
@@ -1295,6 +1315,7 @@ const rootRouteChildren: RootRouteChildren = {
   CandidatesIdRoute: CandidatesIdRoute,
   InterviewsMineRoute: InterviewsMineRoute,
   OfferTokenRoute: OfferTokenRoute,
+  PayTokenRoute: PayTokenRoute,
   RequisitionsIdRoute: RequisitionsIdRoute,
   ScheduleTokenRoute: ScheduleTokenRoute,
   AgentsIndexRoute: AgentsIndexRoute,

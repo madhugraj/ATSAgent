@@ -313,6 +313,61 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
     );
   }
 
+  if (applicationId && e.type === "assessment.completed") {
+    const p = e.payload as { score?: number | null };
+    // Only while the candidate is still at screening: once a person has moved
+    // them on, the screening recommendation is no longer the open question.
+    const [app] = await db
+      .select({ stage: applications.stage })
+      .from(applications)
+      .where(and(eq(applications.id, applicationId), eq(applications.orgId, e.orgId)))
+      .limit(1);
+    if (app && ["applied", "ai_screened", "shortlisted", "reserve", "on_hold"].includes(app.stage))
+      await dispatch(
+        "screening",
+        `Candidate application ${applicationId} (${req.code} "${req.title}") completed the written assessment${p.score != null ? ` (${p.score}/100)` : ""}. Read the result and add your proceed / hold recommendation as a candidate note, citing the scores and red flags. Do not move them to an interview round — a person decides.`,
+        { type: "application", id: applicationId },
+      );
+  }
+
+  if (applicationId && e.type === "compensation.submitted") {
+    // The offer waits for the candidate's expectation: continue it once known —
+    // only for a selected candidate whose offer is not already with approvers.
+    const [app] = await db
+      .select({ stage: applications.stage })
+      .from(applications)
+      .where(and(eq(applications.id, applicationId), eq(applications.orgId, e.orgId)))
+      .limit(1);
+    const offerRows = await db
+      .select({ status: offers.status })
+      .from(offers)
+      .where(and(eq(offers.orgId, e.orgId), eq(offers.applicationId, applicationId)));
+    const [selected] = await db
+      .select({ id: agentEvents.id })
+      .from(agentEvents)
+      .where(
+        and(
+          eq(agentEvents.orgId, e.orgId),
+          eq(agentEvents.type, "hiring.selected"),
+          eq(agentEvents.subjectId, applicationId),
+        ),
+      )
+      .limit(1);
+    const busy = offerRows.some((o) =>
+      ["pending_hr", "pending_cbo", "approved", "released", "accepted", "countered"].includes(
+        o.status,
+      ),
+    );
+    const wanted =
+      app?.stage === "offer_pending" || !!selected || offerRows.some((o) => o.status === "draft");
+    if (app && wanted && !busy && !["rejected", "hired", "joined", "withdrawn"].includes(app.stage))
+      await dispatch(
+        "offer",
+        `The candidate for application ${applicationId} (${req.code} "${req.title}") has shared their expected CTC and notice period. Continue the offer: read get_offer_context and propose within the band, or ask the HR head first if the expectation is above it.`,
+        { type: "application", id: applicationId },
+      );
+  }
+
   if (applicationId && e.type === "hiring.selected") {
     await dispatch(
       "offer",
@@ -602,31 +657,20 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
   } catch (err) {
     log.warn("training.retention_failed", { error: err as Error });
   }
-  // Assessments not completed within their 14 days close, and the team hears about it.
+  // Written assessments: due reminders, overdue follow-up, closing links
+  // (the organisation's policy — src/lib/assessment-timeline.server.ts).
   try {
-    const expired = (await db.execute(sql`
-      update candidate_assessments ca set status = 'expired'
-      from candidates c
-      where c.id = ca.candidate_id and ca.status = 'sent'
-        and ca.created_at < now() - interval '14 days'
-        ${opts.orgId ? sql`and ca.org_id = ${opts.orgId}` : sql``}
-      returning ca.org_id, ca.requisition_id, c.full_name`)) as unknown as {
-      org_id: string;
-      requisition_id: string | null;
-      full_name: string;
-    }[];
-    const desk = await import("../desk/desk.server");
-    for (const x of expired) {
-      if (!x.requisition_id) continue;
-      const conv = await desk.conversationForRequisition(x.org_id, x.requisition_id);
-      if (conv)
-        await desk.postMessage(conv, {
-          role: "desk",
-          body: `${x.full_name} did not complete the written assessment within 14 days, so the link has closed. Send a new one, screen them by phone, or decide without it.`,
-        });
-    }
+    const { runAssessmentSweep } = await import("@/lib/assessment-timeline.server");
+    await runAssessmentSweep(opts.orgId);
   } catch (err) {
-    log.warn("assessment.expiry_failed", { error: err as Error });
+    log.warn("assessment.sweep_failed", { error: err as Error });
+  }
+  // Pay & availability forms: the same timeline (src/lib/compensation.server.ts).
+  try {
+    const { runCompensationSweep } = await import("@/lib/compensation.server");
+    await runCompensationSweep(opts.orgId);
+  } catch (err) {
+    log.warn("compensation.sweep_failed", { error: err as Error });
   }
   // Hiring-desk threads hear about new applicants.
   try {

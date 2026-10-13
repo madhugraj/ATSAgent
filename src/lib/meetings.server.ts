@@ -379,6 +379,19 @@ export async function testMeetingProvider(
         message: "Google Calendar is reachable — Meet links can be created.",
       };
     }
+    // Connected by signing in (delegated): refresh the token and read the account.
+    if (secrets["refresh_token"]) {
+      const token = await msDelegatedToken(secrets);
+      const me = await fetch("https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const body = (await jsonOrThrow(me, "Microsoft account check")) as Record<string, unknown>;
+      const who = String(body["mail"] ?? body["userPrincipalName"] ?? "the connected account");
+      return {
+        status: "ok" as const,
+        message: `Connected as ${who} — Teams links are created from this account.`,
+      };
+    }
     await graphToken(secrets);
     return { status: "ok" as const, message: "Microsoft Graph credentials accepted." };
   } catch (e) {

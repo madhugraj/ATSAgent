@@ -141,6 +141,41 @@ export async function loadPairing(
  * The caller has already established that candidateId/requisitionId live in
  * orgId (loadPairing re-checks every lookup).
  */
+/** The candidate's completed written assessment for this role, for the call kit to build on. */
+async function writtenAssessmentFor(orgId: string, candidateId: string, requisitionId: string) {
+  const { candidateAssessments } = await import("@db/schema");
+  const [a] = await db
+    .select({
+      score: candidateAssessments.mindsetScore,
+      summary: candidateAssessments.summary,
+      dimensions: candidateAssessments.dimensions,
+      strengths: candidateAssessments.strengths,
+      redFlags: candidateAssessments.redFlags,
+    })
+    .from(candidateAssessments)
+    .where(
+      and(
+        eq(candidateAssessments.orgId, orgId),
+        eq(candidateAssessments.candidateId, candidateId),
+        eq(candidateAssessments.requisitionId, requisitionId),
+        eq(candidateAssessments.status, "completed"),
+      ),
+    )
+    .orderBy(desc(candidateAssessments.completedAt))
+    .limit(1);
+  if (!a) return null;
+  return {
+    score: a.score,
+    summary: a.summary,
+    areas: (Array.isArray(a.dimensions)
+      ? (a.dimensions as { dimension?: string; score?: number }[])
+      : []
+    ).map((d) => ({ area: String(d.dimension ?? ""), score: d.score ?? null })),
+    strengths: a.strengths ?? [],
+    redFlags: a.redFlags ?? [],
+  };
+}
+
 export async function prepareScreeningKitForPairing(input: {
   orgId: string;
   candidateId: string;
@@ -180,6 +215,7 @@ export async function prepareScreeningKitForPairing(input: {
     matchRationale: match?.rationale ?? null,
     missingSkills: match?.missingSkills ?? [],
     riskFlags: match?.riskFlags ?? [],
+    writtenAssessment: await writtenAssessmentFor(input.orgId, candidate.id, requisition.id),
   });
 
   const [row] = await db

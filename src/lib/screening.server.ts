@@ -115,6 +115,14 @@ export async function buildScreeningKit(input: {
   matchRationale: string | null;
   missingSkills: string[];
   riskFlags: string[];
+  /** The completed written assessment (mindset and ways of working), when there is one. */
+  writtenAssessment?: {
+    score: number | null;
+    summary: string | null;
+    areas: { area: string; score: number | null }[];
+    strengths: string[];
+    redFlags: string[];
+  } | null;
 }): Promise<ScreeningKit> {
   const result = await aiJson<{ questions: ScreeningQuestion[]; focus_summary: string }>({
     system:
@@ -129,6 +137,10 @@ export async function buildScreeningKit(input: {
       "candidate is being asked it — cite the JD requirement or the CV line that triggers it), expected_answer " +
       "(the specifics a strong candidate would give), weak_answer (what an evasive or thin answer sounds like) and " +
       "weight (1-5, higher for must-haves). " +
+      "existing_match.risk_flags are automated inferences from the CV: verify them, never treat them as facts. " +
+      "If written_assessment is present, the candidate has already been assessed in writing on mindset and ways of " +
+      "working: do not ask again what it established; probe its weakest areas and any red flags, and resolve the CV " +
+      "inferences it did not settle. Say in reason when a question follows from the written assessment. " +
       "Return ONLY JSON: {questions:[{focus, question, reason, expected_answer, weak_answer, weight}], " +
       "focus_summary: one or two sentences on what this call must establish}.",
     prompt: untrusted(
@@ -159,6 +171,17 @@ export async function buildScreeningKit(input: {
           missing_skills: input.missingSkills.slice(0, 20),
           risk_flags: input.riskFlags.slice(0, 20),
         },
+        ...(input.writtenAssessment
+          ? {
+              written_assessment: {
+                score: input.writtenAssessment.score,
+                summary: (input.writtenAssessment.summary ?? "").slice(0, 1500),
+                areas: input.writtenAssessment.areas.slice(0, 12),
+                strengths: input.writtenAssessment.strengths.slice(0, 10),
+                red_flags: input.writtenAssessment.redFlags.slice(0, 10),
+              },
+            }
+          : {}),
       }),
     ),
     orgId: input.orgId,

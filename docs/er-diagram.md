@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-76 tables across 9 domains.
+80 tables across 9 domains.
 
 ## Identity & access
 
@@ -437,6 +437,13 @@ erDiagram
     text model "nullable"
     timestamptz created_at
     timestamptz completed_at "nullable"
+    uuid application_id FK
+    timestamptz due_at "nullable"
+    timestamptz closes_at "nullable"
+    integer reminders_sent
+    timestamptz last_reminded_at "nullable"
+    timestamptz overdue_at "nullable"
+    text waived_reason "nullable"
   }
   candidate_ownership_events {
     uuid id PK
@@ -512,6 +519,7 @@ erDiagram
   candidate_assessments }o--|| candidates : "candidate_id · cascade"
   candidate_assessments }o--o| requisitions : "requisition_id"
   candidate_assessments }o--o| organizations : "org_id · cascade"
+  candidate_assessments }o--o| applications : "application_id"
   candidate_ownership_events }o--o| organizations : "org_id"
   candidate_ownership_events }o--|| candidates : "candidate_id · cascade"
   candidate_referrals }o--o| organizations : "org_id"
@@ -1002,9 +1010,12 @@ erDiagram
 | `applications` | `candidate_id` | `candidates` | cascade |
 | `applications` | `org_id` | `organizations` | cascade |
 | `applications` | `requisition_id` | `requisitions` | cascade |
+| `assessment_settings` | `org_id` | `organizations` | cascade |
+| `assessment_settings` | `updated_by` | `users` | no action |
 | `board_sync_state` | `integration_id` | `source_integrations` | cascade |
 | `board_sync_state` | `org_id` | `organizations` | cascade |
 | `board_webhook_events` | `org_id` | `organizations` | no action |
+| `candidate_assessments` | `application_id` | `applications` | no action |
 | `candidate_assessments` | `candidate_id` | `candidates` | cascade |
 | `candidate_assessments` | `org_id` | `organizations` | cascade |
 | `candidate_assessments` | `requisition_id` | `requisitions` | no action |
@@ -1023,6 +1034,14 @@ erDiagram
 | `capture_events` | `requisition_id` | `requisitions` | no action |
 | `comp_knowledge` | `org_id` | `organizations` | cascade |
 | `comp_knowledge` | `requisition_id` | `requisitions` | no action |
+| `compensation_details` | `application_id` | `applications` | cascade |
+| `compensation_details` | `candidate_id` | `candidates` | cascade |
+| `compensation_details` | `entered_by` | `users` | no action |
+| `compensation_details` | `org_id` | `organizations` | cascade |
+| `compensation_details` | `request_id` | `compensation_requests` | no action |
+| `compensation_requests` | `application_id` | `applications` | cascade |
+| `compensation_requests` | `candidate_id` | `candidates` | cascade |
+| `compensation_requests` | `org_id` | `organizations` | cascade |
 | `content_templates` | `org_id` | `organizations` | cascade |
 | `copilot_messages` | `org_id` | `organizations` | cascade |
 | `departments` | `org_id` | `organizations` | cascade |
@@ -1058,6 +1077,8 @@ erDiagram
 | `master_items` | `org_id` | `organizations` | cascade |
 | `match_scores` | `application_id` | `applications` | cascade |
 | `match_scores` | `org_id` | `organizations` | cascade |
+| `notification_states` | `org_id` | `organizations` | cascade |
+| `notification_states` | `user_id` | `users` | cascade |
 | `offers` | `application_id` | `applications` | cascade |
 | `offers` | `org_id` | `organizations` | cascade |
 | `onboarding_documents` | `application_id` | `applications` | cascade |
@@ -1144,10 +1165,11 @@ erDiagram
 | `ai_settings` | Communications & AI settings | 9 | (org_id) |
 | `ai_usage_events` | Communications & AI settings | 19 | — |
 | `applications` | Candidates & pipeline | 10 | (requisitionId+candidateId) |
+| `assessment_settings` | — | 8 | — |
 | `audit_log` | Identity & access | 10 | — |
 | `board_sync_state` | — | 11 | (integration_id) |
 | `board_webhook_events` | — | 15 | (dedupe_key) |
-| `candidate_assessments` | Candidates & pipeline | 16 | (token) |
+| `candidate_assessments` | Candidates & pipeline | 23 | (token) |
 | `candidate_notes` | Candidates & pipeline | 8 | — |
 | `candidate_ownership_events` | Candidates & pipeline | 8 | — |
 | `candidate_referrals` | Candidates & pipeline | 11 | — |
@@ -1155,6 +1177,8 @@ erDiagram
 | `candidates` | Candidates & pipeline | 40 | — |
 | `capture_events` | Sourcing & integrations | 10 | — |
 | `comp_knowledge` | Intelligence | 17 | — |
+| `compensation_details` | — | 19 | — |
+| `compensation_requests` | — | 12 | (token) |
 | `content_templates` | Requisitions & job content | 16 | — |
 | `copilot_messages` | Intelligence | 6 | — |
 | `departments` | Organisations & masters | 8 | (orgId+name) |
@@ -1174,6 +1198,7 @@ erDiagram
 | `job_descriptions` | Requisitions & job content | 17 | — |
 | `master_items` | Organisations & masters | 8 | — |
 | `match_scores` | Candidates & pipeline | 26 | — |
+| `notification_states` | — | 7 | — |
 | `offers` | Offers & onboarding | 14 | — |
 | `onboarding_documents` | Offers & onboarding | 23 | — |
 | `ontology_snapshots` | Intelligence | 11 | — |

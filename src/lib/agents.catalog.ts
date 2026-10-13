@@ -111,7 +111,7 @@ export const AUTONOMY_OPTIONS: { value: AgentAutonomy; label: string; hint: stri
   {
     value: "autonomous",
     label: "Autonomous",
-    hint: "Internal changes run silently (still in activity and the audit trail). Every candidate message template sends on its own. Job-board posts go out on their own only on the boards ticked below; otherwise the HR head approves them. Decisions always stay with people.",
+    hint: "Internal changes run silently (still in activity and the audit trail). Every candidate message template sends on its own. Job-board posts go out on their own only on the boards ticked below; otherwise the HR head approves them. Decisions always stay with people, at every level: approving requisitions and job descriptions, rejecting candidates, the hiring decision, approving and releasing offers, and validating documents.",
   },
 ];
 
@@ -127,6 +127,7 @@ export const WHITELISTABLE_TEMPLATES: { id: string; label: string; group: "email
   { id: "interview_invite", label: "Interview invitation", group: "email" },
   { id: "interview_slots", label: "Interview time choice (candidate picks)", group: "email" },
   { id: "assessment_invite", label: "Assessment invitation (and reminder)", group: "email" },
+  { id: "compensation_form", label: "Pay & availability form (and reminder)", group: "email" },
   { id: "document_request", label: "Pre-onboarding document request", group: "email" },
   { id: "role_invite", label: "Invitation to apply (past candidates)", group: "email" },
   { id: "job_board:linkedin", label: "LinkedIn post", group: "board" },

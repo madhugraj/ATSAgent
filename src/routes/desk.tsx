@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { AgentMarkdown } from "@/components/AgentMarkdown";
 import { z } from "zod";
 import {
   Bot,
@@ -348,7 +349,7 @@ function Bubble({
         className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${mine ? "bg-primary text-primary-foreground" : "bg-muted"}`}
       >
         {who ? <p className="mb-0.5 text-[11px] font-medium opacity-70">{who}</p> : null}
-        <div className="whitespace-pre-wrap">{renderMarkdown(body)}</div>
+        <AgentMarkdown text={body} />
       </div>
       {mine ? (
         <span className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-full bg-muted">
@@ -1063,42 +1064,6 @@ function StartButton({
   );
 }
 
-/**
- * Agents write a little markdown (**bold**, `code`). Render just those as
- * React nodes — never as HTML — so text stays escaped.
- */
-function inlineMarkdown(text: string): React.ReactNode[] {
-  return text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((part, i) =>
-    part.startsWith("**") && part.endsWith("**") && part.length > 4 ? (
-      <strong key={i}>{part.slice(2, -2)}</strong>
-    ) : part.startsWith("`") && part.endsWith("`") && part.length > 2 ? (
-      <code key={i} className="rounded bg-background/60 px-1 text-[0.9em]">
-        {part.slice(1, -1)}
-      </code>
-    ) : (
-      part
-    ),
-  );
-}
-
-/** Lines starting with #, ## or ### become bold lines; the rest gets inline markdown. */
-function renderMarkdown(text: string): React.ReactNode[] {
-  return text.split("\n").map((line, i, all) => {
-    const heading = /^#{1,6}\s+(.*)$/.exec(line);
-    const nl = i < all.length - 1 ? "\n" : "";
-    return heading ? (
-      <strong key={i} className="block">
-        {inlineMarkdown(heading[1]!)}
-      </strong>
-    ) : (
-      <span key={i}>
-        {inlineMarkdown(line)}
-        {nl}
-      </span>
-    );
-  });
-}
-
 /* ------------------------------------------------------------ reasoning */
 
 /** The AI's reasoning for one candidate: rationale, score per dimension, evidence, risks. */
@@ -1621,7 +1586,7 @@ function JdCard({ card }: { card: DeskCardView }) {
         </Link>
       </div>
       <div className="max-h-96 overflow-y-auto whitespace-pre-wrap px-3 py-2 text-[13px] leading-relaxed">
-        {renderMarkdown(String(card["text"] ?? ""))}
+        <AgentMarkdown text={String(card["text"] ?? "")} />
       </div>
     </div>
   );

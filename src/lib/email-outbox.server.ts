@@ -40,6 +40,7 @@ const KIND_TOGGLE: Record<
   // Internal mail to a member: governed by the master switch only.
   interviewer_brief: null,
   interview_slots: "interviewEnabled",
+  compensation_form: "stageEnabled",
 };
 
 export async function getOrgEmailSettings(orgId: string): Promise<EmailSettingsEffective> {

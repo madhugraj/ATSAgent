@@ -1,9 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../server/db";
-import { candidateAssessments, candidates, requisitions } from "@db/schema";
+import { applications, candidateAssessments, candidates, requisitions } from "@db/schema";
 import { requireOrg } from "./auth.middleware";
 import { generateQuestions, scoreAnswers, type AssessmentQuestion } from "./assessment.server";
 
@@ -13,7 +13,29 @@ const CreateInput = z.object({
   candidateId: z.string().uuid(),
   requisitionId: z.string().uuid().optional().nullable(),
   count: z.number().min(4).max(10).default(6),
+  /** The application it is for, when known (reminders and decisions act on it). */
+  applicationId: z.string().uuid().optional().nullable(),
 });
+
+async function applicationFor(
+  orgId: string,
+  candidateId: string,
+  requisitionId: string | null | undefined,
+): Promise<string | null> {
+  if (!requisitionId) return null;
+  const [a] = await db
+    .select({ id: applications.id })
+    .from(applications)
+    .where(
+      and(
+        eq(applications.orgId, orgId),
+        eq(applications.candidateId, candidateId),
+        eq(applications.requisitionId, requisitionId),
+      ),
+    )
+    .limit(1);
+  return a?.id ?? null;
+}
 
 /** Build a role-specific questionnaire and issue a private candidate link. */
 /** Shared by the candidate page and the Screening agent. */
@@ -61,6 +83,14 @@ export async function createAssessmentCore(orgId: string, data: z.infer<typeof C
     count: data.count,
   });
   const token = crypto.randomUUID().replace(/-/g, "");
+  // One organisation policy decides the due date the candidate is told and
+  // when the link closes (src/lib/assessment-timeline.server.ts).
+  const { assessmentPolicyOf, timelineFor } = await import("./assessment-timeline.server");
+  const { getOrgEmailSettings } = await import("./email-outbox.server");
+  const timeZone = (await getOrgEmailSettings(orgId)).timezone;
+  // One instant for "sent", the due date and the closing time — they must agree exactly.
+  const issuedAt = new Date();
+  const timeline = timelineFor(issuedAt, await assessmentPolicyOf(orgId), timeZone);
 
   const [row] = await db
     .insert(candidateAssessments)
@@ -71,11 +101,23 @@ export async function createAssessmentCore(orgId: string, data: z.infer<typeof C
       token,
       status: "sent",
       questions,
+      applicationId:
+        data.applicationId ?? (await applicationFor(orgId, candidate.id, data.requisitionId)),
+      dueAt: timeline.dueAt,
+      closesAt: timeline.closesAt,
+      createdAt: issuedAt,
     })
     .returning({ id: candidateAssessments.id, token: candidateAssessments.token });
   if (!row) throw new Error("The assessment could not be created.");
 
-  return { id: row.id, token: row.token, questions };
+  return {
+    id: row.id,
+    token: row.token,
+    questions,
+    dueAt: timeline.dueAt,
+    closesAt: timeline.closesAt,
+    timeZone,
+  };
 }
 
 export const createAssessment = createServerFn({ method: "POST" })
@@ -98,13 +140,15 @@ export const getAssessment = createServerFn({ method: "GET" })
         questions: candidateAssessments.questions,
         candidateId: candidateAssessments.candidateId,
         createdAt: candidateAssessments.createdAt,
+        closesAt: candidateAssessments.closesAt,
       })
       .from(candidateAssessments)
       .where(eq(candidateAssessments.token, data.token))
       .limit(1);
     if (!row) throw new Error("This assessment link is not valid");
-    // Links expire 14 days after they are issued.
-    if (Date.now() - row.createdAt.getTime() > 14 * 24 * 60 * 60 * 1000) {
+    // The link works until it closes (the organisation's policy; 14 days for old links).
+    const closes = row.closesAt?.getTime() ?? row.createdAt.getTime() + 14 * 864e5;
+    if (Date.now() > closes || row.status === "expired" || row.status === "waived") {
       throw new Error("This assessment link has expired.");
     }
 
@@ -128,68 +172,97 @@ const SubmitInput = z.object({
   answers: z.array(z.object({ id: z.string(), answer: z.string().max(4000) })).min(1),
 });
 
+/**
+ * Submit answers once, grade them, lock the assessment, and start what comes
+ * next. `grade` is the AI grader (injectable for tests).
+ */
+export async function submitAssessmentCore(
+  data: z.infer<typeof SubmitInput>,
+  grade: typeof scoreAnswers = scoreAnswers,
+): Promise<{ ok: true }> {
+  const [row] = await db
+    .select({
+      id: candidateAssessments.id,
+      status: candidateAssessments.status,
+      questions: candidateAssessments.questions,
+      requisitionId: candidateAssessments.requisitionId,
+      orgId: candidateAssessments.orgId,
+      candidateId: candidateAssessments.candidateId,
+      applicationId: candidateAssessments.applicationId,
+      createdAt: candidateAssessments.createdAt,
+      closesAt: candidateAssessments.closesAt,
+    })
+    .from(candidateAssessments)
+    .where(eq(candidateAssessments.token, data.token))
+    .limit(1);
+  if (!row) throw new Error("This assessment link is not valid");
+  if (!row.orgId) throw new Error("This assessment link is not valid");
+  if (row.status === "completed") throw new Error("This assessment has already been submitted");
+  // A closed or waived link takes no answers, even from a page left open.
+  const closes = row.closesAt?.getTime() ?? row.createdAt.getTime() + 14 * 864e5;
+  if (row.status !== "sent" || Date.now() > closes)
+    throw new Error("This assessment link has expired.");
+
+  const questions = (row.questions as unknown as AssessmentQuestion[]) ?? [];
+  let title: string = "the role";
+  if (row.requisitionId) {
+    const [req] = await db
+      .select({ title: requisitions.title })
+      .from(requisitions)
+      .where(eq(requisitions.id, row.requisitionId))
+      .limit(1);
+    if (req?.title) title = req.title;
+  }
+
+  // Grading counts towards this candidate's hiring cost.
+  const { withAiSubject } = await import("../server/agents/context");
+  const result = await withAiSubject(
+    { candidateId: row.candidateId, requisitionId: row.requisitionId },
+    () =>
+      grade({
+        orgId: row.orgId!,
+        title,
+        questions,
+        answers: data.answers,
+      }),
+  );
+
+  // Atomic lock: the status guard lives in the UPDATE itself, so two
+  // concurrent submissions cannot both write (TOCTOU).
+  const locked = await db
+    .update(candidateAssessments)
+    .set({
+      status: "completed",
+      answers: data.answers,
+      mindsetScore: result.mindset_score,
+      dimensions: result.dimensions,
+      strengths: result.strengths,
+      redFlags: result.red_flags,
+      summary: result.summary,
+      model: result.model,
+      completedAt: new Date(),
+    })
+    // Only an open link records answers (not completed, expired or waived).
+    .where(and(eq(candidateAssessments.id, row.id), eq(candidateAssessments.status, "sent")))
+    .returning({ id: candidateAssessments.id });
+  if (!locked.length) throw new Error("This assessment has already been submitted");
+
+  // The next step starts now: the role's thread is told, and the Screening
+  // agent gives its recommendation for a person to decide on.
+  const { onAssessmentCompleted } = await import("./assessment-timeline.server");
+  await onAssessmentCompleted({
+    orgId: row.orgId,
+    assessmentId: row.id,
+    candidateId: row.candidateId,
+    requisitionId: row.requisitionId,
+    applicationId: row.applicationId,
+    score: result.mindset_score ?? null,
+  });
+
+  return { ok: true as const };
+}
+
 /** Public: submit answers once, score them, and lock the assessment. */
 export const submitAssessment = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => SubmitInput.parse(data))
-  .handler(async ({ data }) => {
-    const [row] = await db
-      .select({
-        id: candidateAssessments.id,
-        status: candidateAssessments.status,
-        questions: candidateAssessments.questions,
-        requisitionId: candidateAssessments.requisitionId,
-        orgId: candidateAssessments.orgId,
-        candidateId: candidateAssessments.candidateId,
-      })
-      .from(candidateAssessments)
-      .where(eq(candidateAssessments.token, data.token))
-      .limit(1);
-    if (!row) throw new Error("This assessment link is not valid");
-    if (!row.orgId) throw new Error("This assessment link is not valid");
-    if (row.status === "completed") throw new Error("This assessment has already been submitted");
-
-    const questions = (row.questions as unknown as AssessmentQuestion[]) ?? [];
-    let title: string = "the role";
-    if (row.requisitionId) {
-      const [req] = await db
-        .select({ title: requisitions.title })
-        .from(requisitions)
-        .where(eq(requisitions.id, row.requisitionId))
-        .limit(1);
-      if (req?.title) title = req.title;
-    }
-
-    // Grading counts towards this candidate's hiring cost.
-    const { withAiSubject } = await import("../server/agents/context");
-    const result = await withAiSubject(
-      { candidateId: row.candidateId, requisitionId: row.requisitionId },
-      () =>
-        scoreAnswers({
-          orgId: row.orgId!,
-          title,
-          questions,
-          answers: data.answers,
-        }),
-    );
-
-    // Atomic lock: the status guard lives in the UPDATE itself, so two
-    // concurrent submissions cannot both write (TOCTOU).
-    const locked = await db
-      .update(candidateAssessments)
-      .set({
-        status: "completed",
-        answers: data.answers,
-        mindsetScore: result.mindset_score,
-        dimensions: result.dimensions,
-        strengths: result.strengths,
-        redFlags: result.red_flags,
-        summary: result.summary,
-        model: result.model,
-        completedAt: new Date(),
-      })
-      .where(and(eq(candidateAssessments.id, row.id), ne(candidateAssessments.status, "completed")))
-      .returning({ id: candidateAssessments.id });
-    if (!locked.length) throw new Error("This assessment has already been submitted");
-
-    return { ok: true as const };
-  });
+  .handler(async ({ data }) => submitAssessmentCore(data));

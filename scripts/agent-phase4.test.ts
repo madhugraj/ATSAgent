@@ -127,6 +127,7 @@ async function finalist(stage = "l3") {
       fullName: "Sana",
       email: `sana-${Math.random().toString(36).slice(2, 7)}@cand.local`,
       expectedCtc: "3200000",
+      noticePeriodDays: 60,
     })
     .returning({ id: candidates.id });
   const [a] = await db

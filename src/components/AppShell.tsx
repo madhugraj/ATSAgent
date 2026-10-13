@@ -5,6 +5,7 @@ import { Bot, Hand, PanelLeftClose, PanelLeftOpen, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Copilot } from "@/components/Copilot";
 import { NotificationBell } from "@/components/NotificationBell";
+import { AgentPopup } from "@/components/AgentPopup";
 import { AccountMenu } from "@/components/AccountMenu";
 import { CommandPalette } from "@/components/CommandPalette";
 import { useNavCtx } from "@/hooks/useNavCtx";
@@ -224,6 +225,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <main className="mx-auto max-w-[1400px] space-y-4 p-4 sm:p-6">{children}</main>
         <BrandFooter />
       </div>
+      <AgentPopup />
       <Copilot />
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
     </div>

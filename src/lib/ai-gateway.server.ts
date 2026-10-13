@@ -1402,6 +1402,22 @@ async function aiAgentStepCall(opts: {
 
 const capture = () => import("../server/training/capture.server");
 
+/**
+ * Every model call is told today's date. Without it a model reasons from its
+ * training cutoff — a role that started this year reads as "future-dated", a
+ * current job as a short stint.
+ */
+export function withToday(system: string, now = new Date()): string {
+  const day = now.toLocaleDateString("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+  return `Today is ${day} (${now.toISOString().slice(0, 10)}, UTC). Dates up to today are in the past; judge tenure, recency and gaps against today.\n\n${system}`;
+}
+
 /** The JSON Schema an output had to satisfy, when the schema can describe itself. */
 function outputSchemaOf(schema: unknown): unknown {
   if (!schema) return null;
@@ -1415,9 +1431,10 @@ function outputSchemaOf(schema: unknown): unknown {
 export async function aiJson<T>(
   opts: Parameters<typeof aiJsonCall<T>>[0],
 ): Promise<AiJsonResult<T>> {
+  const dated = { ...opts, system: withToday(opts.system) };
   const { withInferenceCapture, describeAttachment } = await capture();
   return withInferenceCapture(
-    () => aiJsonCall<T>(opts),
+    () => aiJsonCall<T>(dated),
     (r, latencyMs) => ({
       orgId: opts.orgId,
       callKind: "json",
@@ -1425,7 +1442,7 @@ export async function aiJson<T>(
       provider: r.ok ? r.provider : null,
       model: r.ok ? r.model : null,
       request: {
-        system: opts.system,
+        system: dated.system,
         prompt: opts.prompt,
         ...(opts.images?.length ? { images: opts.images.map(describeAttachment) } : {}),
         ...(opts.docs?.length ? { docs: opts.docs.map(describeAttachment) } : {}),
@@ -1444,16 +1461,17 @@ export async function aiJson<T>(
 export async function aiResearchJson<T>(
   opts: Parameters<typeof aiResearchJsonCall<T>>[0],
 ): Promise<AiResearchResult<T>> {
+  const dated = { ...opts, system: withToday(opts.system) };
   const { withInferenceCapture } = await capture();
   return withInferenceCapture(
-    () => aiResearchJsonCall<T>(opts),
+    () => aiResearchJsonCall<T>(dated),
     (r, latencyMs) => ({
       orgId: opts.orgId,
       callKind: "research",
       feature: opts.feature,
       provider: r.ok ? r.provider : null,
       model: r.ok ? r.model : null,
-      request: { system: opts.system, prompt: opts.prompt },
+      request: { system: dated.system, prompt: opts.prompt },
       response: r.ok ? { data: r.data } : null,
       status: r.ok ? "ok" : "error",
       errorMessage: r.ok ? null : r.message,
@@ -1468,14 +1486,15 @@ export async function aiResearchJson<T>(
 export async function aiAgentStep(
   opts: Parameters<typeof aiAgentStepCall>[0],
 ): Promise<AgentStepResult> {
+  const dated = { ...opts, system: withToday(opts.system) };
   const { withInferenceCapture } = await capture();
   return withInferenceCapture(
-    () => aiAgentStepCall(opts),
+    () => aiAgentStepCall(dated),
     (r, latencyMs) => ({
       orgId: opts.orgId,
       callKind: "agent_step",
       feature: opts.feature,
-      request: { system: opts.system, messages: opts.messages, tools: opts.tools ?? [] },
+      request: { system: dated.system, messages: opts.messages, tools: opts.tools ?? [] },
       response: r.ok ? { text: r.text, toolCalls: r.toolCalls } : null,
       status: r.ok ? "ok" : "error",
       errorMessage: r.ok ? null : r.message,

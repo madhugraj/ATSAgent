@@ -444,3 +444,31 @@ describe("hiring cost", () => {
     expect(o.total.cost).toBeCloseTo(0.105, 6);
   });
 });
+
+describe("meeting connection test", () => {
+  test("Teams connected by signing in is reported with its account, not as unconfigured", async () => {
+    const real = globalThis.fetch;
+    const calls: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.includes("/oauth2/v2.0/token"))
+        return new Response(JSON.stringify({ access_token: "stub-token" }), { status: 200 });
+      if (url.startsWith("https://graph.microsoft.com/v1.0/me"))
+        return new Response(JSON.stringify({ mail: "hr@yavar.ai" }), { status: 200 });
+      return new Response("unexpected", { status: 500 });
+    }) as typeof fetch;
+    try {
+      const { testMeetingProvider } = await import("../src/lib/meetings.server");
+      expect(await testMeetingProvider("teams", { refresh_token: "r" })).toEqual({
+        status: "ok",
+        message: "Connected as hr@yavar.ai — Teams links are created from this account.",
+      });
+      expect(calls.some((u) => u.includes("graph.microsoft.com/v1.0/me"))).toBe(true);
+      // Neither a sign-in nor app credentials: still reported as not configured.
+      expect((await testMeetingProvider("teams", {})).status).toBe("pending");
+    } finally {
+      globalThis.fetch = real;
+    }
+  });
+});

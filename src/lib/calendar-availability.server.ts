@@ -191,7 +191,7 @@ export function zonedTime(
   return guess - tzOffset(first, timeZone);
 }
 
-function wallDate(at: number, timeZone: string) {
+export function wallDate(at: number, timeZone: string) {
   const local = new Date(at + tzOffset(at, timeZone));
   return {
     y: local.getUTCFullYear(),
