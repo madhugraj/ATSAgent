@@ -10,7 +10,9 @@ export function registerPhase1Agents(): void {
   registerAgent({
     type: "copilot",
     name: "Copilot",
-    version: "1.2.0",
+    // 1.2.1: shared rules — plain language for people (no tool or field names,
+    // IDs or flags) and times in the organisation's time zone.
+    version: "1.2.1",
     owner: "hr_head",
     responsibility:
       "Turns a person's request into work for the specialist agents and starts them only after the person confirms.",
@@ -42,7 +44,9 @@ export function registerPhase1Agents(): void {
   registerAgent({
     type: "requisition",
     name: "Requisition agent",
-    version: "1.2.0",
+    // 1.2.1: shared rules — plain language for people (no tool or field names,
+    // IDs or flags) and times in the organisation's time zone.
+    version: "1.2.1",
     owner: "hr_head",
     responsibility:
       "Turns a hiring need into a complete, evidence-backed draft requisition and walks it through the DH → HR → CBO approval chain.",
@@ -97,7 +101,9 @@ export function registerPhase1Agents(): void {
   registerAgent({
     type: "jd",
     name: "JD agent",
-    version: "1.3.0",
+    // 1.3.1: shared rules — plain language for people (no tool or field names,
+    // IDs or flags) and times in the organisation's time zone.
+    version: "1.3.1",
     owner: "department_head",
     responsibility:
       "Drafts and revises the job description for an approved requisition and gets it reviewed by the department head.",
@@ -132,7 +138,9 @@ export function registerPhase1Agents(): void {
     // 1.3.0: job-board posts requested by anyone, approved (and posted) by the HR head.
     // 1.4.0: checks every channel first; posts only where a board can post; the
     // apply link goes in every post; an honest fallback where no board can.
-    version: "1.4.0",
+    // 1.4.1: shared rules — plain language for people (no tool or field names,
+    // IDs or flags) and times in the organisation's time zone.
+    version: "1.4.1",
     owner: "hr_head",
     responsibility:
       "Makes an approved requisition visible: internal job board first, then reviewed external job-board posts.",
@@ -179,7 +187,9 @@ export function registerPhase2Agents(): void {
     name: "Intake & matching agent",
     // 1.3.0: talent-pool search by meaning (equivalent terms, CV text), with reasons.
     // 1.4.0: never moves a candidate out of an interview round / offer / closed stage.
-    version: "1.4.0",
+    // 1.4.1: shared rules — plain language for people (no tool or field names,
+    // IDs or flags) and times in the organisation's time zone.
+    version: "1.4.1",
     owner: "hr_head",
     responsibility:
       "Keeps an approved requisition's pipeline scored, reviewed and full; proposes rejections for a person to decide.",
@@ -239,7 +249,9 @@ export function registerPhase2Agents(): void {
     // 1.6.0: reads the full assessment (areas, evidence, strengths, red flags) and labels CV
     // flags as automated; writes a structured, evidence-first recommendation.
     // 1.7.0: sends the pay & availability form at screening when expected CTC or notice is unknown.
-    version: "1.7.0",
+    // 1.7.1: shared rules — plain language for people (no tool or field names,
+    // IDs or flags) and times in the organisation's time zone.
+    version: "1.7.1",
     owner: "hr_head",
     responsibility:
       "Moves shortlisted candidates through screening: kits, assessments, the pay & availability form, reminders and proceed / hold notes.",
@@ -291,7 +303,9 @@ export function registerPhase2Agents(): void {
     // 1.3.0: pending scorecards are listed per panel member.
     // 1.4.0: no longer reminds candidates — assessment reminders follow the
     // organisation's policy automatically (src/lib/assessment-timeline.server.ts).
-    version: "1.4.0",
+    // 1.4.1: shared rules — plain language for people (no tool or field names,
+    // IDs or flags) and times in the organisation's time zone.
+    version: "1.4.1",
     owner: "hr_head",
     responsibility: "Once a day, finds work that is overdue and reminds the right person.",
     mustNever: [
@@ -333,7 +347,9 @@ export function registerPhase3Agents(): void {
     // 1.5.0: shortlisted candidates are interviewed only once screening is on record.
     // 1.6.0: a round's times start after the candidate's earlier round ends.
     // 1.7.0: re-offers times a candidate declined or let expire (capped; then a person).
-    version: "1.7.0",
+    // 1.7.1: shared rules — plain language for people (no tool or field names,
+    // IDs or flags) and times in the organisation's time zone.
+    version: "1.7.1",
     owner: "hr_head",
     responsibility:
       "Books the next interview round for candidates who advanced: panel from organisation members, free times from the interviewer's calendar, the candidate's choice of time, a meeting link, and invites to both the candidate and the interviewer.",
@@ -388,7 +404,9 @@ export function registerPhase3Agents(): void {
     name: "Evaluation agent",
     // 1.2.0: debriefs every completed round; asks for the hiring decision only after the
     // final round of the role's plan (or when a round's verdict is hold / reject).
-    version: "1.2.0",
+    // 1.2.1: shared rules — plain language for people (no tool or field names,
+    // IDs or flags) and times in the organisation's time zone.
+    version: "1.2.1",
     owner: "hiring_manager",
     responsibility:
       "After interview rounds, writes the debrief across all evidence, surfaces disagreements and fairness signals, and asks the hiring manager for the hiring decision.",
@@ -431,7 +449,11 @@ export function registerPhase4Agents(): void {
     // 1.2.0: an offer an approver sent back is revised for their reason (or a person asked).
     // 1.3.0: never drafts without the candidate's expected CTC and notice period (sends the
     // pay & availability form); an expectation above the band goes to the HR head first.
-    version: "1.3.0",
+    // 1.3.1: shared rules — plain language for people (no tool or field names,
+    // IDs or flags) and times in the organisation's time zone.
+    // 1.4.0: an offer always carries a joining date; approvers refuse offers whose terms are
+    // not settled, and an approved offer can be sent back for them.
+    version: "1.4.0",
     owner: "hr_head",
     responsibility:
       "Turns a hiring decision into a draft offer inside the approved band — built on the candidate's stated expectation and notice period — with its letter and an approval brief, and walks it through HR head and CBO approval.",
@@ -480,7 +502,7 @@ export function registerPhase4Agents(): void {
       "1b. If compensation.complete is false: if compensation.form is open (status sent), finish and say you are waiting for the candidate; otherwise send_compensation_form and finish. Never draft without the candidate's expected CTC and notice period, and never guess them.",
       "1c. If compensation.expectedCtc is above the band maximum: ask_human with assignee_role hr_head — state the expectation, the band, the gap in money and %, current pay and competing offers — and offer three choices: (a) offer at the band maximum, (b) seek a CBO exception above the band, (c) stop. Follow the answer: (a) draft at the band maximum; (b) ask_human with assignee_role president_cbo for the figure, then draft at the figure they give; (c) finish without drafting.",
       "2. Propose a CTC inside the requisition's band: anchor on the candidate's expected CTC, the internal parity median and the band midpoint; use research_compensation if the band is missing. Never exceed the band unless the CBO answered 1c(b).",
-      "3. draft_offer (joining date: the candidate's earliest joining date if given, otherwise notice period from today, rounded to the next Monday).",
+      "3. draft_offer with a joining date, always: the candidate's earliest joining date if given, otherwise notice period from today, rounded to the next Monday. An offer without a joining date cannot go for approval. When revising a sent-back offer, set the joining date the same way.",
       "4. generate_offer_letter, then submit_offer_for_approval.",
       "5. request_approval with subject {type: 'offer', id: <offerId>} and a brief: CTC and where it sits in the band, internal parity, the candidate's expectation and hike, competing offers, risks (the system adds the expectation and gap itself). When the HR head approves, request the CBO's approval the same way.",
       "If an approver sent the offer back (an existing offer is draft with sentBack): read their reason. If it can be met inside the band (pay, joining date), revise_offer with your reasoning, generate_offer_letter, submit_offer_for_approval and request approval again with a brief that states what was asked and what changed. If it cannot be met inside the band or is not about the offer's terms, ask_human. Never resubmit an unchanged offer.",
@@ -494,7 +516,11 @@ export function registerPhase4Agents(): void {
     // 1.1.0: never re-requests documents already received or requested and not yet due;
     // onboarding_status names the offer (offerId) a release request needs.
     // 1.2.0: asks again for a document HR rejected, telling the candidate why.
-    version: "1.2.0",
+    // 1.2.1: shared rules — plain language for people (no tool or field names,
+    // IDs or flags) and times in the organisation's time zone.
+    // 1.3.0: never requests documents before the offer's terms (expected CTC, notice
+    // period, joining date) are settled.
+    version: "1.3.0",
     owner: "hr_head",
     responsibility:
       "Collects and cross-checks the pre-onboarding documents for an approved offer, asks HR to validate them, and asks the HR head to release the offer once everything is verified.",
@@ -502,6 +528,7 @@ export function registerPhase4Agents(): void {
       "Mark a document verified or rejected itself",
       "Release an offer",
       "Request documents beyond the organisation's document catalogue",
+      "Request documents before the offer's terms (expected CTC, notice period, joining date) are settled",
     ],
     scope: {
       reads: [
@@ -519,7 +546,7 @@ export function registerPhase4Agents(): void {
     tools: ["onboarding_status", "compensation_cross_check", "request_documents"],
     system: [
       "You are the pre-onboarding agent for one approved offer.",
-      "1. onboarding_status.",
+      "1. onboarding_status. If termsMissing is not empty, request nothing: finish and say which terms are missing and that an HR head should send the offer back so the Offer agent collects them.",
       "2. If required documents are missing and were never requested (or their due date has passed), request_documents for exactly those types. Documents already received or requested and not yet due are not asked for again — wait for the candidate.",
       "2b. A document HR rejected (status rejected, with HR's reviewNote) and no newer copy: request_documents for that type again with note giving HR's reason in plain words for the candidate.",
       "3. For documents received and pending review: compensation_cross_check, then request_approval with subject {type: 'document_validation', applicationId, documentIds} addressed to hr_head. In the summary, list for each document what it shows and any conflict with the candidate's declared details or the offer.",
@@ -534,7 +561,9 @@ export function registerPhase6Agents(): void {
   registerAgent({
     type: "sourcing",
     name: "Sourcing agent",
-    version: "1.0.0",
+    // 1.0.1: shared rules — plain language for people (no tool or field names,
+    // IDs or flags) and times in the organisation's time zone.
+    version: "1.0.1",
     owner: "hr_head",
     responsibility:
       "Keeps an approved, published role supplied with candidates: watches applicants by channel, tops up the pipeline from the talent pool, invites strong past candidates to apply, and says what to change when a role is starving.",

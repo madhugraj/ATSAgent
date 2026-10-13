@@ -440,6 +440,20 @@ the autonomy dial.
   %, the change on current CTC, notice and competing offers. Health rule
   `offer.pay_unknown`: a form closed unanswered while expected CTC or notice
   is still unknown near an offer.
+- **Settled terms before approval (Offer 1.4.0, Pre-onboarding 1.3.0):**
+  `advanceOfferCore` — the one path for agents, the inbox and the Offers
+  page — refuses to send an offer for approval, approve it (HR head, CBO) or
+  release it while the candidate's expected CTC or notice period, or the
+  offer's joining date, is missing; the approval card says so from the
+  system. The Offer agent always sets a joining date (earliest joining, else
+  notice from today, next Monday). An approved offer that is not yet
+  released can be sent back by the HR head (audited, on the trail, the
+  thread told); once released, only revoking applies. Pre-onboarding
+  documents are not requested until the terms are settled
+  (`onboarding_status.termsMissing`; `request_documents` refuses).
+  Order: pay & availability at screening → interviews → selection → offer
+  on the candidate's numbers (HR head first if above the band) → HR head →
+  CBO → documents → release → the candidate accepts or asks for changes.
 
 ### 4.9 Pre-onboarding & release agent
 
@@ -953,6 +967,24 @@ the target of 75% is reached as soon as two of the three are delegated.
 - Cards carry the same approve / edit / decline buttons as the Decisions
   inbox (same `agent_tasks`), so a decision made in the thread, the inbox or
   the regular pages is one decision.
+- **Reading the thread (clarity pass):** the latest 20 messages show, older
+  ones fold under "Show earlier", and a request still waiting for a person is
+  always shown; the journey panel's "waiting for you" jumps to it. Action
+  cards a later step overtook fold with the reason (an older ranked list; a
+  "bring candidates in" once candidates arrived or an offer is in play);
+  ranked lists offer screening only for candidates still at screening. Agent
+  text is kept whole (clipped only at a paragraph, beyond 12,000 characters)
+  and long messages fold behind "Show more". Every agent and desk message is
+  tidied when the thread is read, so older messages read like new ones: ids
+  and the labels left empty without them, internal tool and field names,
+  true/false flags, "(s)" plurals, and UTC times (shown in the organisation's
+  time zone). The shared agent rules ask for plain language and local times;
+  interview tools return `slotsLocal` / `atLocal` / `expiresLocal`. "New
+  applicants" skips desk uploads and people already in a ranked list; the JD
+  agent's recap is not posted after the desk announced the approval; a
+  re-score posts what changed (score moves, flags no longer raised) so
+  earlier messages read as out of date. A job board counts as connected only
+  with saved credentials (not the set-up placeholder row).
 
 ### 13.3 Voice agent integration (in-house)
 

@@ -242,7 +242,9 @@ function Offers() {
                         {step.label}
                       </Button>
                     ) : null}
-                    {o.status === "pending_hr" || o.status === "pending_cbo" ? (
+                    {o.status === "pending_hr" ||
+                    o.status === "pending_cbo" ||
+                    o.status === "approved" ? (
                       <Button size="sm" variant="ghost" onClick={() => void sendBack(o.id)}>
                         Send back
                       </Button>

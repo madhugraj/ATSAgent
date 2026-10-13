@@ -615,6 +615,108 @@ describe("the Offer agent", () => {
   });
 });
 
+/* ------------------------------------------------------------ settled terms */
+
+describe("an offer moves only on settled terms", () => {
+  const offersLib = () => import("../src/lib/offers.functions");
+  async function offerAt(status: string, joiningDate: string | null) {
+    const [o] = await db
+      .insert(offers)
+      .values({
+        orgId,
+        applicationId: appId,
+        offeredCtc: "8500000",
+        status,
+        joiningDate,
+        letter: { subject: "Offer" },
+      } as never)
+      .returning({ id: offers.id });
+    return o!.id;
+  }
+
+  test("submit, HR head, CBO and release refuse without expected CTC, notice and joining date", async () => {
+    await db.update(applications).set({ stage: "offer_pending" }).where(eq(applications.id, appId));
+    const { advanceOfferCore } = await offersLib();
+    const asCbo = { orgId, userId: cbo, memberEmail: "cbo@x" };
+    const draft = await offerAt("draft", null);
+    await expect(advanceOfferCore(asHr(), { id: draft, status: "pending_hr" })).rejects.toThrow(
+      /cannot go for approval yet: the candidate's expected CTC, their notice period and a joining date on the offer are missing/,
+    );
+    const atHr = await offerAt("pending_hr", "2026-12-07");
+    await expect(advanceOfferCore(asHr(), { id: atHr, status: "pending_cbo" })).rejects.toThrow(
+      /cannot be approved yet: the candidate's expected CTC and their notice period are missing/,
+    );
+    // Known pay, still no joining date: the CBO cannot approve either.
+    await comp.recordCompensation(
+      asHr(),
+      appId,
+      { expectedCtc: 9_000_000, noticePeriodDays: 60 },
+      "recruiter",
+    );
+    const atCbo = await offerAt("pending_cbo", null);
+    await expect(advanceOfferCore(asCbo, { id: atCbo, status: "approved" })).rejects.toThrow(
+      /cannot be approved yet: a joining date on the offer is missing/,
+    );
+    // Settled: it moves.
+    await advanceOfferCore(asHr(), { id: atHr, status: "pending_cbo" });
+    expect((await db.select().from(offers).where(eq(offers.id, atHr)))[0]!.status).toBe(
+      "pending_cbo",
+    );
+    // Nothing moved for the refused ones.
+    expect((await db.select().from(offers).where(eq(offers.id, draft)))[0]!.status).toBe("draft");
+    expect((await db.select().from(offers).where(eq(offers.id, atCbo)))[0]!.status).toBe(
+      "pending_cbo",
+    );
+  });
+
+  test("an approved, unreleased offer can be sent back by the HR head only", async () => {
+    const { sendBackOfferCore } = await offersLib();
+    const approved = await offerAt("approved", null);
+    await expect(
+      sendBackOfferCore(
+        { orgId, userId: cbo, memberEmail: "cbo@x" },
+        { id: approved, reason: "Terms never agreed" },
+      ),
+    ).rejects.toThrow();
+    await sendBackOfferCore(asHr(), {
+      id: approved,
+      reason: "Collect expected CTC, notice period and joining date first",
+    });
+    const [o] = await db.select().from(offers).where(eq(offers.id, approved));
+    expect(o!.status).toBe("draft");
+    expect((o!.approvalTrail as { decision: string; from: string }[]).at(-1)).toMatchObject({
+      decision: "sent_back",
+      from: "approved",
+    });
+    expect((await messages()).at(-1)).toMatch(/after its approval \(it was not released\)/);
+    const released = await offerAt("released", "2026-12-07");
+    await expect(
+      sendBackOfferCore(asHr(), { id: released, reason: "Changed my mind" }),
+    ).rejects.toThrow(/not waiting for an approval/);
+  });
+
+  test("pre-onboarding asks for no documents until the terms are settled", async () => {
+    await offerAt("approved", null);
+    const status = getTool("onboarding_status")!;
+    const ctx = { orgId, runId: "r", principalUserId: hr, agentType: "onboarding", actor: "a" };
+    const out = (await status.run(ctx as never, { applicationId: appId } as never)) as {
+      termsMissing: string[];
+    };
+    expect(out.termsMissing).toEqual([
+      "the candidate's expected CTC",
+      "their notice period",
+      "a joining date on the offer",
+    ]);
+    const ask = getTool("request_documents")!;
+    expect(
+      await ask.precheck!(
+        ctx as never,
+        { applicationId: appId, documentTypes: ["payslip"] } as never,
+      ),
+    ).toMatch(/terms are not settled[\s\S]*Do not request documents/);
+  });
+});
+
 /* ------------------------------------------------------------ the sweep and nudges */
 
 describe("sweep and nudges", () => {

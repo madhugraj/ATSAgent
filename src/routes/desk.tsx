@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { RECENT_MESSAGES, SCREENABLE, foldText, supersededMessages } from "@/lib/desk-view";
 import { AgentMarkdown } from "@/components/AgentMarkdown";
 import { z } from "zod";
 import {
@@ -220,6 +221,7 @@ function Thread({ id }: { id: string }) {
   });
   const [text, setText] = useState("");
   const [pending, setPending] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
   const list = useRef<HTMLDivElement>(null);
   const count = q.data?.messages.length ?? 0;
   useEffect(() => {
@@ -258,10 +260,16 @@ function Thread({ id }: { id: string }) {
       </section>
     );
   const d = q.data;
-  const openTasks = d.messages.filter((m) => {
+  const isOpenTask = (m: DeskMessageView) => {
     const t = (m.card as { taskId?: string } | null)?.taskId;
-    return t && (d.tasks[t] ?? "open") === "open";
-  }).length;
+    return Boolean(t && (d.tasks[t] ?? "open") === "open");
+  };
+  const openTasks = d.messages.filter(isOpenTask).length;
+  const superseded = supersededMessages(d);
+  // Long threads: the latest messages, plus every request still waiting; the rest folds.
+  const hidden = showAll ? 0 : Math.max(0, d.messages.length - RECENT_MESSAGES);
+  const visible = d.messages.filter((m, i) => i >= hidden || isOpenTask(m));
+  const folded = d.messages.length - visible.length;
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
       {/* The journey: first on small screens, a sticky column on wide ones. */}
@@ -284,8 +292,23 @@ function Thread({ id }: { id: string }) {
           ) : null}
         </header>
         <div ref={list} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
-          {d.messages.map((m) => (
-            <Message key={m.id} m={m} conv={d} onChanged={refresh} />
+          {folded > 0 ? (
+            <button
+              type="button"
+              className="w-full rounded-md border border-dashed border-border py-1.5 text-xs text-muted-foreground hover:bg-muted"
+              onClick={() => setShowAll(true)}
+            >
+              Show {folded} earlier {folded === 1 ? "message" : "messages"}
+            </button>
+          ) : null}
+          {visible.map((m) => (
+            <Message
+              key={m.id}
+              m={m}
+              conv={d}
+              onChanged={refresh}
+              superseded={superseded.get(m.id) ?? null}
+            />
           ))}
           {pending ? (
             <>
@@ -338,6 +361,8 @@ function Bubble({
   who?: string;
 }) {
   const mine = role === "user";
+  const [expanded, setExpanded] = useState(false);
+  const { head, folded } = foldText(body);
   return (
     <div className={`flex gap-2 ${mine ? "justify-end" : ""}`}>
       {!mine ? (
@@ -349,7 +374,16 @@ function Bubble({
         className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${mine ? "bg-primary text-primary-foreground" : "bg-muted"}`}
       >
         {who ? <p className="mb-0.5 text-[11px] font-medium opacity-70">{who}</p> : null}
-        <AgentMarkdown text={body} />
+        <AgentMarkdown text={folded && !expanded ? head : body} />
+        {folded ? (
+          <button
+            type="button"
+            className="mt-1 text-xs font-medium text-primary underline"
+            onClick={() => setExpanded(!expanded)}
+          >
+            {expanded ? "Show less" : "Show more"}
+          </button>
+        ) : null}
       </div>
       {mine ? (
         <span className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-full bg-muted">
@@ -364,11 +398,24 @@ function Message({
   m,
   conv,
   onChanged,
+  superseded,
 }: {
   m: DeskMessageView;
   conv: DeskConversationView;
   onChanged: () => void;
+  /** Why this message's card no longer applies (it is folded), or null. */
+  superseded?: string | null;
 }) {
+  const [reopen, setReopen] = useState(false);
+  if (superseded && !reopen)
+    return (
+      <p className="ml-9 text-xs text-muted-foreground">
+        {superseded}{" "}
+        <button type="button" className="underline" onClick={() => setReopen(true)}>
+          Show it
+        </button>
+      </p>
+    );
   const who =
     m.role === "agent"
       ? (AGENT_LABEL[m.agentType ?? ""] ?? "Agent")
@@ -490,7 +537,8 @@ function SimilarRolesCard({
               {r.code} · {r.title}
             </p>
             <p className="text-xs text-muted-foreground">
-              {r.location || "—"} · {r.openings} opening(s) · {r.status.replace(/_/g, " ")}
+              {r.location || "—"} · {r.openings} {r.openings === 1 ? "opening" : "openings"} ·{" "}
+              {r.status.replace(/_/g, " ")}
               {r.jdApproved ? " · JD approved" : ""}
             </p>
           </div>
@@ -557,11 +605,12 @@ function RankedCard({
   const [busy, setBusy] = useState(false);
   const toggle = (id: string, on: boolean) =>
     setPicked((p) => (on ? [...p, id] : p.filter((x) => x !== id)));
+  const screenable = items.filter((i) => SCREENABLE.has(conv.stages[i.applicationId] ?? i.stage));
   async function screen(ids: string[]) {
     setBusy(true);
     try {
       const r = await screenDeskCandidates({ data: { id: conv.id, applicationIds: ids } });
-      toast.success(`Screening ${r.screening} candidate(s)`);
+      toast.success(`Screening ${r.screening} ${r.screening === 1 ? "candidate" : "candidates"}`);
       setPicked([]);
       onChanged();
     } catch (e) {
@@ -600,11 +649,13 @@ function RankedCard({
               <Fragment key={r.applicationId}>
                 <tr className="border-b border-border/60 align-top">
                   <td className="px-2 py-2">
-                    <Checkbox
-                      checked={picked.includes(r.applicationId)}
-                      onCheckedChange={(v) => toggle(r.applicationId, Boolean(v))}
-                      aria-label={`Select ${r.name}`}
-                    />
+                    {SCREENABLE.has(r.stage) ? (
+                      <Checkbox
+                        checked={picked.includes(r.applicationId)}
+                        onCheckedChange={(v) => toggle(r.applicationId, Boolean(v))}
+                        aria-label={`Select ${r.name}`}
+                      />
+                    ) : null}
                   </td>
                   <td className="num px-2 py-2 text-muted-foreground">{r.rank}</td>
                   <td className="px-2 py-2">
@@ -618,7 +669,9 @@ function RankedCard({
                   <td className="px-2 py-2">
                     {r.recommendation ? <Badge variant="outline">{r.recommendation}</Badge> : "—"}
                     {r.risks ? (
-                      <p className="mt-1 text-xs text-muted-foreground">{r.risks} risk flag(s)</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {r.risks} risk {r.risks === 1 ? "flag" : "flags"}
+                      </p>
                     ) : null}
                   </td>
                   <td className="px-2 py-2 text-xs">
@@ -651,19 +704,25 @@ function RankedCard({
           })}
         </tbody>
       </table>
-      <div className="flex flex-wrap gap-2 border-t border-border p-2">
-        <Button size="sm" disabled={busy || !picked.length} onClick={() => screen(picked)}>
-          Screen selected ({picked.length})
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={busy || !items.length}
-          onClick={() => screen(items.slice(0, 5).map((i) => i.applicationId))}
-        >
-          Screen the top {Math.min(5, items.length)}
-        </Button>
-      </div>
+      {screenable.length ? (
+        <div className="flex flex-wrap gap-2 border-t border-border p-2">
+          <Button size="sm" disabled={busy || !picked.length} onClick={() => screen(picked)}>
+            Screen selected ({picked.length})
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => screen(screenable.slice(0, 5).map((i) => i.applicationId))}
+          >
+            Screen the top {Math.min(5, screenable.length)}
+          </Button>
+        </div>
+      ) : (
+        <p className="border-t border-border p-2 text-xs text-muted-foreground">
+          Everyone on this list is past screening.
+        </p>
+      )}
     </div>
   );
 }
@@ -938,9 +997,18 @@ function JourneyPanel({ conv, onChanged }: { conv: DeskConversationView; onChang
                       </p>
                     ) : null}
                     {n.waitingForYou ? (
-                      <p className="font-medium text-primary">
-                        {n.waitingForYou} request(s) waiting for you in the conversation
-                      </p>
+                      <button
+                        type="button"
+                        className="text-left font-medium text-primary underline"
+                        onClick={() =>
+                          document
+                            .querySelector("[data-open-task]")
+                            ?.scrollIntoView({ block: "center", behavior: "smooth" })
+                        }
+                      >
+                        {n.waitingForYou} {n.waitingForYou === 1 ? "request" : "requests"} waiting
+                        for you — show
+                      </button>
                     ) : null}
                     {runState === "paused" && n.run?.budget ? (
                       <BudgetPaused conv={conv} budget={n.run.budget} onChanged={onChanged} />
@@ -1155,7 +1223,7 @@ function BringCandidatesCard({
       });
       setProgress("Scoring against the job description…");
       const r = await scoreDeskCandidates({ data: { id: conv.id } });
-      toast.success(`${r.scored} candidate(s) scored`);
+      toast.success(`${r.scored} ${r.scored === 1 ? "candidate" : "candidates"} scored`);
       onChanged();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not add the CVs");
@@ -1681,7 +1749,7 @@ function RescoreCard({
     try {
       const r = await rescoreDeskCandidates({ data: { id: conv.id } });
       setDone(r.scored);
-      toast.success(`${r.scored} candidate(s) re-scored`);
+      toast.success(`${r.scored} ${r.scored === 1 ? "candidate" : "candidates"} re-scored`);
       onChanged();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not re-score");
@@ -1692,7 +1760,8 @@ function RescoreCard({
   if (done !== null)
     return (
       <p className="text-xs text-muted-foreground">
-        Re-scored {done} candidate(s); the ranked list above is updated.
+        Re-scored {done} {done === 1 ? "candidate" : "candidates"}; the ranked list above is
+        updated.
       </p>
     );
   return (

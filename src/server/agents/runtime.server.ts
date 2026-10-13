@@ -183,6 +183,7 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
         status: offers.status,
         applicationId: offers.applicationId,
         ctc: offers.offeredCtc,
+        joiningDate: offers.joiningDate,
         name: candidates.fullName,
         title: requisitions.title,
         budget: requisitions.budgetCtc,
@@ -216,11 +217,21 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
             ? ` Outside the approved band ${rupees(lo)}–${rupees(hi)}.`
             : ` Inside the approved band ${rupees(lo)}–${rupees(hi)}.`
           : "";
-      const { detailsFor } = await import("@/lib/compensation.server");
+      const { detailsFor, offerTermsMissing, listWords } =
+        await import("@/lib/compensation.server");
+      const missing = await offerTermsMissing(
+        orgId,
+        o.applicationId,
+        o.joiningDate ? String(o.joiningDate) : null,
+      );
       return {
         role,
         status: o.status,
-        detail: `Offer for ${o.name} (${o.title}): ${rupees(ctc)} CTC — ${o.status}.${vsBudget}${vsBand}${expectationLine(ctc, await detailsFor(orgId, o.applicationId))}`,
+        detail: `Offer for ${o.name} (${o.title}): ${rupees(ctc)} CTC — ${o.status}.${vsBudget}${vsBand}${expectationLine(ctc, await detailsFor(orgId, o.applicationId))}${
+          missing.length
+            ? `\n\nThis offer cannot be approved yet: ${listWords(missing)} ${missing.length > 1 ? "are" : "is"} missing. Decline it with that reason — it goes back to draft and the Offer agent collects them.`
+            : ""
+        }`,
       };
     }
     if (o.status !== "approved")

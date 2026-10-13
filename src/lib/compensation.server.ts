@@ -707,3 +707,26 @@ export async function openPayRequests(orgId: string) {
       ),
     );
 }
+
+/**
+ * What an offer still lacks before it may go to approvers, be approved or be
+ * released (or before pre-onboarding documents are asked for): the
+ * candidate's expected CTC and notice period, and the offer's joining date.
+ * Empty when the terms are settled. Org-scoped.
+ */
+export async function offerTermsMissing(
+  orgId: string,
+  applicationId: string,
+  joiningDate: string | null,
+): Promise<string[]> {
+  const pay = await detailsFor(orgId, applicationId);
+  return [
+    pay.expectedCtc == null ? "the candidate's expected CTC" : null,
+    pay.noticePeriodDays == null ? "their notice period" : null,
+    joiningDate ? null : "a joining date on the offer",
+  ].filter((x): x is string => x !== null);
+}
+
+/** "a, b and c". */
+export const listWords = (xs: string[]) =>
+  xs.length <= 1 ? (xs[0] ?? "") : `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}`;

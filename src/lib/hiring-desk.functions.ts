@@ -182,7 +182,10 @@ export const getDeskConversation = createServerFn({ method: "GET" })
       deskActivity,
       startStage,
       candidateReasoning,
+      tidyForPeople,
+      deskTimeZone,
     } = await import("../server/desk/desk.server");
+    const timeZone = await deskTimeZone(context.orgId);
     const rankedIds = msgs.flatMap((m) => {
       const c = m.card as { type?: string; items?: { applicationId?: string }[] } | null;
       return c?.type === "ranked_candidates"
@@ -201,7 +204,7 @@ export const getDeskConversation = createServerFn({ method: "GET" })
         id: m.id,
         role: m.role,
         agentType: m.agentType,
-        body: m.body,
+        body: m.role === "user" ? m.body : tidyForPeople(m.body, timeZone),
         card: (m.card as DeskMessageView["card"]) ?? null,
         at: m.createdAt.toISOString(),
       })),

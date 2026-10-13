@@ -307,7 +307,7 @@ describe("desk: after the JD, and new applicants", () => {
     await apply(role, await candidate("Chitra"), "applied", "agent_talent_pool");
     expect(await desk.announceNewApplicants(orgId)).toBe(1);
     const last = (await messages(conv.id)).at(-1)!;
-    expect(last.body).toMatch(/^2 new applicant\(s\): 2 via careers inbox — Asha, Bala/);
+    expect(last.body).toMatch(/^2 new applicants: 2 via careers inbox — Asha, Bala/);
     expect(await desk.announceNewApplicants(orgId)).toBe(0);
   });
 

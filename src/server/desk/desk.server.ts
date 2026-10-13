@@ -12,6 +12,7 @@
  * The model only extracts details and words the next question; what happens
  * next (which agent, which records) is decided here in plain code.
  */
+import { localWhen } from "@/lib/local-time";
 import { and, asc, desc, eq, ilike, inArray, notInArray, or, sql } from "drizzle-orm";
 import { z } from "zod/v4";
 
@@ -145,6 +146,20 @@ export function describeNeed(s: DeskSlots): string {
 type Conversation = typeof hiringConversations.$inferSelect;
 export type DeskCard = Record<string, unknown> & { type: string };
 
+/** Longest message body kept; the thread folds long text behind "Show more". */
+const MESSAGE_MAX = 12_000;
+
+/** Cut long text at a paragraph (never mid-sentence) and say where the rest is. */
+export function clipText(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const at = text.lastIndexOf("\n\n", max - 80);
+  const cut = at > max / 2 ? at : text.lastIndexOf(". ", max - 80) + 1 || max - 80;
+  return `${text.slice(0, cut).trimEnd()}\n\n… The full text is in Agent activity.`;
+}
+
+/** "1 candidate", "3 candidates". */
+export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
 export async function postMessage(
   conv: { id: string; orgId: string },
   m: { role: "user" | "desk" | "agent"; body: string; agentType?: string | null; card?: DeskCard },
@@ -154,7 +169,7 @@ export async function postMessage(
     orgId: conv.orgId,
     role: m.role,
     agentType: m.agentType ?? null,
-    body: m.body.slice(0, 4000),
+    body: clipText(m.body, MESSAGE_MAX),
     card: (m.card ?? null) as never,
   });
   await db
@@ -811,7 +826,7 @@ export async function postRankedList(conv: Conversation): Promise<void> {
       await postMessage(conv, {
         role: "agent",
         agentType: "intake",
-        body: `Only ${items.length} candidate(s) so far, best first.`,
+        body: `Only ${plural(items.length, "candidate")} so far, best first.`,
         card: { type: "ranked_candidates", requisitionId: conv.requisitionId, items },
       });
     await postMessage(conv, {
@@ -904,7 +919,7 @@ export async function screenCandidates(
       "Shortlist any that are not shortlisted yet, prepare a screening kit for each, and summarise who should proceed. Automated screening calls are not connected yet, so say that the kits are ready for the call.",
     ].join("\n"),
     conv.requisitionId,
-    `Screening ${rows.length} candidate(s): ${rows.map((r) => r.name).join(", ")}. The Screening agent is preparing their screening questions; calls will be placed by the voice agent once it is connected.`,
+    `Screening ${plural(rows.length, "candidate")}: ${rows.map((r) => r.name).join(", ")}. The Screening agent is preparing their screening questions; calls will be placed by the voice agent once it is connected.`,
   );
   return rows.length;
 }
@@ -1101,18 +1116,49 @@ export async function onRunFinished(run: {
   const conv = await loadConversation(run.orgId, run.conversationId).catch(() => null);
   if (!conv) return;
   const name = AGENT_NAME[run.agentType] ?? `${run.agentType} agent`;
+  if (run.status === "done" && (await recapAlreadyPosted(conv, run))) return;
   await postMessage(conv, {
     role: "agent",
     agentType: run.agentType,
     body:
       run.status === "done"
-        ? readableAgentText(run.result ?? "Done.").slice(0, 1500)
+        ? readableAgentText(run.result ?? "Done.")
         : `The ${name} stopped: ${failureReason(run.error)}`,
     ...(run.status === "failed" && run.id
       ? { card: { type: "run_failed", runId: run.id, agentType: run.agentType } }
       : {}),
   });
   if (run.status === "done" && run.agentType === "intake") await postRankedList(conv);
+}
+
+/**
+ * A JD run ends only after its approval, by which time the desk has already
+ * said "the job description is approved — here is what happens next"; the
+ * agent's recap would arrive late and out of order, so it is not posted.
+ */
+async function recapAlreadyPosted(
+  conv: { id: string },
+  run: { id?: string; agentType: string },
+): Promise<boolean> {
+  if (run.agentType !== "jd" || !run.id) return false;
+  const [r] = await db
+    .select({ at: agentRuns.createdAt })
+    .from(agentRuns)
+    .where(eq(agentRuns.id, run.id))
+    .limit(1);
+  if (!r) return false;
+  const [m] = await db
+    .select({ id: hiringMessages.id })
+    .from(hiringMessages)
+    .where(
+      and(
+        eq(hiringMessages.conversationId, conv.id),
+        sql`${hiringMessages.card} ->> 'type' = 'next_steps'`,
+        sql`${hiringMessages.createdAt} >= ${r.at.toISOString()}::timestamptz`,
+      ),
+    )
+    .limit(1);
+  return Boolean(m);
 }
 
 /** A run working for a thread needs a person: show the request in the thread. */
@@ -1175,7 +1221,7 @@ export async function onTaskOpened(
     )
     .orderBy(desc(hiringMessages.createdAt))
     .limit(1);
-  const body = readableAgentText(task.body).slice(0, 1500);
+  const body = clipText(readableAgentText(task.body), 6000);
   const revision = task.kind === "approval" ? await revisionOf(conv, task) : null;
   const repeated = (prev?.card as { body?: string } | null)?.body === body && body.length > 0;
   await postMessage(conv, {
@@ -1609,7 +1655,7 @@ async function assessmentWait(orgId: string, requisitionId: string): Promise<str
   const parts: string[] = [];
   if (open.length)
     parts.push(
-      `Waiting for ${open.length} candidate(s) to complete the written assessment: ${open
+      `Waiting for ${plural(open.length, "candidate")} to complete the written assessment: ${open
         .map((r) => {
           const sent = new Date(r.created_at);
           return `${r.name} (sent ${day(sent)}, link open until ${day(new Date(sent.getTime() + 14 * 864e5))})`;
@@ -2152,7 +2198,7 @@ export async function deskFacts(conv: Conversation): Promise<string> {
   const last = trail.at(-1);
   const progress = await deskProgress(conv);
   return [
-    `${req.code} "${req.title}" (${req.location ?? "—"}, ${req.openings} opening(s)) is ${STATUS_WORDS[req.status] ?? req.status}.`,
+    `${req.code} "${req.title}" (${req.location ?? "—"}, ${plural(req.openings ?? 0, "opening")}) is ${STATUS_WORDS[req.status] ?? req.status}.`,
     last?.to && ["closed", "rejected", "on_hold"].includes(last.to)
       ? `It became ${last.to.replace("_", " ")}${last.at ? ` on ${last.at.slice(0, 10)}` : ""}${last.comment ? ` — reason: "${last.comment}"` : ""}.`
       : "",
@@ -2352,11 +2398,11 @@ export async function onRequisitionEnded(
   const last = trail.at(-1);
   const reason = comment ?? last?.comment ?? null;
   const loose = [
-    open?.rounds ? `${open.rounds} interview round(s) still booked` : "",
-    open?.offers ? `${open.offers} offer(s) still open` : "",
-    open?.people ? `${open.people} candidate(s) still in the pipeline` : "",
+    open?.rounds ? `${plural(open.rounds, "interview round")} still booked` : "",
+    open?.offers ? `${plural(open.offers, "offer")} still open` : "",
+    open?.people ? `${plural(open.people, "candidate")} still in the pipeline` : "",
   ].filter(Boolean);
-  const head = `${req?.code ?? "The requisition"} was ${to === "on_hold" ? "put on hold" : to}${last?.actor ? ` by ${last.actor}` : ""}${reason ? ` — reason: "${reason}"` : ""}. ${active.length ? `${active.length} agent run(s) working on it were stopped. ` : ""}${withdrawn.length ? `${withdrawn.length} open interview-time link(s) were withdrawn. ` : ""}${loose.length ? `Still to settle by a person: ${loose.join(", ")} — tell the candidates and cancel or keep them on the Interviews and Offers pages. ` : ""}`;
+  const head = `${req?.code ?? "The requisition"} was ${to === "on_hold" ? "put on hold" : to}${last?.actor ? ` by ${last.actor}` : ""}${reason ? ` — reason: "${reason}"` : ""}. ${active.length ? `${plural(active.length, "agent run")} working on it ${active.length === 1 ? "was" : "were"} stopped. ` : ""}${withdrawn.length ? `${plural(withdrawn.length, "open interview-time link")} ${withdrawn.length === 1 ? "was" : "were"} withdrawn. ` : ""}${loose.length ? `Still to settle by a person: ${loose.join(", ")} — tell the candidates and cancel or keep them on the Interviews and Offers pages. ` : ""}`;
   if (to === "on_hold") {
     // Paused, not ended: agents start again once the role is approved again.
     await postMessage(conv, {
@@ -2475,7 +2521,7 @@ async function advanceGathering(
   await postMessage(conv, {
     role: "desk",
     body: similar.length
-      ? `Got it: ${describeNeed(slots)}. I found ${similar.length} similar role(s). Continue with one of them, reuse an approved JD for a new role, or create a new role.`
+      ? `Got it: ${describeNeed(slots)}. I found ${plural(similar.length, "similar role")}. Continue with one of them, reuse an approved JD for a new role, or create a new role.`
       : `Got it: ${describeNeed(slots)}. There is no similar role yet — shall I create a new one?`,
     card: {
       type: "similar_roles",
@@ -2944,14 +2990,112 @@ export function readableAgentText(text: string): string {
     links.push(url);
     return `\uE000${links.length - 1}\uE000`;
   });
-  return stripIds(shielded).replace(/\uE000(\d+)\uE000/g, (_, i) => links[Number(i)]!);
+  return humanizeInternals(stripIds(shielded)).replace(
+    /\uE000(\d+)\uE000/g,
+    (_, i) => links[Number(i)]!,
+  );
 }
+
+/**
+ * Internal names an agent may echo: tool names (list_departments) become
+ * words, "finalComplete: true"-style flags go. Code spans and links are kept.
+ */
+export function humanizeInternals(text: string): string {
+  return text
+    .split(/(```[\s\S]*?```)/)
+    .map((part, i) =>
+      i % 2
+        ? part
+        : part
+            // "(finalComplete: true)", "; isFinal=false"
+            .replace(/\s*\(\s*[a-z]+[A-Z]\w*\s*[:=]\s*(?:true|false)\s*\)/g, "")
+            .replace(/(?:[;,]\s*)?\b[a-z]+[A-Z]\w*\s*[:=]\s*(?:true|false)\b/g, "")
+            // `list_departments` / list_departments → "list departments" (not emails or file names)
+            .replace(/`?(?<![\w@.])([a-z]+(?:_[a-z]+)+)(?![\w@]|\.\w)`?/g, (_m, w: string) =>
+              w.replace(/_/g, " "),
+            )
+            .replace(/\(\s*\)/g, ""),
+    )
+    .join("");
+}
+
+const MONTHS =
+  "January|February|March|April|May|June|July|August|September|October|November|December";
+const WEEKDAY = "(?:(?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day,?\\s+)?";
+
+/**
+ * Times an agent wrote in UTC, shown in the organisation's time zone (pure;
+ * unit-tested): "2026-10-14 08:30:00 UTC", "Wednesday, October 14, 2026 at
+ * 08:30 UTC (14:00 IST)" → "Wed 14 Oct, 14:00 IST"; "Offered Times (UTC):"
+ * loses its "(UTC)".
+ */
+export function localizeUtc(text: string, timeZone: string): string {
+  const at = (iso: string) => {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? null : localWhen(d, timeZone);
+  };
+  return text
+    .replace(
+      /\b(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::\d{2})?(?:\.\d+)?\s*(?:UTC|Z)\b(?:\s*\(\d{1,2}:\d{2}\s*[A-Z]{2,5}\))?/g,
+      (m, d: string, h: string, min: string) => at(`${d}T${h}:${min}:00Z`) ?? m,
+    )
+    .replace(
+      new RegExp(
+        `${WEEKDAY}(${MONTHS}) (\\d{1,2}),? (\\d{4}),?(?: at)? (\\d{1,2}):(\\d{2}) UTC(?:\\s*\\(\\d{1,2}:\\d{2}\\s*[A-Z]{2,5}\\))?`,
+        "g",
+      ),
+      (m, mon: string, day: string, y: string, h: string, min: string) =>
+        at(`${mon} ${day}, ${y} ${h}:${min} UTC`) ?? m,
+    )
+    .replace(/\s*\(UTC\)/g, "");
+}
+
+/** "1 candidate(s)" → "1 candidate"; "Interviewer(s): one name" → "Interviewer: one name". */
+export function fixPlurals(text: string): string {
+  return text
+    .replace(/\b(\d+) ([A-Za-z-]+)\(s\)/g, (_m, n: string, w: string) =>
+      Number(n) === 1 ? `${n} ${w}` : `${n} ${w}s`,
+    )
+    .replace(
+      /\b([A-Za-z]+)\(s\)([*_]*\s*:[*_]*\s+)([^\n]*)/g,
+      (m, w: string, sep: string, rest: string) =>
+        w.toLowerCase() === "http"
+          ? m
+          : /,| and /.test(rest)
+            ? `${w}s${sep}${rest}`
+            : `${w}${sep}${rest}`,
+    );
+}
+
+/**
+ * Agent and desk text as people see it, applied when a thread is read so
+ * older messages read the same as new ones: ids and internal names out,
+ * plurals, times in the organisation's time zone.
+ */
+export function tidyForPeople(text: string, timeZone: string): string {
+  return fixPlurals(localizeUtc(readableAgentText(text), timeZone));
+}
+
+export const deskTimeZone = (orgId: string) => orgTimeZone(orgId);
+
+const ENTITY = "Application|Candidate|Requisition|Offer|Run|Task|Assessment|Interview";
 
 function stripIds(text: string): string {
   const id = `\`?${UUID.source}\`?`;
+  const hadId = new RegExp(UUID.source, "i");
+  // A line that was "Application ID: <id>" in any markdown dress, now empty.
+  const emptyLabel = /^[\s>*_\-•#]*[A-Za-z][\w ./&-]{0,40}[*_]*\s*[:=]?\s*[*_`]*\s*$/;
   return (
     text
       .split("\n")
+      .map((line) => {
+        if (!hadId.test(line)) return line;
+        const left = line.replace(new RegExp(`\\s*${id}`, "gi"), "");
+        return /[:=]/.test(line) && emptyLabel.test(left) ? null : line;
+      })
+      .filter((line): line is string => line !== null)
+      // "Application ID:" left empty when an earlier pass removed its id.
+      .filter((line) => !/^[\s>*_\-•]*[A-Za-z ]{0,30}\bID\b[*_]*\s*[:=]?\s*[*_`]*\s*$/.test(line))
       // A line that is only "<label> id: <id>" says nothing to a person.
       .filter(
         (line) => !new RegExp(`^[\\s*\\-•]*[\\w ]{0,30}:?\\s*${id}[\\s.,)]*$`, "i").test(line),
@@ -2959,7 +3103,11 @@ function stripIds(text: string): string {
       .join("\n")
       // "Application ID: <id>", "(ID: <id>)", "Requisition: <id>": the label goes with the id.
       .replace(new RegExp(`,?\\s*\\b[A-Za-z]+(?:\\s(?:ID|Id|id))?\\s*[:=]\\s*${id}`, "g"), "")
+      // "(Application <id>, Requisition <id>)": the entity word goes with its id.
+      .replace(new RegExp(`,?\\s*\\b(?:${ENTITY})(?:\\s+ID)?\\s+${id}`, "gi"), "")
       .replace(new RegExp(`\\s*${id}`, "gi"), "")
+      // …and what an earlier pass left of it: "(Application, Requisition)".
+      .replace(new RegExp(`\\s*\\((?:\\s*(?:${ENTITY})(?:\\s+ID)?\\s*,?)+\\s*\\)`, "gi"), "")
       // "(<id>)" leaves "()" behind; "(<id>, x)" leaves "(, x)".
       .replace(/\s*\(\s*\)/g, "")
       .replace(/\(\s*,\s*/g, "(")
@@ -3151,7 +3299,7 @@ async function explainAfterJd(conv: Conversation, jdId: string | null): Promise<
   if (!s?.n) return;
   await postMessage(conv, {
     role: "desk",
-    body: `${s.n} candidate(s) were scored against an earlier version of the JD. Their scores and ranking may no longer fit version ${version}.`,
+    body: `${plural(s.n, "candidate")} ${s.n === 1 ? "was" : "were"} scored against an earlier version of the JD. Their scores and ranking may no longer fit version ${version}.`,
     card: { type: "rescore", count: s.n, version },
   });
 }
@@ -3174,6 +3322,7 @@ const RESCORABLE = [
  */
 export async function rescoreThread(conv: Conversation, userId: string): Promise<number> {
   if (!conv.requisitionId) throw new Error("This thread has no role yet.");
+  const before = await scoresOf(conv);
   const removed = (await db.execute(sql`
     delete from match_scores m using applications a
     where m.application_id = a.id and a.requisition_id = ${conv.requisitionId}
@@ -3198,7 +3347,45 @@ export async function rescoreThread(conv: Conversation, userId: string): Promise
     total += n;
     if (n < 25) break;
   }
+  // Earlier messages quote the old scores and flags: say what changed.
+  const changes = scoreChanges(before, await scoresOf(conv));
+  if (changes) await postMessage(conv, { role: "desk", body: changes });
   return total;
+}
+
+type ScoreSnap = { applicationId: string; name: string; score: number | null; risks: string[] };
+
+async function scoresOf(conv: Conversation): Promise<ScoreSnap[]> {
+  return (await db.execute(sql`
+    select a.id "applicationId", c.full_name name, m.overall_score score,
+      coalesce(m.risk_flags, '{}') risks
+    from applications a
+    join candidates c on c.id = a.candidate_id
+    left join match_scores m on m.application_id = a.id
+    where a.requisition_id = ${conv.requisitionId} and a.org_id = ${conv.orgId}`)) as unknown as ScoreSnap[];
+}
+
+/**
+ * What a re-score changed, for the thread (pure; unit-tested): score moves
+ * and risk flags no longer raised — so earlier messages quoting them read
+ * as out of date. Null when nothing changed.
+ */
+export function scoreChanges(before: ScoreSnap[], after: ScoreSnap[]): string | null {
+  const lines: string[] = [];
+  for (const b of before) {
+    const a = after.find((x) => x.applicationId === b.applicationId);
+    if (!a || b.score == null) continue;
+    const dropped = (b.risks ?? []).filter((f) => !(a.risks ?? []).includes(f));
+    const moved = a.score != null && a.score !== b.score;
+    if (!moved && !dropped.length) continue;
+    lines.push(
+      `- ${b.name}: ${moved ? `${b.score} → ${a.score}` : `still ${b.score}`}${
+        dropped.length ? `; no longer flagged: ${dropped.map((f) => `"${f}"`).join(", ")}` : ""
+      }`,
+    );
+  }
+  if (!lines.length) return null;
+  return `Re-scored against the current job description:\n${lines.join("\n")}\n\nEarlier messages in this thread that quote the old scores or flags are out of date.`;
 }
 
 /**
@@ -3291,6 +3478,13 @@ export async function announceNewApplicants(orgId?: string): Promise<number> {
       from applications a join candidates c on c.id = a.candidate_id
       where a.requisition_id = ${conv.requisitionId} and a.org_id = ${conv.orgId}
         and a.source not like 'agent%'
+        -- Uploaded through this desk: the thread already confirmed them.
+        and a.source <> 'hiring_desk'
+        -- Already in a ranked list posted here: announcing them again reads as news.
+        and not exists (
+          select 1 from hiring_messages m, jsonb_array_elements(m.card -> 'items') it
+          where m.conversation_id = ${conv.id} and m.card ->> 'type' = 'ranked_candidates'
+            and it ->> 'applicationId' = a.id::text)
         and a.applied_at > greatest(
           ${conv.createdAt.toISOString()}::timestamptz,
           coalesce((
@@ -3310,7 +3504,7 @@ export async function announceNewApplicants(orgId?: string): Promise<number> {
     const names = rows.slice(0, 5).map((r) => r.name);
     await postMessage(conv, {
       role: "desk",
-      body: `${rows.length} new applicant(s): ${via} — ${names.join(", ")}${rows.length > 5 ? ` and ${rows.length - 5} more` : ""}. The Intake & matching agent scores new applicants within minutes when it is on.`,
+      body: `${plural(rows.length, "new applicant")}: ${via} — ${names.join(", ")}${rows.length > 5 ? ` and ${rows.length - 5} more` : ""}. The Intake & matching agent scores new applicants within minutes when it is on.`,
       card: { type: "applicants", count: rows.length, bySource: Object.fromEntries(bySource) },
     });
     posted++;

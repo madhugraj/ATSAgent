@@ -536,7 +536,7 @@ describe("what happens next", () => {
     const p = await desk.deskProgress(await reload(conv.id));
     expect(p.next?.stage).toBe("screening");
     expect(p.next?.text).toMatch(
-      /Waiting for 1 candidate\(s\) to complete the written assessment: Asha \(sent .+, link open until .+\)\. Nothing is stuck/,
+      /Waiting for 1 candidate to complete the written assessment: Asha \(sent .+, link open until .+\)\. Nothing is stuck/,
     );
     expect(p.next?.text).toMatch(/Completed: Bala \(82\/100\)/);
     expect(p.next?.text).toMatch(/Link closed without an answer: Chitra/);
@@ -889,7 +889,7 @@ describe("the thread follows the requisition", () => {
     const ended = (await messages(conv.id)).filter((m) => /was closed/.test(m.body));
     expect(ended).toHaveLength(1);
     expect(ended[0]!.body).toMatch(/Budget cut/);
-    expect(ended[0]!.body).toMatch(/1 agent run\(s\) working on it were stopped/);
+    expect(ended[0]!.body).toMatch(/1 agent run working on it was stopped/);
     const p = await desk.deskProgress(c);
     expect(p.next).toBeNull();
     expect(p.ended).toMatchObject({ status: "closed", reason: "Budget cut", by: "hr@x" });
@@ -1408,6 +1408,7 @@ describe("JD changes, templates, budget pauses and readable agent text", () => {
     const out = desk.readableAgentText(text);
     expect(out).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}/);
     expect(out).toContain("REQ-2026-106");
-    expect(out).toContain("- Status: approved (run)");
+    // "run <id>" goes whole — no "(run)" left behind.
+    expect(out.split("\n").at(-1)).toBe("- Status: approved");
   });
 });

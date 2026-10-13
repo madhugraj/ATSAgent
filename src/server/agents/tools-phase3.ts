@@ -83,6 +83,12 @@ async function roundsOf(orgId: string, applicationId: string) {
   return { rounds, cards };
 }
 
+export { localWhen } from "@/lib/local-time";
+import { localWhen } from "@/lib/local-time";
+
+const orgZone = async (orgId: string) =>
+  (await (await import("@/lib/email-outbox.server")).getOrgEmailSettings(orgId)).timezone;
+
 export function registerPhase3Tools(): void {
   /* ------------------------------------------------------ coordinator */
 
@@ -297,6 +303,7 @@ export function registerPhase3Tools(): void {
         booked: true,
         level: i.level,
         at: when.toISOString(),
+        atLocal: localWhen(when, await orgZone(ctx.orgId)),
         meetingLink,
         candidateEmailed: r.candidateEmail,
       };
@@ -306,7 +313,7 @@ export function registerPhase3Tools(): void {
   registerTool({
     name: "find_interview_slots",
     description:
-      "Free interview times for an interviewer and the rest of the panel (times that suit everyone): weekdays 10:00–17:00 in the organisation's time zone, at least 18 hours ahead, spread over different days, avoiding their calendar's busy time (when Google or Microsoft 365 calendar is connected), rounds already booked in ATSIQ and times already offered to another candidate. Pass the applicationId and level of the round being booked so its times start after the candidate's earlier rounds end. Says whether the calendar was actually checked.",
+      "Free interview times for an interviewer and the rest of the panel (times that suit everyone): weekdays 10:00–17:00 in the organisation's time zone, at least 18 hours ahead, spread over different days, avoiding their calendar's busy time (when Google or Microsoft 365 calendar is connected), rounds already booked in ATSIQ and times already offered to another candidate. slotsLocal gives each time in the organisation's time zone — quote those to people, never UTC. Pass the applicationId and level of the round being booked so its times start after the candidate's earlier rounds end. Says whether the calendar was actually checked.",
     input: z.object({
       /** The candidate's application and round: times start after their earlier rounds end. */
       applicationId: z.string().uuid().optional(),
@@ -335,7 +342,7 @@ export function registerPhase3Tools(): void {
         count: i.count,
         timeZone,
       });
-      return { ...r, timeZone };
+      return { ...r, slotsLocal: r.slots.map((x) => localWhen(x, timeZone)), timeZone };
     },
   });
 
@@ -388,7 +395,14 @@ export function registerPhase3Tools(): void {
           panelEmails: i.panelEmails ?? [],
         },
       );
-      return { offered: r.slots.length, slots: r.slots, expiresAt: r.expiresAt };
+      const tz = await orgZone(ctx.orgId);
+      return {
+        offered: r.slots.length,
+        slots: r.slots,
+        slotsLocal: r.slots.map((x) => localWhen(x, tz)),
+        expiresAt: r.expiresAt,
+        expiresLocal: r.expiresAt ? localWhen(r.expiresAt, tz) : null,
+      };
     },
   });
 

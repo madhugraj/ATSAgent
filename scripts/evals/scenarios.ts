@@ -606,7 +606,12 @@ export function scenarios(): ScriptedScenario[] {
       },
       script: [
         (m) => call("c", "get_offer_context", { applicationId: fromGoal(m, "app") }),
-        (m) => call("d", "draft_offer", { applicationId: fromGoal(m, "app"), offeredCtc: 3000000 }),
+        (m) =>
+          call("d", "draft_offer", {
+            applicationId: fromGoal(m, "app"),
+            offeredCtc: 3000000,
+            joiningDate: "2026-12-07",
+          }),
         (m) =>
           call("l", "generate_offer_letter", {
             offerId: String(toolResult(m, "draft_offer")["offerId"]),

@@ -184,6 +184,19 @@ export async function offerReadiness(
   return null;
 }
 
+/** What the application's latest offer still lacks (expected CTC, notice, joining date). */
+async function termsMissingFor(orgId: string, applicationId: string): Promise<string[]> {
+  const [o] = await db
+    .select({ joiningDate: offers.joiningDate })
+    .from(offers)
+    .where(and(eq(offers.orgId, orgId), eq(offers.applicationId, applicationId)))
+    .orderBy(desc(offers.createdAt))
+    .limit(1);
+  if (!o) return ["an offer for this candidate"];
+  const { offerTermsMissing } = await import("@/lib/compensation.server");
+  return offerTermsMissing(orgId, applicationId, o.joiningDate ? String(o.joiningDate) : null);
+}
+
 export function registerPhase4Tools(): void {
   /* ------------------------------------------------------------- offer */
 
@@ -464,7 +477,7 @@ export function registerPhase4Tools(): void {
   registerTool({
     name: "onboarding_status",
     description:
-      "Pre-onboarding readiness for one application: its current offer (offerId, status, revision), which required documents are missing, and every document received with its type, status and what was extracted from it.",
+      "Pre-onboarding readiness for one application: its current offer (offerId, status, revision), whether the offer's terms are settled (termsMissing: the candidate's expected CTC, notice period or the offer's joining date — documents are not requested until it is empty), which required documents are missing, and every document received with its type, status and what was extracted from it.",
     input: AppId,
     risk: "read",
     untrustedOutput: true,
@@ -500,6 +513,7 @@ export function registerPhase4Tools(): void {
       return {
         candidate: app.candidateName,
         offer: offer ?? null,
+        termsMissing: await termsMissingFor(ctx.orgId, app.id),
         ready: readiness.ready,
         missingRequired: readiness.missing.map((m) => ({ type: m, label: docTypeLabel(m) })),
         documents: docs.map((d) => ({
@@ -539,7 +553,15 @@ export function registerPhase4Tools(): void {
     risk: "external",
     templateOf: () => "document_request",
     describe: (i) => `Email the candidate for ${i.documentTypes.length} document(s)`,
-    precheck: (ctx, i) => documentsNotNeeded(ctx.orgId, i.applicationId, i.documentTypes),
+    precheck: async (ctx, i) => {
+      // Documents (payslips included) follow agreed terms, never precede them.
+      const missing = await termsMissingFor(ctx.orgId, i.applicationId);
+      if (missing.length) {
+        const { listWords } = await import("@/lib/compensation.server");
+        return `The offer's terms are not settled — ${listWords(missing)} ${missing.length > 1 ? "are" : "is"} missing. Do not request documents. Finish and say an HR head should send the offer back so the Offer agent collects them.`;
+      }
+      return documentsNotNeeded(ctx.orgId, i.applicationId, i.documentTypes);
+    },
     run: async (ctx, i) => {
       const app = await loadApplication(ctx.orgId, i.applicationId);
       if (!app.candidateEmail) throw new Error("The candidate has no email address.");
