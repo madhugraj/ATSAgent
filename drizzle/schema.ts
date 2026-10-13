@@ -991,7 +991,8 @@ export type EmailOutboxKind =
   | "role_invite"
   | "interviewer_brief"
   | "interview_slots"
-  | "compensation_form";
+  | "compensation_form"
+  | "offer_negotiation";
 export type EmailOutboxStatus = "queued" | "sent" | "failed" | "suppressed";
 export type EmailOutboxAttachment = {
   filename: string;
@@ -2499,4 +2500,72 @@ export const compensationDetails = pgTable(
       sql`${t.noticePeriodDays} between 0 and 365`,
     ),
   ],
+);
+
+export type NegotiationStatus =
+  | "open"
+  | "message_sent"
+  | "countered"
+  | "call_requested"
+  | "agreed"
+  | "no_agreement"
+  | "expired"
+  | "cancelled";
+
+/** What can make an offer work besides base pay. */
+export type NegotiationLevers = {
+  joiningBonus?: number | null;
+  /** A pay review after this many months, written into the letter. */
+  reviewMonths?: number | null;
+  /** Free text: fixed / variable split, ESOPs, title or scope. */
+  other?: string | null;
+};
+
+/** Agreeing the figure with a candidate before the offer (migration 0039). HR roles only. */
+export const offerNegotiations = pgTable(
+  "offer_negotiations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    candidateId: uuid("candidate_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "cascade" }),
+    status: text("status").$type<NegotiationStatus>().notNull().default("open"),
+    expectedCtc: numeric("expected_ctc", { precision: 14, scale: 2 }),
+    ceiling: numeric("ceiling", { precision: 14, scale: 2 }).notNull(),
+    ceilingApprovedBy: text("ceiling_approved_by").$type<"hr_head" | "president_cbo">().notNull(),
+    proposedCtc: numeric("proposed_ctc", { precision: 14, scale: 2 }).notNull(),
+    levers: jsonb("levers").$type<NegotiationLevers>().notNull().default({}),
+    talkTrack: text("talk_track").notNull().default(""),
+    message: text("message"),
+    token: text("token").unique(),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    closesAt: timestamp("closes_at", { withTimezone: true }),
+    /** The candidate's answer: { decision: accept | propose | call, amount?, note?, at }. */
+    answer: jsonb("answer").$type<{
+      decision: "accept" | "propose" | "call";
+      amount?: number | null;
+      note?: string | null;
+      at: string;
+    } | null>(),
+    /** What was agreed (or not): { agreedCtc?, joiningBonus?, joiningDate?, note?, source, by? }. */
+    outcome: jsonb("outcome").$type<{
+      agreedCtc?: number | null;
+      joiningBonus?: number | null;
+      joiningDate?: string | null;
+      note?: string | null;
+      source: "candidate_link" | "call";
+      by?: string | null;
+    } | null>(),
+    runId: uuid("run_id").references(() => agentRuns.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+  },
+  (t) => [index("offer_negotiations_app_idx").on(t.applicationId, t.createdAt)],
 );

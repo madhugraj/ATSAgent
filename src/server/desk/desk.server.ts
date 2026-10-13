@@ -1842,7 +1842,8 @@ export function argDetails(
       .replace(/([a-z])([A-Z])/g, "$1 $2")
       .replace(/_/g, " ")
       .replace(/^./, (c) => c.toUpperCase()),
-    value: fmtValue(k, v, timeZone).slice(0, 400),
+    // The message a person approves is shown whole.
+    value: fmtValue(k, v, timeZone).slice(0, k === "message" || k === "talkTrack" ? 3000 : 400),
   }));
 }
 

@@ -9,6 +9,7 @@ import {
   recordCandidateCompensation,
   sendCandidateCompensationForm,
 } from "@/lib/compensation.functions";
+import { getNegotiation, recordNegotiationCall } from "@/lib/negotiation.functions";
 import { lakhsToRupees } from "@/lib/money";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -171,6 +172,7 @@ function AppPayRow({ a, candidateId }: { a: AppPay; candidateId: string }) {
           {d.complete ? "Correct details" : "Enter from a call"}
         </Button>
       </div>
+      <NegotiationSection applicationId={a.applicationId} />
       {editing ? (
         <EntryDialog
           applicationId={a.applicationId}
@@ -318,6 +320,238 @@ function EntryDialog({
             Cancel
           </Button>
           <Button onClick={() => void submit()} disabled={busy}>
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ------------------------------------------------------------ pay discussion */
+
+const NEGOTIATION_LABEL: Record<string, string> = {
+  open: "Prepared — the HR head approves the message; you may call instead",
+  message_sent: "Message sent — waiting for the candidate",
+  countered: "The candidate suggested another figure",
+  call_requested: "The candidate asked for a call",
+  agreed: "Agreed",
+  no_agreement: "No agreement",
+  expired: "No answer — the link closed",
+  cancelled: "Cancelled",
+};
+
+/** The pay discussion for one application: the call brief, the answer, the outcome. */
+export function NegotiationSection({ applicationId }: { applicationId: string }) {
+  const load = useServerFn(getNegotiation);
+  const qc = useQueryClient();
+  const q = useQuery({
+    queryKey: ["negotiation", applicationId],
+    queryFn: () => load({ data: { applicationId } }),
+  });
+  const [briefOpen, setBriefOpen] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const n = q.data;
+  if (!n) return null;
+  const canRecord = ["open", "message_sent", "countered", "call_requested", "expired"].includes(
+    n.status,
+  );
+  return (
+    <div className="mt-3 rounded-md border border-primary/30 bg-primary/5 p-3 text-xs">
+      <p className="font-semibold">Pay discussion · {NEGOTIATION_LABEL[n.status] ?? n.status}</p>
+      <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+        <dt className="text-muted-foreground">They expect</dt>
+        <dd className="num">{lpa(n.expectedCtc)}</dd>
+        <dt className="text-muted-foreground">Ceiling</dt>
+        <dd className="num">
+          {lpa(n.ceiling)} (approved by{" "}
+          {n.ceilingApprovedBy === "president_cbo" ? "the CBO" : "the HR head"})
+        </dd>
+        <dt className="text-muted-foreground">Proposed</dt>
+        <dd className="num">
+          {lpa(n.proposedCtc)}
+          {n.levers?.joiningBonus ? ` + ${lpa(n.levers.joiningBonus)} joining bonus` : ""}
+          {n.levers?.reviewMonths ? ` · review after ${n.levers.reviewMonths} months` : ""}
+        </dd>
+        {n.answer ? (
+          <>
+            <dt className="text-muted-foreground">Their answer</dt>
+            <dd>
+              {n.answer.decision === "accept"
+                ? "Accepted"
+                : n.answer.decision === "propose"
+                  ? `Suggests ${lpa(n.answer.amount ?? null)}`
+                  : "Asked for a call"}
+              {n.answer.note ? ` — "${n.answer.note}"` : ""}
+            </dd>
+          </>
+        ) : null}
+        {n.outcome ? (
+          <>
+            <dt className="text-muted-foreground">Outcome</dt>
+            <dd>
+              {n.outcome.agreedCtc != null ? `Agreed ${lpa(n.outcome.agreedCtc)}` : "No agreement"}
+              {n.outcome.joiningBonus ? ` + ${lpa(n.outcome.joiningBonus)} joining bonus` : ""}
+              {n.outcome.note ? ` — ${n.outcome.note}` : ""}
+              {n.outcome.by ? ` (${n.outcome.by})` : ""}
+            </dd>
+          </>
+        ) : null}
+      </dl>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7"
+          onClick={() => setBriefOpen(!briefOpen)}
+        >
+          {briefOpen ? "Hide the call brief" : "Call brief"}
+        </Button>
+        {canRecord ? (
+          <Button size="sm" className="h-7" onClick={() => setRecording(true)}>
+            Record the call
+          </Button>
+        ) : null}
+      </div>
+      {briefOpen ? (
+        <div className="mt-2 space-y-2 rounded border border-border bg-background p-2">
+          <p className="whitespace-pre-wrap">{n.talkTrack}</p>
+          {n.message ? (
+            <>
+              <p className="font-medium">The message to the candidate</p>
+              <p className="whitespace-pre-wrap text-muted-foreground">{n.message}</p>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+      {recording ? (
+        <NegotiationOutcomeDialog
+          negotiationId={n.id}
+          ceiling={n.ceiling}
+          onClose={() => setRecording(false)}
+          onSaved={() => {
+            setRecording(false);
+            void qc.invalidateQueries({ queryKey: ["negotiation", applicationId] });
+            void qc.invalidateQueries({ queryKey: ["notifications"] });
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/** What was agreed on a call — or that nothing was. Used on the candidate page and in the pop-up. */
+export function NegotiationOutcomeDialog({
+  negotiationId,
+  ceiling,
+  onClose,
+  onSaved,
+}: {
+  negotiationId: string;
+  ceiling: number | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const save = useServerFn(recordNegotiationCall);
+  const [agreed, setAgreed] = useState(true);
+  const [f, setF] = useState({ agreedCtc: "", joiningBonus: "", joiningDate: "", note: "" });
+  const [busy, setBusy] = useState(false);
+  const set = (k: keyof typeof f) => (e: { target: { value: string } }) =>
+    setF((p) => ({ ...p, [k]: e.target.value }));
+  async function submit() {
+    setBusy(true);
+    try {
+      const ctc = lakhsToRupees(f.agreedCtc);
+      const bonus = lakhsToRupees(f.joiningBonus);
+      if (agreed && (ctc == null || Number.isNaN(ctc) || (bonus != null && Number.isNaN(bonus))))
+        throw new Error("Amounts are lakhs per annum, e.g. 110.");
+      await save({
+        data: {
+          negotiationId,
+          outcome: agreed
+            ? {
+                agreed: true,
+                agreedCtc: ctc,
+                joiningBonus: bonus,
+                joiningDate: f.joiningDate || null,
+                note: f.note.trim() || undefined,
+              }
+            : { agreed: false, note: f.note.trim() },
+        },
+      });
+      toast.success("Recorded.");
+      onSaved();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not save");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Dialog open onOpenChange={(o) => (!o ? onClose() : undefined)}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Record the pay call</DialogTitle>
+          <DialogDescription>
+            {ceiling != null ? `The approved ceiling is ${lpa(ceiling)}. ` : ""}An agreed figure
+            starts the Offer agent; it drafts at it for HR head and CBO approval.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex gap-4 text-sm">
+          <label className="flex items-center gap-2">
+            <input type="radio" checked={agreed} onChange={() => setAgreed(true)} /> We agreed a
+            figure
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="radio" checked={!agreed} onChange={() => setAgreed(false)} /> No agreement
+          </label>
+        </div>
+        {agreed ? (
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label htmlFor="neg-ctc">Agreed CTC (₹ L)</Label>
+              <Input
+                id="neg-ctc"
+                inputMode="decimal"
+                value={f.agreedCtc}
+                onChange={set("agreedCtc")}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="neg-bonus">Joining bonus (₹ L)</Label>
+              <Input
+                id="neg-bonus"
+                inputMode="decimal"
+                value={f.joiningBonus}
+                onChange={set("joiningBonus")}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="neg-date">Joining date</Label>
+              <Input
+                id="neg-date"
+                type="date"
+                value={f.joiningDate}
+                onChange={set("joiningDate")}
+              />
+            </div>
+          </div>
+        ) : null}
+        <Textarea
+          rows={2}
+          maxLength={1000}
+          placeholder={agreed ? "Notes (optional)" : "Why no figure was agreed (required)"}
+          value={f.note}
+          onChange={set("note")}
+        />
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => void submit()}
+            disabled={busy || (agreed ? !f.agreedCtc.trim() : f.note.trim().length < 3)}
+          >
             Save
           </Button>
         </DialogFooter>

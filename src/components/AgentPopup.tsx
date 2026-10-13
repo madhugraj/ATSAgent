@@ -16,6 +16,7 @@ import {
   setNotificationState,
 } from "@/lib/nudges.functions";
 import { sendCandidateCompensationForm } from "@/lib/compensation.functions";
+import { NegotiationOutcomeDialog } from "@/components/CompensationPanel";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -113,7 +114,17 @@ export function AgentPopup() {
           </Link>
         </div>
       </div>
-      {action ? (
+      {action?.id === "negotiation_outcome" && n.subject?.negotiationId ? (
+        <NegotiationOutcomeDialog
+          negotiationId={n.subject.negotiationId}
+          ceiling={null}
+          onClose={() => setAction(null)}
+          onSaved={() => {
+            setAction(null);
+            qc.invalidateQueries({ queryKey: ["notifications"] });
+          }}
+        />
+      ) : action ? (
         <ActionDialog
           n={n}
           action={action}
@@ -193,6 +204,11 @@ function ActionDialog({
       title: `Not taking ${who} further`,
       desc: "They get a kind, final email — your reason stays internal.",
       go: "Confirm",
+    },
+    negotiation_outcome: {
+      title: `Record the pay call with ${who}`,
+      desc: "",
+      go: "Save",
     },
     pay_remind: {
       title: `Remind ${who} about the pay & availability form`,

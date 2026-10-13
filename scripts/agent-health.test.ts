@@ -237,6 +237,53 @@ describe("rules", () => {
     await db.delete(requisitions).where(eq(requisitions.id, q!.id));
   });
 
+  test("a pay discussion waiting on a person, or ended without agreement, is flagged", async () => {
+    const { applications, candidates, requisitions, offerNegotiations } =
+      await import("../drizzle/schema");
+    const [q] = await db
+      .insert(requisitions)
+      .values({ orgId, code: `REQ-NEG-${stamp}`, title: "VP", status: "approved" } as never)
+      .returning({ id: requisitions.id });
+    const [c] = await db
+      .insert(candidates)
+      .values({ orgId, fullName: "Neha", email: `neha-${stamp}@x.local` })
+      .returning({ id: candidates.id });
+    const [a] = await db
+      .insert(applications)
+      .values({ orgId, requisitionId: q!.id, candidateId: c!.id, stage: "offer_pending" })
+      .returning({ id: applications.id });
+    const rule = async () => (await open()).filter((i) => i.rule === "offer.negotiation_stalled");
+    const [n] = await db
+      .insert(offerNegotiations)
+      .values({
+        orgId,
+        applicationId: a!.id,
+        candidateId: c!.id,
+        status: "countered",
+        ceiling: "11000000",
+        ceilingApprovedBy: "hr_head",
+        proposedCtc: "11000000",
+        updatedAt: new Date(),
+      })
+      .returning({ id: offerNegotiations.id });
+    await evaluate();
+    expect(await rule()).toHaveLength(0); // fresh: a person has time to act
+    await db
+      .update(offerNegotiations)
+      .set({ updatedAt: new Date(Date.now() - (HEALTH.negotiationWaitDays + 1) * 864e5) })
+      .where(eq(offerNegotiations.id, n!.id));
+    await evaluate();
+    expect((await rule())[0]).toMatchObject({ agentType: "offer", severity: "warning" });
+    // Agreed: nothing left to flag.
+    await db
+      .update(offerNegotiations)
+      .set({ status: "agreed" })
+      .where(eq(offerNegotiations.id, n!.id));
+    await evaluate();
+    expect(await rule()).toHaveLength(0);
+    await db.delete(requisitions).where(eq(requisitions.id, q!.id));
+  });
+
   test("tool error rate fires above the threshold only", async () => {
     const id = await run("screening", { status: "done" });
     const steps = (errors: number) =>

@@ -173,6 +173,12 @@ export async function offerReadiness(
       ? `The candidate's ${missing.join(" and ")} ${missing.length > 1 ? "are" : "is"} not known yet. The pay & availability form was already sent and is open — do not draft and do not send it again. Finish: you will be started again when the candidate answers (or TA enters it from a call).`
       : `The candidate's ${missing.join(" and ")} ${missing.length > 1 ? "are" : "is"} not known, so no offer can be drafted yet. send_compensation_form to the candidate, then finish: you will be started again when they answer (or TA enters it from a call).`;
   }
+  const neg = await import("@/lib/negotiation.server");
+  const latest = await neg.latestNegotiation(ctx.orgId, applicationId);
+  if (latest && neg.OPEN_NEGOTIATION.includes(latest.status))
+    return "A pay discussion with the candidate is in progress (the HR head approves the message; TA may call). Do not draft — finish; you will be started again when a figure is agreed.";
+  // A figure agreed with the candidate settles the expectation.
+  if (await neg.agreedTerms(ctx.orgId, applicationId)) return null;
   const max = num(app.bandMax);
   if (
     max != null &&
@@ -265,6 +271,22 @@ export function registerPhase4Tools(): void {
             form: r ? { status: r.status, sentAt: r.createdAt, dueAt: r.dueAt } : null,
           };
         })(),
+        negotiation: await (async () => {
+          const { latestNegotiation } = await import("@/lib/negotiation.server");
+          const n = await latestNegotiation(ctx.orgId, app.id);
+          return n
+            ? {
+                negotiationId: n.id,
+                status: n.status,
+                ceiling: num(n.ceiling),
+                ceilingApprovedBy: n.ceilingApprovedBy,
+                proposedCtc: num(n.proposedCtc),
+                levers: n.levers,
+                answer: n.answer,
+                outcome: n.outcome,
+              }
+            : null;
+        })(),
         hiringDecision: decision[0]?.body ?? null,
         existingOffers: existing.map(({ approvalTrail, ...o }) => {
           // An approver who sent it back: their step and reason.
@@ -319,6 +341,66 @@ export function registerPhase4Tools(): void {
   });
 
   registerTool({
+    name: "propose_negotiation",
+    description:
+      "When the candidate's expected CTC is above what the HR head will pay: prepare a pay discussion — the approved ceiling, the figure you propose (at or under it), levers that cost less than base pay (joiningBonus in rupees, reviewMonths for an early pay review, other: fixed / variable split, ESOPs, title or scope), a talkTrack for a recruiter's call (her numbers, the gap, what to offer first, the walk-away), and a warm, personal message to the candidate (plain text, no amounts beyond the proposal and levers, no pressure). The ceiling must come from the HR head's answer in this run; above the band also from the CBO's. Contacts nobody: then send_negotiation_message.",
+    input: z.object({
+      applicationId: z.string().uuid(),
+      ceiling: z.number().positive(),
+      proposedCtc: z.number().positive(),
+      levers: z
+        .object({
+          joiningBonus: z.number().min(0).nullable().optional(),
+          reviewMonths: z.number().int().min(3).max(24).nullable().optional(),
+          other: z.string().max(500).nullable().optional(),
+        })
+        .default({}),
+      talkTrack: z.string().min(40).max(3000),
+      message: z.string().min(80).max(3000),
+    }),
+    risk: "write",
+    describe: (i) =>
+      `Prepare a pay discussion: propose ${rupees(i.proposedCtc)} (ceiling ${rupees(i.ceiling)})`,
+    run: async (ctx, i) => {
+      const { prepareNegotiation } = await import("@/lib/negotiation.server");
+      return prepareNegotiation(ctx, i);
+    },
+  });
+
+  registerTool({
+    name: "send_negotiation_message",
+    description:
+      "Email the candidate the prepared pay message with a private link to accept, suggest another figure or ask for a call. Always approved by the HR head first — who may edit the words — whatever the agent's autonomy; it is then sent as them.",
+    input: z.object({ negotiationId: z.string().uuid(), message: z.string().min(80).max(3000) }),
+    risk: "external",
+    // No template: a pay message is never pre-approved, so a person always approves it.
+    templateOf: () => null,
+    approverRole: "hr_head",
+    describe: () => "Send the pay message to the candidate",
+    precheck: async (ctx, i) => {
+      const { offerNegotiations } = await import("@db/schema");
+      const [n] = await db
+        .select({ status: offerNegotiations.status })
+        .from(offerNegotiations)
+        .where(
+          and(eq(offerNegotiations.id, i.negotiationId), eq(offerNegotiations.orgId, ctx.orgId)),
+        )
+        .limit(1);
+      if (!n) return "That pay discussion does not exist — propose_negotiation first.";
+      return n.status === "open"
+        ? null
+        : `This pay discussion is ${n.status.replace(/_/g, " ")} — nothing to send.`;
+    },
+    run: async (ctx, i) => {
+      const { sendNegotiationMessage } = await import("@/lib/negotiation.server");
+      return sendNegotiationMessage(ctx.orgId, i.negotiationId, i.message, {
+        userId: ctx.principalUserId,
+        actor: ctx.actor,
+      });
+    },
+  });
+
+  registerTool({
     name: "draft_offer",
     description:
       "Create a DRAFT offer for a selected candidate. The CTC must sit inside the requisition's approved band; if it cannot, ask a person instead. The person the agent works for must be on the recruiting team.",
@@ -348,8 +430,17 @@ export function registerPhase4Tools(): void {
       const max = num(app.bandMax);
       // Above the band only with the CBO's answer in this run (an exception the
       // HR head asked for); never below it.
+      const agreed = await (
+        await import("@/lib/negotiation.server")
+      ).agreedTerms(ctx.orgId, app.id);
+      if (agreed && i.offeredCtc > agreed.ceiling)
+        throw new Error(
+          `${rupees(i.offeredCtc)} is above the ceiling ${rupees(agreed.ceiling)} agreed for this candidate. Draft at the agreed ${rupees(agreed.agreedCtc)}.`,
+        );
       const cboException =
-        max != null && i.offeredCtc > max && (await answeredInRun(ctx.runId, ["president_cbo"]));
+        max != null &&
+        i.offeredCtc > max &&
+        ((agreed?.cboApproved ?? false) || (await answeredInRun(ctx.runId, ["president_cbo"])));
       if (
         min != null &&
         max != null &&

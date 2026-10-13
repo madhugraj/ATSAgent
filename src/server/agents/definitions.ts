@@ -453,7 +453,10 @@ export function registerPhase4Agents(): void {
     // IDs or flags) and times in the organisation's time zone.
     // 1.4.0: an offer always carries a joining date; approvers refuse offers whose terms are
     // not settled, and an approved offer can be sent back for them.
-    version: "1.4.0",
+    // 1.5.0: when the expectation is above the HR head's ceiling, prepares a pay discussion
+    // (call brief + a message a person always approves) instead of handing off; drafts at
+    // the agreed figure.
+    version: "1.5.0",
     owner: "hr_head",
     responsibility:
       "Turns a hiring decision into a draft offer inside the approved band — built on the candidate's stated expectation and notice period — with its letter and an approval brief, and walks it through HR head and CBO approval.",
@@ -462,6 +465,8 @@ export function registerPhase4Agents(): void {
       "Offer outside the requisition's approved band without a person's explicit go-ahead",
       "Draft an offer before the candidate's expected CTC and notice period are known",
       "Draft against an expectation above the band before the HR head has decided how to proceed",
+      "Contact the candidate about pay except through a message a person approved word for word",
+      "Propose or agree a figure above the ceiling the HR head (and the CBO above the band) approved",
       "Change an offer after it has been submitted for approval",
     ],
     scope: {
@@ -477,13 +482,17 @@ export function registerPhase4Agents(): void {
         "offer letters on draft offers",
         "submission into the approval chain",
       ],
-      external: ["the pay & availability form to the candidate"],
+      external: [
+        "the pay & availability form to the candidate",
+        "the pay discussion message (always approved by the HR head, who may edit it)",
+      ],
     },
     gates: ["general"],
     riskTier: "high",
     evals: [
       "offer: drafts in band, generates the letter and routes it to the HR head",
       "offer: sends the pay & availability form instead of drafting blind",
+      "offer: prepares a pay discussion when the expectation is above the HR head's ceiling",
     ],
     feature: "agent_offer",
     maxSteps: 14,
@@ -491,6 +500,8 @@ export function registerPhase4Agents(): void {
       "get_offer_context",
       "research_compensation",
       "send_compensation_form",
+      "propose_negotiation",
+      "send_negotiation_message",
       "draft_offer",
       "revise_offer",
       "generate_offer_letter",
@@ -501,6 +512,8 @@ export function registerPhase4Agents(): void {
       "1. get_offer_context. Only continue if the hiring decision says SELECT and there is no active offer.",
       "1b. If compensation.complete is false: if compensation.form is open (status sent), finish and say you are waiting for the candidate; otherwise send_compensation_form and finish. Never draft without the candidate's expected CTC and notice period, and never guess them.",
       "1c. If compensation.expectedCtc is above the band maximum: ask_human with assignee_role hr_head — state the expectation, the band, the gap in money and %, current pay and competing offers — and offer three choices: (a) offer at the band maximum, (b) seek a CBO exception above the band, (c) stop. Follow the answer: (a) draft at the band maximum; (b) ask_human with assignee_role president_cbo for the figure, then draft at the figure they give; (c) finish without drafting.",
+      "1d. If the approved figure (the HR head's ceiling, or the CBO's) is still below the candidate's expectation, do not hand off and do not draft: if the ceiling is above the band maximum and the CBO has not answered, ask_human with assignee_role president_cbo first. Then propose_negotiation: ceiling = the approved figure; proposedCtc = the ceiling (or a little under it, keeping room to agree); levers that cost less than base pay — a joiningBonus that covers variable pay they give up by leaving, reviewMonths 6 for an early review, and other (fixed / variable split, ESOPs if the organisation has them); a talkTrack for TA's call (their current pay, ask and gap; open with appreciation; the proposal and levers; what TA may agree up to the ceiling; when to stop and hand to the HR head); and a message to the candidate: warm and personal, thank them, say plainly what the organisation can offer and why (internal parity, the role's band), list the levers, invite them to accept, suggest another figure or ask for a call; no pressure, no deadlines beyond the link's date, no internal reasoning about other candidates. Then send_negotiation_message with the negotiationId and that message, and finish: a person approves it, and you are started again when a figure is agreed.",
+      "1e. When negotiation.status is agreed: draft_offer (or revise_offer) at negotiation.outcome.agreedCtc, joining date = outcome.joiningDate or the candidate's earliest joining date, and state the joining bonus and review in your approval brief. Never draft above the agreed figure. If it is countered, call_requested or open, finish — a person is handling it.",
       "2. Propose a CTC inside the requisition's band: anchor on the candidate's expected CTC, the internal parity median and the band midpoint; use research_compensation if the band is missing. Never exceed the band unless the CBO answered 1c(b).",
       "3. draft_offer with a joining date, always: the candidate's earliest joining date if given, otherwise notice period from today, rounded to the next Monday. An offer without a joining date cannot go for approval. When revising a sent-back offer, set the joining date the same way.",
       "4. generate_offer_letter, then submit_offer_for_approval.",

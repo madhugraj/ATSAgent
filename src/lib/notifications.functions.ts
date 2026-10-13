@@ -33,7 +33,8 @@ export type NotificationAction = {
     | "move_l1"
     | "hold"
     | "reject"
-    | "pay_remind";
+    | "pay_remind"
+    | "negotiation_outcome";
   label: string;
 };
 
@@ -64,6 +65,8 @@ export type Notification = {
     assessmentId?: string;
     /** A pay & availability form request. */
     payRequestId?: string;
+    /** A pay discussion (offer negotiation). */
+    negotiationId?: string;
     applicationId?: string;
     candidate?: string;
     dueAt?: string | null;
@@ -432,7 +435,11 @@ export const myNotifications = createServerFn({ method: "GET" })
         member.isOwner ||
         roles.some((r) => r === "recruiter" || r === "hr_head" || r === "president_cbo")
       )
-        out.push(...(await assessmentNudges(member.orgId)), ...(await payNudges(member.orgId)));
+        out.push(
+          ...(await assessmentNudges(member.orgId)),
+          ...(await payNudges(member.orgId)),
+          ...(await negotiationNudges(member.orgId)),
+        );
     }
     // This person's pop-up choices (snoozed / dismissed).
     const states = out.length
@@ -641,6 +648,87 @@ export async function payNudges(orgId: string, now = new Date()): Promise<Notifi
         subject,
       });
     }
+  }
+  return out;
+}
+
+/**
+ * Pay discussions that need a person (TA / HR only — the caller checks):
+ * prepared (call, or approve the message), a suggested figure, a call asked
+ * for, no answer past the due date, or a closed link. No amounts in a nudge.
+ */
+export async function negotiationNudges(orgId: string, now = new Date()): Promise<Notification[]> {
+  const { offerNegotiations, candidates } = await import("@db/schema");
+  const { negotiationOverdue } = await import("./negotiation.server");
+  const rows = await db
+    .select({ n: offerNegotiations, name: candidates.fullName })
+    .from(offerNegotiations)
+    .innerJoin(candidates, eq(candidates.id, offerNegotiations.candidateId))
+    .where(
+      and(
+        eq(offerNegotiations.orgId, orgId),
+        inArray(offerNegotiations.status, [
+          "open",
+          "countered",
+          "call_requested",
+          "message_sent",
+          "expired",
+        ]),
+        sql`${offerNegotiations.updatedAt} >= now() - interval '30 days'`,
+      ),
+    );
+  const out: Notification[] = [];
+  for (const { n, name } of rows) {
+    const subject = { negotiationId: n.id, applicationId: n.applicationId, candidate: name };
+    const base = {
+      kind: "offer" as const,
+      to: `/candidates/${n.candidateId}`,
+      at: n.updatedAt.toISOString(),
+      popup: true,
+      agent: "Offer agent",
+      actions: [{ id: "negotiation_outcome" as const, label: "Record the call" }],
+      subject,
+    };
+    if (n.status === "open")
+      out.push({
+        ...base,
+        id: `negotiation:open:${n.id}`,
+        title: `Agree ${name}'s pay before the offer`,
+        body: "Their expectation is above the approved ceiling. Call them with the brief on their page, or the HR head approves the prepared message.",
+        severity: "warn",
+      });
+    else if (n.status === "countered")
+      out.push({
+        ...base,
+        id: `negotiation:countered:${n.id}`,
+        title: `${name} suggested another figure`,
+        body: "Call them or decide with the HR head; record what you agree. Above the ceiling needs the HR head (and the CBO above the band).",
+        severity: "urgent",
+      });
+    else if (n.status === "call_requested")
+      out.push({
+        ...base,
+        id: `negotiation:call:${n.id}`,
+        title: `${name} asked for a call about the offer`,
+        body: "The call brief is on their page. Record the outcome after the call.",
+        severity: "urgent",
+      });
+    else if (n.status === "message_sent" && negotiationOverdue(n, now))
+      out.push({
+        ...base,
+        id: `negotiation:waiting:${n.id}`,
+        title: `No answer from ${name} on the pay message`,
+        body: "A short call usually helps. Record the outcome after it.",
+        severity: "warn",
+      });
+    else if (n.status === "expired")
+      out.push({
+        ...base,
+        id: `negotiation:expired:${n.id}`,
+        title: `${name} did not answer the pay message`,
+        body: "Call them, or the HR head decides whether to raise the ceiling or stop.",
+        severity: "warn",
+      });
   }
   return out;
 }

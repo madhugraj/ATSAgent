@@ -141,6 +141,19 @@ type GateInfo = {
  * The candidate's own numbers against the offer, stated by the system on the
  * approval card (pure; unit-tested) — never left to the agent's brief.
  */
+/** What was agreed with the candidate in a pay discussion, against the offer (pure). */
+export function agreedLine(
+  ctc: number,
+  agreed: { agreedCtc: number; joiningBonus: number | null; cboApproved: boolean } | null,
+): string {
+  if (!agreed) return "";
+  const match =
+    ctc === agreed.agreedCtc
+      ? "this offer matches it"
+      : `this offer is ${rupees(Math.abs(ctc - agreed.agreedCtc))} ${ctc > agreed.agreedCtc ? "above" : "below"} it`;
+  return ` Agreed with the candidate in a pay discussion: ${rupees(agreed.agreedCtc)}${agreed.joiningBonus ? ` plus a ${rupees(agreed.joiningBonus)} joining bonus` : ""}${agreed.cboApproved ? " (ceiling approved by the CBO)" : ""}; ${match}.`;
+}
+
 export function expectationLine(
   ctc: number,
   pay: {
@@ -227,7 +240,7 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
       return {
         role,
         status: o.status,
-        detail: `Offer for ${o.name} (${o.title}): ${rupees(ctc)} CTC — ${o.status}.${vsBudget}${vsBand}${expectationLine(ctc, await detailsFor(orgId, o.applicationId))}${
+        detail: `Offer for ${o.name} (${o.title}): ${rupees(ctc)} CTC — ${o.status}.${vsBudget}${vsBand}${expectationLine(ctc, await detailsFor(orgId, o.applicationId))}${agreedLine(ctc, await (await import("@/lib/negotiation.server")).agreedTerms(orgId, o.applicationId))}${
           missing.length
             ? `\n\nThis offer cannot be approved yet: ${listWords(missing)} ${missing.length > 1 ? "are" : "is"} missing. Decline it with that reason — it goes back to draft and the Offer agent collects them.`
             : ""

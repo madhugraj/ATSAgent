@@ -66,6 +66,13 @@ cancelled or expired links, and its server functions are rate-limited with all o
 answers are readable only by TA, the HR head, the CBO and owners (role-checked server-side); audit
 entries and thread messages record that details changed, never the amounts.
 
+The candidate's pay discussion page (`/negotiate/<token>`) is public in the same way: a 64-hex token
+issued only when a person approved the message, showing that message, the proposed figure and its
+levers; it records one answer (accept, another figure, a call) — claimed in the update itself —
+refuses closed links, and its server functions are rate-limited with all other RPCs. The message is
+never sent without a person's approval, whatever the agent's autonomy (the tool has no pre-approvable
+template), and no figure above the approved ceiling can be agreed.
+
 The candidate's interview-time page (`/schedule/<token>`) is public: the token is 64 random hex
 characters, it returns only the round, role, organisation, the interviewer's first name and the
 offered times, it can book one of those times once (the offer is claimed before booking and every

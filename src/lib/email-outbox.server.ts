@@ -41,6 +41,7 @@ const KIND_TOGGLE: Record<
   interviewer_brief: null,
   interview_slots: "interviewEnabled",
   compensation_form: "stageEnabled",
+  offer_negotiation: "offerEnabled",
 };
 
 export async function getOrgEmailSettings(orgId: string): Promise<EmailSettingsEffective> {

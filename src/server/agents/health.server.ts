@@ -57,6 +57,8 @@ export const HEALTH = {
   interviewNoShows7d: 3,
   /** An open offer on its this-many-th revision is going back and forth. */
   offerRevisions: 3,
+  /** A pay discussion waiting on a person (suggested figure, call asked for) this many days. */
+  negotiationWaitDays: 2,
   /** Re-evaluate at most this often (minutes). */
   evaluateEveryMinutes: 5,
 } as const;
@@ -467,6 +469,38 @@ export const RULES: Rule[] = [
         {
           agentType: "offer",
           title: `${n} candidate(s) near an offer never shared their expected pay or notice period`,
+          detail: { candidates: n },
+        },
+      ];
+    },
+  },
+  {
+    id: "offer.negotiation_stalled",
+    element: "hitl",
+    severity: "warning",
+    description: `A pay discussion has waited on a person for more than ${HEALTH.negotiationWaitDays} days (the candidate suggested a figure or asked for a call), or it closed without agreement while the candidate is still near an offer — someone should call them or the HR head should decide.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number }>(sql`
+        select count(distinct n.application_id)::int n
+        from offer_negotiations n
+        join applications a on a.id = n.application_id and a.org_id = n.org_id
+        where n.org_id = ${orgId}
+          and a.stage in ('l1','l2','l3','offer_pending')
+          and (
+            (n.status in ('countered','call_requested','open')
+              and n.updated_at < now() - make_interval(days => ${HEALTH.negotiationWaitDays}))
+            or (n.status in ('expired','no_agreement')
+              and n.updated_at >= now() - interval '14 days'
+              and not exists (
+                select 1 from offer_negotiations later
+                where later.application_id = n.application_id
+                  and later.created_at > n.created_at)))`);
+      const n = r[0]?.n ?? 0;
+      if (!n) return [];
+      return [
+        {
+          agentType: "offer",
+          title: `${n} pay ${n === 1 ? "discussion" : "discussions"} waiting on a person or ended without agreement`,
           detail: { candidates: n },
         },
       ];

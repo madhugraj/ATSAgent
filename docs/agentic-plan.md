@@ -451,6 +451,24 @@ the autonomy dial.
   thread told); once released, only revoking applies. Pre-onboarding
   documents are not requested until the terms are settled
   (`onboarding_status.termsMissing`; `request_documents` refuses).
+- **Pay discussion before the letter (Offer 1.5.0, migration `0039`):** when
+  the candidate's expectation is above the ceiling the HR head sets (the CBO
+  too when it is above the band), the Offer agent does not hand off or
+  draft: `propose_negotiation` records the ceiling (and who approved it),
+  a proposed figure at or under it, levers that cost less than base pay
+  (joining bonus, a pay review after N months, split / ESOPs), a call brief
+  for TA and a warm message. `send_negotiation_message` has no template, so
+  a person — the HR head — always approves (and may edit) the exact words,
+  whatever the agent's autonomy; it is then sent as them with a private
+  `/negotiate/<token>` link (accept · suggest another figure · ask for a
+  call; once; closes on the assessment policy's timeline). TA can record a
+  call's outcome at any time from the candidate page or the pop-up (never
+  above the ceiling). Agreement raises `negotiation.agreed`: the Offer agent
+  drafts at that figure (above the band only on a CBO-approved ceiling) and
+  the approval card states what was agreed. A suggested figure, a call
+  request, no answer or a closed link pops up for TA / HR; health rule
+  `offer.negotiation_stalled`. Amounts never reach the thread, nudges or
+  audit.
   Order: pay & availability at screening → interviews → selection → offer
   on the candidate's numbers (HR head first if above the band) → HR head →
   CBO → documents → release → the candidate accepts or asks for changes.

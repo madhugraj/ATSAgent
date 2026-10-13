@@ -671,6 +671,79 @@ export function scenarios(): ScriptedScenario[] {
       ],
     },
     {
+      name: "offer: prepares a pay discussion when the expectation is above the HR head's ceiling",
+      agentType: "offer",
+      setup: async ({ orgId, userId }) => {
+        const requisitionId = await seedRequisition(orgId, userId, "approved");
+        const { db } = await import("../../src/server/db");
+        const { requisitions, candidateNotes, applications, compensationDetails } =
+          await import("../../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        await db
+          .update(requisitions)
+          .set({ ctcBandMin: "2500000", ctcBandMax: "3500000", budgetCtc: "3000000" })
+          .where(eq(requisitions.id, requisitionId));
+        const app = await seedApplication(orgId, requisitionId, "Kavya", "l3", 88);
+        const [a] = await db
+          .select({ c: applications.candidateId })
+          .from(applications)
+          .where(eq(applications.id, app));
+        await db.insert(candidateNotes).values({
+          orgId,
+          candidateId: a!.c,
+          authorId: userId,
+          body: "Hiring decision: SELECT. Strong across rounds.",
+        });
+        await db.insert(compensationDetails).values({
+          orgId,
+          applicationId: app,
+          candidateId: a!.c,
+          currentFixed: "3000000",
+          currentVariable: "400000",
+          expectedCtc: "4500000",
+          noticePeriodDays: 60,
+          source: "candidate_form",
+        });
+        return { requisitionId, app };
+      },
+      goal: (d) => `Prepare the offer. app=${d["app"]}\n\nRequisition id: ${d["requisitionId"]}`,
+      decide: (t) =>
+        t.kind === "clarification"
+          ? { status: "answered", answer: "We can go up to 35 L, the band maximum. Negotiate." }
+          : { status: "approved" },
+      expect: {
+        status: "done",
+        calls: ["get_offer_context", "propose_negotiation", "send_negotiation_message"],
+        neverCalls: ["draft_offer"],
+      },
+      script: [
+        (m) => call("c", "get_offer_context", { applicationId: fromGoal(m, "app") }),
+        call("q", "ask_human", {
+          question:
+            "Kavya expects 45 L (band max 35 L, 29% above). Offer at the band maximum, seek a CBO exception, or stop?",
+          assignee_role: "hr_head",
+        }),
+        (m) =>
+          call("p", "propose_negotiation", {
+            applicationId: fromGoal(m, "app"),
+            ceiling: 3500000,
+            proposedCtc: 3500000,
+            levers: { joiningBonus: 300000, reviewMonths: 6 },
+            talkTrack:
+              "Thank her; her ask is 45 L on 34 L today. We can do 35 L plus a 3 L joining bonus and a six-month review. Do not go above 35 L; hand to the HR head if she holds firm.",
+            message:
+              "Thank you for sharing your expectations, Kavya — the team enjoyed every conversation with you.\n\nWe can offer ₹35,00,000 a year, a ₹3,00,000 joining bonus and a pay review after six months.",
+          }),
+        (m) =>
+          call("s", "send_negotiation_message", {
+            negotiationId: String(toolResult(m, "propose_negotiation")["negotiationId"]),
+            message:
+              "Thank you for sharing your expectations, Kavya — the team enjoyed every conversation with you.\n\nWe can offer ₹35,00,000 a year, a ₹3,00,000 joining bonus and a pay review after six months.",
+          }),
+        say("Prepared the pay discussion; the HR head approved the message and it went to Kavya."),
+      ],
+    },
+    {
       name: "onboarding: requests missing documents, then asks HR to validate",
       agentType: "onboarding",
       setup: async ({ orgId, userId }) => {

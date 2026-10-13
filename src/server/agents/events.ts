@@ -22,7 +22,8 @@ export type AgentEventType =
   | "interview.missed"
   | "interview.slots_unanswered"
   | "assessment.completed"
-  | "compensation.submitted";
+  | "compensation.submitted"
+  | "negotiation.agreed";
 
 export async function emitAgentEvent(e: {
   orgId: string;

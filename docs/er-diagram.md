@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-80 tables across 9 domains.
+81 tables across 9 domains.
 
 ## Identity & access
 
@@ -1079,6 +1079,10 @@ erDiagram
 | `match_scores` | `org_id` | `organizations` | cascade |
 | `notification_states` | `org_id` | `organizations` | cascade |
 | `notification_states` | `user_id` | `users` | cascade |
+| `offer_negotiations` | `application_id` | `applications` | cascade |
+| `offer_negotiations` | `candidate_id` | `candidates` | cascade |
+| `offer_negotiations` | `org_id` | `organizations` | cascade |
+| `offer_negotiations` | `run_id` | `agent_runs` | no action |
 | `offers` | `application_id` | `applications` | cascade |
 | `offers` | `org_id` | `organizations` | cascade |
 | `onboarding_documents` | `application_id` | `applications` | cascade |
@@ -1199,6 +1203,7 @@ erDiagram
 | `master_items` | Organisations & masters | 8 | — |
 | `match_scores` | Candidates & pipeline | 26 | — |
 | `notification_states` | — | 7 | — |
+| `offer_negotiations` | — | 21 | — |
 | `offers` | Offers & onboarding | 14 | — |
 | `onboarding_documents` | Offers & onboarding | 23 | — |
 | `ontology_snapshots` | Intelligence | 11 | — |
