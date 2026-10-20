@@ -71,6 +71,12 @@ head / CBO / owner) or holding only an unused draft requisition (HR head / CBO /
 the server enforces the stage and role. Deletions are audited, hidden at once and restorable by an
 owner for 30 days, then purged; agent runs and the audit log are kept.
 
+Requisition scoring weights decide how every candidate is ranked, so they are role- and stage-checked
+on the server: a draft by its raiser or the HR head / CBO, an approved role by the HR head / CBO only,
+never while in approval (send it back for changes instead) or once closed; they must total 100 and every
+change is audited with its before and after values. Sending a requisition back for changes is limited to
+the current approver, its raiser and HR leadership, and is recorded on its approval trail.
+
 The candidate's pay discussion page (`/negotiate/<token>`) is public in the same way: a 64-hex token
 issued only when a person approved the message, showing that message, the proposed figure and its
 levers; it records one answer (accept, another figure, a call) — claimed in the update itself —

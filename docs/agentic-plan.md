@@ -1016,6 +1016,23 @@ the target of 75% is reached as soon as two of the three are delegated.
   (`desk.thread_purged`): its messages go, agent runs keep their record with
   the link cleared.
 
+- **Changing a requisition in approval (Requisition 1.3.0, migration
+  `0041`):** a requisition with an approver can be **sent back for changes**
+  (not declined) — by the current approver, the person who raised it, or the
+  HR head / CBO — from its approval card ("Send back for changes") or by
+  asking in the chat ("i need 25% for social"). It returns to draft with the
+  change on the approval trail (`requisition.sent_back`); approvals so far no
+  longer count; the waiting Requisition agent is told the exact change,
+  applies it (weights rebalanced to 100, before / after stated) and
+  resubmits — never unchanged. "Decline" stays final. **Scoring weights**
+  total 100, are locked in approval and once closed, are changed on a draft by
+  its raiser or HR leadership and on an approved role by HR leadership only,
+  and every change is audited with before and after
+  (`requisition.weights_changed`). **Work mode** (onsite / hybrid / remote) is
+  a required desk detail after location, kept on the requisition and shown
+  with the location in the JD and job posts ("Chennai (Hybrid)"). Buttons
+  pressed in the thread appear as the person's message.
+
 ### 13.3 Voice agent integration (in-house)
 
 The organisation's in-house voice agent owns telephony and speech-to-speech;

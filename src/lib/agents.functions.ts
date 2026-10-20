@@ -115,7 +115,12 @@ const Decision = z.discriminatedUnion("status", [
     args: z.record(z.string(), z.unknown()).optional(),
     comment: z.string().max(2000).optional(),
   }),
-  z.object({ status: z.literal("rejected"), reason: z.string().max(2000).optional() }),
+  z.object({
+    status: z.literal("rejected"),
+    reason: z.string().max(2000).optional(),
+    /** Send back for changes (requisitions in approval) instead of a final decline. */
+    changes: z.boolean().optional(),
+  }),
   z.object({ status: z.literal("answered"), answer: z.string().min(1).max(4000) }),
 ]);
 

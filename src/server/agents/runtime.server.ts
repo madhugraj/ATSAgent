@@ -537,6 +537,14 @@ async function performGate(
     if (subject.expects && r.status !== subject.expects) {
       throw new Error("This requisition has already moved on; refresh to see its current state.");
     }
+    if (decision.status === "rejected" && decision.changes) {
+      // Sent back for changes (not final): draft again, the reason on the trail.
+      await lifecycle.sendBackRequisitionCore(actor, {
+        id: subject.id,
+        reason: decision.reason?.trim() || "Changes requested.",
+      });
+      return;
+    }
     const to =
       decision.status === "approved" ? lifecycle.NEXT_APPROVAL[r.status] : ("rejected" as const);
     if (!to) throw new Error(`The requisition is ${r.status}, not waiting for an approval.`);
@@ -608,16 +616,32 @@ export async function syncGateTasks(
     const declined =
       current === "rejected" ||
       current === "changes_requested" ||
-      (subject.type === "offer" && current === "draft");
+      ((subject.type === "offer" || subject.type === "requisition") && current === "draft");
     const now = new Date();
+    // A requisition sent back for changes carries what to change (its trail's last entry).
+    const sentBack =
+      subject.type === "requisition" && current === "draft"
+        ? await (async () => {
+            const [r] = await db
+              .select({ trail: requisitions.approvalTrail })
+              .from(requisitions)
+              .where(eq(requisitions.id, subject.id))
+              .limit(1);
+            const last = (Array.isArray(r?.trail) ? r.trail : []).at(-1) as
+              { decision?: string; comment?: string } | undefined;
+            return last?.decision === "sent_back" ? (last.comment ?? "Changes requested.") : null;
+          })()
+        : null;
     const done = await db
       .update(agentTasks)
       .set({
         status: declined ? "rejected" : "approved",
-        response: {
-          status: declined ? "rejected" : "approved",
-          [declined ? "reason" : "comment"]: `Decided outside the inbox (now ${current}).`,
-        } as never,
+        response: (sentBack
+          ? { status: "rejected", reason: sentBack, changes: true }
+          : {
+              status: declined ? "rejected" : "approved",
+              [declined ? "reason" : "comment"]: `Decided outside the inbox (now ${current}).`,
+            }) as never,
         decidedBy,
         decidedAt: now,
         updatedAt: now,

@@ -13,6 +13,7 @@
  * next (which agent, which records) is decided here in plain code.
  */
 import { localWhen } from "@/lib/local-time";
+import { placeLabel } from "@/lib/work-mode";
 import { and, asc, desc, eq, ilike, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
 import { z } from "zod/v4";
 
@@ -43,6 +44,8 @@ const skillList = z.array(z.string().trim().min(1).max(60)).max(20);
 export const DeskSlots = z.object({
   roleTitle: z.string().trim().min(2).max(120).optional(),
   location: z.string().trim().min(2).max(120).optional(),
+  /** Where the work happens (migration 0041). */
+  workMode: z.enum(["onsite", "hybrid", "remote"]).optional(),
   experienceMin: z.number().min(0).max(40).optional(),
   experienceMax: z.number().min(0).max(50).optional(),
   openings: z.number().int().min(1).max(100).optional(),
@@ -68,6 +71,7 @@ export type DeskSlots = z.infer<typeof DeskSlots>;
 export const REQUIRED_SLOTS = [
   "roleTitle",
   "location",
+  "workMode",
   "experience",
   "openings",
   "mustHaveSkills",
@@ -77,6 +81,7 @@ export type RequiredSlot = (typeof REQUIRED_SLOTS)[number];
 const FALLBACK_QUESTION: Record<RequiredSlot, string> = {
   roleTitle: "Which role are you hiring for?",
   location: "Which location is this role based in?",
+  workMode: "Is this role onsite, hybrid or remote?",
   experience: "How many years of experience should candidates have (for example 3–6)?",
   openings: "How many people do you need for this role?",
   mustHaveSkills: "Which skills are must-haves for this role?",
@@ -130,7 +135,7 @@ export function describeNeed(s: DeskSlots): string {
         : `${s.experienceMin}+ years`;
   return [
     `${s.openings ?? 1} × ${s.roleTitle ?? "role"}`,
-    s.location ? `in ${s.location}` : "",
+    s.location || s.workMode ? `in ${placeLabel(s.location, s.workMode)}` : "",
     exp ? `· ${exp}` : "",
     s.mustHaveSkills?.length ? `· must have ${s.mustHaveSkills.join(", ")}` : "",
     s.goodToHaveSkills?.length ? `· good to have ${s.goodToHaveSkills.join(", ")}` : "",
@@ -287,7 +292,7 @@ const SYSTEM = [
   "",
   "You are the hiring desk of an applicant tracking system. A recruiter describes a hiring need in a chat.",
   "Each turn, return JSON with:",
-  '- "slots": only the hiring details the LATEST message states or changes (omit the rest). Fields: roleTitle, location, experienceMin, experienceMax (years), openings, mustHaveSkills, goodToHaveSkills (short skill names), budgetLpaMax (lakhs per annum), maxNoticeDays, employmentType (full_time|contract|internship), urgency (immediate|within_a_month|flexible). "a candidate" means openings 1. Expand obvious role shorthands (e.g. "Full stack" → "Full Stack Developer"). Never invent values that were not said.',
+  '- "slots": only the hiring details the LATEST message states or changes (omit the rest). Fields: roleTitle, location, workMode (onsite|hybrid|remote — "office"/"WFO" means onsite, "WFH"/"work from home" means remote; a message that says "hybrid" sets hybrid even next to a city), experienceMin, experienceMax (years), openings, mustHaveSkills, goodToHaveSkills (short skill names), budgetLpaMax (lakhs per annum), maxNoticeDays, employmentType (full_time|contract|internship), urgency (immediate|within_a_month|flexible). "a candidate" means openings 1. Expand obvious role shorthands (e.g. "Full stack" → "Full Stack Developer"). Never invent values that were not said.',
   '- JD details (only when the person gives them): responsibilities (their key responsibilities, as text), reportingTo, successMeasures (what success looks like), education. If they ask you to fill these from the market / research / "you decide", set researchRole true.',
   '- "command": {"type":"none"} unless the person asks to act: "talk to / screen / call the first 5" → {"type":"screen","top":5}; "screen 1, 3 and 4" → {"type":"screen","ranks":[1,3,4]}; "create a new role" → {"type":"new_role"}; "use REQ-2026-014" → {"type":"use_existing","code":"REQ-2026-014"}.',
   '- "command" also: "close / cancel / delete / withdraw this role" → {"type":"close_role"}.',
@@ -578,6 +583,7 @@ export async function createNewRole(
       title: s.roleTitle!,
       departmentId: null,
       location: s.location!,
+      workMode: s.workMode ?? null,
       openings: s.openings ?? 1,
       experienceMin: s.experienceMin ?? 0,
       experienceMax: s.experienceMax ?? s.experienceMin ?? 0,
@@ -1261,6 +1267,11 @@ export async function onTaskOpened(
       kind: task.kind,
       title: task.title,
       body,
+      ...(() => {
+        const t = (task.proposedAction as { args?: { subject?: { type?: string } } } | null)?.args
+          ?.subject?.type;
+        return t ? { subjectType: t } : {};
+      })(),
       ...(step ? { step } : {}),
       ...(repeated ? { repeated: true } : {}),
       ...(revision ? { revision } : {}),
@@ -1553,7 +1564,7 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
   const cur: StageKey = current;
 
   const TEXT: Record<StageKey, string> = {
-    need: "Answer the desk's questions until the role, location, experience, openings and must-have skills are known.",
+    need: "Answer the desk's questions until the role, location, work mode, experience, openings and must-have skills are known.",
     requisition: detail.requisition ?? "",
     jd: detail.jd ?? "",
     candidates:
@@ -2440,6 +2451,7 @@ export async function onRequisitionEnded(
 const SLOT_LABEL: Record<string, string> = {
   roleTitle: "Role",
   location: "Location",
+  workMode: "Work mode",
   experienceMin: "Experience from",
   experienceMax: "Experience up to",
   openings: "Openings",
@@ -2457,6 +2469,7 @@ const SLOT_LABEL: Record<string, string> = {
 const REQUIRED_LABEL: Record<RequiredSlot, string> = {
   roleTitle: "role",
   location: "location",
+  workMode: "work mode (onsite / hybrid / remote)",
   experience: "experience",
   openings: "number of openings",
   mustHaveSkills: "must-have skills",
@@ -2787,7 +2800,7 @@ export async function sendFeedback(
         ? r.agentType === "jd" && (r.kind !== "gate" || r.subjectType === "jd")
         : r.kind === "approval" ||
           r.kind === "clarification" ||
-          (r.kind === "gate" && r.subjectType === "jd"),
+          (r.kind === "gate" && (r.subjectType === "jd" || r.subjectType === "requisition")),
     ) ?? null;
   const agent = (r: OpenRequest) => AGENT_TITLE[r.agentType] ?? `${r.agentType} agent`;
   if (!target && template?.trim() && conv.requisitionId) {
@@ -2888,6 +2901,10 @@ export async function sendFeedback(
     reason = `${text}\nUse the JD template "${match.name}".`;
     understood = [...understood, { label: "Template", value: found }];
   }
+  if (target.kind === "gate" && target.subjectType === "requisition" && target.subjectId) {
+    await sendRequisitionBack(conv, userId, target.subjectId, target, text, understood);
+    return;
+  }
   const { resolveTask } = await import("../agents/runtime.server");
   try {
     await resolveTask({
@@ -2927,6 +2944,54 @@ export async function sendFeedback(
           : isJd
             ? `Requested changes on the job description (it is now "changes requested", not rejected) and returned it to the ${agent(target)}.`
             : `Returned "${target.title}" to the ${agent(target)} with your change. The old request is closed, so it cannot be approved by mistake.`,
+    },
+  });
+}
+
+/**
+ * A change asked for in the chat while the requisition is in approval: send it
+ * back to draft with those words (the current approver, the person who raised
+ * it, or the HR head / CBO — checked in the lifecycle core), close the waiting
+ * approval with the change so the Requisition agent applies it and resubmits.
+ */
+async function sendRequisitionBack(
+  conv: Conversation,
+  userId: string,
+  requisitionId: string,
+  target: { title: string; agentType: string },
+  text: string,
+  understood: { label: string; value: string }[],
+): Promise<void> {
+  const { activeOrgOf } = await import("@/lib/auth.middleware");
+  const org = await activeOrgOf(userId);
+  if (!org || org.orgId !== conv.orgId) return;
+  const { sendBackRequisitionCore } = await import("@/lib/requisitions.server");
+  let sent: { from: string; code: string };
+  try {
+    sent = await sendBackRequisitionCore(
+      { orgId: conv.orgId, userId, memberEmail: org.memberEmail },
+      { id: requisitionId, reason: text },
+    );
+  } catch (e) {
+    await postMessage(conv, {
+      role: "desk",
+      body: `I couldn't send it back: ${e instanceof Error ? e.message : "the requisition could not be updated."}`,
+      card: { type: "reasoning", understood, missing: [], next: "Nothing was changed." },
+    });
+    return;
+  }
+  const { syncGateTasks } = await import("../agents/runtime.server");
+  await syncGateTasks(conv.orgId, { type: "requisition", id: requisitionId }, userId, sent.from);
+  const { kickAgents } = await import("../agents/orchestrator.server");
+  kickAgents(conv.orgId);
+  await postMessage(conv, {
+    role: "desk",
+    body: `Sent ${sent.code} back to draft with your change: "${text}". The Requisition agent applies it and asks for approval again — the approvals start over at the department head.`,
+    card: {
+      type: "reasoning",
+      understood,
+      missing: [],
+      next: `Sent back for changes (not declined): "${target.title}" is closed and the change is on the approval trail.`,
     },
   });
 }

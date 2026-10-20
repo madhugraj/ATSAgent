@@ -111,6 +111,8 @@ jobs:
         run: bun test scripts/desk-clarity.test.ts
       - name: Deleting a hiring-desk chat (30-day restore)
         run: bun test scripts/desk-delete.test.ts
+      - name: Requisition changes in approval, weights and work mode
+        run: bun test scripts/requisition-changes.test.ts
       - name: Agent markdown rendering (structure and escaping)
         run: bun test scripts/agent-markdown.test.ts
       - name: Career metrics (employers, promotions, dates)

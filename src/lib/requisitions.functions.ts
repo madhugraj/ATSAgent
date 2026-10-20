@@ -156,12 +156,12 @@ export const saveRequisitionWeights = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { saveRequisitionWeightsCore } = await import("./requisitions.server");
-    await saveRequisitionWeightsCore(
+    const out = await saveRequisitionWeightsCore(
       { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
       data.id,
       data.weights,
     );
-    return { ok: true as const };
+    return { ok: true as const, ...out };
   });
 
 /** Write budget CTC + band (e.g. chosen from a market benchmark) and the ladder level they came from. */

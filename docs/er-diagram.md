@@ -197,6 +197,7 @@ erDiagram
     reqTypeEnum req_type
     reqStatusEnum status
     text location "nullable"
+    text work_mode "nullable"
     integer openings
     integer experience_min
     integer experience_max
@@ -1215,7 +1216,7 @@ erDiagram
 | `platform_admins` | Identity & access | 6 | (email) |
 | `product_catalogue_commercials` | Organisations & masters | 8 | — |
 | `requisition_board_postings` | — | 16 | (requisitionId+provider) |
-| `requisitions` | Requisitions & job content | 40 | (orgId+code) |
+| `requisitions` | Requisitions & job content | 41 | (orgId+code) |
 | `salary_benchmarks` | Intelligence | 15 | — |
 | `screening_kits` | Screening & interviews | 11 | — |
 | `screening_prep_jobs` | Screening & interviews | 10 | (application_id) |

@@ -313,6 +313,8 @@ export const requisitions = pgTable(
     reqType: reqTypeEnum("req_type").notNull().default("new"),
     status: reqStatusEnum("status").notNull().default("draft"),
     location: text("location"),
+    /** onsite | hybrid | remote (migration 0041); null for older roles. */
+    workMode: text("work_mode").$type<"onsite" | "hybrid" | "remote">(),
     openings: integer("openings").notNull().default(1),
     experienceMin: integer("experience_min").notNull().default(0),
     experienceMax: integer("experience_max").notNull().default(5),

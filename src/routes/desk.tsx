@@ -918,6 +918,9 @@ function TaskCard({
 }) {
   const taskId = String(card["taskId"]);
   const kind = String(card["kind"]);
+  // A requisition in approval can be sent back for changes instead of declined for good.
+  const sendable =
+    kind === "gate" && (card["subjectType"] ?? conv.taskSubjects[taskId]) === "requisition";
   const status = conv.tasks[taskId] ?? "open";
   const details =
     conv.taskDetails[taskId] ??
@@ -1011,13 +1014,25 @@ function TaskCard({
               rows={2}
               maxLength={1000}
               placeholder={
-                kind === "gate"
-                  ? "Why are you declining? (required — the agent and the team act on it)"
-                  : "Why? (optional — tells the agent what to change)"
+                sendable
+                  ? "What should change? (e.g. social profiling 25%) — or why you are declining"
+                  : kind === "gate"
+                    ? "Why are you declining? (required — the agent and the team act on it)"
+                    : "Why? (optional — tells the agent what to change)"
               }
               onChange={(e) => setWhy(e.target.value)}
             />
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
+              {sendable ? (
+                <Button
+                  size="sm"
+                  disabled={busy || why.trim().length < 3}
+                  title="Back to draft with your change; the agent applies it and the approvals start over"
+                  onClick={() => decide({ status: "rejected", reason: why.trim(), changes: true })}
+                >
+                  Send back for changes
+                </Button>
+              ) : null}
               <Button
                 size="sm"
                 variant="destructive"
@@ -1029,7 +1044,7 @@ function TaskCard({
                   })
                 }
               >
-                Decline
+                {sendable ? "Decline (final)" : "Decline"}
               </Button>
               <Button size="sm" variant="ghost" disabled={busy} onClick={() => setDeclining(false)}>
                 Back

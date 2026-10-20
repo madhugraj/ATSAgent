@@ -89,6 +89,8 @@ export type RequisitionFields = {
   engagementType: string;
   clientName: string | null;
   costCenter: string | null;
+  /** onsite | hybrid | remote. */
+  workMode?: "onsite" | "hybrid" | "remote" | null;
 };
 
 export async function createRequisitionCore(
@@ -114,6 +116,7 @@ export async function createRequisitionCore(
       title: f.title,
       departmentId: f.departmentId,
       location: f.location,
+      workMode: f.workMode ?? null,
       openings: f.openings || 1,
       experienceMin: f.experienceMin || 0,
       experienceMax: f.experienceMax || 0,
@@ -155,6 +158,7 @@ export type RequisitionDraftPatch = {
       | "title"
       | "departmentId"
       | "location"
+      | "workMode"
       | "openings"
       | "experienceMin"
       | "experienceMax"
@@ -250,6 +254,96 @@ export async function advanceRequisitionCore(
   return { from: current.status, to: input.status };
 }
 
+/** Statuses where the requisition is with an approver. */
+export const IN_APPROVAL: ReqStatus[] = ["pending_dh", "pending_hr", "pending_cbo"];
+
+/**
+ * Send a requisition in approval back to draft with the changes asked for
+ * (never final, unlike Decline): the current step's approver, the person who
+ * raised it, or the HR head / CBO (owners pass). The reason goes on the
+ * approval trail; approvals given so far no longer count — on resubmission the
+ * chain starts again at the department head. Audited; raises
+ * requisition.status_changed (to draft, sentBack).
+ */
+export async function sendBackRequisitionCore(
+  actor: LifecycleActor,
+  input: { id: string; reason: string },
+): Promise<{ from: ReqStatus; code: string }> {
+  const reason = input.reason.replace(/\s+/g, " ").trim().slice(0, 1000);
+  if (reason.length < 3)
+    throw new Error("Say what should change — it goes to the Requisition agent and on the trail.");
+  const [current] = await db
+    .select({
+      status: requisitions.status,
+      code: requisitions.code,
+      createdBy: requisitions.createdBy,
+      approvalTrail: requisitions.approvalTrail,
+    })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, input.id), eq(requisitions.orgId, actor.orgId)))
+    .limit(1);
+  if (!current) throw new Error("Requisition not found.");
+  const from = current.status as ReqStatus;
+  if (!IN_APPROVAL.includes(from))
+    throw new Error(
+      from === "draft"
+        ? "This requisition is a draft — change it directly."
+        : `A requisition that is ${from.replace(/_/g, " ")} cannot be sent back; only one in approval can.`,
+    );
+  if (current.createdBy !== actor.userId) {
+    const approver = APPROVER_ROLE[from]!;
+    await assertRole(
+      actor.userId,
+      actor.orgId,
+      [...new Set<AppRole>([approver, "hr_head", "president_cbo"])],
+      "Only the current approver, the person who raised it, the HR head or the CBO can send it back.",
+    );
+  }
+  const trail = [
+    ...(Array.isArray(current.approvalTrail) ? current.approvalTrail : []),
+    {
+      from,
+      to: "draft",
+      actor: actor.memberEmail,
+      decision: "sent_back",
+      comment: reason,
+      at: new Date().toISOString(),
+      ...(actor.via ? { via: actor.via } : {}),
+    },
+  ];
+  const done = await db
+    .update(requisitions)
+    .set({ status: "draft", approvalTrail: trail as never })
+    .where(
+      and(
+        eq(requisitions.id, input.id),
+        eq(requisitions.orgId, actor.orgId),
+        eq(requisitions.status, from),
+      ),
+    )
+    .returning({ id: requisitions.id });
+  if (!done.length) throw new Error("This requisition has just moved on; refresh to see it.");
+  const { writeAudit } = await import("../server/audit");
+  await writeAudit({
+    actor: actor.memberEmail,
+    actorUserId: actor.userId,
+    orgId: actor.orgId,
+    action: "requisition.sent_back",
+    entityType: "requisition",
+    entityId: input.id,
+    detail: { code: current.code, from, reason, ...(actor.via ? { via: actor.via } : {}) },
+  });
+  await emitAgentEvent({
+    orgId: actor.orgId,
+    type: "requisition.status_changed",
+    subjectType: "requisition",
+    subjectId: input.id,
+    actorUserId: actor.userId,
+    payload: { from, to: "draft", sentBack: true, comment: reason, via: actor.via ?? null },
+  });
+  return { from, code: current.code };
+}
+
 export async function updateRequisitionCompensationCore(
   actor: LifecycleActor,
   input: {
@@ -280,11 +374,77 @@ export type ScoringWeights = {
   social: number;
 };
 
+/** Weights are whole percentages that add up to 100 (pure; unit-tested). */
+export function weightsProblem(w: ScoringWeights): string | null {
+  const vals = Object.values(w);
+  if (vals.some((v) => !Number.isInteger(v) || v < 0 || v > 100))
+    return "Each weight is a whole percentage between 0 and 100.";
+  const total = vals.reduce((a, b) => a + b, 0);
+  return total === 100 ? null : `The weights add up to ${total}%; they must total 100%.`;
+}
+
+/**
+ * Change a requisition's scoring weights — they decide how every candidate is
+ * ranked, so: a draft (or rejected / on-hold) one by the person who raised it
+ * or the HR head / CBO; one in approval only by sending it back for changes;
+ * an approved one by the HR head / CBO (its candidates can then be re-scored);
+ * never a closed one. Must total 100; audited with before and after.
+ */
 export async function saveRequisitionWeightsCore(
   actor: LifecycleActor,
   id: string,
   w: ScoringWeights,
-): Promise<void> {
+): Promise<{ status: ReqStatus; changed: boolean }> {
+  const problem = weightsProblem(w);
+  if (problem) throw new Error(problem);
+  const [req] = await db
+    .select({
+      status: requisitions.status,
+      code: requisitions.code,
+      createdBy: requisitions.createdBy,
+      skills: requisitions.weightSkills,
+      experience: requisitions.weightExperience,
+      career: requisitions.weightCareer,
+      impact: requisitions.weightImpact,
+      education: requisitions.weightEducation,
+      social: requisitions.weightSocial,
+    })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, id), eq(requisitions.orgId, actor.orgId)))
+    .limit(1);
+  if (!req) throw new Error("Requisition not found.");
+  const status = req.status as ReqStatus;
+  if (IN_APPROVAL.includes(status))
+    throw new Error(
+      `${req.code} is in approval, so its weights are what the approvers are reviewing. Send it back for changes (from its approval card or the hiring desk) to change them.`,
+    );
+  if (status === "closed")
+    throw new Error(`${req.code} is closed; its weights can no longer change.`);
+  const leaders: AppRole[] = ["hr_head", "president_cbo"];
+  if (status === "approved")
+    await assertRole(
+      actor.userId,
+      actor.orgId,
+      leaders,
+      "Only the HR head or the CBO can change the weights of an approved requisition.",
+    );
+  else if (req.createdBy !== actor.userId)
+    await assertRole(
+      actor.userId,
+      actor.orgId,
+      leaders,
+      "Only the person who raised this requisition, the HR head or the CBO can change its weights.",
+    );
+  const before = {
+    skills: req.skills,
+    experience: req.experience,
+    career: req.career,
+    impact: req.impact,
+    education: req.education,
+    social: req.social,
+  };
+  const changed = (Object.keys(w) as (keyof ScoringWeights)[]).some((k) => before[k] !== w[k]);
+  if (!changed) return { status, changed: false };
   await db
     .update(requisitions)
     .set({
@@ -296,6 +456,17 @@ export async function saveRequisitionWeightsCore(
       weightSocial: w.social,
     })
     .where(and(eq(requisitions.id, id), eq(requisitions.orgId, actor.orgId)));
+  const { writeAudit } = await import("../server/audit");
+  await writeAudit({
+    actor: actor.memberEmail,
+    actorUserId: actor.userId,
+    orgId: actor.orgId,
+    action: "requisition.weights_changed",
+    entityType: "requisition",
+    entityId: id,
+    detail: { code: req.code, status, before, after: w, ...(actor.via ? { via: actor.via } : {}) },
+  });
+  return { status, changed: true };
 }
 
 export async function setRequisitionIjpCore(

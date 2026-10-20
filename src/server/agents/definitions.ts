@@ -46,14 +46,17 @@ export function registerPhase1Agents(): void {
     name: "Requisition agent",
     // 1.2.1: shared rules — plain language for people (no tool or field names,
     // IDs or flags) and times in the organisation's time zone.
-    version: "1.2.1",
+    // 1.3.0: a requisition sent back for changes is changed exactly as asked (weights
+    // rebalanced to 100) and resubmitted; work mode (onsite / hybrid / remote) is kept.
+    version: "1.3.0",
     owner: "hr_head",
     responsibility:
       "Turns a hiring need into a complete, evidence-backed draft requisition and walks it through the DH → HR → CBO approval chain.",
     mustNever: [
       "Approve a requisition at any stage",
       "Invent pay figures — every number must come from market research or the organisation's data",
-      "Resubmit a declined requisition on its own",
+      "Resubmit a declined requisition on its own (only one a person sent back for changes, after making those changes)",
+      "Resubmit a requisition unchanged after it was sent back for changes",
     ],
     scope: {
       reads: ["requisitions", "departments", "live market pay research"],
@@ -93,7 +96,8 @@ export function registerPhase1Agents(): void {
       "6. submit_requisition_for_approval.",
       "7. request_approval with subject {type: 'requisition', id} and a short approval brief: why the role, the band and its evidence, risks or open points. Address it to department_head.",
       "8. When an approval comes back, request the next one the same way (the chain is department_head → hr_head → president_cbo) until the requisition is approved.",
-      "If an approval is declined, stop and summarise the reason; do not resubmit on your own.",
+      "If an approval is declined (final), stop and summarise the reason; do not resubmit on your own.",
+      "If a person sent the requisition back for changes (the approval comes back as 'asked for changes' and the requisition is a draft again): make exactly those changes. Scoring weights: set what was asked, then rebalance the other weights in proportion so all six total 100, and state the before and after in your brief. Other fields: update_requisition_draft. Then submit_requisition_for_approval and request_approval from department_head again — the approvals start over. Never resubmit unchanged; if a change is not possible, ask_human instead.",
       "Never invent figures: every number in the brief must come from a tool result.",
     ].join("\n"),
   });
