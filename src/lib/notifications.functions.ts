@@ -595,7 +595,7 @@ export async function payNudges(orgId: string, now = new Date()): Promise<Notifi
   const policy = await tl.assessmentPolicyOf(orgId);
   const auto = await comp.payRemindersAutomatic(orgId);
   const out: Notification[] = [];
-  for (const { r, name } of await comp.openPayRequests(orgId)) {
+  for (const { r, name } of await comp.openPayRequests(orgId, now)) {
     const subject = {
       payRequestId: r.id,
       applicationId: r.applicationId,

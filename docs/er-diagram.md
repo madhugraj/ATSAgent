@@ -1052,6 +1052,7 @@ erDiagram
 | `evaluations` | `interview_id` | `interviews` | no action |
 | `evaluations` | `org_id` | `organizations` | cascade |
 | `hiring_conversations` | `created_by` | `users` | cascade |
+| `hiring_conversations` | `deleted_by` | `users` | no action |
 | `hiring_conversations` | `org_id` | `organizations` | cascade |
 | `hiring_conversations` | `requisition_id` | `requisitions` | no action |
 | `hiring_conversations` | `reuse_jd_from` | `requisitions` | no action |
@@ -1189,7 +1190,7 @@ erDiagram
 | `email_outbox` | Communications & AI settings | 16 | (idempotency_key) |
 | `email_settings` | Communications & AI settings | 11 | (org_id) |
 | `evaluations` | Candidates & pipeline | 15 | — |
-| `hiring_conversations` | — | 10 | — |
+| `hiring_conversations` | — | 13 | — |
 | `hiring_messages` | — | 8 | — |
 | `hr_incentive_schemes` | Offers & onboarding | 9 | — |
 | `hrms_employees` | — | 15 | (integrationId+externalId) |

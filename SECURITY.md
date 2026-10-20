@@ -66,6 +66,11 @@ cancelled or expired links, and its server functions are rate-limited with all o
 answers are readable only by TA, the HR head, the CBO and owners (role-checked server-side); audit
 entries and thread messages record that details changed, never the amounts.
 
+Deleting a hiring-desk chat is limited to chats still gathering details (their starter, or the HR
+head / CBO / owner) or holding only an unused draft requisition (HR head / CBO / owner, with a reason);
+the server enforces the stage and role. Deletions are audited, hidden at once and restorable by an
+owner for 30 days, then purged; agent runs and the audit log are kept.
+
 The candidate's pay discussion page (`/negotiate/<token>`) is public in the same way: a 64-hex token
 issued only when a person approved the message, showing that message, the proposed figure and its
 levers; it records one answer (accept, another figure, a call) — claimed in the update itself —

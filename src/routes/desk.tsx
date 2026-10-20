@@ -15,6 +15,7 @@ import {
   RotateCcw,
   Send,
   Sparkles,
+  Trash2,
   UserRound,
 } from "lucide-react";
 
@@ -23,6 +24,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { AGENT_LABEL } from "@/lib/agents.catalog";
 import { decideAgentTask, type AgentDecisionInput } from "@/lib/agents.functions";
 import {
@@ -33,7 +42,10 @@ import {
   startDeskSourcing,
   chooseDeskRole,
   closeDeskRole,
+  deleteDeskConversation,
   getDeskConversation,
+  listDeletedDeskConversations,
+  restoreDeskConversation,
   listDeskConversations,
   publishDeskRole,
   researchDeskRole,
@@ -117,8 +129,13 @@ function DeskPage() {
               ))}
             </ul>
           )}
+          <RecentlyDeleted onRestored={(id) => select(id)} />
         </aside>
-        {c ? <Thread id={c} /> : <NewThread onStarted={(id) => select(id)} />}
+        {c ? (
+          <Thread id={c} onDeleted={() => select(undefined)} />
+        ) : (
+          <NewThread onStarted={(id) => select(id)} />
+        )}
       </div>
     </>
   );
@@ -212,7 +229,159 @@ function Composer({
 
 /* -------------------------------------------------------------- thread */
 
-function Thread({ id }: { id: string }) {
+/** Chats deleted in the last 30 days, with Restore — shown to owners only (the server checks). */
+function RecentlyDeleted({ onRestored }: { onRestored: (id: string) => void }) {
+  const qc = useQueryClient();
+  const q = useQuery({
+    queryKey: ["desk_deleted"],
+    queryFn: () => listDeletedDeskConversations(),
+    refetchInterval: 60_000,
+  });
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const rows = q.data ?? [];
+  if (!rows.length) return null;
+  async function restore(id: string) {
+    setBusy(id);
+    try {
+      await restoreDeskConversation({ data: { id } });
+      toast.success("Chat restored");
+      void qc.invalidateQueries({ queryKey: ["desk_deleted"] });
+      void qc.invalidateQueries({ queryKey: ["desk_list"] });
+      onRestored(id);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not restore");
+    } finally {
+      setBusy(null);
+    }
+  }
+  return (
+    <div className="mt-2 border-t border-border pt-2">
+      <button
+        type="button"
+        className="flex w-full items-center gap-1.5 px-3 py-1 text-xs text-muted-foreground hover:text-foreground"
+        onClick={() => setOpen(!open)}
+      >
+        <Trash2 className="size-3.5" /> Recently deleted ({rows.length})
+      </button>
+      {open ? (
+        <ul className="mt-1 space-y-1">
+          {rows.map((t) => (
+            <li key={t.id} className="rounded-md px-3 py-2 text-xs">
+              <p className="truncate font-medium">{t.title}</p>
+              <p className="text-muted-foreground">
+                {t.daysLeft} {t.daysLeft === 1 ? "day" : "days"} left to restore
+                {t.reason ? ` · "${t.reason}"` : ""}
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-1 h-6 gap-1 text-xs"
+                disabled={busy === t.id}
+                onClick={() => void restore(t.id)}
+              >
+                <RotateCcw className="size-3" /> Restore
+              </Button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+/** The dustbin: what it deletes, who decided, and that it can be restored for 30 days. */
+function DeleteThreadButton({
+  conv,
+  onDeleted,
+}: {
+  conv: DeskConversationView;
+  onDeleted: () => void;
+}) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const what = conv.canDelete;
+  if (!what) return null;
+  const draft = what.kind === "draft";
+  async function confirm() {
+    setBusy(true);
+    try {
+      await deleteDeskConversation({ data: { id: conv.id, reason: reason.trim() } });
+      toast.success(
+        draft
+          ? `Chat and draft ${what && "code" in what ? what.code : ""} deleted`
+          : "Chat deleted",
+      );
+      setOpen(false);
+      void qc.invalidateQueries({ queryKey: ["desk_list"] });
+      void qc.invalidateQueries({ queryKey: ["desk_deleted"] });
+      onDeleted();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not delete");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Delete this chat"
+        title={draft ? "Delete this chat and its draft requisition" : "Delete this chat"}
+        className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+        onClick={() => setOpen(true)}
+      >
+        <Trash2 className="size-4" />
+      </button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {draft && "code" in what
+                ? `Delete this chat and draft ${what.code}?`
+                : "Delete this chat?"}
+            </DialogTitle>
+            <DialogDescription>
+              {draft && "code" in what
+                ? `The draft requisition ${what.code} was never approved and has no applicants; it is deleted permanently. `
+                : "Nothing has been created from it yet. "}
+              The chat disappears for everyone now; an owner can restore it for 30 days, then it is
+              removed for good. The deletion is recorded in the audit log.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1">
+            <label className="text-xs font-medium" htmlFor="delete-reason">
+              {draft ? "Why? (required)" : "Why? (optional)"}
+            </label>
+            <Textarea
+              id="delete-reason"
+              rows={2}
+              maxLength={500}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setOpen(false)} disabled={busy}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={busy || (draft && reason.trim().length < 3)}
+              onClick={() => void confirm()}
+            >
+              <Trash2 className="size-4" /> Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function Thread({ id, onDeleted }: { id: string; onDeleted: () => void }) {
   const qc = useQueryClient();
   const q = useQuery({
     queryKey: ["desk", id],
@@ -281,6 +450,7 @@ function Thread({ id }: { id: string }) {
         <header className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
           <h2 className="font-semibold">{d.title}</h2>
           <Badge variant="outline">{STATUS_LABEL[d.status] ?? d.status}</Badge>
+          <DeleteThreadButton conv={d} onDeleted={onDeleted} />
           {d.requisition ? (
             <Link
               to="/requisitions/$id"

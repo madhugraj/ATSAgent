@@ -701,6 +701,15 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
   } catch (err) {
     log.warn("compensation.sweep_failed", { error: err as Error });
   }
+  // Deleted hiring-desk chats past their 30-day restore are removed for good.
+  if (!opts.orgId) {
+    try {
+      const { purgeDeletedThreads } = await import("../desk/desk.server");
+      await purgeDeletedThreads();
+    } catch (err) {
+      log.warn("desk.purge_failed", { error: err as Error });
+    }
+  }
   // Hiring-desk threads hear about new applicants.
   try {
     const { announceNewApplicants } = await import("../desk/desk.server");

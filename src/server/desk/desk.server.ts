@@ -13,7 +13,7 @@
  * next (which agent, which records) is decided here in plain code.
  */
 import { localWhen } from "@/lib/local-time";
-import { and, asc, desc, eq, ilike, inArray, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
 import { z } from "zod/v4";
 
 import { INJECTION_RULES, aiJson, untrusted } from "@/lib/ai-gateway.server";
@@ -178,11 +178,22 @@ export async function postMessage(
     .where(eq(hiringConversations.id, conv.id));
 }
 
-export async function loadConversation(orgId: string, id: string): Promise<Conversation> {
+export async function loadConversation(
+  orgId: string,
+  id: string,
+  opts: { includeDeleted?: boolean } = {},
+): Promise<Conversation> {
   const [c] = await db
     .select()
     .from(hiringConversations)
-    .where(and(eq(hiringConversations.id, id), eq(hiringConversations.orgId, orgId)))
+    .where(
+      and(
+        eq(hiringConversations.id, id),
+        eq(hiringConversations.orgId, orgId),
+        // A deleted chat is gone for everyone but its restore.
+        opts.includeDeleted ? undefined : isNull(hiringConversations.deletedAt),
+      ),
+    )
     .limit(1);
   if (!c) throw new Error("Conversation not found.");
   return c;
@@ -201,6 +212,7 @@ export async function conversationForRequisition(
         eq(hiringConversations.orgId, orgId),
         eq(hiringConversations.requisitionId, requisitionId),
         notInArray(hiringConversations.status, ["closed"]),
+        isNull(hiringConversations.deletedAt),
       ),
     )
     .orderBy(desc(hiringConversations.createdAt))
@@ -2001,6 +2013,7 @@ export async function resumeThreadsForAgent(
         eq(hiringConversations.orgId, orgId),
         eq(hiringConversations.status, "active"),
         sql`${hiringConversations.requisitionId} is not null`,
+        isNull(hiringConversations.deletedAt),
       ),
     )
     .limit(200);
@@ -3490,6 +3503,7 @@ export async function announceNewApplicants(orgId?: string): Promise<number> {
         eq(hiringConversations.status, "active"),
         sql`${hiringConversations.requisitionId} is not null`,
         sql`${hiringConversations.updatedAt} >= now() - interval '60 days'`,
+        isNull(hiringConversations.deletedAt),
       ),
     )
     .limit(200);
@@ -3567,4 +3581,241 @@ export function suggestBudget(used: number, limit: number, now: Date): number {
   ).getUTCDate();
   const projected = (used / Math.max(day, 2)) * daysInMonth * 1.25;
   return Math.ceil(Math.max(limit * 2, used * 2, projected) / 50_000) * 50_000;
+}
+
+/* ------------------------------------------------------------ deleting a chat */
+
+/** How long a deleted chat can be restored before the sweep purges it. */
+export const RESTORE_DAYS = 30;
+
+export type ThreadDeletion =
+  { kind: "chat" } | { kind: "draft"; requisitionId: string; code: string } | null;
+
+/**
+ * What the dustbin would delete (pure on its inputs; unit-tested): a chat
+ * still gathering details (no requisition), or a chat with an unused draft
+ * requisition. Anything in approval or later is rejected / closed instead,
+ * so its trail stays.
+ */
+export function deletionFor(
+  conv: { requisitionId: string | null },
+  req: { id: string; code: string; status: string; applications: number } | null,
+): ThreadDeletion {
+  if (!conv.requisitionId) return { kind: "chat" };
+  if (req && req.status === "draft" && req.applications === 0)
+    return { kind: "draft", requisitionId: req.id, code: req.code };
+  return null;
+}
+
+async function threadRequisition(conv: Conversation) {
+  if (!conv.requisitionId) return null;
+  const [req] = await db
+    .select({ id: requisitions.id, code: requisitions.code, status: requisitions.status })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, conv.orgId)))
+    .limit(1);
+  if (!req) return null;
+  const [a] = (await db.execute(sql`
+    select count(*)::int n from applications
+    where requisition_id = ${req.id} and org_id = ${conv.orgId}`)) as unknown as { n: number }[];
+  return { ...req, applications: a?.n ?? 0 };
+}
+
+/**
+ * Whether this person may delete this chat now, and what it would delete.
+ * A chat only: its starter, or the HR head / CBO / owner. With a draft
+ * requisition: HR head / CBO / owner (the Requisitions page's rule).
+ */
+export async function deletionAllowed(conv: Conversation, userId: string): Promise<ThreadDeletion> {
+  const what = deletionFor(conv, await threadRequisition(conv));
+  if (!what) return null;
+  const { assertRole } = await import("@/lib/auth.middleware");
+  const leader = await assertRole(userId, conv.orgId, ["hr_head", "president_cbo"]).then(
+    () => true,
+    () => false,
+  );
+  if (what.kind === "chat") return leader || conv.createdBy === userId ? what : null;
+  return leader ? what : null;
+}
+
+/** Delete a chat (and its unused draft): hidden now, restorable for 30 days; audited. */
+export async function deleteThread(
+  conv: Conversation,
+  userId: string,
+  reason: string,
+  now = new Date(),
+): Promise<{ kind: "chat" | "draft"; code: string | null; restoreUntil: string }> {
+  const { activeOrgOf } = await import("@/lib/auth.middleware");
+  const org = await activeOrgOf(userId);
+  if (!org || org.orgId !== conv.orgId)
+    throw new Error("You are not a member of this organisation.");
+  const what = await deletionAllowed(conv, userId);
+  if (!what) {
+    const req = await threadRequisition(conv);
+    throw new Error(
+      req && req.status !== "draft"
+        ? `${req.code} is ${STATUS_WORDS[req.status] ?? req.status}, so this chat cannot be deleted — reject or close the role instead; the chat then stays as its record.`
+        : req && req.applications > 0
+          ? `${req.code} already has applications, so this chat cannot be deleted.`
+          : "Only the person who started this chat, the HR head, the CBO or an owner can delete it.",
+    );
+  }
+  const why = reason.replace(/\s+/g, " ").trim().slice(0, 500);
+  if (what.kind === "draft" && why.length < 3)
+    throw new Error("Say why — the draft requisition is deleted with the chat.");
+  // Nothing keeps working for a deleted chat.
+  const active = await db
+    .select({ id: agentRuns.id })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.orgId, conv.orgId),
+        eq(agentRuns.conversationId, conv.id),
+        inArray(agentRuns.status, ["queued", "running", "awaiting_human"]),
+      ),
+    );
+  const { cancelRun } = await import("../agents/runtime.server");
+  for (const r of active) await cancelRun({ orgId: conv.orgId, runId: r.id, userId });
+  const hidden = await db
+    .update(hiringConversations)
+    .set({ deletedAt: now, deletedBy: userId, deleteReason: why || null, updatedAt: now })
+    .where(and(eq(hiringConversations.id, conv.id), isNull(hiringConversations.deletedAt)))
+    .returning({ id: hiringConversations.id });
+  if (!hidden.length) throw new Error("This chat was already deleted.");
+  if (what.kind === "draft") {
+    await db
+      .delete(requisitions)
+      .where(
+        and(
+          eq(requisitions.id, what.requisitionId),
+          eq(requisitions.orgId, conv.orgId),
+          eq(requisitions.status, "draft"),
+        ),
+      );
+    await writeAudit({
+      actor: org.memberEmail,
+      actorUserId: userId,
+      orgId: conv.orgId,
+      action: "requisition.delete",
+      entityType: "requisition",
+      entityId: what.requisitionId,
+      detail: { code: what.code, reason: why, via: "hiring_desk", conversation_id: conv.id },
+    });
+  }
+  const [m] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(hiringMessages)
+    .where(eq(hiringMessages.conversationId, conv.id));
+  await writeAudit({
+    actor: org.memberEmail,
+    actorUserId: userId,
+    orgId: conv.orgId,
+    action: "desk.thread_deleted",
+    entityType: "hiring_conversation",
+    entityId: conv.id,
+    detail: {
+      title: conv.title,
+      messages: Number(m?.n ?? 0),
+      stage: what.kind,
+      requisition: what.kind === "draft" ? what.code : null,
+      reason: why || null,
+      runsStopped: active.length,
+    },
+  });
+  return {
+    kind: what.kind,
+    code: what.kind === "draft" ? what.code : null,
+    restoreUntil: new Date(now.getTime() + RESTORE_DAYS * 864e5).toISOString(),
+  };
+}
+
+/** Chats deleted in the last 30 days (owners restore them). */
+export async function deletedThreads(orgId: string, now = new Date()) {
+  return db
+    .select({
+      id: hiringConversations.id,
+      title: hiringConversations.title,
+      deletedAt: hiringConversations.deletedAt,
+      reason: hiringConversations.deleteReason,
+    })
+    .from(hiringConversations)
+    .where(
+      and(
+        eq(hiringConversations.orgId, orgId),
+        sql`${hiringConversations.deletedAt} > ${new Date(now.getTime() - RESTORE_DAYS * 864e5).toISOString()}::timestamptz`,
+      ),
+    )
+    .orderBy(desc(hiringConversations.deletedAt));
+}
+
+/**
+ * An owner restores a chat within 30 days; audited. A draft deleted with it is
+ * not brought back — the chat says so and the details are still there to raise it again.
+ */
+export async function restoreThread(
+  orgId: string,
+  userId: string,
+  id: string,
+  now = new Date(),
+): Promise<{ ok: true }> {
+  const { activeOrgOf } = await import("@/lib/auth.middleware");
+  const org = await activeOrgOf(userId);
+  if (!org || org.orgId !== orgId || !org.isOwner)
+    throw new Error("Only an owner can restore a deleted chat.");
+  const conv = await loadConversation(orgId, id, { includeDeleted: true });
+  if (!conv.deletedAt) throw new Error("This chat is not deleted.");
+  if (now.getTime() - conv.deletedAt.getTime() > RESTORE_DAYS * 864e5)
+    throw new Error(
+      `Deleted chats can be restored for ${RESTORE_DAYS} days; this one has passed that.`,
+    );
+  await db
+    .update(hiringConversations)
+    .set({ deletedAt: null, deletedBy: null, deleteReason: null, updatedAt: now })
+    .where(and(eq(hiringConversations.id, conv.id), eq(hiringConversations.orgId, orgId)));
+  await writeAudit({
+    actor: org.memberEmail,
+    actorUserId: userId,
+    orgId,
+    action: "desk.thread_restored",
+    entityType: "hiring_conversation",
+    entityId: conv.id,
+    detail: { title: conv.title, deletedAt: conv.deletedAt.toISOString() },
+  });
+  const restored = await loadConversation(orgId, id);
+  if (conv.requisitionId === null && restored.status !== "gathering") {
+    // Its draft was deleted with it (the link is cleared): back to gathering details.
+    await db
+      .update(hiringConversations)
+      .set({ status: "gathering" })
+      .where(eq(hiringConversations.id, conv.id));
+    await postMessage(restored, {
+      role: "desk",
+      body: 'This chat was restored. Its draft requisition was deleted with it and is not brought back — the hiring details are still here; say "create it" to raise a new draft.',
+    });
+  } else await postMessage(restored, { role: "desk", body: "This chat was restored." });
+  return { ok: true };
+}
+
+/** Chats deleted more than 30 days ago are removed for good (scheduler sweep); audited. */
+export async function purgeDeletedThreads(now = new Date()): Promise<number> {
+  const gone = await db
+    .delete(hiringConversations)
+    .where(
+      sql`${hiringConversations.deletedAt} <= ${new Date(now.getTime() - RESTORE_DAYS * 864e5).toISOString()}::timestamptz`,
+    )
+    .returning({
+      id: hiringConversations.id,
+      orgId: hiringConversations.orgId,
+      title: hiringConversations.title,
+    });
+  for (const g of gone)
+    await writeAudit({
+      actor: "system:desk-retention",
+      orgId: g.orgId,
+      action: "desk.thread_purged",
+      entityType: "hiring_conversation",
+      entityId: g.id,
+      detail: { title: g.title, afterDays: RESTORE_DAYS },
+    });
+  return gone.length;
 }

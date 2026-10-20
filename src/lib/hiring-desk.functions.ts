@@ -4,7 +4,7 @@
  * owner); every query is predicated on the organisation.
  */
 import { createServerFn } from "@tanstack/react-start";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../server/db";
@@ -82,6 +82,7 @@ export const listDeskConversations = createServerFn({ method: "GET" })
       .where(
         and(
           eq(hiringConversations.orgId, context.orgId),
+          isNull(hiringConversations.deletedAt),
           all ? undefined : eq(hiringConversations.createdBy, context.userId),
         ),
       )
@@ -134,6 +135,8 @@ export type DeskConversationView = {
   canStart: boolean;
   /** The viewer may change agent settings (budget, autonomy) — HR head / CBO / owner. */
   canEditAgents: boolean;
+  /** What the dustbin would delete for this viewer now ("chat" / "draft" + code), or null. */
+  canDelete: { kind: "chat" } | { kind: "draft"; code: string } | null;
 };
 
 export const getDeskConversation = createServerFn({ method: "GET" })
@@ -219,6 +222,15 @@ export const getDeskConversation = createServerFn({ method: "GET" })
       activity: await deskActivity(conv),
       canStart: Boolean(await startStage(conv, context.userId, { dryRun: true })),
       canEditAgents: await canEditAgents(context.userId, context.orgId),
+      canDelete: await (async () => {
+        const { deletionAllowed } = await import("../server/desk/desk.server");
+        const d = await deletionAllowed(conv, context.userId);
+        return d
+          ? d.kind === "chat"
+            ? { kind: "chat" as const }
+            : { kind: "draft" as const, code: d.code }
+          : null;
+      })(),
     };
   });
 
@@ -523,3 +535,41 @@ async function liveStages(orgId: string, ids: string[]): Promise<Record<string, 
     .where(and(eq(applications.orgId, orgId), inArray(applications.id, ids)));
   return Object.fromEntries(rows.map((r) => [r.id, r.stage]));
 }
+
+/** Delete a chat still gathering details (or with its unused draft) — restorable for 30 days. */
+export const deleteDeskConversation = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) =>
+    z.object({ id: z.string().uuid(), reason: z.string().max(500).default("") }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    const { deleteThread } = await import("../server/desk/desk.server");
+    return deleteThread(conv, context.userId, data.reason);
+  });
+
+/** Chats deleted in the last 30 days — owners only (they restore them). */
+export const listDeletedDeskConversations = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .handler(async ({ context }) => {
+    if (!context.isOwner) return [];
+    const { deletedThreads, RESTORE_DAYS } = await import("../server/desk/desk.server");
+    const now = Date.now();
+    return (await deletedThreads(context.orgId)).map((t) => ({
+      id: t.id,
+      title: t.title,
+      reason: t.reason,
+      daysLeft: Math.max(
+        0,
+        Math.ceil((t.deletedAt!.getTime() + RESTORE_DAYS * 864e5 - now) / 864e5),
+      ),
+    }));
+  });
+
+export const restoreDeskConversation = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { restoreThread } = await import("../server/desk/desk.server");
+    return restoreThread(context.orgId, context.userId, data.id);
+  });

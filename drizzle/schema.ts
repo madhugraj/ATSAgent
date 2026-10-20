@@ -2188,6 +2188,10 @@ export const hiringConversations = pgTable(
     }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Deleted (hidden) — restorable by an owner for 30 days, then purged (migration 0040). */
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    deletedBy: uuid("deleted_by").references(() => users.id, { onDelete: "set null" }),
+    deleteReason: text("delete_reason"),
   },
   (t) => [index("hiring_conversations_org_idx").on(t.orgId, t.updatedAt)],
 );

@@ -1004,6 +1004,18 @@ the target of 75% is reached as soon as two of the three are delegated.
   earlier messages read as out of date. A job board counts as connected only
   with saved credentials (not the set-up placeholder row).
 
+- **Deleting a chat (migration 0040):** a dustbin in the thread header while
+  the chat is still gathering details (its starter, or the HR head / CBO /
+  owner) or has only an unused draft requisition (HR head / CBO / owner, with
+  a reason — the draft is deleted with it, under the same rule as the
+  Requisitions page). Anything in approval or later is rejected or closed
+  instead, so its trail stays. Deleting hides the chat at once, stops its
+  agent runs and is audited (`desk.thread_deleted`); an owner can restore it
+  for 30 days ("Recently deleted", `desk.thread_restored` — a deleted draft
+  is not brought back); then the scheduler's sweep purges it
+  (`desk.thread_purged`): its messages go, agent runs keep their record with
+  the link cleared.
+
 ### 13.3 Voice agent integration (in-house)
 
 The organisation's in-house voice agent owns telephony and speech-to-speech;

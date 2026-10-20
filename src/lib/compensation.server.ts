@@ -565,6 +565,7 @@ export async function remindCompensation(
   orgId: string,
   requestId: string,
   by: Actor,
+  now = new Date(),
 ): Promise<{ sent: true }> {
   const [r] = await db
     .select()
@@ -572,14 +573,14 @@ export async function remindCompensation(
     .where(and(eq(compensationRequests.id, requestId), eq(compensationRequests.orgId, orgId)))
     .limit(1);
   if (!r) throw new Error("That request is not here.");
-  if (!isOpen(r)) throw new Error("This form is no longer open.");
+  if (!isOpen(r, now.getTime())) throw new Error("This form is no longer open.");
   const app = await loadApp(orgId, r.applicationId);
   if (!app.email) throw new Error("The candidate has no email address.");
   const k = r.remindersSent + 1;
   await emailForm(orgId, r, app, k);
   await db
     .update(compensationRequests)
-    .set({ remindersSent: k, lastRemindedAt: new Date() })
+    .set({ remindersSent: k, lastRemindedAt: now })
     .where(eq(compensationRequests.id, r.id));
   const { writeAudit } = await import("../server/audit");
   await writeAudit({
@@ -666,7 +667,7 @@ export async function runCompensationSweep(
       if (!auto.has(r.orgId)) auto.set(r.orgId, await payRemindersAutomatic(r.orgId));
       if (auto.get(r.orgId)) {
         try {
-          await remindCompensation(r.orgId, r.id, { userId: null, memberEmail: null });
+          await remindCompensation(r.orgId, r.id, { userId: null, memberEmail: null }, now);
           counts.reminded++;
         } catch {
           /* no email address: the overdue nudge asks a person */
@@ -688,7 +689,7 @@ export function payOverdue(
 }
 
 /** Open requests for an org (for nudges). */
-export async function openPayRequests(orgId: string) {
+export async function openPayRequests(orgId: string, now = new Date()) {
   return db
     .select({
       r: compensationRequests,
@@ -703,7 +704,7 @@ export async function openPayRequests(orgId: string) {
         eq(compensationRequests.orgId, orgId),
         eq(compensationRequests.status, "sent"),
         inArray(applications.stage, PAY_STAGE_LIST),
-        sql`coalesce(${compensationRequests.closesAt}, now() + interval '1 day') > now()`,
+        sql`coalesce(${compensationRequests.closesAt}, ${now.toISOString()}::timestamptz + interval '1 day') > ${now.toISOString()}::timestamptz`,
       ),
     );
 }
