@@ -3015,9 +3015,32 @@ export function humanizeInternals(text: string): string {
             .replace(/`?(?<![\w@.])([a-z]+(?:_[a-z]+)+)(?![\w@]|\.\w)`?/g, (_m, w: string) =>
               w.replace(/_/g, " "),
             )
+            // What a removed flag leaves behind: "(``)", "``".
+            .replace(/\s*\(\s*`\s*`\s*\)/g, "")
+            .replace(/`\s*`/g, "")
             .replace(/\(\s*\)/g, ""),
     )
     .join("");
+}
+
+/**
+ * One-paragraph preview of agent text for lists (Agent activity): ids and
+ * internal names out, markdown marks removed, cut at a word (pure; tested).
+ */
+export function plainPreview(text: string | null, max: number): string | null {
+  if (!text) return text;
+  const plain = readableAgentText(text)
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/^\s*#{1,6}\s+/gm, "")
+    .replace(/^\s*[-*•]\s+/gm, "")
+    .replace(/^\s*\|?\s*:?-{2,}.*$/gm, "")
+    .replace(/\*\*|__|`/g, "")
+    .replace(/\s*\|\s*/g, " · ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (plain.length <= max) return plain;
+  const cut = plain.lastIndexOf(" ", max);
+  return `${plain.slice(0, cut > max / 2 ? cut : max)}…`;
 }
 
 const MONTHS =
@@ -3104,8 +3127,6 @@ function stripIds(text: string): string {
       .join("\n")
       // "Application ID: <id>", "(ID: <id>)", "Requisition: <id>": the label goes with the id.
       .replace(new RegExp(`,?\\s*\\b[A-Za-z]+(?:\\s(?:ID|Id|id))?\\s*[:=]\\s*${id}`, "g"), "")
-      // "(Application <id>, Requisition <id>)": the entity word goes with its id.
-      .replace(new RegExp(`,?\\s*\\b(?:${ENTITY})(?:\\s+ID)?\\s+${id}`, "gi"), "")
       .replace(new RegExp(`\\s*${id}`, "gi"), "")
       // …and what an earlier pass left of it: "(Application, Requisition)".
       .replace(new RegExp(`\\s*\\((?:\\s*(?:${ENTITY})(?:\\s+ID)?\\s*,?)+\\s*\\)`, "gi"), "")

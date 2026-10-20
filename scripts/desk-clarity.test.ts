@@ -142,6 +142,27 @@ describe("agent text for people", () => {
     expect(out).toContain("keep_this_code");
   });
 
+  test("a removed flag leaves no empty backticks behind", () => {
+    expect(
+      desk.readableAgentText(
+        "Round L3 complete; final interview round completed (`finalComplete: true`).",
+      ),
+    ).toBe("Round L3 complete; final interview round completed.");
+  });
+
+  test("activity previews: ids and markdown out, cut at a word", () => {
+    const id = "b701a84d-f47e-4217-b65a-8a12986ab159";
+    const out = desk.plainPreview(
+      `The candidate for application ${id} (REQ-2026-001) shared their CTC.\nRequisition id: ${id}\n### Supply Verdict **Starving** — only \`1\` applicant\n- Added: none`,
+      200,
+    );
+    expect(out).toBe(
+      "The candidate for application (REQ-2026-001) shared their CTC. Supply Verdict Starving — only 1 applicant Added: none",
+    );
+    expect(desk.plainPreview("word ".repeat(100), 50)!.endsWith("word…")).toBe(true);
+    expect(desk.plainPreview(null, 10)).toBeNull();
+  });
+
   test("long text is kept whole up to the limit and clipped at a paragraph", () => {
     const para = "Word ".repeat(200).trim();
     const long = Array.from({ length: 20 }, () => para).join("\n\n");

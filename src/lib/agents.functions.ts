@@ -9,6 +9,7 @@ import { and, desc, eq, inArray, or } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../server/db";
+import { plainPreview } from "../server/desk/desk.server";
 import { agentPolicies, agentRuns, agentTasks, userRoles } from "@db/schema";
 import { requireOrg } from "./auth.middleware";
 import { AGENT_CATALOG, WHITELISTABLE_TEMPLATES } from "./agents.catalog";
@@ -97,7 +98,7 @@ export const listAgentTasks = createServerFn({ method: "GET" })
         body: r.body,
         agentType: r.agentType,
         runId: r.runId,
-        goal: clip(r.goal, 300) ?? "",
+        goal: plainPreview(r.goal, 300) ?? "",
         action:
           r.kind === "approval" && a?.name
             ? { name: a.name, argsJson: JSON.stringify(a.args ?? {}, null, 2) }
@@ -169,8 +170,8 @@ export const listAgentRuns = createServerFn({ method: "GET" })
       id: r.id,
       agentType: r.agentType,
       status: r.status,
-      goal: clip(r.goal, 300) ?? "",
-      result: clip(r.result, 600),
+      goal: plainPreview(r.goal, 300) ?? "",
+      result: plainPreview(r.result, 600),
       error: r.lastError
         ? SAFE_RUN_ERRORS.has(r.lastError)
           ? r.lastError
@@ -789,7 +790,7 @@ export const myAgentActions = createServerFn({ method: "GET" })
       runId: r.runId,
       agentType: r.agentType,
       tool: r.tool ?? "",
-      goal: clip(r.goal, 200) ?? "",
+      goal: plainPreview(r.goal, 200) ?? "",
       at: r.at.toISOString(),
       seen: r.state === "seen",
     }));
