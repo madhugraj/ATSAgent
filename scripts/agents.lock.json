@@ -36,8 +36,8 @@
     "hash": "e933cd26e78c2ca790f5c234caa297e9b7f10e05e545d6b1a140e3e4772e14c5"
   },
   "requisition": {
-    "version": "1.3.0",
-    "hash": "606819be84759f1e0437602f819261cdd59365b4f037ad2fa0ef63a54998648a"
+    "version": "1.3.1",
+    "hash": "6cd5c59acfc9fd45193ee0e19628d7b2f3a759be97b80f140b1061e6b540cff4"
   },
   "screening": {
     "version": "1.7.1",

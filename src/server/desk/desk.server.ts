@@ -1716,6 +1716,29 @@ export async function retryRun(conv: Conversation, userId: string, runId: string
       `The ${AGENT_TITLE[r.agentType] ?? r.agentType} is switched off — switch it on in Agent settings first.`,
     );
   }
+  // One run per agent per piece of work: a second click (or a colleague's)
+  // must not start a parallel run that asks for the same approvals again.
+  const [busy] = await db
+    .select({ id: agentRuns.id, createdAt: agentRuns.createdAt, status: agentRuns.status })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.orgId, conv.orgId),
+        eq(agentRuns.agentType, r.agentType),
+        inArray(agentRuns.status, ["queued", "running", "awaiting_human"]),
+        r.subjectId
+          ? or(eq(agentRuns.subjectId, r.subjectId), eq(agentRuns.conversationId, conv.id))
+          : eq(agentRuns.conversationId, conv.id),
+      ),
+    )
+    .orderBy(desc(agentRuns.createdAt))
+    .limit(1);
+  if (busy) {
+    const at = localWhen(busy.createdAt, await orgTimeZone(conv.orgId));
+    throw new Error(
+      `The ${AGENT_TITLE[r.agentType] ?? r.agentType} is already working on this — it started ${at}${busy.status === "awaiting_human" ? " and is waiting for a person" : ""}. Nothing new was started.`,
+    );
+  }
   const { startRun } = await import("../agents/runtime.server");
   const { runId: next } = await startRun({
     orgId: conv.orgId,

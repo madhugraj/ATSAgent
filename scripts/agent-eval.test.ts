@@ -149,6 +149,25 @@ describe("governance", () => {
     }
   });
 
+  test("every rehearsal an agent declares is explained in plain words", async () => {
+    registerReal();
+    const { EVAL_CATALOG } = await import("../src/lib/eval-catalog");
+    for (const a of listAgents())
+      for (const e of a.evals) {
+        const x = EVAL_CATALOG[e];
+        expect({ agent: a.type, eval: e, explained: Boolean(x) }).toMatchObject({
+          explained: true,
+        });
+        // A title, the situation and at least one check — no developer terms.
+        expect(x!.title.length).toBeGreaterThan(10);
+        expect(x!.situation.length).toBeGreaterThan(10);
+        expect(x!.checks.length).toBeGreaterThan(0);
+        expect([x!.title, x!.situation, ...x!.checks].join(" ")).not.toMatch(
+          /\b[a-z]+_[a-z_]+\b|request_approval|\bCI\b|scripted|gate routing|tool call/,
+        );
+      }
+  });
+
   test("tools that would make a human decision cannot be registered", () => {
     resetRegistry();
     const t = (name: string) => ({

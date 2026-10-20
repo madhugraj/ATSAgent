@@ -377,7 +377,7 @@ function EfficiencyTable({ u }: { u: UtilisationView }) {
         <thead className="text-left text-muted-foreground">
           <tr className="border-b border-border">
             <th className="py-1.5 pr-3 font-medium">Agent</th>
-            <th className="py-1.5 pr-3 text-right font-medium">Runs (done / failed)</th>
+            <th className="py-1.5 pr-3 text-right font-medium">Runs · 30 d (done / failed)</th>
             <th className="py-1.5 pr-3 text-right font-medium">Tokens</th>
             {u.rate ? <th className="py-1.5 pr-3 text-right font-medium">Cost / run</th> : null}
             <th className="py-1.5 pr-3 text-right font-medium">Tokens / done run</th>

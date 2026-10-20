@@ -97,6 +97,22 @@ export const RUN_LIMITS = {
 import { CEILING_MESSAGE, LEG_LIMIT_MESSAGE } from "./run-messages";
 export { CEILING_MESSAGE, LEG_LIMIT_MESSAGE };
 
+/** Messages of things that broke rather than rules that said no (pure; unit-tested). */
+const BROKEN =
+  /ECONN|ETIMEDOUT|timed? ?out|fetch failed|network|socket|database|Failed query|syntax error|duplicate key|deadlock|violates|does not exist|undefined|null|NaN|Cannot read/i;
+
+/**
+ * A tool that threw: was it a business rule or guardrail saying no (shown as
+ * "refused", not counted as a failure), or did something break? Only a plain
+ * Error with a readable message counts as a refusal; driver, validation and
+ * programming errors (their own classes) and infrastructure messages are failures.
+ */
+export function isRuleRefusal(e: unknown): boolean {
+  if (!(e instanceof Error) || e.constructor !== Error) return false;
+  const m = e.message.trim();
+  return m.length > 0 && m.length < 600 && !BROKEN.test(m);
+}
+
 /** Which limit (if any) a run has reached now (pure; unit-tested). Ceiling first. */
 export function limitReached(r: {
   stepCount: number;
@@ -1413,14 +1429,15 @@ async function handleCall(
   call: AgentToolCall,
   seq: number,
 ): Promise<CallOutcome> {
-  const toolError = async (message: string): Promise<CallOutcome> => {
+  /** `refused`: a rule or guardrail said no (not a failure of the agent or the system). */
+  const toolError = async (message: string, refused = false): Promise<CallOutcome> => {
     await recordStep(run, seq, {
       kind: "tool",
       toolName: call.name,
       toolCallId: call.id,
       status: "error",
       input: redactArgs(call.args),
-      output: { error: message },
+      output: refused ? { error: message, refused: true } : { error: message },
     });
     return {
       kind: "message",
@@ -1474,7 +1491,7 @@ async function handleCall(
     let detail = "";
     if (call.name === "request_approval" && subject) {
       const gate = await gateFor(run.orgId, subject);
-      if ("error" in gate) return toolError(gate.error);
+      if ("error" in gate) return toolError(gate.error, true);
       if (run.mode === "replay") {
         return simulated(run, call, seq, "Approval simulated as granted; nothing was changed.", {
           gate: gate.role,
@@ -1514,7 +1531,7 @@ async function handleCall(
 
   if (tool.precheck && tool.risk !== "read") {
     const refusal = await tool.precheck(ctx, parsed.data);
-    if (refusal) return toolError(refusal);
+    if (refusal) return toolError(refusal, true);
   }
 
   const verdict = decideToolCall(tool.risk, policy, tool.templateOf?.(parsed.data) ?? null);
@@ -1667,7 +1684,9 @@ async function execute(
       toolCallId: call.id,
       status: "error",
       input: redactArgs(args),
-      output: { error: preview(message) },
+      output: isRuleRefusal(e)
+        ? { error: preview(message), refused: true }
+        : { error: preview(message) },
       durationMs: Date.now() - started,
     });
     return { role: "tool", toolCallId: call.id, name, content: message, isError: true };

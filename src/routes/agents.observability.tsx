@@ -831,7 +831,7 @@ function elementsOf(a: AgentObservability, slaHours: number): Element[] {
       name: "Tools",
       tab: "tools",
       status: worst(a.issues, "tools", base),
-      line: `${a.tools.declared} assigned · ${a.tools.calls7d} calls · ${pct(a.tools.errors7d, a.tools.calls7d)} errors`,
+      line: `${a.tools.declared} assigned · ${a.tools.calls7d} calls in 7 d · ${a.tools.errors7d} failed${a.tools.refused7d ? ` · ${a.tools.refused7d} refused by a rule` : ""}`,
     },
     {
       name: "AI skills",
@@ -840,10 +840,10 @@ function elementsOf(a: AgentObservability, slaHours: number): Element[] {
       line: `${a.skills.declared.length} skills · ${a.skills.requests7d} requests · p95 ${a.skills.p95Ms == null ? "—" : `${(a.skills.p95Ms / 1000).toFixed(1)} s`}`,
     },
     {
-      name: "Evals",
+      name: "Rehearsals (evals)",
       tab: "evals",
       status: a.evals.declared.length ? "good" : "critical",
-      line: `${a.evals.declared.length} scenario(s) in CI`,
+      line: `${a.evals.declared.length} ${a.evals.declared.length === 1 ? "rehearsal" : "rehearsals"} checked before every release`,
     },
     {
       name: "Budget",
@@ -940,9 +940,9 @@ function AgentCard({
   const els = elementsOf(a, slaHours);
   const metrics: [string, string][] = [
     ["Runs · 7 d", String(a.harness.runs7d)],
-    ["Success", finished ? `${Math.round((a.harness.done7d / finished) * 100)}%` : "—"],
-    ["Waiting", String(a.hitl.open)],
-    ["Tool errors", pct(a.tools.errors7d, a.tools.calls7d)],
+    ["Finished OK · 7 d", finished ? `${Math.round((a.harness.done7d / finished) * 100)}%` : "—"],
+    ["Waiting on people", String(a.hitl.open)],
+    ["Tool failures · 7 d", a.tools.calls7d ? `${a.tools.errors7d} of ${a.tools.calls7d}` : "—"],
   ];
   return (
     <article

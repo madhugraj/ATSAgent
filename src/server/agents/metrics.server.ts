@@ -32,7 +32,8 @@ export async function rollupAgentMetrics(opts: { days?: number } = {}): Promise<
     steps as (
       select s.org_id, r.agent_type, (s.created_at at time zone 'utc')::date as day,
         count(*) as steps,
-        count(*) filter (where s.kind = 'tool' and s.status = 'error') as tool_errors,
+        count(*) filter (where s.kind = 'tool' and s.status = 'error'
+          and coalesce(s.output ->> 'refused', 'false') <> 'true') as tool_errors,
         coalesce(sum(s.prompt_tokens), 0) as prompt_tokens,
         coalesce(sum(s.completion_tokens), 0) as completion_tokens
       from agent_steps s join agent_runs r on r.id = s.run_id

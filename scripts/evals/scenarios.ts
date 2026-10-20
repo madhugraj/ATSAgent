@@ -257,6 +257,128 @@ export function scenarios(): ScriptedScenario[] {
       ],
     },
     {
+      name: "requisition: walks the approval chain from the department head to the CBO",
+      agentType: "requisition",
+      autonomy: "act_and_notify",
+      goal: "Open one Platform SRE role in Bengaluru, 4–8 years, Kubernetes and Go.",
+      decide: () => ({ status: "approved" }),
+      expect: {
+        status: "done",
+        calls: [
+          "draft_requisition",
+          "set_compensation",
+          "save_weights",
+          "submit_requisition_for_approval",
+          "request_approval",
+          "request_approval",
+          "request_approval",
+        ],
+        gateRoles: ["department_head", "hr_head", "president_cbo"],
+      },
+      script: [
+        call("d", "draft_requisition", {
+          title: "Platform SRE",
+          location: "Bengaluru",
+          workMode: "hybrid",
+          experienceMin: 4,
+          experienceMax: 8,
+          mustHaveSkills: ["Kubernetes", "Go"],
+        }),
+        (m) =>
+          call("c", "set_compensation", {
+            requisitionId: reqIdOf(m),
+            budgetCtc: 3000000,
+            bandMin: 2600000,
+            bandMax: 3400000,
+          }),
+        (m) => call("w", "save_weights", { requisitionId: reqIdOf(m), ...SRE_WEIGHTS }),
+        (m) => call("s", "submit_requisition_for_approval", { requisitionId: reqIdOf(m) }),
+        ...(["department_head", "hr_head", "president_cbo"] as const).map(
+          (role) => (m: Msg[]) =>
+            call(`g-${role}`, "request_approval", {
+              title: "Approve Platform SRE",
+              summary: "Band 26–34 L.",
+              assignee_role: role,
+              subject: { type: "requisition", id: reqIdOf(m) },
+            }),
+        ),
+        say("Approved by the department head, the HR head and the CBO."),
+      ],
+    },
+    (() => {
+      let asked = 0;
+      return {
+        name: "requisition: makes the change it was sent back for and asks again",
+        agentType: "requisition" as const,
+        autonomy: "act_and_notify" as const,
+        goal: "Open one Platform SRE role in Bengaluru, 4–8 years, Kubernetes and Go.",
+        // The department head sends it back once, then approves the changed version.
+        decide: () =>
+          asked++ === 0
+            ? {
+                status: "rejected" as const,
+                reason: "Make social profiling 25%.",
+                changes: true,
+              }
+            : { status: "approved" as const },
+        expect: {
+          status: "done" as const,
+          calls: [
+            "draft_requisition",
+            "save_weights",
+            "submit_requisition_for_approval",
+            "request_approval",
+            "save_weights",
+            "submit_requisition_for_approval",
+            "request_approval",
+          ],
+          gateRoles: ["department_head", "department_head"],
+          resultIncludes: ["25%"],
+        },
+        script: [
+          call("d", "draft_requisition", {
+            title: "Platform SRE",
+            location: "Bengaluru",
+            experienceMin: 4,
+            experienceMax: 8,
+            mustHaveSkills: ["Kubernetes", "Go"],
+          }),
+          (m: Msg[]) => call("w", "save_weights", { requisitionId: reqIdOf(m), ...SRE_WEIGHTS }),
+          (m: Msg[]) => call("s", "submit_requisition_for_approval", { requisitionId: reqIdOf(m) }),
+          (m: Msg[]) =>
+            call("g", "request_approval", {
+              title: "Approve Platform SRE",
+              summary: "Band 26–34 L.",
+              assignee_role: "department_head",
+              subject: { type: "requisition", id: reqIdOf(m) },
+            }),
+          // Sent back: social to 25%, the other five scaled down to keep 100.
+          (m: Msg[]) =>
+            call("w2", "save_weights", {
+              requisitionId: reqIdOf(m),
+              skills: 33,
+              experience: 17,
+              career: 8,
+              impact: 13,
+              education: 4,
+              social: 25,
+            }),
+          (m: Msg[]) =>
+            call("s2", "submit_requisition_for_approval", { requisitionId: reqIdOf(m) }),
+          (m: Msg[]) =>
+            call("g2", "request_approval", {
+              title: "Approve Platform SRE (social profiling now 25%)",
+              summary: "Changed as asked: social profiling 10% → 25%, others scaled to 100.",
+              assignee_role: "department_head",
+              subject: { type: "requisition", id: reqIdOf(m) },
+            }),
+          say(
+            "Changed social profiling to 25% as asked and resubmitted; the department head approved.",
+          ),
+        ],
+      };
+    })(),
+    {
       name: "jd: drafts the JD and routes it to the department head",
       agentType: "jd",
       autonomy: "act_and_notify",
@@ -885,6 +1007,20 @@ async function seedApplication(
 }
 
 /** JSON result of the most recent call to a named tool (unwrapping an untrusted fence). */
+/** The requisition the scenario drafted (the first tool result is draft_requisition's). */
+function reqIdOf(m: Msg[]): string {
+  return (JSON.parse([...m].find((x) => x.role === "tool")!.content!) as { id: string }).id;
+}
+
+const SRE_WEIGHTS = {
+  skills: 40,
+  experience: 20,
+  career: 10,
+  impact: 15,
+  education: 5,
+  social: 10,
+};
+
 function toolResult(m: Msg[], name: string): Record<string, unknown> {
   const hit = [...m]
     .reverse()

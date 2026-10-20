@@ -143,7 +143,7 @@ export function AgentDetailDrawer({
               <TabsTrigger value="skills">Skills ({d.skills.length})</TabsTrigger>
               <TabsTrigger value="harness">Harness</TabsTrigger>
               <TabsTrigger value="hitl">Human-in-the-loop</TabsTrigger>
-              <TabsTrigger value="evals">Evals ({d.evals.length})</TabsTrigger>
+              <TabsTrigger value="evals">Rehearsals ({d.evals.length})</TabsTrigger>
               <TabsTrigger value="audit">Audit</TabsTrigger>
               <TabsTrigger value="issues">Issues ({d.issues.open.length})</TabsTrigger>
             </TabsList>
@@ -163,14 +163,7 @@ export function AgentDetailDrawer({
               <HitlTab d={d} />
             </TabsContent>
             <TabsContent value="evals">
-              <Section title="Eval scenarios (run in CI on every change; CI fails if none)">
-                <Bullets items={d.evals.map((e) => e.name)} empty="None — CI blocks this agent." />
-              </Section>
-              <p className="mt-3 text-xs text-muted-foreground">
-                Each scenario runs this exact agent and its real tools against seeded data with a
-                scripted model, checking tool order, gate routing and the outcome. A live-model run
-                uses the same scenarios (`bun run eval:agents`).
-              </p>
+              <EvalsTab d={d} />
             </TabsContent>
             <TabsContent value="audit">
               <Section title="Latest audit events written by this agent">
@@ -265,7 +258,9 @@ function ToolsTab({ d }: { d: AgentDetail }) {
       <p className="mt-3 text-xs text-muted-foreground">
         The only tools this agent can call (plus ask a person, request an approval, hand off). Read
         tools always run; write and external tools follow the autonomy setting. Usage is the last 7
-        days.
+        days. <span className="text-destructive">Failed</span> means something broke or the agent
+        called the tool wrongly; <span className="text-amber-600">refused</span> means a business
+        rule or guardrail said no — that is the system protecting itself, not a failure.
       </p>
       {d.tools.map((t) => (
         <details key={t.name} className="mt-3 rounded-md border border-border p-3">
@@ -286,7 +281,12 @@ function ToolsTab({ d }: { d: AgentDetail }) {
               {t.preApprovable ? <Badge variant="outline">pre-approvable</Badge> : null}
               {t.untrustedOutput ? <Badge variant="outline">output fenced</Badge> : null}
               <span className="num ml-auto text-xs text-muted-foreground">
-                {t.calls7d} calls · {t.errors7d} errors · avg {ms(t.avgMs)}
+                {t.calls7d} calls ·{" "}
+                <span className={t.errors7d ? "text-destructive" : ""}>{t.errors7d} failed</span>
+                {t.refused7d ? (
+                  <span className="text-amber-600"> · {t.refused7d} refused by a rule</span>
+                ) : null}{" "}
+                · avg {ms(t.avgMs)}
                 {t.awaitingApproval7d ? ` · ${t.awaitingApproval7d} sent for approval` : ""}
               </span>
             </div>
@@ -298,7 +298,19 @@ function ToolsTab({ d }: { d: AgentDetail }) {
                 rows={[
                   ["AI skills", t.skills.join(", ") || "none"],
                   ["Last used", when(t.lastUsedAt)],
-                  ["Last error", t.lastError ?? "—"],
+                  [
+                    t.lastErrorRefused ? "Last refusal" : "Last failure",
+                    t.lastError ? (
+                      <span
+                        key="e"
+                        className={t.lastErrorRefused ? "text-amber-600" : "text-destructive"}
+                      >
+                        {t.lastError}
+                      </span>
+                    ) : (
+                      "—"
+                    ),
+                  ],
                 ]}
               />
             </div>
@@ -479,6 +491,74 @@ function IssuesTab({ d }: { d: AgentDetail }) {
           ])}
         />
       </Section>
+    </>
+  );
+}
+
+/**
+ * Rehearsals, for people: what each one sets up and what must happen for it
+ * to pass, plus the latest result recorded here.
+ */
+function EvalsTab({ d }: { d: AgentDetail }) {
+  return (
+    <>
+      <p className="mt-3 text-sm">
+        Before any change to this agent is released, it is put through these rehearsals: the real
+        agent, with its real tools, on made-up test data, with the AI&apos;s answers written in
+        advance so every run is the same. Each rehearsal checks what the agent <em>did</em> — the
+        steps, their order and who it asked — not how it worded things. If any check fails, the
+        change cannot be released.
+      </p>
+      {d.evals.length === 0 ? (
+        <p className="mt-3 text-sm text-destructive">
+          No rehearsals — this agent cannot be released until it has at least one.
+        </p>
+      ) : (
+        <ol className="mt-3 space-y-3">
+          {d.evals.map((e) => (
+            <li key={e.name} className="rounded-lg border border-border p-3">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <p className="text-sm font-semibold">{e.title}</p>
+                {e.last ? (
+                  <Badge variant={e.last.passed ? "outline" : "destructive"}>
+                    {e.last.passed ? "Passed" : "Failed"} ·{" "}
+                    {new Date(e.last.at).toLocaleDateString()}
+                    {e.last.mode === "live" ? " · real AI" : ""}
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-muted-foreground">
+                    Checked on every change
+                  </Badge>
+                )}
+              </div>
+              {e.situation ? (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">The situation: </span>
+                  {e.situation}
+                </p>
+              ) : null}
+              {e.checks.length ? (
+                <>
+                  <p className="mt-2 text-xs font-medium">To pass:</p>
+                  <ul className="mt-0.5 space-y-0.5 text-xs">
+                    {e.checks.map((c) => (
+                      <li key={c} className="flex gap-1.5">
+                        <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-primary" />
+                        <span>{c}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+            </li>
+          ))}
+        </ol>
+      )}
+      <p className="mt-3 text-xs text-muted-foreground">
+        &quot;Passed&quot; or &quot;Failed&quot; is the latest rehearsal recorded in this
+        environment; &quot;real AI&quot; marks a run with the live model instead of written answers.
+        Where none is shown, the rehearsals still run automatically on every change before release.
+      </p>
     </>
   );
 }

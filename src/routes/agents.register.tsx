@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { explainEval } from "@/lib/eval-catalog";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { ShieldCheck } from "lucide-react";
@@ -165,7 +166,10 @@ function AgentCard({ a }: { a: AgentRegisterEntry }) {
       </div>
 
       <div className="mt-4 grid gap-4 md:grid-cols-3">
-        <List title="Evals (run in CI on every change)" items={m.evals} />
+        <List
+          title="Rehearsals before every release"
+          items={m.evals.map((e) => explainEval(e).title)}
+        />
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Activity here (30 days)

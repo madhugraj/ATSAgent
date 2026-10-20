@@ -229,15 +229,17 @@ export const RULES: Rule[] = [
         top: string | null;
       }>(sql`
         with s as (
-          select r.agent_type, st.tool_name, st.status
+          -- Refusals (a rule said no) are guardrails working, not failures.
+          select r.agent_type, st.tool_name, st.status,
+            coalesce(st.output ->> 'refused', 'false') = 'true' refused
           from agent_steps st join agent_runs r on r.id = st.run_id
           where st.org_id = ${orgId} and st.kind = 'tool' and st.status in ('ok','error')
             and st.created_at >= now() - interval '24 hours'
         )
         select agent_type, count(*)::int calls,
-          count(*) filter (where status = 'error')::int errors,
+          count(*) filter (where status = 'error' and coalesce(refused, false) = false)::int errors,
           (select tool_name from s s2 where s2.agent_type = s.agent_type and s2.status = 'error'
-            group by tool_name order by count(*) desc limit 1) top
+            and not s2.refused group by tool_name order by count(*) desc limit 1) top
         from s group by agent_type having count(*) >= ${HEALTH.minToolCalls}`);
       return r
         .filter((x) => x.errors / x.calls > HEALTH.toolErrorRate)

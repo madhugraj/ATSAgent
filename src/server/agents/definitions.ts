@@ -48,7 +48,8 @@ export function registerPhase1Agents(): void {
     // IDs or flags) and times in the organisation's time zone.
     // 1.3.0: a requisition sent back for changes is changed exactly as asked (weights
     // rebalanced to 100) and resubmitted; work mode (onsite / hybrid / remote) is kept.
-    version: "1.3.0",
+    // 1.3.1: rehearsals for the full approval chain and for a send-back.
+    version: "1.3.1",
     owner: "hr_head",
     responsibility:
       "Turns a hiring need into a complete, evidence-backed draft requisition and walks it through the DH → HR → CBO approval chain.",
@@ -70,7 +71,11 @@ export function registerPhase1Agents(): void {
     },
     gates: ["requisition", "general"],
     riskTier: "medium",
-    evals: ["requisition: drafts, bands, submits and routes the real requisition to the DH"],
+    evals: [
+      "requisition: drafts, bands, submits and routes the real requisition to the DH",
+      "requisition: walks the approval chain from the department head to the CBO",
+      "requisition: makes the change it was sent back for and asks again",
+    ],
     feature: "agent_requisition",
     maxSteps: 16,
     tools: [

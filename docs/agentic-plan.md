@@ -222,6 +222,22 @@ Initial tool surface (each maps to existing code):
 
 ---
 
+### 3.y Refused vs failed, readable rehearsals (migration `0043`)
+
+A tool error is recorded as **refused** when a business rule or guardrail
+said no (a plain, readable message — e.g. weights locked in approval) and as
+**failed** when something broke or the agent called a tool wrongly
+(`isRuleRefusal`; earlier steps classified by the same rule). Only failures
+count towards error rates, the `tools.error_rate` health rule and daily
+metrics; refusals are shown separately, in amber, with their message. Agent
+cards state counts with their window ("Tool failures · 7 d: 2 of 32"), and
+the efficiency table names its 30-day window. Every rehearsal (eval) has a
+plain-language explanation in `src/lib/eval-catalog.ts` — what it sets up and
+what must happen to pass — shown in the agent drawer and register with its
+latest recorded result; CI fails if an agent declares a rehearsal without
+one. "Try again" refuses while the same agent is already working on that
+piece of work.
+
 ### 3.x Run limits per stretch of work (migration `0042`)
 
 A run's step and token limits apply per **stretch** — the work between two
