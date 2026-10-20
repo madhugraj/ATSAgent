@@ -66,6 +66,8 @@ const {
   agentTasks,
   agentTelemetrySettings,
   auditLog,
+  emailOutbox,
+  emailSettings,
   orgMembers,
   organizations,
   userRoles,
@@ -79,7 +81,8 @@ const { evaluateAgentHealth } = await import("../src/server/agents/health.server
 const { compareRuns, diffToolSequences } = await import("../src/server/agents/replay.server");
 const { recommendAutonomy, autonomyRecommendations, AUTONOMY } =
   await import("../src/server/agents/autonomy.server");
-const { dispatchAgentAlerts } = await import("../src/server/agents/alerts.server");
+const { dispatchAgentAlerts, sendTestAlertEmail } =
+  await import("../src/server/agents/alerts.server");
 const { buildOtlpPayload, exportAgentTraces } = await import("../src/server/agents/otel.server");
 const { platformAgentConsoleData } = await import("../src/server/agents/platform.server");
 
@@ -501,6 +504,40 @@ describe("alert delivery", () => {
     await dispatchAgentAlerts();
     expect(posted.filter((p) => p.url.includes("hooks.example.test"))).toHaveLength(0);
     expect(await audits("agent.issue.alerted")).toHaveLength(1);
+  });
+});
+
+describe("test alert e-mail", () => {
+  test("the owner and HR heads get the same alert e-mail, marked as a test; audited; refusals", async () => {
+    const actor = { orgId, userId: hrHeadId, memberEmail: `p5h-${stamp}@test.local` };
+    expect(await sendTestAlertEmail({ ...actor, alertEmailEnabled: false })).toEqual({
+      ok: false,
+      message: "Switch on alert e-mail and save first.",
+    });
+    const before = await db.select().from(emailOutbox).where(eq(emailOutbox.orgId, orgId));
+    const r = await sendTestAlertEmail({ ...actor, alertEmailEnabled: true });
+    expect(r.ok).toBe(true);
+    const mails = (await db.select().from(emailOutbox).where(eq(emailOutbox.orgId, orgId))).filter(
+      (m) => !before.some((b) => b.id === m.id),
+    );
+    // Owner and HR head; never the recruiter.
+    expect(mails.map((m) => m.toEmail).sort()).toEqual(
+      [`p5h-${stamp}@test.local`, `p5o-${stamp}@test.local`].sort(),
+    );
+    expect(mails.every((m) => m.kind === "member_reminder")).toBe(true);
+    expect((mails[0]!.templateData as { heading: string }).heading).toMatch(
+      /^Agent alert \(test\)/,
+    );
+    expect(mails.every((m) => m.idempotencyKey.startsWith("agent-alert-test:"))).toBe(true);
+    const [audit] = await audits("agent.alert.test_email");
+    expect(audit).toMatchObject({ actorUserId: hrHeadId });
+    expect(audit!.detail).toEqual({ recipients: 2 });
+    // E-mail switched off for the organisation: refused, nothing queued.
+    await db.insert(emailSettings).values({ orgId, enabled: false } as never);
+    const off = await sendTestAlertEmail({ ...actor, alertEmailEnabled: true });
+    expect(off.ok).toBe(false);
+    expect(off.message).toMatch(/E-mail is switched off/);
+    await db.delete(emailSettings).where(eq(emailSettings.orgId, orgId));
   });
 });
 

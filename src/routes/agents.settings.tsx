@@ -415,7 +415,7 @@ function TelemetryForm({ t, onSaved }: { t: AgentTelemetryView; onSaved: () => v
     }
   }
 
-  async function test(target: "otlp" | "webhook") {
+  async function test(target: "otlp" | "webhook" | "email") {
     setBusy(true);
     try {
       const r = await testAgentTelemetry({ data: { target } });
@@ -509,6 +509,15 @@ function TelemetryForm({ t, onSaved }: { t: AgentTelemetryView; onSaved: () => v
             />
             <Label htmlFor="alert-email">E-mail the owner, HR heads and CBOs</Label>
           </div>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={disabled || !t.alertEmailEnabled}
+            title={t.alertEmailEnabled ? undefined : "Switch on alert e-mail and save first"}
+            onClick={() => test("email")}
+          >
+            Send a test alert e-mail
+          </Button>
           <div>
             <Label className="text-xs" htmlFor="alert-webhook">
               Alert webhook (optional — e.g. your paging or chat tool)
