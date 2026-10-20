@@ -1871,6 +1871,9 @@ export const agentPolicies = pgTable(
       .notNull()
       .default(sql`'[]'::jsonb`),
     monthlyTokenBudget: integer("monthly_token_budget"),
+    /** Run limits per leg (AI turns / tokens between human decisions); null = the agent's default. */
+    maxStepsPerLeg: integer("max_steps_per_leg"),
+    maxTokensPerLeg: integer("max_tokens_per_leg"),
     updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1960,6 +1963,9 @@ export const agentRuns = pgTable(
     tokensUsed: integer("tokens_used").notNull().default(0),
     maxSteps: integer("max_steps").notNull().default(20),
     maxTokens: integer("max_tokens").notNull().default(200000),
+    /** Where the current leg began (a human decision starts a new one; migration 0042). */
+    legStepStart: integer("leg_step_start").notNull().default(0),
+    legTokenStart: integer("leg_token_start").notNull().default(0),
     traceId: uuid("trace_id").notNull().defaultRandom(),
     leaseUntil: timestamp("lease_until", { withTimezone: true }),
     attempts: integer("attempts").notNull().default(0),

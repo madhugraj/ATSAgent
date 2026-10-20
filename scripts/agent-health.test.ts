@@ -284,6 +284,43 @@ describe("rules", () => {
     await db.delete(requisitions).where(eq(requisitions.id, q!.id));
   });
 
+  test("a run stopped on its limits is flagged until its work is picked up again", async () => {
+    const { LEG_LIMIT_MESSAGE, CEILING_MESSAGE } =
+      await import("../src/server/agents/run-messages");
+    const subject = crypto.randomUUID();
+    const rule = async () => (await open()).filter((i) => i.rule === "harness.run_limits");
+    await run("requisition", {
+      status: "failed",
+      lastError: LEG_LIMIT_MESSAGE,
+      subjectType: "requisition",
+      subjectId: subject,
+      finishedAt: ago(30),
+      createdAt: ago(60),
+    });
+    await evaluate();
+    expect((await rule())[0]).toMatchObject({ agentType: "requisition", severity: "warning" });
+    // Tried again and finished: nothing is waiting any more.
+    await run("requisition", {
+      status: "done",
+      subjectType: "requisition",
+      subjectId: subject,
+      createdAt: ago(10),
+      finishedAt: ago(5),
+    });
+    await evaluate();
+    expect(await rule()).toHaveLength(0);
+    // Stopped at the overall ceiling: serious.
+    await run("jd", {
+      status: "failed",
+      lastError: CEILING_MESSAGE,
+      subjectType: "requisition",
+      subjectId: crypto.randomUUID(),
+      finishedAt: ago(20),
+    });
+    await evaluate();
+    expect((await rule()).find((i) => i.agentType === "jd")).toMatchObject({ severity: "serious" });
+  });
+
   test("tool error rate fires above the threshold only", async () => {
     const id = await run("screening", { status: "done" });
     const steps = (errors: number) =>

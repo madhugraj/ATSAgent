@@ -81,6 +81,60 @@ export const HARNESS_LIMITS = {
   budgetRecheckMinutes: 60,
 } as const;
 
+/**
+ * Run limits work per leg: the AI turns and tokens between two human
+ * decisions. Waiting for a person is not a loop, so a decision starts a fresh
+ * leg; a hard ceiling of LEG_CEILING legs' worth still stops a looping agent.
+ * Organisations may raise an agent's per-leg limits up to these maximums.
+ */
+export const RUN_LIMITS = {
+  legCeiling: 4,
+  maxStepsPerLeg: 60,
+  minStepsPerLeg: 4,
+  maxTokensPerLeg: 1_000_000,
+  minTokensPerLeg: 20_000,
+} as const;
+import { CEILING_MESSAGE, LEG_LIMIT_MESSAGE } from "./run-messages";
+export { CEILING_MESSAGE, LEG_LIMIT_MESSAGE };
+
+/** Which limit (if any) a run has reached now (pure; unit-tested). Ceiling first. */
+export function limitReached(r: {
+  stepCount: number;
+  tokensUsed: number;
+  legStepStart: number;
+  legTokenStart: number;
+  maxSteps: number;
+  maxTokens: number;
+}): "ceiling" | "leg" | null {
+  if (
+    r.stepCount >= r.maxSteps * RUN_LIMITS.legCeiling ||
+    r.tokensUsed >= r.maxTokens * RUN_LIMITS.legCeiling
+  )
+    return "ceiling";
+  if (r.stepCount - r.legStepStart >= r.maxSteps || r.tokensUsed - r.legTokenStart >= r.maxTokens)
+    return "leg";
+  return null;
+}
+
+/**
+ * What the model re-reads each turn (pure; unit-tested): the run's own record
+ * keeps everything, but tool results older than the last `keep` messages are
+ * shortened — a long run's cost no longer grows with every earlier result.
+ * Untrusted fences stay intact around what is kept.
+ */
+export function compactForModel(transcript: AgentMessage[], keep = 8, max = 700): AgentMessage[] {
+  const cut = transcript.length - keep;
+  return transcript.map((m, i) => {
+    if (i >= cut || m.role !== "tool" || m.content.length <= max) return m;
+    const note = `\n[… shortened: ${m.content.length - max} more characters are in the run trail]`;
+    const fenced = /^(<untrusted_data[^>]*>\n)([\s\S]*)(\n<\/untrusted_data>)$/.exec(m.content);
+    const content = fenced
+      ? `${fenced[1]}${fenced[2]!.slice(0, max)}${note}${fenced[3]}`
+      : `${m.content.slice(0, max)}${note}`;
+    return { ...m, content };
+  });
+}
+
 type AgentRun = typeof agentRuns.$inferSelect;
 type PendingCall = { taskId: string; call: AgentToolCall };
 
@@ -699,6 +753,7 @@ export async function startRun(input: {
       log.warn("desk.link_failed", { org_id: input.orgId, error: e as Error });
     }
   }
+  const startPolicy = await loadPolicy(input.orgId, input.agentType);
   const [run] = await db
     .insert(agentRuns)
     .values({
@@ -712,7 +767,8 @@ export async function startRun(input: {
       subjectType: input.subjectType ?? null,
       subjectId: input.subjectId ?? null,
       triggerEventId: input.triggerEventId ?? null,
-      maxSteps: input.maxSteps ?? def.maxSteps ?? 20,
+      maxSteps: input.maxSteps ?? startPolicy.maxStepsPerLeg ?? def.maxSteps ?? 20,
+      ...(startPolicy.maxTokensPerLeg ? { maxTokens: startPolicy.maxTokensPerLeg } : {}),
       conversationId,
       transcript: [{ role: "user", content: input.goal } satisfies AgentMessage],
     })
@@ -1170,6 +1226,15 @@ async function driveRun(run: AgentRun): Promise<"done" | "awaiting" | "yielded" 
       const message = await applyDecision(ctx, task, p.call, seq++);
       transcript.push(message);
     }
+    // A person decided: the next stretch of work gets a fresh allowance.
+    if ((run.pending as PendingCall[]).length) {
+      run.legStepStart = stepCount;
+      run.legTokenStart = tokensUsed;
+      await db
+        .update(agentRuns)
+        .set({ legStepStart: stepCount, legTokenStart: tokensUsed })
+        .where(eq(agentRuns.id, run.id));
+    }
   }
 
   const allowed = new Set(def.tools);
@@ -1220,16 +1285,30 @@ async function driveRun(run: AgentRun): Promise<"done" | "awaiting" | "yielded" 
       await pauseForBudget(run);
       return "yielded";
     }
-    if (stepCount >= run.maxSteps || tokensUsed >= run.maxTokens) {
+    const reached = limitReached({
+      stepCount,
+      tokensUsed,
+      legStepStart: run.legStepStart,
+      legTokenStart: run.legTokenStart,
+      // The organisation's raised limits apply to runs already under way.
+      maxSteps: policy.maxStepsPerLeg ?? run.maxSteps,
+      maxTokens: policy.maxTokensPerLeg ?? run.maxTokens,
+    });
+    if (reached) {
       await save(run, transcript, null, stepCount, tokensUsed);
-      await finish(run, "failed", null, "The run reached its step or token budget.");
+      await finish(
+        run,
+        "failed",
+        null,
+        reached === "ceiling" ? CEILING_MESSAGE : LEG_LIMIT_MESSAGE,
+      );
       return "failed";
     }
 
     const started = Date.now();
     const res = await aiAgentStep({
       system,
-      messages: transcript,
+      messages: compactForModel(transcript),
       tools: specs,
       orgId: run.orgId,
       feature: def.feature,

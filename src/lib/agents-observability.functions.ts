@@ -5,6 +5,7 @@
  * 7 / 14 days plus open health issues. Governance roles only; vendor- and
  * model-neutral (AI is reported by feature slug).
  */
+import { CEILING_MESSAGE, LEG_LIMIT_MESSAGE } from "../server/agents/run-messages";
 import { createServerFn } from "@tanstack/react-start";
 import { and, eq, ne, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -555,6 +556,8 @@ export type AgentDetail = {
 };
 
 const SAFE_ERRORS = new Set([
+  LEG_LIMIT_MESSAGE,
+  CEILING_MESSAGE,
   "The run reached its step or token budget.",
   "The worker stopped before finishing this step.",
   "No AI model key saved. Add one on the Integrations page.",

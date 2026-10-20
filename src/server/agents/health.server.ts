@@ -107,6 +107,35 @@ export const RULES: Rule[] = [
     },
   },
   {
+    id: "harness.run_limits",
+    element: "harness",
+    severity: "warning",
+    description:
+      "A run stopped on its step or token limit in the last 7 days and nothing has picked its work up since — the role or candidate it was working on is waiting. Raise the agent's run limits in Agent settings and try it again; if it stopped at the overall ceiling, check its steps first (it may be going round in circles).",
+    evaluate: async (orgId) => {
+      const r = await rows<{ agent_type: string; n: number; ceiling: number }>(sql`
+        select f.agent_type, count(*)::int n,
+          count(*) filter (where f.last_error like '%overall step or token ceiling%')::int ceiling
+        from agent_runs f
+        where f.org_id = ${orgId} and f.status = 'failed' and f.mode = 'live'
+          and f.last_error like '%step or token%'
+          and f.finished_at >= now() - interval '7 days'
+          and not exists (
+            select 1 from agent_runs later
+            where later.org_id = f.org_id and later.agent_type = f.agent_type
+              and later.subject_id is not distinct from f.subject_id
+              and later.created_at > f.created_at
+              and later.status in ('queued','running','awaiting_human','done'))
+        group by f.agent_type`);
+      return r.map((x) => ({
+        agentType: x.agent_type,
+        title: `${x.n} ${x.n === 1 ? "run" : "runs"} stopped on ${x.n === 1 ? "its" : "their"} limits, with the work still waiting${x.ceiling ? ` (${x.ceiling} at the overall ceiling)` : ""}`,
+        detail: { runs: x.n, atCeiling: x.ceiling },
+        ...(x.ceiling ? { severity: "serious" as const } : {}),
+      }));
+    },
+  },
+  {
     id: "harness.failures",
     element: "harness",
     severity: "serious",

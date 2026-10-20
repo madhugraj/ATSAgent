@@ -1160,8 +1160,8 @@ erDiagram
 | `agent_events` | — | 12 | — |
 | `agent_issues` | — | 16 | — |
 | `agent_metrics_daily` | — | 17 | — |
-| `agent_policies` | — | 10 | (orgId+agentType) |
-| `agent_runs` | — | 31 | — |
+| `agent_policies` | — | 12 | (orgId+agentType) |
+| `agent_runs` | — | 33 | — |
 | `agent_runtime_heartbeat` | — | 4 | — |
 | `agent_steps` | — | 17 | (runId+seq) |
 | `agent_tasks` | — | 16 | — |

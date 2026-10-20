@@ -17,6 +17,9 @@ export type EffectivePolicy = {
   autonomy: AgentAutonomy;
   whitelistedTemplates: string[];
   monthlyTokenBudget: number | null;
+  /** Run limits per leg set by the organisation; null = the agent's default. */
+  maxStepsPerLeg: number | null;
+  maxTokensPerLeg: number | null;
 };
 
 /**
@@ -28,6 +31,8 @@ export const DEFAULT_POLICY: EffectivePolicy = {
   autonomy: "suggest",
   whitelistedTemplates: [],
   monthlyTokenBudget: null,
+  maxStepsPerLeg: null,
+  maxTokensPerLeg: null,
 };
 
 /**
@@ -72,5 +77,7 @@ export async function loadPolicy(orgId: string, agentType: AgentType): Promise<E
     autonomy: own?.autonomy ?? DEFAULT_POLICY.autonomy,
     whitelistedTemplates: own?.whitelistedTemplates ?? [],
     monthlyTokenBudget: own?.monthlyTokenBudget ?? null,
+    maxStepsPerLeg: own?.maxStepsPerLeg ?? null,
+    maxTokensPerLeg: own?.maxTokensPerLeg ?? null,
   };
 }

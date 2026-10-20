@@ -222,6 +222,22 @@ Initial tool surface (each maps to existing code):
 
 ---
 
+### 3.x Run limits per stretch of work (migration `0042`)
+
+A run's step and token limits apply per **stretch** — the work between two
+decisions by a person — not to the whole run: a run that waits on an
+approval chain or a question is not a loop, and each decision starts a fresh
+stretch (`agent_runs.leg_step_start` / `leg_token_start`). A hard ceiling of
+four stretches' worth (`RUN_LIMITS.legCeiling`) still stops a looping agent.
+The HR head / CBO can raise an agent's allowance in Agent settings → Run
+limits (4–60 AI turns, 20,000–1,000,000 tokens per stretch; audited as
+`agent.policy.updated`), which also applies to runs under way; the monthly
+token budget remains the cost control. Older tool results are shortened in
+what the model re-reads each turn (`compactForModel`); the run's own record
+keeps them whole. A run stopped on its limits says what to do, and the
+health rule `harness.run_limits` flags it while its work is still waiting
+(serious at the ceiling).
+
 ## 4. The agents
 
 Each agent = system prompt + tool subset + output contract + HITL points. All

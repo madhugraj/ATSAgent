@@ -12,6 +12,7 @@
  * The model only extracts details and words the next question; what happens
  * next (which agent, which records) is decided here in plain code.
  */
+import { CEILING_MESSAGE, LEG_LIMIT_MESSAGE } from "../agents/run-messages";
 import { localWhen } from "@/lib/local-time";
 import { placeLabel } from "@/lib/work-mode";
 import { and, asc, desc, eq, ilike, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
@@ -1096,6 +1097,8 @@ async function handleUserMessageInner(
 /* ---------------------------------------------------- runtime hooks */
 
 const SAFE_ERRORS = new Set([
+  LEG_LIMIT_MESSAGE,
+  CEILING_MESSAGE,
   "The run reached its step or token budget.",
   "The worker stopped before finishing this step.",
   "No AI model key saved. Add one on the Integrations page.",

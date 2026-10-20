@@ -4,6 +4,7 @@
  * HR-head / CBO (owner passes); decisions are checked against each task's
  * role or assignee by the runtime.
  */
+import { CEILING_MESSAGE, LEG_LIMIT_MESSAGE } from "../server/agents/run-messages";
 import { createServerFn } from "@tanstack/react-start";
 import { and, desc, eq, inArray, or } from "drizzle-orm";
 import { z } from "zod";
@@ -26,6 +27,8 @@ const SETTINGS_ROLES = ["hr_head", "president_cbo"] as const;
 
 /** Errors the runtime itself writes; anything else (provider text) is not shown. */
 const SAFE_RUN_ERRORS = new Set([
+  LEG_LIMIT_MESSAGE,
+  CEILING_MESSAGE,
   "The run reached its step or token budget.",
   "The worker stopped before finishing this step.",
   "No AI model key saved. Add one on the Integrations page.",
@@ -223,6 +226,11 @@ export type AgentSettingsView = {
     autonomy: "suggest" | "act_and_notify" | "autonomous";
     whitelistedTemplates: string[];
     monthlyTokenBudget: number | null;
+    /** Run limits per stretch of work (between human decisions); null = the agent's default. */
+    maxStepsPerLeg: number | null;
+    maxTokensPerLeg: number | null;
+    /** The agent's own default AI turns per stretch. */
+    defaultStepsPerLeg: number;
     /** Measured over 30 days; a person applies it (docs/agentic-plan.md §5.2). */
     recommendation: import("../server/agents/autonomy.server").AutonomyRecommendation | null;
   }[];
@@ -232,6 +240,7 @@ export const agentSettings = createServerFn({ method: "GET" })
   .middleware([requireOrg])
   .handler(async ({ context }): Promise<AgentSettingsView> => {
     const { isAgentLive } = await import("../server/agents");
+    const { getAgent } = await import("../server/agents/registry");
     const rows = await db
       .select()
       .from(agentPolicies)
@@ -258,6 +267,9 @@ export const agentSettings = createServerFn({ method: "GET" })
           autonomy: r?.autonomy ?? "suggest",
           whitelistedTemplates: r?.whitelistedTemplates ?? [],
           monthlyTokenBudget: r?.monthlyTokenBudget ?? null,
+          maxStepsPerLeg: r?.maxStepsPerLeg ?? null,
+          maxTokensPerLeg: r?.maxTokensPerLeg ?? null,
+          defaultStepsPerLeg: getAgent(a.type)?.maxSteps ?? 20,
           recommendation: recs[a.type] ?? null,
         };
       }),
@@ -273,6 +285,9 @@ const PolicyInput = z.object({
     .max(20)
     .optional(),
   monthlyTokenBudget: z.number().int().min(0).max(1_000_000_000).nullable().optional(),
+  /** Run limits per stretch of work (platform range; null = the agent's default). */
+  maxStepsPerLeg: z.number().int().min(4).max(60).nullable().optional(),
+  maxTokensPerLeg: z.number().int().min(20_000).max(1_000_000).nullable().optional(),
   /** Set when the change applies a measured recommendation (recorded in the audit entry). */
   viaRecommendation: z.boolean().optional(),
 });
@@ -294,6 +309,12 @@ export const saveAgentPolicy = createServerFn({ method: "POST" })
         : {}),
       ...(data.agentType !== "*" && data.monthlyTokenBudget !== undefined
         ? { monthlyTokenBudget: data.monthlyTokenBudget }
+        : {}),
+      ...(data.agentType !== "*" && data.maxStepsPerLeg !== undefined
+        ? { maxStepsPerLeg: data.maxStepsPerLeg }
+        : {}),
+      ...(data.agentType !== "*" && data.maxTokensPerLeg !== undefined
+        ? { maxTokensPerLeg: data.maxTokensPerLeg }
         : {}),
       updatedBy: context.userId,
       updatedAt: now,
