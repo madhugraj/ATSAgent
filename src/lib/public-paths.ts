@@ -10,6 +10,7 @@ export function isPublicPath(pathname: string): boolean {
     pathname.startsWith("/apply/") ||
     pathname.startsWith("/assess/") ||
     pathname.startsWith("/pay/") ||
+    pathname.startsWith("/negotiate/") ||
     pathname.startsWith("/schedule/") ||
     pathname.startsWith("/offer/")
   );

@@ -57,6 +57,8 @@ export const HEALTH = {
   interviewNoShows7d: 3,
   /** An open offer on its this-many-th revision is going back and forth. */
   offerRevisions: 3,
+  /** A pay discussion waiting on a person (suggested figure, call asked for) this many days. */
+  negotiationWaitDays: 2,
   /** Re-evaluate at most this often (minutes). */
   evaluateEveryMinutes: 5,
 } as const;
@@ -101,6 +103,35 @@ export const RULES: Rule[] = [
         agentType: x.agent_type,
         title: `${x.n} run(s) stuck or repeatedly reclaimed`,
         detail: { runs: x.n },
+      }));
+    },
+  },
+  {
+    id: "harness.run_limits",
+    element: "harness",
+    severity: "warning",
+    description:
+      "A run stopped on its step or token limit in the last 7 days and nothing has picked its work up since — the role or candidate it was working on is waiting. Raise the agent's run limits in Agent settings and try it again; if it stopped at the overall ceiling, check its steps first (it may be going round in circles).",
+    evaluate: async (orgId) => {
+      const r = await rows<{ agent_type: string; n: number; ceiling: number }>(sql`
+        select f.agent_type, count(*)::int n,
+          count(*) filter (where f.last_error like '%overall step or token ceiling%')::int ceiling
+        from agent_runs f
+        where f.org_id = ${orgId} and f.status = 'failed' and f.mode = 'live'
+          and f.last_error like '%step or token%'
+          and f.finished_at >= now() - interval '7 days'
+          and not exists (
+            select 1 from agent_runs later
+            where later.org_id = f.org_id and later.agent_type = f.agent_type
+              and later.subject_id is not distinct from f.subject_id
+              and later.created_at > f.created_at
+              and later.status in ('queued','running','awaiting_human','done'))
+        group by f.agent_type`);
+      return r.map((x) => ({
+        agentType: x.agent_type,
+        title: `${x.n} ${x.n === 1 ? "run" : "runs"} stopped on ${x.n === 1 ? "its" : "their"} limits, with the work still waiting${x.ceiling ? ` (${x.ceiling} at the overall ceiling)` : ""}`,
+        detail: { runs: x.n, atCeiling: x.ceiling },
+        ...(x.ceiling ? { severity: "serious" as const } : {}),
       }));
     },
   },
@@ -198,15 +229,17 @@ export const RULES: Rule[] = [
         top: string | null;
       }>(sql`
         with s as (
-          select r.agent_type, st.tool_name, st.status
+          -- Refusals (a rule said no) are guardrails working, not failures.
+          select r.agent_type, st.tool_name, st.status,
+            coalesce(st.output ->> 'refused', 'false') = 'true' refused
           from agent_steps st join agent_runs r on r.id = st.run_id
           where st.org_id = ${orgId} and st.kind = 'tool' and st.status in ('ok','error')
             and st.created_at >= now() - interval '24 hours'
         )
         select agent_type, count(*)::int calls,
-          count(*) filter (where status = 'error')::int errors,
+          count(*) filter (where status = 'error' and coalesce(refused, false) = false)::int errors,
           (select tool_name from s s2 where s2.agent_type = s.agent_type and s2.status = 'error'
-            group by tool_name order by count(*) desc limit 1) top
+            and not s2.refused group by tool_name order by count(*) desc limit 1) top
         from s group by agent_type having count(*) >= ${HEALTH.minToolCalls}`);
       return r
         .filter((x) => x.errors / x.calls > HEALTH.toolErrorRate)
@@ -467,6 +500,38 @@ export const RULES: Rule[] = [
         {
           agentType: "offer",
           title: `${n} candidate(s) near an offer never shared their expected pay or notice period`,
+          detail: { candidates: n },
+        },
+      ];
+    },
+  },
+  {
+    id: "offer.negotiation_stalled",
+    element: "hitl",
+    severity: "warning",
+    description: `A pay discussion has waited on a person for more than ${HEALTH.negotiationWaitDays} days (the candidate suggested a figure or asked for a call), or it closed without agreement while the candidate is still near an offer — someone should call them or the HR head should decide.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number }>(sql`
+        select count(distinct n.application_id)::int n
+        from offer_negotiations n
+        join applications a on a.id = n.application_id and a.org_id = n.org_id
+        where n.org_id = ${orgId}
+          and a.stage in ('l1','l2','l3','offer_pending')
+          and (
+            (n.status in ('countered','call_requested','open')
+              and n.updated_at < now() - make_interval(days => ${HEALTH.negotiationWaitDays}))
+            or (n.status in ('expired','no_agreement')
+              and n.updated_at >= now() - interval '14 days'
+              and not exists (
+                select 1 from offer_negotiations later
+                where later.application_id = n.application_id
+                  and later.created_at > n.created_at)))`);
+      const n = r[0]?.n ?? 0;
+      if (!n) return [];
+      return [
+        {
+          agentType: "offer",
+          title: `${n} pay ${n === 1 ? "discussion" : "discussions"} waiting on a person or ended without agreement`,
           detail: { candidates: n },
         },
       ];

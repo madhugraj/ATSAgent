@@ -330,6 +330,28 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
       );
   }
 
+  if (applicationId && e.type === "negotiation.agreed") {
+    // A figure agreed with the candidate (their answer or a recorded call):
+    // the Offer agent drafts (or revises a sent-back draft) at it.
+    const busy = await db
+      .select({ id: offers.id })
+      .from(offers)
+      .where(
+        and(
+          eq(offers.orgId, e.orgId),
+          eq(offers.applicationId, applicationId),
+          inArray(offers.status, ["pending_hr", "pending_cbo", "approved", "released", "accepted"]),
+        ),
+      )
+      .limit(1);
+    if (!busy.length)
+      await dispatch(
+        "offer",
+        `A pay figure was agreed with the candidate for application ${applicationId} (${req.code} "${req.title}"). Read get_offer_context: draft the offer (or revise the sent-back draft) at the agreed figure with the joining date, generate the letter and take it through HR head and CBO approval.`,
+        { type: "application", id: applicationId },
+      );
+  }
+
   if (applicationId && e.type === "compensation.submitted") {
     // The offer waits for the candidate's expectation: continue it once known —
     // only for a selected candidate whose offer is not already with approvers.
@@ -665,12 +687,28 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
   } catch (err) {
     log.warn("assessment.sweep_failed", { error: err as Error });
   }
+  // Pay discussions whose link closed unanswered (src/lib/negotiation.server.ts).
+  try {
+    const { runNegotiationSweep } = await import("@/lib/negotiation.server");
+    await runNegotiationSweep(opts.orgId);
+  } catch (err) {
+    log.warn("negotiation.sweep_failed", { error: err as Error });
+  }
   // Pay & availability forms: the same timeline (src/lib/compensation.server.ts).
   try {
     const { runCompensationSweep } = await import("@/lib/compensation.server");
     await runCompensationSweep(opts.orgId);
   } catch (err) {
     log.warn("compensation.sweep_failed", { error: err as Error });
+  }
+  // Deleted hiring-desk chats past their 30-day restore are removed for good.
+  if (!opts.orgId) {
+    try {
+      const { purgeDeletedThreads } = await import("../desk/desk.server");
+      await purgeDeletedThreads();
+    } catch (err) {
+      log.warn("desk.purge_failed", { error: err as Error });
+    }
   }
   // Hiring-desk threads hear about new applicants.
   try {

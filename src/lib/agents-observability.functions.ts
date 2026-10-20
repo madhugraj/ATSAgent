@@ -5,6 +5,7 @@
  * 7 / 14 days plus open health issues. Governance roles only; vendor- and
  * model-neutral (AI is reported by feature slug).
  */
+import { CEILING_MESSAGE, LEG_LIMIT_MESSAGE } from "../server/agents/run-messages";
 import { createServerFn } from "@tanstack/react-start";
 import { and, eq, ne, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -42,8 +43,11 @@ export type AgentObservability = {
   tools: {
     declared: number;
     calls7d: number;
+    /** Tool calls that failed (something broke, or the agent called a tool wrongly). */
     errors7d: number;
-    byTool: { tool: string; calls: number; errors: number }[];
+    /** Tool calls a business rule or guardrail refused — not failures. */
+    refused7d: number;
+    byTool: { tool: string; calls: number; errors: number; refused: number }[];
   };
   skills: {
     declared: string[];
@@ -187,7 +191,8 @@ async function buildObservability(orgId: string): Promise<ObservabilityView> {
       order by d.day`);
     const toolStats = await q(sql`
       select r.agent_type, st.tool_name tool, count(*)::int calls,
-        count(*) filter (where st.status = 'error')::int errors
+        count(*) filter (where st.status = 'error' and coalesce(st.output ->> 'refused', 'false') <> 'true')::int errors,
+        count(*) filter (where st.status = 'error' and st.output ->> 'refused' = 'true')::int refused
       from agent_steps st join agent_runs r on r.id = st.run_id
       where st.org_id = ${org} and st.kind = 'tool' and st.status in ('ok','error')
         and st.created_at >= now() - interval '7 days'
@@ -266,7 +271,7 @@ async function buildObservability(orgId: string): Promise<ObservabilityView> {
       s as (
         select (created_at at time zone 'utc')::date as day,
           count(*) filter (where status = 'ok')::int ok,
-          count(*) filter (where status = 'error')::int errors
+          count(*) filter (where status = 'error' and coalesce(output ->> 'refused', 'false') <> 'true')::int errors
         from agent_steps where org_id = ${org} and kind = 'tool' and status in ('ok','error')
           and created_at >= current_date - 13
         group by 1
@@ -317,6 +322,7 @@ async function buildObservability(orgId: string): Promise<ObservabilityView> {
         tool: String(t["tool"]),
         calls: n(t["calls"]),
         errors: n(t["errors"]),
+        refused: n(t["refused"]),
       }));
       const ai = by(aiStats, def.type).map((a) => ({
         feature: String(a["feature"]),
@@ -343,6 +349,7 @@ async function buildObservability(orgId: string): Promise<ObservabilityView> {
           declared: def.tools.length,
           calls7d: tools.reduce((s, t) => s + t.calls, 0),
           errors7d: tools.reduce((s, t) => s + t.errors, 0),
+          refused7d: tools.reduce((s, t) => s + t.refused, 0),
           byTool: tools.sort((a, b) => b.calls - a.calls).slice(0, 6),
         },
         skills: {
@@ -487,10 +494,15 @@ export type AgentDetail = {
     untrustedOutput: boolean;
     inputSchemaJson: string;
     calls7d: number;
+    /** Failed: something broke, or the agent called the tool wrongly. */
     errors7d: number;
+    /** Refused by a business rule or guardrail — not a failure. */
+    refused7d: number;
     avgMs: number | null;
     awaitingApproval7d: number;
     lastError: string | null;
+    /** The last error was a refusal (a rule said no), not a failure. */
+    lastErrorRefused: boolean;
     lastUsedAt: string | null;
   }[];
   skills: {
@@ -540,7 +552,18 @@ export type AgentDetail = {
       decidedAt: string | null;
     }[];
   };
-  evals: { name: string }[];
+  /**
+   * Rehearsals in plain words, with the latest result recorded in this
+   * environment (null when none ran here — CI runs them on every change).
+   * Never the model or provider: `mode` is "scripted" or "live" only.
+   */
+  evals: {
+    name: string;
+    title: string;
+    situation: string;
+    checks: string[];
+    last: { passed: boolean; at: string; mode: string } | null;
+  }[];
   audit: { action: string; actor: string; entityType: string | null; at: string }[];
   issues: {
     open: IssueView[];
@@ -555,6 +578,8 @@ export type AgentDetail = {
 };
 
 const SAFE_ERRORS = new Set([
+  LEG_LIMIT_MESSAGE,
+  CEILING_MESSAGE,
   "The run reached its step or token budget.",
   "The worker stopped before finishing this step.",
   "No AI model key saved. Add one on the Integrations page.",
@@ -607,7 +632,8 @@ async function buildDetail(org: string, agentType: string): Promise<AgentDetail>
   const toolRows = await q(sql`
     select st.tool_name tool,
       count(*) filter (where st.status in ('ok','error'))::int calls,
-      count(*) filter (where st.status = 'error')::int errors,
+      count(*) filter (where st.status = 'error' and coalesce(st.output ->> 'refused', 'false') <> 'true')::int errors,
+      count(*) filter (where st.status = 'error' and st.output ->> 'refused' = 'true')::int refused,
       count(*) filter (where st.status = 'awaiting')::int awaiting,
       round(avg(st.duration_ms) filter (where st.status in ('ok','error')))::int avg_ms,
       max(st.created_at) last_used
@@ -616,7 +642,8 @@ async function buildDetail(org: string, agentType: string): Promise<AgentDetail>
       and st.created_at >= now() - interval '7 days'
     group by st.tool_name`);
   const lastErrors = await q(sql`
-    select distinct on (st.tool_name) st.tool_name tool, st.output ->> 'error' err
+    select distinct on (st.tool_name) st.tool_name tool, st.output ->> 'error' err,
+      st.output ->> 'refused' = 'true' refused
     from agent_steps st join agent_runs r on r.id = st.run_id
     where st.org_id = ${org} and r.agent_type = ${def.type} and st.kind = 'tool' and st.status = 'error'
     order by st.tool_name, st.created_at desc`);
@@ -700,10 +727,12 @@ async function buildDetail(org: string, agentType: string): Promise<AgentDetail>
         inputSchemaJson: t ? JSON.stringify(toolParameters(t.input), null, 2) : "{}",
         calls7d: n(u["calls"]),
         errors7d: n(u["errors"]),
+        refused7d: n(u["refused"]),
         avgMs: nOrNull(u["avg_ms"]),
         awaitingApproval7d: n(u["awaiting"]),
         lastError:
           (lastErrors.find((e) => e["tool"] === name)?.["err"] as string | undefined) ?? null,
+        lastErrorRefused: Boolean(lastErrors.find((e) => e["tool"] === name)?.["refused"]),
         lastUsedAt: u["last_used"] ? new Date(String(u["last_used"])).toISOString() : null,
       };
     }),
@@ -785,7 +814,35 @@ async function buildDetail(org: string, agentType: string): Promise<AgentDetail>
         decidedAt: t["decided_at"] ? new Date(String(t["decided_at"])).toISOString() : null,
       })),
     },
-    evals: def.evals.map((name) => ({ name })),
+    evals: await (async () => {
+      const { explainEval } = await import("./eval-catalog");
+      const { trainingEvalResults } = await import("@db/schema");
+      const { inArray, desc } = await import("drizzle-orm");
+      const rows = def.evals.length
+        ? await db
+            .select({
+              scenario: trainingEvalResults.scenario,
+              passed: trainingEvalResults.passed,
+              mode: trainingEvalResults.mode,
+              at: trainingEvalResults.createdAt,
+            })
+            .from(trainingEvalResults)
+            .where(inArray(trainingEvalResults.scenario, def.evals))
+            .orderBy(desc(trainingEvalResults.createdAt))
+            .limit(200)
+        : [];
+      return def.evals.map((name) => {
+        const e = explainEval(name);
+        const latest = rows.find((x) => x.scenario === name);
+        return {
+          name,
+          ...e,
+          last: latest
+            ? { passed: latest.passed, at: latest.at.toISOString(), mode: latest.mode }
+            : null,
+        };
+      });
+    })(),
     audit: audit.map((a) => ({
       action: String(a["action"]),
       actor: String(a["actor"]),

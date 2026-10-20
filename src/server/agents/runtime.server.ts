@@ -81,6 +81,76 @@ export const HARNESS_LIMITS = {
   budgetRecheckMinutes: 60,
 } as const;
 
+/**
+ * Run limits work per leg: the AI turns and tokens between two human
+ * decisions. Waiting for a person is not a loop, so a decision starts a fresh
+ * leg; a hard ceiling of LEG_CEILING legs' worth still stops a looping agent.
+ * Organisations may raise an agent's per-leg limits up to these maximums.
+ */
+export const RUN_LIMITS = {
+  legCeiling: 4,
+  maxStepsPerLeg: 60,
+  minStepsPerLeg: 4,
+  maxTokensPerLeg: 1_000_000,
+  minTokensPerLeg: 20_000,
+} as const;
+import { CEILING_MESSAGE, LEG_LIMIT_MESSAGE } from "./run-messages";
+export { CEILING_MESSAGE, LEG_LIMIT_MESSAGE };
+
+/** Messages of things that broke rather than rules that said no (pure; unit-tested). */
+const BROKEN =
+  /ECONN|ETIMEDOUT|timed? ?out|fetch failed|network|socket|database|Failed query|syntax error|duplicate key|deadlock|violates|does not exist|undefined|null|NaN|Cannot read/i;
+
+/**
+ * A tool that threw: was it a business rule or guardrail saying no (shown as
+ * "refused", not counted as a failure), or did something break? Only a plain
+ * Error with a readable message counts as a refusal; driver, validation and
+ * programming errors (their own classes) and infrastructure messages are failures.
+ */
+export function isRuleRefusal(e: unknown): boolean {
+  if (!(e instanceof Error) || e.constructor !== Error) return false;
+  const m = e.message.trim();
+  return m.length > 0 && m.length < 600 && !BROKEN.test(m);
+}
+
+/** Which limit (if any) a run has reached now (pure; unit-tested). Ceiling first. */
+export function limitReached(r: {
+  stepCount: number;
+  tokensUsed: number;
+  legStepStart: number;
+  legTokenStart: number;
+  maxSteps: number;
+  maxTokens: number;
+}): "ceiling" | "leg" | null {
+  if (
+    r.stepCount >= r.maxSteps * RUN_LIMITS.legCeiling ||
+    r.tokensUsed >= r.maxTokens * RUN_LIMITS.legCeiling
+  )
+    return "ceiling";
+  if (r.stepCount - r.legStepStart >= r.maxSteps || r.tokensUsed - r.legTokenStart >= r.maxTokens)
+    return "leg";
+  return null;
+}
+
+/**
+ * What the model re-reads each turn (pure; unit-tested): the run's own record
+ * keeps everything, but tool results older than the last `keep` messages are
+ * shortened — a long run's cost no longer grows with every earlier result.
+ * Untrusted fences stay intact around what is kept.
+ */
+export function compactForModel(transcript: AgentMessage[], keep = 8, max = 700): AgentMessage[] {
+  const cut = transcript.length - keep;
+  return transcript.map((m, i) => {
+    if (i >= cut || m.role !== "tool" || m.content.length <= max) return m;
+    const note = `\n[… shortened: ${m.content.length - max} more characters are in the run trail]`;
+    const fenced = /^(<untrusted_data[^>]*>\n)([\s\S]*)(\n<\/untrusted_data>)$/.exec(m.content);
+    const content = fenced
+      ? `${fenced[1]}${fenced[2]!.slice(0, max)}${note}${fenced[3]}`
+      : `${m.content.slice(0, max)}${note}`;
+    return { ...m, content };
+  });
+}
+
 type AgentRun = typeof agentRuns.$inferSelect;
 type PendingCall = { taskId: string; call: AgentToolCall };
 
@@ -141,6 +211,19 @@ type GateInfo = {
  * The candidate's own numbers against the offer, stated by the system on the
  * approval card (pure; unit-tested) — never left to the agent's brief.
  */
+/** What was agreed with the candidate in a pay discussion, against the offer (pure). */
+export function agreedLine(
+  ctc: number,
+  agreed: { agreedCtc: number; joiningBonus: number | null; cboApproved: boolean } | null,
+): string {
+  if (!agreed) return "";
+  const match =
+    ctc === agreed.agreedCtc
+      ? "this offer matches it"
+      : `this offer is ${rupees(Math.abs(ctc - agreed.agreedCtc))} ${ctc > agreed.agreedCtc ? "above" : "below"} it`;
+  return ` Agreed with the candidate in a pay discussion: ${rupees(agreed.agreedCtc)}${agreed.joiningBonus ? ` plus a ${rupees(agreed.joiningBonus)} joining bonus` : ""}${agreed.cboApproved ? " (ceiling approved by the CBO)" : ""}; ${match}.`;
+}
+
 export function expectationLine(
   ctc: number,
   pay: {
@@ -183,6 +266,7 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
         status: offers.status,
         applicationId: offers.applicationId,
         ctc: offers.offeredCtc,
+        joiningDate: offers.joiningDate,
         name: candidates.fullName,
         title: requisitions.title,
         budget: requisitions.budgetCtc,
@@ -216,11 +300,21 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
             ? ` Outside the approved band ${rupees(lo)}–${rupees(hi)}.`
             : ` Inside the approved band ${rupees(lo)}–${rupees(hi)}.`
           : "";
-      const { detailsFor } = await import("@/lib/compensation.server");
+      const { detailsFor, offerTermsMissing, listWords } =
+        await import("@/lib/compensation.server");
+      const missing = await offerTermsMissing(
+        orgId,
+        o.applicationId,
+        o.joiningDate ? String(o.joiningDate) : null,
+      );
       return {
         role,
         status: o.status,
-        detail: `Offer for ${o.name} (${o.title}): ${rupees(ctc)} CTC — ${o.status}.${vsBudget}${vsBand}${expectationLine(ctc, await detailsFor(orgId, o.applicationId))}`,
+        detail: `Offer for ${o.name} (${o.title}): ${rupees(ctc)} CTC — ${o.status}.${vsBudget}${vsBand}${expectationLine(ctc, await detailsFor(orgId, o.applicationId))}${agreedLine(ctc, await (await import("@/lib/negotiation.server")).agreedTerms(orgId, o.applicationId))}${
+          missing.length
+            ? `\n\nThis offer cannot be approved yet: ${listWords(missing)} ${missing.length > 1 ? "are" : "is"} missing. Decline it with that reason — it goes back to draft and the Offer agent collects them.`
+            : ""
+        }`,
       };
     }
     if (o.status !== "approved")
@@ -513,6 +607,14 @@ async function performGate(
     if (subject.expects && r.status !== subject.expects) {
       throw new Error("This requisition has already moved on; refresh to see its current state.");
     }
+    if (decision.status === "rejected" && decision.changes) {
+      // Sent back for changes (not final): draft again, the reason on the trail.
+      await lifecycle.sendBackRequisitionCore(actor, {
+        id: subject.id,
+        reason: decision.reason?.trim() || "Changes requested.",
+      });
+      return;
+    }
     const to =
       decision.status === "approved" ? lifecycle.NEXT_APPROVAL[r.status] : ("rejected" as const);
     if (!to) throw new Error(`The requisition is ${r.status}, not waiting for an approval.`);
@@ -584,16 +686,32 @@ export async function syncGateTasks(
     const declined =
       current === "rejected" ||
       current === "changes_requested" ||
-      (subject.type === "offer" && current === "draft");
+      ((subject.type === "offer" || subject.type === "requisition") && current === "draft");
     const now = new Date();
+    // A requisition sent back for changes carries what to change (its trail's last entry).
+    const sentBack =
+      subject.type === "requisition" && current === "draft"
+        ? await (async () => {
+            const [r] = await db
+              .select({ trail: requisitions.approvalTrail })
+              .from(requisitions)
+              .where(eq(requisitions.id, subject.id))
+              .limit(1);
+            const last = (Array.isArray(r?.trail) ? r.trail : []).at(-1) as
+              { decision?: string; comment?: string } | undefined;
+            return last?.decision === "sent_back" ? (last.comment ?? "Changes requested.") : null;
+          })()
+        : null;
     const done = await db
       .update(agentTasks)
       .set({
         status: declined ? "rejected" : "approved",
-        response: {
-          status: declined ? "rejected" : "approved",
-          [declined ? "reason" : "comment"]: `Decided outside the inbox (now ${current}).`,
-        } as never,
+        response: (sentBack
+          ? { status: "rejected", reason: sentBack, changes: true }
+          : {
+              status: declined ? "rejected" : "approved",
+              [declined ? "reason" : "comment"]: `Decided outside the inbox (now ${current}).`,
+            }) as never,
         decidedBy,
         decidedAt: now,
         updatedAt: now,
@@ -651,6 +769,7 @@ export async function startRun(input: {
       log.warn("desk.link_failed", { org_id: input.orgId, error: e as Error });
     }
   }
+  const startPolicy = await loadPolicy(input.orgId, input.agentType);
   const [run] = await db
     .insert(agentRuns)
     .values({
@@ -664,7 +783,8 @@ export async function startRun(input: {
       subjectType: input.subjectType ?? null,
       subjectId: input.subjectId ?? null,
       triggerEventId: input.triggerEventId ?? null,
-      maxSteps: input.maxSteps ?? def.maxSteps ?? 20,
+      maxSteps: input.maxSteps ?? startPolicy.maxStepsPerLeg ?? def.maxSteps ?? 20,
+      ...(startPolicy.maxTokensPerLeg ? { maxTokens: startPolicy.maxTokensPerLeg } : {}),
       conversationId,
       transcript: [{ role: "user", content: input.goal } satisfies AgentMessage],
     })
@@ -1122,6 +1242,15 @@ async function driveRun(run: AgentRun): Promise<"done" | "awaiting" | "yielded" 
       const message = await applyDecision(ctx, task, p.call, seq++);
       transcript.push(message);
     }
+    // A person decided: the next stretch of work gets a fresh allowance.
+    if ((run.pending as PendingCall[]).length) {
+      run.legStepStart = stepCount;
+      run.legTokenStart = tokensUsed;
+      await db
+        .update(agentRuns)
+        .set({ legStepStart: stepCount, legTokenStart: tokensUsed })
+        .where(eq(agentRuns.id, run.id));
+    }
   }
 
   const allowed = new Set(def.tools);
@@ -1172,16 +1301,30 @@ async function driveRun(run: AgentRun): Promise<"done" | "awaiting" | "yielded" 
       await pauseForBudget(run);
       return "yielded";
     }
-    if (stepCount >= run.maxSteps || tokensUsed >= run.maxTokens) {
+    const reached = limitReached({
+      stepCount,
+      tokensUsed,
+      legStepStart: run.legStepStart,
+      legTokenStart: run.legTokenStart,
+      // The organisation's raised limits apply to runs already under way.
+      maxSteps: policy.maxStepsPerLeg ?? run.maxSteps,
+      maxTokens: policy.maxTokensPerLeg ?? run.maxTokens,
+    });
+    if (reached) {
       await save(run, transcript, null, stepCount, tokensUsed);
-      await finish(run, "failed", null, "The run reached its step or token budget.");
+      await finish(
+        run,
+        "failed",
+        null,
+        reached === "ceiling" ? CEILING_MESSAGE : LEG_LIMIT_MESSAGE,
+      );
       return "failed";
     }
 
     const started = Date.now();
     const res = await aiAgentStep({
       system,
-      messages: transcript,
+      messages: compactForModel(transcript),
       tools: specs,
       orgId: run.orgId,
       feature: def.feature,
@@ -1286,14 +1429,15 @@ async function handleCall(
   call: AgentToolCall,
   seq: number,
 ): Promise<CallOutcome> {
-  const toolError = async (message: string): Promise<CallOutcome> => {
+  /** `refused`: a rule or guardrail said no (not a failure of the agent or the system). */
+  const toolError = async (message: string, refused = false): Promise<CallOutcome> => {
     await recordStep(run, seq, {
       kind: "tool",
       toolName: call.name,
       toolCallId: call.id,
       status: "error",
       input: redactArgs(call.args),
-      output: { error: message },
+      output: refused ? { error: message, refused: true } : { error: message },
     });
     return {
       kind: "message",
@@ -1347,7 +1491,7 @@ async function handleCall(
     let detail = "";
     if (call.name === "request_approval" && subject) {
       const gate = await gateFor(run.orgId, subject);
-      if ("error" in gate) return toolError(gate.error);
+      if ("error" in gate) return toolError(gate.error, true);
       if (run.mode === "replay") {
         return simulated(run, call, seq, "Approval simulated as granted; nothing was changed.", {
           gate: gate.role,
@@ -1387,7 +1531,7 @@ async function handleCall(
 
   if (tool.precheck && tool.risk !== "read") {
     const refusal = await tool.precheck(ctx, parsed.data);
-    if (refusal) return toolError(refusal);
+    if (refusal) return toolError(refusal, true);
   }
 
   const verdict = decideToolCall(tool.risk, policy, tool.templateOf?.(parsed.data) ?? null);
@@ -1540,7 +1684,9 @@ async function execute(
       toolCallId: call.id,
       status: "error",
       input: redactArgs(args),
-      output: { error: preview(message) },
+      output: isRuleRefusal(e)
+        ? { error: preview(message), refused: true }
+        : { error: preview(message) },
       durationMs: Date.now() - started,
     });
     return { role: "tool", toolCallId: call.id, name, content: message, isError: true };

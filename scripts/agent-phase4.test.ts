@@ -226,7 +226,11 @@ describe("offer agent", () => {
     script.push(
       call({ id: "a", name: "draft_offer", args: { applicationId: appId, offeredCtc: 4000000 } }),
       call({ id: "b", name: "draft_offer", args: { applicationId: appId, offeredCtc: 3000000 } }),
-      call({ id: "c", name: "draft_offer", args: { applicationId: appId, offeredCtc: 3100000 } }),
+      call({
+        id: "c",
+        name: "draft_offer",
+        args: { applicationId: appId, offeredCtc: 3100000, joiningDate: "2026-12-07" },
+      }),
       say("done"),
     );
     await runAgentTick({ orgId });
@@ -250,7 +254,7 @@ describe("offer agent", () => {
       call({
         id: "d",
         name: "draft_offer",
-        args: { applicationId: other.appId, offeredCtc: 3000000 },
+        args: { applicationId: other.appId, offeredCtc: 3000000, joiningDate: "2026-12-07" },
       }),
       say("x"),
     );
@@ -269,6 +273,7 @@ describe("offer agent", () => {
         orgId,
         applicationId: appId,
         offeredCtc: "3000000",
+        joiningDate: "2026-12-07",
         status: "pending_hr",
         letter: { subject: "x" } as never,
       })
@@ -344,6 +349,7 @@ describe("offer agent", () => {
         orgId,
         applicationId: appId,
         offeredCtc: "3000000",
+        joiningDate: "2026-12-07",
         status: "pending_hr",
         letter: { subject: "x" } as never,
       })
@@ -384,7 +390,13 @@ describe("pre-onboarding agent", () => {
     const f = await finalist("offer_pending");
     const [o] = await db
       .insert(offers)
-      .values({ orgId, applicationId: f.appId, offeredCtc: "3000000", status: "approved" })
+      .values({
+        orgId,
+        applicationId: f.appId,
+        offeredCtc: "3000000",
+        joiningDate: "2026-12-07",
+        status: "approved",
+      })
       .returning({ id: offers.id });
     return { ...f, offerId: o!.id };
   }

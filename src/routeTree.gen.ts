@@ -44,6 +44,7 @@ import { Route as CandidatesIndexRouteImport } from './routes/candidates.index'
 import { Route as CandidatesIdRouteImport } from './routes/candidates.$id'
 import { Route as InterviewsIndexRouteImport } from './routes/interviews.index'
 import { Route as InterviewsMineRouteImport } from './routes/interviews.mine'
+import { Route as NegotiateTokenRouteImport } from './routes/negotiate.$token'
 import { Route as OfferTokenRouteImport } from './routes/offer.$token'
 import { Route as PayTokenRouteImport } from './routes/pay.$token'
 import { Route as RequisitionsIndexRouteImport } from './routes/requisitions.index'
@@ -247,6 +248,11 @@ const InterviewsMineRoute = InterviewsMineRouteImport.update({
   path: '/interviews/mine',
   getParentRoute: () => rootRouteImport,
 } as any)
+const NegotiateTokenRoute = NegotiateTokenRouteImport.update({
+  id: '/negotiate/$token',
+  path: '/negotiate/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const OfferTokenRoute = OfferTokenRouteImport.update({
   id: '/offer/$token',
   path: '/offer/$token',
@@ -422,6 +428,7 @@ export interface FileRoutesByFullPath {
   '/auth/reset': typeof AuthResetRoute
   '/candidates/$id': typeof CandidatesIdRoute
   '/interviews/mine': typeof InterviewsMineRoute
+  '/negotiate/$token': typeof NegotiateTokenRoute
   '/offer/$token': typeof OfferTokenRoute
   '/pay/$token': typeof PayTokenRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
@@ -486,6 +493,7 @@ export interface FileRoutesByTo {
   '/auth/reset': typeof AuthResetRoute
   '/candidates/$id': typeof CandidatesIdRoute
   '/interviews/mine': typeof InterviewsMineRoute
+  '/negotiate/$token': typeof NegotiateTokenRoute
   '/offer/$token': typeof OfferTokenRoute
   '/pay/$token': typeof PayTokenRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
@@ -551,6 +559,7 @@ export interface FileRoutesById {
   '/auth/reset': typeof AuthResetRoute
   '/candidates/$id': typeof CandidatesIdRoute
   '/interviews/mine': typeof InterviewsMineRoute
+  '/negotiate/$token': typeof NegotiateTokenRoute
   '/offer/$token': typeof OfferTokenRoute
   '/pay/$token': typeof PayTokenRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
@@ -617,6 +626,7 @@ export interface FileRouteTypes {
     | '/auth/reset'
     | '/candidates/$id'
     | '/interviews/mine'
+    | '/negotiate/$token'
     | '/offer/$token'
     | '/pay/$token'
     | '/requisitions/$id'
@@ -681,6 +691,7 @@ export interface FileRouteTypes {
     | '/auth/reset'
     | '/candidates/$id'
     | '/interviews/mine'
+    | '/negotiate/$token'
     | '/offer/$token'
     | '/pay/$token'
     | '/requisitions/$id'
@@ -745,6 +756,7 @@ export interface FileRouteTypes {
     | '/auth/reset'
     | '/candidates/$id'
     | '/interviews/mine'
+    | '/negotiate/$token'
     | '/offer/$token'
     | '/pay/$token'
     | '/requisitions/$id'
@@ -810,6 +822,7 @@ export interface RootRouteChildren {
   AuthResetRoute: typeof AuthResetRoute
   CandidatesIdRoute: typeof CandidatesIdRoute
   InterviewsMineRoute: typeof InterviewsMineRoute
+  NegotiateTokenRoute: typeof NegotiateTokenRoute
   OfferTokenRoute: typeof OfferTokenRoute
   PayTokenRoute: typeof PayTokenRoute
   RequisitionsIdRoute: typeof RequisitionsIdRoute
@@ -1089,6 +1102,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InterviewsMineRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/negotiate/$token': {
+      id: '/negotiate/$token'
+      path: '/negotiate/$token'
+      fullPath: '/negotiate/$token'
+      preLoaderRoute: typeof NegotiateTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/offer/$token': {
       id: '/offer/$token'
       path: '/offer/$token'
@@ -1314,6 +1334,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthResetRoute: AuthResetRoute,
   CandidatesIdRoute: CandidatesIdRoute,
   InterviewsMineRoute: InterviewsMineRoute,
+  NegotiateTokenRoute: NegotiateTokenRoute,
   OfferTokenRoute: OfferTokenRoute,
   PayTokenRoute: PayTokenRoute,
   RequisitionsIdRoute: RequisitionsIdRoute,

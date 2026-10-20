@@ -313,6 +313,8 @@ export const requisitions = pgTable(
     reqType: reqTypeEnum("req_type").notNull().default("new"),
     status: reqStatusEnum("status").notNull().default("draft"),
     location: text("location"),
+    /** onsite | hybrid | remote (migration 0041); null for older roles. */
+    workMode: text("work_mode").$type<"onsite" | "hybrid" | "remote">(),
     openings: integer("openings").notNull().default(1),
     experienceMin: integer("experience_min").notNull().default(0),
     experienceMax: integer("experience_max").notNull().default(5),
@@ -991,7 +993,8 @@ export type EmailOutboxKind =
   | "role_invite"
   | "interviewer_brief"
   | "interview_slots"
-  | "compensation_form";
+  | "compensation_form"
+  | "offer_negotiation";
 export type EmailOutboxStatus = "queued" | "sent" | "failed" | "suppressed";
 export type EmailOutboxAttachment = {
   filename: string;
@@ -1868,6 +1871,9 @@ export const agentPolicies = pgTable(
       .notNull()
       .default(sql`'[]'::jsonb`),
     monthlyTokenBudget: integer("monthly_token_budget"),
+    /** Run limits per leg (AI turns / tokens between human decisions); null = the agent's default. */
+    maxStepsPerLeg: integer("max_steps_per_leg"),
+    maxTokensPerLeg: integer("max_tokens_per_leg"),
     updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1957,6 +1963,9 @@ export const agentRuns = pgTable(
     tokensUsed: integer("tokens_used").notNull().default(0),
     maxSteps: integer("max_steps").notNull().default(20),
     maxTokens: integer("max_tokens").notNull().default(200000),
+    /** Where the current leg began (a human decision starts a new one; migration 0042). */
+    legStepStart: integer("leg_step_start").notNull().default(0),
+    legTokenStart: integer("leg_token_start").notNull().default(0),
     traceId: uuid("trace_id").notNull().defaultRandom(),
     leaseUntil: timestamp("lease_until", { withTimezone: true }),
     attempts: integer("attempts").notNull().default(0),
@@ -2187,6 +2196,10 @@ export const hiringConversations = pgTable(
     }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Deleted (hidden) — restorable by an owner for 30 days, then purged (migration 0040). */
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    deletedBy: uuid("deleted_by").references(() => users.id, { onDelete: "set null" }),
+    deleteReason: text("delete_reason"),
   },
   (t) => [index("hiring_conversations_org_idx").on(t.orgId, t.updatedAt)],
 );
@@ -2499,4 +2512,72 @@ export const compensationDetails = pgTable(
       sql`${t.noticePeriodDays} between 0 and 365`,
     ),
   ],
+);
+
+export type NegotiationStatus =
+  | "open"
+  | "message_sent"
+  | "countered"
+  | "call_requested"
+  | "agreed"
+  | "no_agreement"
+  | "expired"
+  | "cancelled";
+
+/** What can make an offer work besides base pay. */
+export type NegotiationLevers = {
+  joiningBonus?: number | null;
+  /** A pay review after this many months, written into the letter. */
+  reviewMonths?: number | null;
+  /** Free text: fixed / variable split, ESOPs, title or scope. */
+  other?: string | null;
+};
+
+/** Agreeing the figure with a candidate before the offer (migration 0039). HR roles only. */
+export const offerNegotiations = pgTable(
+  "offer_negotiations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    candidateId: uuid("candidate_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "cascade" }),
+    status: text("status").$type<NegotiationStatus>().notNull().default("open"),
+    expectedCtc: numeric("expected_ctc", { precision: 14, scale: 2 }),
+    ceiling: numeric("ceiling", { precision: 14, scale: 2 }).notNull(),
+    ceilingApprovedBy: text("ceiling_approved_by").$type<"hr_head" | "president_cbo">().notNull(),
+    proposedCtc: numeric("proposed_ctc", { precision: 14, scale: 2 }).notNull(),
+    levers: jsonb("levers").$type<NegotiationLevers>().notNull().default({}),
+    talkTrack: text("talk_track").notNull().default(""),
+    message: text("message"),
+    token: text("token").unique(),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    closesAt: timestamp("closes_at", { withTimezone: true }),
+    /** The candidate's answer: { decision: accept | propose | call, amount?, note?, at }. */
+    answer: jsonb("answer").$type<{
+      decision: "accept" | "propose" | "call";
+      amount?: number | null;
+      note?: string | null;
+      at: string;
+    } | null>(),
+    /** What was agreed (or not): { agreedCtc?, joiningBonus?, joiningDate?, note?, source, by? }. */
+    outcome: jsonb("outcome").$type<{
+      agreedCtc?: number | null;
+      joiningBonus?: number | null;
+      joiningDate?: string | null;
+      note?: string | null;
+      source: "candidate_link" | "call";
+      by?: string | null;
+    } | null>(),
+    runId: uuid("run_id").references(() => agentRuns.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+  },
+  (t) => [index("offer_negotiations_app_idx").on(t.applicationId, t.createdAt)],
 );

@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-80 tables across 9 domains.
+81 tables across 9 domains.
 
 ## Identity & access
 
@@ -197,6 +197,7 @@ erDiagram
     reqTypeEnum req_type
     reqStatusEnum status
     text location "nullable"
+    text work_mode "nullable"
     integer openings
     integer experience_min
     integer experience_max
@@ -1052,6 +1053,7 @@ erDiagram
 | `evaluations` | `interview_id` | `interviews` | no action |
 | `evaluations` | `org_id` | `organizations` | cascade |
 | `hiring_conversations` | `created_by` | `users` | cascade |
+| `hiring_conversations` | `deleted_by` | `users` | no action |
 | `hiring_conversations` | `org_id` | `organizations` | cascade |
 | `hiring_conversations` | `requisition_id` | `requisitions` | no action |
 | `hiring_conversations` | `reuse_jd_from` | `requisitions` | no action |
@@ -1079,6 +1081,10 @@ erDiagram
 | `match_scores` | `org_id` | `organizations` | cascade |
 | `notification_states` | `org_id` | `organizations` | cascade |
 | `notification_states` | `user_id` | `users` | cascade |
+| `offer_negotiations` | `application_id` | `applications` | cascade |
+| `offer_negotiations` | `candidate_id` | `candidates` | cascade |
+| `offer_negotiations` | `org_id` | `organizations` | cascade |
+| `offer_negotiations` | `run_id` | `agent_runs` | no action |
 | `offers` | `application_id` | `applications` | cascade |
 | `offers` | `org_id` | `organizations` | cascade |
 | `onboarding_documents` | `application_id` | `applications` | cascade |
@@ -1154,8 +1160,8 @@ erDiagram
 | `agent_events` | — | 12 | — |
 | `agent_issues` | — | 16 | — |
 | `agent_metrics_daily` | — | 17 | — |
-| `agent_policies` | — | 10 | (orgId+agentType) |
-| `agent_runs` | — | 31 | — |
+| `agent_policies` | — | 12 | (orgId+agentType) |
+| `agent_runs` | — | 33 | — |
 | `agent_runtime_heartbeat` | — | 4 | — |
 | `agent_steps` | — | 17 | (runId+seq) |
 | `agent_tasks` | — | 16 | — |
@@ -1185,7 +1191,7 @@ erDiagram
 | `email_outbox` | Communications & AI settings | 16 | (idempotency_key) |
 | `email_settings` | Communications & AI settings | 11 | (org_id) |
 | `evaluations` | Candidates & pipeline | 15 | — |
-| `hiring_conversations` | — | 10 | — |
+| `hiring_conversations` | — | 13 | — |
 | `hiring_messages` | — | 8 | — |
 | `hr_incentive_schemes` | Offers & onboarding | 9 | — |
 | `hrms_employees` | — | 15 | (integrationId+externalId) |
@@ -1199,6 +1205,7 @@ erDiagram
 | `master_items` | Organisations & masters | 8 | — |
 | `match_scores` | Candidates & pipeline | 26 | — |
 | `notification_states` | — | 7 | — |
+| `offer_negotiations` | — | 21 | — |
 | `offers` | Offers & onboarding | 14 | — |
 | `onboarding_documents` | Offers & onboarding | 23 | — |
 | `ontology_snapshots` | Intelligence | 11 | — |
@@ -1209,7 +1216,7 @@ erDiagram
 | `platform_admins` | Identity & access | 6 | (email) |
 | `product_catalogue_commercials` | Organisations & masters | 8 | — |
 | `requisition_board_postings` | — | 16 | (requisitionId+provider) |
-| `requisitions` | Requisitions & job content | 40 | (orgId+code) |
+| `requisitions` | Requisitions & job content | 41 | (orgId+code) |
 | `salary_benchmarks` | Intelligence | 15 | — |
 | `screening_kits` | Screening & interviews | 11 | — |
 | `screening_prep_jobs` | Screening & interviews | 10 | (application_id) |

@@ -4,7 +4,7 @@
  * owner); every query is predicated on the organisation.
  */
 import { createServerFn } from "@tanstack/react-start";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../server/db";
@@ -35,6 +35,24 @@ async function accessible(ctx: { orgId: string; userId: string; isOwner: boolean
   if (conv.createdBy !== ctx.userId && !(await isLeadership(ctx.userId, ctx.orgId, ctx.isOwner)))
     throw new Error("Conversation not found.");
   return conv;
+}
+
+/**
+ * A button pressed in the thread, shown as the person's message — so the chat
+ * reads as what they asked for, not as the desk acting on its own.
+ */
+async function echoClick(conv: { id: string; orgId: string }, text: string) {
+  const { postMessage } = await import("../server/desk/desk.server");
+  await postMessage(conv, { role: "user", body: text });
+}
+
+async function codeOf(orgId: string, requisitionId: string): Promise<string> {
+  const [r] = await db
+    .select({ code: requisitions.code })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, requisitionId), eq(requisitions.orgId, orgId)))
+    .limit(1);
+  return r?.code ?? "that role";
 }
 
 async function needsAiKey(orgId: string) {
@@ -82,6 +100,7 @@ export const listDeskConversations = createServerFn({ method: "GET" })
       .where(
         and(
           eq(hiringConversations.orgId, context.orgId),
+          isNull(hiringConversations.deletedAt),
           all ? undefined : eq(hiringConversations.createdBy, context.userId),
         ),
       )
@@ -120,6 +139,8 @@ export type DeskConversationView = {
   tasks: Record<string, string>;
   /** Whether the viewer may decide each request, and who it waits for otherwise. */
   deciders: Record<string, { canDecide: boolean; waitingFor: string | null }>;
+  /** What each request is about (requisition, jd, offer …), for cards posted before it was recorded. */
+  taskSubjects: Record<string, string>;
   /** What each approval request would do, as label / value lines. */
   taskDetails: Record<string, { label: string; value: string }[]>;
   /** Why each ranked candidate scored as they did (live from their match score). */
@@ -134,6 +155,8 @@ export type DeskConversationView = {
   canStart: boolean;
   /** The viewer may change agent settings (budget, autonomy) — HR head / CBO / owner. */
   canEditAgents: boolean;
+  /** What the dustbin would delete for this viewer now ("chat" / "draft" + code), or null. */
+  canDelete: { kind: "chat" } | { kind: "draft"; code: string } | null;
 };
 
 export const getDeskConversation = createServerFn({ method: "GET" })
@@ -182,7 +205,10 @@ export const getDeskConversation = createServerFn({ method: "GET" })
       deskActivity,
       startStage,
       candidateReasoning,
+      tidyForPeople,
+      deskTimeZone,
     } = await import("../server/desk/desk.server");
+    const timeZone = await deskTimeZone(context.orgId);
     const rankedIds = msgs.flatMap((m) => {
       const c = m.card as { type?: string; items?: { applicationId?: string }[] } | null;
       return c?.type === "ranked_candidates"
@@ -201,11 +227,26 @@ export const getDeskConversation = createServerFn({ method: "GET" })
         id: m.id,
         role: m.role,
         agentType: m.agentType,
-        body: m.body,
+        body: m.role === "user" ? m.body : tidyForPeople(m.body, timeZone),
         card: (m.card as DeskMessageView["card"]) ?? null,
         at: m.createdAt.toISOString(),
       })),
       tasks: await taskStatuses(context.orgId, taskIds),
+      taskSubjects: await (async () => {
+        if (!taskIds.length) return {};
+        const { agentTasks } = await import("@db/schema");
+        const rows = await db
+          .select({ id: agentTasks.id, action: agentTasks.proposedAction })
+          .from(agentTasks)
+          .where(and(eq(agentTasks.orgId, context.orgId), inArray(agentTasks.id, taskIds)));
+        return Object.fromEntries(
+          rows.flatMap((t) => {
+            const type = (t.action as { args?: { subject?: { type?: string } } } | null)?.args
+              ?.subject?.type;
+            return type ? [[t.id, type]] : [];
+          }),
+        );
+      })(),
       taskDetails: await taskDetails(context.orgId, taskIds),
       deciders: await (
         await import("../server/desk/desk.server")
@@ -216,6 +257,15 @@ export const getDeskConversation = createServerFn({ method: "GET" })
       activity: await deskActivity(conv),
       canStart: Boolean(await startStage(conv, context.userId, { dryRun: true })),
       canEditAgents: await canEditAgents(context.userId, context.orgId),
+      canDelete: await (async () => {
+        const { deletionAllowed } = await import("../server/desk/desk.server");
+        const d = await deletionAllowed(conv, context.userId);
+        return d
+          ? d.kind === "chat"
+            ? { kind: "chat" as const }
+            : { kind: "draft" as const, code: d.code }
+          : null;
+      })(),
     };
   });
 
@@ -264,10 +314,20 @@ export const chooseDeskRole = createServerFn({ method: "POST" })
     const { assertRequisitionInOrg } = await import("../server/guards");
     if (data.choice.kind === "existing") {
       await assertRequisitionInOrg(data.choice.requisitionId, context.orgId);
+      await echoClick(
+        conv,
+        `Continue with ${await codeOf(context.orgId, data.choice.requisitionId)}`,
+      );
       await desk.continueWithRole(conv, context.userId, data.choice.requisitionId);
     } else {
       if (data.choice.reuseJdFrom)
         await assertRequisitionInOrg(data.choice.reuseJdFrom, context.orgId);
+      await echoClick(
+        conv,
+        data.choice.reuseJdFrom
+          ? `Create a new role, reusing ${await codeOf(context.orgId, data.choice.reuseJdFrom)}'s approved job description`
+          : "Create a new role",
+      );
       await desk.createNewRole(conv, context.userId, {
         reuseJdFrom: data.choice.reuseJdFrom ?? null,
       });
@@ -374,6 +434,7 @@ export const acceptDeskProposal = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const conv = await accessible(context, data.id);
     await needsAiKey(context.orgId);
+    await echoClick(conv, "Use these");
     const { applyProposal } = await import("../server/desk/desk.server");
     await applyProposal(conv);
     return { ok: true as const };
@@ -396,6 +457,12 @@ export const researchDeskRole = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const conv = await accessible(context, data.id);
     await needsAiKey(context.orgId);
+    const words = { skills: "the skills", experience: "the experience", budget: "the budget" };
+    const asked = data.fields.map((f) => words[f]);
+    await echoClick(
+      conv,
+      `Research ${asked.length > 1 ? `${asked.slice(0, -1).join(", ")} and ${asked.at(-1)}` : asked[0]} from the market`,
+    );
     const { researchRole } = await import("../server/desk/desk.server");
     await researchRole(conv, data.fields);
     return { ok: true as const };
@@ -520,3 +587,41 @@ async function liveStages(orgId: string, ids: string[]): Promise<Record<string, 
     .where(and(eq(applications.orgId, orgId), inArray(applications.id, ids)));
   return Object.fromEntries(rows.map((r) => [r.id, r.stage]));
 }
+
+/** Delete a chat still gathering details (or with its unused draft) — restorable for 30 days. */
+export const deleteDeskConversation = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) =>
+    z.object({ id: z.string().uuid(), reason: z.string().max(500).default("") }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    const { deleteThread } = await import("../server/desk/desk.server");
+    return deleteThread(conv, context.userId, data.reason);
+  });
+
+/** Chats deleted in the last 30 days — owners only (they restore them). */
+export const listDeletedDeskConversations = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .handler(async ({ context }) => {
+    if (!context.isOwner) return [];
+    const { deletedThreads, RESTORE_DAYS } = await import("../server/desk/desk.server");
+    const now = Date.now();
+    return (await deletedThreads(context.orgId)).map((t) => ({
+      id: t.id,
+      title: t.title,
+      reason: t.reason,
+      daysLeft: Math.max(
+        0,
+        Math.ceil((t.deletedAt!.getTime() + RESTORE_DAYS * 864e5 - now) / 864e5),
+      ),
+    }));
+  });
+
+export const restoreDeskConversation = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { restoreThread } = await import("../server/desk/desk.server");
+    return restoreThread(context.orgId, context.userId, data.id);
+  });

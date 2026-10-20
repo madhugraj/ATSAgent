@@ -135,6 +135,8 @@ function AgentRow({
   onSave: (input: AgentPolicyInput) => Promise<void>;
 }) {
   const [budget, setBudget] = useState(row.monthlyTokenBudget?.toString() ?? "");
+  const [legSteps, setLegSteps] = useState(row.maxStepsPerLeg?.toString() ?? "");
+  const [legTokens, setLegTokens] = useState(row.maxTokensPerLeg?.toString() ?? "");
   const hint = AUTONOMY_OPTIONS.find((o) => o.value === row.autonomy)?.hint;
   const base = {
     agentType: row.type,
@@ -256,6 +258,51 @@ function AgentRow({
             </Button>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">Leave empty for no limit.</p>
+        </div>
+
+        <div>
+          <Label className="text-xs" htmlFor={`legsteps-${row.type}`}>
+            Run limits (per stretch of work)
+          </Label>
+          <div className="mt-1 grid grid-cols-[1fr_1fr_auto] gap-2">
+            <Input
+              id={`legsteps-${row.type}`}
+              inputMode="numeric"
+              aria-label="AI turns per stretch"
+              placeholder={`${row.defaultStepsPerLeg} AI turns`}
+              value={legSteps}
+              disabled={!canEdit}
+              onChange={(e) => setLegSteps(e.target.value.replace(/[^0-9]/g, ""))}
+            />
+            <Input
+              inputMode="numeric"
+              aria-label="Tokens per stretch"
+              placeholder="200000 tokens"
+              value={legTokens}
+              disabled={!canEdit}
+              onChange={(e) => setLegTokens(e.target.value.replace(/[^0-9]/g, ""))}
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!canEdit}
+              onClick={() =>
+                onSave({
+                  ...base,
+                  maxStepsPerLeg: legSteps ? Number(legSteps) : null,
+                  maxTokensPerLeg: legTokens ? Number(legTokens) : null,
+                })
+              }
+            >
+              Save
+            </Button>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            A stretch is the work between two decisions by a person; each decision gives a fresh
+            allowance, and a run stops for good at four stretches&apos; worth (a loop guard). Turns
+            4–60, tokens 20,000–1,000,000; leave empty for the agent&apos;s default. The monthly
+            token budget is still the cost limit.
+          </p>
         </div>
       </div>
     </section>
@@ -415,7 +462,7 @@ function TelemetryForm({ t, onSaved }: { t: AgentTelemetryView; onSaved: () => v
     }
   }
 
-  async function test(target: "otlp" | "webhook") {
+  async function test(target: "otlp" | "webhook" | "email") {
     setBusy(true);
     try {
       const r = await testAgentTelemetry({ data: { target } });
@@ -509,6 +556,15 @@ function TelemetryForm({ t, onSaved }: { t: AgentTelemetryView; onSaved: () => v
             />
             <Label htmlFor="alert-email">E-mail the owner, HR heads and CBOs</Label>
           </div>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={disabled || !t.alertEmailEnabled}
+            title={t.alertEmailEnabled ? undefined : "Switch on alert e-mail and save first"}
+            onClick={() => test("email")}
+          >
+            Send a test alert e-mail
+          </Button>
           <div>
             <Label className="text-xs" htmlFor="alert-webhook">
               Alert webhook (optional — e.g. your paging or chat tool)

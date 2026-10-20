@@ -200,7 +200,13 @@ export async function advanceOfferCore(
   },
 ) {
   const [current] = await db
-    .select({ status: offers.status, letter: offers.letter, approvalTrail: offers.approvalTrail })
+    .select({
+      status: offers.status,
+      letter: offers.letter,
+      approvalTrail: offers.approvalTrail,
+      applicationId: offers.applicationId,
+      joiningDate: offers.joiningDate,
+    })
     .from(offers)
     .where(and(eq(offers.id, data.id), eq(offers.orgId, actor.orgId)))
     .limit(1);
@@ -215,6 +221,22 @@ export async function advanceOfferCore(
   }
   if (data.status === "pending_hr" && !current.letter) {
     throw new Error("Generate and review the offer letter before sending this offer for approval.");
+  }
+  // No offer goes to approvers, is approved or is released on terms the
+  // candidate never stated: expected CTC, notice period and a joining date.
+  if (TERMS_GATED.has(data.status)) {
+    const { offerTermsMissing, listWords } = await import("./compensation.server");
+    const missing = await offerTermsMissing(
+      actor.orgId,
+      current.applicationId,
+      current.joiningDate ? String(current.joiningDate) : null,
+    );
+    if (missing.length)
+      throw new Error(
+        data.status === "pending_hr"
+          ? `This offer cannot go for approval yet: ${listWords(missing)} ${missing.length > 1 ? "are" : "is"} missing. Send the candidate the pay & availability form (or enter it from a call) and set the joining date.`
+          : `This offer cannot be ${data.status === "released" ? "released" : "approved"} yet: ${listWords(missing)} ${missing.length > 1 ? "are" : "is"} missing. Send it back with that reason — the Offer agent collects them and redrafts.`,
+      );
   }
   // Release gate: pre-onboarding documents must be collected and validated
   // before the letter goes out. The checklist is evaluated server-side.
@@ -340,10 +362,18 @@ export const advanceOffer = createServerFn({ method: "POST" })
     ),
   );
 
-/** Who may send an offer back from each approval step. */
+/** Offer moves that need settled terms (expected CTC, notice, joining date). */
+const TERMS_GATED = new Set(["pending_hr", "pending_cbo", "approved", "released"]);
+
+/**
+ * Who may send an offer back from each step. An approved offer not yet
+ * released can still go back (HR head), e.g. when its terms were never
+ * agreed with the candidate; once released, only revoking applies.
+ */
 const SEND_BACK_ROLE: Record<string, AppRole> = {
   pending_hr: "hr_head",
   pending_cbo: "president_cbo",
+  approved: "hr_head",
 };
 
 /**
@@ -453,9 +483,11 @@ export async function sendBackOfferCore(
     if (conv)
       await desk.postMessage(conv, {
         role: "desk",
-        body: `${actor.memberEmail} sent ${a!.name}'s offer back to draft at the ${
-          o.status === "pending_hr" ? "HR head" : "CBO"
-        } step: "${reason}". The Offer agent revises it inside the band or asks a person.`,
+        body: `${actor.memberEmail} sent ${a!.name}'s offer back to draft ${
+          o.status === "approved"
+            ? "after its approval (it was not released)"
+            : `at the ${o.status === "pending_hr" ? "HR head" : "CBO"} step`
+        }: "${reason}". The Offer agent revises it inside the band or asks a person.`,
       });
   } catch {
     /* the trail and audit are the record */

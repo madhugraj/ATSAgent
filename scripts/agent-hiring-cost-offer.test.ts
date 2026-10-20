@@ -98,7 +98,13 @@ beforeAll(async () => {
     (
       await db
         .insert(candidates)
-        .values({ orgId, fullName: name, email: `${name.toLowerCase()}-${stamp}@cand.local` })
+        .values({
+          orgId,
+          fullName: name,
+          email: `${name.toLowerCase()}-${stamp}@cand.local`,
+          expectedCtc: "10000000",
+          noticePeriodDays: 60,
+        })
         .returning({ id: candidates.id })
     )[0]!.id;
   candA = await cand("Asha");
@@ -226,6 +232,7 @@ async function releasedOffer(ctc = 10_000_000) {
       orgId,
       applicationId: appA,
       offeredCtc: String(ctc),
+      joiningDate: "2026-12-07",
       status: "released",
       responseToken: token,
       letter: { subject: "Offer", opening: "Dear Asha", sections: [{ heading: "Pay", body: "x" }] },
@@ -242,6 +249,7 @@ describe("the candidate answers the offer", () => {
         orgId,
         applicationId: appA,
         offeredCtc: "10000000",
+        joiningDate: "2026-12-07",
         status: "approved",
         letter: {
           subject: "Offer",
@@ -397,6 +405,14 @@ describe("the candidate answers the offer", () => {
 describe("pre-onboarding document requests", () => {
   test("never asks again for documents received or requested and not yet due", async () => {
     await db.delete(onboardingDocuments).where(eq(onboardingDocuments.orgId, orgId));
+    // Documents follow an offer with settled terms (expected CTC, notice, joining date).
+    const tool0 = getTool("request_documents")!;
+    const noOffer = await tool0.precheck!(
+      { orgId, principalUserId: userId, runId: "x", agentType: "onboarding", actor: "t" } as never,
+      { applicationId: appA, documentTypes: ["id_proof"], dueInDays: 5 } as never,
+    );
+    expect(noOffer).toMatch(/an offer for this candidate is missing/);
+    await releasedOffer();
     const tool = getTool("request_documents")!;
     const [run] = await db
       .insert(agentRuns)

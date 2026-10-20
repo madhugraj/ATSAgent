@@ -260,13 +260,18 @@ describe("slot filling", () => {
     );
     expect(s.mustHaveSkills).toEqual(["React"]);
     expect([s.experienceMin, s.experienceMax]).toEqual([4, 8]);
-    expect(desk.missingSlots(s)).toEqual(["location", "openings"]);
+    expect(desk.missingSlots(s)).toEqual(["location", "workMode", "openings"]);
   });
 
   test("asks one question at a time, then shows similar roles", async () => {
     const conv = await newConversation();
     deskScript.push({
-      slots: { roleTitle: "Full Stack Developer", location: "Chennai", openings: 1 },
+      slots: {
+        roleTitle: "Full Stack Developer",
+        location: "Chennai",
+        workMode: "onsite",
+        openings: 1,
+      },
       reply: "How many years of experience should candidates have?",
     });
     await desk.handleUserMessage(
@@ -311,6 +316,7 @@ describe("slot filling", () => {
 const complete = {
   roleTitle: "Full Stack Developer",
   location: "Chennai",
+  workMode: "onsite" as const,
   experienceMin: 3,
   experienceMax: 6,
   openings: 1,
@@ -536,7 +542,7 @@ describe("what happens next", () => {
     const p = await desk.deskProgress(await reload(conv.id));
     expect(p.next?.stage).toBe("screening");
     expect(p.next?.text).toMatch(
-      /Waiting for 1 candidate\(s\) to complete the written assessment: Asha \(sent .+, link open until .+\)\. Nothing is stuck/,
+      /Waiting for 1 candidate to complete the written assessment: Asha \(sent .+, link open until .+\)\. Nothing is stuck/,
     );
     expect(p.next?.text).toMatch(/Completed: Bala \(82\/100\)/);
     expect(p.next?.text).toMatch(/Link closed without an answer: Chitra/);
@@ -889,7 +895,7 @@ describe("the thread follows the requisition", () => {
     const ended = (await messages(conv.id)).filter((m) => /was closed/.test(m.body));
     expect(ended).toHaveLength(1);
     expect(ended[0]!.body).toMatch(/Budget cut/);
-    expect(ended[0]!.body).toMatch(/1 agent run\(s\) working on it were stopped/);
+    expect(ended[0]!.body).toMatch(/1 agent run working on it was stopped/);
     const p = await desk.deskProgress(c);
     expect(p.next).toBeNull();
     expect(p.ended).toMatchObject({ status: "closed", reason: "Budget cut", by: "hr@x" });
@@ -948,6 +954,7 @@ describe("delegating to the market, and showing the desk's thinking", () => {
   const uiux = {
     roleTitle: "UI/UX Engineer",
     location: "Remote",
+    workMode: "remote" as const,
     experienceMin: 3,
     experienceMax: 6,
     openings: 1,
@@ -955,7 +962,10 @@ describe("delegating to the market, and showing the desk's thinking", () => {
 
   test("each question carries what was understood, what is missing and what is next", async () => {
     const conv = await newConversation();
-    deskScript.push({ slots: { roleTitle: "UI/UX Engineer", location: "Remote" }, reply: "" });
+    deskScript.push({
+      slots: { roleTitle: "UI/UX Engineer", location: "Remote", workMode: "remote" },
+      reply: "",
+    });
     await desk.handleUserMessage(conv, recruiter, "UI/UX engineer, remote");
     const card = (await messages(conv.id)).at(-1)!.card as {
       type: string;
@@ -1408,6 +1418,7 @@ describe("JD changes, templates, budget pauses and readable agent text", () => {
     const out = desk.readableAgentText(text);
     expect(out).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}/);
     expect(out).toContain("REQ-2026-106");
-    expect(out).toContain("- Status: approved (run)");
+    // "run <id>" goes whole — no "(run)" left behind.
+    expect(out.split("\n").at(-1)).toBe("- Status: approved");
   });
 });

@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { placeLabel } from "@/lib/work-mode";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
@@ -481,14 +482,20 @@ function RequisitionDetail() {
     qc.invalidateQueries({ queryKey: ["jd_statuses"] });
   }
 
-  async function saveWeights(next: typeof weights) {
+  async function saveWeights(next: typeof weights): Promise<boolean> {
     try {
-      await saveRequisitionWeights({ data: { id: r!.id, weights: next } });
+      const out = await saveRequisitionWeights({ data: { id: r!.id, weights: next } });
+      toast.success(
+        out.status === "approved" && out.changed
+          ? "Weights saved. Re-score this role's candidates so the ranking uses them."
+          : "Weights saved",
+      );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not save the weights");
-      return;
+      return false;
     }
     qc.invalidateQueries({ queryKey: ["requisition", id] });
+    return true;
   }
 
   /* ------------------------------------------------ JD-aware weight advice */
@@ -766,7 +773,7 @@ function RequisitionDetail() {
       <PageHeader
         eyebrow={r.code}
         title={r.title}
-        description={`${dept?.name ?? "Unassigned"} · ${r.location} · ${r.openings} opening(s) · ${r.experience_min}–${r.experience_max} yrs · ${inr(Number(r.budget_ctc))}`}
+        description={`${dept?.name ?? "Unassigned"} · ${placeLabel(r.location, (r as { work_mode?: string | null }).work_mode)} · ${r.openings} opening(s) · ${r.experience_min}–${r.experience_max} yrs · ${inr(Number(r.budget_ctc))}`}
         actions={
           <div className="flex items-center gap-2">
             <StatusBadge status={r.status} />
@@ -1604,101 +1611,16 @@ function RequisitionDetail() {
             <InterviewPlanCard requisitionId={r.id} />
           </section>
           <section className="panel p-5">
-            <h2 className="font-semibold">Match weight configuration</h2>
-            <p className="text-xs text-muted-foreground">
-              Applied to every JD↔CV score for this requisition. Total must be 100.
-            </p>
-            <div className="mt-4 space-y-4">
-              {(
-                [
-                  ["skills", "Skills fit"],
-                  ["experience", "Experience"],
-                  ["career", "Career history"],
-                  ["impact", "Impact & innovation"],
-                  ["education", "Education"],
-                  ["social", "Social profiling"],
-                ] as const
-              ).map(([key, label]) => (
-                <div key={key}>
-                  <div className="mb-1.5 flex items-center justify-between text-sm">
-                    <span>{label}</span>
-                    <span className="num font-semibold">{weights[key]}</span>
-                  </div>
-                  <Slider
-                    value={[weights[key]]}
-                    min={0}
-                    max={70}
-                    step={5}
-                    onValueChange={([v]) => saveWeights({ ...weights, [key]: v })}
-                  />
-                </div>
-              ))}
-              <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
-                <p
-                  className={
-                    weightTotal === 100
-                      ? "num text-xs text-muted-foreground"
-                      : "num text-xs text-destructive"
-                  }
-                >
-                  Total {weightTotal} / 100
-                  {weightTotal !== 100 ? " — rebalance before scoring" : ""}
-                </p>
-                {weightTotal !== 100 && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => saveWeights(balanceWeights(weights))}
-                  >
-                    Balance to 100
-                  </Button>
-                )}
-              </div>
-
-              <div className="border-t border-border pt-3">
-                <Button size="sm" variant="outline" onClick={adviseWeights} disabled={advising}>
-                  <Sparkles className="size-4" />{" "}
-                  {advising ? "Reading the JD…" : "Suggest weights from this JD"}
-                </Button>
-                {advice && (
-                  <div className="mt-3 space-y-2 rounded-lg border border-dashed border-border p-3 text-xs">
-                    <p className="num font-semibold">
-                      Skills {advice.skills} · Experience {advice.experience} · Career{" "}
-                      {advice.career} · Impact {advice.impact} · Education {advice.education} ·
-                      Social {advice.social}
-                    </p>
-                    <p className="text-muted-foreground">{advice.rationale}</p>
-                    {advice.notes.length > 0 && (
-                      <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground">
-                        {advice.notes.map((n, i) => (
-                          <li key={i}>{n}</li>
-                        ))}
-                      </ul>
-                    )}
-                    <div className="flex gap-2 pt-1">
-                      <Button
-                        size="sm"
-                        onClick={() =>
-                          saveWeights({
-                            skills: advice.skills,
-                            experience: advice.experience,
-                            career: advice.career,
-                            impact: advice.impact,
-                            education: advice.education,
-                            social: advice.social,
-                          })
-                        }
-                      >
-                        Apply these weights
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => setAdvice(null)}>
-                        Dismiss
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
+            <WeightsPanel
+              requisitionId={r.id}
+              status={r.status}
+              saved={weights}
+              save={saveWeights}
+              advising={advising}
+              onAdvise={adviseWeights}
+              advice={advice}
+              onDismissAdvice={() => setAdvice(null)}
+            />
           </section>
 
           <MarketBenchmark
@@ -1812,6 +1734,183 @@ function RequisitionDetail() {
             </div>
           </section>
         </div>
+      </div>
+    </>
+  );
+}
+
+type Weights = {
+  skills: number;
+  experience: number;
+  career: number;
+  impact: number;
+  education: number;
+  social: number;
+};
+
+const WEIGHT_LABELS = [
+  ["skills", "Skills fit"],
+  ["experience", "Experience"],
+  ["career", "Career history"],
+  ["impact", "Impact & innovation"],
+  ["education", "Education"],
+  ["social", "Social profiling"],
+] as const;
+
+/**
+ * The six scoring weights: edited as a whole and saved once they total 100.
+ * In approval they are what the approvers review (send the requisition back
+ * to change them); closed roles are fixed. The server enforces the same rules.
+ */
+function WeightsPanel({
+  requisitionId,
+  status,
+  saved,
+  save,
+  advising,
+  onAdvise,
+  advice,
+  onDismissAdvice,
+}: {
+  requisitionId: string;
+  status: string;
+  saved: Weights;
+  save: (w: Weights) => Promise<boolean>;
+  advising: boolean;
+  onAdvise: () => void;
+  advice: (Weights & { rationale: string; notes: string[] }) | null;
+  onDismissAdvice: () => void;
+}) {
+  const [draft, setDraft] = useState<Weights>(saved);
+  const [busy, setBusy] = useState(false);
+  const key = JSON.stringify(saved);
+  const [lastKey, setLastKey] = useState(key);
+  if (key !== lastKey) {
+    // The saved weights changed (saved here or elsewhere): start from them.
+    setLastKey(key);
+    setDraft(saved);
+  }
+  const locked = ["pending_dh", "pending_hr", "pending_cbo", "closed"].includes(status);
+  const total = Object.values(draft).reduce((a, b) => a + b, 0);
+  const dirty = JSON.stringify(draft) !== key;
+  async function commit(w: Weights) {
+    setBusy(true);
+    try {
+      await save(w);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <>
+      <h2 className="font-semibold">Match weight configuration</h2>
+      <p className="text-xs text-muted-foreground">
+        Applied to every JD↔CV score for this requisition. Total must be 100.
+      </p>
+      {locked ? (
+        <p className="mt-2 rounded-md border border-border bg-muted/40 p-2 text-xs text-muted-foreground">
+          {status === "closed"
+            ? "This role is closed; its weights are fixed."
+            : "In approval: these weights are part of what the approvers are reviewing. To change them, send the requisition back for changes from its approval card or the hiring desk."}
+        </p>
+      ) : status === "approved" ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Approved role: only the HR head or the CBO can change the weights; re-score its candidates
+          afterwards.
+        </p>
+      ) : null}
+      <div className="mt-4 space-y-4" data-requisition={requisitionId}>
+        {WEIGHT_LABELS.map(([k, label]) => (
+          <div key={k}>
+            <div className="mb-1.5 flex items-center justify-between text-sm">
+              <span>{label}</span>
+              <span className="num font-semibold">{draft[k]}</span>
+            </div>
+            <Slider
+              value={[draft[k]]}
+              min={0}
+              max={70}
+              step={5}
+              disabled={locked || busy}
+              onValueChange={([v]) => setDraft((d) => ({ ...d, [k]: v ?? d[k] }))}
+            />
+          </div>
+        ))}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
+          <p
+            className={
+              total === 100 ? "num text-xs text-muted-foreground" : "num text-xs text-destructive"
+            }
+          >
+            Total {total} / 100{total !== 100 ? " — rebalance to save" : ""}
+          </p>
+          <div className="flex gap-2">
+            {total !== 100 && !locked ? (
+              <Button size="sm" variant="outline" onClick={() => setDraft(balanceWeights(draft))}>
+                Balance to 100
+              </Button>
+            ) : null}
+            {dirty && !locked ? (
+              <>
+                <Button size="sm" variant="ghost" disabled={busy} onClick={() => setDraft(saved)}>
+                  Undo
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={busy || total !== 100}
+                  onClick={() => void commit(draft)}
+                >
+                  Save weights
+                </Button>
+              </>
+            ) : null}
+          </div>
+        </div>
+
+        {!locked ? (
+          <div className="border-t border-border pt-3">
+            <Button size="sm" variant="outline" onClick={onAdvise} disabled={advising}>
+              <Sparkles className="size-4" />{" "}
+              {advising ? "Reading the JD…" : "Suggest weights from this JD"}
+            </Button>
+            {advice && (
+              <div className="mt-3 space-y-2 rounded-lg border border-dashed border-border p-3 text-xs">
+                <p className="num font-semibold">
+                  Skills {advice.skills} · Experience {advice.experience} · Career {advice.career} ·
+                  Impact {advice.impact} · Education {advice.education} · Social {advice.social}
+                </p>
+                <p className="text-muted-foreground">{advice.rationale}</p>
+                {advice.notes.length > 0 && (
+                  <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground">
+                    {advice.notes.map((n, i) => (
+                      <li key={i}>{n}</li>
+                    ))}
+                  </ul>
+                )}
+                <div className="flex gap-2 pt-1">
+                  <Button
+                    size="sm"
+                    onClick={() =>
+                      setDraft({
+                        skills: advice.skills,
+                        experience: advice.experience,
+                        career: advice.career,
+                        impact: advice.impact,
+                        education: advice.education,
+                        social: advice.social,
+                      })
+                    }
+                  >
+                    Use these weights
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={onDismissAdvice}>
+                    Dismiss
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : null}
       </div>
     </>
   );

@@ -71,6 +71,17 @@ async function loadRole(orgId: string, requisitionId: string) {
   return r;
 }
 
+/** A board is connected when it has credentials, not merely a row (pure; unit-tested). */
+export function isBoardConnected(conn: {
+  integrationId: string;
+  secrets?: Record<string, unknown> | null;
+  accessToken?: string | null;
+}): boolean {
+  if (!conn.integrationId) return false;
+  if (conn.accessToken) return true;
+  return Object.values(conn.secrets ?? {}).some((v) => typeof v === "string" && v.trim() !== "");
+}
+
 export type BoardChannel = {
   provider: (typeof BOARDS)[number];
   connected: boolean;
@@ -128,7 +139,9 @@ export async function publishChannels(
     let detail: string | null = null;
     try {
       const conn = await loadBoardConnection(orgId, provider);
-      connected = Boolean(conn.integrationId);
+      // Every organisation has a placeholder row per board from its set-up;
+      // only saved credentials (or a LinkedIn sign-in) make it connected.
+      connected = isBoardConnected(conn);
       enabled = Boolean(conn.enabled);
       if (!connected) detail = "Not connected on the Integrations page.";
       else if (!enabled) detail = "Connected but switched off on the Integrations page.";

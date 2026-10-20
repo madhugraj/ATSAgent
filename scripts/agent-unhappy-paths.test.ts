@@ -86,7 +86,13 @@ beforeAll(async () => {
   role = r!.id;
   const [c] = await db
     .insert(candidates)
-    .values({ orgId, fullName: "Asha Rao", email: `asha-${stamp}@cand.local` })
+    .values({
+      orgId,
+      fullName: "Asha Rao",
+      email: `asha-${stamp}@cand.local`,
+      expectedCtc: "11000000",
+      noticePeriodDays: 60,
+    })
     .returning({ id: candidates.id });
   candId = c!.id;
   const [a] = await db
@@ -145,6 +151,7 @@ async function offerAt(status: string) {
       orgId,
       applicationId: appId,
       offeredCtc: "11000000",
+      joiningDate: "2026-12-07",
       status,
       letter: { subject: "Offer", opening: "Dear Asha", sections: [{ heading: "Pay", body: "x" }] },
     } as never)
@@ -271,13 +278,19 @@ describe("an offer declined at an approval step", () => {
     expect(t2!.status).toBe("rejected");
   });
 
-  test("the CBO step is sent back by the CBO; a decided offer cannot be sent back", async () => {
+  test("the CBO step is sent back by the CBO; a released offer cannot be sent back", async () => {
     const id = await offerAt("pending_cbo");
     await offersLib.sendBackOfferCore(actor(), { id, reason: "Above our parity for this level" });
     expect((await db.select().from(offers).where(eq(offers.id, id)))[0]!.status).toBe("draft");
-    const done = await offerAt("approved");
+    // Approved but not released: the HR head may still send it back.
+    const approved = await offerAt("approved");
+    await offersLib.sendBackOfferCore(actor(), { id: approved, reason: "Terms never agreed" });
+    expect((await db.select().from(offers).where(eq(offers.id, approved)))[0]!.status).toBe(
+      "draft",
+    );
+    const released = await offerAt("released");
     await expect(
-      offersLib.sendBackOfferCore(actor(), { id: done, reason: "Changed my mind" }),
+      offersLib.sendBackOfferCore(actor(), { id: released, reason: "Changed my mind" }),
     ).rejects.toThrow(/not waiting for an approval/);
     await expect(
       offersLib.sendBackOfferCore(actor(), { id: await offerAt("pending_hr"), reason: "" }),
@@ -373,8 +386,8 @@ describe("a role closed or put on hold", () => {
     expect(s!.status).toBe("cancelled");
     const last = (await messages(conv.id)).at(-1)!;
     expect(last).toMatch(/was closed .*Budget cut/);
-    expect(last).toMatch(/1 open interview-time link\(s\) were withdrawn/);
-    expect(last).toMatch(/1 offer\(s\) still open, 1 candidate\(s\) still in the pipeline/);
+    expect(last).toMatch(/1 open interview-time link was withdrawn/);
+    expect(last).toMatch(/1 offer still open, 1 candidate still in the pipeline/);
     const [c] = await db
       .select()
       .from(hiringConversations)

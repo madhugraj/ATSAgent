@@ -4,6 +4,7 @@
  * provider: the requisition's approval state, the board's capability verdict
  * and the posting row are all resolved and written here.
  */
+import { placeLabel } from "@/lib/work-mode";
 import { and, eq } from "drizzle-orm";
 
 import { db } from "../db";
@@ -36,6 +37,7 @@ export async function publishToBoardImpl(input: {
       status: requisitions.status,
       title: requisitions.title,
       location: requisitions.location,
+      workMode: requisitions.workMode,
       openings: requisitions.openings,
       experienceMin: requisitions.experienceMin,
       experienceMax: requisitions.experienceMax,
@@ -73,7 +75,7 @@ export async function publishToBoardImpl(input: {
   const snapshot: RequisitionSnapshot = {
     id: requisition.id,
     title: requisition.title,
-    location: requisition.location,
+    location: placeLabel(requisition.location, requisition.workMode),
     openings: requisition.openings,
     experienceMin: requisition.experienceMin,
     experienceMax: requisition.experienceMax,

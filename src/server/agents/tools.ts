@@ -13,6 +13,7 @@ import { z } from "zod/v4";
 
 import { db } from "../db";
 import { departments, jobDescriptions, requisitions } from "@db/schema";
+import { placeLabel } from "@/lib/work-mode";
 import { registerTool, type ToolContext } from "./registry";
 
 const actor = async (ctx: ToolContext) => {
@@ -40,6 +41,7 @@ function requisitionView(r: typeof requisitions.$inferSelect) {
     status: r.status,
     departmentId: r.departmentId,
     location: r.location,
+    workMode: r.workMode,
     openings: r.openings,
     experienceMin: r.experienceMin,
     experienceMax: r.experienceMax,
@@ -69,6 +71,8 @@ const DraftFields = z.object({
   title: z.string().min(2).max(200),
   departmentId: z.string().uuid().nullable().optional(),
   location: z.string().max(200).default(""),
+  /** Where the work happens. */
+  workMode: z.enum(["onsite", "hybrid", "remote"]).nullable().optional(),
   openings: z.number().int().min(1).max(500).default(1),
   experienceMin: z.number().int().min(0).max(50).default(0),
   experienceMax: z.number().int().min(0).max(60).default(0),
@@ -274,6 +278,7 @@ export function registerPhase1Tools(): void {
           title: i.title,
           departmentId: i.departmentId ?? null,
           location: i.location,
+          workMode: i.workMode ?? null,
           openings: i.openings,
           experienceMin: i.experienceMin,
           experienceMax: i.experienceMax,
@@ -310,6 +315,7 @@ export function registerPhase1Tools(): void {
       await updateRequisitionDraftCore(await actor(ctx), i.requisitionId, {
         ...c,
         departmentId: c.departmentId ?? undefined,
+        workMode: c.workMode ?? undefined,
         responsibilities: c.responsibilities ?? undefined,
         educationRequirement: c.educationRequirement ?? undefined,
         hiringManager: c.hiringManager ?? undefined,
@@ -344,7 +350,8 @@ export function registerPhase1Tools(): void {
 
   registerTool({
     name: "save_weights",
-    description: "Save the six candidate-scoring weights (integers that sum to 100).",
+    description:
+      "Save the six candidate-scoring weights (integers that sum to 100) on a draft requisition — one in approval must be sent back for changes first.",
     input: RequisitionId.extend({
       skills: z.number().int().min(0).max(100),
       experience: z.number().int().min(0).max(100),
@@ -423,7 +430,7 @@ export function registerPhase1Tools(): void {
         templateId: template?.id ?? null,
         title: r.title,
         department: dept?.name ?? null,
-        location: r.location,
+        location: placeLabel(r.location, r.workMode),
         experienceMin: r.experienceMin,
         experienceMax: r.experienceMax,
         mustHave: r.mustHaveSkills,

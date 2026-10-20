@@ -68,6 +68,8 @@ export type Scenario = {
     neverCalls?: string[];
     /** Every request for a human decision must use request_approval with this role. */
     gateRole?: string;
+    /** Approval requests, in this order, go to these roles (an approval chain). */
+    gateRoles?: string[];
     /** The final summary must contain these phrases (case-insensitive). */
     resultIncludes?: string[];
     maxSteps?: number;
@@ -199,6 +201,16 @@ export async function runScenario(s: Scenario): Promise<EvalReport> {
           failures.push(`gate routed to ${g.assigneeRole}, expected ${e.gateRole}`);
         }
       }
+    }
+    if (e.gateRoles) {
+      const routed = tasks
+        .filter((t) => t.kind === "gate")
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+        .map((t) => t.assigneeRole ?? "none");
+      if (routed.join(" → ") !== e.gateRoles.join(" → "))
+        failures.push(
+          `approvals went to ${routed.join(" → ") || "nobody"}, expected ${e.gateRoles.join(" → ")}`,
+        );
     }
     for (const phrase of e.resultIncludes ?? []) {
       if (!(run?.result ?? "").toLowerCase().includes(phrase.toLowerCase())) {

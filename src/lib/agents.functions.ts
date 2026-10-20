@@ -4,11 +4,13 @@
  * HR-head / CBO (owner passes); decisions are checked against each task's
  * role or assignee by the runtime.
  */
+import { CEILING_MESSAGE, LEG_LIMIT_MESSAGE } from "../server/agents/run-messages";
 import { createServerFn } from "@tanstack/react-start";
 import { and, desc, eq, inArray, or } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../server/db";
+import { plainPreview } from "../server/desk/desk.server";
 import { agentPolicies, agentRuns, agentTasks, userRoles } from "@db/schema";
 import { requireOrg } from "./auth.middleware";
 import { AGENT_CATALOG, WHITELISTABLE_TEMPLATES } from "./agents.catalog";
@@ -25,6 +27,8 @@ const SETTINGS_ROLES = ["hr_head", "president_cbo"] as const;
 
 /** Errors the runtime itself writes; anything else (provider text) is not shown. */
 const SAFE_RUN_ERRORS = new Set([
+  LEG_LIMIT_MESSAGE,
+  CEILING_MESSAGE,
   "The run reached its step or token budget.",
   "The worker stopped before finishing this step.",
   "No AI model key saved. Add one on the Integrations page.",
@@ -97,7 +101,7 @@ export const listAgentTasks = createServerFn({ method: "GET" })
         body: r.body,
         agentType: r.agentType,
         runId: r.runId,
-        goal: clip(r.goal, 300) ?? "",
+        goal: plainPreview(r.goal, 300) ?? "",
         action:
           r.kind === "approval" && a?.name
             ? { name: a.name, argsJson: JSON.stringify(a.args ?? {}, null, 2) }
@@ -114,7 +118,12 @@ const Decision = z.discriminatedUnion("status", [
     args: z.record(z.string(), z.unknown()).optional(),
     comment: z.string().max(2000).optional(),
   }),
-  z.object({ status: z.literal("rejected"), reason: z.string().max(2000).optional() }),
+  z.object({
+    status: z.literal("rejected"),
+    reason: z.string().max(2000).optional(),
+    /** Send back for changes (requisitions in approval) instead of a final decline. */
+    changes: z.boolean().optional(),
+  }),
   z.object({ status: z.literal("answered"), answer: z.string().min(1).max(4000) }),
 ]);
 
@@ -169,8 +178,8 @@ export const listAgentRuns = createServerFn({ method: "GET" })
       id: r.id,
       agentType: r.agentType,
       status: r.status,
-      goal: clip(r.goal, 300) ?? "",
-      result: clip(r.result, 600),
+      goal: plainPreview(r.goal, 300) ?? "",
+      result: plainPreview(r.result, 600),
       error: r.lastError
         ? SAFE_RUN_ERRORS.has(r.lastError)
           ? r.lastError
@@ -217,6 +226,11 @@ export type AgentSettingsView = {
     autonomy: "suggest" | "act_and_notify" | "autonomous";
     whitelistedTemplates: string[];
     monthlyTokenBudget: number | null;
+    /** Run limits per stretch of work (between human decisions); null = the agent's default. */
+    maxStepsPerLeg: number | null;
+    maxTokensPerLeg: number | null;
+    /** The agent's own default AI turns per stretch. */
+    defaultStepsPerLeg: number;
     /** Measured over 30 days; a person applies it (docs/agentic-plan.md §5.2). */
     recommendation: import("../server/agents/autonomy.server").AutonomyRecommendation | null;
   }[];
@@ -226,6 +240,7 @@ export const agentSettings = createServerFn({ method: "GET" })
   .middleware([requireOrg])
   .handler(async ({ context }): Promise<AgentSettingsView> => {
     const { isAgentLive } = await import("../server/agents");
+    const { getAgent } = await import("../server/agents/registry");
     const rows = await db
       .select()
       .from(agentPolicies)
@@ -252,6 +267,9 @@ export const agentSettings = createServerFn({ method: "GET" })
           autonomy: r?.autonomy ?? "suggest",
           whitelistedTemplates: r?.whitelistedTemplates ?? [],
           monthlyTokenBudget: r?.monthlyTokenBudget ?? null,
+          maxStepsPerLeg: r?.maxStepsPerLeg ?? null,
+          maxTokensPerLeg: r?.maxTokensPerLeg ?? null,
+          defaultStepsPerLeg: getAgent(a.type)?.maxSteps ?? 20,
           recommendation: recs[a.type] ?? null,
         };
       }),
@@ -267,6 +285,9 @@ const PolicyInput = z.object({
     .max(20)
     .optional(),
   monthlyTokenBudget: z.number().int().min(0).max(1_000_000_000).nullable().optional(),
+  /** Run limits per stretch of work (platform range; null = the agent's default). */
+  maxStepsPerLeg: z.number().int().min(4).max(60).nullable().optional(),
+  maxTokensPerLeg: z.number().int().min(20_000).max(1_000_000).nullable().optional(),
   /** Set when the change applies a measured recommendation (recorded in the audit entry). */
   viaRecommendation: z.boolean().optional(),
 });
@@ -288,6 +309,12 @@ export const saveAgentPolicy = createServerFn({ method: "POST" })
         : {}),
       ...(data.agentType !== "*" && data.monthlyTokenBudget !== undefined
         ? { monthlyTokenBudget: data.monthlyTokenBudget }
+        : {}),
+      ...(data.agentType !== "*" && data.maxStepsPerLeg !== undefined
+        ? { maxStepsPerLeg: data.maxStepsPerLeg }
+        : {}),
+      ...(data.agentType !== "*" && data.maxTokensPerLeg !== undefined
+        ? { maxTokensPerLeg: data.maxTokensPerLeg }
         : {}),
       updatedBy: context.userId,
       updatedAt: now,
@@ -789,7 +816,7 @@ export const myAgentActions = createServerFn({ method: "GET" })
       runId: r.runId,
       agentType: r.agentType,
       tool: r.tool ?? "",
-      goal: clip(r.goal, 200) ?? "",
+      goal: plainPreview(r.goal, 200) ?? "",
       at: r.at.toISOString(),
       seen: r.state === "seen",
     }));

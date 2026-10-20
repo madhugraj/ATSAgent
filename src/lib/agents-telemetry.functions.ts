@@ -152,7 +152,9 @@ export const saveAgentTelemetry = createServerFn({ method: "POST" })
 /** Send one synthetic trace or alert to the saved destination. */
 export const testAgentTelemetry = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ target: z.enum(["otlp", "webhook"]) }).parse(d))
+  .inputValidator((d: unknown) =>
+    z.object({ target: z.enum(["otlp", "webhook", "email"]) }).parse(d),
+  )
   .handler(async ({ data, context }): Promise<{ ok: boolean; message: string }> => {
     const { assertRole } = await import("./auth.middleware");
     await assertRole(context.userId, context.orgId, [...SETTINGS_ROLES]);
@@ -196,6 +198,15 @@ export const testAgentTelemetry = createServerFn({ method: "POST" })
       return error
         ? { ok: false, message: error }
         : { ok: true, message: "The collector accepted a test trace." };
+    }
+    if (data.target === "email") {
+      const { sendTestAlertEmail } = await import("../server/agents/alerts.server");
+      return sendTestAlertEmail({
+        orgId: context.orgId,
+        userId: context.userId,
+        memberEmail: context.memberEmail,
+        alertEmailEnabled: s?.alertEmailEnabled !== false,
+      });
     }
     if (!s?.alertWebhookUrl) return { ok: false, message: "Save a webhook address first." };
     const { signAlert } = await import("../server/agents/alerts.server");

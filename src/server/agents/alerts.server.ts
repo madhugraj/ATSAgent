@@ -48,7 +48,9 @@ export function signAlert(body: string, secret: string): string {
 }
 
 /** People who receive alert e-mail: active owners, HR heads and CBOs of the org. */
-async function recipients(orgId: string): Promise<{ email: string; name: string | null }[]> {
+export async function alertRecipients(
+  orgId: string,
+): Promise<{ email: string; name: string | null }[]> {
   const leaders = db
     .select({ userId: userRoles.userId })
     .from(userRoles)
@@ -112,7 +114,7 @@ export async function dispatchAgentAlerts(): Promise<{ alerted: number }> {
 
     if (settings?.alertEmailEnabled !== false) {
       const { enqueueEmail } = await import("@/lib/email-outbox.server");
-      for (const r of await recipients(issue.orgId)) {
+      for (const r of await alertRecipients(issue.orgId)) {
         await enqueueEmail({
           orgId: issue.orgId,
           kind: "member_reminder",
@@ -179,4 +181,61 @@ export async function dispatchAgentAlerts(): Promise<{ alerted: number }> {
     alerted++;
   }
   return { alerted };
+}
+
+/**
+ * "Send a test alert e-mail" in Agent settings: the same message, channel and
+ * recipients as a real alert, marked as a test; audited. Org-scoped.
+ */
+export async function sendTestAlertEmail(ctx: {
+  orgId: string;
+  userId: string;
+  memberEmail: string;
+  alertEmailEnabled: boolean;
+}): Promise<{ ok: boolean; message: string }> {
+  if (!ctx.alertEmailEnabled)
+    return { ok: false, message: "Switch on alert e-mail and save first." };
+  const { enqueueEmail, getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+  if (!(await getOrgEmailSettings(ctx.orgId)).enabled)
+    return {
+      ok: false,
+      message: "E-mail is switched off for this organisation (Settings → E-mail).",
+    };
+  const people = await alertRecipients(ctx.orgId);
+  if (!people.length) return { ok: false, message: "No active owner, HR head or CBO to e-mail." };
+  const [org] = await db
+    .select({ name: organizations.name })
+    .from(organizations)
+    .where(eq(organizations.id, ctx.orgId))
+    .limit(1);
+  const at = Date.now();
+  for (const r of people)
+    await enqueueEmail({
+      orgId: ctx.orgId,
+      kind: "member_reminder",
+      templateName: "member_reminder",
+      toEmail: r.email,
+      idempotencyKey: `agent-alert-test:${ctx.orgId}:${at}:${r.email.toLowerCase()}`,
+      templateData: {
+        memberName: r.name ?? undefined,
+        orgName: org?.name ?? undefined,
+        heading: "Agent alert (test): this is how serious agent issues reach you",
+        message:
+          "This is a test from Agent settings. When an agent health issue is serious or critical — for example a stuck run, repeated failures or a missing audit trail — the owner, HR heads and CBOs get an e-mail like this once per issue. Nothing is wrong.",
+        actionUrl: `${env.PUBLIC_SITE_URL.replace(/\/$/, "")}/agents/observability`,
+      },
+    });
+  await writeAudit({
+    actor: ctx.memberEmail,
+    actorUserId: ctx.userId,
+    orgId: ctx.orgId,
+    action: "agent.alert.test_email",
+    entityType: "agent_telemetry_settings",
+    entityId: ctx.orgId,
+    detail: { recipients: people.length },
+  });
+  return {
+    ok: true,
+    message: `Test alert queued for ${people.map((p) => p.email).join(", ")}; it is sent within a few minutes.`,
+  };
 }

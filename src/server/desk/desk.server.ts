@@ -12,7 +12,10 @@
  * The model only extracts details and words the next question; what happens
  * next (which agent, which records) is decided here in plain code.
  */
-import { and, asc, desc, eq, ilike, inArray, notInArray, or, sql } from "drizzle-orm";
+import { CEILING_MESSAGE, LEG_LIMIT_MESSAGE } from "../agents/run-messages";
+import { localWhen } from "@/lib/local-time";
+import { placeLabel } from "@/lib/work-mode";
+import { and, asc, desc, eq, ilike, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
 import { z } from "zod/v4";
 
 import { INJECTION_RULES, aiJson, untrusted } from "@/lib/ai-gateway.server";
@@ -42,6 +45,8 @@ const skillList = z.array(z.string().trim().min(1).max(60)).max(20);
 export const DeskSlots = z.object({
   roleTitle: z.string().trim().min(2).max(120).optional(),
   location: z.string().trim().min(2).max(120).optional(),
+  /** Where the work happens (migration 0041). */
+  workMode: z.enum(["onsite", "hybrid", "remote"]).optional(),
   experienceMin: z.number().min(0).max(40).optional(),
   experienceMax: z.number().min(0).max(50).optional(),
   openings: z.number().int().min(1).max(100).optional(),
@@ -67,6 +72,7 @@ export type DeskSlots = z.infer<typeof DeskSlots>;
 export const REQUIRED_SLOTS = [
   "roleTitle",
   "location",
+  "workMode",
   "experience",
   "openings",
   "mustHaveSkills",
@@ -76,6 +82,7 @@ export type RequiredSlot = (typeof REQUIRED_SLOTS)[number];
 const FALLBACK_QUESTION: Record<RequiredSlot, string> = {
   roleTitle: "Which role are you hiring for?",
   location: "Which location is this role based in?",
+  workMode: "Is this role onsite, hybrid or remote?",
   experience: "How many years of experience should candidates have (for example 3–6)?",
   openings: "How many people do you need for this role?",
   mustHaveSkills: "Which skills are must-haves for this role?",
@@ -129,7 +136,7 @@ export function describeNeed(s: DeskSlots): string {
         : `${s.experienceMin}+ years`;
   return [
     `${s.openings ?? 1} × ${s.roleTitle ?? "role"}`,
-    s.location ? `in ${s.location}` : "",
+    s.location || s.workMode ? `in ${placeLabel(s.location, s.workMode)}` : "",
     exp ? `· ${exp}` : "",
     s.mustHaveSkills?.length ? `· must have ${s.mustHaveSkills.join(", ")}` : "",
     s.goodToHaveSkills?.length ? `· good to have ${s.goodToHaveSkills.join(", ")}` : "",
@@ -145,6 +152,20 @@ export function describeNeed(s: DeskSlots): string {
 type Conversation = typeof hiringConversations.$inferSelect;
 export type DeskCard = Record<string, unknown> & { type: string };
 
+/** Longest message body kept; the thread folds long text behind "Show more". */
+const MESSAGE_MAX = 12_000;
+
+/** Cut long text at a paragraph (never mid-sentence) and say where the rest is. */
+export function clipText(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const at = text.lastIndexOf("\n\n", max - 80);
+  const cut = at > max / 2 ? at : text.lastIndexOf(". ", max - 80) + 1 || max - 80;
+  return `${text.slice(0, cut).trimEnd()}\n\n… The full text is in Agent activity.`;
+}
+
+/** "1 candidate", "3 candidates". */
+export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
 export async function postMessage(
   conv: { id: string; orgId: string },
   m: { role: "user" | "desk" | "agent"; body: string; agentType?: string | null; card?: DeskCard },
@@ -154,7 +175,7 @@ export async function postMessage(
     orgId: conv.orgId,
     role: m.role,
     agentType: m.agentType ?? null,
-    body: m.body.slice(0, 4000),
+    body: clipText(m.body, MESSAGE_MAX),
     card: (m.card ?? null) as never,
   });
   await db
@@ -163,11 +184,22 @@ export async function postMessage(
     .where(eq(hiringConversations.id, conv.id));
 }
 
-export async function loadConversation(orgId: string, id: string): Promise<Conversation> {
+export async function loadConversation(
+  orgId: string,
+  id: string,
+  opts: { includeDeleted?: boolean } = {},
+): Promise<Conversation> {
   const [c] = await db
     .select()
     .from(hiringConversations)
-    .where(and(eq(hiringConversations.id, id), eq(hiringConversations.orgId, orgId)))
+    .where(
+      and(
+        eq(hiringConversations.id, id),
+        eq(hiringConversations.orgId, orgId),
+        // A deleted chat is gone for everyone but its restore.
+        opts.includeDeleted ? undefined : isNull(hiringConversations.deletedAt),
+      ),
+    )
     .limit(1);
   if (!c) throw new Error("Conversation not found.");
   return c;
@@ -186,6 +218,7 @@ export async function conversationForRequisition(
         eq(hiringConversations.orgId, orgId),
         eq(hiringConversations.requisitionId, requisitionId),
         notInArray(hiringConversations.status, ["closed"]),
+        isNull(hiringConversations.deletedAt),
       ),
     )
     .orderBy(desc(hiringConversations.createdAt))
@@ -260,7 +293,7 @@ const SYSTEM = [
   "",
   "You are the hiring desk of an applicant tracking system. A recruiter describes a hiring need in a chat.",
   "Each turn, return JSON with:",
-  '- "slots": only the hiring details the LATEST message states or changes (omit the rest). Fields: roleTitle, location, experienceMin, experienceMax (years), openings, mustHaveSkills, goodToHaveSkills (short skill names), budgetLpaMax (lakhs per annum), maxNoticeDays, employmentType (full_time|contract|internship), urgency (immediate|within_a_month|flexible). "a candidate" means openings 1. Expand obvious role shorthands (e.g. "Full stack" → "Full Stack Developer"). Never invent values that were not said.',
+  '- "slots": only the hiring details the LATEST message states or changes (omit the rest). Fields: roleTitle, location, workMode (onsite|hybrid|remote — "office"/"WFO" means onsite, "WFH"/"work from home" means remote; a message that says "hybrid" sets hybrid even next to a city), experienceMin, experienceMax (years), openings, mustHaveSkills, goodToHaveSkills (short skill names), budgetLpaMax (lakhs per annum), maxNoticeDays, employmentType (full_time|contract|internship), urgency (immediate|within_a_month|flexible). "a candidate" means openings 1. Expand obvious role shorthands (e.g. "Full stack" → "Full Stack Developer"). Never invent values that were not said.',
   '- JD details (only when the person gives them): responsibilities (their key responsibilities, as text), reportingTo, successMeasures (what success looks like), education. If they ask you to fill these from the market / research / "you decide", set researchRole true.',
   '- "command": {"type":"none"} unless the person asks to act: "talk to / screen / call the first 5" → {"type":"screen","top":5}; "screen 1, 3 and 4" → {"type":"screen","ranks":[1,3,4]}; "create a new role" → {"type":"new_role"}; "use REQ-2026-014" → {"type":"use_existing","code":"REQ-2026-014"}.',
   '- "command" also: "close / cancel / delete / withdraw this role" → {"type":"close_role"}.',
@@ -551,6 +584,7 @@ export async function createNewRole(
       title: s.roleTitle!,
       departmentId: null,
       location: s.location!,
+      workMode: s.workMode ?? null,
       openings: s.openings ?? 1,
       experienceMin: s.experienceMin ?? 0,
       experienceMax: s.experienceMax ?? s.experienceMin ?? 0,
@@ -811,7 +845,7 @@ export async function postRankedList(conv: Conversation): Promise<void> {
       await postMessage(conv, {
         role: "agent",
         agentType: "intake",
-        body: `Only ${items.length} candidate(s) so far, best first.`,
+        body: `Only ${plural(items.length, "candidate")} so far, best first.`,
         card: { type: "ranked_candidates", requisitionId: conv.requisitionId, items },
       });
     await postMessage(conv, {
@@ -904,7 +938,7 @@ export async function screenCandidates(
       "Shortlist any that are not shortlisted yet, prepare a screening kit for each, and summarise who should proceed. Automated screening calls are not connected yet, so say that the kits are ready for the call.",
     ].join("\n"),
     conv.requisitionId,
-    `Screening ${rows.length} candidate(s): ${rows.map((r) => r.name).join(", ")}. The Screening agent is preparing their screening questions; calls will be placed by the voice agent once it is connected.`,
+    `Screening ${plural(rows.length, "candidate")}: ${rows.map((r) => r.name).join(", ")}. The Screening agent is preparing their screening questions; calls will be placed by the voice agent once it is connected.`,
   );
   return rows.length;
 }
@@ -1063,6 +1097,8 @@ async function handleUserMessageInner(
 /* ---------------------------------------------------- runtime hooks */
 
 const SAFE_ERRORS = new Set([
+  LEG_LIMIT_MESSAGE,
+  CEILING_MESSAGE,
   "The run reached its step or token budget.",
   "The worker stopped before finishing this step.",
   "No AI model key saved. Add one on the Integrations page.",
@@ -1101,18 +1137,49 @@ export async function onRunFinished(run: {
   const conv = await loadConversation(run.orgId, run.conversationId).catch(() => null);
   if (!conv) return;
   const name = AGENT_NAME[run.agentType] ?? `${run.agentType} agent`;
+  if (run.status === "done" && (await recapAlreadyPosted(conv, run))) return;
   await postMessage(conv, {
     role: "agent",
     agentType: run.agentType,
     body:
       run.status === "done"
-        ? readableAgentText(run.result ?? "Done.").slice(0, 1500)
+        ? readableAgentText(run.result ?? "Done.")
         : `The ${name} stopped: ${failureReason(run.error)}`,
     ...(run.status === "failed" && run.id
       ? { card: { type: "run_failed", runId: run.id, agentType: run.agentType } }
       : {}),
   });
   if (run.status === "done" && run.agentType === "intake") await postRankedList(conv);
+}
+
+/**
+ * A JD run ends only after its approval, by which time the desk has already
+ * said "the job description is approved — here is what happens next"; the
+ * agent's recap would arrive late and out of order, so it is not posted.
+ */
+async function recapAlreadyPosted(
+  conv: { id: string },
+  run: { id?: string; agentType: string },
+): Promise<boolean> {
+  if (run.agentType !== "jd" || !run.id) return false;
+  const [r] = await db
+    .select({ at: agentRuns.createdAt })
+    .from(agentRuns)
+    .where(eq(agentRuns.id, run.id))
+    .limit(1);
+  if (!r) return false;
+  const [m] = await db
+    .select({ id: hiringMessages.id })
+    .from(hiringMessages)
+    .where(
+      and(
+        eq(hiringMessages.conversationId, conv.id),
+        sql`${hiringMessages.card} ->> 'type' = 'next_steps'`,
+        sql`${hiringMessages.createdAt} >= ${r.at.toISOString()}::timestamptz`,
+      ),
+    )
+    .limit(1);
+  return Boolean(m);
 }
 
 /** A run working for a thread needs a person: show the request in the thread. */
@@ -1175,7 +1242,7 @@ export async function onTaskOpened(
     )
     .orderBy(desc(hiringMessages.createdAt))
     .limit(1);
-  const body = readableAgentText(task.body).slice(0, 1500);
+  const body = clipText(readableAgentText(task.body), 6000);
   const revision = task.kind === "approval" ? await revisionOf(conv, task) : null;
   const repeated = (prev?.card as { body?: string } | null)?.body === body && body.length > 0;
   await postMessage(conv, {
@@ -1203,6 +1270,11 @@ export async function onTaskOpened(
       kind: task.kind,
       title: task.title,
       body,
+      ...(() => {
+        const t = (task.proposedAction as { args?: { subject?: { type?: string } } } | null)?.args
+          ?.subject?.type;
+        return t ? { subjectType: t } : {};
+      })(),
       ...(step ? { step } : {}),
       ...(repeated ? { repeated: true } : {}),
       ...(revision ? { revision } : {}),
@@ -1495,7 +1567,7 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
   const cur: StageKey = current;
 
   const TEXT: Record<StageKey, string> = {
-    need: "Answer the desk's questions until the role, location, experience, openings and must-have skills are known.",
+    need: "Answer the desk's questions until the role, location, work mode, experience, openings and must-have skills are known.",
     requisition: detail.requisition ?? "",
     jd: detail.jd ?? "",
     candidates:
@@ -1609,7 +1681,7 @@ async function assessmentWait(orgId: string, requisitionId: string): Promise<str
   const parts: string[] = [];
   if (open.length)
     parts.push(
-      `Waiting for ${open.length} candidate(s) to complete the written assessment: ${open
+      `Waiting for ${plural(open.length, "candidate")} to complete the written assessment: ${open
         .map((r) => {
           const sent = new Date(r.created_at);
           return `${r.name} (sent ${day(sent)}, link open until ${day(new Date(sent.getTime() + 14 * 864e5))})`;
@@ -1642,6 +1714,29 @@ export async function retryRun(conv: Conversation, userId: string, runId: string
   if (!(await agentOn(conv.orgId, r.agentType))) {
     throw new Error(
       `The ${AGENT_TITLE[r.agentType] ?? r.agentType} is switched off — switch it on in Agent settings first.`,
+    );
+  }
+  // One run per agent per piece of work: a second click (or a colleague's)
+  // must not start a parallel run that asks for the same approvals again.
+  const [busy] = await db
+    .select({ id: agentRuns.id, createdAt: agentRuns.createdAt, status: agentRuns.status })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.orgId, conv.orgId),
+        eq(agentRuns.agentType, r.agentType),
+        inArray(agentRuns.status, ["queued", "running", "awaiting_human"]),
+        r.subjectId
+          ? or(eq(agentRuns.subjectId, r.subjectId), eq(agentRuns.conversationId, conv.id))
+          : eq(agentRuns.conversationId, conv.id),
+      ),
+    )
+    .orderBy(desc(agentRuns.createdAt))
+    .limit(1);
+  if (busy) {
+    const at = localWhen(busy.createdAt, await orgTimeZone(conv.orgId));
+    throw new Error(
+      `The ${AGENT_TITLE[r.agentType] ?? r.agentType} is already working on this — it started ${at}${busy.status === "awaiting_human" ? " and is waiting for a person" : ""}. Nothing new was started.`,
     );
   }
   const { startRun } = await import("../agents/runtime.server");
@@ -1796,7 +1891,8 @@ export function argDetails(
       .replace(/([a-z])([A-Z])/g, "$1 $2")
       .replace(/_/g, " ")
       .replace(/^./, (c) => c.toUpperCase()),
-    value: fmtValue(k, v, timeZone).slice(0, 400),
+    // The message a person approves is shown whole.
+    value: fmtValue(k, v, timeZone).slice(0, k === "message" || k === "talkTrack" ? 3000 : 400),
   }));
 }
 
@@ -1954,6 +2050,7 @@ export async function resumeThreadsForAgent(
         eq(hiringConversations.orgId, orgId),
         eq(hiringConversations.status, "active"),
         sql`${hiringConversations.requisitionId} is not null`,
+        isNull(hiringConversations.deletedAt),
       ),
     )
     .limit(200);
@@ -2152,7 +2249,7 @@ export async function deskFacts(conv: Conversation): Promise<string> {
   const last = trail.at(-1);
   const progress = await deskProgress(conv);
   return [
-    `${req.code} "${req.title}" (${req.location ?? "—"}, ${req.openings} opening(s)) is ${STATUS_WORDS[req.status] ?? req.status}.`,
+    `${req.code} "${req.title}" (${req.location ?? "—"}, ${plural(req.openings ?? 0, "opening")}) is ${STATUS_WORDS[req.status] ?? req.status}.`,
     last?.to && ["closed", "rejected", "on_hold"].includes(last.to)
       ? `It became ${last.to.replace("_", " ")}${last.at ? ` on ${last.at.slice(0, 10)}` : ""}${last.comment ? ` — reason: "${last.comment}"` : ""}.`
       : "",
@@ -2352,11 +2449,11 @@ export async function onRequisitionEnded(
   const last = trail.at(-1);
   const reason = comment ?? last?.comment ?? null;
   const loose = [
-    open?.rounds ? `${open.rounds} interview round(s) still booked` : "",
-    open?.offers ? `${open.offers} offer(s) still open` : "",
-    open?.people ? `${open.people} candidate(s) still in the pipeline` : "",
+    open?.rounds ? `${plural(open.rounds, "interview round")} still booked` : "",
+    open?.offers ? `${plural(open.offers, "offer")} still open` : "",
+    open?.people ? `${plural(open.people, "candidate")} still in the pipeline` : "",
   ].filter(Boolean);
-  const head = `${req?.code ?? "The requisition"} was ${to === "on_hold" ? "put on hold" : to}${last?.actor ? ` by ${last.actor}` : ""}${reason ? ` — reason: "${reason}"` : ""}. ${active.length ? `${active.length} agent run(s) working on it were stopped. ` : ""}${withdrawn.length ? `${withdrawn.length} open interview-time link(s) were withdrawn. ` : ""}${loose.length ? `Still to settle by a person: ${loose.join(", ")} — tell the candidates and cancel or keep them on the Interviews and Offers pages. ` : ""}`;
+  const head = `${req?.code ?? "The requisition"} was ${to === "on_hold" ? "put on hold" : to}${last?.actor ? ` by ${last.actor}` : ""}${reason ? ` — reason: "${reason}"` : ""}. ${active.length ? `${plural(active.length, "agent run")} working on it ${active.length === 1 ? "was" : "were"} stopped. ` : ""}${withdrawn.length ? `${plural(withdrawn.length, "open interview-time link")} ${withdrawn.length === 1 ? "was" : "were"} withdrawn. ` : ""}${loose.length ? `Still to settle by a person: ${loose.join(", ")} — tell the candidates and cancel or keep them on the Interviews and Offers pages. ` : ""}`;
   if (to === "on_hold") {
     // Paused, not ended: agents start again once the role is approved again.
     await postMessage(conv, {
@@ -2380,6 +2477,7 @@ export async function onRequisitionEnded(
 const SLOT_LABEL: Record<string, string> = {
   roleTitle: "Role",
   location: "Location",
+  workMode: "Work mode",
   experienceMin: "Experience from",
   experienceMax: "Experience up to",
   openings: "Openings",
@@ -2397,6 +2495,7 @@ const SLOT_LABEL: Record<string, string> = {
 const REQUIRED_LABEL: Record<RequiredSlot, string> = {
   roleTitle: "role",
   location: "location",
+  workMode: "work mode (onsite / hybrid / remote)",
   experience: "experience",
   openings: "number of openings",
   mustHaveSkills: "must-have skills",
@@ -2475,7 +2574,7 @@ async function advanceGathering(
   await postMessage(conv, {
     role: "desk",
     body: similar.length
-      ? `Got it: ${describeNeed(slots)}. I found ${similar.length} similar role(s). Continue with one of them, reuse an approved JD for a new role, or create a new role.`
+      ? `Got it: ${describeNeed(slots)}. I found ${plural(similar.length, "similar role")}. Continue with one of them, reuse an approved JD for a new role, or create a new role.`
       : `Got it: ${describeNeed(slots)}. There is no similar role yet — shall I create a new one?`,
     card: {
       type: "similar_roles",
@@ -2727,7 +2826,7 @@ export async function sendFeedback(
         ? r.agentType === "jd" && (r.kind !== "gate" || r.subjectType === "jd")
         : r.kind === "approval" ||
           r.kind === "clarification" ||
-          (r.kind === "gate" && r.subjectType === "jd"),
+          (r.kind === "gate" && (r.subjectType === "jd" || r.subjectType === "requisition")),
     ) ?? null;
   const agent = (r: OpenRequest) => AGENT_TITLE[r.agentType] ?? `${r.agentType} agent`;
   if (!target && template?.trim() && conv.requisitionId) {
@@ -2828,6 +2927,10 @@ export async function sendFeedback(
     reason = `${text}\nUse the JD template "${match.name}".`;
     understood = [...understood, { label: "Template", value: found }];
   }
+  if (target.kind === "gate" && target.subjectType === "requisition" && target.subjectId) {
+    await sendRequisitionBack(conv, userId, target.subjectId, target, text, understood);
+    return;
+  }
   const { resolveTask } = await import("../agents/runtime.server");
   try {
     await resolveTask({
@@ -2867,6 +2970,54 @@ export async function sendFeedback(
           : isJd
             ? `Requested changes on the job description (it is now "changes requested", not rejected) and returned it to the ${agent(target)}.`
             : `Returned "${target.title}" to the ${agent(target)} with your change. The old request is closed, so it cannot be approved by mistake.`,
+    },
+  });
+}
+
+/**
+ * A change asked for in the chat while the requisition is in approval: send it
+ * back to draft with those words (the current approver, the person who raised
+ * it, or the HR head / CBO — checked in the lifecycle core), close the waiting
+ * approval with the change so the Requisition agent applies it and resubmits.
+ */
+async function sendRequisitionBack(
+  conv: Conversation,
+  userId: string,
+  requisitionId: string,
+  target: { title: string; agentType: string },
+  text: string,
+  understood: { label: string; value: string }[],
+): Promise<void> {
+  const { activeOrgOf } = await import("@/lib/auth.middleware");
+  const org = await activeOrgOf(userId);
+  if (!org || org.orgId !== conv.orgId) return;
+  const { sendBackRequisitionCore } = await import("@/lib/requisitions.server");
+  let sent: { from: string; code: string };
+  try {
+    sent = await sendBackRequisitionCore(
+      { orgId: conv.orgId, userId, memberEmail: org.memberEmail },
+      { id: requisitionId, reason: text },
+    );
+  } catch (e) {
+    await postMessage(conv, {
+      role: "desk",
+      body: `I couldn't send it back: ${e instanceof Error ? e.message : "the requisition could not be updated."}`,
+      card: { type: "reasoning", understood, missing: [], next: "Nothing was changed." },
+    });
+    return;
+  }
+  const { syncGateTasks } = await import("../agents/runtime.server");
+  await syncGateTasks(conv.orgId, { type: "requisition", id: requisitionId }, userId, sent.from);
+  const { kickAgents } = await import("../agents/orchestrator.server");
+  kickAgents(conv.orgId);
+  await postMessage(conv, {
+    role: "desk",
+    body: `Sent ${sent.code} back to draft with your change: "${text}". The Requisition agent applies it and asks for approval again — the approvals start over at the department head.`,
+    card: {
+      type: "reasoning",
+      understood,
+      missing: [],
+      next: `Sent back for changes (not declined): "${target.title}" is closed and the change is on the approval trail.`,
     },
   });
 }
@@ -2944,14 +3095,135 @@ export function readableAgentText(text: string): string {
     links.push(url);
     return `\uE000${links.length - 1}\uE000`;
   });
-  return stripIds(shielded).replace(/\uE000(\d+)\uE000/g, (_, i) => links[Number(i)]!);
+  return humanizeInternals(stripIds(shielded)).replace(
+    /\uE000(\d+)\uE000/g,
+    (_, i) => links[Number(i)]!,
+  );
 }
+
+/**
+ * Internal names an agent may echo: tool names (list_departments) become
+ * words, "finalComplete: true"-style flags go. Code spans and links are kept.
+ */
+export function humanizeInternals(text: string): string {
+  return text
+    .split(/(```[\s\S]*?```)/)
+    .map((part, i) =>
+      i % 2
+        ? part
+        : part
+            // "(finalComplete: true)", "; isFinal=false"
+            .replace(/\s*\(\s*[a-z]+[A-Z]\w*\s*[:=]\s*(?:true|false)\s*\)/g, "")
+            .replace(/(?:[;,]\s*)?\b[a-z]+[A-Z]\w*\s*[:=]\s*(?:true|false)\b/g, "")
+            // `list_departments` / list_departments → "list departments" (not emails or file names)
+            .replace(/`?(?<![\w@.])([a-z]+(?:_[a-z]+)+)(?![\w@]|\.\w)`?/g, (_m, w: string) =>
+              w.replace(/_/g, " "),
+            )
+            // What a removed flag leaves behind: "(``)", "``".
+            .replace(/\s*\(\s*`\s*`\s*\)/g, "")
+            .replace(/`\s*`/g, "")
+            .replace(/\(\s*\)/g, ""),
+    )
+    .join("");
+}
+
+/**
+ * One-paragraph preview of agent text for lists (Agent activity): ids and
+ * internal names out, markdown marks removed, cut at a word (pure; tested).
+ */
+export function plainPreview(text: string | null, max: number): string | null {
+  if (!text) return text;
+  const plain = readableAgentText(text)
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/^\s*#{1,6}\s+/gm, "")
+    .replace(/^\s*[-*•]\s+/gm, "")
+    .replace(/^\s*\|?\s*:?-{2,}.*$/gm, "")
+    .replace(/\*\*|__|`/g, "")
+    .replace(/\s*\|\s*/g, " · ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (plain.length <= max) return plain;
+  const cut = plain.lastIndexOf(" ", max);
+  return `${plain.slice(0, cut > max / 2 ? cut : max)}…`;
+}
+
+const MONTHS =
+  "January|February|March|April|May|June|July|August|September|October|November|December";
+const WEEKDAY = "(?:(?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day,?\\s+)?";
+
+/**
+ * Times an agent wrote in UTC, shown in the organisation's time zone (pure;
+ * unit-tested): "2026-10-14 08:30:00 UTC", "Wednesday, October 14, 2026 at
+ * 08:30 UTC (14:00 IST)" → "Wed 14 Oct, 14:00 IST"; "Offered Times (UTC):"
+ * loses its "(UTC)".
+ */
+export function localizeUtc(text: string, timeZone: string): string {
+  const at = (iso: string) => {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? null : localWhen(d, timeZone);
+  };
+  return text
+    .replace(
+      /\b(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::\d{2})?(?:\.\d+)?\s*(?:UTC|Z)\b(?:\s*\(\d{1,2}:\d{2}\s*[A-Z]{2,5}\))?/g,
+      (m, d: string, h: string, min: string) => at(`${d}T${h}:${min}:00Z`) ?? m,
+    )
+    .replace(
+      new RegExp(
+        `${WEEKDAY}(${MONTHS}) (\\d{1,2}),? (\\d{4}),?(?: at)? (\\d{1,2}):(\\d{2}) UTC(?:\\s*\\(\\d{1,2}:\\d{2}\\s*[A-Z]{2,5}\\))?`,
+        "g",
+      ),
+      (m, mon: string, day: string, y: string, h: string, min: string) =>
+        at(`${mon} ${day}, ${y} ${h}:${min} UTC`) ?? m,
+    )
+    .replace(/\s*\(UTC\)/g, "");
+}
+
+/** "1 candidate(s)" → "1 candidate"; "Interviewer(s): one name" → "Interviewer: one name". */
+export function fixPlurals(text: string): string {
+  return text
+    .replace(/\b(\d+) ([A-Za-z-]+)\(s\)/g, (_m, n: string, w: string) =>
+      Number(n) === 1 ? `${n} ${w}` : `${n} ${w}s`,
+    )
+    .replace(
+      /\b([A-Za-z]+)\(s\)([*_]*\s*:[*_]*\s+)([^\n]*)/g,
+      (m, w: string, sep: string, rest: string) =>
+        w.toLowerCase() === "http"
+          ? m
+          : /,| and /.test(rest)
+            ? `${w}s${sep}${rest}`
+            : `${w}${sep}${rest}`,
+    );
+}
+
+/**
+ * Agent and desk text as people see it, applied when a thread is read so
+ * older messages read the same as new ones: ids and internal names out,
+ * plurals, times in the organisation's time zone.
+ */
+export function tidyForPeople(text: string, timeZone: string): string {
+  return fixPlurals(localizeUtc(readableAgentText(text), timeZone));
+}
+
+export const deskTimeZone = (orgId: string) => orgTimeZone(orgId);
+
+const ENTITY = "Application|Candidate|Requisition|Offer|Run|Task|Assessment|Interview";
 
 function stripIds(text: string): string {
   const id = `\`?${UUID.source}\`?`;
+  const hadId = new RegExp(UUID.source, "i");
+  // A line that was "Application ID: <id>" in any markdown dress, now empty.
+  const emptyLabel = /^[\s>*_\-•#]*[A-Za-z][\w ./&-]{0,40}[*_]*\s*[:=]?\s*[*_`]*\s*$/;
   return (
     text
       .split("\n")
+      .map((line) => {
+        if (!hadId.test(line)) return line;
+        const left = line.replace(new RegExp(`\\s*${id}`, "gi"), "");
+        return /[:=]/.test(line) && emptyLabel.test(left) ? null : line;
+      })
+      .filter((line): line is string => line !== null)
+      // "Application ID:" left empty when an earlier pass removed its id.
+      .filter((line) => !/^[\s>*_\-•]*[A-Za-z ]{0,30}\bID\b[*_]*\s*[:=]?\s*[*_`]*\s*$/.test(line))
       // A line that is only "<label> id: <id>" says nothing to a person.
       .filter(
         (line) => !new RegExp(`^[\\s*\\-•]*[\\w ]{0,30}:?\\s*${id}[\\s.,)]*$`, "i").test(line),
@@ -2960,6 +3232,8 @@ function stripIds(text: string): string {
       // "Application ID: <id>", "(ID: <id>)", "Requisition: <id>": the label goes with the id.
       .replace(new RegExp(`,?\\s*\\b[A-Za-z]+(?:\\s(?:ID|Id|id))?\\s*[:=]\\s*${id}`, "g"), "")
       .replace(new RegExp(`\\s*${id}`, "gi"), "")
+      // …and what an earlier pass left of it: "(Application, Requisition)".
+      .replace(new RegExp(`\\s*\\((?:\\s*(?:${ENTITY})(?:\\s+ID)?\\s*,?)+\\s*\\)`, "gi"), "")
       // "(<id>)" leaves "()" behind; "(<id>, x)" leaves "(, x)".
       .replace(/\s*\(\s*\)/g, "")
       .replace(/\(\s*,\s*/g, "(")
@@ -3151,7 +3425,7 @@ async function explainAfterJd(conv: Conversation, jdId: string | null): Promise<
   if (!s?.n) return;
   await postMessage(conv, {
     role: "desk",
-    body: `${s.n} candidate(s) were scored against an earlier version of the JD. Their scores and ranking may no longer fit version ${version}.`,
+    body: `${plural(s.n, "candidate")} ${s.n === 1 ? "was" : "were"} scored against an earlier version of the JD. Their scores and ranking may no longer fit version ${version}.`,
     card: { type: "rescore", count: s.n, version },
   });
 }
@@ -3174,6 +3448,7 @@ const RESCORABLE = [
  */
 export async function rescoreThread(conv: Conversation, userId: string): Promise<number> {
   if (!conv.requisitionId) throw new Error("This thread has no role yet.");
+  const before = await scoresOf(conv);
   const removed = (await db.execute(sql`
     delete from match_scores m using applications a
     where m.application_id = a.id and a.requisition_id = ${conv.requisitionId}
@@ -3198,7 +3473,45 @@ export async function rescoreThread(conv: Conversation, userId: string): Promise
     total += n;
     if (n < 25) break;
   }
+  // Earlier messages quote the old scores and flags: say what changed.
+  const changes = scoreChanges(before, await scoresOf(conv));
+  if (changes) await postMessage(conv, { role: "desk", body: changes });
   return total;
+}
+
+type ScoreSnap = { applicationId: string; name: string; score: number | null; risks: string[] };
+
+async function scoresOf(conv: Conversation): Promise<ScoreSnap[]> {
+  return (await db.execute(sql`
+    select a.id "applicationId", c.full_name name, m.overall_score score,
+      coalesce(m.risk_flags, '{}') risks
+    from applications a
+    join candidates c on c.id = a.candidate_id
+    left join match_scores m on m.application_id = a.id
+    where a.requisition_id = ${conv.requisitionId} and a.org_id = ${conv.orgId}`)) as unknown as ScoreSnap[];
+}
+
+/**
+ * What a re-score changed, for the thread (pure; unit-tested): score moves
+ * and risk flags no longer raised — so earlier messages quoting them read
+ * as out of date. Null when nothing changed.
+ */
+export function scoreChanges(before: ScoreSnap[], after: ScoreSnap[]): string | null {
+  const lines: string[] = [];
+  for (const b of before) {
+    const a = after.find((x) => x.applicationId === b.applicationId);
+    if (!a || b.score == null) continue;
+    const dropped = (b.risks ?? []).filter((f) => !(a.risks ?? []).includes(f));
+    const moved = a.score != null && a.score !== b.score;
+    if (!moved && !dropped.length) continue;
+    lines.push(
+      `- ${b.name}: ${moved ? `${b.score} → ${a.score}` : `still ${b.score}`}${
+        dropped.length ? `; no longer flagged: ${dropped.map((f) => `"${f}"`).join(", ")}` : ""
+      }`,
+    );
+  }
+  if (!lines.length) return null;
+  return `Re-scored against the current job description:\n${lines.join("\n")}\n\nEarlier messages in this thread that quote the old scores or flags are out of date.`;
 }
 
 /**
@@ -3281,6 +3594,7 @@ export async function announceNewApplicants(orgId?: string): Promise<number> {
         eq(hiringConversations.status, "active"),
         sql`${hiringConversations.requisitionId} is not null`,
         sql`${hiringConversations.updatedAt} >= now() - interval '60 days'`,
+        isNull(hiringConversations.deletedAt),
       ),
     )
     .limit(200);
@@ -3291,6 +3605,13 @@ export async function announceNewApplicants(orgId?: string): Promise<number> {
       from applications a join candidates c on c.id = a.candidate_id
       where a.requisition_id = ${conv.requisitionId} and a.org_id = ${conv.orgId}
         and a.source not like 'agent%'
+        -- Uploaded through this desk: the thread already confirmed them.
+        and a.source <> 'hiring_desk'
+        -- Already in a ranked list posted here: announcing them again reads as news.
+        and not exists (
+          select 1 from hiring_messages m, jsonb_array_elements(m.card -> 'items') it
+          where m.conversation_id = ${conv.id} and m.card ->> 'type' = 'ranked_candidates'
+            and it ->> 'applicationId' = a.id::text)
         and a.applied_at > greatest(
           ${conv.createdAt.toISOString()}::timestamptz,
           coalesce((
@@ -3310,7 +3631,7 @@ export async function announceNewApplicants(orgId?: string): Promise<number> {
     const names = rows.slice(0, 5).map((r) => r.name);
     await postMessage(conv, {
       role: "desk",
-      body: `${rows.length} new applicant(s): ${via} — ${names.join(", ")}${rows.length > 5 ? ` and ${rows.length - 5} more` : ""}. The Intake & matching agent scores new applicants within minutes when it is on.`,
+      body: `${plural(rows.length, "new applicant")}: ${via} — ${names.join(", ")}${rows.length > 5 ? ` and ${rows.length - 5} more` : ""}. The Intake & matching agent scores new applicants within minutes when it is on.`,
       card: { type: "applicants", count: rows.length, bySource: Object.fromEntries(bySource) },
     });
     posted++;
@@ -3351,4 +3672,241 @@ export function suggestBudget(used: number, limit: number, now: Date): number {
   ).getUTCDate();
   const projected = (used / Math.max(day, 2)) * daysInMonth * 1.25;
   return Math.ceil(Math.max(limit * 2, used * 2, projected) / 50_000) * 50_000;
+}
+
+/* ------------------------------------------------------------ deleting a chat */
+
+/** How long a deleted chat can be restored before the sweep purges it. */
+export const RESTORE_DAYS = 30;
+
+export type ThreadDeletion =
+  { kind: "chat" } | { kind: "draft"; requisitionId: string; code: string } | null;
+
+/**
+ * What the dustbin would delete (pure on its inputs; unit-tested): a chat
+ * still gathering details (no requisition), or a chat with an unused draft
+ * requisition. Anything in approval or later is rejected / closed instead,
+ * so its trail stays.
+ */
+export function deletionFor(
+  conv: { requisitionId: string | null },
+  req: { id: string; code: string; status: string; applications: number } | null,
+): ThreadDeletion {
+  if (!conv.requisitionId) return { kind: "chat" };
+  if (req && req.status === "draft" && req.applications === 0)
+    return { kind: "draft", requisitionId: req.id, code: req.code };
+  return null;
+}
+
+async function threadRequisition(conv: Conversation) {
+  if (!conv.requisitionId) return null;
+  const [req] = await db
+    .select({ id: requisitions.id, code: requisitions.code, status: requisitions.status })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, conv.orgId)))
+    .limit(1);
+  if (!req) return null;
+  const [a] = (await db.execute(sql`
+    select count(*)::int n from applications
+    where requisition_id = ${req.id} and org_id = ${conv.orgId}`)) as unknown as { n: number }[];
+  return { ...req, applications: a?.n ?? 0 };
+}
+
+/**
+ * Whether this person may delete this chat now, and what it would delete.
+ * A chat only: its starter, or the HR head / CBO / owner. With a draft
+ * requisition: HR head / CBO / owner (the Requisitions page's rule).
+ */
+export async function deletionAllowed(conv: Conversation, userId: string): Promise<ThreadDeletion> {
+  const what = deletionFor(conv, await threadRequisition(conv));
+  if (!what) return null;
+  const { assertRole } = await import("@/lib/auth.middleware");
+  const leader = await assertRole(userId, conv.orgId, ["hr_head", "president_cbo"]).then(
+    () => true,
+    () => false,
+  );
+  if (what.kind === "chat") return leader || conv.createdBy === userId ? what : null;
+  return leader ? what : null;
+}
+
+/** Delete a chat (and its unused draft): hidden now, restorable for 30 days; audited. */
+export async function deleteThread(
+  conv: Conversation,
+  userId: string,
+  reason: string,
+  now = new Date(),
+): Promise<{ kind: "chat" | "draft"; code: string | null; restoreUntil: string }> {
+  const { activeOrgOf } = await import("@/lib/auth.middleware");
+  const org = await activeOrgOf(userId);
+  if (!org || org.orgId !== conv.orgId)
+    throw new Error("You are not a member of this organisation.");
+  const what = await deletionAllowed(conv, userId);
+  if (!what) {
+    const req = await threadRequisition(conv);
+    throw new Error(
+      req && req.status !== "draft"
+        ? `${req.code} is ${STATUS_WORDS[req.status] ?? req.status}, so this chat cannot be deleted — reject or close the role instead; the chat then stays as its record.`
+        : req && req.applications > 0
+          ? `${req.code} already has applications, so this chat cannot be deleted.`
+          : "Only the person who started this chat, the HR head, the CBO or an owner can delete it.",
+    );
+  }
+  const why = reason.replace(/\s+/g, " ").trim().slice(0, 500);
+  if (what.kind === "draft" && why.length < 3)
+    throw new Error("Say why — the draft requisition is deleted with the chat.");
+  // Nothing keeps working for a deleted chat.
+  const active = await db
+    .select({ id: agentRuns.id })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.orgId, conv.orgId),
+        eq(agentRuns.conversationId, conv.id),
+        inArray(agentRuns.status, ["queued", "running", "awaiting_human"]),
+      ),
+    );
+  const { cancelRun } = await import("../agents/runtime.server");
+  for (const r of active) await cancelRun({ orgId: conv.orgId, runId: r.id, userId });
+  const hidden = await db
+    .update(hiringConversations)
+    .set({ deletedAt: now, deletedBy: userId, deleteReason: why || null, updatedAt: now })
+    .where(and(eq(hiringConversations.id, conv.id), isNull(hiringConversations.deletedAt)))
+    .returning({ id: hiringConversations.id });
+  if (!hidden.length) throw new Error("This chat was already deleted.");
+  if (what.kind === "draft") {
+    await db
+      .delete(requisitions)
+      .where(
+        and(
+          eq(requisitions.id, what.requisitionId),
+          eq(requisitions.orgId, conv.orgId),
+          eq(requisitions.status, "draft"),
+        ),
+      );
+    await writeAudit({
+      actor: org.memberEmail,
+      actorUserId: userId,
+      orgId: conv.orgId,
+      action: "requisition.delete",
+      entityType: "requisition",
+      entityId: what.requisitionId,
+      detail: { code: what.code, reason: why, via: "hiring_desk", conversation_id: conv.id },
+    });
+  }
+  const [m] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(hiringMessages)
+    .where(eq(hiringMessages.conversationId, conv.id));
+  await writeAudit({
+    actor: org.memberEmail,
+    actorUserId: userId,
+    orgId: conv.orgId,
+    action: "desk.thread_deleted",
+    entityType: "hiring_conversation",
+    entityId: conv.id,
+    detail: {
+      title: conv.title,
+      messages: Number(m?.n ?? 0),
+      stage: what.kind,
+      requisition: what.kind === "draft" ? what.code : null,
+      reason: why || null,
+      runsStopped: active.length,
+    },
+  });
+  return {
+    kind: what.kind,
+    code: what.kind === "draft" ? what.code : null,
+    restoreUntil: new Date(now.getTime() + RESTORE_DAYS * 864e5).toISOString(),
+  };
+}
+
+/** Chats deleted in the last 30 days (owners restore them). */
+export async function deletedThreads(orgId: string, now = new Date()) {
+  return db
+    .select({
+      id: hiringConversations.id,
+      title: hiringConversations.title,
+      deletedAt: hiringConversations.deletedAt,
+      reason: hiringConversations.deleteReason,
+    })
+    .from(hiringConversations)
+    .where(
+      and(
+        eq(hiringConversations.orgId, orgId),
+        sql`${hiringConversations.deletedAt} > ${new Date(now.getTime() - RESTORE_DAYS * 864e5).toISOString()}::timestamptz`,
+      ),
+    )
+    .orderBy(desc(hiringConversations.deletedAt));
+}
+
+/**
+ * An owner restores a chat within 30 days; audited. A draft deleted with it is
+ * not brought back — the chat says so and the details are still there to raise it again.
+ */
+export async function restoreThread(
+  orgId: string,
+  userId: string,
+  id: string,
+  now = new Date(),
+): Promise<{ ok: true }> {
+  const { activeOrgOf } = await import("@/lib/auth.middleware");
+  const org = await activeOrgOf(userId);
+  if (!org || org.orgId !== orgId || !org.isOwner)
+    throw new Error("Only an owner can restore a deleted chat.");
+  const conv = await loadConversation(orgId, id, { includeDeleted: true });
+  if (!conv.deletedAt) throw new Error("This chat is not deleted.");
+  if (now.getTime() - conv.deletedAt.getTime() > RESTORE_DAYS * 864e5)
+    throw new Error(
+      `Deleted chats can be restored for ${RESTORE_DAYS} days; this one has passed that.`,
+    );
+  await db
+    .update(hiringConversations)
+    .set({ deletedAt: null, deletedBy: null, deleteReason: null, updatedAt: now })
+    .where(and(eq(hiringConversations.id, conv.id), eq(hiringConversations.orgId, orgId)));
+  await writeAudit({
+    actor: org.memberEmail,
+    actorUserId: userId,
+    orgId,
+    action: "desk.thread_restored",
+    entityType: "hiring_conversation",
+    entityId: conv.id,
+    detail: { title: conv.title, deletedAt: conv.deletedAt.toISOString() },
+  });
+  const restored = await loadConversation(orgId, id);
+  if (conv.requisitionId === null && restored.status !== "gathering") {
+    // Its draft was deleted with it (the link is cleared): back to gathering details.
+    await db
+      .update(hiringConversations)
+      .set({ status: "gathering" })
+      .where(eq(hiringConversations.id, conv.id));
+    await postMessage(restored, {
+      role: "desk",
+      body: 'This chat was restored. Its draft requisition was deleted with it and is not brought back — the hiring details are still here; say "create it" to raise a new draft.',
+    });
+  } else await postMessage(restored, { role: "desk", body: "This chat was restored." });
+  return { ok: true };
+}
+
+/** Chats deleted more than 30 days ago are removed for good (scheduler sweep); audited. */
+export async function purgeDeletedThreads(now = new Date()): Promise<number> {
+  const gone = await db
+    .delete(hiringConversations)
+    .where(
+      sql`${hiringConversations.deletedAt} <= ${new Date(now.getTime() - RESTORE_DAYS * 864e5).toISOString()}::timestamptz`,
+    )
+    .returning({
+      id: hiringConversations.id,
+      orgId: hiringConversations.orgId,
+      title: hiringConversations.title,
+    });
+  for (const g of gone)
+    await writeAudit({
+      actor: "system:desk-retention",
+      orgId: g.orgId,
+      action: "desk.thread_purged",
+      entityType: "hiring_conversation",
+      entityId: g.id,
+      detail: { title: g.title, afterDays: RESTORE_DAYS },
+    });
+  return gone.length;
 }

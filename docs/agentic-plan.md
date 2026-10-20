@@ -222,6 +222,38 @@ Initial tool surface (each maps to existing code):
 
 ---
 
+### 3.y Refused vs failed, readable rehearsals (migration `0043`)
+
+A tool error is recorded as **refused** when a business rule or guardrail
+said no (a plain, readable message — e.g. weights locked in approval) and as
+**failed** when something broke or the agent called a tool wrongly
+(`isRuleRefusal`; earlier steps classified by the same rule). Only failures
+count towards error rates, the `tools.error_rate` health rule and daily
+metrics; refusals are shown separately, in amber, with their message. Agent
+cards state counts with their window ("Tool failures · 7 d: 2 of 32"), and
+the efficiency table names its 30-day window. Every rehearsal (eval) has a
+plain-language explanation in `src/lib/eval-catalog.ts` — what it sets up and
+what must happen to pass — shown in the agent drawer and register with its
+latest recorded result; CI fails if an agent declares a rehearsal without
+one. "Try again" refuses while the same agent is already working on that
+piece of work.
+
+### 3.x Run limits per stretch of work (migration `0042`)
+
+A run's step and token limits apply per **stretch** — the work between two
+decisions by a person — not to the whole run: a run that waits on an
+approval chain or a question is not a loop, and each decision starts a fresh
+stretch (`agent_runs.leg_step_start` / `leg_token_start`). A hard ceiling of
+four stretches' worth (`RUN_LIMITS.legCeiling`) still stops a looping agent.
+The HR head / CBO can raise an agent's allowance in Agent settings → Run
+limits (4–60 AI turns, 20,000–1,000,000 tokens per stretch; audited as
+`agent.policy.updated`), which also applies to runs under way; the monthly
+token budget remains the cost control. Older tool results are shortened in
+what the model re-reads each turn (`compactForModel`); the run's own record
+keeps them whole. A run stopped on its limits says what to do, and the
+health rule `harness.run_limits` flags it while its work is still waiting
+(serious at the ceiling).
+
 ## 4. The agents
 
 Each agent = system prompt + tool subset + output contract + HITL points. All
@@ -440,6 +472,38 @@ the autonomy dial.
   %, the change on current CTC, notice and competing offers. Health rule
   `offer.pay_unknown`: a form closed unanswered while expected CTC or notice
   is still unknown near an offer.
+- **Settled terms before approval (Offer 1.4.0, Pre-onboarding 1.3.0):**
+  `advanceOfferCore` — the one path for agents, the inbox and the Offers
+  page — refuses to send an offer for approval, approve it (HR head, CBO) or
+  release it while the candidate's expected CTC or notice period, or the
+  offer's joining date, is missing; the approval card says so from the
+  system. The Offer agent always sets a joining date (earliest joining, else
+  notice from today, next Monday). An approved offer that is not yet
+  released can be sent back by the HR head (audited, on the trail, the
+  thread told); once released, only revoking applies. Pre-onboarding
+  documents are not requested until the terms are settled
+  (`onboarding_status.termsMissing`; `request_documents` refuses).
+- **Pay discussion before the letter (Offer 1.5.0, migration `0039`):** when
+  the candidate's expectation is above the ceiling the HR head sets (the CBO
+  too when it is above the band), the Offer agent does not hand off or
+  draft: `propose_negotiation` records the ceiling (and who approved it),
+  a proposed figure at or under it, levers that cost less than base pay
+  (joining bonus, a pay review after N months, split / ESOPs), a call brief
+  for TA and a warm message. `send_negotiation_message` has no template, so
+  a person — the HR head — always approves (and may edit) the exact words,
+  whatever the agent's autonomy; it is then sent as them with a private
+  `/negotiate/<token>` link (accept · suggest another figure · ask for a
+  call; once; closes on the assessment policy's timeline). TA can record a
+  call's outcome at any time from the candidate page or the pop-up (never
+  above the ceiling). Agreement raises `negotiation.agreed`: the Offer agent
+  drafts at that figure (above the band only on a CBO-approved ceiling) and
+  the approval card states what was agreed. A suggested figure, a call
+  request, no answer or a closed link pops up for TA / HR; health rule
+  `offer.negotiation_stalled`. Amounts never reach the thread, nudges or
+  audit.
+  Order: pay & availability at screening → interviews → selection → offer
+  on the candidate's numbers (HR head first if above the band) → HR head →
+  CBO → documents → release → the candidate accepts or asks for changes.
 
 ### 4.9 Pre-onboarding & release agent
 
@@ -953,6 +1017,53 @@ the target of 75% is reached as soon as two of the three are delegated.
 - Cards carry the same approve / edit / decline buttons as the Decisions
   inbox (same `agent_tasks`), so a decision made in the thread, the inbox or
   the regular pages is one decision.
+- **Reading the thread (clarity pass):** the latest 20 messages show, older
+  ones fold under "Show earlier", and a request still waiting for a person is
+  always shown; the journey panel's "waiting for you" jumps to it. Action
+  cards a later step overtook fold with the reason (an older ranked list; a
+  "bring candidates in" once candidates arrived or an offer is in play);
+  ranked lists offer screening only for candidates still at screening. Agent
+  text is kept whole (clipped only at a paragraph, beyond 12,000 characters)
+  and long messages fold behind "Show more". Every agent and desk message is
+  tidied when the thread is read, so older messages read like new ones: ids
+  and the labels left empty without them, internal tool and field names,
+  true/false flags, "(s)" plurals, and UTC times (shown in the organisation's
+  time zone). The shared agent rules ask for plain language and local times;
+  interview tools return `slotsLocal` / `atLocal` / `expiresLocal`. "New
+  applicants" skips desk uploads and people already in a ranked list; the JD
+  agent's recap is not posted after the desk announced the approval; a
+  re-score posts what changed (score moves, flags no longer raised) so
+  earlier messages read as out of date. A job board counts as connected only
+  with saved credentials (not the set-up placeholder row).
+
+- **Deleting a chat (migration 0040):** a dustbin in the thread header while
+  the chat is still gathering details (its starter, or the HR head / CBO /
+  owner) or has only an unused draft requisition (HR head / CBO / owner, with
+  a reason — the draft is deleted with it, under the same rule as the
+  Requisitions page). Anything in approval or later is rejected or closed
+  instead, so its trail stays. Deleting hides the chat at once, stops its
+  agent runs and is audited (`desk.thread_deleted`); an owner can restore it
+  for 30 days ("Recently deleted", `desk.thread_restored` — a deleted draft
+  is not brought back); then the scheduler's sweep purges it
+  (`desk.thread_purged`): its messages go, agent runs keep their record with
+  the link cleared.
+
+- **Changing a requisition in approval (Requisition 1.3.0, migration
+  `0041`):** a requisition with an approver can be **sent back for changes**
+  (not declined) — by the current approver, the person who raised it, or the
+  HR head / CBO — from its approval card ("Send back for changes") or by
+  asking in the chat ("i need 25% for social"). It returns to draft with the
+  change on the approval trail (`requisition.sent_back`); approvals so far no
+  longer count; the waiting Requisition agent is told the exact change,
+  applies it (weights rebalanced to 100, before / after stated) and
+  resubmits — never unchanged. "Decline" stays final. **Scoring weights**
+  total 100, are locked in approval and once closed, are changed on a draft by
+  its raiser or HR leadership and on an approved role by HR leadership only,
+  and every change is audited with before and after
+  (`requisition.weights_changed`). **Work mode** (onsite / hybrid / remote) is
+  a required desk detail after location, kept on the requisition and shown
+  with the location in the JD and job posts ("Chennai (Hybrid)"). Buttons
+  pressed in the thread appear as the person's message.
 
 ### 13.3 Voice agent integration (in-house)
 

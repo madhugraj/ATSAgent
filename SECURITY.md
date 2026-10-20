@@ -66,6 +66,24 @@ cancelled or expired links, and its server functions are rate-limited with all o
 answers are readable only by TA, the HR head, the CBO and owners (role-checked server-side); audit
 entries and thread messages record that details changed, never the amounts.
 
+Deleting a hiring-desk chat is limited to chats still gathering details (their starter, or the HR
+head / CBO / owner) or holding only an unused draft requisition (HR head / CBO / owner, with a reason);
+the server enforces the stage and role. Deletions are audited, hidden at once and restorable by an
+owner for 30 days, then purged; agent runs and the audit log are kept.
+
+Requisition scoring weights decide how every candidate is ranked, so they are role- and stage-checked
+on the server: a draft by its raiser or the HR head / CBO, an approved role by the HR head / CBO only,
+never while in approval (send it back for changes instead) or once closed; they must total 100 and every
+change is audited with its before and after values. Sending a requisition back for changes is limited to
+the current approver, its raiser and HR leadership, and is recorded on its approval trail.
+
+The candidate's pay discussion page (`/negotiate/<token>`) is public in the same way: a 64-hex token
+issued only when a person approved the message, showing that message, the proposed figure and its
+levers; it records one answer (accept, another figure, a call) — claimed in the update itself —
+refuses closed links, and its server functions are rate-limited with all other RPCs. The message is
+never sent without a person's approval, whatever the agent's autonomy (the tool has no pre-approvable
+template), and no figure above the approved ceiling can be agreed.
+
 The candidate's interview-time page (`/schedule/<token>`) is public: the token is 64 random hex
 characters, it returns only the round, role, organisation, the interviewer's first name and the
 offered times, it can book one of those times once (the offer is claimed before booking and every
