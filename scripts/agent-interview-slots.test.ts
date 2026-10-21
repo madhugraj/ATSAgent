@@ -101,7 +101,7 @@ const day = (n: number) => new Date(Date.now() + n * 864e5);
  */
 function weekdayAt(n: number, hour = 11) {
   const d = day(0);
-  for (let left = n; left > 0; ) {
+  for (let left = n; left > 0;) {
     d.setUTCDate(d.getUTCDate() + 1);
     if (![0, 6].includes(d.getUTCDay())) left--;
   }
