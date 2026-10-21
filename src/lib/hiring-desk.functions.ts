@@ -538,7 +538,7 @@ export const enableDeskAgent = createServerFn({ method: "POST" })
     z
       .object({
         id: z.string().uuid(),
-        agentType: z.enum(["intake", "publishing", "sourcing"]),
+        agentType: z.enum(["intake", "publishing", "sourcing", "distribution"]),
       })
       .parse(d),
   )
@@ -576,6 +576,17 @@ export const startDeskSourcing = createServerFn({ method: "POST" })
     await registered();
     const { startSourcing } = await import("../server/desk/desk.server");
     return { runId: await startSourcing(conv, context.userId) };
+  });
+
+/** Ask the Distribution agent to advertise this role across the job portals. */
+export const startDeskDistribution = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    await registered();
+    const { startDistribution } = await import("../server/desk/desk.server");
+    return { runId: await startDistribution(conv, context.userId) };
   });
 
 async function liveStages(orgId: string, ids: string[]): Promise<Record<string, string>> {

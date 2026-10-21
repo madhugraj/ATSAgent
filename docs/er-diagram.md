@@ -324,6 +324,8 @@ erDiagram
     text referral_source "nullable"
     jsonb employment_history
     jsonb career_metrics "nullable"
+    text pool_use
+    text pool_use_source "nullable"
   }
   applications {
     uuid id PK
@@ -1183,7 +1185,7 @@ erDiagram
 | `candidate_ownership_events` | Candidates & pipeline | 8 | — |
 | `candidate_referrals` | Candidates & pipeline | 11 | — |
 | `candidate_verifications` | Candidates & pipeline | 11 | — |
-| `candidates` | Candidates & pipeline | 40 | — |
+| `candidates` | Candidates & pipeline | 42 | — |
 | `capture_events` | Sourcing & integrations | 10 | — |
 | `comp_knowledge` | Intelligence | 17 | — |
 | `compensation_details` | — | 19 | — |

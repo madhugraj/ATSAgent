@@ -40,6 +40,7 @@ import {
   raiseDeskAgentBudget,
   rescoreDeskCandidates,
   startDeskSourcing,
+  startDeskDistribution,
   chooseDeskRole,
   closeDeskRole,
   deleteDeskConversation,
@@ -1056,8 +1057,20 @@ function TaskCard({
             <Button size="sm" disabled={busy} onClick={() => decide({ status: "approved" })}>
               Approve
             </Button>
+            {sendable ? (
+              // A change is the common answer to a requisition in approval —
+              // offered directly, not hidden behind Decline.
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => setDeclining(true)}
+              >
+                Send back for changes
+              </Button>
+            ) : null}
             <Button size="sm" variant="outline" disabled={busy} onClick={() => setDeclining(true)}>
-              Decline
+              {sendable ? "Decline (final)" : "Decline"}
             </Button>
             <Link to="/agents" className="self-center text-xs text-primary underline">
               Review or edit in Agent decisions
@@ -1386,7 +1399,7 @@ function BringCandidatesCard({
   conv: DeskConversationView;
   onChanged: () => void;
 }) {
-  const [busy, setBusy] = useState<null | "upload" | "publish" | "source">(null);
+  const [busy, setBusy] = useState<null | "upload" | "publish" | "source" | "distribute">(null);
   const [progress, setProgress] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const reqId = conv.requisition?.id ?? null;
@@ -1426,6 +1439,18 @@ function BringCandidatesCard({
       onChanged();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not publish");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function distribute() {
+    setBusy("distribute");
+    try {
+      await startDeskDistribution({ data: { id: conv.id } });
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not start the Distribution agent");
     } finally {
       setBusy(null);
     }
@@ -1475,16 +1500,16 @@ function BringCandidatesCard({
           <p className="mt-0.5 text-xs text-muted-foreground">
             Internal posting now; LinkedIn and job-board posts come back here for your approval.
           </p>
-          <Button
-            size="sm"
-            variant="outline"
-            className="mt-2"
-            disabled={busy !== null}
-            onClick={publish}
-          >
-            {busy === "publish" ? <Loader2 className="size-4 animate-spin" /> : null}
-            Publish
-          </Button>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" disabled={busy !== null} onClick={publish}>
+              {busy === "publish" ? <Loader2 className="size-4 animate-spin" /> : null}
+              Publish
+            </Button>
+            <Button size="sm" variant="outline" disabled={busy !== null} onClick={distribute}>
+              {busy === "distribute" ? <Loader2 className="size-4 animate-spin" /> : null}
+              Advertise on job portals
+            </Button>
+          </div>
         </div>
         <div className="rounded-md border border-border p-2.5">
           <p className="font-medium">Find more candidates</p>
@@ -1846,7 +1871,7 @@ function JdCard({ card }: { card: DeskCardView }) {
 }
 
 type NextItem = {
-  agentType: "intake" | "publishing" | "sourcing";
+  agentType: "intake" | "publishing" | "sourcing" | "distribution";
   name: string;
   text: string;
   enabled: boolean;

@@ -279,17 +279,19 @@ function TaskCard({ task }: { task: AgentTaskView }) {
       <p className="mt-2 text-xs text-muted-foreground">Goal: {task.goal}</p>
 
       {task.action ? (
-        <div className="mt-3">
-          <p className="text-xs font-medium">
-            Action: <code>{task.action.name}</code> — review or edit the details before approving
-          </p>
+        // The title says what the agent will do in plain words; the exact
+        // details stay one click away for anyone who wants to check or edit them.
+        <details className="mt-3">
+          <summary className="cursor-pointer text-xs font-medium">
+            Review or edit the details before approving
+          </summary>
           <Textarea
             className="mt-1 font-mono text-xs"
             rows={Math.min(12, Math.max(3, args.split("\n").length))}
             value={args}
             onChange={(e) => setArgs(e.target.value)}
           />
-        </div>
+        </details>
       ) : null}
 
       <Textarea

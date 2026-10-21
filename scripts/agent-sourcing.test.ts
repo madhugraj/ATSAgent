@@ -256,10 +256,13 @@ describe("desk: after the JD, and new applicants", () => {
     await desk.onJdApproved(orgId, role, null);
     const m = await messages(conv.id);
     const steps = m.find((x) => (x.card as { type?: string } | null)?.type === "next_steps")!;
-    expect(steps.body).toMatch(/Publishing agent and Sourcing agent are switched off/);
+    expect(steps.body).toMatch(
+      /Publishing agent, Distribution agent and Sourcing agent are switched off/,
+    );
     expect((steps.card as { items: { agentType: string; enabled: boolean }[] }).items).toEqual([
       expect.objectContaining({ agentType: "intake", enabled: true }),
       expect.objectContaining({ agentType: "publishing", enabled: false }),
+      expect.objectContaining({ agentType: "distribution", enabled: false }),
       expect.objectContaining({ agentType: "sourcing", enabled: false }),
     ]);
   });

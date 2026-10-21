@@ -11,7 +11,7 @@
  * Runs act for the member who raised the requisition (falling back to the
  * member whose action produced the event).
  */
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 
 import { db } from "../db";
 import {
@@ -164,7 +164,15 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
   if (!principal) return { started, synced };
 
   const dispatch = async (
-    agent: "jd" | "publishing" | "screening" | "interview" | "evaluation" | "offer" | "onboarding",
+    agent:
+      | "jd"
+      | "publishing"
+      | "distribution"
+      | "screening"
+      | "interview"
+      | "evaluation"
+      | "offer"
+      | "onboarding",
     goal: string,
     /** Per-candidate work (evaluation) de-duplicates on the application instead. */
     subject: { type: "requisition" | "application"; id: string } = {
@@ -484,6 +492,18 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
         `Requisition ${req.code} "${req.title}" and its job description are approved. Publish it internally and prepare the external posts.`,
       );
     }
+    // The Distribution agent advertises it across the portals — only where the
+    // organisation switched it on (no "agent is off" note for an optional agent).
+    if (
+      getAgent("distribution") &&
+      (await loadPolicy(e.orgId, "distribution")).enabled &&
+      !(await recentRun(e.orgId, "distribution", 24 * 30, req.id))
+    ) {
+      await dispatch(
+        "distribution",
+        `Requisition ${req.code} "${req.title}" and its job description are approved. Advertise it on the right job portals and make sure the CVs they send back reach it.`,
+      );
+    }
   }
   return { started, synced };
 }
@@ -663,6 +683,35 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
         });
         started++;
       }
+    }
+  }
+  // The Distribution agent's daily check: CVs arriving by portal, quiet
+  // listings, unread inbox mail and role-limited CVs past retention.
+  if (getAgent("distribution")) {
+    for (const orgId of await enabledOrgs("distribution", opts.orgId)) {
+      const [recent] = await db
+        .select({ id: agentRuns.id })
+        .from(agentRuns)
+        .where(
+          and(
+            eq(agentRuns.orgId, orgId),
+            eq(agentRuns.agentType, "distribution"),
+            eq(agentRuns.mode, "live"),
+            isNull(agentRuns.subjectId),
+            sql`(${agentRuns.status} in ('queued','running','awaiting_human') or ${agentRuns.createdAt} >= now() - interval '20 hours')`,
+          ),
+        )
+        .limit(1);
+      if (recent) continue;
+      const principal = await ownerOf(orgId);
+      if (!principal) continue;
+      await startRun({
+        orgId,
+        agentType: "distribution",
+        principalUserId: principal,
+        goal: "Daily check: CVs arriving from the job portals, listings that have sent none, careers-inbox mail that could not be read, and CVs a portal limited to their role that are due for erasure.",
+      });
+      started++;
     }
   }
   // Interview times nobody chose in time close, and the team hears about it.

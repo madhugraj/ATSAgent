@@ -38,11 +38,24 @@ export type JobChannel = {
   /** What we could not verify, or a caution worth knowing. */
   caution?: string;
   feedFormat?: FeedFormat;
+  /**
+   * What a CV handed over by the portal (an export or its application mail)
+   * may be used for. 'role_only': the portal's terms limit it to the role it
+   * was for — never reused, erased once that role is over. A candidate who
+   * applies on our own apply page gave us the CV directly, whatever link they
+   * followed, and is not limited by this.
+   */
+  dataUse: "pool" | "role_only";
+  /** Why, when it is limited (shown to people). */
+  dataUseNote?: string;
+  /** Domains the portal's application mails come from (careers-inbox credit). */
+  senderDomains?: string[];
 };
 
 export const JOB_CHANNELS: JobChannel[] = [
   {
     id: "google_jobs",
+    dataUse: "pool",
     name: "Google for Jobs",
     route: "structured_data",
     region: "Global",
@@ -53,6 +66,8 @@ export const JOB_CHANNELS: JobChannel[] = [
   },
   {
     id: "jooble",
+    dataUse: "pool",
+    senderDomains: ["jooble.org", "jooble.com"],
     name: "Jooble",
     route: "feed",
     region: "About 66 countries",
@@ -72,6 +87,8 @@ export const JOB_CHANNELS: JobChannel[] = [
   },
   {
     id: "adzuna",
+    dataUse: "pool",
+    senderDomains: ["adzuna.com", "adzuna.co.uk", "adzuna.in"],
     name: "Adzuna",
     route: "feed",
     region: "19 countries, including India",
@@ -88,6 +105,8 @@ export const JOB_CHANNELS: JobChannel[] = [
   },
   {
     id: "jora",
+    dataUse: "pool",
+    senderDomains: ["jora.com"],
     name: "Jora",
     route: "feed",
     region: "Australia only",
@@ -106,6 +125,8 @@ export const JOB_CHANNELS: JobChannel[] = [
   },
   {
     id: "linkedin",
+    dataUse: "pool",
+    senderDomains: ["linkedin.com"],
     name: "LinkedIn Jobs",
     route: "partner_api",
     region: "Global",
@@ -123,6 +144,8 @@ export const JOB_CHANNELS: JobChannel[] = [
   },
   {
     id: "indeed",
+    dataUse: "pool",
+    senderDomains: ["indeed.com", "indeedemail.com"],
     name: "Indeed",
     route: "partner_api",
     region: "Global",
@@ -140,6 +163,10 @@ export const JOB_CHANNELS: JobChannel[] = [
   },
   {
     id: "naukri",
+    dataUse: "role_only",
+    dataUseNote:
+      "Naukri's terms limit applications to the role they were for and ask for deletion when it closes.",
+    senderDomains: ["naukri.com"],
     name: "Naukri",
     route: "partner_api",
     region: "India",
@@ -158,6 +185,8 @@ export const JOB_CHANNELS: JobChannel[] = [
   },
   {
     id: "wellfound",
+    dataUse: "pool",
+    senderDomains: ["wellfound.com", "angel.co"],
     name: "Wellfound",
     route: "assisted",
     region: "Global (start-ups)",
@@ -174,6 +203,8 @@ export const JOB_CHANNELS: JobChannel[] = [
   },
   {
     id: "timesjobs",
+    dataUse: "pool",
+    senderDomains: ["timesjobs.com"],
     name: "TimesJobs",
     route: "assisted",
     region: "India",
@@ -190,6 +221,8 @@ export const JOB_CHANNELS: JobChannel[] = [
   },
   {
     id: "placementindia",
+    dataUse: "pool",
+    senderDomains: ["placementindia.com"],
     name: "PlacementIndia",
     route: "assisted",
     region: "India",
@@ -205,6 +238,10 @@ export const JOB_CHANNELS: JobChannel[] = [
   },
   {
     id: "jobhai",
+    dataUse: "role_only",
+    dataUseNote:
+      "Job Hai's terms allow applicants' data to be used only for that hiring requirement.",
+    senderDomains: ["jobhai.com"],
     name: "Job Hai",
     route: "assisted",
     region: "India",
@@ -221,6 +258,8 @@ export const JOB_CHANNELS: JobChannel[] = [
   },
   {
     id: "workindia",
+    dataUse: "pool",
+    senderDomains: ["workindia.in"],
     name: "WorkIndia",
     route: "assisted",
     region: "India",
@@ -237,6 +276,8 @@ export const JOB_CHANNELS: JobChannel[] = [
   },
   {
     id: "apna",
+    dataUse: "pool",
+    senderDomains: ["apna.co"],
     name: "Apna",
     route: "assisted",
     region: "India",
@@ -252,6 +293,10 @@ export const JOB_CHANNELS: JobChannel[] = [
   },
   {
     id: "internshala",
+    dataUse: "role_only",
+    dataUseNote:
+      "Internshala's terms allow applicants' data to be used solely for that hiring and never shared.",
+    senderDomains: ["internshala.com"],
     name: "Internshala",
     route: "assisted",
     region: "India (internships, fresher jobs)",
@@ -288,6 +333,25 @@ const OWN_SOURCES: Record<string, string> = {
 
 export function channelById(id: string | null | undefined): JobChannel | null {
   return JOB_CHANNELS.find((c) => c.id === id) ?? null;
+}
+
+/**
+ * The portal a careers-inbox mail came from, by its sender's domain (the
+ * domain itself or a subdomain); null for anyone else.
+ */
+export function channelForSender(email: string | null | undefined): JobChannel | null {
+  const domain = (email ?? "").trim().toLowerCase().split("@")[1] ?? "";
+  if (!domain) return null;
+  return (
+    JOB_CHANNELS.find((c) =>
+      (c.senderDomains ?? []).some((d) => domain === d || domain.endsWith(`.${d}`)),
+    ) ?? null
+  );
+}
+
+/** What a CV from this source may be used for (unknown sources: the pool). */
+export function poolUseFor(source: string | null | undefined): "pool" | "role_only" {
+  return channelById(source)?.dataUse ?? "pool";
 }
 
 /** People-readable name of an application source. */

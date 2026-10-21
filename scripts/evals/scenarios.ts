@@ -929,6 +929,127 @@ export function scenarios(): ScriptedScenario[] {
         say("Requested 3 documents; HR verified the payslip."),
       ],
     },
+    {
+      name: "distribution: lists an approved role on the feeds and asks a person to post where no feed exists",
+      agentType: "distribution",
+      autonomy: "act_and_notify",
+      setup: async ({ orgId, userId }) => ({
+        requisitionId: await seedRequisition(orgId, userId, "approved", true),
+      }),
+      goal: (d) =>
+        `Advertise this approved role on the job portals that suit it.\n\nRequisition id: ${d["requisitionId"]}`,
+      decide: () => ({ status: "approved" }),
+      expect: {
+        status: "done",
+        calls: [
+          "get_role_channels",
+          "request_feed_listing",
+          "request_feed_listing",
+          "list_members",
+          "remind_member",
+        ],
+        neverCalls: ["request_role_limited_cv_erasure"],
+      },
+      script: [
+        (m) => call("g", "get_role_channels", { requisitionId: idFromGoal(m) }),
+        (m) =>
+          call("j", "request_feed_listing", { requisitionId: idFromGoal(m), channel: "jooble" }),
+        (m) =>
+          call("a", "request_feed_listing", { requisitionId: idFromGoal(m), channel: "adzuna" }),
+        () => call("l", "list_members", {}),
+        (m) =>
+          call("r", "remind_member", {
+            userId: (toolResult(m, "list_members") as unknown as { userId: string }[])[0]!.userId,
+            heading: "Post Platform SRE on Naukri and Apna",
+            message:
+              "Platform SRE is approved and now on the Jooble and Adzuna feeds. Naukri and Apna have no integration: the ready text is on the role's page — post it there and mark it posted.",
+            path: `/requisitions/${idFromGoal(m)}`,
+          }),
+        say(
+          "On the Jooble and Adzuna feeds (approved by the HR head). Asked the HR head to post on Naukri and Apna with the ready text.",
+        ),
+      ],
+    },
+    {
+      name: "distribution: chases a quiet portal and asks before erasing role-limited CVs",
+      agentType: "distribution",
+      autonomy: "autonomous",
+      setup: async ({ orgId, userId }) => {
+        const { db } = await import("../../src/server/db");
+        const { applications, candidates, requisitionBoardPostings } =
+          await import("../../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        // Live on Internshala for 10 days; nothing has come back from it.
+        const live = await seedRequisition(orgId, userId, "approved", true);
+        await db.insert(requisitionBoardPostings).values({
+          orgId,
+          requisitionId: live,
+          provider: "internshala",
+          status: "published",
+          publishedAt: new Date(Date.now() - 10 * 864e5),
+        });
+        // Meena came from Naukri for a role that closed six weeks ago.
+        const closed = await seedRequisition(orgId, userId, "closed", true);
+        const app = await seedApplication(orgId, closed, "Meena", "rejected", 41);
+        const [a] = await db
+          .select({ c: applications.candidateId })
+          .from(applications)
+          .where(eq(applications.id, app));
+        await db
+          .update(candidates)
+          .set({
+            poolUse: "role_only",
+            poolUseSource: "naukri",
+            createdAt: new Date(Date.now() - 50 * 864e5),
+          })
+          .where(eq(candidates.id, a!.c));
+        await db
+          .update(applications)
+          .set({ source: "naukri", lastActivityAt: new Date(Date.now() - 42 * 864e5) })
+          .where(eq(applications.id, app));
+        return { live };
+      },
+      goal: () =>
+        "Daily check: CVs arriving from the job portals, listings that have sent none, careers-inbox mail that could not be read, and CVs a portal limited to their role that are due for erasure.",
+      decide: () => ({ status: "approved" }),
+      expect: {
+        status: "done",
+        calls: [
+          "check_cv_inflow",
+          "list_members",
+          "remind_member",
+          "list_role_limited_cvs",
+          "request_role_limited_cv_erasure",
+        ],
+        neverCalls: ["request_feed_listing"],
+      },
+      script: [
+        () => call("c", "check_cv_inflow", {}),
+        () => call("l", "list_members", {}),
+        (m) => {
+          const quiet = toolResult(m, "check_cv_inflow")["quietListings"] as {
+            requisitionId: string;
+            name: string;
+          }[];
+          return call("r", "remind_member", {
+            userId: (toolResult(m, "list_members") as unknown as { userId: string }[])[0]!.userId,
+            heading: `No CVs from ${quiet[0]!.name} in 10 days`,
+            message: `Platform SRE has been on ${quiet[0]!.name} for 10 days with no CVs here. Internshala keeps applications on its own site: export them and upload the CVs to the role with Internshala as the source, or take the listing down.`,
+            path: `/requisitions/${quiet[0]!.requisitionId}`,
+          });
+        },
+        () => call("x", "list_role_limited_cvs", {}),
+        (m) =>
+          call("e", "request_role_limited_cv_erasure", {
+            candidateIds: (
+              toolResult(m, "list_role_limited_cvs")["candidates"] as { candidateId: string }[]
+            ).map((c) => c.candidateId),
+          }),
+        say(
+          "Reminded the HR head about the quiet Internshala listing. The HR head approved erasing 1 CV that Naukri's terms limit to its closed role.",
+        ),
+      ],
+    },
   ];
 }
 

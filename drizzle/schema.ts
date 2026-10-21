@@ -486,9 +486,20 @@ export const candidates = pgTable(
       .notNull()
       .default(sql`'[]'::jsonb`),
     careerMetrics: jsonb("career_metrics"),
+    /**
+     * What this CV may be used for (migration 0045): 'pool' (any role, with
+     * consent) or 'role_only' — it came from a portal whose terms limit it to
+     * the role it was for; never reused, erased (after a person approves)
+     * once its roles are over. pool_use_source names that portal.
+     */
+    poolUse: text("pool_use").$type<"pool" | "role_only">().notNull().default("pool"),
+    poolUseSource: text("pool_use_source"),
   },
   (t) => [
     index("candidates_skills_gin").using("gin", t.skills),
+    index("candidates_role_only_idx")
+      .on(t.orgId)
+      .where(sql`${t.poolUse} = 'role_only'`),
     uniqueIndex("candidates_external_unique")
       .on(t.externalProvider, t.externalId)
       .where(sql`${t.externalId} is not null`),
@@ -1894,7 +1905,8 @@ export type AgentType =
   | "offer"
   | "onboarding"
   | "followup"
-  | "sourcing";
+  | "sourcing"
+  | "distribution";
 export type AgentAutonomy = "suggest" | "act_and_notify" | "autonomous";
 export type AgentRunStatus =
   "queued" | "running" | "awaiting_human" | "done" | "failed" | "cancelled";

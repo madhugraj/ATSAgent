@@ -32,7 +32,13 @@ export const COST_STAGES: { stage: string; features: string[] }[] = [
   },
   {
     stage: "Matching",
-    features: ["candidate_score", "talent_search", "agent_intake", "agent_sourcing"],
+    features: [
+      "candidate_score",
+      "talent_search",
+      "agent_intake",
+      "agent_sourcing",
+      "agent_distribution",
+    ],
   },
   {
     stage: "Screening",

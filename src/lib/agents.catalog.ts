@@ -55,6 +55,13 @@ export const AGENT_CATALOG: AgentInfo[] = [
       "Watches applicants by channel, tops up a starving role from the talent pool, invites strong past candidates to apply (with your approval) and recommends where to publish.",
   },
   {
+    type: "distribution",
+    label: "Distribution agent",
+    phase: 2,
+    description:
+      "Advertises approved roles across job portals by the route each allows (Google for Jobs, job feeds, posting by hand), chases portals that send no CVs, credits every CV to its portal and erases CVs a portal limited to their role once it is over (with your approval).",
+  },
+  {
     type: "screening",
     label: "Screening agent",
     phase: 2,
@@ -133,6 +140,9 @@ export const WHITELISTABLE_TEMPLATES: { id: string; label: string; group: "email
   { id: "job_board:linkedin", label: "LinkedIn post", group: "board" },
   { id: "job_board:naukri", label: "Naukri posting", group: "board" },
   { id: "job_board:indeed", label: "Indeed posting", group: "board" },
+  { id: "job_board:jooble", label: "Jooble job feed", group: "board" },
+  { id: "job_board:adzuna", label: "Adzuna job feed", group: "board" },
+  { id: "job_board:jora", label: "Jora job feed", group: "board" },
 ];
 
 export const AGENT_LABEL: Record<string, string> = Object.fromEntries(

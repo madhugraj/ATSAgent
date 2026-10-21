@@ -3,6 +3,7 @@
  * automatic careers-inbox import: parse a CV, upsert the talent-pool record by
  * email, and raise the application against a requisition.
  */
+import { poolUseFor } from "./job-channels";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { createHash } from "crypto";
 import { z } from "zod";
@@ -344,13 +345,26 @@ async function ingestCandidateInner(input: {
               ),
             )
           : row;
+        // Where the person first came from is kept; this arrival's source is
+        // recorded on the application below (portal credit, migration 0045).
+        const { source: _firstSourceKept, ...refresh } = updateRow as typeof row;
         await tx
           .update(candidates)
-          .set({ ...updateRow, skills: [...skills] })
+          .set({ ...refresh, skills: [...skills] })
           .where(eq(candidates.id, existing.id));
         candidateId = existing.id;
       } else {
-        const [created] = await tx.insert(candidates).values(row).returning({ id: candidates.id });
+        // A CV a portal handed over may be limited to its role by the portal's
+        // terms (src/lib/job-channels.ts); an existing record keeps its own rule.
+        const poolUse = poolUseFor(input.source);
+        const [created] = await tx
+          .insert(candidates)
+          .values({
+            ...row,
+            poolUse,
+            poolUseSource: poolUse === "role_only" ? input.source : null,
+          })
+          .returning({ id: candidates.id });
         if (!created) throw new Error("Could not save the candidate.");
         candidateId = created.id;
       }

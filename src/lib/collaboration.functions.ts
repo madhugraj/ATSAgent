@@ -148,11 +148,21 @@ export const referCandidate = createServerFn({ method: "POST" })
     if (data.toUser === context.userId) throw new Error("Pick a colleague other than yourself.");
 
     const [cand] = await db
-      .select({ id: candidates.id })
+      .select({
+        id: candidates.id,
+        name: candidates.fullName,
+        poolUse: candidates.poolUse,
+        poolUseSource: candidates.poolUseSource,
+      })
       .from(candidates)
       .where(and(eq(candidates.id, data.candidateId), eq(candidates.orgId, me.orgId)))
       .limit(1);
     if (!cand) throw new Error("That candidate is not in your organisation's pool.");
+    // Referring against a role would add them to it — not for a role-limited CV.
+    if (data.requisitionId) {
+      const { assertReusable } = await import("./pipeline.server");
+      assertReusable([cand]);
+    }
 
     const [peer] = await db
       .select({ id: orgMembers.id })

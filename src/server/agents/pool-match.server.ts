@@ -68,6 +68,8 @@ export async function matchNewCvsToRoles(orgId: string): Promise<PoolMatchResult
         eq(candidates.orgId, orgId),
         isNull(candidates.roleMatchCheckedAt),
         eq(candidates.isInternal, false),
+        // CVs a portal limited to their own role are never matched to others (0045).
+        eq(candidates.poolUse, "pool"),
         sql`${candidates.createdAt} >= now() - make_interval(days => ${POOL_MATCH.recentDays})`,
       ),
     )

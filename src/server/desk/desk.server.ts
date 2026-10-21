@@ -54,6 +54,9 @@ export const DeskSlots = z.object({
   mustHaveSkills: skillList.optional(),
   goodToHaveSkills: skillList.optional(),
   budgetLpaMax: z.number().min(0).max(1000).optional(),
+  /** The pay band the person gave, when they gave one (LPA). */
+  bandLpaMin: z.number().min(0).max(1000).optional(),
+  bandLpaMax: z.number().min(0).max(1000).optional(),
   maxNoticeDays: z.number().int().min(0).max(365).optional(),
   employmentType: z.enum(["full_time", "contract", "internship"]).optional(),
   urgency: z.enum(["immediate", "within_a_month", "flexible"]).optional(),
@@ -142,6 +145,9 @@ export function describeNeed(s: DeskSlots): string {
     s.mustHaveSkills?.length ? `· must have ${s.mustHaveSkills.join(", ")}` : "",
     s.goodToHaveSkills?.length ? `· good to have ${s.goodToHaveSkills.join(", ")}` : "",
     s.budgetLpaMax !== undefined ? `· budget up to ${s.budgetLpaMax} LPA` : "",
+    s.bandLpaMin !== undefined && s.bandLpaMax !== undefined
+      ? `· pay band ${s.bandLpaMin}–${s.bandLpaMax} LPA`
+      : "",
     s.maxNoticeDays !== undefined ? `· notice up to ${s.maxNoticeDays} days` : "",
   ]
     .filter(Boolean)
@@ -294,7 +300,7 @@ const SYSTEM = [
   "",
   "You are the hiring desk of an applicant tracking system. A recruiter describes a hiring need in a chat.",
   "Each turn, return JSON with:",
-  '- "slots": only the hiring details the LATEST message states or changes (omit the rest). Fields: roleTitle, location, workMode (onsite|hybrid|remote — "office"/"WFO" means onsite, "WFH"/"work from home" means remote; a message that says "hybrid" sets hybrid even next to a city), experienceMin, experienceMax (years), openings, mustHaveSkills, goodToHaveSkills (short skill names), budgetLpaMax (lakhs per annum), maxNoticeDays, employmentType (full_time|contract|internship), urgency (immediate|within_a_month|flexible). "a candidate" means openings 1. Expand obvious role shorthands (e.g. "Full stack" → "Full Stack Developer"). Never invent values that were not said.',
+  '- "slots": only the hiring details the LATEST message states or changes (omit the rest). Fields: roleTitle, location, workMode (onsite|hybrid|remote — "office"/"WFO" means onsite, "WFH"/"work from home" means remote; a message that says "hybrid" sets hybrid even next to a city), experienceMin, experienceMax (years), openings, mustHaveSkills, goodToHaveSkills (short skill names), budgetLpaMax (lakhs per annum — the budget; when a band is given as well, the budget is the figure called budget, not the top of the band), bandLpaMin and bandLpaMax (a pay band the person gives, lakhs per annum; only when stated), maxNoticeDays, employmentType (full_time|contract|internship), urgency (immediate|within_a_month|flexible). "a candidate" means openings 1. Expand obvious role shorthands (e.g. "Full stack" → "Full Stack Developer"). Never invent values that were not said.',
   '- JD details (only when the person gives them): responsibilities (their key responsibilities, as text), reportingTo, successMeasures (what success looks like), education. If they ask you to fill these from the market / research / "you decide", set researchRole true.',
   '- "command": {"type":"none"} unless the person asks to act: "talk to / screen / call the first 5" → {"type":"screen","top":5}; "screen 1, 3 and 4" → {"type":"screen","ranks":[1,3,4]}; "create a new role" → {"type":"new_role"}; "use REQ-2026-014" → {"type":"use_existing","code":"REQ-2026-014"}.',
   '- "command" also: "close / cancel / delete / withdraw this role" → {"type":"close_role"}.',
@@ -590,8 +596,12 @@ export async function createNewRole(
       experienceMin: s.experienceMin ?? 0,
       experienceMax: s.experienceMax ?? s.experienceMin ?? 0,
       budgetCtc: s.budgetLpaMax ? s.budgetLpaMax * 100_000 : 0,
-      ctcBandMin: null,
-      ctcBandMax: null,
+      // A band the person gave is the organisation's own figure; the
+      // Requisition agent keeps it and only researches what is missing.
+      ctcBandMin:
+        s.bandLpaMin !== undefined && s.bandLpaMax !== undefined ? s.bandLpaMin * 100_000 : null,
+      ctcBandMax:
+        s.bandLpaMin !== undefined && s.bandLpaMax !== undefined ? s.bandLpaMax * 100_000 : null,
       maxNoticePeriodDays: s.maxNoticeDays ?? null,
       workAuthorizationRequired: null,
       hiringManager: null,
@@ -1457,6 +1467,7 @@ const AGENT_TITLE: Record<string, string> = {
   publishing: "Publishing agent",
   followup: "Follow-up agent",
   sourcing: "Sourcing agent",
+  distribution: "Distribution agent",
   copilot: "Copilot",
 };
 
@@ -2485,6 +2496,8 @@ const SLOT_LABEL: Record<string, string> = {
   mustHaveSkills: "Must-have skills",
   goodToHaveSkills: "Good-to-have skills",
   budgetLpaMax: "Budget (LPA, up to)",
+  bandLpaMin: "Pay band from (LPA)",
+  bandLpaMax: "Pay band to (LPA)",
   maxNoticeDays: "Notice period (days, max)",
   employmentType: "Employment type",
   urgency: "Urgency",
@@ -3373,6 +3386,10 @@ const NEXT_AFTER_JD: { agentType: AgentType; text: string }[] = [
     text: "Posts the role on the internal job board and on every job board that is connected (the HR head approves external posts); where no board can post, it gives you a ready post and the apply link to share.",
   },
   {
+    agentType: "distribution",
+    text: "Advertises the role on the job portals that suit it — job feeds go to the HR head for approval, portals without an integration get ready text and a reminder for a person to post — and chases portals that send no CVs.",
+  },
+  {
     agentType: "sourcing",
     text: "Watches how many applicants arrive by channel and, when the role runs dry, tops it up from the talent pool and invites strong past candidates (with your approval).",
   },
@@ -3409,7 +3426,17 @@ async function explainAfterJd(conv: Conversation, jdId: string | null): Promise<
   const off = items.filter((i) => !i.enabled);
   await postMessage(conv, {
     role: "desk",
-    body: `The job description (version ${version}) is approved. Here is what happens next${off.length ? ` — ${off.map((o) => o.name).join(" and ")} ${off.length === 1 ? "is" : "are"} switched off, so ${off.length === 1 ? "that step waits" : "those steps wait"} until you switch ${off.length === 1 ? "it" : "them"} on` : ""}.`,
+    body: `The job description (version ${version}) is approved. Here is what happens next${
+      off.length
+        ? ` — ${off
+            .map((o) => o.name)
+            .join(", ")
+            .replace(
+              /, ([^,]*)$/,
+              " and $1",
+            )} ${off.length === 1 ? "is" : "are"} switched off, so ${off.length === 1 ? "that step waits" : "those steps wait"} until you switch ${off.length === 1 ? "it" : "them"} on`
+        : ""
+    }.`,
     card: { type: "next_steps", items },
   });
   if (version <= 1) return;
@@ -3524,7 +3551,7 @@ export function scoreChanges(before: ScoreSnap[], after: ScoreSnap[]): string | 
 export async function enableAgentForThread(
   conv: Conversation,
   userId: string,
-  agentType: "intake" | "publishing" | "sourcing",
+  agentType: "intake" | "publishing" | "sourcing" | "distribution",
 ): Promise<string | null> {
   const { agentPolicies } = await import("@db/schema");
   await db
@@ -3545,8 +3572,32 @@ export async function enableAgentForThread(
   });
   if (agentType === "publishing") return publishRole(conv, userId);
   if (agentType === "sourcing") return startSourcing(conv, userId);
+  if (agentType === "distribution") return startDistribution(conv, userId);
   await resumeThreadsForAgent(conv.orgId, agentType);
   return null;
+}
+
+/** Ask the Distribution agent to advertise this role across the job portals. */
+export async function startDistribution(
+  conv: Conversation,
+  userId: string,
+): Promise<string | null> {
+  if (!conv.requisitionId) throw new Error("Choose or create the role first.");
+  const [req] = await db
+    .select({ code: requisitions.code, title: requisitions.title, status: requisitions.status })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, conv.orgId)))
+    .limit(1);
+  if (req?.status !== "approved")
+    throw new Error("Only an approved role can be advertised outside the organisation.");
+  return startForThread(
+    conv,
+    "distribution",
+    userId,
+    `${req.code} "${req.title}": advertise it on the job portals that suit it and make sure the CVs they send back reach it.`,
+    conv.requisitionId,
+    "I've asked the Distribution agent to advertise this role on the job portals. Feed listings come to the HR head for approval; for portals without an integration you'll get a reminder with the ready text.",
+  );
 }
 
 /** Ask the Sourcing agent to check this role's supply now. */

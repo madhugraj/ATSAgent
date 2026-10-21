@@ -6,6 +6,7 @@
  * applicants — arrives on the inbound webhook, is stored in inbox_messages and
  * the attached CV is parsed straight into the talent pool. HR configures nothing.
  */
+import { channelForSender } from "./job-channels";
 import { and, desc, eq, ilike, inArray } from "drizzle-orm";
 
 import { db } from "../server/db";
@@ -66,6 +67,15 @@ export function applicantSender(sender: {
   if (!email.includes("@")) return null;
   if (RELAY_LOCAL.test(email.split("@")[0] ?? "")) return null;
   return { email, name: sender.name ?? null };
+}
+
+/**
+ * The source a careers-inbox CV is recorded under: the portal that sent the
+ * mail (by its sender's domain — application mails a portal relays), else the
+ * careers inbox itself.
+ */
+export function inboxSource(senderEmail: string | null | undefined): string {
+  return channelForSender(senderEmail)?.id ?? "careers_inbox";
 }
 
 export type InboundAttachment = {
@@ -255,7 +265,7 @@ export async function receiveMail(mail: InboundMail): Promise<InboundResult> {
       fileName: cv.filename,
       requisitionId,
       orgId: org.id,
-      source: "careers_inbox",
+      source: inboxSource(sender.email),
       parsed,
       fullName: parsed?.full_name || applicant?.name || null,
       email: parsed?.email ?? emailInText(text) ?? applicant?.email ?? null,
@@ -314,7 +324,7 @@ export async function retryMessage(orgId: string, messageId: string): Promise<In
       fileName: msg.attachmentName ?? "mail-body.txt",
       requisitionId,
       orgId,
-      source: "careers_inbox",
+      source: inboxSource(msg.fromEmail),
       parsed,
       fullName: parsed?.full_name || applicant?.name || null,
       email: parsed?.email ?? emailInText(text) ?? applicant?.email ?? null,

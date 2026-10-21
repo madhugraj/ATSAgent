@@ -12,7 +12,8 @@ export function registerPhase1Agents(): void {
     name: "Copilot",
     // 1.2.1: shared rules — plain language for people (no tool or field names,
     // IDs or flags) and times in the organisation's time zone.
-    version: "1.2.1",
+    // 1.2.2: can hand an approved role to the Distribution agent.
+    version: "1.2.2",
     owner: "hr_head",
     responsibility:
       "Turns a person's request into work for the specialist agents and starts them only after the person confirms.",
@@ -35,7 +36,7 @@ export function registerPhase1Agents(): void {
       "You are the hiring copilot. You turn a person's request into work for the specialist agents.",
       "- Understand the request; read existing requisitions when it refers to one.",
       "- If something essential is ambiguous (role, number of openings, team), ask with ask_human before acting.",
-      "- Hand the work over with start_agent: 'requisition' for a new role, 'jd' to draft or revise a job description for an existing requisition, 'publishing' to post an approved role, 'intake' to score and review an approved role's applicants, 'screening' to screen its shortlisted candidates.",
+      "- Hand the work over with start_agent: 'requisition' for a new role, 'jd' to draft or revise a job description for an existing requisition, 'publishing' to post an approved role, 'distribution' to advertise an approved role across the job portals and chase the CVs they send back, 'intake' to score and review an approved role's applicants, 'screening' to screen its shortlisted candidates.",
       "- Write a precise goal for the specialist, including every detail the person gave.",
       "- Finish with a two-line summary of what you started.",
     ].join("\n"),
@@ -49,13 +50,16 @@ export function registerPhase1Agents(): void {
     // 1.3.0: a requisition sent back for changes is changed exactly as asked (weights
     // rebalanced to 100) and resubmitted; work mode (onsite / hybrid / remote) is kept.
     // 1.3.1: rehearsals for the full approval chain and for a send-back.
-    version: "1.3.1",
+    // 1.4.0: a budget or pay band the person gave is kept; research only fills
+    // what they did not give and is compared in the brief.
+    version: "1.4.0",
     owner: "hr_head",
     responsibility:
       "Turns a hiring need into a complete, evidence-backed draft requisition and walks it through the DH → HR → CBO approval chain.",
     mustNever: [
       "Approve a requisition at any stage",
       "Invent pay figures — every number must come from market research or the organisation's data",
+      "Replace a budget or pay band the person gave with market figures",
       "Resubmit a declined requisition on its own (only one a person sent back for changes, after making those changes)",
       "Resubmit a requisition unchanged after it was sent back for changes",
     ],
@@ -96,7 +100,7 @@ export function registerPhase1Agents(): void {
       "1. find_similar_requisitions for the role: reuse skills, experience and bands; if an open requisition already covers the need, say so and hand off instead of duplicating.",
       "2. list_departments and pick the right department (ask_human if unclear).",
       "3. draft_requisition with concrete must-have and good-to-have skills, experience range, location, openings and responsibilities.",
-      "4. research_compensation, then set_compensation with the recommended budget and band (cite the source count and median in your brief).",
+      "4. research_compensation. A budget or pay band the person gave (in the goal, or already on the draft from get_requisition) is the organisation's own figure: keep it exactly. Use the research only for what they did not give, and in your brief compare their figures with the market (source count and median) — say so plainly if they sit above or below it. Then set_compensation.",
       "5. suggest_weights, then save_weights.",
       "6. submit_requisition_for_approval.",
       "7. request_approval with subject {type: 'requisition', id} and a short approval brief: why the role, the band and its evidence, risks or open points. Address it to department_head.",
@@ -631,6 +635,72 @@ export function registerPhase6Agents(): void {
       "3. find_past_candidates. Invite the strongest (at most 5) with invite_to_apply in ONE call — only people with hasEmail true whose earlier stage shows they did well.",
       "4. list_publish_channels. Note channels not in use (internal posting off, a board not connected or not live) as recommendations; never publish yourself.",
       "Finish with: the supply verdict, who you added from the pool, who you invited (or asked to invite), and at most three concrete recommendations (for example: switch on the Publishing agent, connect Naukri, widen a must-have that no applicant has).",
+    ].join("\n"),
+  });
+
+  registerAgent({
+    type: "distribution",
+    name: "Distribution agent",
+    // 1.0.1: the closing summary reports what happened after approvals (done,
+    // declined), never an approved step as still waiting.
+    version: "1.0.1",
+    owner: "hr_head",
+    responsibility:
+      "Advertises approved roles across the job portals by the routes each portal allows (Google for Jobs, job feeds, posting by hand), makes sure the CVs they send back reach the role and the talent pool credited to the right portal, and keeps CVs a portal limited to their role out of the pool and erased (with approval) once that role is over.",
+    mustNever: [
+      "Log into a job portal, scrape it or read a portal's CV database — every portal's terms forbid it",
+      "Record a role as posted or taken down on a portal — the person who posted it does",
+      "List a role hired for a client on an aggregator's feed",
+      "Reuse a CV a portal limited to its role for another role, or erase any CV without the HR head's approval",
+      "Score, shortlist, reject or move candidates — the Intake & matching agent and people decide",
+    ],
+    scope: {
+      reads: [
+        "requisitions and where each is advertised",
+        "applications by source",
+        "careers-inbox import results",
+        "the organisation's channel results over the last year",
+        "CVs a portal limited to their role, and whether their roles are over",
+      ],
+      writes: [
+        "a role's listing on the organisation's job feeds (approved by the HR head)",
+        "erasure of role-limited CVs past retention (approved by the HR head)",
+        "reminders to members",
+      ],
+      external: [
+        "job feeds read by Jooble, Adzuna and Jora — the HR head approves each listing unless that feed is pre-approved for an Autonomous agent",
+      ],
+    },
+    gates: ["general"],
+    riskTier: "medium",
+    evals: [
+      "distribution: lists an approved role on the feeds and asks a person to post where no feed exists",
+      "distribution: chases a quiet portal and asks before erasing role-limited CVs",
+    ],
+    feature: "agent_distribution",
+    maxSteps: 16,
+    tools: [
+      "get_role_channels",
+      "request_feed_listing",
+      "check_cv_inflow",
+      "list_role_limited_cvs",
+      "request_role_limited_cv_erasure",
+      "list_members",
+      "remind_member",
+    ],
+    system: [
+      "You are the distribution agent. You get approved roles in front of candidates on the portals they use, and make sure what comes back reaches the role. You never judge candidates.",
+      "When the goal names one role (a requisition id):",
+      "1. get_role_channels. Continue only if the role is approved.",
+      "2. Choose channels: those that brought shortlists or hires before (history), plus the ones that fit the role's region and level (Jora is Australia only; Internshala is for internships and fresher roles; Job Hai, WorkIndia and Apna are for high-volume and entry-level roles). Do not re-list anything already live.",
+      "3. For each chosen feed (jooble, adzuna, jora) that is not live: request_feed_listing, one call per feed. Never for a role hired for a client.",
+      "4. For chosen portals posted by hand (and LinkedIn, Indeed, Naukri unless live through their integration): you cannot post them. list_members, then remind_member once — the HR head, or the recruiter who owns the role — naming the portals, with the path /requisitions/<requisition id> where each portal's ready text is.",
+      "5. If Google for Jobs is on but the role is not listed, say what is missing (its gaps). If quiet channels exist, say which and suggest replacing them.",
+      "When the goal is the daily check (no single role):",
+      "1. check_cv_inflow. For each quiet listing on a portal posted by hand, remind_member once (the HR head or the role's recruiter): the portal's CVs come back as its howCvsComeBack says — ask them to export or download the CVs and upload them to the role with that portal as the source, or to take the listing down. Group several listings for the same person into one reminder.",
+      "2. If careers-inbox mail could not be read, or portal CVs sit against no role, mention it in your summary (the Careers inbox page).",
+      "3. list_role_limited_cvs. If any are due, request_role_limited_cv_erasure for them in one call (up to 25), and say which portal's terms require it.",
+      "Finish with: what is now live and where, who you reminded about what, and anything a person must fix (Google gaps, unread inbox mail, CVs with no role). Report what actually happened after each approval came back — done, or declined (with the reason) — and say something waits for the HR head only if its approval is still open.",
     ].join("\n"),
   });
 }

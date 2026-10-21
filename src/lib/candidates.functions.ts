@@ -1,11 +1,11 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { poolUseFor } from "./job-channels";
+import { and, eq } from "drizzle-orm";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { db } from "../server/db";
-import { candidates, captureEvents, applications, requisitions } from "@db/schema";
+import { candidates, applications, requisitions } from "@db/schema";
 import { assertRole, requireOrg } from "./auth.middleware";
-import { deleteObject } from "../server/storage";
 
 /**
  * Permanently delete candidates and everything attached to them:
@@ -27,32 +27,10 @@ export const deleteCandidates = createServerFn({ method: "POST" })
       "Only the HR head or the CBO can delete candidates.",
     );
     // Org predicate everywhere: an id from another tenant simply does not match.
-    const rows = await db
-      .select({
-        id: candidates.id,
-        fullName: candidates.fullName,
-        resumeFilePath: candidates.resumeFilePath,
-      })
-      .from(candidates)
-      .where(and(inArray(candidates.id, data.candidateIds), eq(candidates.orgId, context.orgId)));
-    const found = rows;
+    const { eraseCandidatesCore } = await import("../server/erase.server");
+    const found = await eraseCandidatesCore(context.orgId, data.candidateIds);
     if (found.length === 0)
       throw new Error("No matching candidates found — they may already be deleted.");
-
-    await db
-      .update(captureEvents)
-      .set({ candidateId: null })
-      .where(inArray(captureEvents.candidateId, data.candidateIds));
-
-    // Storage deletions must actually happen — a failed delete aborts the
-    // request instead of silently orphaning the candidate's CV.
-    for (const file of found) {
-      if (file.resumeFilePath) await deleteObject(file.resumeFilePath);
-    }
-
-    await db
-      .delete(candidates)
-      .where(and(inArray(candidates.id, data.candidateIds), eq(candidates.orgId, context.orgId)));
 
     return { deleted: found.length, names: found.map((r) => r.fullName).slice(0, 5) };
   });
@@ -83,11 +61,18 @@ export const attachApplication = createServerFn({ method: "POST" })
     if (!req) throw new Error("Requisition not found.");
 
     const [cand] = await db
-      .select({ id: candidates.id })
+      .select({
+        id: candidates.id,
+        name: candidates.fullName,
+        poolUse: candidates.poolUse,
+        poolUseSource: candidates.poolUseSource,
+      })
       .from(candidates)
       .where(and(eq(candidates.id, data.candidateId), eq(candidates.orgId, context.orgId)))
       .limit(1);
     if (!cand) throw new Error("Candidate not found.");
+    const { assertReusable } = await import("./pipeline.server");
+    assertReusable([cand]);
 
     // The (requisition_id, candidate_id) unique index keeps repeat attaches out.
     await db.insert(applications).values({
@@ -149,6 +134,9 @@ export const createCandidate = createServerFn({ method: "POST" })
         websiteUrl: data.websiteUrl || null,
         xUrl: data.xUrl || null,
         source: data.source,
+        // A CV a portal handed over may be limited to its role (job-channels.ts).
+        poolUse: poolUseFor(data.source),
+        poolUseSource: poolUseFor(data.source) === "role_only" ? data.source : null,
         currentEmployer: data.currentEmployer || null,
         noticePeriodDays: data.noticePeriodDays ? Number(data.noticePeriodDays) : null,
         currentCtc: data.currentCtc ? String(Number(data.currentCtc)) : null,

@@ -1317,6 +1317,14 @@ function Candidates() {
                             </span>{" "}
                             on {new Date(c.created_at).toLocaleDateString()}
                           </span>
+                          {c.pool_use === "role_only" ? (
+                            <span
+                              className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400"
+                              title={`${sourceLabel(c.pool_use_source)}'s terms limit this CV to the role it came for: it is not offered for other roles or shared, and it is erased (with the HR head's approval) once that role is over.`}
+                            >
+                              Role only
+                            </span>
+                          ) : null}
                           <span
                             className={
                               fresh.tier === "stale"
