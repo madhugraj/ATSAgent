@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-81 tables across 9 domains.
+83 tables across 9 domains.
 
 ## Identity & access
 
@@ -1076,6 +1076,8 @@ erDiagram
 | `interviews` | `org_id` | `organizations` | cascade |
 | `job_descriptions` | `org_id` | `organizations` | cascade |
 | `job_descriptions` | `requisition_id` | `requisitions` | cascade |
+| `job_index_notifications` | `org_id` | `organizations` | cascade |
+| `job_index_notifications` | `requisition_id` | `requisitions` | no action |
 | `master_items` | `org_id` | `organizations` | cascade |
 | `match_scores` | `application_id` | `applications` | cascade |
 | `match_scores` | `org_id` | `organizations` | cascade |
@@ -1092,6 +1094,7 @@ erDiagram
 | `onboarding_documents` | `offer_id` | `offers` | no action |
 | `onboarding_documents` | `org_id` | `organizations` | cascade |
 | `ontology_snapshots` | `org_id` | `organizations` | cascade |
+| `org_job_distribution` | `org_id` | `organizations` | cascade |
 | `org_linkedin_connections` | `org_id` | `organizations` | cascade |
 | `org_members` | `org_id` | `organizations` | cascade |
 | `org_members` | `user_id` | `users` | cascade |
@@ -1202,6 +1205,7 @@ erDiagram
 | `interview_slot_offers` | — | 22 | (token) |
 | `interviews` | Screening & interviews | 16 | — |
 | `job_descriptions` | Requisitions & job content | 17 | — |
+| `job_index_notifications` | — | 10 | — |
 | `master_items` | Organisations & masters | 8 | — |
 | `match_scores` | Candidates & pipeline | 26 | — |
 | `notification_states` | — | 7 | — |
@@ -1209,6 +1213,7 @@ erDiagram
 | `offers` | Offers & onboarding | 14 | — |
 | `onboarding_documents` | Offers & onboarding | 23 | — |
 | `ontology_snapshots` | Intelligence | 11 | — |
+| `org_job_distribution` | — | 7 | — |
 | `org_linkedin_connections` | Organisations & masters | 11 | — |
 | `org_members` | Organisations & masters | 12 | (orgId+email) |
 | `org_pool_shares` | Organisations & masters | 10 | (ownerOrg+partnerOrg) |

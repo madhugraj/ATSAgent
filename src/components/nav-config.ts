@@ -17,6 +17,7 @@ import {
   Inbox,
   LayoutDashboard,
   LayoutTemplate,
+  Megaphone,
   MessagesSquare,
   PhoneCall,
   Plug,
@@ -171,6 +172,13 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: Inbox,
         show: (c) => c.recruiterView,
         mode: "manual",
+      },
+      // Both ways of working: advertising a role is the same either way.
+      {
+        to: "/distribution",
+        label: "Job distribution",
+        icon: Megaphone,
+        show: (c) => c.recruiterView || c.governance,
       },
       {
         to: "/ijp",

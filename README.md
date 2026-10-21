@@ -20,6 +20,7 @@ ATSIQ by Yavar AI is an enterprise recruiting intelligence platform. It combines
 - Pre-onboarding document collection, agent extraction and HR validation gating offer release
 - Public applications, careers-inbox intake, bulk CV parsing and ATSIQ Capture for deep LinkedIn Recruiter collection
 - Enterprise job-board connections for LinkedIn, Indeed and Naukri: approved requisitions publish to the boards' job surfaces and board applications are ingested (signed webhooks + scheduled polling) into the same deduplicated, scored pipeline — capability-gated per partner contract
+- Job distribution across 14 portals (verified routes in `docs/job-distribution-research.md`): Google for Jobs structured data on every approved role's apply page (Indexing API notifications within the daily quota), per-organisation job feeds for Jooble, Adzuna and Jora, copy-ready posting packs for portals with no integration, apply links tagged per channel and a per-channel report of who applied and how far they got
 - Candidate email notifications (acknowledgment, stage update, interview invitation, offer) with per-organisation toggles
 - Explainable JD↔CV scoring, social-claim verification and recruiter overrides
 - Contextual screening kits, private audio transcription, grading and interview scorecards

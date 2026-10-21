@@ -121,3 +121,5 @@ jobs:
         run: bun test scripts/agent-markdown.test.ts
       - name: Career metrics (employers, promotions, dates)
         run: bun test scripts/career-metrics.test.ts
+      - name: Job distribution (Google for Jobs, feeds, tracked links, report)
+        run: bun test scripts/job-distribution.test.ts

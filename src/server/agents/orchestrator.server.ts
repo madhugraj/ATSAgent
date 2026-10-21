@@ -701,6 +701,18 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
   } catch (err) {
     log.warn("compensation.sweep_failed", { error: err as Error });
   }
+  // Google for Jobs follows each role's state; Google is told within the
+  // platform's daily quota (src/server/distribution/).
+  try {
+    const { reconcileGoogleListings } = await import("../distribution/distribution.server");
+    await reconcileGoogleListings(opts.orgId);
+    if (!opts.orgId) {
+      const { processIndexQueue } = await import("../distribution/google-indexing.server");
+      await processIndexQueue();
+    }
+  } catch (err) {
+    log.warn("distribution.sweep_failed", { error: err as Error });
+  }
   // Deleted hiring-desk chats past their 30-day restore are removed for good.
   if (!opts.orgId) {
     try {

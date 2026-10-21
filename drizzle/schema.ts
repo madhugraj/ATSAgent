@@ -1715,9 +1715,12 @@ export const hrmsFieldMappings = pgTable(
 /* ------------------------------------------------- job board connections */
 
 /**
- * Syndication state for one requisition on one partner board (LinkedIn /
- * Indeed / Naukri). `external_id` is the vendor's posting id — the key the
- * inbound webhook uses to route an applicant back to this requisition.
+ * Syndication state for one requisition on one channel: a partner board
+ * (LinkedIn / Indeed / Naukri, by API or posted by hand), a job feed
+ * (Jooble / Adzuna / Jora), Google for Jobs, or a portal a person posts on
+ * (provider = a channel id from src/lib/job-channels.ts). `external_id` is the
+ * vendor's posting id — the key the inbound webhook uses to route an
+ * applicant back to this requisition.
  */
 export const requisitionBoardPostings = pgTable(
   "requisition_board_postings",
@@ -1754,6 +1757,57 @@ export const requisitionBoardPostings = pgTable(
     index("board_postings_provider_external_idx")
       .on(t.provider, t.externalId)
       .where(sql`${t.externalId} is not null`),
+  ],
+);
+
+/**
+ * How an organisation advertises beyond the partner boards (migration 0044):
+ * Google for Jobs listing and the token behind its public job feeds. The
+ * token is a feed address, stored encrypted with a SHA-256 lookup hash.
+ */
+export const orgJobDistribution = pgTable(
+  "org_job_distribution",
+  {
+    orgId: uuid("org_id")
+      .primaryKey()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    googleJobsEnabled: boolean("google_jobs_enabled").notNull().default(false),
+    feedToken: text("feed_token"),
+    feedTokenHash: text("feed_token_hash"),
+    feedRotatedAt: timestamp("feed_rotated_at", { withTimezone: true }),
+    updatedBy: uuid("updated_by"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("org_job_distribution_feed_token_hash_key")
+      .on(t.feedTokenHash)
+      .where(sql`${t.feedTokenHash} is not null`),
+  ],
+);
+
+/** Google Indexing API notifications, sent within the platform's daily quota. */
+export const jobIndexNotifications = pgTable(
+  "job_index_notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    requisitionId: uuid("requisition_id").references(() => requisitions.id, {
+      onDelete: "set null",
+    }),
+    url: text("url").notNull(),
+    kind: text("kind").$type<"URL_UPDATED" | "URL_DELETED">().notNull(),
+    /** pending | sent | failed | expired */
+    status: text("status").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("job_index_notifications_status_idx").on(t.status, t.createdAt),
+    index("job_index_notifications_org_idx").on(t.orgId, t.createdAt),
   ],
 );
 

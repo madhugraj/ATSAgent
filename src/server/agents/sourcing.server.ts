@@ -24,6 +24,7 @@ import {
   requisitions,
 } from "@db/schema";
 import { env } from "../env";
+import { trackedApplyUrl } from "@/lib/job-channels";
 
 /** Explicit thresholds, so every "starving" verdict is explainable. */
 export const SOURCING = {
@@ -45,8 +46,9 @@ export const AGENT_SOURCES = ["agent_talent_pool", "pool_match"] as const;
 
 const BOARDS = ["linkedin", "naukri", "indeed"] as const;
 
-export function applyUrl(requisitionId: string): string {
-  return `${env.PUBLIC_SITE_URL.replace(/\/$/, "")}/apply/${requisitionId}`;
+/** The role's apply link, tagged with where it is shared (src/lib/job-channels.ts). */
+export function applyUrl(requisitionId: string, source?: string): string {
+  return trackedApplyUrl(env.PUBLIC_SITE_URL, requisitionId, source);
 }
 
 async function loadRole(orgId: string, requisitionId: string) {
@@ -157,7 +159,8 @@ export async function publishChannels(
   }
   return {
     requisition: { code: r.code, title: r.title, status: r.status },
-    applyUrl: applyUrl(r.id),
+    // The publishing agent puts this link in its LinkedIn post.
+    applyUrl: applyUrl(r.id, "linkedin_post"),
     careersInbox: inboxAddress(org?.inboxSlug ?? org?.slug ?? null),
     internal: { live: r.ijpEnabled, postedAt: r.ijpPostedAt?.toISOString() ?? null },
     boards,

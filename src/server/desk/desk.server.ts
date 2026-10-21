@@ -15,6 +15,7 @@
 import { CEILING_MESSAGE, LEG_LIMIT_MESSAGE } from "../agents/run-messages";
 import { localWhen } from "@/lib/local-time";
 import { placeLabel } from "@/lib/work-mode";
+import { sourceLabel as channelSourceLabel } from "@/lib/job-channels";
 import { and, asc, desc, eq, ilike, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
 import { z } from "zod/v4";
 
@@ -3569,7 +3570,9 @@ export async function startSourcing(conv: Conversation, userId: string): Promise
 
 const SOURCE_LABEL: Record<string, string> = {
   careers_inbox: "careers inbox",
-  linkedin_post: "the apply page",
+  careers_site: "the apply page",
+  linkedin_post: "a LinkedIn post",
+  role_invite: "an invitation to apply",
   direct: "the apply page",
   ijp: "internal job board",
   talent_pool: "talent pool upload",
@@ -3624,7 +3627,7 @@ export async function announceNewApplicants(orgId?: string): Promise<number> {
     if (!rows.length) continue;
     const bySource = new Map<string, number>();
     for (const r of rows) {
-      const k = SOURCE_LABEL[r.source] ?? r.source.replace(/_/g, " ");
+      const k = SOURCE_LABEL[r.source] ?? channelSourceLabel(r.source);
       bySource.set(k, (bySource.get(k) ?? 0) + 1);
     }
     const via = [...bySource].map(([k, n]) => `${n} via ${k}`).join(", ");

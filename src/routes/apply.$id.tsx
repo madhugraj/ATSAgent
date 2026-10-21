@@ -1,5 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { CheckCircle2, Loader2, MapPin, Upload } from "lucide-react";
 import { useState } from "react";
@@ -8,35 +7,56 @@ import { BrandFooter, BrandLogo } from "@/components/Brand";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { publicJob, submitApplication } from "@/lib/apply.functions";
+import { publicJob, submitApplication, type PublicJob } from "@/lib/apply.functions";
 import { extractResumeText } from "@/lib/cv-extract";
 
+/** Where the link was shared: ?src=<channel>, or Google's utm_source. */
+type ApplySearch = { src?: string | undefined; utm_source?: string | undefined };
+
 export const Route = createFileRoute("/apply/$id")({
-  head: () => ({
-    meta: [
-      { title: "Apply for this role — ATSIQ by Yavar AI" },
-      {
-        name: "description",
-        content:
-          "Upload your CV to apply. Your details are read automatically and shared with the hiring team for this role.",
-      },
-      { property: "og:title", content: "Apply for this role — ATSIQ by Yavar AI" },
-      { property: "og:description", content: "Upload your CV and apply in under a minute." },
-      { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary" },
-    ],
+  validateSearch: (search: Record<string, unknown>): ApplySearch => ({
+    src: typeof search["src"] === "string" ? search["src"].slice(0, 60) : undefined,
+    utm_source:
+      typeof search["utm_source"] === "string" ? search["utm_source"].slice(0, 60) : undefined,
   }),
+  // Loaded on the server so the page (and Google's structured data) is in the HTML.
+  loader: async ({ params }): Promise<PublicJob | null> => {
+    try {
+      return await publicJob({ data: { requisitionId: params.id } });
+    } catch {
+      return null;
+    }
+  },
+  head: ({ loaderData }) => {
+    const title = loaderData
+      ? `${loaderData.title}${loaderData.company ? ` — ${loaderData.company}` : ""}`
+      : "Apply for this role — ATSIQ by Yavar AI";
+    return {
+      scripts: loaderData?.jsonLd
+        ? [{ type: "application/ld+json", children: loaderData.jsonLd }]
+        : [],
+      meta: [
+        { title },
+        {
+          name: "description",
+          content:
+            "Upload your CV to apply. Your details are read automatically and shared with the hiring team for this role.",
+        },
+        { property: "og:title", content: title },
+        { property: "og:description", content: "Upload your CV and apply in under a minute." },
+        { property: "og:type", content: "website" },
+        { name: "twitter:card", content: "summary" },
+      ],
+    };
+  },
   component: ApplyPage,
 });
 
 function ApplyPage() {
   const { id } = Route.useParams();
+  const { src, utm_source } = Route.useSearch();
   const submit = useServerFn(submitApplication);
-
-  const job = useQuery({
-    queryKey: ["public_job", id],
-    queryFn: () => publicJob({ data: { requisitionId: id } }),
-  });
+  const j = Route.useLoaderData();
 
   const [file, setFile] = useState<File | null>(null);
   const [fullName, setFullName] = useState("");
@@ -63,7 +83,8 @@ function ApplyPage() {
           email: email.trim() || null,
           fullName: fullName.trim() || null,
           phone: phone.trim() || null,
-          source: "linkedin_post",
+          source: src ?? null,
+          utmSource: utm_source ?? null,
         },
       });
       setDone({ name: res.name, already: res.alreadyApplied });
@@ -73,8 +94,6 @@ function ApplyPage() {
       setBusy(false);
     }
   }
-
-  const j = job.data;
 
   return (
     <div className="min-h-screen bg-background">
@@ -86,9 +105,7 @@ function ApplyPage() {
       </header>
 
       <main className="mx-auto max-w-3xl px-5 py-10">
-        {job.isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading the role…</p>
-        ) : !j ? (
+        {!j ? (
           <div className="panel p-6">
             <h1 className="text-lg font-semibold">This job link is not valid</h1>
             <p className="mt-2 text-sm text-muted-foreground">
@@ -151,9 +168,11 @@ function ApplyPage() {
               </div>
             ) : null}
 
-            {j.responsibilities ? (
+            {j.description || j.responsibilities ? (
               <p className="mt-5 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
-                {j.responsibilities}
+                {(j.description ?? j.responsibilities ?? "")
+                  .replace(/^#{1,6}\s+/gm, "")
+                  .replace(/\*\*(.+?)\*\*/g, "$1")}
               </p>
             ) : null}
 

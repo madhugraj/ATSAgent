@@ -5,13 +5,13 @@
  * and the posting row are all resolved and written here.
  */
 import { placeLabel } from "@/lib/work-mode";
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 
 import { db } from "../db";
 import { requisitions, requisitionBoardPostings } from "@db/schema";
 import { writeAudit } from "../audit";
 import { assertRequisitionInOrg } from "../guards";
-import { getBoardAdapter, loadBoardConnection } from "./registry";
+import { getBoardAdapter, isBoardProvider, loadBoardConnection } from "./registry";
 import type { BoardProviderId, RequisitionSnapshot } from "./types";
 import { env } from "../env";
 
@@ -186,7 +186,8 @@ export async function closeBoardPostingImpl(input: {
   if (!posting) throw new Error("This requisition is not posted on that board.");
 
   let vendorError: string | null = null;
-  if (posting.externalId && posting.status === "published") {
+  // Feed, Google and hand-posted channels have no vendor posting to close.
+  if (posting.externalId && posting.status === "published" && isBoardProvider(input.provider)) {
     try {
       const conn = await loadBoardConnection(input.orgId, input.provider);
       await getBoardAdapter(input.provider).closePosting(conn, posting.externalId, input.reason);
@@ -239,6 +240,8 @@ export async function closePostingsForRequisition(input: {
         eq(requisitionBoardPostings.requisitionId, input.requisitionId),
         eq(requisitionBoardPostings.orgId, input.orgId),
         eq(requisitionBoardPostings.status, "published"),
+        // Google for Jobs follows the requisition on its own (distribution sweep).
+        ne(requisitionBoardPostings.provider, "google_jobs"),
       ),
     );
   for (const row of rows) {

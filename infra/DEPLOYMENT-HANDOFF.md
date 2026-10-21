@@ -80,6 +80,11 @@ printf %s "smtps://user:pass@smtp.example.com:465" | gcloud secrets create atsiq
 # 5+ Optional feature flags (app boots fine without them):
 printf %s "$(openssl rand -hex 32)" | gcloud secrets create atsiq-inbound-email-secret --data-file=-
 printf %s "$(openssl rand -hex 32)" | gcloud secrets create atsiq-cron-secret --data-file=-
+# Google for Jobs (optional): a service account with the Indexing API enabled,
+# added as an OWNER of the site's Search Console property. Pass as
+# GOOGLE_INDEXING_CREDENTIALS; without it roles are still listed from their
+# apply page and Google finds them on its own crawl.
+gcloud secrets create atsiq-google-indexing --data-file=indexing-service-account.json
 ```
 
 Also `EMAIL_FROM` (e.g. `ATSIQ <noreply@yavar.ai>`) can be passed as a plain

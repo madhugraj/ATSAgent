@@ -168,6 +168,8 @@ export const MANUAL_SECTIONS: ManualSection[] = [
       "The companion reports the precise failed stage when navigation, identity confirmation, attachment discovery, download, private storage or analysis does not complete. Stop interrupts the current wait rather than leaving the run stuck.",
       "A successful original-file capture is parsed and stored privately. When only validated profile evidence is available, ATSIQ keeps the candidate, runs available social analysis and matching, and waits for a later CV capture to enrich the same person.",
       "Use Careers inbox (/inbox) to trigger mailbox intake and background matching for CVs received through job advertisements.",
+      "Advertise approved roles from Job distribution (/distribution): the HR head switches on Google for Jobs and creates the job-feed links for Jooble, Adzuna and Jora once. On each requisition, 'Where this role is advertised' adds the role to a feed, or opens a posting pack (ready text and a tagged apply link) for portals you post on yourself — then record it as posted.",
+      "Every apply link carries where it was shared, so Job distribution shows which channels bring applicants and how far they get. When you upload CVs downloaded from a portal, choose that portal as the source.",
     ],
   },
   {

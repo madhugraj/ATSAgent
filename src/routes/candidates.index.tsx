@@ -34,6 +34,7 @@ import { verifyCandidates } from "@/lib/verification.functions";
 import { getResumeDownloadUrl } from "@/lib/resume.functions";
 import { downloadResume } from "@/lib/resume-download";
 import { createCandidate, deleteCandidates } from "@/lib/candidates.functions";
+import { sourceLabel as channelSourceLabel, UPLOAD_SOURCES } from "@/lib/job-channels";
 import { intakeCvs, type IntakeStatus } from "@/lib/cv-intake";
 import { normalizeExternalUrl } from "@/lib/external-links";
 import { canonical, nextAction, stalledDays, STAGE_LABEL, type Stage } from "@/lib/lifecycle";
@@ -149,25 +150,7 @@ function money(v: number | null) {
 }
 
 /** Human-friendly label for how the candidate entered the talent pool. */
-const SOURCE_LABELS: Record<string, string> = {
-  direct: "Manual upload",
-  bulk_upload: "Manual upload",
-  browser_capture: "LinkedIn companion",
-  careers_inbox: "Careers inbox",
-  linkedin: "LinkedIn",
-  naukri: "Naukri",
-  indeed: "Indeed",
-  referral: "Referral",
-  consultant: "Consultant",
-  campus: "Campus",
-  ijp: "Internal job posting",
-};
-
-function sourceLabel(source: string | null | undefined) {
-  const key = (source ?? "").trim();
-  if (!key) return "Unknown";
-  return SOURCE_LABELS[key] ?? key.replace(/_/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase());
-}
+const sourceLabel = channelSourceLabel;
 
 /** Experience bucket used for the Excel-style column filter. */
 function expBucket(years: number) {
@@ -808,18 +791,9 @@ function Candidates() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {[
-                          "direct",
-                          "naukri",
-                          "linkedin",
-                          "indeed",
-                          "referral",
-                          "consultant",
-                          "campus",
-                          "ijp",
-                        ].map((s) => (
+                        {UPLOAD_SOURCES.map((s) => (
                           <SelectItem key={s} value={s}>
-                            {s}
+                            {sourceLabel(s)}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -956,17 +930,9 @@ function Candidates() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {[
-                          "direct",
-                          "naukri",
-                          "linkedin",
-                          "indeed",
-                          "referral",
-                          "consultant",
-                          "campus",
-                        ].map((s) => (
+                        {UPLOAD_SOURCES.map((s) => (
                           <SelectItem key={s} value={s}>
-                            {s}
+                            {sourceLabel(s)}
                           </SelectItem>
                         ))}
                       </SelectContent>

@@ -15,6 +15,7 @@ import { Route as CatalogueRouteImport } from './routes/catalogue'
 import { Route as CollaborationRouteImport } from './routes/collaboration'
 import { Route as CookiesRouteImport } from './routes/cookies'
 import { Route as DeskRouteImport } from './routes/desk'
+import { Route as DistributionRouteImport } from './routes/distribution'
 import { Route as HelpRouteImport } from './routes/help'
 import { Route as HiringCostRouteImport } from './routes/hiring-cost'
 import { Route as IjpRouteImport } from './routes/ijp'
@@ -69,6 +70,7 @@ import { Route as ApiPublicSyncCandidatesRouteImport } from './routes/api/public
 import { Route as ApiPublicSyncHrmsRouteImport } from './routes/api/public/sync-hrms'
 import { Route as ApiPublicLinkedinCallbackRouteImport } from './routes/api/public/linkedin/callback'
 import { Route as ApiPublicBoardsProviderTokenRouteImport } from './routes/api/public/boards/$provider.$token'
+import { Route as ApiPublicFeedsTokenFormatRouteImport } from './routes/api/public/feeds/$token.$format'
 import { Route as ApiPublicIntegrationsGoogleCallbackRouteImport } from './routes/api/public/integrations/google/callback'
 import { Route as ApiPublicIntegrationsMicrosoftCallbackRouteImport } from './routes/api/public/integrations/microsoft/callback'
 import { Route as ApiPublicIntegrationsZoomCallbackRouteImport } from './routes/api/public/integrations/zoom/callback'
@@ -101,6 +103,11 @@ const CookiesRoute = CookiesRouteImport.update({
 const DeskRoute = DeskRouteImport.update({
   id: '/desk',
   path: '/desk',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DistributionRoute = DistributionRouteImport.update({
+  id: '/distribution',
+  path: '/distribution',
   getParentRoute: () => rootRouteImport,
 } as any)
 const HelpRoute = HelpRouteImport.update({
@@ -376,6 +383,12 @@ const ApiPublicBoardsProviderTokenRoute =
     path: '/api/public/boards/$provider/$token',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicFeedsTokenFormatRoute =
+  ApiPublicFeedsTokenFormatRouteImport.update({
+    id: '/api/public/feeds/$token/$format',
+    path: '/api/public/feeds/$token/$format',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicIntegrationsGoogleCallbackRoute =
   ApiPublicIntegrationsGoogleCallbackRouteImport.update({
     id: '/api/public/integrations/google/callback',
@@ -402,6 +415,7 @@ export interface FileRoutesByFullPath {
   '/collaboration': typeof CollaborationRoute
   '/cookies': typeof CookiesRoute
   '/desk': typeof DeskRoute
+  '/distribution': typeof DistributionRoute
   '/help': typeof HelpRoute
   '/hiring-cost': typeof HiringCostRoute
   '/ijp': typeof IjpRoute
@@ -456,6 +470,7 @@ export interface FileRoutesByFullPath {
   '/api/public/sync-hrms': typeof ApiPublicSyncHrmsRoute
   '/api/public/linkedin/callback': typeof ApiPublicLinkedinCallbackRoute
   '/api/public/boards/$provider/$token': typeof ApiPublicBoardsProviderTokenRoute
+  '/api/public/feeds/$token/$format': typeof ApiPublicFeedsTokenFormatRoute
   '/api/public/integrations/google/callback': typeof ApiPublicIntegrationsGoogleCallbackRoute
   '/api/public/integrations/microsoft/callback': typeof ApiPublicIntegrationsMicrosoftCallbackRoute
   '/api/public/integrations/zoom/callback': typeof ApiPublicIntegrationsZoomCallbackRoute
@@ -467,6 +482,7 @@ export interface FileRoutesByTo {
   '/collaboration': typeof CollaborationRoute
   '/cookies': typeof CookiesRoute
   '/desk': typeof DeskRoute
+  '/distribution': typeof DistributionRoute
   '/help': typeof HelpRoute
   '/hiring-cost': typeof HiringCostRoute
   '/ijp': typeof IjpRoute
@@ -521,6 +537,7 @@ export interface FileRoutesByTo {
   '/api/public/sync-hrms': typeof ApiPublicSyncHrmsRoute
   '/api/public/linkedin/callback': typeof ApiPublicLinkedinCallbackRoute
   '/api/public/boards/$provider/$token': typeof ApiPublicBoardsProviderTokenRoute
+  '/api/public/feeds/$token/$format': typeof ApiPublicFeedsTokenFormatRoute
   '/api/public/integrations/google/callback': typeof ApiPublicIntegrationsGoogleCallbackRoute
   '/api/public/integrations/microsoft/callback': typeof ApiPublicIntegrationsMicrosoftCallbackRoute
   '/api/public/integrations/zoom/callback': typeof ApiPublicIntegrationsZoomCallbackRoute
@@ -533,6 +550,7 @@ export interface FileRoutesById {
   '/collaboration': typeof CollaborationRoute
   '/cookies': typeof CookiesRoute
   '/desk': typeof DeskRoute
+  '/distribution': typeof DistributionRoute
   '/help': typeof HelpRoute
   '/hiring-cost': typeof HiringCostRoute
   '/ijp': typeof IjpRoute
@@ -587,6 +605,7 @@ export interface FileRoutesById {
   '/api/public/sync-hrms': typeof ApiPublicSyncHrmsRoute
   '/api/public/linkedin/callback': typeof ApiPublicLinkedinCallbackRoute
   '/api/public/boards/$provider/$token': typeof ApiPublicBoardsProviderTokenRoute
+  '/api/public/feeds/$token/$format': typeof ApiPublicFeedsTokenFormatRoute
   '/api/public/integrations/google/callback': typeof ApiPublicIntegrationsGoogleCallbackRoute
   '/api/public/integrations/microsoft/callback': typeof ApiPublicIntegrationsMicrosoftCallbackRoute
   '/api/public/integrations/zoom/callback': typeof ApiPublicIntegrationsZoomCallbackRoute
@@ -600,6 +619,7 @@ export interface FileRouteTypes {
     | '/collaboration'
     | '/cookies'
     | '/desk'
+    | '/distribution'
     | '/help'
     | '/hiring-cost'
     | '/ijp'
@@ -654,6 +674,7 @@ export interface FileRouteTypes {
     | '/api/public/sync-hrms'
     | '/api/public/linkedin/callback'
     | '/api/public/boards/$provider/$token'
+    | '/api/public/feeds/$token/$format'
     | '/api/public/integrations/google/callback'
     | '/api/public/integrations/microsoft/callback'
     | '/api/public/integrations/zoom/callback'
@@ -665,6 +686,7 @@ export interface FileRouteTypes {
     | '/collaboration'
     | '/cookies'
     | '/desk'
+    | '/distribution'
     | '/help'
     | '/hiring-cost'
     | '/ijp'
@@ -719,6 +741,7 @@ export interface FileRouteTypes {
     | '/api/public/sync-hrms'
     | '/api/public/linkedin/callback'
     | '/api/public/boards/$provider/$token'
+    | '/api/public/feeds/$token/$format'
     | '/api/public/integrations/google/callback'
     | '/api/public/integrations/microsoft/callback'
     | '/api/public/integrations/zoom/callback'
@@ -730,6 +753,7 @@ export interface FileRouteTypes {
     | '/collaboration'
     | '/cookies'
     | '/desk'
+    | '/distribution'
     | '/help'
     | '/hiring-cost'
     | '/ijp'
@@ -784,6 +808,7 @@ export interface FileRouteTypes {
     | '/api/public/sync-hrms'
     | '/api/public/linkedin/callback'
     | '/api/public/boards/$provider/$token'
+    | '/api/public/feeds/$token/$format'
     | '/api/public/integrations/google/callback'
     | '/api/public/integrations/microsoft/callback'
     | '/api/public/integrations/zoom/callback'
@@ -796,6 +821,7 @@ export interface RootRouteChildren {
   CollaborationRoute: typeof CollaborationRoute
   CookiesRoute: typeof CookiesRoute
   DeskRoute: typeof DeskRoute
+  DistributionRoute: typeof DistributionRoute
   HelpRoute: typeof HelpRoute
   HiringCostRoute: typeof HiringCostRoute
   IjpRoute: typeof IjpRoute
@@ -850,6 +876,7 @@ export interface RootRouteChildren {
   ApiPublicSyncHrmsRoute: typeof ApiPublicSyncHrmsRoute
   ApiPublicLinkedinCallbackRoute: typeof ApiPublicLinkedinCallbackRoute
   ApiPublicBoardsProviderTokenRoute: typeof ApiPublicBoardsProviderTokenRoute
+  ApiPublicFeedsTokenFormatRoute: typeof ApiPublicFeedsTokenFormatRoute
   ApiPublicIntegrationsGoogleCallbackRoute: typeof ApiPublicIntegrationsGoogleCallbackRoute
   ApiPublicIntegrationsMicrosoftCallbackRoute: typeof ApiPublicIntegrationsMicrosoftCallbackRoute
   ApiPublicIntegrationsZoomCallbackRoute: typeof ApiPublicIntegrationsZoomCallbackRoute
@@ -897,6 +924,13 @@ declare module '@tanstack/react-router' {
       path: '/desk'
       fullPath: '/desk'
       preLoaderRoute: typeof DeskRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/distribution': {
+      id: '/distribution'
+      path: '/distribution'
+      fullPath: '/distribution'
+      preLoaderRoute: typeof DistributionRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/help': {
@@ -1277,6 +1311,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicBoardsProviderTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/feeds/$token/$format': {
+      id: '/api/public/feeds/$token/$format'
+      path: '/api/public/feeds/$token/$format'
+      fullPath: '/api/public/feeds/$token/$format'
+      preLoaderRoute: typeof ApiPublicFeedsTokenFormatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/integrations/google/callback': {
       id: '/api/public/integrations/google/callback'
       path: '/api/public/integrations/google/callback'
@@ -1308,6 +1349,7 @@ const rootRouteChildren: RootRouteChildren = {
   CollaborationRoute: CollaborationRoute,
   CookiesRoute: CookiesRoute,
   DeskRoute: DeskRoute,
+  DistributionRoute: DistributionRoute,
   HelpRoute: HelpRoute,
   HiringCostRoute: HiringCostRoute,
   IjpRoute: IjpRoute,
@@ -1362,6 +1404,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicSyncHrmsRoute: ApiPublicSyncHrmsRoute,
   ApiPublicLinkedinCallbackRoute: ApiPublicLinkedinCallbackRoute,
   ApiPublicBoardsProviderTokenRoute: ApiPublicBoardsProviderTokenRoute,
+  ApiPublicFeedsTokenFormatRoute: ApiPublicFeedsTokenFormatRoute,
   ApiPublicIntegrationsGoogleCallbackRoute:
     ApiPublicIntegrationsGoogleCallbackRoute,
   ApiPublicIntegrationsMicrosoftCallbackRoute:
