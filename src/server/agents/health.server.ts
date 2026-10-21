@@ -10,6 +10,7 @@
  *
  * Thresholds are explicit constants so every issue is explainable.
  */
+import { sourceLabel } from "@/lib/job-channels";
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
 
 import { db } from "../db";
@@ -59,6 +60,10 @@ export const HEALTH = {
   offerRevisions: 3,
   /** A pay discussion waiting on a person (suggested figure, call asked for) this many days. */
   negotiationWaitDays: 2,
+  /** A portal listing live this many days without one CV from it (Distribution agent on). */
+  quietListingDays: 14,
+  /** Role-limited CVs still kept this many days after they became due for erasure. */
+  roleLimitedOverdueDays: 7,
   /** Re-evaluate at most this often (minutes). */
   evaluateEveryMinutes: 5,
 } as const;
@@ -391,6 +396,56 @@ export const RULES: Rule[] = [
             .map((x) => `${x.code} (${x.runs} runs)`)
             .join(", ")}`,
           detail: { roles: r.length, codes: r.slice(0, 5).map((x) => x.code) },
+        },
+      ];
+    },
+  },
+  {
+    id: "distribution.quiet_listing",
+    element: "tools",
+    severity: "warning",
+    description: `A role has been live on a job portal for ${HEALTH.quietListingDays}+ days without a single CV from it — nobody is bringing that portal's applications in (export or download them and upload them with the portal as the source), or the portal is not working for this role and the listing should come down.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ code: string; provider: string }>(sql`
+        select q.code, p.provider
+        from requisition_board_postings p
+        join requisitions q on q.id = p.requisition_id and q.org_id = p.org_id
+        where p.org_id = ${orgId} and p.status = 'published' and q.status = 'approved'
+          and p.provider <> 'google_jobs'
+          and p.published_at <= now() - make_interval(days => ${HEALTH.quietListingDays})
+          and exists (select 1 from agent_policies ap where ap.org_id = ${orgId}
+            and ap.agent_type = 'distribution' and ap.enabled)
+          and not exists (select 1 from applications a
+            where a.requisition_id = q.id and a.source = p.provider)
+        order by p.published_at
+        limit 20`);
+      if (!r.length) return [];
+      return [
+        {
+          agentType: "distribution",
+          title: `${r.length} listing(s) brought no CVs in ${HEALTH.quietListingDays} days: ${r
+            .slice(0, 5)
+            .map((x) => `${x.code} on ${sourceLabel(x.provider)}`)
+            .join(", ")}`,
+          detail: { listings: r.length, sample: r.slice(0, 5) },
+        },
+      ];
+    },
+  },
+  {
+    id: "distribution.role_limited_retention",
+    element: "audit",
+    severity: "serious",
+    description: `CVs a portal's terms limit to the role they were for are still kept ${HEALTH.roleLimitedOverdueDays}+ days after they became due for erasure. The HR head should approve the Distribution agent's erasure request (or erase them from the talent pool).`,
+    evaluate: async (orgId) => {
+      const { overdueRestricted } = await import("./distribution-agent.server");
+      const n = await overdueRestricted(orgId, HEALTH.roleLimitedOverdueDays);
+      if (!n) return [];
+      return [
+        {
+          agentType: "distribution",
+          title: `${n} role-limited CV(s) overdue for erasure`,
+          detail: { overdue: n },
         },
       ];
     },

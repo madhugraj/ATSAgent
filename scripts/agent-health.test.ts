@@ -470,3 +470,86 @@ describe("scheduler heartbeat", () => {
     expect(s.minutesSinceTick).toBeGreaterThanOrEqual(HEALTH.heartbeatMinutes + 3);
   });
 });
+
+describe("distribution rules", () => {
+  const days = (n: number) => new Date(Date.now() - n * 864e5);
+  async function seed() {
+    const { requisitions, candidates, applications } = await import("../drizzle/schema");
+    const role = async (status: string) =>
+      (
+        await db
+          .insert(requisitions)
+          .values({
+            orgId,
+            code: `REQ-DH-${Math.random().toString(36).slice(2, 7)}`,
+            title: "SRE",
+            status,
+          } as never)
+          .returning({ id: requisitions.id })
+      )[0]!.id;
+    const person = async (values: Record<string, unknown>) =>
+      (
+        await db
+          .insert(candidates)
+          .values({
+            orgId,
+            fullName: "Meena",
+            email: `m-${Math.random().toString(36).slice(2, 7)}@x.local`,
+            ...values,
+          } as never)
+          .returning({ id: candidates.id })
+      )[0]!.id;
+    return { role, person, applications, requisitions, candidates };
+  }
+
+  test("a portal listing quiet for 14 days is flagged, only where the Distribution agent is on", async () => {
+    const { requisitionBoardPostings, agentPolicies } = await import("../drizzle/schema");
+    const { role, requisitions } = await seed();
+    const r = await role("approved");
+    await db.insert(requisitionBoardPostings).values({
+      orgId,
+      requisitionId: r,
+      provider: "workindia",
+      status: "published",
+      publishedAt: days(HEALTH.quietListingDays + 1),
+    });
+    await evaluate();
+    expect((await open()).filter((i) => i.rule === "distribution.quiet_listing")).toHaveLength(0);
+    await db.insert(agentPolicies).values({ orgId, agentType: "distribution", enabled: true });
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "distribution.quiet_listing")).toMatchObject({
+      agentType: "distribution",
+      title: expect.stringMatching(/on WorkIndia/),
+    });
+    await db.delete(agentPolicies).where(eq(agentPolicies.orgId, orgId));
+    await db.delete(requisitions).where(eq(requisitions.id, r));
+  });
+
+  test("role-limited CVs kept a week past their erasure date are a serious finding", async () => {
+    const { role, person, applications, requisitions, candidates } = await seed();
+    const closed = await role("closed");
+    const c = await person({ poolUse: "role_only", poolUseSource: "naukri", createdAt: days(60) });
+    await db.insert(applications).values({
+      orgId,
+      requisitionId: closed,
+      candidateId: c,
+      stage: "rejected",
+      source: "naukri",
+      lastActivityAt: days(33),
+    } as never);
+    await evaluate();
+    expect(
+      (await open()).filter((i) => i.rule === "distribution.role_limited_retention"),
+    ).toHaveLength(0);
+    await db
+      .update(applications)
+      .set({ lastActivityAt: days(30 + HEALTH.roleLimitedOverdueDays + 1) })
+      .where(eq(applications.candidateId, c));
+    await evaluate();
+    expect(
+      (await open()).find((i) => i.rule === "distribution.role_limited_retention"),
+    ).toMatchObject({ agentType: "distribution", severity: "serious" });
+    await db.delete(candidates).where(eq(candidates.id, c));
+    await db.delete(requisitions).where(eq(requisitions.id, closed));
+  });
+});

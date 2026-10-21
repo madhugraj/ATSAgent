@@ -54,6 +54,19 @@ partner APIs, and a person posting by hand.
   "taken down" (audited).
 - **Source report** — applicants per channel and how far they got.
 
+## Distribution agent
+
+The agent path over the same records (`src/server/agents/tools-distribution.ts`):
+it requests feed listings (the HR head approves), reminds a person to post on
+portals with no integration, chases portals that send no CVs, and credits
+careers-inbox mail to the portal that sent it. CVs from portals whose terms
+limit them to their role (Naukri, Internshala, Job Hai) are marked
+role-only: never reused or shared, and erased with the HR head's approval
+30 days after their roles are over. Candidates who apply on our own apply
+page are not limited, whatever link they followed. The data-use reading of
+each portal's terms is conservative — have the organisation's counsel
+confirm it.
+
 ## Business steps (not code)
 
 - LinkedIn: partner application form — https://business.linkedin.com/talent-solutions/ats-partners/partner-application

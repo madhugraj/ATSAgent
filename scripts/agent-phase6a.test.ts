@@ -364,6 +364,21 @@ describe("choosing the role", () => {
     expect(a?.entityId).toBe(requisitionId);
   });
 
+  test("a budget and pay band the person gave reach the draft as theirs", async () => {
+    const conv = await confirming();
+    await db
+      .update(hiringConversations)
+      .set({ slots: { ...complete, budgetLpaMax: 85, bandLpaMin: 70, bandLpaMax: 105 } as never })
+      .where(eq(hiringConversations.id, conv.id));
+    const { requisitionId } = await desk.createNewRole(await reload(conv.id), recruiter);
+    const [req] = await db.select().from(requisitions).where(eq(requisitions.id, requisitionId));
+    expect(Number(req!.budgetCtc)).toBe(8_500_000);
+    expect(Number(req!.ctcBandMin)).toBe(7_000_000);
+    expect(Number(req!.ctcBandMax)).toBe(10_500_000);
+    const runs = await runsOf(conv.id);
+    expect(runs[0]!.goal).toMatch(/budget up to 85 LPA · pay band 70–105 LPA/);
+  });
+
   test("a switched-off agent is reported in the thread, not silently queued", async () => {
     await db
       .update(agentPolicies)

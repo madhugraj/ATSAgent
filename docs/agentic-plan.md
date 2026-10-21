@@ -1159,6 +1159,32 @@ arrives):
     emails the apply link — nobody is added without applying). It never
     scores, moves, rejects or publishes; it recommends. Health rule
     `sourcing.no_supply`: 2+ fruitless runs on a role in 7 days.
+  - _Distribution agent (`distribution`, v1.0.1, owner HR head, risk medium):_
+    advertises approved roles across the 14 job portals by the route each
+    allows (`docs/job-distribution-research.md`) and makes sure what they
+    send back reaches the role. Started when a role's JD is approved (only
+    where the organisation switched it on — no "agent is off" note), from the
+    desk ("Advertise on job portals") or by the Copilot (1.2.2), plus a daily
+    check per organisation. Tools: `get_role_channels`, `request_feed_listing`
+    (`external`, template `job_board:<jooble|adzuna|jora>`, approver HR head —
+    pre-approvable per feed for an Autonomous agent; refused for client hires,
+    repeats and unapproved roles before anyone is asked), `check_cv_inflow`,
+    `list_role_limited_cvs`, `request_role_limited_cv_erasure` (`external`,
+    no template, approver HR head — always asks, even at Autonomous; erases
+    only what is still due; audit keeps counts, never names), `list_members`,
+    `remind_member`. It never logs into or scrapes a portal and never records
+    a hand posting — it reminds the person with the role's ready text.
+    Careers-inbox mail is credited to the portal that sent it (sender domain).
+    **Role-limited CVs** (migration `0045` `candidates.pool_use`): a CV a
+    portal handed over whose terms limit it to its role (Naukri, Internshala,
+    Job Hai) is never added to another role (`assertReusable` in
+    `addApplicationsCore`, attach and referrals), searched, matched, invited
+    or shown through a consortium share (`sharedFrom`); 30 days after its
+    roles are over (closed, or turned down / withdrawn; never if hired) the
+    agent asks the HR head to erase it. Candidates who apply on our own apply
+    page are not limited, whatever link they followed. Health rules
+    `distribution.quiet_listing` (live 14+ days, no CV from it; agent on) and
+    `distribution.role_limited_retention` (serious: 7+ days past erasure).
   - _New CV → open roles:_ someone who joins the pool without a role (an
     inbox mail that named no role, an upload, a capture, an HRMS import) is
     checked once by the scheduler (`pool-match.server.ts`, migration `0032`
@@ -1327,6 +1353,7 @@ P6 hiring desk + voice (planned).
 | 11  | Pre-onboarding & release agent | offer approved                                        | requests and cross-checks documents, prepares release                                            | document validation and release (HR head) | P4    |
 | 12  | Follow-up agent                | anything past its deadline                            | nudges approvers / interviewers, drafts candidate follow-ups                                     | candidate messages (unless whitelisted)   | P2    |
 | 13  | Sourcing agent                 | approved role starving for applicants                 | supply by channel, tops up from the talent pool, invites strong past candidates, recommends      | invitations (unless whitelisted)          | P6    |
+| 14  | Distribution agent             | role + JD approved; daily check                       | lists roles on job feeds, reminds people to post where no integration exists, chases quiet portals, credits CVs to portals | feed listings (unless whitelisted); erasing role-limited CVs | P6    |
 
 ### A.2 Tools
 

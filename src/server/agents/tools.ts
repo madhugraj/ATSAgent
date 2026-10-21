@@ -509,12 +509,13 @@ export function registerPhase1Tools(): void {
   registerTool({
     name: "start_agent",
     description:
-      "Hand a piece of work to a specialist agent: requisition (draft and submit a new role), jd (draft or revise a JD for an existing requisition), publishing (post an approved role), intake (score and review an approved role's applicants), screening (screen its shortlisted candidates), interview (book next rounds), evaluation (debrief a candidate and ask for the hiring decision), offer (draft and route an offer) or onboarding (collect documents and prepare release). The person confirms before it starts.",
+      "Hand a piece of work to a specialist agent: requisition (draft and submit a new role), jd (draft or revise a JD for an existing requisition), publishing (post an approved role), distribution (advertise an approved role across the job portals and chase the CVs they send back), intake (score and review an approved role's applicants), screening (screen its shortlisted candidates), interview (book next rounds), evaluation (debrief a candidate and ask for the hiring decision), offer (draft and route an offer) or onboarding (collect documents and prepare release). The person confirms before it starts.",
     input: z.object({
       agent: z.enum([
         "requisition",
         "jd",
         "publishing",
+        "distribution",
         "intake",
         "screening",
         "interview",

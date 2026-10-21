@@ -108,7 +108,12 @@ weights or approval trail); the feed token is 24 random bytes stored with `encry
 SHA-256 lookup hash, replaceable by the HR head (audited). Google for Jobs structured data is
 built server-side from the same candidate-facing fields and escaped for an inline script; the
 Indexing API is called only at Google's two fixed endpoints with a platform service account.
-Tracked apply links keep only known channel names (`?src=`), so a link cannot invent a source.
+CVs a portal hands over under terms that limit them to the role they were for (Naukri, Internshala,
+Job Hai — `candidates.pool_use = 'role_only'`, migration 0045) are never added to another role,
+searched, matched, invited or shown through a consortium pool share, and are erased 30 days after
+their roles are over — only after the HR head approves the Distribution agent's request, even for
+an Autonomous agent (audited `candidate.erase_role_limited`, counts only; health rule
+`distribution.role_limited_retention` flags any kept a week longer). Tracked apply links keep only known channel names (`?src=`), so a link cannot invent a source.
 Including a role on a feed, recording a hand posting and switching Google listing are
 `hr_head`-gated and audited.
 

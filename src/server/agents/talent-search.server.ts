@@ -181,6 +181,8 @@ export async function searchTalentPool(
     .where(
       and(
         eq(candidates.orgId, orgId),
+        // CVs a portal limited to their own role are never reused (migration 0045).
+        eq(candidates.poolUse, "pool"),
         sql`${candidates.id} not in (${inPipeline})`,
         sql`(${sql.join(
           terms.map(

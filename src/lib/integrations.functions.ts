@@ -1,3 +1,4 @@
+import { poolUseFor } from "./job-channels";
 import { createServerFn } from "@tanstack/react-start";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -294,6 +295,9 @@ export const importCandidates = createServerFn({ method: "POST" })
           githubUrl: c.github_url,
           externalId: c.external_id,
           externalProvider: data.provider,
+          // A portal's database may limit its CVs to the role (job-channels.ts).
+          poolUse: poolUseFor(data.provider),
+          poolUseSource: poolUseFor(data.provider) === "role_only" ? data.provider : null,
         })
         .onConflictDoUpdate({
           // Partial unique index candidates_external_unique on
@@ -307,7 +311,6 @@ export const importCandidates = createServerFn({ method: "POST" })
             email: c.email,
             phone: c.phone,
             location: c.location,
-            source: data.provider,
             experienceYears: String(c.experience_years),
             education: c.education,
             skills: c.skills,

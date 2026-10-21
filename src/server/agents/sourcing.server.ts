@@ -291,6 +291,7 @@ export async function pastCandidates(
         sql`, `,
       )})
       and c.consent_given
+      and c.pool_use = 'pool'
       and not exists (select 1 from applications x where x.candidate_id = c.id and x.requisition_id = ${requisitionId})
       and not exists (
         select 1 from applications h where h.candidate_id = c.id and h.stage in ('hired','joined','offer_accepted')

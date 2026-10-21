@@ -71,6 +71,7 @@ const { registerPhase2Tools } = await import("../src/server/agents/tools-phase2"
 const { registerPhase3Tools } = await import("../src/server/agents/tools-phase3");
 const { registerPhase4Tools } = await import("../src/server/agents/tools-phase4");
 const { registerSourcingTools } = await import("../src/server/agents/tools-sourcing");
+const { registerDistributionTools } = await import("../src/server/agents/tools-distribution");
 const {
   registerPhase1Agents,
   registerPhase2Agents,
@@ -88,6 +89,7 @@ const registerReal = () => {
   registerPhase3Tools();
   registerPhase4Tools();
   registerSourcingTools();
+  registerDistributionTools();
   registerPhase1Agents();
   registerPhase2Agents();
   registerPhase3Agents();

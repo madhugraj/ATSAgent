@@ -6,6 +6,7 @@
  * returned in the exact PostgREST wire shape routes were written against:
  * snake_case column names, ISO date strings.
  */
+import { sharedFrom } from "./pool-share";
 import { and, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -183,7 +184,8 @@ export const listCandidates = createServerFn({ method: "POST" })
       ? await db
           .select()
           .from(candidates)
-          .where(inArray(candidates.orgId, fullOwners))
+          // CVs a portal limited to their role never leave the organisation (0045).
+          .where(sharedFrom(fullOwners))
           .orderBy(desc(candidates.createdAt))
       : [];
 
@@ -211,7 +213,7 @@ export const listCandidates = createServerFn({ method: "POST" })
             createdAt: candidates.createdAt,
           })
           .from(candidates)
-          .where(inArray(candidates.orgId, redactedOwners))
+          .where(sharedFrom(redactedOwners))
           .orderBy(desc(candidates.createdAt))
       : [];
 
@@ -299,7 +301,7 @@ export const globalSearch = createServerFn({ method: "POST" })
       ? await db
           .select(slim)
           .from(candidates)
-          .where(and(inArray(candidates.orgId, fullOwners), or(visibleMatch, emailMatch)))
+          .where(and(sharedFrom(fullOwners), or(visibleMatch, emailMatch)))
           .orderBy(desc(candidates.createdAt))
           .limit(8)
       : [];
@@ -314,7 +316,7 @@ export const globalSearch = createServerFn({ method: "POST" })
             experienceYears: candidates.experienceYears,
           })
           .from(candidates)
-          .where(and(inArray(candidates.orgId, redactedOwners), visibleMatch))
+          .where(and(sharedFrom(redactedOwners), visibleMatch))
           .orderBy(desc(candidates.createdAt))
           .limit(8)
       : [];

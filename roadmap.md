@@ -1,5 +1,13 @@
 # Roadmap
 
+## Distribution agent (2026-10-21)
+
+- [x] Distribution agent v1.0.0 (owner HR head): advertises approved roles across the job portals by the route each allows — requests feed listings (HR head approves; pre-approvable per feed for Autonomous), reminds a person to post where no integration exists with the role's ready text — and runs a daily check: CVs arriving by portal, listings quiet for a week, unread careers-inbox mail, portal CVs with no role
+- [x] Careers-inbox mail credited to the portal that sent it (sender domain)
+- [x] Role-limited CVs (migration 0045): CVs from portals whose terms limit them to their role (Naukri, Internshala, Job Hai) are never reused for another role, searched, matched, invited or shared with partner organisations, are marked "Role only" in the talent pool, and are erased 30 days after their roles are over once the HR head approves (always asked, even at Autonomous)
+- [x] Health rules `distribution.quiet_listing` and `distribution.role_limited_retention`; two rehearsals; desk "Advertise on job portals"; Copilot 1.2.2 can start it
+- [x] From the end-to-end test: the desk keeps a pay band the person states and Requisition agent 1.4.0 keeps a stated budget and band (research fills only what is missing and is compared in the brief); a CV arriving again keeps the candidate's first source and credits the new channel on the application; "Send back for changes" sits next to Approve on a requisition in approval; approval cards no longer show tool names; Distribution 1.0.1 reports what happened after approvals and names portals properly
+
 ## Job distribution — phase 1 (2026-10-21)
 
 - [x] 14 portals researched against their own employer, partner and developer pages (`docs/job-distribution-research.md`); one channel catalogue drives the product (`src/lib/job-channels.ts`)

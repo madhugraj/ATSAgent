@@ -4,6 +4,7 @@
  * check, attaching talent-pool candidates, and candidate notes. Every core
  * predicates on the organisation and applies the same role rules as the UI.
  */
+import { sourceLabel } from "./job-channels";
 import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "../server/db";
@@ -90,6 +91,21 @@ export async function moveStageCore(
 }
 
 /** Attach this organisation's candidates to one of its requisitions. */
+/**
+ * A CV a portal limited to the role it was for (job-channels.ts, migration
+ * 0045) is never added to another role — by a person or an agent.
+ */
+export function assertReusable(
+  rows: { name: string; poolUse: string; poolUseSource: string | null }[],
+): void {
+  const limited = rows.filter((r) => r.poolUse === "role_only");
+  if (!limited.length) return;
+  const via = limited[0]!.poolUseSource;
+  throw new Error(
+    `${limited.map((r) => r.name).join(", ")} came from ${via ? sourceLabel(via) : "a portal"}, whose terms limit the CV to the role it was for — it cannot be added to another role.`,
+  );
+}
+
 export async function addApplicationsCore(
   actor: LifecycleActor,
   input: { requisitionId: string; candidateIds: string[]; source: string },
@@ -101,12 +117,18 @@ export async function addApplicationsCore(
     .limit(1);
   if (!requisition) throw new Error("Requisition not found");
   const owned = await db
-    .select({ id: candidates.id })
+    .select({
+      id: candidates.id,
+      name: candidates.fullName,
+      poolUse: candidates.poolUse,
+      poolUseSource: candidates.poolUseSource,
+    })
     .from(candidates)
     .where(and(inArray(candidates.id, input.candidateIds), eq(candidates.orgId, actor.orgId)));
   if (owned.length !== new Set(input.candidateIds).size) {
     throw new Error("Some candidates are not in this organisation's talent pool.");
   }
+  assertReusable(owned);
   await db.insert(applications).values(
     input.candidateIds.map((candidateId) => ({
       requisitionId: input.requisitionId,

@@ -123,3 +123,5 @@ jobs:
         run: bun test scripts/career-metrics.test.ts
       - name: Job distribution (Google for Jobs, feeds, tracked links, report)
         run: bun test scripts/job-distribution.test.ts
+      - name: Distribution agent (portal credit, role-limited CVs, daily check)
+        run: bun test scripts/distribution-agent.test.ts
