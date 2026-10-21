@@ -58,6 +58,13 @@ const schema = z.object({
   SMTP_URL: z.string().optional(),
   EMAIL_FROM: z.string().optional(),
 
+  // Google for Jobs: a service account (JSON key, raw or base64) that owns the
+  // PUBLIC_SITE_URL property in Search Console. Unset = roles are still listed
+  // through the structured data on their apply page; Google finds them on its
+  // own crawl instead of being told. The quota is shared by every organisation.
+  GOOGLE_INDEXING_CREDENTIALS: z.string().optional(),
+  GOOGLE_INDEXING_DAILY_LIMIT: z.coerce.number().int().min(1).max(100_000).default(180),
+
   // CV vault (S3-compatible; MinIO in development compose)
   S3_ENDPOINT: z.string().optional(),
   S3_REGION: z.string().default("us-east-1"),

@@ -129,7 +129,7 @@ beforeEach(async () => {
 describe("channels and supply", () => {
   test("channels report the real state: nothing connected, apply link, internal posting", async () => {
     const c = await sourcing.publishChannels(orgId, role);
-    expect(c.applyUrl).toMatch(new RegExp(`/apply/${role}$`));
+    expect(c.applyUrl).toMatch(new RegExp(`/apply/${role}\\?src=linkedin_post$`));
     expect(c.internal.live).toBe(false);
     expect(c.boards.map((b) => b.provider)).toEqual(["linkedin", "naukri", "indeed"]);
     for (const b of c.boards) {

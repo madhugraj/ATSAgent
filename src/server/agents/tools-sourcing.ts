@@ -105,7 +105,7 @@ export function registerSourcingTools(): void {
             orgName: org?.name ?? "the hiring team",
             jobTitle: r.title,
             location: r.location ?? undefined,
-            applyUrl: applyUrl(r.id),
+            applyUrl: applyUrl(r.id, "role_invite"),
           },
         });
         invited.push(c.name);

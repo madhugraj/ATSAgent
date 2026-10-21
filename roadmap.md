@@ -1,5 +1,16 @@
 # Roadmap
 
+## Job distribution — phase 1 (2026-10-21)
+
+- [x] 14 portals researched against their own employer, partner and developer pages (`docs/job-distribution-research.md`); one channel catalogue drives the product (`src/lib/job-channels.ts`)
+- [x] Google for Jobs: JobPosting structured data rendered on the server on the apply page for approved, complete roles of organisations that switch it on; a role can be excluded; the Indexing API is told when a role opens or closes, within the platform's daily quota (migration 0044)
+- [x] Job feeds for Jooble, Adzuna and Jora per organisation (replaceable, encrypted token); roles added by the HR head; client hires never listed
+- [x] Posting packs for LinkedIn, Indeed and Naukri (until partnered) and Wellfound, TimesJobs, PlacementIndia, Job Hai, WorkIndia, Apna, Internshala: copy without contact details, tracked link where the portal accepts one, mark posted / taken down (audited)
+- [x] Apply links tagged per channel (`?src=`, Google's `utm_source`); only known channels are recorded; bulk CV upload offers every portal as the source
+- [x] Per-channel report: applicants, shortlisted, interviewed, offered, hired and live roles
+- [ ] Phase 2 (needs partner approval): Naukri Zwayam Amplify, Indeed Job Sync + Indeed Apply, LinkedIn Apply Connect / Basic Jobs feed, Adzuna Easy Apply, Apna enterprise
+- [ ] A Distribution agent that proposes where to post a role and prepares the packs (people still post and approve)
+
 ## Autonomy and job-board posting (2026-10-08)
 
 - [x] Any member can ask the Publishing agent for a LinkedIn / Naukri / Indeed post; the HR head approves it (with its text) and it is published as that HR head (Publishing agent v1.3.0); tools can name an approver role

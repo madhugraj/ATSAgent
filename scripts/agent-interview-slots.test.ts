@@ -94,10 +94,17 @@ beforeEach(async () => {
 });
 
 const day = (n: number) => new Date(Date.now() + n * 864e5);
-/** A weekday 11:00 UTC at least `n` days ahead. */
+/**
+ * The n-th weekday from today, at `hour`:00 UTC. Counting weekdays (rather
+ * than skipping a weekend landing forward) keeps different `n` on different
+ * days whatever weekday the suite runs on.
+ */
 function weekdayAt(n: number, hour = 11) {
-  const d = day(n);
-  while ([0, 6].includes(d.getUTCDay())) d.setUTCDate(d.getUTCDate() + 1);
+  const d = day(0);
+  for (let left = n; left > 0; ) {
+    d.setUTCDate(d.getUTCDate() + 1);
+    if (![0, 6].includes(d.getUTCDay())) left--;
+  }
   d.setUTCHours(hour, 0, 0, 0);
   return d;
 }

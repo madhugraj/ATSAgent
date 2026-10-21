@@ -1,10 +1,11 @@
 /**
  * Public job-application intake.
  *
- * The LinkedIn job post carries an ATSIQ apply link. Anyone who taps it lands
- * on /apply/<requisition>, uploads a CV, and the CV is parsed and filed into
- * the talent pool plus this requisition's pipeline automatically — no recruiter
- * download step, no LinkedIn data agreement needed.
+ * Every post, feed and portal listing carries the role's apply link, tagged
+ * with where it was shared (?src=, see src/lib/job-channels.ts). Anyone who
+ * taps it lands on /apply/<requisition>, uploads a CV, and the CV is parsed
+ * and filed into the talent pool plus this requisition's pipeline
+ * automatically, recorded under that source — no recruiter download step.
  *
  * These functions are intentionally unauthenticated (public applicants), so
  * every handler is narrow: read-only job summary for approved requisitions,
@@ -20,6 +21,7 @@ import { z } from "zod";
 import { db } from "../server/db";
 import { applications, candidates, organizations, requisitions } from "@db/schema";
 import { aiJson } from "./ai-gateway.server";
+import { resolveSource } from "./job-channels";
 
 const IdInput = z.object({ requisitionId: z.string().uuid() });
 
@@ -35,6 +37,10 @@ export type PublicJob = {
   responsibilities: string | null;
   company: string | null;
   open: boolean;
+  /** The approved job description (plain text), when there is one. */
+  description: string | null;
+  /** Google for Jobs structured data, ready for an inline JSON-LD script; null when not listed. */
+  jsonLd: string | null;
 };
 
 /** Job summary an applicant is allowed to see. Nothing commercial is exposed. */
@@ -70,6 +76,10 @@ export const publicJob = createServerFn({ method: "GET" })
       company = org?.name ?? null;
     }
 
+    const { publicListing } = await import("../server/distribution/distribution.server");
+    const { jsonForScript } = await import("../server/distribution/content");
+    const listing = await publicListing(r.id);
+
     return {
       id: r.id,
       title: r.title,
@@ -82,6 +92,8 @@ export const publicJob = createServerFn({ method: "GET" })
       responsibilities: r.responsibilities,
       company,
       open: r.status === "approved",
+      description: listing?.job.description ?? null,
+      jsonLd: listing?.jsonLd ? jsonForScript(listing.jsonLd) : null,
     };
   });
 
@@ -92,7 +104,9 @@ const SubmitInput = z.object({
   email: z.string().email().optional().nullable(),
   fullName: z.string().max(200).optional().nullable(),
   phone: z.string().max(50).optional().nullable(),
-  source: z.string().max(60).default("linkedin_post"),
+  /** Where the link was shared (?src=); only known sources are kept. */
+  source: z.string().max(60).nullish(),
+  utmSource: z.string().max(60).nullish(),
 });
 
 /**
@@ -110,6 +124,7 @@ export async function submitApplicationImpl(
   data: z.infer<typeof SubmitInput>,
 ): Promise<{ ok: true; alreadyApplied: boolean; merged: boolean; name: string }> {
   {
+    const source = resolveSource(data.source, data.utmSource);
     const [r] = await db
       .select({
         id: requisitions.id,
@@ -176,7 +191,7 @@ export async function submitApplicationImpl(
           linkedinUrl: p?.linkedin_url || null,
           githubUrl: p?.github_url || null,
           websiteUrl: p?.website_url || null,
-          source: data.source,
+          source,
           resumeText: data.resumeText,
           orgId: r.orgId,
           lastSyncedAt: new Date(),
@@ -198,7 +213,7 @@ export async function submitApplicationImpl(
         .values({
           candidateId,
           requisitionId: r.id,
-          source: data.source,
+          source,
           orgId: r.orgId,
         })
         .returning({ id: applications.id });

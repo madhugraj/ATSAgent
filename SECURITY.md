@@ -99,6 +99,19 @@ application is routed through ATSIQ's own org-scoped posting rows, and every del
 first in `board_webhook_events` (deduplicated, signature failures kept for forensics, terminal
 rows purged after 30 days). Publishing and webhook rotation are `hr_head`-gated and audited.
 
+Job distribution (`docs/job-distribution-research.md`) never logs into a job portal or reads a
+portal's CV database — every portal's terms forbid automated access; channels without an
+integration are posted by a person. The public job feeds (`/api/public/feeds/<token>/<format>`)
+are rate-limited with every `/api/public` route and list only approved roles the HR head put on
+that feed, never roles hired for a client, and only what a candidate may see (no budget, band,
+weights or approval trail); the feed token is 24 random bytes stored with `encryptSecret` and a
+SHA-256 lookup hash, replaceable by the HR head (audited). Google for Jobs structured data is
+built server-side from the same candidate-facing fields and escaped for an inline script; the
+Indexing API is called only at Google's two fixed endpoints with a platform service account.
+Tracked apply links keep only known channel names (`?src=`), so a link cannot invent a source.
+Including a role on a feed, recording a hand posting and switching Google listing are
+`hr_head`-gated and audited.
+
 Agent telemetry leaves the platform only to destinations an organisation configures (HR head /
 CBO / owner, audited as `agent.telemetry.updated`): OpenTelemetry trace export and alert webhooks
 are sent through `safeFetch` (https only, private ranges blocked), collector header values and the

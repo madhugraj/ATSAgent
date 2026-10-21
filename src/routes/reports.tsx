@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
+import { sourceLabel } from "@/lib/job-channels";
 
 import {
   applicationsQuery,
@@ -326,7 +327,7 @@ function Reports() {
           r?.location ?? "",
           STAGE_LABEL[canonical(a.stage)],
           scoreMap.get(a.id)?.overall_score ?? "",
-          a.source,
+          sourceLabel(a.source),
           new Date(a.applied_at).toISOString().slice(0, 10),
           stalledDays(a.stage as Stage, a.last_activity_at) ?? "",
         ];
@@ -539,7 +540,7 @@ function Reports() {
               <ul className="mt-3 space-y-2 text-sm">
                 {sources.map(([source, count]) => (
                   <li key={source} className="flex items-center justify-between">
-                    <span className="capitalize">{source}</span>
+                    <span>{sourceLabel(source)}</span>
                     <span className="num font-semibold">{count}</span>
                   </li>
                 ))}

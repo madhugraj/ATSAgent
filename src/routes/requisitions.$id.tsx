@@ -61,6 +61,7 @@ import {
 import { MarketBenchmark } from "@/components/salary-benchmark";
 import { JobCard, ZoneOverlay, type JobCardZone } from "@/components/job-card";
 import { JobBoardsSection } from "@/components/requisition-job-boards";
+import { RoleDistributionSection } from "@/components/requisition-distribution";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -733,7 +734,9 @@ function RequisitionDetail() {
           jdText: latestJd?.full_text ?? null,
           tone: postTone,
           applyUrl:
-            typeof window === "undefined" ? null : `${window.location.origin}/apply/${r!.id}`,
+            typeof window === "undefined"
+              ? null
+              : `${window.location.origin}/apply/${r!.id}?src=linkedin_post`,
           templateId: postTemplateId || null,
         },
       });
@@ -1549,6 +1552,8 @@ function RequisitionDetail() {
               </div>
             )}
           </section>
+
+          <RoleDistributionSection requisitionId={r.id} />
 
           <JobBoardsSection requisitionId={r.id} approved={r.status === "approved"} />
 
