@@ -377,6 +377,8 @@ describe("choosing the role", () => {
     expect(Number(req!.ctcBandMax)).toBe(10_500_000);
     const runs = await runsOf(conv.id);
     expect(runs[0]!.goal).toMatch(/budget up to 85 LPA · pay band 70–105 LPA/);
+    // The person already chose a new role over similar ones: the agent must not hand it off.
+    expect(runs[0]!.goal).toMatch(/chose to open this new requisition — complete it/);
   });
 
   test("a switched-off agent is reported in the thread, not silently queued", async () => {

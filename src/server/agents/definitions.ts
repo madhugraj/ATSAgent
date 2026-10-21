@@ -52,7 +52,9 @@ export function registerPhase1Agents(): void {
     // 1.3.1: rehearsals for the full approval chain and for a send-back.
     // 1.4.0: a budget or pay band the person gave is kept; research only fills
     // what they did not give and is compared in the brief.
-    version: "1.4.0",
+    // 1.4.1: a new role the person chose over similar ones is completed, not
+    // handed off as a duplicate.
+    version: "1.4.1",
     owner: "hr_head",
     responsibility:
       "Turns a hiring need into a complete, evidence-backed draft requisition and walks it through the DH → HR → CBO approval chain.",
@@ -97,7 +99,7 @@ export function registerPhase1Agents(): void {
     system: [
       "You are the requisition agent. You turn a hiring need into a complete requisition and walk it through approval.",
       "Work in this order:",
-      "1. find_similar_requisitions for the role: reuse skills, experience and bands; if an open requisition already covers the need, say so and hand off instead of duplicating.",
+      "1. find_similar_requisitions for the role: reuse skills, experience and bands; if an open requisition already covers the need, say so and hand off instead of duplicating — unless the goal says the person already reviewed the similar roles and chose to open this one, in which case complete it.",
       "2. list_departments and pick the right department (ask_human if unclear).",
       "3. draft_requisition with concrete must-have and good-to-have skills, experience range, location, openings and responsibilities.",
       "4. research_compensation. A budget or pay band the person gave (in the goal, or already on the draft from get_requisition) is the organisation's own figure: keep it exactly. Use the research only for what they did not give, and in your brief compare their figures with the market (source count and median) — say so plainly if they sit above or below it. Then set_compensation.",
@@ -469,7 +471,9 @@ export function registerPhase4Agents(): void {
     // 1.5.0: when the expectation is above the HR head's ceiling, prepares a pay discussion
     // (call brief + a message a person always approves) instead of handing off; drafts at
     // the agreed figure.
-    version: "1.5.0",
+    // 1.5.1: asks again when an answer lacks the figure it needs; the final
+    // message is a plain summary, never its deliberation.
+    version: "1.5.1",
     owner: "hr_head",
     responsibility:
       "Turns a hiring decision into a draft offer inside the approved band — built on the candidate's stated expectation and notice period — with its letter and an approval brief, and walks it through HR head and CBO approval.",
@@ -533,6 +537,8 @@ export function registerPhase4Agents(): void {
       "5. request_approval with subject {type: 'offer', id: <offerId>} and a brief: CTC and where it sits in the band, internal parity, the candidate's expectation and hike, competing offers, risks (the system adds the expectation and gap itself). When the HR head approves, request the CBO's approval the same way.",
       "If an approver sent the offer back (an existing offer is draft with sentBack): read their reason. If it can be met inside the band (pay, joining date), revise_offer with your reasoning, generate_offer_letter, submit_offer_for_approval and request approval again with a brief that states what was asked and what changed. If it cannot be met inside the band or is not about the offer's terms, ask_human. Never resubmit an unchanged offer.",
       "When the candidate asked for changes (an existing offer is countered): read their counter (expected CTC, joining date, note). Meet the ask if it sits inside the band and within reason of internal parity; otherwise propose the highest defensible figure inside the band and say why. revise_offer with that CTC and your reasoning, then generate_offer_letter, submit_offer_for_approval, and request the HR head's (then the CBO's) approval with a brief that states what the candidate asked for, what you propose and why. Never exceed the band — ask_human instead.",
+      "If a person's answer does not give the figure you need (for example the HR head's ceiling), ask_human again once, naming the figure you need and the options; never guess it.",
+      "Your final message is read by people: a short summary of what you did, what is waiting and for whom, with the figures. Never include your deliberation, questions to yourself, quotes of tool descriptions or instructions, or tool and field names.",
     ].join("\n"),
   });
 

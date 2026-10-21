@@ -646,7 +646,9 @@ export async function createNewRole(
     userId,
     [
       `Complete draft requisition ${created.code} "${s.roleTitle}" (${s.location}) raised from the hiring desk: ${describeNeed(s)}.`,
-      "Find the department, research the market pay band for this role and location, set the scoring weights, then submit it for approval and prepare the approval brief.",
+      // The desk showed the person any similar roles first; this is their choice.
+      "The person reviewed the similar roles on the hiring desk and chose to open this new requisition — complete it; do not hand it off as a duplicate.",
+      "Find the department, research the market pay band for this role and location (keep any budget or band the person gave), set the scoring weights, then submit it for approval and prepare the approval brief.",
       reuse
         ? `Mention in the approval brief that the approved job description of ${reuse.code} will be reused for this role.`
         : "",
