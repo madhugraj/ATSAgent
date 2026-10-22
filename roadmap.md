@@ -6,6 +6,7 @@
 - [x] Careers-inbox mail credited to the portal that sent it (sender domain)
 - [x] Role-limited CVs (migration 0045): CVs from portals whose terms limit them to their role (Naukri, Internshala, Job Hai) are never reused for another role, searched, matched, invited or shared with partner organisations, are marked "Role only" in the talent pool, and are erased 30 days after their roles are over once the HR head approves (always asked, even at Autonomous)
 - [x] Health rules `distribution.quiet_listing` and `distribution.role_limited_retention`; two rehearsals; desk "Advertise on job portals"; Copilot 1.2.2 can start it
+- [x] From the autonomous end-to-end run (hiring need → hired): a new role the person chose over similar ones is completed, not handed off as a duplicate (Requisition 1.4.1); the Offer agent asks again when an answer lacks the figure it needs and its final message is a plain summary (Offer 1.5.1)
 - [x] From the end-to-end test: the desk keeps a pay band the person states and Requisition agent 1.4.0 keeps a stated budget and band (research fills only what is missing and is compared in the brief); a CV arriving again keeps the candidate's first source and credits the new channel on the application; "Send back for changes" sits next to Approve on a requisition in approval; approval cards no longer show tool names; Distribution 1.0.1 reports what happened after approvals and names portals properly
 
 ## Job distribution — phase 1 (2026-10-21)

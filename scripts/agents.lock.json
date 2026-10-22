@@ -28,8 +28,8 @@
     "hash": "b3f329fb17b3e547a1601993a2194355588eacc5a6655288e05507f76cbf87af"
   },
   "offer": {
-    "version": "1.5.0",
-    "hash": "ac12a0d5769c6d4af7abff8ca25aaccaf478179f0f351e132ae8dee6419910fe"
+    "version": "1.5.1",
+    "hash": "ff97939be252d9a52608d3247a5095a92501c55ee3502669e5bde7b15416b372"
   },
   "onboarding": {
     "version": "1.3.0",
@@ -40,8 +40,8 @@
     "hash": "e933cd26e78c2ca790f5c234caa297e9b7f10e05e545d6b1a140e3e4772e14c5"
   },
   "requisition": {
-    "version": "1.4.0",
-    "hash": "1d31f0e7c2ea1ce6235b5f4da1bc0b3718720d1f810a971b661b2ebff69f576f"
+    "version": "1.4.1",
+    "hash": "20bdc5c926a314056096b34fef7b3fd56556a65d9e2f51a349fc324742bdb1e2"
   },
   "screening": {
     "version": "1.7.1",
