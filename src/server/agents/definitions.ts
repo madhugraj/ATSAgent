@@ -473,7 +473,9 @@ export function registerPhase4Agents(): void {
     // the agreed figure.
     // 1.5.1: asks again when an answer lacks the figure it needs; the final
     // message is a plain summary, never its deliberation.
-    version: "1.5.1",
+    // 1.5.2: pay figures only on the talent-pool profile are confirmed with the
+    // pay & availability form before an offer is built on them.
+    version: "1.5.2",
     owner: "hr_head",
     responsibility:
       "Turns a hiring decision into a draft offer inside the approved band — built on the candidate's stated expectation and notice period — with its letter and an approval brief, and walks it through HR head and CBO approval.",

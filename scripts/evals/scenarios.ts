@@ -705,12 +705,20 @@ export function scenarios(): ScriptedScenario[] {
           authorId: userId,
           body: "Hiring decision: SELECT. Strong across rounds.",
         });
-        // The candidate's stated expectation: an offer is never drafted without it.
-        const { candidates } = await import("../../drizzle/schema");
+        // The candidate's stated expectation, confirmed for this role: an offer is never drafted without it.
+        const { candidates, compensationDetails } = await import("../../drizzle/schema");
         await db
           .update(candidates)
           .set({ currentCtc: "2600000", expectedCtc: "3000000", noticePeriodDays: 60 })
           .where(eq(candidates.id, a!.c));
+        await db.insert(compensationDetails).values({
+          orgId,
+          applicationId: app,
+          candidateId: a!.c,
+          expectedCtc: "3000000",
+          noticePeriodDays: 60,
+          source: "screening_call",
+        });
         return { requisitionId, app };
       },
       goal: (d) => `Prepare the offer. app=${d["app"]}\n\nRequisition id: ${d["requisitionId"]}`,
