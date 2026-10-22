@@ -162,6 +162,14 @@ export async function offerReadiness(
   const { detailsFor, latestRequest } = await import("@/lib/compensation.server");
   const app = await loadApplication(ctx.orgId, applicationId);
   const pay = await detailsFor(ctx.orgId, applicationId);
+  if (pay.complete && pay.unconfirmed) {
+    // Figures from the talent-pool profile (maybe an earlier process) are confirmed first.
+    const r = await latestRequest(ctx.orgId, applicationId);
+    const waiting = r?.status === "sent" && (r.closesAt?.getTime() ?? Infinity) > Date.now();
+    return waiting
+      ? "The pay figures on file come from the candidate's talent-pool profile, not from this application. The pay & availability form was already sent and is open — do not draft and do not send it again. Finish: you will be started again when the candidate answers (or TA enters it from a call)."
+      : `The pay figures on file (expects ${rupees(pay.expectedCtc)}) come from the candidate's talent-pool profile, possibly from an earlier process, and were never confirmed for this role. send_compensation_form so the candidate confirms them, then finish: you will be started again when they answer (or TA enters it from a call).`;
+  }
   if (!pay.complete) {
     const missing = [
       pay.expectedCtc == null ? "expected CTC" : null,
@@ -314,7 +322,7 @@ export function registerPhase4Tools(): void {
   registerTool({
     name: "send_compensation_form",
     description:
-      "Email the candidate a private pay & availability form: current pay (fixed / variable), expected CTC, notice period, earliest joining date, competing offers, location and relocation. Only TA and HR see the answers. Due date, reminders and closing follow the organisation's assessment policy; reminders are automatic. Refused when the details are already known or a form is already open. Leaves the organisation, so a person approves it unless the form is pre-approved.",
+      "Email the candidate a private pay & availability form: current pay (fixed / variable), expected CTC, notice period, earliest joining date, competing offers, location and relocation. Only TA and HR see the answers. Due date, reminders and closing follow the organisation's assessment policy; reminders are automatic. Refused when the details are already known for this application or a form is already open; figures only on the candidate's talent-pool profile (perhaps from an earlier process) must be confirmed with it first. Leaves the organisation, so a person approves it unless the form is pre-approved.",
     input: AppId,
     risk: "external",
     templateOf: () => "compensation_form",
@@ -322,7 +330,7 @@ export function registerPhase4Tools(): void {
     precheck: async (ctx, i) => {
       const { detailsFor, latestRequest } = await import("@/lib/compensation.server");
       const d = await detailsFor(ctx.orgId, i.applicationId);
-      if (d.complete)
+      if (d.complete && !d.unconfirmed)
         return "The candidate's expected CTC and notice period are already known — do not ask again.";
       const r = await latestRequest(ctx.orgId, i.applicationId);
       if (r?.status === "sent" && (r.closesAt?.getTime() ?? Infinity) > Date.now())
@@ -671,7 +679,7 @@ export function registerPhase4Tools(): void {
         .where(eq(organizations.id, ctx.orgId))
         .limit(1);
       const due = new Date(Date.now() + i.dueInDays * 864e5);
-      const { enqueueEmail } = await import("@/lib/email-outbox.server");
+      const { enqueueEmail, careersReplyAddress } = await import("@/lib/email-outbox.server");
       await enqueueEmail({
         orgId: ctx.orgId,
         kind: "document_request",
@@ -684,7 +692,7 @@ export function registerPhase4Tools(): void {
           orgName: org?.name,
           jobTitle: app.jobTitle,
           documents: i.documentTypes.map(docTypeLabel).join("\n"),
-          replyTo: org?.careersEmail ?? undefined,
+          replyTo: (await careersReplyAddress(ctx.orgId)) ?? undefined,
           dueDate: due.toDateString(),
           ...(i.note ? { note: i.note } : {}),
         },
