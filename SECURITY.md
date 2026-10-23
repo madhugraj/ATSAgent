@@ -32,7 +32,11 @@ We credit reporters in release notes on request.
   server-validated allowlist and is never inferred from browser storage.
 - Secrets: `SECRET_ENCRYPTION_KEY` encrypts stored credentials (AES-256-GCM); OAuth state
   is HMAC-signed with required secrets; no secret values are committed. Every organisation supplies
-  its own AI provider key, and no deployment-level AI key is used as a fallback.
+  its own AI provider key, and no deployment-level AI key is used as a fallback. That includes the
+  AI voice for phone screening: the organisation's Google API key or a Vertex AI service-account key
+  it uploads (validated, stored encrypted, reported to the browser only as "stored"; saving and
+  removing it are audited `ai.voice_credential.save` / `.remove`). The PBX extension the voice
+  worker dials from (`SIP_*`) is deployment configuration; phone numbers are never logged.
 - Rate limiting on all public HTTP routes and server-function RPCs (`src/server.ts`).
 - SSRF gate: server-side fetches of user-supplied URLs go through `src/server/safe-fetch.ts`.
 - Auditing: privileged actions append to `audit_log` (`src/server/audit.ts`).

@@ -3,8 +3,8 @@
 ## Voice screening agent (2026-10-23)
 
 - [x] M0 voice foundation (docs/voice-screening-agent.md): SIP/RTP/G.711 call stack in TypeScript (`src/server/voice/`), live voice sessions through the AI gateway (`aiVoiceSession`, feature `screening_call`, ledger + training capture), spike script; real test calls placed from a workstation and from inside GKE with two-way audio
-- [ ] M1–M4: `screening_calls` data, voice worker, Screening agent 1.8.0 `request_screening_call`, Screening call agent 1.0.0 with evals and health rules, UI, pilot
-- [ ] Decide which voice credential an organisation stores (API key or Vertex service account)
+- [x] M1 (migration 0046): `screening_calls` and `phone_screening_settings`; Phone screening card on the Organisation page (switch, assistant name, calling window and days, attempts, call length; audited); the organisation's own AI voice credential — its Google API key or an uploaded Vertex AI service account, stored encrypted (Integrations → AI model; audited); Indian-mobile number normalisation; `SIP_*` deployment settings
+- [ ] M2–M4: voice worker and the call, Screening agent 1.8.0 `request_screening_call`, Screening call agent 1.0.0 with evals and health rules, candidate-page UI, pilot
 
 ## Distribution agent (2026-10-21)
 

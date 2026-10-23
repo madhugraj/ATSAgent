@@ -82,17 +82,17 @@ real candidate is called.
 `screening_calls` (org-scoped; `candidate_id` FK `on delete cascade` so erasure
 removes calls and transcripts):
 
-| column | notes |
-|---|---|
-| `org_id`, `candidate_id`, `application_id`, `requisition_id`, `kit_id` | scope + what is asked |
-| `agent_run_id` | the run that requested it (ledger attribution) |
-| `status` | `requested · approved · dialling · in_progress · completed · callback · no_answer · failed · consent_declined · cancelled · fell_back` |
-| `attempt`, `due_at`, `callback_at` | retry and callback scheduling |
-| `consent_at`, `language` | consent captured on the call; language used |
-| `started_at`, `ended_at`, `end_reason`, `duration_s` | call record |
-| `transcript` jsonb | turns `{who, text, at}` — kept only if consent was given |
-| `answers` jsonb | `{question_id, summary}` from `record_answer` |
-| `screening_run_id` | the graded run this produced |
+| column                                                                 | notes                                                                                                                                  |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `org_id`, `candidate_id`, `application_id`, `requisition_id`, `kit_id` | scope + what is asked                                                                                                                  |
+| `agent_run_id`                                                         | the run that requested it (ledger attribution)                                                                                         |
+| `status`                                                               | `requested · approved · dialling · in_progress · completed · callback · no_answer · failed · consent_declined · cancelled · fell_back` |
+| `attempt`, `due_at`, `callback_at`                                     | retry and callback scheduling                                                                                                          |
+| `consent_at`, `language`                                               | consent captured on the call; language used                                                                                            |
+| `started_at`, `ended_at`, `end_reason`, `duration_s`                   | call record                                                                                                                            |
+| `transcript` jsonb                                                     | turns `{who, text, at}` — kept only if consent was given                                                                               |
+| `answers` jsonb                                                        | `{question_id, summary}` from `record_answer`                                                                                          |
+| `screening_run_id`                                                     | the graded run this produced                                                                                                           |
 
 No audio recording in v1 — transcript only. (Recording needs storage, retention and
 its own consent line; add later if wanted.) Phone numbers are never logged.
@@ -107,12 +107,12 @@ other candidates, band) or mark their own answers.
 
 In-call tools (function calls the live model may make; each validated server-side):
 
-| tool | effect |
-|---|---|
-| `record_consent(granted)` | stamps `consent_at`; if declined → polite end, transcript discarded, status `consent_declined` |
-| `record_answer(question_id, summary)` | must be a kit question id; stored in `answers` |
-| `request_callback(when)` | parsed in the org's time zone, clamped to calling hours → status `callback` |
-| `end_call(reason)` | goodbye already spoken; hang up |
+| tool                                  | effect                                                                                         |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `record_consent(granted)`             | stamps `consent_at`; if declined → polite end, transcript discarded, status `consent_declined` |
+| `record_answer(question_id, summary)` | must be a kit question id; stored in `answers`                                                 |
+| `request_callback(when)`              | parsed in the org's time zone, clamped to calling hours → status `callback`                    |
+| `end_call(reason)`                    | goodbye already spoken; hang up                                                                |
 
 Hard limits enforced by the worker, not the prompt: 15 min max, 20 s silence →
 close, voicemail / no speech in 10 s → one-line message and end, calling hours
@@ -166,13 +166,13 @@ egress, secrets), SECURITY (consent, no recording, transcript erasure), roadmap.
 
 ## Milestones
 
-| | what | done when |
-|---|---|---|
-| M0 | TS port spike: SIP/RTP/G.711/resampler + live session from a script, run from GKE | a real call from the cluster with two-way audio |
-| M1 | migration 0046, `aiVoiceSession`, `screening_call` feature, PBX settings | ledger row with reported tokens for a test session |
-| M2 | voice worker: claim, dial, in-call tools, limits, grading hand-off | end-to-end call produces a graded `screening_runs` row |
-| M3 | Screening agent 1.8.0, Screening call agent 1.0.0, evals, health rules, UI, docs | CI green incl. evals and lock |
-| M4 | pilot with internal test numbers, then one real requisition | HR reviews 10 transcripts and grades |
+|     | what                                                                              | done when                                              |
+| --- | --------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| M0  | TS port spike: SIP/RTP/G.711/resampler + live session from a script, run from GKE | a real call from the cluster with two-way audio        |
+| M1  | migration 0046, `aiVoiceSession`, `screening_call` feature, PBX settings          | ledger row with reported tokens for a test session     |
+| M2  | voice worker: claim, dial, in-call tools, limits, grading hand-off                | end-to-end call produces a graded `screening_runs` row |
+| M3  | Screening agent 1.8.0, Screening call agent 1.0.0, evals, health rules, UI, docs  | CI green incl. evals and lock                          |
+| M4  | pilot with internal test numbers, then one real requisition                       | HR reviews 10 transcripts and grades                   |
 
 ## M0 spike — findings (2026-10-23)
 
@@ -227,3 +227,105 @@ Code: `src/server/voice/{g711,resample,rtp,sip}.ts`, `aiVoiceSession` in
 4. TypeScript port (Decision A) rather than keeping the Python bridge.
 5. Platform PBX for v1 (Decision C); the organisation's own Google key for the voice
    model (Decision B).
+
+## Stage 1 build plan (M1–M3) — for approval (2026-10-23)
+
+Branch `feat/voice-screening-stage1`, stacked on `feat/voice-screening-m0` (PR #26).
+One commit per milestone; one PR at the end. Decision B settled: **each
+organisation brings its own voice credential** — the Google API key it can
+already save, or a Vertex AI service account (new); no platform key.
+
+### M1 — data, credentials, settings
+
+- **Migration `0046_screening_calls.sql`** (idempotent) + `drizzle/schema.ts` +
+  ER diagram (`DOMAINS`: "Screening & interviews"):
+  - `screening_calls` as in "Data" above, plus `phone_last4` (shown in the UI; the
+    full number is read from the candidate at dial time, never copied) and
+    `agent_run_id` of the call's own run. Status check constraint; indexes on
+    `(org_id, status, due_at)` and `(application_id, created_at)`;
+    `candidate_id … on delete cascade`.
+  - `phone_screening_settings` (`org_id` PK, mirrors `assessment_settings`):
+    `enabled` (default off), `assistant_name` (default "Saranya"), calling window
+    `10:00–19:00`, days Mon–Sat, `max_attempts` 3, `max_minutes` 15, `updated_by/at`.
+- **Voice credential:** `ai_provider_credentials` row `provider = "google_vertex"`
+  holding the encrypted service-account JSON + project + location (`encryptSecret`;
+  the column is free text, no migration). Gateway `resolveVoiceTarget(orgId)` — Vertex
+  if stored, else the Google API key, else "unavailable". Integrations → AI model
+  gets a "Phone screening voice" block (upload JSON / remove; HR head; audited
+  `ai.voice_credential.save` / `.remove`; key never returned, only "stored").
+- **Phone screening switch + policy** (Organisation page card next to the
+  assessment policy; HR head; audited `screening_call.settings.set`).
+- **Phone numbers:** `dialNumber(phone, country)` — today's stored numbers are free
+  text; normalise to the PBX's 10-digit national form for India, refuse anything
+  else (tests). Never logged; `phone_last4` only.
+- **Telephony env** in `src/server/env.ts`: `SIP_SERVER`, `SIP_PORT`, `SIP_USER`,
+  `SIP_PASSWORD`, `SIP_AUTH_USER`, `SIP_DOMAIN`, `SIP_CALLER_NAME`, `SIP_PUBLIC_IP`,
+  `VOICE_MAX_CONCURRENT` (default 2); boot check "SIP_SERVER needs SIP_PASSWORD";
+  `sipConfigured()`.
+
+### M2 — the call and the voice worker
+
+- **Grading without a request:** lift the body of `gradeScreeningAnswers` into
+  `gradeTranscriptForKit({orgId, kitId, transcript, inputKind, createdBy})` in
+  `screening.server.ts`; the server fn and the call both use it (`inputKind`
+  `"phone_ai"`).
+- **Call brief** (`src/server/voice/call-brief.server.ts`): from the kit and the
+  requisition — company, role title and code, location, work mode, the recruiter's
+  name (the "how can I trust you" answer, plus "you'll get an e-mail confirming
+  this call"), the kit questions with ids; notice period / availability only when
+  unknown, never pay; persona name from settings; speech-adapted injection rules.
+- **One call** (`call-session.server.ts`): dial (`SipCall`) + `aiVoiceSession`
+  with the in-call tools `record_consent`, `record_answer`, `request_callback`,
+  `end_call` — each validated against the kit/call before it takes effect. Limits
+  enforced in code: max minutes, 20 s silence, voicemail / no speech in 10 s. The
+  transcript is kept only after consent. On end: grade → `screening_runs`; notice
+  period → compensation via a new notice-and-availability-only core (source
+  `screening_call`, entered by "AI screening call", amount-free audit — pay fields
+  cannot be written); status transition; event `screening_call.ended`.
+  Runs inside `agentRunScope` (the call's own run) + `withAiSubject` so the ledger,
+  training capture and erasure all follow the candidate.
+- **Dispatcher** (`dispatcher.server.ts`): claim due approved calls `FOR UPDATE
+SKIP LOCKED` inside the org's calling window (org time zone), concurrency cap,
+  retry after 2 h then next working day; after the last attempt, consent declined
+  or no usable number → `fell_back`.
+- **Worker** `src/server/voice/worker.ts`: poll every 15 s, run calls, finish
+  in-flight calls on SIGTERM. Bundled to `.output/voice-worker/index.mjs`
+  (`bun build --target node`) as part of `bun run build`; `crane-stage.sh` keeps it
+  in the image; `deploy.sh` rolls `deploy/atsiq-voice-worker` when it exists. The
+  Deployment and its Secret are created by a person (documented, as with the
+  spike).
+
+### M3 — agents, evals, health, UI, docs
+
+- **Screening agent 1.8.0:** new tool `request_screening_call` (risk `external`,
+  `templateOf` `"screening_call"` so Autonomous can run it; precheck: switch on,
+  voice credential and SIP configured, kit ready, usable number, shortlisted, no open
+  call). `get_screening_status` also returns the call's status. Playbook: prefer a
+  call when available, otherwise the e-mailed assessment; on `screening_call.ended`
+  — fell back → `send_assessment`; graded → the existing recommendation note.
+- **Screening call agent 1.0.0** (new type `screening_call`, feature
+  `agent_screening_call`, risk tier high, owner HR head): its `system` is the call
+  persona's rules and its `tools` the four in-call tools (registered with zod
+  contracts), so the lock covers them. Each call is one run of this agent.
+  Registered in `index.ts`, `agents-lock.ts`, the governance test and
+  `AGENT_CATALOG`.
+- **Evals:** Screening — requests a call when phone screening is on; sends the
+  assessment when there is no usable number. Screening call agent (a text-mode
+  harness: candidate lines as messages, same tools) — cooperative candidate;
+  declines consent → nothing kept; asks about salary → defers to HR; injection →
+  ignored. Catalogue entries in plain words.
+- **Health rules** + tests: `screening_call.answer_rate`, `.failures`,
+  `.consent_declined_rate`, `.stuck`, `.short_calls`.
+- **UI:** `ScreeningPanel` "Phone screening" section — status, attempts, "Call now"
+  (same approval rules), transcript with answers per question, link to the graded
+  run; the Organisation settings card; the Integrations voice credential block.
+- **Docs:** README, DEPLOYMENT-GCP + DEPLOYMENT-HANDOFF (worker Deployment, env,
+  Secret, Cloud NAT), SECURITY (consent, no recording, credentials, masking),
+  `user-manual.ts`, roadmap.
+
+### Testing
+
+Unit (brief, numbers, calling window, retries, tool validation, status machine,
+usage); a DB test that runs a whole call with a fake phone line and a fake voice
+session (`scripts/screening-call.test.ts`); evals in CI; then one real call on the
+local stack against a test requisition (your number), before the PR.

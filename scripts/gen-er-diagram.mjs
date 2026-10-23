@@ -45,6 +45,8 @@ const DOMAINS = {
   screening_kits: "Screening & interviews",
   screening_runs: "Screening & interviews",
   screening_prep_jobs: "Screening & interviews",
+  screening_calls: "Screening & interviews",
+  phone_screening_settings: "Screening & interviews",
   interviews: "Screening & interviews",
   ai_interviews: "Screening & interviews",
   offers: "Offers & onboarding",
