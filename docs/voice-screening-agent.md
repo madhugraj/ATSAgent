@@ -329,3 +329,24 @@ Unit (brief, numbers, calling window, retries, tool validation, status machine,
 usage); a DB test that runs a whole call with a fake phone line and a fake voice
 session (`scripts/screening-call.test.ts`); evals in CI; then one real call on the
 local stack against a test requisition (your number), before the PR.
+
+## M2 — built (2026-10-23)
+
+`src/server/voice/`: `call-brief.server.ts`, `call-session.server.ts`,
+`schedule.ts`, `dispatcher.server.ts`, `sip-line.ts`, `worker.ts`;
+`gradeScreeningForKit` (`screening.functions.ts`) and `recordCallAvailability`
+(`compensation.server.ts`); `scripts/build-voice-worker.mjs`; tests in
+`scripts/screening-call.test.ts`. Differences from the plan:
+
+- A fifth in-call tool, `record_availability`, keeps notice period and
+  availability separate from the kit answers; its schema has no pay fields.
+- Kit questions mentioning pay (CTC, salary, budget …) are removed from the
+  call; the grader still sees the whole kit and marks them not answered.
+- The trust answer uses the person who raised the role and the organisation's
+  reply-to or careers e-mail — there is no recruiter assignment on a role.
+- Silence and "has the candidate spoken" also use the line's audio level, so a
+  long answer is not cut off before its transcript line arrives.
+- The worker bundle externalises TanStack Start's web-only virtual modules
+  (reached only through the HTTP handler of shared server-function modules).
+- Until M3 adds the Screening call agent's own run, a call is attributed to the
+  Screening agent run that requested it.

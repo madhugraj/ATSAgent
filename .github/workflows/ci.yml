@@ -129,3 +129,5 @@ jobs:
         run: bun test scripts/voice.test.ts
       - name: Phone screening settings (numbers, policy, voice credential, readiness)
         run: bun test scripts/phone-screening.test.ts
+      - name: Phone screening call (brief, in-call tools, outcomes, window, dispatcher)
+        run: bun test scripts/screening-call.test.ts

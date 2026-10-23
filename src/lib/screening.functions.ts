@@ -237,6 +237,78 @@ export async function prepareScreeningKitForPairing(input: {
   return { kitId: row.id, questions: kit.questions, focus_summary: kit.focus_summary };
 }
 
+/**
+ * Grade a screening against its kit and save the run — the typed answers, call
+ * notes or a transcript. No request context: the screening-call worker uses it
+ * as well as the form (`createdBy` null for the AI call). Callers check access.
+ */
+export async function gradeScreeningForKit(input: {
+  orgId: string;
+  kit: typeof screeningKits.$inferSelect;
+  answers: { question_id: string; answer: string }[];
+  transcript: string | null;
+  inputKind: string;
+  audioPath?: string | null;
+  audioEngine?: string | null;
+  createdBy: string | null;
+}) {
+  const { kit } = input;
+  if (kit.orgId !== input.orgId) throw new Error("Screening kit not found");
+  const questions = (Array.isArray(kit.questions) ? kit.questions : []) as ScreeningQuestion[];
+  if (!questions.length) throw new Error("This kit has no questions to grade against.");
+  const { candidate, requisition, jdText, match } = await loadPairing(
+    input.orgId,
+    kit.candidateId,
+    kit.requisitionId,
+  );
+
+  const grade = await gradeScreening({
+    orgId: input.orgId,
+    role: requisition?.title ?? "the role",
+    jdText,
+    mustHave: requisition?.mustHaveSkills ?? [],
+    candidateName: candidate.fullName,
+    questions,
+    answers: input.answers,
+    transcript: input.transcript,
+  });
+
+  const matchScore =
+    typeof match?.overallScore === "number" ? Math.round(match.overallScore) : null;
+  const combined =
+    matchScore === null
+      ? grade.screening_score
+      : Math.round(matchScore * 0.6 + grade.screening_score * 0.4);
+
+  const [run] = await db
+    .insert(screeningRuns)
+    .values({
+      orgId: input.orgId,
+      kitId: kit.id,
+      candidateId: kit.candidateId,
+      requisitionId: kit.requisitionId,
+      applicationId: kit.applicationId,
+      inputKind: input.inputKind,
+      answers: input.answers as never,
+      transcript: input.transcript,
+      audioPath: input.audioPath ?? null,
+      audioEngine: input.audioEngine ?? null,
+      screeningScore: grade.screening_score,
+      matchScore,
+      combinedScore: combined,
+      verdicts: grade.verdicts as never,
+      redFlags: grade.red_flags,
+      rationale: grade.rationale,
+      recommendation: grade.recommendation,
+      recommendationReason: grade.recommendation_reason,
+      engine: grade.engine as never,
+      createdBy: input.createdBy,
+    })
+    .returning({ id: screeningRuns.id });
+  if (!run) throw new Error("Could not save the screening run");
+  return { run, grade, matchScore, combined };
+}
+
 export const createScreeningKit = createServerFn({ method: "POST" })
   .middleware([requireOrg])
   .inputValidator((data: unknown) =>
@@ -310,12 +382,6 @@ export const gradeScreeningAnswers = createServerFn({ method: "POST" })
     const questions = (Array.isArray(kit.questions) ? kit.questions : []) as ScreeningQuestion[];
     if (!questions.length) throw new Error("This kit has no questions to grade against.");
 
-    const { candidate, requisition, jdText, match } = await loadPairing(
-      context.orgId,
-      kit.candidateId,
-      kit.requisitionId,
-    );
-
     // Audio, when supplied, is stored first and transcribed with the org's provider.
     let transcript = data.notes?.trim() ? data.notes.trim() : null;
     let audioPath: string | null = null;
@@ -348,50 +414,16 @@ export const gradeScreeningAnswers = createServerFn({ method: "POST" })
     }
     if (typed.length && !data.audio && !data.notes) inputKind = "typed";
 
-    const grade = await gradeScreening({
+    const { run, grade, matchScore, combined } = await gradeScreeningForKit({
       orgId: context.orgId,
-      role: requisition?.title ?? "the role",
-      jdText,
-      mustHave: requisition?.mustHaveSkills ?? [],
-      candidateName: candidate.fullName,
-      questions,
+      kit,
       answers: typed,
       transcript,
+      inputKind,
+      audioPath,
+      audioEngine,
+      createdBy: context.userId,
     });
-
-    const matchScore =
-      typeof match?.overallScore === "number" ? Math.round(match.overallScore) : null;
-    const combined =
-      matchScore === null
-        ? grade.screening_score
-        : Math.round(matchScore * 0.6 + grade.screening_score * 0.4);
-
-    const [run] = await db
-      .insert(screeningRuns)
-      .values({
-        orgId: context.orgId,
-        kitId: kit.id,
-        candidateId: kit.candidateId,
-        requisitionId: kit.requisitionId,
-        applicationId: kit.applicationId,
-        inputKind,
-        answers: typed as never,
-        transcript,
-        audioPath,
-        audioEngine,
-        screeningScore: grade.screening_score,
-        matchScore,
-        combinedScore: combined,
-        verdicts: grade.verdicts as never,
-        redFlags: grade.red_flags,
-        rationale: grade.rationale,
-        recommendation: grade.recommendation,
-        recommendationReason: grade.recommendation_reason,
-        engine: grade.engine as never,
-        createdBy: context.userId,
-      })
-      .returning({ id: screeningRuns.id });
-    if (!run) throw new Error("Could not save the screening run");
 
     // `engine`/`audio_engine` stay server-internal (persisted above).
     return {

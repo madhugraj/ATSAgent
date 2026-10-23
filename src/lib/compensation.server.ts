@@ -560,6 +560,48 @@ export async function recordCompensation(
   return { ok: true, complete: view.complete };
 }
 
+/** What the AI screening call may record: availability only — never pay. */
+export const CallAvailabilityFields = z
+  .object({
+    noticePeriodDays: z.number().int().min(0).max(365).nullable().optional(),
+    earliestJoining: isoDate.nullable().optional(),
+    currentLocation: z.string().trim().max(120).nullable().optional(),
+    openToRelocate: z.boolean().nullable().optional(),
+  })
+  .strict();
+export type CallAvailability = z.infer<typeof CallAvailabilityFields>;
+
+/**
+ * The Screening call agent records what the candidate said about notice
+ * period and availability (source `screening_call`, entered by no person).
+ * Pay fields are refused by the schema itself. Audited with field names only;
+ * a person still confirms pay through the form or TA.
+ */
+export async function recordCallAvailability(
+  orgId: string,
+  applicationId: string,
+  input: CallAvailability,
+  now = new Date(),
+): Promise<{ recorded: string[] }> {
+  const data = CallAvailabilityFields.parse(input);
+  const fields = Object.keys(data).filter((k) => data[k as keyof typeof data] != null);
+  if (!fields.length) return { recorded: [] };
+  if (joiningDateProblem(data.earliestJoining, now)) delete data.earliestJoining;
+  const app = await loadApp(orgId, applicationId);
+  const detailId = await insertDetails(orgId, app, data, "screening_call", null, null);
+  const { writeAudit } = await import("../server/audit");
+  await writeAudit({
+    actor: "agent:screening_call",
+    actorUserId: null,
+    orgId,
+    action: "compensation.recorded",
+    entityType: "compensation_details",
+    entityId: detailId,
+    detail: { applicationId: app.id, source: "screening_call", fields },
+  });
+  return { recorded: fields };
+}
+
 /** Email the form again (counted; the same link). */
 export async function remindCompensation(
   orgId: string,

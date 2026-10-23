@@ -12,6 +12,7 @@ printf "%s" "$REGISTRY_AUTH" > /outimg/.docker/config.json
 mkdir -p /stage/app
 tar -xzf /out.tgz -C /stage/app
 test -f /stage/app/.output/server/index.mjs
+test -f /stage/app/.output/voice-worker/index.mjs
 tar -cf /stage/layer.tar -C /stage app
 
 # crane: single static binary from go-containerregistry releases (gzip tar)

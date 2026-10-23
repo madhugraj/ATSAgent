@@ -4,7 +4,8 @@
 
 - [x] M0 voice foundation (docs/voice-screening-agent.md): SIP/RTP/G.711 call stack in TypeScript (`src/server/voice/`), live voice sessions through the AI gateway (`aiVoiceSession`, feature `screening_call`, ledger + training capture), spike script; real test calls placed from a workstation and from inside GKE with two-way audio
 - [x] M1 (migration 0046): `screening_calls` and `phone_screening_settings`; Phone screening card on the Organisation page (switch, assistant name, calling window and days, attempts, call length; audited); the organisation's own AI voice credential — its Google API key or an uploaded Vertex AI service account, stored encrypted (Integrations → AI model; audited); Indian-mobile number normalisation; `SIP_*` deployment settings
-- [ ] M2–M4: voice worker and the call, Screening agent 1.8.0 `request_screening_call`, Screening call agent 1.0.0 with evals and health rules, candidate-page UI, pilot
+- [x] M2: the call — brief from the kit and role (AI disclosure, facts only, pay questions removed, a way to check the call is genuine), in-call tools checked in code (nothing before consent, kit questions only, availability never pay), limits (call length, silence, no response), outcomes (graded run `phone_ai`, notice period via a pay-free path, callback in the calling window, retries then the e-mailed assessment), event `screening_call.ended`; dispatcher (ready orgs, calling window and time zone, atomic claims, stuck-call recovery); the voice worker bundled into the image (`.output/voice-worker`) and rolled by `deploy.sh` when its Deployment exists
+- [ ] M3–M4: Screening agent 1.8.0 `request_screening_call`, Screening call agent 1.0.0 with evals and health rules, candidate-page UI, pilot
 
 ## Distribution agent (2026-10-21)
 
