@@ -57,13 +57,20 @@ export async function claimCall(orgId: string, id: string): Promise<boolean> {
  * it be retried in 15 minutes.
  */
 export async function recoverStuckCalls(now: Date): Promise<number> {
-  const rows = await db.execute<{ id: string }>(sql`
+  const rows = await db.execute<{ id: string; agent_run_id: string | null }>(sql`
     update screening_calls
     set status = 'failed', due_at = ${new Date(now.getTime() + 15 * 60_000).toISOString()}::timestamptz,
         last_error = 'the voice worker stopped during the call', updated_at = ${now.toISOString()}::timestamptz
     where status in ('dialling', 'in_progress')
       and updated_at < ${new Date(now.getTime() - 40 * 60_000).toISOString()}::timestamptz
-    returning id`);
+    returning id, agent_run_id`);
+  // Their runs end too (they hold no lease, so nothing else would close them).
+  for (const r of rows as unknown as { agent_run_id: string | null }[])
+    if (r.agent_run_id)
+      await db.execute(sql`
+        update agent_runs set status = 'failed', last_error = 'The voice worker stopped during the call.',
+          finished_at = ${now.toISOString()}::timestamptz, updated_at = ${now.toISOString()}::timestamptz
+        where id = ${r.agent_run_id} and status = 'running'`);
   return rows.length;
 }
 

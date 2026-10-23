@@ -350,3 +350,33 @@ local stack against a test requisition (your number), before the PR.
   (reached only through the HTTP handler of shared server-function modules).
 - Until M3 adds the Screening call agent's own run, a call is attributed to the
   Screening agent run that requested it.
+
+## M3 — built (2026-10-23)
+
+- **Screening agent 1.8.0**: `request_screening_call` (risk `external`, template
+  `screening_call`: a person approves unless Autonomous or pre-approved; refused
+  with a reason when phone screening is not ready, the kit is missing, there is no
+  usable mobile, or a call is already arranged / done / declined).
+  `get_screening_status` reports `phoneScreening` (available, latest call's
+  state — never the number, answers or transcript). The orchestrator dispatches
+  the agent on `screening_call.ended`.
+- **Screening call agent 1.0.0** (`screening_call`, feature `agent_screening_call`,
+  risk tier high): its `system` is `callSystemPrompt` rendered with placeholders
+  and its tools are the five in-call tools registered from
+  `src/server/voice/call-tools.ts` — the same contracts the live call uses (the
+  voice session's function declarations are generated from them, sent as
+  `parametersJsonSchema` like the text path). Each call attempt is one run,
+  opened "running" with no lease (never claimed by the step loop, never
+  reclaimed), closed with the outcome; a crashed attempt's run is failed by the
+  stuck-call recovery.
+- **Evals** (5): asks for a call when phone screening is on; written assessment
+  after a fall-back; declined consent keeps nothing; answers recorded and pay
+  deferred; an injected instruction is ignored. The call agent's evals run in
+  text mode (the call so far in the goal; the tools act on the seeded call).
+- **Health rules**: `not_placed`, `stuck`, `failures`, `answer_rate`,
+  `declines`, `short_calls` (tests in `scripts/agent-health.test.ts`).
+- **UI**: "AI phone screening" in the candidate's Screening section; "Call now"
+  is a person's request (TA, HR head, CBO; audited `screening_call.requested`),
+  "Cancel call" for a call still waiting (audited `screening_call.cancelled`).
+- **Still to verify (M4)**: a real call through the worker — including that the
+  live model accepts `parametersJsonSchema` for the in-call tools.

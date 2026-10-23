@@ -404,11 +404,11 @@ describe("in-call tools", () => {
         "candidate",
       ),
     ).toBe("completed");
-    expect(o({ ...fresh(), consent: false }, "agent")).toBe("consent_declined");
-    expect(o({ ...fresh(), callback: { whenLocal: null } }, "agent")).toBe("callback");
-    expect(o({ ...fresh(), endReason: "voicemail" }, "agent")).toBe("no_answer");
-    expect(o({ ...fresh() }, "candidate")).toBe("no_answer");
-    expect(o({ ...fresh(), endReason: "wrong_person" }, "agent")).toBe("wrong_person");
+    expect(o({ ...fresh(), consent: false })).toBe("consent_declined");
+    expect(o({ ...fresh(), callback: { whenLocal: null } })).toBe("callback");
+    expect(o({ ...fresh(), endReason: "voicemail" })).toBe("no_answer");
+    expect(o({ ...fresh() })).toBe("no_answer");
+    expect(o({ ...fresh(), endReason: "wrong_person" })).toBe("wrong_person");
   });
 });
 

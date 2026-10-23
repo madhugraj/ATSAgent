@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ScoreChip } from "@/components/ats";
+import { PhoneScreeningCalls } from "@/components/PhoneScreeningCalls";
 
 type Question = {
   id: string;
@@ -242,6 +243,14 @@ export function ScreeningPanel(props: {
           </Button>
         </div>
       </div>
+
+      {reqId ? (
+        <PhoneScreeningCalls
+          candidateId={props.candidateId}
+          requisitionId={reqId}
+          hasKit={Boolean(kit && kit.requisition_id === reqId && questions.length)}
+        />
+      ) : null}
 
       {!props.roles.length ? (
         <p className="mt-3 text-sm text-muted-foreground">

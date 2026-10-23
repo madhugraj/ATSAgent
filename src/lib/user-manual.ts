@@ -200,6 +200,9 @@ export const MANUAL_SECTIONS: ManualSection[] = [
       "After the call, enter answers question by question, paste whole-call notes, or upload the private audio recording for transcription. Submit for per-question verdicts, a screening score, recommendation, red flags and rationale — the combined fit uses 60% existing JD/CV match and 40% screening result.",
       "If questions are not prepared, the organisation's AI key is missing or the role has no job description — check Integrations, then press Prepare questions on the candidate as a fallback.",
       "The Screening section on the candidate profile offers the same kit and grading; previous runs and private recording links remain available to authorised organisation users.",
+      "AI phone screening (optional): the HR head switches it on under Organisation → Phone screening (assistant's name, calling hours and days, attempts, call length) and stores the AI voice key under Integrations → AI model. Then the Screening agent can ask for a call to a shortlisted candidate with a mobile number — a person approves it unless the agent is Autonomous — or press Call now in the candidate's Screening section.",
+      "On the call the assistant says it is an AI calling for your hiring team, asks the candidate's consent, then asks the kit's questions one at a time — never about pay — and their notice period if it is not known. Calls happen only in your calling hours; unanswered calls are tried again (after 2 hours, then the next day), a candidate can ask to be called back later, and anyone who cannot be reached or declines gets the written assessment instead.",
+      "After the call the answers are graded like any screening and the Screening agent adds its proceed / hold note. The candidate's Screening section shows each call, the answers per question and — only if the candidate agreed — the transcript. Calls are not recorded.",
     ],
   },
   {

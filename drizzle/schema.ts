@@ -1906,7 +1906,8 @@ export type AgentType =
   | "onboarding"
   | "followup"
   | "sourcing"
-  | "distribution";
+  | "distribution"
+  | "screening_call";
 export type AgentAutonomy = "suggest" | "act_and_notify" | "autonomous";
 export type AgentRunStatus =
   "queued" | "running" | "awaiting_human" | "done" | "failed" | "cancelled";

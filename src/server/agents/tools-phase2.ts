@@ -23,6 +23,7 @@ import {
 } from "@db/schema";
 import { env } from "../env";
 import { registerTool, type ToolContext } from "./registry";
+import { registerScreeningCallTools } from "./tools-screening-call";
 
 const actor = async (ctx: ToolContext) => {
   const { actorFor } = await import("@/lib/requisitions.server");
@@ -251,7 +252,7 @@ export function registerPhase2Tools(): void {
   registerTool({
     name: "get_screening_status",
     description:
-      "For one application: the written assessment in full (status, score, each area with its score and the candidate's own words as evidence, strengths, red flags, summary — direct evidence), the screening-call kit (focus and questions), the latest screening-call result, the CV match (score and its automated risk flags — inferences from the CV, to verify, not facts), and whether the candidate's expected CTC and notice period are known (payDetails; never the amounts).",
+      "For one application: phone screening (whether calls can be placed, and the latest call's status), the written assessment in full (status, score, each area with its score and the candidate's own words as evidence, strengths, red flags, summary — direct evidence), the screening-call kit (focus and questions), the latest screening-call result, the CV match (score and its automated risk flags — inferences from the CV, to verify, not facts), and whether the candidate's expected CTC and notice period are known (payDetails; never the amounts).",
     input: AppId,
     risk: "read",
     // The assessment evidence quotes the candidate's own answers.
@@ -365,6 +366,41 @@ export function registerPhase2Tools(): void {
               note: "Inferred automatically from the CV — verify; the written assessment is direct evidence.",
             }
           : null,
+        // Phone screening: whether calls can be placed, and the latest call's state —
+        // never the number, the transcript or the answers (they go to the grader).
+        phoneScreening: await (async () => {
+          const { phoneScreeningReadiness } = await import("../voice/settings.server");
+          const { screeningCalls } = await import("@db/schema");
+          const ready = await phoneScreeningReadiness(ctx.orgId);
+          const [call] = await db
+            .select({
+              status: screeningCalls.status,
+              attempt: screeningCalls.attempt,
+              dueAt: screeningCalls.dueAt,
+              endReason: screeningCalls.endReason,
+              answers: screeningCalls.answers,
+              screeningRunId: screeningCalls.screeningRunId,
+            })
+            .from(screeningCalls)
+            .where(
+              and(eq(screeningCalls.orgId, ctx.orgId), eq(screeningCalls.applicationId, app.id)),
+            )
+            .orderBy(desc(screeningCalls.createdAt))
+            .limit(1);
+          return {
+            available: ready.ready,
+            call: call
+              ? {
+                  status: call.status,
+                  attempts: call.attempt,
+                  nextTryAt: call.dueAt,
+                  endReason: call.endReason,
+                  questionsAnswered: call.answers.length,
+                  graded: Boolean(call.screeningRunId),
+                }
+              : null,
+          };
+        })(),
         // Whether pay is known — never the amounts (those are for TA, HR and the Offer agent).
         payDetails: await (async () => {
           const { detailsFor, latestRequest } = await import("@/lib/compensation.server");
@@ -647,4 +683,6 @@ export function registerPhase2Tools(): void {
       return { reminded: true };
     },
   });
+
+  registerScreeningCallTools();
 }

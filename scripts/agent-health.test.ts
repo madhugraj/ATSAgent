@@ -553,3 +553,94 @@ describe("distribution rules", () => {
     await db.delete(requisitions).where(eq(requisitions.id, closed));
   });
 });
+
+describe("phone screening health", () => {
+  const ruleOf = async (rule: string) => (await open()).find((i) => i.rule === rule);
+  async function calls(n: number, values: Record<string, unknown>) {
+    const { candidates, screeningCalls } = await import("../drizzle/schema");
+    const [c] = await db
+      .insert(candidates)
+      .values({ orgId, fullName: "Call Test", email: `call-${Math.random()}@cand.local` } as never)
+      .returning({ id: candidates.id });
+    for (let i = 0; i < n; i++)
+      await db.insert(screeningCalls).values({ orgId, candidateId: c!.id, ...values } as never);
+    return c!.id;
+  }
+  const clear = async (candidateId: string) => {
+    const { candidates } = await import("../drizzle/schema");
+    await db.delete(candidates).where(eq(candidates.id, candidateId));
+  };
+
+  test("calls not placed long after they were due; resolved once placed", async () => {
+    const c = await calls(1, { status: "approved", dueAt: ago(60) });
+    await evaluate();
+    expect(await ruleOf("screening_call.not_placed")).toBeUndefined();
+    const late = await calls(1, {
+      status: "approved",
+      dueAt: ago(HEALTH.callOverdueHours * 60 + 10),
+    });
+    await evaluate();
+    expect(await ruleOf("screening_call.not_placed")).toMatchObject({
+      agentType: "screening_call",
+      severity: "serious",
+    });
+    await clear(late);
+    await evaluate();
+    expect(await ruleOf("screening_call.not_placed")).toBeUndefined();
+    await clear(c);
+  });
+
+  test("a call stuck mid-call is critical", async () => {
+    const c = await calls(1, {
+      status: "in_progress",
+      updatedAt: ago(HEALTH.callStuckMinutes + 5),
+    });
+    await evaluate();
+    expect(await ruleOf("screening_call.stuck")).toMatchObject({ severity: "critical" });
+    await clear(c);
+  });
+
+  test("line or voice failures, not unanswered calls", async () => {
+    const quiet = await calls(HEALTH.callFailures24h, { status: "no_answer", attempt: 1 });
+    await evaluate();
+    expect(await ruleOf("screening_call.failures")).toBeUndefined();
+    const broken = await calls(HEALTH.callFailures24h, {
+      status: "fell_back",
+      attempt: 1,
+      lastError: "503 Service Unavailable",
+    });
+    await evaluate();
+    expect(await ruleOf("screening_call.failures")).toMatchObject({ severity: "serious" });
+    await clear(quiet);
+    await clear(broken);
+  });
+
+  test("low pick-up, then many declines, then calls ending before any question", async () => {
+    const unanswered = await calls(HEALTH.minCalls7d, { status: "no_answer", attempt: 1 });
+    await evaluate();
+    expect(await ruleOf("screening_call.answer_rate")).toMatchObject({ severity: "warning" });
+    await clear(unanswered);
+
+    const declined = await calls(HEALTH.minCalls7d, {
+      status: "consent_declined",
+      attempt: 1,
+      startedAt: ago(30),
+    });
+    await evaluate();
+    expect(await ruleOf("screening_call.answer_rate")).toBeUndefined();
+    expect(await ruleOf("screening_call.declines")).toMatchObject({ severity: "warning" });
+    await clear(declined);
+
+    const short = await calls(HEALTH.shortCalls7d, {
+      status: "completed",
+      attempt: 1,
+      startedAt: ago(30),
+      consentAt: ago(29),
+    });
+    await evaluate();
+    expect(await ruleOf("screening_call.short_calls")).toMatchObject({ severity: "warning" });
+    await clear(short);
+    await evaluate();
+    expect(await ruleOf("screening_call.short_calls")).toBeUndefined();
+  });
+});

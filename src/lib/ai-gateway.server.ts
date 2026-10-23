@@ -1657,10 +1657,11 @@ export function voiceSetupMessage(opts: {
       tools: opts.tools.length
         ? [
             {
+              // Full JSON Schema, as on the text path (aiAgentStep).
               functionDeclarations: opts.tools.map((t) => ({
                 name: t.name,
                 description: t.description,
-                ...(t.parameters ? { parameters: t.parameters } : {}),
+                ...(t.parameters ? { parametersJsonSchema: t.parameters } : {}),
               })),
             },
           ]

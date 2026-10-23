@@ -9,9 +9,9 @@
  * tested without a phone (scripts/screening-call.test.ts).
  */
 import { and, eq } from "drizzle-orm";
-import { z } from "zod";
 
 import {
+  agentRuns,
   applications,
   candidates,
   screeningCalls,
@@ -24,12 +24,18 @@ import {
   aiVoiceSession,
   type VoiceSession,
   type VoiceSessionEvents,
-  type VoiceToolSpec,
 } from "@/lib/ai-gateway.server";
 import { agentRunScope, withAiSubject } from "../agents/context";
 import { db } from "../db";
 import { log } from "../log";
 import { callSystemPrompt, loadBriefFacts } from "./call-brief.server";
+import {
+  applyCallTool,
+  CALL_TOOLS,
+  callOutcome,
+  type CallState,
+  freshCallState,
+} from "./call-tools";
 import { dialNumber } from "./phone";
 import { Resampler } from "./resample";
 import { afterAttempt, callbackAt, localNow } from "./schedule";
@@ -72,180 +78,15 @@ export type CallLimits = {
 
 const DEFAULT_LIMITS: CallLimits = { ringMs: 45_000, silenceMs: 20_000, firstWordsMs: 25_000 };
 
-/* ------------------------------------------------------ in-call tools */
-
-export const END_REASONS = [
-  "completed",
-  "callback",
-  "declined",
-  "wrong_person",
-  "voicemail",
-  "candidate_left",
-  "other",
-] as const;
-export type EndReason = (typeof END_REASONS)[number];
-
-export const CALL_TOOL_INPUTS = {
-  record_consent: z.object({ granted: z.boolean() }),
-  record_answer: z.object({
-    question_id: z.string().min(1).max(20),
-    summary: z.string().trim().min(1).max(600),
-  }),
-  record_availability: z.object({
-    notice_period_days: z.number().int().min(0).max(365).nullable().optional(),
-    earliest_joining: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/)
-      .nullable()
-      .optional(),
-    current_location: z.string().trim().max(120).nullable().optional(),
-    open_to_relocate: z.boolean().nullable().optional(),
-  }),
-  request_callback: z.object({
-    when_local: z.string().max(40).nullable().optional(),
-    their_words: z.string().max(200).optional(),
-  }),
-  end_call: z.object({ reason: z.enum(END_REASONS) }),
-} as const;
-export type CallToolName = keyof typeof CALL_TOOL_INPUTS;
-
-/** What the live model is told about each tool (JSON Schema arguments). */
-export const CALL_TOOLS: VoiceToolSpec[] = [
-  {
-    name: "record_consent",
-    description:
-      "Record whether the candidate agreed to the screening call now and to it being transcribed. granted true only if they clearly agreed to both.",
-    parameters: {
-      type: "object",
-      properties: { granted: { type: "boolean" } },
-      required: ["granted"],
-    },
-  },
-  {
-    name: "record_answer",
-    description:
-      "After the candidate answers one of the listed questions: the question's id and a faithful one or two sentence summary of what they said.",
-    parameters: {
-      type: "object",
-      properties: { question_id: { type: "string" }, summary: { type: "string" } },
-      required: ["question_id", "summary"],
-    },
-  },
-  {
-    name: "record_availability",
-    description:
-      "What the candidate said about their notice period (in days), the earliest date they could join (YYYY-MM-DD), where they live now, and whether they are open to relocating. Leave out anything they did not say. Never pay.",
-    parameters: {
-      type: "object",
-      properties: {
-        notice_period_days: { type: "integer" },
-        earliest_joining: { type: "string" },
-        current_location: { type: "string" },
-        open_to_relocate: { type: "boolean" },
-      },
-    },
-  },
-  {
-    name: "request_callback",
-    description:
-      "The candidate wants to be called later. when_local: the time they asked for as YYYY-MM-DDTHH:mm in local time (see the current local time); omit if they gave none. their_words: what they said.",
-    parameters: {
-      type: "object",
-      properties: { when_local: { type: "string" }, their_words: { type: "string" } },
-    },
-  },
-  {
-    name: "end_call",
-    description: "Hang up. Say goodbye out loud first, then call this with why the call ended.",
-    parameters: {
-      type: "object",
-      properties: { reason: { type: "string", enum: [...END_REASONS] } },
-      required: ["reason"],
-    },
-  },
-];
-
-/* ---------------------------------------------------------------- state */
-
-type CallState = {
-  consent: boolean | null;
-  consentAt?: number;
-  answers: ScreeningCallAnswer[];
-  availability: z.infer<typeof CALL_TOOL_INPUTS.record_availability> | null;
-  callback: { whenLocal: string | null } | null;
-  endReason: EndReason | null;
-};
-
-/**
- * Validate and apply one in-call tool call (pure over the state; unit-tested).
- * Returns what the model is told back.
- */
-export function applyCallTool(
-  state: CallState,
-  name: string,
-  args: unknown,
-  questionIds: Set<string>,
-  now: number,
-): Record<string, unknown> {
-  if (!(name in CALL_TOOL_INPUTS)) return { ok: false, error: "Unknown tool." };
-  const parsed = CALL_TOOL_INPUTS[name as CallToolName].safeParse(args);
-  if (!parsed.success) return { ok: false, error: "Those arguments are not valid." };
-  const needsConsent = name === "record_answer" || name === "record_availability";
-  if (needsConsent && state.consent !== true)
-    return { ok: false, error: "Ask for and record the candidate's consent first." };
-  switch (name as CallToolName) {
-    case "record_consent": {
-      const { granted } = parsed.data as { granted: boolean };
-      state.consent = granted;
-      if (granted) state.consentAt = now;
-      return { ok: true };
-    }
-    case "record_answer": {
-      const a = parsed.data as { question_id: string; summary: string };
-      if (!questionIds.has(a.question_id))
-        return { ok: false, error: "That is not one of the listed question ids." };
-      state.answers = state.answers.filter((x) => x.question_id !== a.question_id);
-      state.answers.push({
-        question_id: a.question_id,
-        summary: a.summary,
-        at: new Date(now).toISOString(),
-      });
-      return { ok: true, answered: state.answers.length };
-    }
-    case "record_availability": {
-      state.availability = {
-        ...state.availability,
-        ...(parsed.data as CallState["availability"]),
-      };
-      return { ok: true };
-    }
-    case "request_callback": {
-      const c = parsed.data as { when_local?: string | null };
-      state.callback = { whenLocal: c.when_local ?? null };
-      return { ok: true };
-    }
-    case "end_call": {
-      state.endReason = (parsed.data as { reason: EndReason }).reason;
-      return { ok: true };
-    }
-  }
-  return { ok: false, error: "Unknown tool." };
-}
-
-/** Where a finished conversation leaves the call (pure; unit-tested). */
-export function callOutcome(
-  s: Pick<CallState, "consent" | "answers" | "callback" | "endReason">,
-  hungUpBy: "agent" | "candidate" | "limit",
-): "completed" | "callback" | "consent_declined" | "no_answer" | "wrong_person" {
-  if (s.endReason === "wrong_person") return "wrong_person";
-  if (s.callback) return "callback";
-  if (s.consent === false || s.endReason === "declined") return "consent_declined";
-  if (s.consent === true && (s.answers.length > 0 || s.endReason === "completed"))
-    return "completed";
-  // Voicemail, silence, or they hung up before agreeing: try again later.
-  void hungUpBy;
-  return "no_answer";
-}
+export {
+  applyCallTool,
+  CALL_TOOL_INPUTS,
+  CALL_TOOLS,
+  callOutcome,
+  END_REASONS,
+  type CallToolName,
+  type EndReason,
+} from "./call-tools";
 
 /** Above this RMS (int16) a 20 ms frame is speech, not line noise. */
 const SPEECH_RMS = 600;
@@ -295,7 +136,12 @@ export async function runScreeningCall(
     .where(and(eq(screeningCalls.id, callId), eq(screeningCalls.orgId, orgId)))
     .limit(1);
   if (!call) throw new Error("Screening call not found");
-  const runId = call.agentRunId ?? call.requestedRunId;
+  // Each attempt is one run of the Screening call agent (its ledger, trace and outcome).
+  const runId = await openCallRun(orgId, call).catch((e) => {
+    log.warn("screening_call.run_open_failed", { call_id: callId, error: e as Error });
+    return null;
+  });
+  if (runId) call.agentRunId = runId;
   const scoped = <T>(fn: () => Promise<T>) =>
     withAiSubject(
       {
@@ -317,6 +163,78 @@ export async function runScreeningCall(
     });
   }
 }
+
+/**
+ * Open the Screening call agent's run for this attempt: "running" with no
+ * lease, so the step-loop runner never claims it and the lease reclaimer
+ * leaves it alone; its principal is the person who asked for (or approved)
+ * the call. Null when nobody is on record.
+ */
+async function openCallRun(
+  orgId: string,
+  call: typeof screeningCalls.$inferSelect,
+): Promise<string | null> {
+  let principal = call.requestedBy;
+  if (!principal && call.requestedRunId) {
+    const [r] = await db
+      .select({ principal: agentRuns.principalUserId })
+      .from(agentRuns)
+      .where(and(eq(agentRuns.id, call.requestedRunId), eq(agentRuns.orgId, orgId)))
+      .limit(1);
+    principal = r?.principal ?? null;
+  }
+  if (!principal) return null;
+  await import("../agents");
+  const { getAgent } = await import("../agents/registry");
+  const { ensureDefinition } = await import("../agents/manifest.server");
+  const def = getAgent("screening_call");
+  if (!def) return null;
+  const definition = await ensureDefinition(def);
+  const now = new Date();
+  const [run] = await db
+    .insert(agentRuns)
+    .values({
+      orgId,
+      agentType: "screening_call",
+      status: "running",
+      principalUserId: principal,
+      subjectType: "application",
+      subjectId: call.applicationId,
+      definitionId: definition.id,
+      definitionVersion: definition.version,
+      definitionHash: definition.hash,
+      goal: `Phone screening call, attempt ${call.attempt}.`,
+      startedAt: now,
+      leaseUntil: null,
+    })
+    .returning({ id: agentRuns.id });
+  await setCall(call.id, orgId, { agentRunId: run!.id });
+  return run!.id;
+}
+
+/** Close the attempt's run with what happened (in plain words). */
+async function closeCallRun(runId: string, ok: boolean, result: string) {
+  const now = new Date();
+  await db
+    .update(agentRuns)
+    .set({
+      status: ok ? "done" : "failed",
+      result,
+      lastError: ok ? null : result,
+      finishedAt: now,
+      updatedAt: now,
+    })
+    .where(and(eq(agentRuns.id, runId), eq(agentRuns.status, "running")));
+}
+
+const OUTCOME_WORDS: Record<string, string> = {
+  completed: "The candidate took the screening call; the answers were sent for grading.",
+  consent_declined: "The candidate declined the screening call; nothing was kept.",
+  callback: "The candidate asked to be called back later.",
+  no_answer: "Nobody answered; the call will be tried again.",
+  failed: "The call could not be placed; it will be tried again.",
+  fell_back: "The call could not happen; the Screening agent sends the written assessment instead.",
+};
 
 async function placeCall(
   orgId: string,
@@ -350,13 +268,7 @@ async function placeCall(
   const questionIds = new Set(facts.questions.map((q) => q.id));
   const system = `Current local time: ${localNow(now(), tz)} (${tz}).\n\n${callSystemPrompt(facts)}`;
 
-  const state: CallState = {
-    consent: null,
-    answers: [],
-    availability: null,
-    callback: null,
-    endReason: null,
-  };
+  const state: CallState = freshCallState();
   const line = deps.line();
   const up = new Resampler(2, 1); // 8 kHz phone → 16 kHz model
   const down = new Resampler(1, 3); // 24 kHz model → 8 kHz phone
@@ -439,7 +351,6 @@ async function placeCall(
   session.sendText("(The person has just picked up the phone. Begin.)");
   lastActivity = now();
 
-  let hungUpBy: "agent" | "candidate" | "limit" = "limit";
   let watchdog: ReturnType<typeof setInterval> | null = null;
   const limitHit = new Promise<string>((resolve) => {
     watchdog = setInterval(() => {
@@ -450,9 +361,9 @@ async function placeCall(
     }, 250);
   });
   const why = await Promise.race([
-    agentEnd.then(() => ((hungUpBy = "agent"), state.endReason ?? "completed")),
-    line.ended.then(() => ((hungUpBy = "candidate"), "candidate_hung_up")),
-    session.done.then((s) => ((hungUpBy = "limit"), s.error ? "voice_closed" : "voice_ended")),
+    agentEnd.then(() => state.endReason ?? "completed"),
+    line.ended.then(() => "candidate_hung_up"),
+    session.done.then((s) => (s.error ? "voice_closed" : "voice_ended")),
     limitHit,
   ]);
   if (watchdog) clearInterval(watchdog);
@@ -460,7 +371,7 @@ async function placeCall(
   line.close();
   const summary = await session.close();
 
-  const outcome = callOutcome(state, hungUpBy);
+  const outcome = callOutcome(state);
   // The transcript is kept only when the candidate consented.
   const transcript: ScreeningCallTurn[] =
     state.consent === true ? (summary.transcript as ScreeningCallTurn[]) : [];
@@ -590,6 +501,14 @@ async function finish(
     callbackAt: status === "callback" ? dueAt : null,
     lastError: o.lastError ?? null,
   });
+  if (call.agentRunId)
+    await closeCallRun(
+      call.agentRunId,
+      o.endReason !== "error",
+      OUTCOME_WORDS[status] ?? `The call ended: ${status}.`,
+    ).catch((e) =>
+      log.warn("screening_call.run_close_failed", { call_id: call.id, error: e as Error }),
+    );
   const settled = status === "completed" || status === "consent_declined" || status === "fell_back";
   if (settled && call.applicationId) {
     const { emitAgentEvent } = await import("../agents/events");
