@@ -1,7 +1,7 @@
 const $ = (id) => document.getElementById(id);
 // Capture posts carry the org's capture key — the destination must be one of
 // ours. Never let the destination become user-editable text (phishing vector).
-const ALLOWED_SITES = ["https://atsiq.yavar.ai", "http://localhost:8080"];
+const ALLOWED_SITES = ["https://atsiq.yavar.ai", "http://localhost:8080", "http://localhost:9000"];
 const status = (msg, cls = "") => {
   const el = $("status");
   el.textContent = msg;
@@ -189,3 +189,147 @@ $("stop").addEventListener("click", async () => {
 
 void refresh();
 setInterval(refresh, 1200);
+
+/* ------------------------------------------------- posting on job portals */
+
+// Portals people post on by hand that the companion supports so far.
+const PORTALS = [
+  { channel: "internshala", name: "Internshala", hosts: ["internshala.com"] },
+  { channel: "apna", name: "Apna", hosts: ["apna.co"] },
+];
+const postStatus = (msg, cls = "") => {
+  const el = $("postStatus");
+  el.textContent = msg;
+  el.style.color = cls === "err" ? "#b42318" : cls === "ok" ? "#027a48" : "";
+};
+let portal = null;
+let queue = [];
+
+async function activeTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tab;
+}
+
+async function distribution(body) {
+  const { site, token } = settings();
+  if (!token) throw new Error("Add your capture key and save settings first.");
+  const res = await fetch(`${site}/api/public/distribution`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token, ...body }),
+  });
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok || out.status !== "ok") throw new Error(out.detail || "ATSIQ did not accept that.");
+  return out;
+}
+
+async function loadPortal() {
+  const tab = await activeTab();
+  let host = "";
+  try {
+    host = new URL(tab.url || "").hostname.toLowerCase();
+  } catch {
+    return;
+  }
+  portal = PORTALS.find((p) => p.hosts.some((h) => host === h || host.endsWith(`.${h}`))) || null;
+  if (!portal) return;
+  $("post").style.display = "";
+  $("portalName").textContent = portal.name;
+  try {
+    const out = await distribution({ action: "queue", channel: portal.channel });
+    queue = out.roles || [];
+    $("role").innerHTML = "";
+    for (const r of queue) {
+      const o = document.createElement("option");
+      o.value = r.requisitionId;
+      o.textContent = `${r.code} · ${r.title} — ${r.status === "posted" ? "posted" : "waiting"}`;
+      $("role").appendChild(o);
+    }
+    postStatus(
+      queue.length
+        ? `${queue.filter((r) => r.status === "waiting").length} role(s) waiting to be posted on ${portal.name}.`
+        : `Nothing is planned for ${portal.name} yet — the Distribution agent plans roles here.`,
+    );
+  } catch (e) {
+    postStatus(e.message, "err");
+  }
+}
+
+const chosen = () => queue.find((r) => r.requisitionId === $("role").value);
+
+$("fill").addEventListener("click", async () => {
+  const role = chosen();
+  if (!role) return postStatus("Choose a role first.", "err");
+  try {
+    const tab = await activeTab();
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["portal-fill.js"] });
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: (fields, name) => globalThis.atsiqFillForm(fields, name),
+      args: [role.fields, portal.name],
+    });
+    postStatus(
+      result.filled.length
+        ? `Filled ${result.filled.length} field(s). Check the form, then submit it on ${portal.name}.`
+        : "No fields recognised on this page — use the Copy buttons in the panel on the page.",
+      result.filled.length ? "ok" : "",
+    );
+  } catch (e) {
+    postStatus(e.message || "Could not fill this page.", "err");
+  }
+});
+
+$("recordPosted").addEventListener("click", async () => {
+  const role = chosen();
+  if (!role) return postStatus("Choose a role first.", "err");
+  const tab = await activeTab();
+  try {
+    await distribution({
+      action: "posted",
+      channel: portal.channel,
+      requisitionId: role.requisitionId,
+      listingUrl: tab.url,
+    });
+    postStatus(`Recorded: ${role.code} is live on ${portal.name}.`, "ok");
+    await loadPortal();
+  } catch (e) {
+    postStatus(e.message, "err");
+  }
+});
+
+$("sendApplicant").addEventListener("click", async () => {
+  const role = chosen();
+  if (!role) return postStatus("Choose a role first.", "err");
+  const { site, token } = settings();
+  try {
+    const tab = await activeTab();
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: grabPage,
+    });
+    if (!result || (!result.resume && result.text.length < 80))
+      throw new Error("Open one applicant's profile or CV first.");
+    const res = await fetch(`${site}/api/public/capture`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        token,
+        kind: "cv",
+        text: result.text,
+        file: result.resume,
+        sourceUrl: result.url,
+        title: result.title,
+        requisitionId: role.requisitionId,
+        channel: portal.channel,
+      }),
+    });
+    const out = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(out.detail || "ATSIQ did not accept that.");
+    postStatus(out.detail || "Sent.", "ok");
+  } catch (e) {
+    postStatus(e.message, "err");
+  }
+});
+
+// After the saved address and key are back in the form (the read above runs first).
+chrome.storage.local.get(null, () => loadPortal());

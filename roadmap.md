@@ -2,6 +2,9 @@
 
 ## Distribution agent (2026-10-21)
 
+- [x] Hand posting with the companion (2026-10-22): the Distribution agent 1.1.0 plans roles for portals a person posts on ("waiting to be posted"); ATSIQ Capture 1.16.0 on Internshala and Apna lists them, fills the portal's form in the person's own signed-in browser (never submits), records the posting from the portal's own listing page, and sends applicants into the role credited to the portal (`/api/public/distribution`, capture `channel`); the daily check chases postings still waiting after 2 days
+- [ ] Partner portals (Naukri, Indeed, LinkedIn) handed to the Distribution agent once partner access is approved
+
 - [x] Distribution agent v1.0.0 (owner HR head): advertises approved roles across the job portals by the route each allows — requests feed listings (HR head approves; pre-approvable per feed for Autonomous), reminds a person to post where no integration exists with the role's ready text — and runs a daily check: CVs arriving by portal, listings quiet for a week, unread careers-inbox mail, portal CVs with no role
 - [x] Careers-inbox mail credited to the portal that sent it (sender domain)
 - [x] Role-limited CVs (migration 0045): CVs from portals whose terms limit them to their role (Naukri, Internshala, Job Hai) are never reused for another role, searched, matched, invited or shared with partner organisations, are marked "Role only" in the talent pool, and are erased 30 days after their roles are over once the HR head approves (always asked, even at Autonomous)

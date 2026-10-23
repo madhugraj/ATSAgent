@@ -953,6 +953,7 @@ export function scenarios(): ScriptedScenario[] {
           "get_role_channels",
           "request_feed_listing",
           "request_feed_listing",
+          "request_hand_posting",
           "list_members",
           "remind_member",
         ],
@@ -964,6 +965,11 @@ export function scenarios(): ScriptedScenario[] {
           call("j", "request_feed_listing", { requisitionId: idFromGoal(m), channel: "jooble" }),
         (m) =>
           call("a", "request_feed_listing", { requisitionId: idFromGoal(m), channel: "adzuna" }),
+        (m) =>
+          call("h", "request_hand_posting", {
+            requisitionId: idFromGoal(m),
+            channels: ["naukri", "apna"],
+          }),
         () => call("l", "list_members", {}),
         (m) =>
           call("r", "remind_member", {

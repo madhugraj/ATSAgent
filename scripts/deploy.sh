@@ -84,7 +84,7 @@ mkdir -p "$WORK/ctx"
 git archive "$SHA" | tar -x -C "$WORK/ctx" 2>/dev/null || fail "cannot archive $SHA — is it committed/pushed?"
 if [ ! -f "$WORK/ctx/public/atsiq-capture.zip" ]; then
   echo "  companion zip missing — rebuilding from extension/"
-  ( cd extension && zip -qr "$WORK/ctx/public/atsiq-capture.zip" manifest.json background.js popup.js popup.html )
+  ( cd extension && zip -qr "$WORK/ctx/public/atsiq-capture.zip" manifest.json background.js popup.js popup.html portal-fill.js )
 fi
 COPYFILE_DISABLE=1 tar --exclude='._*' -czf "$WORK/ctx.tgz" -C "$WORK/ctx" .
 echo "  context: $(du -h "$WORK/ctx.tgz" | cut -f1)"

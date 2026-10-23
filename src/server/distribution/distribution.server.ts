@@ -31,6 +31,9 @@ import { writeAudit } from "../audit";
 import { decryptSecret, encryptSecret } from "../crypto";
 import { assertRequisitionInOrg } from "../guards";
 import {
+  places,
+  plainText,
+  stripContactDetails,
   adzunaFeed,
   countryCode,
   describeJob,
@@ -44,7 +47,8 @@ import {
 } from "./content";
 import { indexingConfigured, queueIndexNotification } from "./google-indexing.server";
 
-export type DistributionActor = { memberEmail: string; userId: string };
+/** A member, or (userId null) the organisation's paired browser extension. */
+export type DistributionActor = { memberEmail: string; userId: string | null };
 
 const GOOGLE = "google_jobs";
 const site = () => env.PUBLIC_SITE_URL.replace(/\/$/, "");
@@ -200,7 +204,9 @@ async function upsertPosting(
               ? existing.publishedAt
               : now,
         }
-      : { closedAt: now }),
+      : values.status === "pending"
+        ? {}
+        : { closedAt: now }),
   };
   if (existing) {
     await db
@@ -504,12 +510,15 @@ export async function markPosted(
   requisitionId: string,
   channelId: string,
   listingUrl: string | null,
+  via: "page" | "browser_extension" = "page",
 ): Promise<void> {
   const channel = channelOrThrow(channelId, ["assisted", "partner_api"]);
   await approvedRole(orgId, requisitionId);
   const url = listingUrl?.trim() || null;
   if (url && (url.length > 500 || !httpUrl(url)))
     throw new Error("The listing link must be a web address starting with https://.");
+  if (via === "browser_extension" && (!url || !onPortal(channel.id, url)))
+    throw new Error(`Record it from the ${channel.name} listing page itself.`);
   const existing = await postingOf(orgId, requisitionId, channel.id);
   if (existing?.status === "published" && existing.externalId)
     throw new Error(`This role is already live on ${channel.name} through the integration.`);
@@ -526,8 +535,118 @@ export async function markPosted(
     action: "board.posting.publish",
     entityType: "requisition",
     entityId: requisitionId,
-    detail: { provider: channel.id, route: "manual", url },
+    detail: { provider: channel.id, route: "manual", url, via },
   });
+}
+
+/** Whether a listing link is on the portal's own site (the paired browser must not record elsewhere). */
+export function onPortal(channelId: string, listingUrl: string): boolean {
+  const channel = channelById(channelId);
+  try {
+    const host = new URL(listingUrl).hostname.toLowerCase();
+    return (channel?.senderDomains ?? []).some((d) => host === d || host.endsWith(`.${d}`));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The Distribution agent plans a role for portals a person posts on: each
+ * becomes "waiting to be posted" until the person posts it (the ATSIQ browser
+ * extension fills the portal's form and records it). Live postings are left
+ * alone. Audited.
+ */
+export async function planHandPosting(
+  orgId: string,
+  actor: DistributionActor,
+  requisitionId: string,
+  channelIds: string[],
+): Promise<{ planned: string[]; alreadyLive: string[] }> {
+  const job = await approvedRole(orgId, requisitionId);
+  const planned: string[] = [];
+  const alreadyLive: string[] = [];
+  for (const id of [...new Set(channelIds)]) {
+    const channel = channelOrThrow(id, ["assisted", "partner_api"]);
+    const existing = await postingOf(orgId, requisitionId, channel.id);
+    if (existing?.status === "published") {
+      alreadyLive.push(channel.name);
+      continue;
+    }
+    if (existing?.status !== "pending")
+      await upsertPosting(orgId, requisitionId, channel.id, {
+        status: "pending",
+        actor,
+        payload: { route: "manual", planned: true },
+      });
+    planned.push(channel.name);
+  }
+  if (planned.length)
+    await writeAudit({
+      actor: actor.memberEmail,
+      orgId,
+      actorUserId: actor.userId,
+      action: "distribution.hand_posting.planned",
+      entityType: "requisition",
+      entityId: requisitionId,
+      detail: { channels: planned, role: job.code },
+    });
+  return { planned, alreadyLive };
+}
+
+/** Roles to post (or posted) on one portal, with the text for its form — for the browser extension. */
+export async function handPostingQueue(orgId: string, channelId: string) {
+  const channel = channelOrThrow(channelId, ["assisted", "partner_api"]);
+  const rows = await db
+    .select({
+      requisitionId: requisitionBoardPostings.requisitionId,
+      status: requisitionBoardPostings.status,
+      url: requisitionBoardPostings.externalUrl,
+      publishedAt: requisitionBoardPostings.publishedAt,
+    })
+    .from(requisitionBoardPostings)
+    .innerJoin(requisitions, eq(requisitions.id, requisitionBoardPostings.requisitionId))
+    .where(
+      and(
+        eq(requisitionBoardPostings.orgId, orgId),
+        eq(requisitions.orgId, orgId),
+        eq(requisitionBoardPostings.provider, channel.id),
+        eq(requisitions.status, "approved"),
+        sql`${requisitionBoardPostings.status} in ('pending', 'published')`,
+      ),
+    )
+    .orderBy(requisitionBoardPostings.updatedAt)
+    .limit(50);
+  const out = [];
+  for (const r of rows) {
+    const job = await loadJob(orgId, r.requisitionId, channel.id);
+    if (!job) continue;
+    const applyUrl =
+      channel.externalLink === "no" ? null : trackedApplyUrl(site(), job.id, channel.id);
+    out.push({
+      requisitionId: job.id,
+      code: job.code,
+      title: job.title,
+      status: r.status === "published" ? "posted" : "waiting",
+      listingUrl: r.url,
+      postedAt: r.publishedAt?.toISOString() ?? null,
+      fields: {
+        title: job.title,
+        location: places(job.location).join(", ") || null,
+        workMode: job.workMode,
+        openings: job.openings,
+        experienceMin: job.experienceMin,
+        experienceMax: job.experienceMax,
+        skills: [...job.mustHave, ...job.goodToHave],
+        description: stripContactDetails(plainText(job.description)),
+        applyUrl,
+      },
+      text: packText(job, applyUrl),
+    });
+  }
+  return {
+    channel: { id: channel.id, name: channel.name, steps: channel.steps ?? [] },
+    roles: out,
+  };
 }
 
 /**
@@ -546,10 +665,11 @@ export async function takeDown(
   if (!existing || existing.status !== "published")
     throw new Error(`This role is not live on ${channel.name}.`);
   if (channel.route === "partner_api" && existing.externalId) {
+    if (!actor.userId) throw new Error("A member closes integration postings.");
     const { closeBoardPostingImpl } = await import("../boards/publish.server");
     await closeBoardPostingImpl({
       orgId,
-      actor,
+      actor: { memberEmail: actor.memberEmail, userId: actor.userId },
       requisitionId,
       provider: channel.id as "linkedin" | "indeed" | "naukri",
       reason: "closed",

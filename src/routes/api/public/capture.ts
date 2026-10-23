@@ -24,6 +24,8 @@ const Payload = z.object({
   candidateName: z.string().min(2).max(200).nullish(),
   profileOnly: z.boolean().optional().default(false),
   requisitionId: z.string().uuid().nullish(),
+  /** The job portal this applicant came from (credited, with its data-use rule). */
+  channel: z.string().max(40).nullish(),
 });
 
 /**
@@ -81,6 +83,7 @@ async function handle(request: Request) {
       candidateName: body.candidateName ?? null,
       profileOnly: body.profileOnly,
       requisitionId: body.requisitionId ?? null,
+      channel: body.channel ?? null,
     });
     return Response.json(result, {
       status: result.status === "error" ? 422 : 200,

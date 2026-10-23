@@ -6,6 +6,7 @@
  * description, or an attached CV) and posts it here with the organisation's
  * capture token. Nothing on our side pretends to be the recruiter.
  */
+import { channelById } from "./job-channels";
 import { eq } from "drizzle-orm";
 
 import { db } from "../server/db";
@@ -34,6 +35,12 @@ export type CaptureInput = {
   /** Retain validated LinkedIn evidence even when its original CV is still pending. */
   profileOnly?: boolean;
   requisitionId?: string | null;
+  /**
+   * The job portal the person is capturing from (job-channels.ts), e.g. an
+   * Internshala applicant page: the CV is credited to it and follows its
+   * data-use rule. Only portals people post on by hand are accepted.
+   */
+  channel?: string | null;
 };
 
 export type CaptureResult = {
@@ -118,6 +125,12 @@ async function nextCaptureCode(orgId: string): Promise<string> {
     .toString(36)
     .slice(2, 6)
     .toUpperCase()}`;
+}
+
+/** A portal the person posts on by hand, else the companion itself. */
+function captureSource(channel: string | null | undefined): string {
+  const c = channelById(channel);
+  return c && (c.route === "assisted" || c.route === "partner_api") ? c.id : "browser_capture";
 }
 
 /** Resolve the organisation behind a capture token. */
@@ -209,7 +222,7 @@ export async function capture(input: CaptureInput): Promise<CaptureResult> {
         fileName,
         requisitionId: input.requisitionId ?? null,
         orgId: org.id,
-        source: "browser_capture",
+        source: captureSource(input.channel),
         fullName: input.candidateName ?? null,
         identityKey: input.publicProfileUrl ?? input.sourceUrl ?? null,
         profileUrl: input.publicProfileUrl ?? input.sourceUrl ?? null,

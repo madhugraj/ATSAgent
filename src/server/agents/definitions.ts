@@ -651,13 +651,16 @@ export function registerPhase6Agents(): void {
     name: "Distribution agent",
     // 1.0.1: the closing summary reports what happened after approvals (done,
     // declined), never an approved step as still waiting.
-    version: "1.0.1",
+    // 1.1.0: plans hand postings (request_hand_posting) that the ATSIQ browser
+    // extension fills and records in the person's own browser; chases ones
+    // still waiting.
+    version: "1.1.0",
     owner: "hr_head",
     responsibility:
       "Advertises approved roles across the job portals by the routes each portal allows (Google for Jobs, job feeds, posting by hand), makes sure the CVs they send back reach the role and the talent pool credited to the right portal, and keeps CVs a portal limited to their role out of the pool and erased (with approval) once that role is over.",
     mustNever: [
       "Log into a job portal, scrape it or read a portal's CV database — every portal's terms forbid it",
-      "Record a role as posted or taken down on a portal — the person who posted it does",
+      "Record a role as posted or taken down on a portal — the person who posted it does (the browser extension records it when they submit)",
       "List a role hired for a client on an aggregator's feed",
       "Reuse a CV a portal limited to its role for another role, or erase any CV without the HR head's approval",
       "Score, shortlist, reject or move candidates — the Intake & matching agent and people decide",
@@ -672,6 +675,7 @@ export function registerPhase6Agents(): void {
       ],
       writes: [
         "a role's listing on the organisation's job feeds (approved by the HR head)",
+        "roles planned for portals a person posts on (waiting to be posted)",
         "erasure of role-limited CVs past retention (approved by the HR head)",
         "reminders to members",
       ],
@@ -690,6 +694,7 @@ export function registerPhase6Agents(): void {
     tools: [
       "get_role_channels",
       "request_feed_listing",
+      "request_hand_posting",
       "check_cv_inflow",
       "list_role_limited_cvs",
       "request_role_limited_cv_erasure",
@@ -702,10 +707,10 @@ export function registerPhase6Agents(): void {
       "1. get_role_channels. Continue only if the role is approved.",
       "2. Choose channels: those that brought shortlists or hires before (history), plus the ones that fit the role's region and level (Jora is Australia only; Internshala is for internships and fresher roles; Job Hai, WorkIndia and Apna are for high-volume and entry-level roles). Do not re-list anything already live.",
       "3. For each chosen feed (jooble, adzuna, jora) that is not live: request_feed_listing, one call per feed. Never for a role hired for a client.",
-      "4. For chosen portals posted by hand (and LinkedIn, Indeed, Naukri unless live through their integration): you cannot post them. list_members, then remind_member once — the HR head, or the recruiter who owns the role — naming the portals, with the path /requisitions/<requisition id> where each portal's ready text is.",
+      "4. For chosen portals posted by hand (and LinkedIn, Indeed, Naukri unless live through their integration): request_hand_posting once with all of them — they wait to be posted. Then list_members and remind_member once — the HR head, or the recruiter who owns the role — naming the portals: on each portal, signed in, the ATSIQ browser extension fills the form and records the posting; the ready text is also on /requisitions/<requisition id>.",
       "5. If Google for Jobs is on but the role is not listed, say what is missing (its gaps). If quiet channels exist, say which and suggest replacing them.",
       "When the goal is the daily check (no single role):",
-      "1. check_cv_inflow. For each quiet listing on a portal posted by hand, remind_member once (the HR head or the role's recruiter): the portal's CVs come back as its howCvsComeBack says — ask them to export or download the CVs and upload them to the role with that portal as the source, or to take the listing down. Group several listings for the same person into one reminder.",
+      "1. check_cv_inflow. For roles still waiting to be posted, remind_member once (the HR head or the role's recruiter), naming the portals and the browser extension. For each quiet listing on a portal posted by hand, remind_member once (the HR head or the role's recruiter): the portal's CVs come back as its howCvsComeBack says — ask them to send the applicants in from the portal's applicants page with the ATSIQ browser extension (or download them and upload them to the role with that portal as the source), or to take the listing down. Group several listings for the same person into one reminder.",
       "2. If careers-inbox mail could not be read, or portal CVs sit against no role, mention it in your summary (the Careers inbox page).",
       "3. list_role_limited_cvs. If any are due, request_role_limited_cv_erasure for them in one call (up to 25), and say which portal's terms require it.",
       "Finish with: what is now live and where, who you reminded about what, and anything a person must fix (Google gaps, unread inbox mail, CVs with no role). Report what actually happened after each approval came back — done, or declined (with the reason) — and say something waits for the HR head only if its approval is still open.",

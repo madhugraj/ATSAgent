@@ -173,6 +173,8 @@ export function RoleDistributionSection({ requisitionId }: { requisitionId: stri
                 {JOB_CHANNELS.filter((c) => c.route === g.route).map((c) => {
                   const p = postingOf(c.id);
                   const live = p?.status === "published";
+                  // Planned by the Distribution agent; posted in the person's browser.
+                  const waiting = p?.status === "pending";
                   return (
                     <li
                       key={c.id}
@@ -189,7 +191,9 @@ export function RoleDistributionSection({ requisitionId }: { requisitionId: stri
                         <p className="text-xs text-muted-foreground">
                           {live
                             ? `${p.viaIntegration ? "Live through the integration" : c.route === "feed" ? "On your feed" : "Posted"} since ${new Date(p.publishedAt ?? Date.now()).toLocaleDateString()}`
-                            : c.applications}
+                            : waiting
+                              ? `Waiting to be posted — open ${c.name} signed in, and the ATSIQ browser extension fills the form and records it.`
+                              : c.applications}
                         </p>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
@@ -204,6 +208,7 @@ export function RoleDistributionSection({ requisitionId }: { requisitionId: stri
                           </a>
                         ) : null}
                         {live ? <Badge>Live</Badge> : null}
+                        {waiting ? <Badge variant="secondary">Waiting</Badge> : null}
                         {c.route === "feed" ? (
                           canPublish ? (
                             <Button
