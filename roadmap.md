@@ -1,5 +1,11 @@
 # Roadmap
 
+## Voice screening agent (2026-10-23)
+
+- [x] M0 voice foundation (docs/voice-screening-agent.md): SIP/RTP/G.711 call stack in TypeScript (`src/server/voice/`), live voice sessions through the AI gateway (`aiVoiceSession`, feature `screening_call`, ledger + training capture), spike script; real test calls placed from a workstation and from inside GKE with two-way audio
+- [ ] M1–M4: `screening_calls` data, voice worker, Screening agent 1.8.0 `request_screening_call`, Screening call agent 1.0.0 with evals and health rules, UI, pilot
+- [ ] Decide which voice credential an organisation stores (API key or Vertex service account)
+
 ## Distribution agent (2026-10-21)
 
 - [x] Distribution agent v1.0.0 (owner HR head): advertises approved roles across the job portals by the route each allows — requests feed listings (HR head approves; pre-approvable per feed for Autonomous), reminds a person to post where no integration exists with the role's ready text — and runs a daily check: CVs arriving by portal, listings quiet for a week, unread careers-inbox mail, portal CVs with no role

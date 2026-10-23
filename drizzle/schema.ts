@@ -2332,7 +2332,7 @@ export const trainingSettings = pgTable(
   ],
 );
 
-export type TrainingCallKind = "json" | "research" | "agent_step";
+export type TrainingCallKind = "json" | "research" | "agent_step" | "voice";
 
 /** One model call: what it was given and what it returned. */
 export const trainingInferences = pgTable(

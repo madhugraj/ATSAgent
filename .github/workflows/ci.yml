@@ -125,3 +125,5 @@ jobs:
         run: bun test scripts/job-distribution.test.ts
       - name: Distribution agent (portal credit, role-limited CVs, daily check)
         run: bun test scripts/distribution-agent.test.ts
+      - name: Voice foundation (G.711, resampler, RTP, SIP, live-session framing)
+        run: bun test scripts/voice.test.ts
