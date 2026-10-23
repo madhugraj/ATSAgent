@@ -52,6 +52,8 @@ export const AI_FEATURES = [
   "talent_search",
   // Hiring desk: researching skills / experience / pay for a role the person delegated.
   "role_research",
+  // Live voice: the screening call with a candidate (docs/voice-screening-agent.md).
+  "screening_call",
 ] as const;
 
 export type AiFeature = (typeof AI_FEATURES)[number];

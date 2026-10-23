@@ -45,3 +45,6 @@ public/*.zip
 
 # Security audit reports — never commit while repo is public
 SECURITY_AUDIT_REPORT*.md
+
+# Voice POC: holds a live SIP password and a Google service-account key — never commit (public repo).
+ai_interviewer/
