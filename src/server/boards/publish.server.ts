@@ -232,6 +232,17 @@ export async function closePostingsForRequisition(input: {
   actor: BoardActor;
   requisitionId: string;
 }): Promise<void> {
+  // Planned hand postings nobody made yet simply stop being planned.
+  await db
+    .update(requisitionBoardPostings)
+    .set({ status: "withdrawn", closedAt: new Date(), updatedAt: new Date() })
+    .where(
+      and(
+        eq(requisitionBoardPostings.requisitionId, input.requisitionId),
+        eq(requisitionBoardPostings.orgId, input.orgId),
+        eq(requisitionBoardPostings.status, "pending"),
+      ),
+    );
   const rows = await db
     .select({ provider: requisitionBoardPostings.provider })
     .from(requisitionBoardPostings)

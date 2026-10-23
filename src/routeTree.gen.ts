@@ -62,6 +62,7 @@ import { Route as ApiAuthSessionRouteImport } from './routes/api/auth/session'
 import { Route as ApiPublicAgentTickRouteImport } from './routes/api/public/agent-tick'
 import { Route as ApiPublicBoardSyncRouteImport } from './routes/api/public/board-sync'
 import { Route as ApiPublicCaptureRouteImport } from './routes/api/public/capture'
+import { Route as ApiPublicDistributionRouteImport } from './routes/api/public/distribution'
 import { Route as ApiPublicInboundEmailRouteImport } from './routes/api/public/inbound-email'
 import { Route as ApiPublicInboxSyncRouteImport } from './routes/api/public/inbox-sync'
 import { Route as ApiPublicProcessEmailOutboxRouteImport } from './routes/api/public/process-email-outbox'
@@ -340,6 +341,11 @@ const ApiPublicCaptureRoute = ApiPublicCaptureRouteImport.update({
   path: '/api/public/capture',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicDistributionRoute = ApiPublicDistributionRouteImport.update({
+  id: '/api/public/distribution',
+  path: '/api/public/distribution',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicInboundEmailRoute = ApiPublicInboundEmailRouteImport.update({
   id: '/api/public/inbound-email',
   path: '/api/public/inbound-email',
@@ -462,6 +468,7 @@ export interface FileRoutesByFullPath {
   '/api/public/agent-tick': typeof ApiPublicAgentTickRoute
   '/api/public/board-sync': typeof ApiPublicBoardSyncRoute
   '/api/public/capture': typeof ApiPublicCaptureRoute
+  '/api/public/distribution': typeof ApiPublicDistributionRoute
   '/api/public/inbound-email': typeof ApiPublicInboundEmailRoute
   '/api/public/inbox-sync': typeof ApiPublicInboxSyncRoute
   '/api/public/process-email-outbox': typeof ApiPublicProcessEmailOutboxRoute
@@ -529,6 +536,7 @@ export interface FileRoutesByTo {
   '/api/public/agent-tick': typeof ApiPublicAgentTickRoute
   '/api/public/board-sync': typeof ApiPublicBoardSyncRoute
   '/api/public/capture': typeof ApiPublicCaptureRoute
+  '/api/public/distribution': typeof ApiPublicDistributionRoute
   '/api/public/inbound-email': typeof ApiPublicInboundEmailRoute
   '/api/public/inbox-sync': typeof ApiPublicInboxSyncRoute
   '/api/public/process-email-outbox': typeof ApiPublicProcessEmailOutboxRoute
@@ -597,6 +605,7 @@ export interface FileRoutesById {
   '/api/public/agent-tick': typeof ApiPublicAgentTickRoute
   '/api/public/board-sync': typeof ApiPublicBoardSyncRoute
   '/api/public/capture': typeof ApiPublicCaptureRoute
+  '/api/public/distribution': typeof ApiPublicDistributionRoute
   '/api/public/inbound-email': typeof ApiPublicInboundEmailRoute
   '/api/public/inbox-sync': typeof ApiPublicInboxSyncRoute
   '/api/public/process-email-outbox': typeof ApiPublicProcessEmailOutboxRoute
@@ -666,6 +675,7 @@ export interface FileRouteTypes {
     | '/api/public/agent-tick'
     | '/api/public/board-sync'
     | '/api/public/capture'
+    | '/api/public/distribution'
     | '/api/public/inbound-email'
     | '/api/public/inbox-sync'
     | '/api/public/process-email-outbox'
@@ -733,6 +743,7 @@ export interface FileRouteTypes {
     | '/api/public/agent-tick'
     | '/api/public/board-sync'
     | '/api/public/capture'
+    | '/api/public/distribution'
     | '/api/public/inbound-email'
     | '/api/public/inbox-sync'
     | '/api/public/process-email-outbox'
@@ -800,6 +811,7 @@ export interface FileRouteTypes {
     | '/api/public/agent-tick'
     | '/api/public/board-sync'
     | '/api/public/capture'
+    | '/api/public/distribution'
     | '/api/public/inbound-email'
     | '/api/public/inbox-sync'
     | '/api/public/process-email-outbox'
@@ -868,6 +880,7 @@ export interface RootRouteChildren {
   ApiPublicAgentTickRoute: typeof ApiPublicAgentTickRoute
   ApiPublicBoardSyncRoute: typeof ApiPublicBoardSyncRoute
   ApiPublicCaptureRoute: typeof ApiPublicCaptureRoute
+  ApiPublicDistributionRoute: typeof ApiPublicDistributionRoute
   ApiPublicInboundEmailRoute: typeof ApiPublicInboundEmailRoute
   ApiPublicInboxSyncRoute: typeof ApiPublicInboxSyncRoute
   ApiPublicProcessEmailOutboxRoute: typeof ApiPublicProcessEmailOutboxRoute
@@ -1255,6 +1268,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicCaptureRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/distribution': {
+      id: '/api/public/distribution'
+      path: '/api/public/distribution'
+      fullPath: '/api/public/distribution'
+      preLoaderRoute: typeof ApiPublicDistributionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/inbound-email': {
       id: '/api/public/inbound-email'
       path: '/api/public/inbound-email'
@@ -1396,6 +1416,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicAgentTickRoute: ApiPublicAgentTickRoute,
   ApiPublicBoardSyncRoute: ApiPublicBoardSyncRoute,
   ApiPublicCaptureRoute: ApiPublicCaptureRoute,
+  ApiPublicDistributionRoute: ApiPublicDistributionRoute,
   ApiPublicInboundEmailRoute: ApiPublicInboundEmailRoute,
   ApiPublicInboxSyncRoute: ApiPublicInboxSyncRoute,
   ApiPublicProcessEmailOutboxRoute: ApiPublicProcessEmailOutboxRoute,

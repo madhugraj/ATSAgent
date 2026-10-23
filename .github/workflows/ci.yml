@@ -125,3 +125,5 @@ jobs:
         run: bun test scripts/job-distribution.test.ts
       - name: Distribution agent (portal credit, role-limited CVs, daily check)
         run: bun test scripts/distribution-agent.test.ts
+      - name: Companion portal form filler (field matching)
+        run: bun test scripts/portal-fill.test.ts

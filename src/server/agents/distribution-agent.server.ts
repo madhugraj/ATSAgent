@@ -150,6 +150,21 @@ export async function cvInflow(orgId: string) {
         where a.requisition_id = r.id and a.source = p.provider)
     order by p.published_at
     limit 50`);
+  const waiting = await rows<{
+    requisition_id: string;
+    code: string;
+    title: string;
+    provider: string;
+    days: number;
+  }>(sql`
+    select r.id requisition_id, r.code, r.title, p.provider,
+      floor(extract(epoch from now() - p.updated_at) / 86400)::int days
+    from requisition_board_postings p
+    join requisitions r on r.id = p.requisition_id and r.org_id = p.org_id
+    where p.org_id = ${orgId} and p.status = 'pending' and r.status = 'approved'
+      and p.updated_at <= now() - interval '2 days'
+    order by p.updated_at
+    limit 50`);
   const [inbox] = await rows<{ unread: number }>(sql`
     select count(*)::int unread from inbox_messages
     where org_id = ${orgId} and status = 'error' and received_at >= now() - interval '7 days'`);
@@ -168,6 +183,13 @@ export async function cvInflow(orgId: string) {
       liveDays: q.live_days,
       howCvsComeBack: channelById(q.provider)?.applications ?? "",
       requisitionPage: `${site()}/requisitions/${q.requisition_id}`,
+    })),
+    waitingToBePosted: waiting.map((w) => ({
+      requisitionId: w.requisition_id,
+      requisition: `${w.code} "${w.title}"`,
+      channel: w.provider,
+      name: sourceLabel(w.provider),
+      waitingDays: w.days,
     })),
     inboxMailNotRead7d: inbox?.unread ?? 0,
     portalCvsWithNoRole14d: unfiled?.n ?? 0,

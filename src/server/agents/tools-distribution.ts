@@ -17,6 +17,9 @@ const FEEDS = JOB_CHANNELS.filter((c) => c.route === "feed").map((c) => c.id) as
   string,
   ...string[],
 ];
+const BY_HAND = JOB_CHANNELS.filter((c) => c.route === "assisted" || c.route === "partner_api").map(
+  (c) => c.id,
+) as [string, ...string[]];
 
 const actor = async (ctx: ToolContext) => {
   const { actorFor } = await import("@/lib/requisitions.server");
@@ -39,7 +42,7 @@ export function registerDistributionTools(): void {
   registerTool({
     name: "check_cv_inflow",
     description:
-      "Across all open roles: CVs that arrived in the last 7 days by source; portal listings live for a week or more that have not produced a single CV (with how that portal's CVs come back); careers-inbox mail that could not be read in the last 7 days; and portal CVs from the last 14 days filed against no role.",
+      "Across all open roles: CVs that arrived in the last 7 days by source; portal listings live for a week or more that have not produced a single CV (with how that portal's CVs come back); roles planned for a portal and still waiting to be posted after 2 days; careers-inbox mail that could not be read in the last 7 days; and portal CVs from the last 14 days filed against no role.",
     input: z.object({}),
     risk: "read",
     run: async (ctx) => {
@@ -78,6 +81,21 @@ export function registerDistributionTools(): void {
           ? "The aggregator picks it up on its next read of the feed."
           : "The feed links are not created yet — the HR head creates them on the Job distribution page and registers them with the aggregator once.",
       };
+    },
+  });
+
+  registerTool({
+    name: "request_hand_posting",
+    description:
+      "Plan an approved requisition for portals a person posts on (no integration, or the partner integration is not connected): each becomes 'waiting to be posted'. In the person's own signed-in browser the ATSIQ browser extension then fills the portal's posting form with the role's text and records the posting once they submit it — the agent never logs in to a portal. Portals already live are left alone.",
+    input: ReqId.extend({ channels: z.array(z.enum(BY_HAND)).min(1).max(12) }),
+    risk: "write",
+    describe: (i) =>
+      `Plan the role for posting on ${i.channels.map((c) => channelById(c)?.name ?? c).join(", ")}`,
+    run: async (ctx, i) => {
+      const a = await actor(ctx);
+      const { planHandPosting } = await import("../distribution/distribution.server");
+      return planHandPosting(ctx.orgId, a, i.requisitionId, i.channels);
     },
   });
 
