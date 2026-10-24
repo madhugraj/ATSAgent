@@ -97,6 +97,12 @@ export function ScreeningPanel(props: {
     [runs.data, kit?.id],
   );
   const latest = kitRuns[0] ?? null;
+  // A phone screen is graded only on the questions answered; this is what it rests on.
+  const coverage = (latest?.coverage ?? null) as {
+    planned: number;
+    answered: number;
+    confidence: "high" | "medium" | "low";
+  } | null;
   const latestVerdicts = useMemo<Verdict[]>(
     () => (Array.isArray(latest?.verdicts) ? (latest!.verdicts as unknown as Verdict[]) : []),
     [latest],
@@ -416,8 +422,18 @@ export function ScreeningPanel(props: {
         <div className="mt-4 rounded-lg border border-primary/30 bg-primary/5 p-3">
           <div className="flex flex-wrap items-center gap-4">
             <div>
-              <p className="text-xs text-muted-foreground">Screening</p>
+              <p className="text-xs text-muted-foreground">
+                {latest.input_kind === "phone_ai" ? "AI phone screen" : "Screening"}
+              </p>
               <ScoreChip score={latest.screening_score} />
+              {coverage ? (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  From {coverage.answered} of {coverage.planned} questions answered ·{" "}
+                  <span className={coverage.confidence === "low" ? "text-amber-600" : ""}>
+                    {coverage.confidence} confidence
+                  </span>
+                </p>
+              ) : null}
             </div>
             {latest.match_score !== null ? (
               <div>
@@ -432,7 +448,11 @@ export function ScreeningPanel(props: {
               </div>
             ) : null}
             <div className="text-xs">
-              <p className="font-semibold capitalize">{latest.recommendation}</p>
+              <p className="font-semibold capitalize">
+                {latest.input_kind === "phone_ai" && latest.recommendation === "hold"
+                  ? "Probe further"
+                  : latest.recommendation}
+              </p>
               <p className="text-muted-foreground">{latest.recommendation_reason}</p>
             </div>
           </div>

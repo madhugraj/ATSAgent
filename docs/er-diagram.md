@@ -604,6 +604,7 @@ erDiagram
     text rationale "nullable"
     text recommendation "nullable"
     text recommendation_reason "nullable"
+    jsonb coverage "nullable"
     jsonb engine
     uuid created_by "nullable"
     timestamptz created_at
@@ -1298,7 +1299,7 @@ erDiagram
 | `screening_calls` | Screening & interviews | 30 | — |
 | `screening_kits` | Screening & interviews | 11 | — |
 | `screening_prep_jobs` | Screening & interviews | 10 | (application_id) |
-| `screening_runs` | Screening & interviews | 22 | — |
+| `screening_runs` | Screening & interviews | 23 | — |
 | `sessions` | Identity & access | 8 | (token_hash) |
 | `skill_edges` | Intelligence | 8 | — |
 | `skill_evidence` | Intelligence | 9 | — |

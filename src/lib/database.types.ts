@@ -2354,6 +2354,7 @@ export type Database = {
           audio_path: string | null;
           candidate_id: string;
           combined_score: number | null;
+          coverage: Json | null
           created_at: string;
           created_by: string | null;
           engine: Json;
@@ -2378,6 +2379,7 @@ export type Database = {
           audio_path?: string | null;
           candidate_id: string;
           combined_score?: number | null;
+          coverage?: Json | null
           created_at?: string;
           created_by?: string | null;
           engine?: Json;
@@ -2402,6 +2404,7 @@ export type Database = {
           audio_path?: string | null;
           candidate_id?: string;
           combined_score?: number | null;
+          coverage?: Json | null
           created_at?: string;
           created_by?: string | null;
           engine?: Json;

@@ -73,6 +73,8 @@ const {
   candidates,
   compensationDetails,
   emailOutbox,
+  hiringConversations,
+  hiringMessages,
   organizations,
   requisitions,
   screeningCalls,
@@ -407,6 +409,14 @@ describe("the call brief", () => {
     expect(p).not.toContain("Call book_slot with the time they asked for");
   });
 
+  test("confidence follows how many planned questions were answered", () => {
+    expect(session.callCoverage(4, 4)).toEqual({ planned: 4, answered: 4, confidence: "high" });
+    expect(session.callCoverage(4, 3)).toMatchObject({ confidence: "high" });
+    expect(session.callCoverage(4, 2)).toMatchObject({ confidence: "medium" });
+    expect(session.callCoverage(4, 1)).toMatchObject({ confidence: "low" });
+    expect(session.callCoverage(0, 0)).toMatchObject({ confidence: "low" });
+  });
+
   test("helpers: JD bullets, strengths, how they applied, calling hours", () => {
     expect(brief.bullets("- Run **clusters**\n2. Lead incidents\n\n• ok")).toEqual([
       "Run clusters",
@@ -644,6 +654,20 @@ describe("the calling window (Asia/Kolkata, Mon–Sat 10:00–19:00)", () => {
 describe("a whole call with a fake line", () => {
   test("completed: details first (pay to HR only), questions graded without them, agent told", async () => {
     const { callId, appId } = await seedCall();
+    // The role's hiring-desk thread, where the call reports how it went.
+    const [app] = await db
+      .select({ requisitionId: applications.requisitionId })
+      .from(applications)
+      .where(eq(applications.id, appId));
+    const [conv] = await db
+      .insert(hiringConversations)
+      .values({
+        orgId,
+        requisitionId: app!.requisitionId,
+        createdBy: userId,
+        title: "Platform SRE",
+      } as never)
+      .returning({ id: hiringConversations.id });
     const seen: { opts?: VoiceOpts; results: unknown[] } = { results: [] };
     const line = new FakeLine();
     const r = await run(
@@ -738,6 +762,21 @@ describe("a whole call with a fake line", () => {
     expect(lastGrade.system).toContain("Fairness rules (mandatory)");
     expect(lastGrade.system).toMatch(/Never let tone, manner/);
     expect(lastGrade.prompt).not.toMatch(/Meera|Krishnan/);
+    // Spoken rubric, and only the questions the candidate answered (never pay or logistics).
+    expect(lastGrade.system).toContain("Spoken-answer rubric");
+    expect(lastGrade.prompt).toContain('"question_id":"q1"');
+    expect(lastGrade.prompt).not.toContain('"question_id":"q3"');
+    expect(graded!.coverage).toEqual({ planned: 2, answered: 2, confidence: "high" });
+    // The desk thread hears how it went.
+    const posted = await db
+      .select({ agentType: hiringMessages.agentType, body: hiringMessages.body })
+      .from(hiringMessages)
+      .where(eq(hiringMessages.conversationId, conv!.id));
+    const fromCall = posted.filter((m) => m.agentType === "screening_call");
+    expect(fromCall).toHaveLength(1);
+    expect(fromCall[0]!.body).toMatch(/from 2 of 2 questions answered \(high confidence\)/);
+    // No amounts anywhere on the thread.
+    expect(JSON.stringify(posted)).not.toMatch(/lakhs|3200000|2400000/);
 
     // Pay goes to the HR-only record; the audit names fields, never amounts.
     const pay = await db

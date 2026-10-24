@@ -28,6 +28,10 @@ exception when duplicate_object then null; end $$;
 alter table screening_calls add column if not exists booked_by_candidate boolean not null default false;
 alter table screening_calls add column if not exists reschedules integer not null default 0;
 
+-- How much of a phone screening a grade rests on: questions planned, answered,
+-- and the confidence that follows (graded only on what was covered).
+alter table screening_runs add column if not exists coverage jsonb;
+
 -- The voice worker's heartbeat: the web app learns a phone line is available
 -- from it, so only the worker ever holds the PBX credentials.
 create table if not exists voice_worker_heartbeat (

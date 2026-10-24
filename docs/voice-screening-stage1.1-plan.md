@@ -253,3 +253,26 @@ rules forward from step B:
   location and notice never considered; **blind grading** — the candidate's name
   is removed from what the grader sees (`blindName`). The fourth call's grade had
   cited "a confrontational communication style".
+
+### Scoring v2 — fair grading of a phone screen (2026-10-24)
+
+The agent-driven call's grade was 17/100 "reject": the grader scored all nine kit
+questions — six never asked counted as 0, the pay and logistics questions were
+graded (declining to share pay cost points and a red flag), and one-minute spoken
+answers were held to written-essay depth. Now:
+
+- **Only the questions answered** on the call are graded (`gradeCallAnswers`,
+  `onlyQuestionIds`); unasked questions are excluded, never zero. Pay and
+  logistics are never in the call's questions, so never graded.
+- **Spoken-answer rubric** (`SPOKEN_RUBRIC`): strong = specific example + own
+  action + outcome/reasoning; partial = one missing; weak = general; brevity is
+  not penalised; promising but brief → "probe in interview".
+- **Coverage and confidence** stored with the run (`screening_runs.coverage`:
+  planned, answered, high ≥ 75 % / medium ≥ 50 % / low) and shown beside the
+  score; the Screening agent (1.9.1) never puts anyone on hold for a low- or
+  medium-confidence phone score.
+- **Never reject from a phone screen**: advance or hold ("Probe further").
+- The call posts its outcome to the role's **hiring-desk thread** (score, coverage,
+  where the details are; never amounts).
+- `scripts/dev-agent-tick.ts` runs the agent scheduler locally (production uses
+  the agent-tick cron) so events from the voice worker reach the agents.

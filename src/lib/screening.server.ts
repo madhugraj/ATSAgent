@@ -212,6 +212,23 @@ export async function buildScreeningKit(input: {
 
 /* ---------------------------------------------------------------- grade */
 
+/**
+ * How to grade answers given on an AI phone screen (prepended in "spoken"
+ * mode). Short, conversational answers are judged on substance; the questions
+ * passed are only the ones the candidate answered.
+ */
+const SPOKEN_RUBRIC = `
+Spoken-answer rubric (this is a short phone screen with an AI assistant, not a written test):
+- Every question you are given was asked and answered on the call; grade each on its own.
+- Judge substance, not length or completeness. Nobody lists tools or frameworks in a one-minute spoken answer; never mark an answer down for what a written essay would add.
+- strong (80-100): a specific example or situation, what the candidate themselves did or decided, and the outcome or their reasoning.
+- partial (55-79): relevant and concrete, with one of those three missing.
+- weak (30-54): on topic but general — no specific example or own action.
+- not_answered (0): nothing relevant was said. Never use it for a question that was answered briefly.
+- If an answer is promising but brief, say "probe in interview: <what>" in its rationale instead of lowering the score further.
+- recommendation is 'advance' or 'hold' only — never 'reject'. Use 'hold' when the evidence is thin, and say what to probe.
+`;
+
 export async function gradeScreening(input: {
   /** Owning organisation — its own AI key pays for this call. */
   orgId: string;
@@ -224,7 +241,14 @@ export async function gradeScreening(input: {
   answers: { question_id: string; answer: string }[];
   /** Whole-call notes or an audio transcript, used when answers are unsplit. */
   transcript: string | null;
+  /**
+   * "spoken": an AI phone screen — answers are short and conversational, so the
+   * rubric looks for substance, not exhaustiveness, and the recommendation is
+   * advance or hold only (never reject: people decide).
+   */
+  mode?: "written" | "spoken";
 }): Promise<ScreeningGrade> {
+  const spoken = input.mode === "spoken";
   const result = await aiJson<{
     screening_score: number;
     verdicts: ScreeningVerdict[];
@@ -235,6 +259,7 @@ export async function gradeScreening(input: {
   }>({
     system:
       INJECTION_RULES +
+      (spoken ? SPOKEN_RUBRIC : "") +
       "\nYou grade a recruiter's screening call. For each prepared question, judge the candidate's actual answer " +
       "against the expected answer: verdict is 'strong', 'partial', 'weak' or 'not_answered' (use not_answered " +
       "only when the answer or transcript contains nothing on it — never guess). Give a 0-100 score per question, " +
@@ -307,7 +332,9 @@ export async function gradeScreening(input: {
     ? Math.round(weighted.sum / weighted.weight)
     : clampScore(result.data.screening_score);
 
-  const rec = String(result.data.recommendation ?? "").toLowerCase();
+  const said = String(result.data.recommendation ?? "").toLowerCase();
+  // A phone screen never rejects anyone: advance, or hold to probe further.
+  const rec = spoken && said === "reject" ? "hold" : said;
   return {
     screening_score,
     verdicts,

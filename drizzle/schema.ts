@@ -1422,6 +1422,16 @@ export const screeningKits = pgTable(
   ],
 );
 
+/** How much of a phone screening a grade rests on. */
+export type ScreeningCoverage = {
+  /** Screening questions the call meant to ask. */
+  planned: number;
+  /** Of those, how many the candidate answered (the grade uses only these). */
+  answered: number;
+  /** answered / planned: high ≥ 75 %, medium ≥ 50 %, else low. */
+  confidence: "high" | "medium" | "low";
+};
+
 /** One graded screening attempt against a kit (typed answers, notes or audio). */
 export const screeningRuns = pgTable(
   "screening_runs",
@@ -1461,6 +1471,8 @@ export const screeningRuns = pgTable(
     rationale: text("rationale"),
     recommendation: text("recommendation"),
     recommendationReason: text("recommendation_reason"),
+    /** Phone screening: what the grade rests on (graded only on the questions covered). */
+    coverage: jsonb("coverage").$type<ScreeningCoverage | null>(),
     engine: jsonb("engine")
       .notNull()
       .default(sql`'{}'::jsonb`),

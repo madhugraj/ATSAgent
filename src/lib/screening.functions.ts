@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { db } from "../server/db";
 import {
+  type ScreeningCoverage,
   applications,
   candidates,
   jobDescriptions,
@@ -265,10 +266,18 @@ export async function gradeScreeningForKit(input: {
   audioPath?: string | null;
   audioEngine?: string | null;
   createdBy: string | null;
+  /** Grade only these kit questions (a phone screen: the ones the candidate answered). */
+  onlyQuestionIds?: string[];
+  /** "spoken" for an AI phone screen (see gradeScreening). */
+  mode?: "written" | "spoken";
+  /** What the grade rests on — stored with the run and shown beside the score. */
+  coverage?: ScreeningCoverage;
 }) {
   const { kit } = input;
   if (kit.orgId !== input.orgId) throw new Error("Screening kit not found");
-  const questions = (Array.isArray(kit.questions) ? kit.questions : []) as ScreeningQuestion[];
+  const all = (Array.isArray(kit.questions) ? kit.questions : []) as ScreeningQuestion[];
+  const only = input.onlyQuestionIds ? new Set(input.onlyQuestionIds) : null;
+  const questions = only ? all.filter((q) => only.has(q.id)) : all;
   if (!questions.length) throw new Error("This kit has no questions to grade against.");
   const { candidate, requisition, jdText, match } = await loadPairing(
     input.orgId,
@@ -285,8 +294,11 @@ export async function gradeScreeningForKit(input: {
     mustHave: requisition?.mustHaveSkills ?? [],
     candidateName: "the candidate",
     questions,
-    answers: input.answers.map((a) => ({ ...a, answer: blind(a.answer) })),
+    answers: input.answers
+      .filter((a) => !only || only.has(a.question_id))
+      .map((a) => ({ ...a, answer: blind(a.answer) })),
     transcript: input.transcript ? blind(input.transcript) : null,
+    ...(input.mode ? { mode: input.mode } : {}),
   });
 
   const matchScore =
@@ -318,6 +330,7 @@ export async function gradeScreeningForKit(input: {
       recommendation: grade.recommendation,
       recommendationReason: grade.recommendation_reason,
       engine: grade.engine as never,
+      coverage: input.coverage ?? null,
       createdBy: input.createdBy,
     })
     .returning({ id: screeningRuns.id });

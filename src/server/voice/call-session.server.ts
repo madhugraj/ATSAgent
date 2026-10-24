@@ -16,8 +16,10 @@ import {
   candidates,
   screeningCalls,
   screeningKits,
+  screeningRuns,
   type ScreeningCallAnswer,
   type ScreeningCallDetails,
+  type ScreeningCoverage,
   type ScreeningCallStatus,
   type ScreeningCallTurn,
 } from "@db/schema";
@@ -488,37 +490,136 @@ async function placeCall(
   // Completed: grade the screening questions against the kit — only the part
   // of the call after the practical details, so pay, location and personal
   // details never reach the grader.
-  let screeningRunId: string | null = null;
-  const screeningPart = transcript.slice(detailsUpToTurn);
-  if (state.answers.length || screeningPart.length) {
-    const [kit] = await db
-      .select()
-      .from(screeningKits)
-      .where(and(eq(screeningKits.id, call.kitId), eq(screeningKits.orgId, orgId)))
-      .limit(1);
-    if (kit) {
-      try {
-        const { gradeScreeningForKit } = await import("@/lib/screening.functions");
-        const graded = await gradeScreeningForKit({
-          orgId,
-          kit,
-          answers: state.answers.map((a) => ({ question_id: a.question_id, answer: a.summary })),
-          transcript: screeningPart.map(lineFor).join("\n") || null,
-          inputKind: "phone_ai",
-          createdBy: null,
-        });
-        screeningRunId = graded.run.id;
-      } catch (e) {
-        log.warn("screening_call.grading_failed", { call_id: call.id, error: e as Error });
-      }
-    }
-  }
+  const screeningRunId = await gradeCallAnswers({
+    orgId,
+    call,
+    answers: state.answers,
+    transcript: transcript.slice(detailsUpToTurn),
+    planned: facts.questions.map((q) => q.id),
+  });
   return finish(orgId, call, {
     status: "completed",
     endReason: why,
     now: endedAt,
     extra: { ...base, screeningRunId },
   });
+}
+
+/** answered / planned → how much a phone screen's grade can be trusted (pure; unit-tested). */
+export function callCoverage(planned: number, answered: number): ScreeningCoverage {
+  const share = planned > 0 ? answered / planned : 0;
+  return {
+    planned,
+    answered,
+    confidence: share >= 0.75 ? "high" : share >= 0.5 ? "medium" : "low",
+  };
+}
+
+/**
+ * Grade a phone screen fairly: only the screening questions the candidate
+ * answered (never one that was not asked, never pay or logistics), with the
+ * spoken-answer rubric, and the coverage stored beside the score. Nothing is
+ * graded when nothing was answered. Returns the run id, or null.
+ */
+export async function gradeCallAnswers(input: {
+  orgId: string;
+  call: typeof screeningCalls.$inferSelect;
+  answers: { question_id: string; summary: string }[];
+  /** The screening part of the call (after the practical details). */
+  transcript: ScreeningCallTurn[];
+  /** The screening questions the call planned to ask. */
+  planned: string[];
+}): Promise<string | null> {
+  const { orgId, call } = input;
+  const plannedSet = new Set(input.planned);
+  const answered = input.answers.filter((a) => plannedSet.has(a.question_id));
+  if (!answered.length || !call.kitId) return null;
+  const [kit] = await db
+    .select()
+    .from(screeningKits)
+    .where(and(eq(screeningKits.id, call.kitId), eq(screeningKits.orgId, orgId)))
+    .limit(1);
+  if (!kit) return null;
+  try {
+    const { gradeScreeningForKit } = await import("@/lib/screening.functions");
+    const graded = await gradeScreeningForKit({
+      orgId,
+      kit,
+      answers: answered.map((a) => ({ question_id: a.question_id, answer: a.summary })),
+      transcript: input.transcript.map(lineFor).join("\n") || null,
+      inputKind: "phone_ai",
+      createdBy: null,
+      onlyQuestionIds: answered.map((a) => a.question_id),
+      mode: "spoken",
+      coverage: callCoverage(input.planned.length, answered.length),
+    });
+    return graded.run.id;
+  } catch (e) {
+    log.warn("screening_call.grading_failed", { call_id: call.id, error: e as Error });
+    return null;
+  }
+}
+
+/**
+ * Tell the role's hiring-desk thread how the call went, in plain words, so the
+ * team sees it where they follow the hiring journey.
+ */
+async function postCallToThread(
+  orgId: string,
+  call: typeof screeningCalls.$inferSelect,
+  status: ScreeningCallStatus,
+  endReason: string,
+  screeningRunId: string | null,
+  dueAt: Date | null,
+) {
+  if (!call.applicationId) return;
+  const desk = await import("../desk/desk.server");
+  const convId = await desk.conversationForSubject(orgId, "application", call.applicationId);
+  if (!convId) return;
+  const [row] = await db
+    .select({ name: candidates.fullName, durationS: screeningCalls.durationS })
+    .from(screeningCalls)
+    .innerJoin(candidates, eq(candidates.id, screeningCalls.candidateId))
+    .where(eq(screeningCalls.id, call.id))
+    .limit(1);
+  const name = row?.name ?? "The candidate";
+  const mins = row?.durationS ? Math.max(1, Math.round(row.durationS / 60)) : null;
+  let body: string;
+  if (status === "callback") {
+    const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+    const tz = (await getOrgEmailSettings(orgId)).timezone;
+    body = `Called ${name}: now was not a good time, so we agreed to talk on ${dueAt ? spokenTime(dueAt, tz) : "a later time"}. A confirmation was e-mailed to them.`;
+  } else if (status === "completed" && endReason !== "not_interested") {
+    let graded = "There was not enough to grade.";
+    if (screeningRunId) {
+      const [r] = await db
+        .select({
+          score: screeningRuns.screeningScore,
+          coverage: screeningRuns.coverage,
+          rec: screeningRuns.recommendation,
+        })
+        .from(screeningRuns)
+        .where(eq(screeningRuns.id, screeningRunId))
+        .limit(1);
+      if (r?.coverage)
+        graded = `Screening score ${r.score}/100 from ${r.coverage.answered} of ${r.coverage.planned} questions answered (${r.coverage.confidence} confidence)${r.rec === "hold" ? " — probe further in the interview" : ""}.`;
+    }
+    body = `Had the AI screening call with ${name}${mins ? ` (${mins} min)` : ""}. ${graded} Practical details and pay are recorded for the HR team. The answers, the reasons for each score and the transcript are on the candidate's page, under Screening. A person decides who moves on.`;
+  } else {
+    const how: Record<string, string> = {
+      not_interested: `${name} is not interested in the role.`,
+      prefers_human: `${name} asked for a person from the team to call them.`,
+      prefers_written: `${name} chose the written assessment instead of the call.`,
+      wrong_person: `The number on ${name}'s profile reached someone else.`,
+      no_number: `${name} has no mobile number we can call.`,
+      declined: `${name} preferred not to do the screening call.`,
+    };
+    body = `AI screening call: ${how[endReason] ?? (status === "consent_declined" ? how["declined"] : `${name} could not be reached after every attempt.`)} The Screening agent takes it from here.`;
+  }
+  await desk.postMessage(
+    { id: convId, orgId },
+    { role: "agent", agentType: "screening_call", body },
+  );
 }
 
 /** The details kept on the call row — never pay (that is HR-only, elsewhere). */
@@ -643,6 +744,10 @@ async function finish(
       log.warn("screening_call.run_close_failed", { call_id: call.id, error: e as Error }),
     );
   const settled = status === "completed" || status === "consent_declined" || status === "fell_back";
+  if (settled || (status === "callback" && o.endReason === "booked"))
+    await postCallToThread(orgId, call, status, o.endReason, screeningRunId, dueAt).catch((e) =>
+      log.warn("screening_call.thread_post_failed", { call_id: call.id, error: e as Error }),
+    );
   if (settled && call.applicationId) {
     const { emitAgentEvent } = await import("../agents/events");
     await emitAgentEvent({

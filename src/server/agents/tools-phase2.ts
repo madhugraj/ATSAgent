@@ -280,6 +280,9 @@ export function registerPhase2Tools(): void {
         .select({
           screeningScore: screeningRuns.screeningScore,
           combinedScore: screeningRuns.combinedScore,
+          by: screeningRuns.inputKind,
+          coverage: screeningRuns.coverage,
+          recommendation: screeningRuns.recommendation,
         })
         .from(screeningRuns)
         .where(and(eq(screeningRuns.orgId, ctx.orgId), eq(screeningRuns.applicationId, app.id)))
