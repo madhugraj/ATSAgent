@@ -354,7 +354,9 @@ export function registerPhase2Agents(): void {
     // 1.1.4 (agent-driven call): reads back the booked time the tool returns (it said
     // "10:40 AM" for a 16:13 booking); a candidate the team added is told "we came across
     // your profile", never "you applied through Hiring desk upload".
-    version: "1.1.4",
+    // 1.1.5: a candidate may move the call at most the organisation's limit (default 2);
+    // after that book_slot refuses and the written assessment or a person is offered.
+    version: "1.1.5",
     owner: "hr_head",
     responsibility:
       "Holds one AI screening phone call with a shortlisted candidate the way an HR recruiter does: says who it is and why it is calling, asks consent, explains the role and why it called them, records their practical details (including the pay they state, for HR only) and their answers to the role's screening questions, or agrees a better time — nothing else.",
@@ -408,6 +410,7 @@ export function registerPhase2Agents(): void {
       appliedVia: "{where they applied}",
       appliedOn: "{when they applied}",
       booked: false,
+      reschedulesLeft: 2,
       contactName: "{person looking after the role}",
       contactEmail: "{reply-to or careers e-mail}",
       candidateFirstName: "{candidate first name}",

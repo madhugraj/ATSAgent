@@ -26,6 +26,7 @@ export const listScreeningCalls = createServerFn({ method: "POST" })
         role: requisitions.title,
         status: screeningCalls.status,
         attempt: screeningCalls.attempt,
+        reschedules: screeningCalls.reschedules,
         dueAt: screeningCalls.dueAt,
         startedAt: screeningCalls.startedAt,
         endedAt: screeningCalls.endedAt,

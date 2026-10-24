@@ -197,6 +197,28 @@ export function PhoneScreeningCard({ canEdit }: { canEdit: boolean }) {
           (in your organisation's time zone)
         </span>
       </div>
+      <div className="grid items-end gap-3 sm:grid-cols-4">
+        <div className="space-y-1">
+          <Label htmlFor="ps-reschedules" className="text-xs">
+            Reschedules allowed
+          </Label>
+          <Input
+            id="ps-reschedules"
+            type="number"
+            min={0}
+            max={5}
+            disabled={!canEdit}
+            value={p.maxReschedules}
+            onChange={(e) =>
+              set({ maxReschedules: Math.min(5, Math.max(0, Number(e.target.value))) })
+            }
+          />
+        </div>
+        <p className="text-xs text-muted-foreground sm:col-span-3">
+          How many times a candidate can ask to move the call to another time. After that the
+          assistant offers the written assessment or a call from a person instead.
+        </p>
+      </div>
       <div className="grid items-start gap-3 sm:grid-cols-4">
         <div className="space-y-1">
           <Label htmlFor="ps-voice" className="text-xs">

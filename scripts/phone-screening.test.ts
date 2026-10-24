@@ -99,6 +99,7 @@ describe("the organisation's phone screening policy", () => {
       callDays: [5, 1, 3, 1],
       maxAttempts: 2,
       maxMinutes: 12,
+      maxReschedules: 1,
       voice: "Aoede",
       nextStepsText: "  we reply within two working days  ",
     };
@@ -121,6 +122,7 @@ describe("the organisation's phone screening policy", () => {
       { windowStartMinute: 900, windowEndMinute: 600 },
       { maxAttempts: 9 },
       { maxMinutes: 120 },
+      { maxReschedules: 9 },
       { assistantName: "S" },
     ];
     for (const b of bad) {

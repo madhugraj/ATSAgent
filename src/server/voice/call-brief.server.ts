@@ -39,6 +39,8 @@ export async function loadBriefFacts(input: {
   policy: PhoneScreeningPolicy;
   /** The candidate agreed this time on an earlier call. */
   booked?: boolean;
+  /** How many more times the candidate may move the call. */
+  reschedulesLeft?: number;
 }): Promise<BriefFacts & { kitQuestions: ScreeningQuestion[] }> {
   const [row] = await db
     .select({
@@ -119,6 +121,7 @@ export async function loadBriefFacts(input: {
     appliedVia: appliedVia(row.source),
     appliedOn: row.appliedAt ? dayMonth(row.appliedAt, email.timezone) : null,
     booked: Boolean(input.booked),
+    reschedulesLeft: input.reschedulesLeft ?? input.policy.maxReschedules,
     contactName: row.contactName?.trim() || null,
     contactEmail: email.replyTo?.trim() || row.careersEmail?.trim() || null,
     candidateFirstName: (row.candidateName ?? "").trim().split(/\s+/)[0] || "the candidate",

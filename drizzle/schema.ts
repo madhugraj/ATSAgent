@@ -2673,6 +2673,8 @@ export const phoneScreeningSettings = pgTable(
       .default(sql`'{1,2,3,4,5,6}'`),
     maxAttempts: integer("max_attempts").notNull().default(3),
     maxMinutes: integer("max_minutes").notNull().default(10),
+    /** Times a candidate may move the call to another time; then alternatives are offered. */
+    maxReschedules: integer("max_reschedules").notNull().default(2),
     /** The assistant's voice (one of the voice service's prebuilt voices). */
     voice: text("voice").notNull().default("Kore"),
     /** What the assistant tells candidates happens next (≤ 300 characters). */
@@ -2699,6 +2701,10 @@ export const phoneScreeningSettings = pgTable(
     ),
     check("phone_screening_settings_max_attempts_check", sql`${t.maxAttempts} between 1 and 5`),
     check("phone_screening_settings_max_minutes_check", sql`${t.maxMinutes} between 5 and 30`),
+    check(
+      "phone_screening_settings_max_reschedules_check",
+      sql`${t.maxReschedules} between 0 and 5`,
+    ),
     check(
       "phone_screening_settings_next_steps_check",
       sql`${t.nextStepsText} is null or char_length(${t.nextStepsText}) <= 300`,
@@ -2778,6 +2784,8 @@ export const screeningCalls = pgTable(
     attempt: integer("attempt").notNull().default(0),
     /** The candidate agreed this time on an earlier call (an expected call, not a cold one). */
     bookedByCandidate: boolean("booked_by_candidate").notNull().default(false),
+    /** Times the candidate moved this call to another time. */
+    reschedules: integer("reschedules").notNull().default(0),
     dueAt: timestamp("due_at", { withTimezone: true }),
     callbackAt: timestamp("callback_at", { withTimezone: true }),
     phoneLast4: text("phone_last4"),

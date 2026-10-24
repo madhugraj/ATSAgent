@@ -267,11 +267,15 @@ async function placeCall(
     kitId: call.kitId,
     policy,
     booked: call.bookedByCandidate,
+    reschedulesLeft: Math.max(0, policy.maxReschedules - call.reschedules),
   });
   const questionIds = new Set(facts.questions.map((q) => q.id));
   const system = `Current local time: ${localNow(now(), tz)} (${tz}).\n\n${callSystemPrompt(facts)}`;
 
-  const state: CallState = freshCallState();
+  const state: CallState = {
+    ...freshCallState(),
+    reschedulesLeft: Math.max(0, policy.maxReschedules - call.reschedules),
+  };
   const line = deps.line();
   const up = new Resampler(2, 1); // 8 kHz phone → 16 kHz model
   const down = new Resampler(1, 3); // 24 kHz model → 8 kHz phone
@@ -441,7 +445,7 @@ async function placeCall(
         policy,
         tz,
         dueAt,
-        extra: { ...base, bookedByCandidate: true },
+        extra: { ...base, bookedByCandidate: true, reschedules: call.reschedules + 1 },
       });
     }
     case "wrong_person":

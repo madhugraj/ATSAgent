@@ -21,6 +21,8 @@ export type PhoneScreeningPolicy = {
   callDays: number[];
   maxAttempts: number;
   maxMinutes: number;
+  /** Times a candidate may move the call; then the written assessment or a person is offered. */
+  maxReschedules: number;
   /** The assistant's voice. */
   voice: string;
   /** What candidates are told happens next; null = a plain default. */
@@ -47,6 +49,7 @@ export const DEFAULT_PHONE_SCREENING_POLICY: PhoneScreeningPolicy = {
   callDays: [1, 2, 3, 4, 5, 6],
   maxAttempts: 3,
   maxMinutes: 10,
+  maxReschedules: 2,
   voice: "Kore",
   nextStepsText: null,
 };
@@ -66,6 +69,7 @@ export async function phoneScreeningPolicyOf(orgId: string): Promise<PhoneScreen
     callDays: [...r.callDays].sort((a, b) => a - b),
     maxAttempts: r.maxAttempts,
     maxMinutes: r.maxMinutes,
+    maxReschedules: r.maxReschedules,
     voice: r.voice,
     nextStepsText: r.nextStepsText,
   };

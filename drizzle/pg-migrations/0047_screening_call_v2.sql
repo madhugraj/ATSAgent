@@ -12,6 +12,13 @@
 alter table phone_screening_settings add column if not exists voice text not null default 'Kore';
 alter table phone_screening_settings add column if not exists next_steps_text text;
 alter table phone_screening_settings alter column max_minutes set default 10;
+-- How many times a candidate may move the call to another time (then the
+-- written assessment or a person is offered instead).
+alter table phone_screening_settings add column if not exists max_reschedules integer not null default 2;
+do $$ begin
+  alter table phone_screening_settings add constraint phone_screening_settings_max_reschedules_check
+    check (max_reschedules between 0 and 5);
+exception when duplicate_object then null; end $$;
 
 do $$ begin
   alter table phone_screening_settings add constraint phone_screening_settings_next_steps_check
@@ -19,6 +26,7 @@ do $$ begin
 exception when duplicate_object then null; end $$;
 
 alter table screening_calls add column if not exists booked_by_candidate boolean not null default false;
+alter table screening_calls add column if not exists reschedules integer not null default 0;
 
 -- The voice worker's heartbeat: the web app learns a phone line is available
 -- from it, so only the worker ever holds the PBX credentials.

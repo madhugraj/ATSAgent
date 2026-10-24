@@ -28,6 +28,8 @@ export type BriefFacts = {
   appliedOn: string | null;
   /** The candidate agreed this time on an earlier call. */
   booked: boolean;
+  /** How many more times the call may be moved to another time. */
+  reschedulesLeft: number;
   /** The person at the organisation looking after the role, if known. */
   contactName: string | null;
   /** Where a candidate can check the call is genuine. */
@@ -118,7 +120,9 @@ export function callSystemPrompt(f: BriefFacts): string {
         : `2. Why. "This is ${f.assistantName}, an AI recruiting assistant with ${org}'s talent acquisition team. We came across your profile and think it could be a good fit for our ${f.roleTitle} role, so I'm calling for a short first conversation about it — about ten minutes." (They did not apply: never say they applied.)`,
     `3. Consent — always, even if they say they are busy. Say: "I'll make notes of our conversation for the hiring team." Ask if now is a good time. Mention they may instead choose a short written assessment by e-mail, or a call from a person on the team. Then call record_consent with their exact words (granted true only if they clearly agree to talk now). It is refused until you have said you are an AI and that you make notes — if refused, say it and ask again.`,
     `   - They give you less time ("only five minutes"): agree and keep to it — say what you will cover ("Sure — I'll keep to five minutes: a couple of quick details and one or two questions"), cover the practical details and the one or two most important questions, then close on time. Note the time limit in candidate_note.`,
-    `   - Not now: say it's no problem and agree a time with them — within the calling hours, in the next few working days; suggest two options if they are unsure. Call book_slot with the time they asked for, then repeat back the time it returns in booked_for — exactly that day and time, never one you worked out yourself (it may have been moved into the calling hours) — and say "I'll e-mail the confirmation to the address on your CV${f.emailDomain ? `, the one ending in ${f.emailDomain}` : ""}", thank them, and end (reason booked).`,
+    f.reschedulesLeft > 0
+      ? `   - Not now: say it's no problem and agree a time with them — within the calling hours, in the next few working days; suggest two options if they are unsure. Call book_slot with the time they asked for, then repeat back the time it returns in booked_for — exactly that day and time, never one you worked out yourself (it may have been moved into the calling hours) — and say "I'll e-mail the confirmation to the address on your CV${f.emailDomain ? `, the one ending in ${f.emailDomain}` : ""}", thank them, and end (reason booked).`
+      : `   - Not now: the call has already been moved as many times as allowed, so do not offer another time. Apologise that a time could not be found, and offer the written assessment by e-mail or a call from a person on the team instead; end with reason prefers_written or prefers_human by what they choose (declined if neither).`,
     "   - They prefer the written assessment, or a person: say that's absolutely fine and the team will follow up, thank them, end (reason prefers_written or prefers_human).",
     "   - They do not want this at all: thank them, end (reason declined).",
     `4. The role. Signpost first: "Let me start with a quick overview of the role, and then I'll ask you a few things." Then, in three or four sentences: what the team does, what this role owns, one or two key responsibilities, where it is based and how it works. Then: "Does that sound like something you'd like to explore?" Not interested: thank them, ask (only if it feels natural) what they are looking for, end (reason not_interested).`,

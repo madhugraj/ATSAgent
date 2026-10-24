@@ -100,6 +100,8 @@ export type CallState = {
   answers: { question_id: string; summary: string; at: string }[];
   booking: { whenLocal: string } | null;
   endReason: EndReason | null;
+  /** How many more times the call may be moved to another time (undefined: no limit known). */
+  reschedulesLeft?: number;
 };
 
 export const freshCallState = (): CallState => ({
@@ -178,6 +180,12 @@ export function applyCallTool(
       return { ok: true, answered: state.answers.length };
     }
     case "book_slot": {
+      if (state.reschedulesLeft !== undefined && state.reschedulesLeft <= 0)
+        return {
+          ok: false,
+          error:
+            "Not booked: this call has already been moved as many times as allowed. Apologise that a time could not be found, and offer the written assessment by e-mail or a call from a person on the team instead.",
+        };
       state.booking = { whenLocal: (parsed.data as { when_local: string }).when_local };
       return { ok: true };
     }

@@ -193,6 +193,9 @@ export function PhoneScreeningCalls(props: {
                 {describe(c).label}
                 {c.phoneLast4 ? ` · mobile ending ${c.phoneLast4}` : ""}
                 {c.attempt ? ` · attempt ${c.attempt}` : ""}
+                {c.reschedules
+                  ? ` · moved by the candidate ${c.reschedules} time${c.reschedules === 1 ? "" : "s"}`
+                  : ""}
                 {c.durationS ? ` · ${Math.max(1, Math.round(c.durationS / 60))} min` : ""}
                 {c.screeningRunId ? " · graded below" : ""}
               </span>

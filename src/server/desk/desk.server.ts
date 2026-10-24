@@ -1681,6 +1681,7 @@ async function phoneCallWait(orgId: string, requisitionId: string): Promise<stri
   const rows = (await db.execute(sql`
     select distinct on (sc.application_id)
       c.full_name as name, sc.status, sc.end_reason, sc.due_at, sc.booked_by_candidate as booked,
+      sc.reschedules,
       sr.screening_score as score
     from screening_calls sc
     join candidates c on c.id = sc.candidate_id
@@ -1692,6 +1693,7 @@ async function phoneCallWait(orgId: string, requisitionId: string): Promise<stri
     end_reason: string | null;
     due_at: string | null;
     booked: boolean;
+    reschedules: number;
     score: number | null;
   }[];
   if (!rows.length) return null;
@@ -1730,7 +1732,7 @@ async function phoneCallWait(orgId: string, requisitionId: string): Promise<stri
     );
   if (booked.length)
     parts.push(
-      `Call time agreed with the candidate: ${names(booked, (r) => `${r.name} (${at(r.due_at)})`)}.`,
+      `Call time agreed with the candidate: ${names(booked, (r) => `${r.name} (${at(r.due_at)}${r.reschedules > 1 ? `, moved ${r.reschedules} times` : ""})`)}.`,
     );
   if (retrying.length)
     parts.push(

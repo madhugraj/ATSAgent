@@ -328,6 +328,7 @@ describe("the call brief", () => {
     appliedVia: "Naukri",
     appliedOn: "20 October",
     booked: false,
+    reschedulesLeft: 2,
     contactName: "Asha Rao",
     contactEmail: "careers@yavar.test",
     candidateFirstName: "Meera",
@@ -398,6 +399,12 @@ describe("the call brief", () => {
       blindName("Speaking with Meera? Yes, MEERA Krishnan here. Meeranath.", "Meera Krishnan"),
     ).toBe("Speaking with the candidate? Yes, the candidate here. Meeranath.");
     expect(blindName("No name here.", "")).toBe("No name here.");
+  });
+
+  test("no more moving the call once the limit is reached: alternatives instead", () => {
+    const p = brief.callSystemPrompt(facts({ reschedulesLeft: 0 }));
+    expect(p).toContain("already been moved as many times as allowed");
+    expect(p).not.toContain("Call book_slot with the time they asked for");
   });
 
   test("helpers: JD bullets, strengths, how they applied, calling hours", () => {
@@ -536,6 +543,18 @@ describe("in-call tools", () => {
         0,
         "",
       ),
+    ).toEqual({ ok: true });
+  });
+
+  test("a call cannot be moved more often than the organisation allows", () => {
+    const s = { ...fresh(), reschedulesLeft: 0 };
+    expect(
+      session.applyCallTool(s as never, "book_slot", { when_local: "2026-10-26T16:00" }, ids, 0),
+    ).toMatchObject({ ok: false, error: expect.stringMatching(/written assessment/) });
+    expect(s.booking).toBeNull();
+    const t = { ...fresh(), reschedulesLeft: 1 };
+    expect(
+      session.applyCallTool(t as never, "book_slot", { when_local: "2026-10-26T16:00" }, ids, 0),
     ).toEqual({ ok: true });
   });
 
@@ -785,6 +804,7 @@ describe("a whole call with a fake line", () => {
     expect(r.status).toBe("callback");
     const c = await callRow(callId);
     expect(c.bookedByCandidate).toBe(true);
+    expect(c.reschedules).toBe(1);
     expect(c.dueAt!.toISOString()).toBe("2026-10-27T10:30:00.000Z");
     const mail = await db
       .select({ kind: emailOutbox.kind, data: emailOutbox.templateData })
