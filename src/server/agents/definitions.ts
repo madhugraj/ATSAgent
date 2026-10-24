@@ -343,7 +343,11 @@ export function registerPhase2Agents(): void {
     // 1.1.1 (second real call): consent counts only after it said it is an AI and makes notes
     // (checked in code); signposts each part; keeps to a time the candidate sets; pay only as
     // stated (never calculated) with a pay note; a poor fit handled honestly and neutrally.
-    version: "1.1.1",
+    // 1.1.2 (third real call): confirms details already on record instead of skipping them
+    // (it told a candidate their pay "was not needed"); records corrections; asks whether to
+    // continue at most once; the voice session runs in Indian English (short words had been
+    // transcribed as Spanish).
+    version: "1.1.2",
     owner: "hr_head",
     responsibility:
       "Holds one AI screening phone call with a shortlisted candidate the way an HR recruiter does: says who it is and why it is calling, asks consent, explains the role and why it called them, records their practical details (including the pay they state, for HR only) and their answers to the role's screening questions, or agrees a better time — nothing else.",

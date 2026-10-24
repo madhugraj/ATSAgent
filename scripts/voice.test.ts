@@ -169,6 +169,10 @@ describe("live voice session framing", () => {
       tools: [{ name: "end_call", description: "hang up" }],
     });
     expect(m.setup.model).toBe("models/m");
+    expect(
+      voiceSetupMessage({ model: "m", system: "", voice: "Kore", tools: [], languageCode: "en-IN" })
+        .setup.generationConfig.speechConfig,
+    ).toMatchObject({ languageCode: "en-IN" });
     expect(m.setup.generationConfig.responseModalities).toEqual(["AUDIO"]);
     expect(m.setup.inputAudioTranscription).toEqual({});
     expect(m.setup.outputAudioTranscription).toEqual({});

@@ -1660,13 +1660,18 @@ export function voiceSetupMessage(opts: {
   tools: VoiceToolSpec[];
   voice: string;
   turnTaking?: VoiceTurnTaking;
+  /** BCP-47 language of the conversation, e.g. "en-IN" (recognition and speech). */
+  languageCode?: string;
 }) {
   return {
     setup: {
       model: opts.model,
       generationConfig: {
         responseModalities: ["AUDIO"],
-        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: opts.voice } } },
+        speechConfig: {
+          voiceConfig: { prebuiltVoiceConfig: { voiceName: opts.voice } },
+          ...(opts.languageCode ? { languageCode: opts.languageCode } : {}),
+        },
       },
       systemInstruction: { parts: [{ text: opts.system }] },
       tools: opts.tools.length
@@ -1733,6 +1738,7 @@ async function openVoiceSession(opts: {
   tools: VoiceToolSpec[];
   voice: string;
   turnTaking?: VoiceTurnTaking | undefined;
+  languageCode?: string | undefined;
   config: AiConfig;
   target: VoiceTarget;
   events: VoiceSessionEvents;
@@ -1805,6 +1811,7 @@ async function openVoiceSession(opts: {
           tools: opts.tools,
           voice: opts.voice,
           ...(opts.turnTaking ? { turnTaking: opts.turnTaking } : {}),
+          ...(opts.languageCode ? { languageCode: opts.languageCode } : {}),
         }),
       ),
     );
@@ -1901,6 +1908,7 @@ export async function aiVoiceSession(opts: {
   tools?: VoiceToolSpec[];
   voice?: string;
   turnTaking?: VoiceTurnTaking;
+  languageCode?: string;
   /** Force a key/model instead of the organisation's saved Google key (scripts, tests). */
   config?: AiConfig;
   /** Use Vertex AI with a service account instead of an API key (`config.model` still applies). */
@@ -1961,6 +1969,7 @@ export async function aiVoiceSession(opts: {
           tools,
           voice: opts.voice ?? "Kore",
           turnTaking: opts.turnTaking,
+          languageCode: opts.languageCode,
           config,
           target,
           events: opts.events ?? {},

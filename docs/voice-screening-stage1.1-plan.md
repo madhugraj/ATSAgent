@@ -213,3 +213,18 @@ Fixed what it showed (Screening call agent 1.1.1):
   bring — never judge or discourage.
 - The "why them" part is skipped when nothing specific is on record, instead of
   risking an invented reason.
+
+### Step A.2 — from the third real call (2026-10-24)
+
+Disclosure, signposting, the relocation concern and a skill gap were all handled
+as intended. Fixed what it showed (Screening call agent 1.1.2):
+
+- **Known details are confirmed, not skipped** — pay already on record had been
+  skipped and the candidate was told it "was not needed"; now "We have your pay
+  details from earlier — has anything changed?" (figures never in its context).
+- **Corrections are recorded** — `record_details` again when the candidate
+  corrects something (10 → 14 years, a different company).
+- **"Would you like to continue?" at most once per call**; later gaps are noted
+  and it moves on to what the candidate does bring.
+- **Indian English** for the session (`languageCode: "en-IN"`) — short replies
+  had been transcribed as Spanish ("Sí, ya", "Ajá").

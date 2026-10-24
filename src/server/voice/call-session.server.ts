@@ -320,6 +320,8 @@ async function placeCall(
     voice: policy.voice,
     // Wait through a thinking pause instead of jumping in.
     turnTaking: { silenceMs: 1000, endOfSpeech: "low", prefixPaddingMs: 300 },
+    // Indian English, so short replies ("yes", "okay") are not heard as another language.
+    languageCode: "en-IN",
     events,
   });
   if (!opened.ok) {

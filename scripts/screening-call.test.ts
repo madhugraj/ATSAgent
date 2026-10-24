@@ -371,7 +371,10 @@ describe("the call brief", () => {
       }),
     );
     expect(p).not.toContain("their notice period and the earliest date");
-    expect(p).not.toContain("expected pay per year");
+    expect(p).not.toContain("their expected pay per year");
+    expect(p).toContain("has anything changed?");
+    expect(p).toContain("Never tell them a detail is not needed");
+    expect(p).toContain("at most once in the whole call");
     expect(p).toContain("I'm calling at the time we agreed");
     expect(p).toContain("on behalf of a client");
   });
@@ -655,6 +658,7 @@ describe("a whole call with a fake line", () => {
     expect(seen.opts!.system).not.toContain("expected CTC is above our budget");
     expect(seen.opts!.voice).toBe("Kore");
     expect(seen.opts!.turnTaking).toMatchObject({ endOfSpeech: "low", silenceMs: 1000 });
+    expect(seen.opts!.languageCode).toBe("en-IN");
     // Refused before consent, and for the pay question.
     expect(
       seen.results.filter((x) => (x as { out: { ok: boolean } }).out.ok === false),

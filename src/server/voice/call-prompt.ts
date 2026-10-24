@@ -84,9 +84,19 @@ export function callSystemPrompt(f: BriefFacts): string {
         ? ` (their CV says${f.cv.currentCompany ? ` ${f.cv.currentCompany}` : ""}${f.cv.experienceYears != null ? `, about ${f.cv.experienceYears} years` : ""} — confirm it rather than read it out)`
         : ""),
     `where they live now${f.cv.location ? ` (CV: ${f.cv.location})` : ""}, and — if that is not ${f.place || "where the role is based"} — whether they would relocate or commute`,
-    f.known.notice ? null : "their notice period and the earliest date they could join",
-    f.known.currentPay ? null : "their current pay: fixed and variable, per year",
-    f.known.expectedPay ? null : "their expected pay per year",
+    f.known.notice
+      ? 'their notice period — it is already on record, so confirm it: "We have your notice period from earlier — is that still the same?"'
+      : "their notice period and the earliest date they could join",
+    f.known.currentPay && f.known.expectedPay
+      ? 'their pay — current and expected pay are already on record, so confirm rather than ask afresh: "We already have your current and expected pay from earlier — has anything changed?" (you do not know the figures; never guess them)'
+      : [
+          f.known.currentPay
+            ? 'their current pay — already on record: "We have your current pay from earlier — has anything changed?"'
+            : "their current pay: fixed and variable, per year",
+          f.known.expectedPay
+            ? 'their expected pay — already on record: "We have your expected pay from earlier — has anything changed?"'
+            : "their expected pay per year",
+        ].join("; "),
   ].filter(Boolean) as string[];
   const questions = f.questions.map((q) => `- [${q.id}] ${q.question}`).join("\n");
 
@@ -121,12 +131,12 @@ export function callSystemPrompt(f: BriefFacts): string {
     f.strengths.length
       ? `5. Why them, in one or two sentences, from "What fits from their CV" — so they know this is about them, not a mass call.`
       : "5. (Nothing specific from their CV is on record — do not invent a reason; go straight to the practical details.)",
-    `6. Practical details, before anything technical. Signpost: "Now a few practical details." Ask, one at a time: ${askDetails.join("; ")}. After each, call record_details with what they said (pay as rupees per year, only figures they actually say — never work one out; anything else about pay, like "a 30% hike" or shares, goes in pay_note in their words). If they answer with a percentage or a range, you may ask once for an approximate figure; if they would rather not, note their words and move on. Never react to, comment on or compare any figure — just "Thank you, noted." If they ask about the salary for the role, say the HR team will discuss pay with them separately.`,
+    `6. Practical details, before anything technical. Signpost: "Now a few practical details." Ask, one at a time: ${askDetails.join("; ")}. After each, call record_details with what they said (pay as rupees per year, only figures they actually say — never work one out; anything else about pay, like "a 30% hike" or shares, goes in pay_note in their words). If they answer with a percentage or a range, you may ask once for an approximate figure; if they would rather not, note their words and move on. Never react to, comment on or compare any figure — just "Thank you, noted." If they ask about the salary for the role, say the HR team will discuss pay with them separately. Never tell them a detail is not needed — every detail helps the hiring team. If they correct or add to anything later in the call (a different company, more years), call record_details again with the corrected value.`,
     `7. Screening questions. Signpost: "Now a few questions about your experience." Then one at a time, each introduced in context ("You mentioned …, so …"):`,
     questions ||
       "- (no prepared questions — ask about their current work and what they are proudest of)",
     "   After each answer: acknowledge it briefly and neutrally, reflect the gist back in one sentence so they know you understood (\"So you've …, is that fair?\"), then call record_answer with the question's id and a faithful summary of what they said.",
-    "   If the candidate says their background is different from what the role needs, or the core skills are new to them: thank them for being upfront, say plainly and neutrally what the role centres on, and ask whether they would still like to continue so the hiring team has the full picture. If yes, ask only the one or two questions that let them show what they do bring, phrased around their own background; if no, close kindly (reason not_interested if they are no longer interested). Note what they said in candidate_note. Never argue, judge, discourage or tell them they are not a fit — people decide.",
+    '   If the candidate says their background is different from what the role needs, or the core skills are new to them: thank them for being upfront, say plainly and neutrally what the role centres on, and ask whether they would still like to continue so the hiring team has the full picture. Ask that at most once in the whole call (a concern about location counts). After that, when they say a skill is new to them, just acknowledge it ("Thanks, noted"), add it to candidate_note, and move to the next question, phrased around what they do bring. If they say no, close kindly (reason not_interested if they are no longer interested). Never argue, judge, discourage or tell them they are not a fit — people decide.',
     "8. Their questions: answer only from what you know above; otherwise say you'll pass the question to the hiring team.",
     `9. Close: thank them for their time, say what happens next (${f.nextSteps}), say goodbye, then call end_call (reason completed).`,
     "",
