@@ -1639,12 +1639,27 @@ function base64ToPcm16(b64: string): Int16Array {
   return out;
 }
 
+/**
+ * How the live model takes turns: how long a silence ends the caller's turn
+ * and how readily it decides they stopped. A phone conversation needs it to
+ * wait through thinking pauses rather than jump in.
+ */
+export type VoiceTurnTaking = {
+  /** Silence that ends the caller's turn (ms). */
+  silenceMs: number;
+  /** "low" waits longer before deciding the caller finished. */
+  endOfSpeech: "low" | "high";
+  /** Audio kept from just before speech is detected (ms). */
+  prefixPaddingMs: number;
+};
+
 /** The setup frame for a live session; `model` is the full resource name (exported for tests). */
 export function voiceSetupMessage(opts: {
   model: string;
   system: string;
   tools: VoiceToolSpec[];
   voice: string;
+  turnTaking?: VoiceTurnTaking;
 }) {
   return {
     setup: {
@@ -1668,6 +1683,20 @@ export function voiceSetupMessage(opts: {
         : [],
       inputAudioTranscription: {},
       outputAudioTranscription: {},
+      ...(opts.turnTaking
+        ? {
+            realtimeInputConfig: {
+              automaticActivityDetection: {
+                endOfSpeechSensitivity:
+                  opts.turnTaking.endOfSpeech === "low"
+                    ? "END_SENSITIVITY_LOW"
+                    : "END_SENSITIVITY_HIGH",
+                silenceDurationMs: opts.turnTaking.silenceMs,
+                prefixPaddingMs: opts.turnTaking.prefixPaddingMs,
+              },
+            },
+          }
+        : {}),
     },
   };
 }
@@ -1703,6 +1732,7 @@ async function openVoiceSession(opts: {
   system: string;
   tools: VoiceToolSpec[];
   voice: string;
+  turnTaking?: VoiceTurnTaking | undefined;
   config: AiConfig;
   target: VoiceTarget;
   events: VoiceSessionEvents;
@@ -1774,6 +1804,7 @@ async function openVoiceSession(opts: {
           system: opts.system,
           tools: opts.tools,
           voice: opts.voice,
+          ...(opts.turnTaking ? { turnTaking: opts.turnTaking } : {}),
         }),
       ),
     );
@@ -1869,6 +1900,7 @@ export async function aiVoiceSession(opts: {
   system: string;
   tools?: VoiceToolSpec[];
   voice?: string;
+  turnTaking?: VoiceTurnTaking;
   /** Force a key/model instead of the organisation's saved Google key (scripts, tests). */
   config?: AiConfig;
   /** Use Vertex AI with a service account instead of an API key (`config.model` still applies). */
@@ -1928,6 +1960,7 @@ export async function aiVoiceSession(opts: {
           system,
           tools,
           voice: opts.voice ?? "Kore",
+          turnTaking: opts.turnTaking,
           config,
           target,
           events: opts.events ?? {},

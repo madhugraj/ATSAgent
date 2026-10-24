@@ -17,6 +17,7 @@ import {
   screeningCalls,
   screeningKits,
   type ScreeningCallAnswer,
+  type ScreeningCallDetails,
   type ScreeningCallStatus,
   type ScreeningCallTurn,
 } from "@db/schema";
@@ -28,7 +29,7 @@ import {
 import { agentRunScope, withAiSubject } from "../agents/context";
 import { db } from "../db";
 import { log } from "../log";
-import { callSystemPrompt, loadBriefFacts } from "./call-brief.server";
+import { type BriefFacts, callSystemPrompt, loadBriefFacts } from "./call-brief.server";
 import {
   applyCallTool,
   CALL_TOOLS,
@@ -230,7 +231,7 @@ async function closeCallRun(runId: string, ok: boolean, result: string) {
 const OUTCOME_WORDS: Record<string, string> = {
   completed: "The candidate took the screening call; the answers were sent for grading.",
   consent_declined: "The candidate declined the screening call; nothing was kept.",
-  callback: "The candidate asked to be called back later.",
+  callback: "The candidate agreed a time for the call; a confirmation was e-mailed.",
   no_answer: "Nobody answered; the call will be tried again.",
   failed: "The call could not be placed; it will be tried again.",
   fell_back: "The call could not happen; the Screening agent sends the written assessment instead.",
@@ -264,6 +265,7 @@ async function placeCall(
     applicationId: call.applicationId,
     kitId: call.kitId,
     policy,
+    booked: call.bookedByCandidate,
   });
   const questionIds = new Set(facts.questions.map((q) => q.id));
   const system = `Current local time: ${localNow(now(), tz)} (${tz}).\n\n${callSystemPrompt(facts)}`;
@@ -274,6 +276,10 @@ async function placeCall(
   const down = new Resampler(1, 3); // 24 kHz model → 8 kHz phone
   let lastActivity = now();
   let candidateSpoke = false;
+  // Transcript lines so far, and how many there were when the practical
+  // details were last recorded: grading reads only what came after.
+  let turns = 0;
+  let detailsUpToTurn = 0;
   let agentEnded!: () => void;
   const agentEnd = new Promise<void>((r) => (agentEnded = r));
 
@@ -284,11 +290,13 @@ async function placeCall(
     },
     onInterrupted: () => line.clear(),
     onTurn: (t) => {
+      turns++;
       lastActivity = now();
       if (t.who === "caller") candidateSpoke = true;
     },
     onToolCall: async (c) => {
       const out = applyCallTool(state, c.name, c.args, questionIds, now());
+      if (c.name === "record_details" && out["ok"]) detailsUpToTurn = turns;
       if (c.name === "end_call" && out["ok"]) {
         // The goodbye is queued; let it play out before hanging up.
         for (let i = 0; i < 100 && line.pendingSeconds() > 0; i++)
@@ -305,6 +313,9 @@ async function placeCall(
     feature: "screening_call",
     system,
     tools: CALL_TOOLS,
+    voice: policy.voice,
+    // Wait through a thinking pause instead of jumping in.
+    turnTaking: { silenceMs: 1000, endOfSpeech: "low", prefixPaddingMs: 300 },
     events,
   });
   if (!opened.ok) {
@@ -384,57 +395,83 @@ async function placeCall(
     consentWords: state.consentWords ?? null,
     transcript,
     answers: state.consent === true ? state.answers : [],
+    details: state.consent === true ? publicDetails(state.details) : {},
   };
 
-  if (outcome === "callback")
-    return finish(orgId, call, {
-      status: "callback",
-      endReason: why,
-      now: endedAt,
-      policy,
-      tz,
-      dueAt: callbackAt(state.callback?.whenLocal, endedAt, policy, tz),
-      extra: base,
-    });
-  if (outcome === "wrong_person")
-    return finish(orgId, call, {
-      status: "fell_back",
-      endReason: "wrong_person",
-      now: endedAt,
-      extra: base,
-    });
-  if (outcome === "consent_declined")
-    return finish(orgId, call, {
-      status: "consent_declined",
-      endReason: why,
-      now: endedAt,
-      extra: base,
-    });
-  if (outcome === "no_answer")
-    return finish(orgId, call, {
-      status: "no_answer",
-      endReason: why,
-      now: endedAt,
-      policy,
-      tz,
-      extra: base,
-    });
-
-  // Completed: availability (never pay), then grade against the kit.
-  let screeningRunId: string | null = null;
-  if (state.availability && call.applicationId) {
-    const a = state.availability;
-    const { recordCallAvailability } = await import("@/lib/compensation.server");
-    await recordCallAvailability(orgId, call.applicationId, {
-      noticePeriodDays: a.notice_period_days ?? null,
-      earliestJoining: a.earliest_joining ?? null,
-      currentLocation: a.current_location ?? null,
-      openToRelocate: a.open_to_relocate ?? null,
+  // What they said about pay, notice and availability goes to the HR-only record.
+  if (state.consent === true && state.details && call.applicationId) {
+    const d = state.details;
+    const { recordCallDetails } = await import("@/lib/compensation.server");
+    await recordCallDetails(orgId, call.applicationId, {
+      currentFixed: d.current_ctc_fixed ?? null,
+      currentVariable: d.current_ctc_variable ?? null,
+      expectedCtc: d.expected_ctc ? d.expected_ctc : null,
+      noticePeriodDays: d.notice_period_days ?? null,
+      earliestJoining: d.earliest_joining ?? null,
+      currentLocation: d.current_location ?? null,
+      openToRelocate: d.open_to_relocate ?? null,
     }).catch((e) =>
-      log.warn("screening_call.availability_failed", { call_id: call.id, error: e as Error }),
+      log.warn("screening_call.details_failed", { call_id: call.id, error: e as Error }),
     );
   }
-  if (state.answers.length || transcript.length) {
+
+  switch (outcome) {
+    case "booked": {
+      const dueAt = callbackAt(state.booking?.whenLocal, endedAt, policy, tz);
+      await confirmBooking(orgId, call, facts, policy, dueAt, tz);
+      return finish(orgId, call, {
+        status: "callback",
+        endReason: "booked",
+        now: endedAt,
+        policy,
+        tz,
+        dueAt,
+        extra: { ...base, bookedByCandidate: true },
+      });
+    }
+    case "wrong_person":
+    case "prefers_written":
+    case "prefers_human":
+      // No AI call: the Screening agent sends the written assessment, or tells a person.
+      return finish(orgId, call, {
+        status: "fell_back",
+        endReason: outcome,
+        now: endedAt,
+        extra: base,
+      });
+    case "consent_declined":
+      return finish(orgId, call, {
+        status: "consent_declined",
+        endReason: why,
+        now: endedAt,
+        extra: base,
+      });
+    case "not_interested":
+      return finish(orgId, call, {
+        status: "completed",
+        endReason: "not_interested",
+        now: endedAt,
+        extra: base,
+      });
+    case "no_answer":
+      return finish(orgId, call, {
+        status: "no_answer",
+        endReason: why,
+        now: endedAt,
+        policy,
+        tz,
+        extra: base,
+      });
+    case "completed":
+      break;
+  }
+
+  // Completed: grade the screening questions against the kit — only the part
+  // of the call after the practical details, so pay, location and personal
+  // details never reach the grader.
+  let screeningRunId: string | null = null;
+  const screeningPart = transcript.slice(detailsUpToTurn);
+  if (state.answers.length || screeningPart.length) {
     const [kit] = await db
       .select()
       .from(screeningKits)
@@ -447,7 +484,7 @@ async function placeCall(
           orgId,
           kit,
           answers: state.answers.map((a) => ({ question_id: a.question_id, answer: a.summary })),
-          transcript: transcript.map(lineFor).join("\n") || null,
+          transcript: screeningPart.map(lineFor).join("\n") || null,
           inputKind: "phone_ai",
           createdBy: null,
         });
@@ -463,6 +500,66 @@ async function placeCall(
     now: endedAt,
     extra: { ...base, screeningRunId },
   });
+}
+
+/** The details kept on the call row — never pay (that is HR-only, elsewhere). */
+function publicDetails(d: CallState["details"]): ScreeningCallDetails {
+  if (!d) return {};
+  const out: ScreeningCallDetails = {};
+  if (d.current_title) out.currentTitle = d.current_title;
+  if (d.current_company) out.currentCompany = d.current_company;
+  if (d.total_experience_years != null) out.totalExperienceYears = d.total_experience_years;
+  if (d.current_location) out.currentLocation = d.current_location;
+  if (d.open_to_relocate != null) out.openToRelocate = d.open_to_relocate;
+  if (d.notice_period_days != null) out.noticePeriodDays = d.notice_period_days;
+  if (d.earliest_joining) out.earliestJoining = d.earliest_joining;
+  return out;
+}
+
+/** E-mail the candidate the time they agreed, at the address on their CV. */
+async function confirmBooking(
+  orgId: string,
+  call: typeof screeningCalls.$inferSelect,
+  facts: BriefFacts,
+  policy: Awaited<ReturnType<typeof phoneScreeningPolicyOf>>,
+  dueAt: Date,
+  tz: string,
+) {
+  const [c] = await db
+    .select({ email: candidates.email, name: candidates.fullName })
+    .from(candidates)
+    .where(and(eq(candidates.id, call.candidateId), eq(candidates.orgId, orgId)))
+    .limit(1);
+  if (!c?.email) return;
+  const when = new Intl.DateTimeFormat("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZone: tz,
+  }).format(dueAt);
+  const { enqueueEmail } = await import("@/lib/email-outbox.server");
+  await enqueueEmail({
+    orgId,
+    kind: "screening_call_booked",
+    templateName: "screening_call_booked",
+    toEmail: c.email,
+    applicationId: call.applicationId,
+    idempotencyKey: `screening_call_booked:${call.id}:${dueAt.toISOString()}`,
+    templateData: {
+      candidateName: facts.candidateFirstName,
+      orgName: facts.orgName,
+      jobTitle: facts.roleTitle,
+      assistantName: policy.assistantName,
+      when,
+      minutes: String(policy.maxMinutes),
+      contactEmail: facts.contactEmail ?? undefined,
+    },
+  }).catch((e) =>
+    log.warn("screening_call.booking_email_failed", { call_id: call.id, error: e as Error }),
+  );
 }
 
 /**

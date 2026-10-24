@@ -81,21 +81,23 @@ async function applyToCall(ctx: ToolContext, name: CallToolName, input: unknown)
       ...(state.consentWords ? { consentWords: state.consentWords } : {}),
       answers: state.consent === true ? state.answers : [],
       ...(state.consent === false ? { status: "consent_declined" as const } : {}),
-      ...(state.callback ? { status: "callback" as const } : {}),
+      ...(state.booking ? { status: "callback" as const, bookedByCandidate: true } : {}),
       ...(state.endReason ? { endReason: state.endReason } : {}),
       updatedAt: new Date(),
     })
     .where(eq(screeningCalls.id, call.id));
-  if (name === "record_availability" && state.availability && call.applicationId) {
-    const { recordCallAvailability } = await import("@/lib/compensation.server");
-    const a = state.availability;
-    const r = await recordCallAvailability(ctx.orgId, call.applicationId, {
-      noticePeriodDays: a.notice_period_days ?? null,
-      earliestJoining: a.earliest_joining ?? null,
-      currentLocation: a.current_location ?? null,
-      openToRelocate: a.open_to_relocate ?? null,
+  if (name === "record_details" && state.details && call.applicationId) {
+    const d = state.details;
+    const { recordCallDetails } = await import("@/lib/compensation.server");
+    await recordCallDetails(ctx.orgId, call.applicationId, {
+      currentFixed: d.current_ctc_fixed ?? null,
+      currentVariable: d.current_ctc_variable ?? null,
+      expectedCtc: d.expected_ctc ? d.expected_ctc : null,
+      noticePeriodDays: d.notice_period_days ?? null,
+      earliestJoining: d.earliest_joining ?? null,
+      currentLocation: d.current_location ?? null,
+      openToRelocate: d.open_to_relocate ?? null,
     });
-    return { ...out, recorded: r.recorded };
   }
   return out;
 }

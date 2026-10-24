@@ -99,12 +99,15 @@ describe("the organisation's phone screening policy", () => {
       callDays: [5, 1, 3, 1],
       maxAttempts: 2,
       maxMinutes: 12,
+      voice: "Aoede",
+      nextStepsText: "  we reply within two working days  ",
     };
     await settings.setPhoneScreeningPolicyCore(orgId, actor(), policy);
     expect(await settings.phoneScreeningPolicyOf(orgId)).toEqual({
       ...policy,
       assistantName: "Saranya",
       callDays: [1, 3, 5],
+      nextStepsText: "we reply within two working days",
     });
     const audit = await db
       .select({ detail: auditLog.detail })

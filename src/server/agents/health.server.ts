@@ -744,6 +744,7 @@ export const RULES: Rule[] = [
       const r = await rows<{ n: number }>(sql`
         select count(*)::int n from screening_calls
         where org_id = ${orgId} and status = 'completed' and consent_at is not null
+          and coalesce(end_reason, '') <> 'not_interested'
           and jsonb_array_length(answers) = 0 and updated_at >= now() - interval '7 days'`);
       const n = r[0]?.n ?? 0;
       if (n < HEALTH.shortCalls7d) return [];

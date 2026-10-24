@@ -39,9 +39,11 @@ function describe(c: Call): {
     case "in_progress":
       return { label: "On the call now", tone: "default" };
     case "completed":
-      return { label: "Screened by phone", tone: "default" };
+      return c.endReason === "not_interested"
+        ? { label: "Not interested in the role", tone: "outline" }
+        : { label: "Screened by phone", tone: "default" };
     case "callback":
-      return { label: `Call back ${when(c.dueAt)} (they asked)`, tone: "secondary" };
+      return { label: `Booked with them for ${when(c.dueAt)}`, tone: "secondary" };
     case "no_answer":
       return { label: `Not answered — trying again ${when(c.dueAt)}`, tone: "outline" };
     case "failed":
@@ -49,12 +51,30 @@ function describe(c: Call): {
     case "consent_declined":
       return { label: "Declined the call — nothing kept", tone: "outline" };
     case "fell_back":
-      return { label: "Could not be reached — written assessment instead", tone: "outline" };
+      return {
+        label:
+          c.endReason === "prefers_human"
+            ? "Asked for a person to call them"
+            : c.endReason === "prefers_written"
+              ? "Chose the written assessment"
+              : "Could not be reached — written assessment instead",
+        tone: "outline",
+      };
     case "cancelled":
       return { label: "Cancelled", tone: "outline" };
   }
   return { label: c.status, tone: "outline" };
 }
+
+const DETAIL_LABEL: Record<string, string> = {
+  currentTitle: "Current role",
+  currentCompany: "Company",
+  totalExperienceYears: "Experience (years)",
+  currentLocation: "Lives in",
+  openToRelocate: "Open to relocating",
+  noticePeriodDays: "Notice (days)",
+  earliestJoining: "Earliest joining",
+};
 
 const WAITING = new Set(["requested", "approved", "callback", "no_answer", "failed"]);
 
@@ -158,7 +178,8 @@ export function PhoneScreeningCalls(props: {
 
       {forRole.map((c) => {
         const expanded = open === c.id;
-        const hasDetail = c.answers.length > 0 || c.transcript.length > 0;
+        const details = Object.entries(c.details ?? {});
+        const hasDetail = c.answers.length > 0 || c.transcript.length > 0 || details.length > 0;
         return (
           <div key={c.id} className="mt-2 border-t pt-2 text-xs">
             <button
@@ -180,6 +201,21 @@ export function PhoneScreeningCalls(props: {
             </button>
             {expanded ? (
               <div className="mt-2 space-y-2">
+                {details.length ? (
+                  <dl className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+                    {details.map(([k, v]) => (
+                      <div key={k} className="contents">
+                        <dt className="text-muted-foreground">{DETAIL_LABEL[k] ?? k}</dt>
+                        <dd>{typeof v === "boolean" ? (v ? "Yes" : "No") : String(v)}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                ) : null}
+                {c.transcriptHidden ? (
+                  <p className="text-muted-foreground">
+                    The transcript includes pay, so only TA, the HR head and the CBO can read it.
+                  </p>
+                ) : null}
                 {c.answers.length ? (
                   <ul className="space-y-1.5">
                     {c.answers.map((a) => (

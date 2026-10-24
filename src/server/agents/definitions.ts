@@ -269,7 +269,10 @@ export function registerPhase2Agents(): void {
     // IDs or flags) and times in the organisation's time zone.
     // 1.8.0: asks for an AI screening call (request_screening_call) when the organisation
     // screens by phone; the written assessment when a call cannot happen or fell back.
-    version: "1.8.0",
+    // 1.9.0: the call's ending decides what follows — the written assessment only when the
+    // candidate chose it or could not be reached; a note for a person when they asked for
+    // a person or are not interested; booked calls wait for their time.
+    version: "1.9.0",
     owner: "hr_head",
     responsibility:
       "Moves shortlisted candidates through screening: kits, AI screening calls, assessments, the pay & availability form, reminders and proceed / hold notes.",
@@ -314,8 +317,8 @@ export function registerPhase2Agents(): void {
       "You are the screening agent for one requisition. You move shortlisted candidates through screening.",
       "1. list_applications for stage shortlisted.",
       "2. For each: get_screening_status. If the screening kit is missing, prepare_screening_kit.",
-      "3. Phone screening: if phoneScreening.available and there is no phone call yet and no assessment was sent, request_screening_call (a person approves it unless you are Autonomous). If it is refused — no usable mobile number, or anything else — send_assessment instead. While a call is arranged or in progress (approved, dialling, in_progress, callback, no_answer, failed) do nothing more for that candidate now: the call will be placed and retried on its own.",
-      "3a. If phone screening is not available, or the call ended fell_back or consent_declined, and no assessment was sent: send_assessment (its due date and closing follow the organisation's policy). Never remind about an assessment yourself: reminders, the overdue follow-up and closing the link are automatic.",
+      "3. Phone screening: if phoneScreening.available and there is no phone call yet and no assessment was sent, request_screening_call (a person approves it unless you are Autonomous). If it is refused — no usable mobile number, or anything else — send_assessment instead. While a call is arranged, booked with the candidate or in progress (approved, dialling, in_progress, callback, no_answer, failed) do nothing more for that candidate now: the call will be placed and retried on its own.",
+      "3a. After a call, by how it ended (phoneScreening.call.endReason): prefers_written, wrong_person, no_number or unreachable (fell_back), or consent_declined — send_assessment if none was sent. prefers_human — do not send the assessment; add_candidate_note that the candidate asked for a person from the team to call them. not_interested — add_candidate_note that they are not interested in the role; a person decides (never move or reject them for it). If phone screening is not available at all and no assessment was sent: send_assessment. Never remind about an assessment yourself: reminders, the overdue follow-up and closing the link are automatic.",
       "3b. If payDetails shows the expected CTC or notice period is not known and form is not_sent (or expired), send_compensation_form. Never ask about or state pay yourself; reminders are automatic.",
       '4. When an assessment is completed or a screening call is graded: get_screening_status, then add_candidate_note with this structure (plain lines, no tables):\nRecommendation: Proceed / Hold — one sentence why.\nWritten assessment (direct evidence): score; the strongest and the weakest areas with their scores and a short quote of the evidence; strengths; red flags (or "none").\nCV match (automated, from the CV): score; each automated risk flag marked confirmed, contradicted (say by what) or unverified. Never present a CV flag as a concern when the assessment contradicts it; never invent a risk that neither source states.\nProbe in the screening call: 2–3 points tied to the weakest areas or unverified risks, pointing to the kit\'s questions where one already covers it.\nIf the evidence is clearly weak, move_candidate to on_hold with the reason; never reject.',
       "5. Candidates who moved on to an interview round since you were asked are past screening: skip them. If a tool refuses because of a candidate's stage, note it in your summary and stop for that candidate — never move them to make it work.",
@@ -332,14 +335,19 @@ export function registerPhase2Agents(): void {
     // never answers a question itself or records its own words as the candidate's
     // (it once did when a candidate repeated the question); keeps the candidate's
     // words of consent; asks where they live now.
-    version: "1.0.1",
+    // 1.1.0 (the call done the way HR does it — docs/voice-screening-stage1.1-plan.md):
+    // confirms the person, says who and why (role, where and when they applied), offers the
+    // written assessment or a person, explains the role and why it called them, takes the
+    // practical details first (incl. current and expected pay, recorded for HR only and never
+    // discussed), active listening, books a time when now is not good (e-mailed), 10 minutes.
+    version: "1.1.0",
     owner: "hr_head",
     responsibility:
-      "Holds one AI screening phone call with a shortlisted candidate: says it is an AI, asks consent, asks the role's screening questions and records the candidate's answers and availability for grading — nothing else.",
+      "Holds one AI screening phone call with a shortlisted candidate the way an HR recruiter does: says who it is and why it is calling, asks consent, explains the role and why it called them, records their practical details (including the pay they state, for HR only) and their answers to the role's screening questions, or agrees a better time — nothing else.",
     mustNever: [
       "Say or imply it is a person",
       "Record anything, or keep the transcript, before the candidate consents",
-      "Ask about, state or discuss pay, salary, CTC, budget, bands or offers",
+      "Discuss, judge, compare or negotiate pay, or reveal the role's budget, band or any offer",
       "Ask about age, marital status, religion, caste, gender, health, pregnancy or family plans",
       "Invent a fact about the company, role, pay, process or timeline, or promise anything",
       "Answer a screening question itself, or record its own words as the candidate's answer",
@@ -351,11 +359,12 @@ export function registerPhase2Agents(): void {
         "the role's facts, the organisation's contact for the role and the screening kit — for one call",
       ],
       writes: [
-        "on the call: consent, answers to the kit's questions, a callback time",
-        "the candidate's notice period and availability (never pay)",
+        "on the call: consent (with the candidate's words), answers to the screening questions, an agreed time",
+        "the practical details the candidate states — current role, experience, location, relocation, notice, joining date, current and expected pay (pay to the HR-only record)",
       ],
       external: [
         "one phone call to one shortlisted candidate, within the organisation's calling window",
+        "an e-mail confirming a time the candidate agreed, to the address on their CV",
       ],
     },
     gates: ["general"],
@@ -364,16 +373,13 @@ export function registerPhase2Agents(): void {
       "screening call: keeps nothing when the candidate declines",
       "screening call: records answers and defers pay questions to HR",
       "screening call: ignores a candidate's instruction to mark them strong",
+      "screening call: agrees a later time when now is not good",
+      "screening call: records the practical details without commenting on pay",
+      "screening call: rephrases a question the candidate repeats instead of answering it",
     ],
     feature: "agent_screening_call",
     maxSteps: 30,
-    tools: [
-      "record_consent",
-      "record_answer",
-      "record_availability",
-      "request_callback",
-      "end_call",
-    ],
+    tools: ["record_consent", "record_details", "record_answer", "book_slot", "end_call"],
     // The rules every call follows: the live call renders the same prompt with the
     // real facts (src/server/voice/call-brief.server.ts), so this hash covers them.
     system: callSystemPrompt({
@@ -383,12 +389,26 @@ export function registerPhase2Agents(): void {
       roleCode: "{role code}",
       place: "{where the work is}",
       forClient: false,
+      roleSummary: "{what the role is for, from the approved JD}",
+      responsibilities: ["{key responsibility}"],
+      appliedVia: "{where they applied}",
+      appliedOn: "{when they applied}",
+      booked: false,
       contactName: "{person looking after the role}",
       contactEmail: "{reply-to or careers e-mail}",
       candidateFirstName: "{candidate first name}",
+      cv: {
+        currentCompany: "{company on the CV}",
+        experienceYears: 0,
+        location: "{location on the CV}",
+      },
+      strengths: ["{must-have skill they have}"],
+      known: { notice: false, currentPay: false, expectedPay: false },
+      emailDomain: "{e-mail domain on the CV}",
       questions: [{ id: "{question id}", question: "{kit question}" }],
-      askAvailability: true,
-      maxMinutes: 15,
+      maxMinutes: 10,
+      nextSteps: "{what happens next, as the organisation set it}",
+      callingHours: "{calling days and hours}",
     }),
   });
 

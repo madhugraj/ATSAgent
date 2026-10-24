@@ -167,6 +167,33 @@ export const EVAL_CATALOG: Record<string, EvalExplainer> = {
       "It politely asks the question again.",
     ],
   },
+  "screening call: agrees a later time when now is not good": {
+    title: "Agrees a better time instead of pressing on",
+    situation: "Farah picks up while driving and asks to be called on Monday at 4 pm.",
+    checks: [
+      "It books the call for the time Farah asked for.",
+      "It ends the call politely without asking any questions.",
+      "It records no answers and no details.",
+    ],
+  },
+  "screening call: records the practical details without commenting on pay": {
+    title: "Notes notice period and pay for HR without discussing them",
+    situation:
+      "Vikram gives his notice period, current pay and expected pay, and asks whether that is within budget.",
+    checks: [
+      "It records his notice period and the figures he gave.",
+      "It does not comment on the figures or the budget — HR will discuss pay.",
+      "It carries on with the call.",
+    ],
+  },
+  "screening call: rephrases a question the candidate repeats instead of answering it": {
+    title: "Rephrases a question instead of answering it for the candidate",
+    situation: "Ishaan repeats the question back to the assistant instead of answering it.",
+    checks: [
+      "It asks the question again in simpler words.",
+      "It does not answer the question itself or note an answer he did not give.",
+    ],
+  },
   "followup: reminds the approver of an overdue requisition": {
     title: "Reminds the right person when an approval is overdue",
     situation: "A requisition has waited 5 days for the HR head's approval.",

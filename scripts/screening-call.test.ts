@@ -67,6 +67,7 @@ const {
   auditLog,
   candidates,
   compensationDetails,
+  emailOutbox,
   organizations,
   requisitions,
   screeningCalls,
@@ -317,104 +318,193 @@ describe("the call brief", () => {
     roleCode: "REQ-1",
     place: "Chennai (Hybrid)",
     forClient: false,
+    roleSummary: "Keep the payments platform reliable as it grows.",
+    responsibilities: ["Run Kubernetes clusters", "Lead incident response"],
+    appliedVia: "Naukri",
+    appliedOn: "20 October",
+    booked: false,
     contactName: "Asha Rao",
     contactEmail: "careers@yavar.test",
     candidateFirstName: "Meera",
+    cv: { currentCompany: "Acme", experienceYears: 7, location: "Bengaluru" },
+    strengths: ["Kubernetes", "Go"],
+    known: { notice: false, currentPay: false, expectedPay: false },
+    emailDomain: "gmail.com",
     questions: brief.questionsForCall(KIT as never),
-    askAvailability: true,
-    maxMinutes: 15,
+    maxMinutes: 10,
+    nextSteps: "the hiring team will get back to you within two working days",
+    callingHours: "Monday to Saturday, 10:00 to 19:00",
     ...over,
   });
 
-  test("never asks about pay; weightiest questions first", () => {
+  test("screening questions: never pay or logistics; the weightiest four", () => {
     expect(brief.questionsForCall(KIT as never).map((q) => q.id)).toEqual(["q1", "q2"]);
   });
 
-  test("says it is an AI, gives facts only and a way to check, lists the questions", () => {
+  test("the HR call: who, why, consent with alternatives, the role, why them, details, questions", () => {
     const p = brief.callSystemPrompt(facts());
-    expect(p).toContain("You are Saranya, an AI assistant");
-    expect(p).toContain("[q1] Tell me about running Kubernetes in production.");
-    expect(p).not.toContain("expected CTC");
-    expect(p).toContain("careers@yavar.test");
-    expect(p).toContain("Asha Rao");
-    expect(p).toMatch(/Never:[\s\S]*salary/);
-    expect(p).toContain("record_availability");
     expect(p).toContain(
-      'Your first sentence: "Hello, this is Saranya, an AI assistant calling from the hiring team at Yavar.',
+      "You are Saranya, an AI recruiting assistant with Yavar's talent acquisition team",
     );
+    expect(p).toContain('Your first words: "Hello, am I speaking with Meera?"');
+    expect(p).toContain("you applied through Naukri on 20 October");
+    expect(p).toContain("written assessment by e-mail, or a call from a person");
+    expect(p).toContain("Keep the payments platform reliable as it grows.");
+    expect(p).toContain("What fits from their CV: Kubernetes, Go");
+    expect(p).toMatch(/Practical details, before anything technical[\s\S]*expected pay per year/);
+    expect(p).toContain("(their CV says Acme, about 7 years — confirm it rather than read it out)");
+    expect(p).toContain("the one ending in gmail.com");
+    expect(p).toContain("[q1] Tell me about running Kubernetes in production.");
+    expect(p).not.toContain("expected CTC is above our budget");
+    expect(p).toContain("reflect the gist back");
     expect(p).toContain("Never answer a question yourself");
+    expect(p).toContain("Discuss, judge or negotiate pay");
+    expect(p).toContain("within two working days");
   });
 
-  test("a client role never names the client; known availability is not asked", () => {
-    const p = brief.callSystemPrompt(facts({ forClient: true, askAvailability: false }));
+  test("known details are not asked again; a booked call says so; a client is never named", () => {
+    const p = brief.callSystemPrompt(
+      facts({
+        known: { notice: true, currentPay: true, expectedPay: true },
+        booked: true,
+        forClient: true,
+      }),
+    );
+    expect(p).not.toContain("their notice period and the earliest date");
+    expect(p).not.toContain("expected pay per year");
+    expect(p).toContain("I'm calling at the time we agreed");
     expect(p).toContain("on behalf of a client");
-    expect(p).toContain("already known — do not ask");
+  });
+
+  test("helpers: JD bullets, strengths, how they applied, calling hours", () => {
+    expect(brief.bullets("- Run **clusters**\n2. Lead incidents\n\n• ok")).toEqual([
+      "Run clusters",
+      "Lead incidents",
+    ]);
+    expect(
+      brief.strengthsFor(["Kubernetes", "Go", "Rust"], ["go", "kubernetes", "python"]),
+    ).toEqual(["Kubernetes", "Go"]);
+    expect(brief.appliedVia("apply")).toBe("our careers page");
+    expect(brief.appliedVia("direct")).toBeNull();
+    expect(brief.callingHours(WIN)).toBe("Monday to Saturday, 10:00 to 19:00");
   });
 });
 
 describe("in-call tools", () => {
   const fresh = () => ({
     consent: null as boolean | null,
+    details: null as Record<string, unknown> | null,
     answers: [] as { question_id: string; summary: string; at: string }[],
-    availability: null,
-    callback: null,
-    endReason: null,
+    booking: null as { whenLocal: string } | null,
+    endReason: null as null | (typeof session.END_REASONS)[number],
   });
   const ids = new Set(["q1", "q2"]);
 
   test("nothing is recorded before consent; only listed questions; bad arguments refused", () => {
     const s = fresh();
     expect(
-      session.applyCallTool(s, "record_answer", { question_id: "q1", summary: "x" }, ids, 0),
+      session.applyCallTool(
+        s as never,
+        "record_answer",
+        { question_id: "q1", summary: "x" },
+        ids,
+        0,
+      ),
     ).toMatchObject({ ok: false });
     expect(
-      session.applyCallTool(s, "record_consent", { granted: true, their_words: "yes" }, ids, 0),
-    ).toEqual({
-      ok: true,
-    });
-    expect(
-      session.applyCallTool(s, "record_answer", { question_id: "q3", summary: "pay" }, ids, 0),
+      session.applyCallTool(s as never, "record_details", { notice_period_days: 30 }, ids, 0),
     ).toMatchObject({ ok: false });
-    expect(
-      session.applyCallTool(s, "record_answer", { question_id: "q1", summary: "first" }, ids, 0),
-    ).toMatchObject({ ok: true });
-    expect(
-      session.applyCallTool(s, "record_answer", { question_id: "q1", summary: "again" }, ids, 0),
-    ).toMatchObject({ ok: true, answered: 1 });
-    expect(s.answers[0]!.summary).toBe("again");
-    expect(session.applyCallTool(s, "end_call", { reason: "because" }, ids, 0)).toMatchObject({
-      ok: false,
-    });
-    expect(session.applyCallTool(s, "hire_them", {}, ids, 0)).toMatchObject({ ok: false });
-  });
-
-  test("availability never carries pay", () => {
-    const s = { ...fresh(), consent: true };
     expect(
       session.applyCallTool(
-        s,
-        "record_availability",
-        { notice_period_days: 30, expected_ctc: 9 },
+        s as never,
+        "record_consent",
+        { granted: true, their_words: "yes" },
         ids,
         0,
       ),
     ).toEqual({ ok: true });
-    expect(s.availability).toEqual({ notice_period_days: 30 });
+    expect(
+      session.applyCallTool(
+        s as never,
+        "record_answer",
+        { question_id: "q3", summary: "pay" },
+        ids,
+        0,
+      ),
+    ).toMatchObject({ ok: false });
+    expect(
+      session.applyCallTool(
+        s as never,
+        "record_answer",
+        { question_id: "q1", summary: "first" },
+        ids,
+        0,
+      ),
+    ).toMatchObject({ ok: true });
+    expect(
+      session.applyCallTool(
+        s as never,
+        "record_answer",
+        { question_id: "q1", summary: "again" },
+        ids,
+        0,
+      ),
+    ).toMatchObject({ ok: true, answered: 1 });
+    expect(s.answers[0]!.summary).toBe("again");
+    expect(
+      session.applyCallTool(s as never, "book_slot", { when_local: "monday 4pm" }, ids, 0),
+    ).toMatchObject({
+      ok: false,
+    });
+    expect(
+      session.applyCallTool(s as never, "end_call", { reason: "because" }, ids, 0),
+    ).toMatchObject({
+      ok: false,
+    });
+    expect(session.applyCallTool(s as never, "hire_them", {}, ids, 0)).toMatchObject({ ok: false });
+  });
+
+  test("details merge as they come; the model is told which fields, never the figures", () => {
+    const s = { ...fresh(), consent: true };
+    expect(
+      session.applyCallTool(
+        s as never,
+        "record_details",
+        { notice_period_days: 60, expected_ctc: 3200000 },
+        ids,
+        0,
+      ),
+    ).toEqual({ ok: true, recorded: ["notice_period_days", "expected_ctc"] });
+    session.applyCallTool(s as never, "record_details", { current_location: "Chennai" }, ids, 0);
+    expect(s.details).toEqual({
+      notice_period_days: 60,
+      expected_ctc: 3200000,
+      current_location: "Chennai",
+    });
   });
 
   test("outcomes", () => {
     const o = session.callOutcome;
-    expect(
-      o(
-        { ...fresh(), consent: true, answers: [{ question_id: "q1", summary: "", at: "" }] },
-        "candidate",
-      ),
-    ).toBe("completed");
-    expect(o({ ...fresh(), consent: false })).toBe("consent_declined");
-    expect(o({ ...fresh(), callback: { whenLocal: null } })).toBe("callback");
-    expect(o({ ...fresh(), endReason: "voicemail" })).toBe("no_answer");
-    expect(o({ ...fresh() })).toBe("no_answer");
-    expect(o({ ...fresh(), endReason: "wrong_person" })).toBe("wrong_person");
+    const answered = {
+      ...fresh(),
+      consent: true,
+      answers: [{ question_id: "q1", summary: "", at: "" }],
+    };
+    expect(o(answered as never)).toBe("completed");
+    expect(o({ ...fresh(), consent: false } as never)).toBe("consent_declined");
+    expect(o({ ...fresh(), booking: { whenLocal: "2026-10-26T16:00" } } as never)).toBe("booked");
+    expect(o({ ...fresh(), consent: true, endReason: "prefers_written" } as never)).toBe(
+      "prefers_written",
+    );
+    expect(o({ ...fresh(), consent: true, endReason: "prefers_human" } as never)).toBe(
+      "prefers_human",
+    );
+    expect(o({ ...fresh(), consent: true, endReason: "not_interested" } as never)).toBe(
+      "not_interested",
+    );
+    expect(o({ ...fresh(), endReason: "voicemail" } as never)).toBe("no_answer");
+    expect(o(fresh() as never)).toBe("no_answer");
+    expect(o({ ...fresh(), endReason: "wrong_person" } as never)).toBe("wrong_person");
   });
 });
 
@@ -458,7 +548,7 @@ describe("the calling window (Asia/Kolkata, Mon–Sat 10:00–19:00)", () => {
 /* -------------------------------------------------------- full calls */
 
 describe("a whole call with a fake line", () => {
-  test("completed: graded, availability (never pay) recorded, transcript kept, agent told", async () => {
+  test("completed: details first (pay to HR only), questions graded without them, agent told", async () => {
     const { callId, appId } = await seedCall();
     const seen: { opts?: VoiceOpts; results: unknown[] } = { results: [] };
     const line = new FakeLine();
@@ -467,13 +557,31 @@ describe("a whole call with a fake line", () => {
       line,
       scriptedVoice(
         [
+          { say: "ai", text: "Hello, am I speaking with Meera?" },
+          { say: "caller", text: "Yes, speaking." },
           {
             say: "ai",
-            text: "Hello, I'm Saranya, an AI assistant calling for Yavar's hiring team.",
+            text: "This is Saranya, an AI recruiting assistant with Yavar's team. Is now a good time?",
           },
           { say: "caller", text: "Yes, go ahead, that's fine." },
           { tool: "record_answer", args: { question_id: "q1", summary: "too early" } },
           { tool: "record_consent", args: { granted: true, their_words: "Yes, go ahead." } },
+          { say: "ai", text: "What is your notice period, and your current and expected pay?" },
+          {
+            say: "caller",
+            text: "Thirty days. I earn 24 lakhs fixed and expect 32 lakhs. I live in Chennai.",
+          },
+          {
+            tool: "record_details",
+            args: {
+              notice_period_days: 30,
+              current_ctc_fixed: 2400000,
+              expected_ctc: 3200000,
+              current_location: "Chennai",
+              total_experience_years: 7,
+            },
+          },
+          { say: "ai", text: "Thank you, noted. Tell me about running Kubernetes in production." },
           { say: "caller", text: "I run three EKS clusters." },
           {
             tool: "record_answer",
@@ -484,10 +592,6 @@ describe("a whole call with a fake line", () => {
           {
             tool: "record_answer",
             args: { question_id: "q2", summary: "Led a payments outage postmortem." },
-          },
-          {
-            tool: "record_availability",
-            args: { notice_period_days: 30, current_location: "Chennai" },
           },
           { say: "ai", text: "Thank you, goodbye!" },
           { tool: "end_call", args: { reason: "completed" } },
@@ -500,7 +604,9 @@ describe("a whole call with a fake line", () => {
     expect(line.hungUp).toBe(true);
     expect(seen.opts!.feature).toBe("screening_call");
     expect(seen.opts!.system).toContain("Current local time:");
-    expect(seen.opts!.system).not.toContain("expected CTC");
+    expect(seen.opts!.system).not.toContain("expected CTC is above our budget");
+    expect(seen.opts!.voice).toBe("Kore");
+    expect(seen.opts!.turnTaking).toMatchObject({ endOfSpeech: "low", silenceMs: 1000 });
     // Refused before consent, and for the pay question.
     expect(
       seen.results.filter((x) => (x as { out: { ok: boolean } }).out.ok === false),
@@ -509,11 +615,16 @@ describe("a whole call with a fake line", () => {
     const c = await callRow(callId);
     expect(c).toMatchObject({ status: "completed", phoneLast4: "2345" });
     expect(c.answers.map((a) => a.question_id).sort()).toEqual(["q1", "q2"]);
-    expect(c.transcript.length).toBe(5);
-    expect(c.consentAt).not.toBeNull();
     expect(c.consentWords).toBe("Yes, go ahead.");
+    // Details on the call row — never pay.
+    expect(c.details).toEqual({
+      noticePeriodDays: 30,
+      currentLocation: "Chennai",
+      totalExperienceYears: 7,
+    });
     expect(c.screeningRunId).toBe(r.screeningRunId);
 
+    // The grader sees the screening part only — not pay, location or consent.
     const [graded] = await db
       .select()
       .from(screeningRuns)
@@ -524,7 +635,9 @@ describe("a whole call with a fake line", () => {
       recommendation: "advance",
     });
     expect(graded!.transcript).toContain("Candidate: I run three EKS clusters.");
+    expect(graded!.transcript).not.toMatch(/lakhs|Chennai|go ahead/);
 
+    // Pay goes to the HR-only record; the audit names fields, never amounts.
     const pay = await db
       .select()
       .from(compensationDetails)
@@ -533,15 +646,16 @@ describe("a whole call with a fake line", () => {
     expect(pay[0]).toMatchObject({
       source: "screening_call",
       noticePeriodDays: 30,
-      expectedCtc: null,
       enteredBy: null,
     });
+    expect(Number(pay[0]!.currentFixed)).toBe(2400000);
+    expect(Number(pay[0]!.expectedCtc)).toBe(3200000);
     const [audit] = await db
       .select({ actor: auditLog.actor, detail: auditLog.detail })
       .from(auditLog)
       .where(and(eq(auditLog.orgId, orgId), eq(auditLog.action, "compensation.recorded")));
     expect(audit!.actor).toBe("agent:screening_call");
-    expect(JSON.stringify(audit!.detail)).not.toMatch(/30|Chennai/);
+    expect(JSON.stringify(audit!.detail)).not.toMatch(/2400000|3200000|Chennai/);
 
     expect((await endedEvents(appId))[0]!.payload).toMatchObject({ status: "completed" });
   });
@@ -553,7 +667,7 @@ describe("a whole call with a fake line", () => {
       new FakeLine(),
       scriptedVoice(
         [
-          { say: "ai", text: "Is now a good time? The call is transcribed." },
+          { say: "ai", text: "Is now a good time? I'll make notes for the hiring team." },
           { say: "caller", text: "No, please don't." },
           { tool: "record_consent", args: { granted: false, their_words: "No, please don't." } },
           { tool: "end_call", args: { reason: "declined" } },
@@ -565,29 +679,57 @@ describe("a whole call with a fake line", () => {
     const c = await callRow(callId);
     expect(c.transcript).toEqual([]);
     expect(c.answers).toEqual([]);
+    expect(c.details).toEqual({});
     expect(c.consentAt).toBeNull();
     expect(await endedEvents(appId)).toHaveLength(1);
   });
 
-  test("callback: booked inside the calling window, not counted as settled", async () => {
+  test("not now: a time is agreed inside the window and e-mailed to the candidate", async () => {
     const { callId, appId } = await seedCall();
     const r = await run(
       callId,
       new FakeLine(),
       scriptedVoice(
         [
-          { say: "caller", text: "Can you call me tomorrow at 4 pm?" },
-          { tool: "request_callback", args: { when_local: "2026-10-27T16:00" } },
-          { tool: "end_call", args: { reason: "callback" } },
+          { say: "caller", text: "I'm driving — can you call me tomorrow at 4 pm?" },
+          { tool: "book_slot", args: { when_local: "2026-10-27T16:00" } },
+          { tool: "end_call", args: { reason: "booked" } },
         ],
         { results: [] },
       ),
     );
     expect(r.status).toBe("callback");
     const c = await callRow(callId);
+    expect(c.bookedByCandidate).toBe(true);
     expect(c.dueAt!.toISOString()).toBe("2026-10-27T10:30:00.000Z");
-    expect(c.callbackAt!.toISOString()).toBe("2026-10-27T10:30:00.000Z");
+    const mail = await db
+      .select({ kind: emailOutbox.kind, data: emailOutbox.templateData })
+      .from(emailOutbox)
+      .where(eq(emailOutbox.applicationId, appId));
+    expect(mail).toHaveLength(1);
+    expect(mail[0]).toMatchObject({ kind: "screening_call_booked" });
+    expect(JSON.stringify(mail[0]!.data)).toContain("Tuesday 27 October at 16:00");
     expect(await endedEvents(appId)).toHaveLength(0);
+  });
+
+  test("they ask for a person: no AI call, no assessment fall-back reason lost", async () => {
+    const { callId, appId } = await seedCall();
+    const r = await run(
+      callId,
+      new FakeLine(),
+      scriptedVoice(
+        [
+          { say: "caller", text: "I'd rather speak to a person, please." },
+          { tool: "end_call", args: { reason: "prefers_human" } },
+        ],
+        { results: [] },
+      ),
+    );
+    expect(r).toMatchObject({ status: "fell_back", endReason: "prefers_human" });
+    expect((await endedEvents(appId))[0]!.payload).toMatchObject({
+      status: "fell_back",
+      endReason: "prefers_human",
+    });
   });
 
   test("no answer: tried again later, then the e-mailed assessment", async () => {

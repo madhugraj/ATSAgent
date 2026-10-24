@@ -1005,7 +1005,8 @@ export type EmailOutboxKind =
   | "interviewer_brief"
   | "interview_slots"
   | "compensation_form"
-  | "offer_negotiation";
+  | "offer_negotiation"
+  | "screening_call_booked";
 export type EmailOutboxStatus = "queued" | "sent" | "failed" | "suppressed";
 export type EmailOutboxAttachment = {
   filename: string;
@@ -2671,7 +2672,11 @@ export const phoneScreeningSettings = pgTable(
       .notNull()
       .default(sql`'{1,2,3,4,5,6}'`),
     maxAttempts: integer("max_attempts").notNull().default(3),
-    maxMinutes: integer("max_minutes").notNull().default(15),
+    maxMinutes: integer("max_minutes").notNull().default(10),
+    /** The assistant's voice (one of the voice service's prebuilt voices). */
+    voice: text("voice").notNull().default("Kore"),
+    /** What the assistant tells candidates happens next (≤ 300 characters). */
+    nextStepsText: text("next_steps_text"),
     updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -2694,6 +2699,10 @@ export const phoneScreeningSettings = pgTable(
     ),
     check("phone_screening_settings_max_attempts_check", sql`${t.maxAttempts} between 1 and 5`),
     check("phone_screening_settings_max_minutes_check", sql`${t.maxMinutes} between 5 and 30`),
+    check(
+      "phone_screening_settings_next_steps_check",
+      sql`${t.nextStepsText} is null or char_length(${t.nextStepsText}) <= 300`,
+    ),
   ],
 );
 
@@ -2718,6 +2727,17 @@ export type ScreeningCallTurn = {
   text: string;
   at: string;
   interrupted?: boolean;
+};
+
+/** Practical details the candidate gave on the call (pay is kept elsewhere, HR-only). */
+export type ScreeningCallDetails = {
+  currentTitle?: string;
+  currentCompany?: string;
+  totalExperienceYears?: number;
+  currentLocation?: string;
+  openToRelocate?: boolean;
+  noticePeriodDays?: number;
+  earliestJoining?: string;
 };
 
 /** What the candidate said for one kit question, as the call agent recorded it. */
@@ -2754,6 +2774,8 @@ export const screeningCalls = pgTable(
     requestedBy: uuid("requested_by").references(() => users.id, { onDelete: "set null" }),
     status: text("status").$type<ScreeningCallStatus>().notNull().default("requested"),
     attempt: integer("attempt").notNull().default(0),
+    /** The candidate agreed this time on an earlier call (an expected call, not a cold one). */
+    bookedByCandidate: boolean("booked_by_candidate").notNull().default(false),
     dueAt: timestamp("due_at", { withTimezone: true }),
     callbackAt: timestamp("callback_at", { withTimezone: true }),
     phoneLast4: text("phone_last4"),
@@ -2773,6 +2795,11 @@ export const screeningCalls = pgTable(
       .$type<ScreeningCallAnswer[]>()
       .notNull()
       .default(sql`'[]'::jsonb`),
+    /** Current role, experience, location, availability as said on the call — never pay. */
+    details: jsonb("details")
+      .$type<ScreeningCallDetails>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
     screeningRunId: uuid("screening_run_id").references(() => screeningRuns.id, {
       onDelete: "set null",
     }),

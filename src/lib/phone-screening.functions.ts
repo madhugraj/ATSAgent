@@ -23,6 +23,8 @@ const Policy = z
     callDays: z.array(z.number().int().min(1).max(7)).min(1, "Choose at least one day.").max(7),
     maxAttempts: z.number().int().min(1).max(5),
     maxMinutes: z.number().int().min(5).max(30),
+    voice: z.enum(["Kore", "Aoede", "Leda", "Zephyr", "Puck", "Charon", "Fenrir", "Orus"]),
+    nextStepsText: z.string().trim().max(300).nullable(),
   })
   .refine((p) => p.windowEndMinute - p.windowStartMinute >= 60, {
     message: "The calling window must be at least an hour long.",

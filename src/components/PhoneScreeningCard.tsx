@@ -11,6 +11,8 @@ import { Switch } from "@/components/ui/switch";
 
 type Policy = Awaited<ReturnType<typeof getPhoneScreening>>["policy"];
 
+const VOICES = ["Kore", "Aoede", "Leda", "Zephyr", "Puck", "Charon", "Fenrir", "Orus"] as const;
+
 const DAYS = [
   [1, "Mon"],
   [2, "Tue"],
@@ -84,10 +86,13 @@ export function PhoneScreeningCard({ canEdit }: { canEdit: boolean }) {
       </div>
       <p className="text-sm text-muted-foreground">
         When on, the Screening agent can ask for an AI assistant to phone a shortlisted candidate.
-        The assistant says it is an AI calling for your HR team, asks their consent, and asks the
-        role's screening questions — never about pay. A person approves each call unless the agent
-        is set to Autonomous. Candidates who can't be reached get the written assessment instead.
-        Calls are not recorded; the transcript is kept only if the candidate agrees.
+        The assistant says it is an AI recruiting assistant from your talent acquisition team,
+        explains the role and why it called them, asks their consent, practical details (including
+        current and expected pay, which only TA and HR see — it never discusses pay) and the role's
+        screening questions. If now is not a good time it agrees a time and e-mails a confirmation.
+        A person approves each call unless the agent is set to Autonomous. Candidates who can't be
+        reached get the written assessment instead. Calls are not recorded; the transcript is kept
+        only if the candidate agrees.
       </p>
       {missing.length ? (
         <p className="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
@@ -190,6 +195,39 @@ export function PhoneScreeningCard({ canEdit }: { canEdit: boolean }) {
         <span className="ml-1 text-xs text-muted-foreground">
           (in your organisation's time zone)
         </span>
+      </div>
+      <div className="grid items-start gap-3 sm:grid-cols-4">
+        <div className="space-y-1">
+          <Label htmlFor="ps-voice" className="text-xs">
+            Voice
+          </Label>
+          <select
+            id="ps-voice"
+            className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+            disabled={!canEdit}
+            value={p.voice}
+            onChange={(e) => set({ voice: e.target.value as Policy["voice"] })}
+          >
+            {VOICES.map((v) => (
+              <option key={v} value={v}>
+                {v}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-1 sm:col-span-3">
+          <Label htmlFor="ps-next" className="text-xs">
+            What candidates are told happens next
+          </Label>
+          <Input
+            id="ps-next"
+            disabled={!canEdit}
+            maxLength={300}
+            placeholder="the hiring team will review this conversation and get back to you by e-mail"
+            value={p.nextStepsText ?? ""}
+            onChange={(e) => set({ nextStepsText: e.target.value || null })}
+          />
+        </div>
       </div>
       {canEdit ? (
         <Button variant="outline" disabled={busy || !valid || !draft} onClick={() => void save()}>

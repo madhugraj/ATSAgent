@@ -21,7 +21,23 @@ export type PhoneScreeningPolicy = {
   callDays: number[];
   maxAttempts: number;
   maxMinutes: number;
+  /** The assistant's voice. */
+  voice: string;
+  /** What candidates are told happens next; null = a plain default. */
+  nextStepsText: string | null;
 };
+
+/** Voices the assistant may use (the voice service's prebuilt voices). */
+export const ASSISTANT_VOICES = [
+  "Kore",
+  "Aoede",
+  "Leda",
+  "Zephyr",
+  "Puck",
+  "Charon",
+  "Fenrir",
+  "Orus",
+] as const;
 
 export const DEFAULT_PHONE_SCREENING_POLICY: PhoneScreeningPolicy = {
   enabled: false,
@@ -30,7 +46,9 @@ export const DEFAULT_PHONE_SCREENING_POLICY: PhoneScreeningPolicy = {
   windowEndMinute: 1140,
   callDays: [1, 2, 3, 4, 5, 6],
   maxAttempts: 3,
-  maxMinutes: 15,
+  maxMinutes: 10,
+  voice: "Kore",
+  nextStepsText: null,
 };
 
 export async function phoneScreeningPolicyOf(orgId: string): Promise<PhoneScreeningPolicy> {
@@ -48,6 +66,8 @@ export async function phoneScreeningPolicyOf(orgId: string): Promise<PhoneScreen
     callDays: [...r.callDays].sort((a, b) => a - b),
     maxAttempts: r.maxAttempts,
     maxMinutes: r.maxMinutes,
+    voice: r.voice,
+    nextStepsText: r.nextStepsText,
   };
 }
 
@@ -62,6 +82,7 @@ export async function setPhoneScreeningPolicyCore(
   const values = {
     ...policy,
     assistantName: policy.assistantName.trim(),
+    nextStepsText: policy.nextStepsText?.trim() || null,
     callDays: [...new Set(policy.callDays)].sort((a, b) => a - b),
   };
   const now = new Date();

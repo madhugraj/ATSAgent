@@ -629,6 +629,8 @@ erDiagram
     integer call_days
     integer max_attempts
     integer max_minutes
+    text voice
+    text next_steps_text "nullable"
     uuid updated_by FK
     timestamptz updated_at
   }
@@ -644,6 +646,7 @@ erDiagram
     uuid requested_by FK
     text status
     integer attempt
+    boolean booked_by_candidate
     timestamptz due_at "nullable"
     timestamptz callback_at "nullable"
     text phone_last4 "nullable"
@@ -656,6 +659,7 @@ erDiagram
     integer duration_s "nullable"
     jsonb transcript
     jsonb answers
+    jsonb details
     uuid screening_run_id FK
     text last_error "nullable"
     timestamptz created_at
@@ -1283,13 +1287,13 @@ erDiagram
 | `org_members` | Organisations & masters | 12 | (orgId+email) |
 | `org_pool_shares` | Organisations & masters | 10 | (ownerOrg+partnerOrg) |
 | `organizations` | Organisations & masters | 26 | (slug), (capture_token), (capture_token_hash) |
-| `phone_screening_settings` | Screening & interviews | 10 | — |
+| `phone_screening_settings` | Screening & interviews | 12 | — |
 | `platform_admins` | Identity & access | 6 | (email) |
 | `product_catalogue_commercials` | Organisations & masters | 8 | — |
 | `requisition_board_postings` | — | 16 | (requisitionId+provider) |
 | `requisitions` | Requisitions & job content | 41 | (orgId+code) |
 | `salary_benchmarks` | Intelligence | 15 | — |
-| `screening_calls` | Screening & interviews | 27 | — |
+| `screening_calls` | Screening & interviews | 29 | — |
 | `screening_kits` | Screening & interviews | 11 | — |
 | `screening_prep_jobs` | Screening & interviews | 10 | (application_id) |
 | `screening_runs` | Screening & interviews | 22 | — |

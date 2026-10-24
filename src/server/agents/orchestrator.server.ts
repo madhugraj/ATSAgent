@@ -339,7 +339,7 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
   }
 
   if (applicationId && e.type === "screening_call.ended") {
-    const p = e.payload as { status?: string };
+    const p = e.payload as { status?: string; endReason?: string };
     const [app] = await db
       .select({ stage: applications.stage })
       .from(applications)
@@ -348,9 +348,9 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
     if (app && ["shortlisted", "reserve", "on_hold"].includes(app.stage))
       await dispatch(
         "screening",
-        p.status === "completed"
+        p.status === "completed" && p.endReason !== "not_interested"
           ? `Candidate application ${applicationId} (${req.code} "${req.title}") took the AI screening call and the answers were graded. Read the result and add your proceed / hold recommendation as a candidate note. Do not move them to an interview round — a person decides.`
-          : `Candidate application ${applicationId} (${req.code} "${req.title}"): the AI screening call ${p.status === "consent_declined" ? "was declined by the candidate" : "could not happen"}. If no written assessment was sent, send it now.`,
+          : `Candidate application ${applicationId} (${req.code} "${req.title}"): the AI screening call ended — ${p.endReason ?? p.status}. Act on how it ended as your instructions say (the written assessment, or a note for a person).`,
         { type: "application", id: applicationId },
       );
   }

@@ -34,6 +34,7 @@ export const listScreeningCalls = createServerFn({ method: "POST" })
         endReason: screeningCalls.endReason,
         consentAt: screeningCalls.consentAt,
         answers: screeningCalls.answers,
+        details: screeningCalls.details,
         transcript: screeningCalls.transcript,
         screeningRunId: screeningCalls.screeningRunId,
         kitQuestions: screeningKits.questions,
@@ -50,12 +51,22 @@ export const listScreeningCalls = createServerFn({ method: "POST" })
       )
       .orderBy(desc(screeningCalls.createdAt))
       .limit(20);
-    return rows.map(({ kitQuestions, ...r }) => {
+    // The candidate states their pay on the call: the transcript is for the
+    // people who may see pay (TA, the HR head, the CBO, owners) only.
+    let seesPay = true;
+    try {
+      await assertRole(context.userId, context.orgId, [...CALL_ROLES], "");
+    } catch {
+      seesPay = false;
+    }
+    return rows.map(({ kitQuestions, transcript, ...r }) => {
       const questions = Array.isArray(kitQuestions)
         ? (kitQuestions as { id?: string; question?: string }[])
         : [];
       return {
         ...r,
+        transcript: seesPay ? transcript : [],
+        transcriptHidden: !seesPay && transcript.length > 0,
         answers: r.answers.map((a) => ({
           ...a,
           question: questions.find((q) => q.id === a.question_id)?.question ?? a.question_id,
