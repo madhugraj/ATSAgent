@@ -648,6 +648,7 @@ erDiagram
     timestamptz callback_at "nullable"
     text phone_last4 "nullable"
     timestamptz consent_at "nullable"
+    text consent_words "nullable"
     text language "nullable"
     timestamptz started_at "nullable"
     timestamptz ended_at "nullable"
@@ -1288,7 +1289,7 @@ erDiagram
 | `requisition_board_postings` | — | 16 | (requisitionId+provider) |
 | `requisitions` | Requisitions & job content | 41 | (orgId+code) |
 | `salary_benchmarks` | Intelligence | 15 | — |
-| `screening_calls` | Screening & interviews | 26 | — |
+| `screening_calls` | Screening & interviews | 27 | — |
 | `screening_kits` | Screening & interviews | 11 | — |
 | `screening_prep_jobs` | Screening & interviews | 10 | (application_id) |
 | `screening_runs` | Screening & interviews | 22 | — |

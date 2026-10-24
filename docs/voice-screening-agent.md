@@ -380,3 +380,30 @@ local stack against a test requisition (your number), before the PR.
   "Cancel call" for a call still waiting (audited `screening_call.cancelled`).
 - **Still to verify (M4)**: a real call through the worker — including that the
   live model accepts `parametersJsonSchema` for the in-call tools.
+
+## M4 — first real end-to-end call (2026-10-24)
+
+Local stack, demo organisation, the voice worker (`bun src/server/voice/worker.ts`)
+with the POC's PBX extension and the organisation's stored Vertex service
+account; the call arranged through the "Call now" core; calling window widened
+to 06:00–22:00 for the test.
+
+- Worked end to end: claimed and dialled within 15 s; 314 s; consent; 7 of 7
+  questions answered through `record_answer` (the live model accepts
+  `parametersJsonSchema`); the pay question in the kit was left out; notice
+  period 90 days and open to relocate recorded (no pay); graded run `phone_ai`;
+  the call's run `done` at 1.0.0; ledger `screening_call` 129,536 in / 4,816 out
+  attributed to the run and the candidate; `screening_call.ended` dispatched the
+  Screening agent.
+- Found and fixed (Screening call agent 1.0.1):
+  - When the candidate repeated a question back, the agent answered it itself
+    and recorded that as the candidate's answer. The rules now forbid it.
+  - It asked for the candidate before saying who was calling; the first
+    sentence now names the AI and the organisation.
+  - The candidate's short "yes" to consent was missing from the live
+    transcript: `record_consent` now keeps their words (`consent_words`).
+  - The Screening agent woken by the call ran inside the voice worker and was
+    cut off when the worker stopped: the worker now never starts agent runs
+    (`AGENT_INLINE_KICK=0`); the app's scheduler handles the event.
+- Not re-verified on a real call after these fixes (covered by unit tests and
+  evals): a second call is the first step of the pilot.
