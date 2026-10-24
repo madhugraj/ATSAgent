@@ -933,7 +933,8 @@ function TaskCard({
   async function decide(decision: AgentDecisionInput) {
     setBusy(true);
     try {
-      await decideAgentTask({ data: { taskId, decision } });
+      const res = await decideAgentTask({ data: { taskId, decision } });
+      if (res.noLongerRelevant) toast.info(res.noLongerRelevant);
       onChanged();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not record the decision");

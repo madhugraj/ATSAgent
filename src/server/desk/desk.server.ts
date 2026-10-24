@@ -24,6 +24,7 @@ import { db } from "../db";
 import { writeAudit } from "../audit";
 import { log } from "../log";
 import { getTool } from "../agents/registry";
+import { taskIsLive } from "../agents/task-liveness";
 import {
   agentPolicies,
   agentRuns,
@@ -1636,6 +1637,7 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
         eq(agentTasks.orgId, conv.orgId),
         eq(agentTasks.status, "open"),
         eq(agentRuns.conversationId, conv.id),
+        taskIsLive(),
       ),
     );
   // The responsible agent already ran for this step and it is still not done:
@@ -2367,6 +2369,8 @@ export async function closeRole(
       entityId: req.id,
       detail: { code: req.code, reason, via: "hiring_desk", conversation_id: conv.id },
     });
+    const { afterSubjectsDeleted } = await import("../agents/runtime.server");
+    await afterSubjectsDeleted(conv.orgId);
     await endThread(conv, `${req.code} was deleted. Reason: ${reason}`);
     return { action: "delete" };
   }
@@ -2799,6 +2803,7 @@ export async function openRequests(conv: Conversation): Promise<OpenRequest[]> {
         eq(agentTasks.orgId, conv.orgId),
         eq(agentTasks.status, "open"),
         eq(agentRuns.conversationId, conv.id),
+        taskIsLive(),
       ),
     )
     .orderBy(desc(agentTasks.createdAt))
@@ -2949,7 +2954,7 @@ export async function sendFeedback(
   }
   const { resolveTask } = await import("../agents/runtime.server");
   try {
-    await resolveTask({
+    const result = await resolveTask({
       orgId: conv.orgId,
       taskId: target.id,
       userId,
@@ -2958,6 +2963,10 @@ export async function sendFeedback(
           ? { status: "answered", answer: reason }
           : { status: "rejected", reason, changes: true },
     });
+    if (result.outcome === "no_longer_relevant") {
+      await postMessage(conv, { role: "desk", body: result.message });
+      return;
+    }
   } catch (e) {
     await postMessage(conv, {
       role: "desk",
@@ -3848,6 +3857,8 @@ export async function deleteThread(
       entityId: what.requisitionId,
       detail: { code: what.code, reason: why, via: "hiring_desk", conversation_id: conv.id },
     });
+    const { afterSubjectsDeleted } = await import("../agents/runtime.server");
+    await afterSubjectsDeleted(conv.orgId);
   }
   const [m] = await db
     .select({ n: sql<number>`count(*)::int` })

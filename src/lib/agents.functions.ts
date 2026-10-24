@@ -5,6 +5,7 @@
  * role or assignee by the runtime.
  */
 import { CEILING_MESSAGE, LEG_LIMIT_MESSAGE } from "../server/agents/run-messages";
+import { taskIsLive } from "../server/agents/task-liveness";
 import { createServerFn } from "@tanstack/react-start";
 import { and, desc, eq, inArray, or } from "drizzle-orm";
 import { z } from "zod";
@@ -89,7 +90,9 @@ export const listAgentTasks = createServerFn({ method: "GET" })
       })
       .from(agentTasks)
       .innerJoin(agentRuns, eq(agentRuns.id, agentTasks.runId))
-      .where(and(eq(agentTasks.orgId, context.orgId), eq(agentTasks.status, "open"), mine))
+      .where(
+        and(eq(agentTasks.orgId, context.orgId), eq(agentTasks.status, "open"), taskIsLive(), mine),
+      )
       .orderBy(agentTasks.createdAt)
       .limit(200);
     return rows.map((r) => {
@@ -136,7 +139,7 @@ export const decideAgentTask = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { resolveTask } = await import("../server/agents/runtime.server");
-    await resolveTask({
+    const result = await resolveTask({
       orgId: context.orgId,
       taskId: data.taskId,
       userId: context.userId,
@@ -144,7 +147,10 @@ export const decideAgentTask = createServerFn({ method: "POST" })
     });
     const { kickAgents } = await import("../server/agents/orchestrator.server");
     kickAgents(context.orgId);
-    return { ok: true as const };
+    // A request that outlived its work was closed, not decided: say so.
+    return result.outcome === "no_longer_relevant"
+      ? { ok: true as const, noLongerRelevant: result.message }
+      : { ok: true as const, noLongerRelevant: null };
   });
 
 /* ------------------------------------------------------------- recent runs */

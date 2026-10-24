@@ -52,12 +52,13 @@ const {
   auditLog,
   orgMembers,
   organizations,
+  requisitions,
   userRoles,
   users,
 } = schema;
 const { registerAgent, registerTool, resetRegistry } =
   await import("../src/server/agents/registry");
-const { cancelRun, resolveTask, runAgentTick, startRun } =
+const { cancelRun, closeStaleTasks, resolveTask, runAgentTick, startRun } =
   await import("../src/server/agents/runtime.server");
 const { rollupAgentMetrics } = await import("../src/server/agents/metrics.server");
 
@@ -477,6 +478,116 @@ describe("agent runtime", () => {
     await cancelRun({ orgId, runId, userId: ownerId });
     expect((await runRow(runId)).status).toBe("cancelled");
     expect((await openTasks(runId)).length).toBe(0);
+  });
+
+  test("a run that ends closes the requests it left open", async () => {
+    // Handoff in the same turn as a write that needs approval: the run is done.
+    const { runId } = await start();
+    script.push(
+      call(
+        { id: "w1", name: "save_draft", args: { text: "v1" } },
+        { id: "h", name: "handoff", args: { reason: "needs legal" } },
+      ),
+    );
+    await runAgentTick();
+    expect((await runRow(runId)).status).toBe("done");
+    expect(await openTasks(runId)).toHaveLength(0);
+    const [task] = await db.select().from(agentTasks).where(eq(agentTasks.runId, runId));
+    expect(task).toMatchObject({ status: "cancelled" });
+    expect((task!.response as { reason: string }).reason).toContain("already finished");
+  });
+
+  test("a run that fails (worker gave up) closes its open requests", async () => {
+    const { runId } = await start();
+    script.push(call({ id: "w1", name: "save_draft", args: { text: "v1" } }));
+    await runAgentTick();
+    expect(await openTasks(runId)).toHaveLength(1);
+    // The worker died mid-turn on its last attempt.
+    await db
+      .update(agentRuns)
+      .set({ status: "running", attempts: 2, leaseUntil: new Date(Date.now() - 60_000) })
+      .where(eq(agentRuns.id, runId));
+    await runAgentTick();
+    expect((await runRow(runId)).status).toBe("failed");
+    expect(await openTasks(runId)).toHaveLength(0);
+    const audits = await db
+      .select({ action: auditLog.action })
+      .from(auditLog)
+      .where(and(eq(auditLog.orgId, orgId), eq(auditLog.action, "agent.task.stale")));
+    expect(audits.length).toBeGreaterThan(0);
+  });
+
+  test("deciding a request whose run already stopped says it no longer applies", async () => {
+    const { runId } = await start();
+    script.push(call({ id: "w1", name: "save_draft", args: { text: "v1" } }));
+    await runAgentTick();
+    const [task] = await openTasks(runId);
+    // Legacy state: the run stopped but its request was left open.
+    await db.update(agentRuns).set({ status: "cancelled" }).where(eq(agentRuns.id, runId));
+
+    // Someone else still may not close it.
+    await expect(
+      resolveTask({ orgId, taskId: task!.id, userId: hrHeadId, decision: { status: "approved" } }),
+    ).rejects.toThrow();
+    const out = await resolveTask({
+      orgId,
+      taskId: task!.id,
+      userId: recruiterId,
+      decision: { status: "approved" },
+    });
+    expect(out).toMatchObject({ outcome: "no_longer_relevant" });
+    expect(out.outcome === "no_longer_relevant" && out.message).toContain("was stopped");
+    expect(out.outcome === "no_longer_relevant" && out.message).toContain("nothing was done");
+    expect(executed).toEqual([]);
+    const [after] = await db.select().from(agentTasks).where(eq(agentTasks.id, task!.id));
+    expect(after).toMatchObject({ status: "cancelled", decidedBy: null });
+    expect((await runRow(runId)).status).toBe("cancelled");
+  });
+
+  test("a request about a deleted requisition is closed, not approved; its run is stopped", async () => {
+    const [req] = await db
+      .insert(requisitions)
+      .values({ orgId, code: `REQ-ST-${Date.now()}`, title: "Head of AI", createdBy: recruiterId })
+      .returning({ id: requisitions.id });
+    const { runId } = await startRun({
+      orgId,
+      agentType: "requisition",
+      principalUserId: recruiterId,
+      goal: "Do the thing",
+      subjectType: "requisition",
+      subjectId: req!.id,
+    });
+    script.push(call({ id: "w1", name: "save_draft", args: { text: "v1" } }));
+    await runAgentTick();
+    const [task] = await openTasks(runId);
+    await db.delete(requisitions).where(eq(requisitions.id, req!.id));
+
+    // Deciding it before any sweep: told plainly, nothing runs.
+    const out = await resolveTask({
+      orgId,
+      taskId: task!.id,
+      userId: recruiterId,
+      decision: { status: "approved" },
+    });
+    expect(out.outcome === "no_longer_relevant" && out.message).toContain(
+      "the requisition it was about has been deleted",
+    );
+    expect(executed).toEqual([]);
+
+    // The sweep stops the run whose subject is gone; re-running changes nothing.
+    await closeStaleTasks({ orgId });
+    expect((await runRow(runId)).status).toBe("cancelled");
+    expect(await closeStaleTasks({ orgId })).toBe(0);
+  });
+
+  test("the sweep closes requests left open on stopped runs (idempotent)", async () => {
+    const { runId } = await start();
+    script.push(call({ id: "w1", name: "save_draft", args: { text: "v1" } }));
+    await runAgentTick();
+    await db.update(agentRuns).set({ status: "failed" }).where(eq(agentRuns.id, runId));
+    expect(await closeStaleTasks({ orgId })).toBe(1);
+    expect(await openTasks(runId)).toHaveLength(0);
+    expect(await closeStaleTasks({ orgId })).toBe(0);
   });
 
   test("tasks cannot be decided from another organisation", async () => {

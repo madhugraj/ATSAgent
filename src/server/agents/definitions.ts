@@ -320,11 +320,14 @@ export function registerPhase2Agents(): void {
     // organisation's policy automatically (src/lib/assessment-timeline.server.ts).
     // 1.4.1: shared rules — plain language for people (no tool or field names,
     // IDs or flags) and times in the organisation's time zone.
-    version: "1.4.1",
+    // 1.5.0: list_overdue leaves out requests whose agent stopped or whose
+    // requisition, candidate, JD or offer was deleted.
+    version: "1.5.0",
     owner: "hr_head",
     responsibility: "Once a day, finds work that is overdue and reminds the right person.",
     mustNever: [
       "Remind anyone outside the organisation",
+      "Remind anyone about a request that can no longer be decided",
       "Remind the same person about the same item more than once a day",
     ],
     scope: {

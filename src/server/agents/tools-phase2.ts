@@ -9,6 +9,7 @@ import { z } from "zod/v4";
 
 import { db } from "../db";
 import {
+  agentRuns,
   agentTasks,
   applications,
   candidateAssessments,
@@ -23,6 +24,7 @@ import {
 } from "@db/schema";
 import { env } from "../env";
 import { registerTool, type ToolContext } from "./registry";
+import { taskIsRemindable } from "./task-liveness";
 
 const actor = async (ctx: ToolContext) => {
   const { actorFor } = await import("@/lib/requisitions.server");
@@ -503,7 +505,7 @@ export function registerPhase2Tools(): void {
   registerTool({
     name: "list_overdue",
     description:
-      "Everything overdue in the organisation: requisitions and JDs waiting for approval longer than the SLA, and agent requests nobody answered. (Candidate assessments are followed up automatically.)",
+      "Everything overdue in the organisation: requisitions and JDs waiting for approval longer than the SLA, and agent requests nobody answered that can still be decided (requests whose agent stopped or whose subject was deleted are left out). (Candidate assessments are followed up automatically.)",
     input: z.object({ slaDays: z.number().int().min(1).max(30).default(2) }),
     risk: "read",
     run: async (ctx, i) => {
@@ -562,11 +564,15 @@ export function registerPhase2Tools(): void {
           createdAt: agentTasks.createdAt,
         })
         .from(agentTasks)
+        .innerJoin(agentRuns, eq(agentRuns.id, agentTasks.runId))
         .where(
           and(
             eq(agentTasks.orgId, ctx.orgId),
             eq(agentTasks.status, "open"),
             lt(agentTasks.createdAt, cutoff),
+            // Only requests a person can still act on: never one whose agent
+            // stopped or whose requisition, candidate or JD was deleted.
+            taskIsRemindable(),
           ),
         );
       return { requisitionApprovals, jdReviews: jds, agentRequests: tasks };
