@@ -52,6 +52,7 @@ import { ensureDefinition, manifestHash, RUNTIME_RULES } from "./manifest.server
 import { looksLikeInjection } from "./injection";
 import { decideToolCall, loadPolicy } from "./policy";
 import { getAgent, getTool, type ToolContext } from "./registry";
+import { LIVE_RUN_STATUSES, runSubjectGone, staleReasonSql } from "./task-liveness";
 
 /**
  * Eval-only: run agents against a fixed model config instead of the org's
@@ -879,17 +880,23 @@ export type TaskDecision =
     }
   | { status: "answered"; answer: string };
 
+export type ResolveOutcome =
+  | { outcome: "decided" }
+  /** The request outlived its work (run stopped, subject deleted): closed, nothing done. */
+  | { outcome: "no_longer_relevant"; message: string };
+
 /**
  * Record a person's decision on an open task and re-queue the run when no
  * other decision is outstanding. The decider must hold the task's role (the
- * org owner passes) or be its named assignee.
+ * org owner passes) or be its named assignee. A request whose run has stopped
+ * or whose subject was deleted is closed instead, and the caller is told so.
  */
 export async function resolveTask(input: {
   orgId: string;
   taskId: string;
   userId: string;
   decision: TaskDecision;
-}): Promise<void> {
+}): Promise<ResolveOutcome> {
   const [task] = await db
     .select()
     .from(agentTasks)
@@ -907,6 +914,19 @@ export async function resolveTask(input: {
   }
   if (task.kind !== "clarification" && decision.status === "answered") {
     throw new Error("Approve or reject this request.");
+  }
+
+  const stale = await staleReasonOf(task.id);
+  if (stale) {
+    await closeTasks(
+      [{ id: task.id, runId: task.runId, orgId: task.orgId }],
+      stale,
+      `user:${input.userId}`,
+    );
+    return {
+      outcome: "no_longer_relevant",
+      message: `This request no longer applies: ${stale}. It has been closed and nothing was done.`,
+    };
   }
 
   // A gate tied to a requisition or JD performs the real approval step first;
@@ -1015,6 +1035,7 @@ export async function resolveTask(input: {
   }
 
   await requeueIfUnblocked(task.runId);
+  return { outcome: "decided" };
 }
 
 /** Stop a run and close its open tasks. */
@@ -1100,8 +1121,20 @@ export async function runAgentTick(
         opts.orgId ? eq(agentRuns.orgId, opts.orgId) : undefined,
       ),
     )
-    .returning({ id: agentRuns.id });
+    .returning({ id: agentRuns.id, orgId: agentRuns.orgId, status: agentRuns.status });
   counts.reclaimed = expired.length;
+  for (const r of expired) {
+    if (r.status === "failed")
+      await closeRunTasks(r, "the agent working on it stopped with an error");
+  }
+
+  // 1b. Close requests that outlived their run or their subject (deleted
+  //     requisitions, applications, JDs, offers; erased candidates).
+  try {
+    await closeStaleTasks(opts.orgId ? { orgId: opts.orgId } : {});
+  } catch (e) {
+    log.error("agent.stale_tasks.failed", { error: e instanceof Error ? e : String(e) });
+  }
 
   // 2. Claim queued runs of agents the org has switched on (opt-in) and not
   //    paused org-wide; disjoint across workers.
@@ -1887,6 +1920,13 @@ async function finish(
     .update(agentRuns)
     .set({ status, result, lastError: error, leaseUntil: null, finishedAt: now, updatedAt: now })
     .where(eq(agentRuns.id, run.id));
+  // A finished run never resumes: requests it left open can no longer be acted on.
+  await closeRunTasks(
+    run,
+    status === "done"
+      ? "the agent working on it has already finished"
+      : "the agent working on it stopped with an error",
+  );
   await writeAudit({
     actor: `agent:${run.agentType}:${run.id}`,
     actorUserId: run.principalUserId,
@@ -2049,4 +2089,146 @@ export async function cancelStaleRequests(
     await requeueIfUnblocked(t.runId);
   }
   return closed.length;
+}
+
+/* ------------------------------------- requests that outlived their work */
+
+type TaskRef = { id: string; runId: string; orgId: string };
+
+/**
+ * Close open requests as cancelled with a plain reason the agent and the
+ * Decisions inbox can show; audited as `agent.task.stale`. A run still
+ * waiting on people is re-queued once nothing else is open, so the agent is
+ * told and carries on.
+ */
+async function closeTasks(tasks: TaskRef[], reason: string, actor: string): Promise<number> {
+  if (!tasks.length) return 0;
+  const now = new Date();
+  const text = `${reason}, so it no longer applies.`;
+  const closed = await db
+    .update(agentTasks)
+    .set({
+      status: "cancelled",
+      response: { status: "cancelled", reason: text } as never,
+      decidedAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        inArray(
+          agentTasks.id,
+          tasks.map((t) => t.id),
+        ),
+        eq(agentTasks.status, "open"),
+      ),
+    )
+    .returning({ id: agentTasks.id, runId: agentTasks.runId, orgId: agentTasks.orgId });
+  for (const t of closed) {
+    await writeAudit({
+      actor,
+      orgId: t.orgId,
+      action: "agent.task.stale",
+      entityType: "agent_task",
+      entityId: t.id,
+      detail: { run_id: t.runId, reason },
+    });
+  }
+  for (const runId of new Set(closed.map((t) => t.runId))) await requeueIfUnblocked(runId);
+  return closed.length;
+}
+
+/** Close every open request of a run that has stopped. */
+async function closeRunTasks(run: { id: string; orgId: string }, reason: string) {
+  const open = await db
+    .select({ id: agentTasks.id, runId: agentTasks.runId, orgId: agentTasks.orgId })
+    .from(agentTasks)
+    .where(
+      and(
+        eq(agentTasks.runId, run.id),
+        eq(agentTasks.orgId, run.orgId),
+        eq(agentTasks.status, "open"),
+      ),
+    );
+  await closeTasks(open, reason, "system:run-ended");
+}
+
+/** Why an open request can no longer be decided, or null while it can. */
+async function staleReasonOf(taskId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ reason: staleReasonSql() })
+    .from(agentTasks)
+    .innerJoin(agentRuns, eq(agentRuns.id, agentTasks.runId))
+    .where(eq(agentTasks.id, taskId))
+    .limit(1);
+  return row?.reason ?? null;
+}
+
+/**
+ * Sweep (each scheduler tick, and right after a deletion or erasure): stop
+ * live runs whose subject was deleted, then close every open request whose
+ * run is no longer live or whose subject is gone. Idempotent.
+ */
+export async function closeStaleTasks(opts: { orgId?: string } = {}): Promise<number> {
+  const now = new Date();
+  const stopped = await db
+    .update(agentRuns)
+    .set({ status: "cancelled", finishedAt: now, updatedAt: now, leaseUntil: null })
+    .where(
+      and(
+        inArray(agentRuns.status, [...LIVE_RUN_STATUSES]),
+        runSubjectGone(),
+        opts.orgId ? eq(agentRuns.orgId, opts.orgId) : undefined,
+      ),
+    )
+    .returning({
+      id: agentRuns.id,
+      orgId: agentRuns.orgId,
+      subjectType: agentRuns.subjectType,
+    });
+  for (const r of stopped) {
+    await writeAudit({
+      actor: "system:subject-deleted",
+      orgId: r.orgId,
+      action: "agent.run.cancelled",
+      entityType: "agent_run",
+      entityId: r.id,
+      detail: { reason: "subject_deleted", subject_type: r.subjectType },
+    });
+  }
+
+  const stale = await db
+    .select({
+      id: agentTasks.id,
+      runId: agentTasks.runId,
+      orgId: agentTasks.orgId,
+      reason: staleReasonSql(),
+    })
+    .from(agentTasks)
+    .innerJoin(agentRuns, eq(agentRuns.id, agentTasks.runId))
+    .where(
+      and(
+        eq(agentTasks.status, "open"),
+        sql`${staleReasonSql()} is not null`,
+        opts.orgId ? eq(agentTasks.orgId, opts.orgId) : undefined,
+      ),
+    );
+  let closed = 0;
+  const byReason = new Map<string, TaskRef[]>();
+  for (const t of stale) byReason.set(t.reason!, [...(byReason.get(t.reason!) ?? []), t]);
+  for (const [reason, tasks] of byReason)
+    closed += await closeTasks(tasks, reason, "system:stale-request");
+  return closed;
+}
+
+/**
+ * Call after deleting or erasing records an agent may be working on
+ * (requisitions, applications, JDs, offers, candidates). Never fails the
+ * deletion: the scheduler's sweep closes anything left on its next tick.
+ */
+export async function afterSubjectsDeleted(orgId: string): Promise<void> {
+  try {
+    await closeStaleTasks({ orgId });
+  } catch (e) {
+    log.warn("agent.stale_tasks.failed", { org_id: orgId, error: e as Error });
+  }
 }
