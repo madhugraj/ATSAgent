@@ -12,6 +12,12 @@ import type { ScriptStep } from "./evals/scenarios";
 
 type Msg = { role: string; content?: string };
 let script: ScriptStep[] = [];
+// Phone screening evals: a phone line on paper (nothing is dialled in an eval)
+// and a key to store the organisation's voice credential with.
+process.env["SIP_SERVER"] ??= "127.0.0.1";
+process.env["SIP_USER"] ??= "eval";
+process.env["SIP_PASSWORD"] ??= "eval";
+process.env["SECRET_ENCRYPTION_KEY"] ??= Buffer.alloc(32, 7).toString("base64");
 const realGateway = await import("../src/lib/ai-gateway.server");
 const JD = {
   purpose: "Run the platform.",

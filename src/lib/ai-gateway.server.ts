@@ -1657,10 +1657,11 @@ export function voiceSetupMessage(opts: {
       tools: opts.tools.length
         ? [
             {
+              // Full JSON Schema, as on the text path (aiAgentStep).
               functionDeclarations: opts.tools.map((t) => ({
                 name: t.name,
                 description: t.description,
-                ...(t.parameters ? { parameters: t.parameters } : {}),
+                ...(t.parameters ? { parametersJsonSchema: t.parameters } : {}),
               })),
             },
           ]
@@ -1882,8 +1883,11 @@ export async function aiVoiceSession(opts: {
   };
   let config: AiConfig;
   let target: VoiceTarget;
-  if (opts.vertex) {
-    const v = opts.vertex;
+  // The organisation's stored service account wins over its API key.
+  const vertex =
+    opts.vertex ?? (!opts.config && opts.orgId ? await readVoiceServiceAccount(opts.orgId) : null);
+  if (vertex) {
+    const v = vertex;
     config = { provider: "google", model: opts.config?.model ?? DEFAULT_VOICE_MODEL, apiKey: null };
     let token: string;
     try {
@@ -1959,4 +1963,98 @@ export async function aiVoiceSession(opts: {
       }),
     );
   });
+}
+
+/* ---------------------------------------------- voice credentials (BYO) */
+
+// The organisation's own credential for the live voice model: its Google API
+// key (saved like any other key), or a Vertex AI service account stored here,
+// encrypted, under its own provider name. No platform credential exists.
+
+const VOICE_VERTEX = "google_vertex";
+
+/** Validate a service-account JSON key file; returns what is stored, or why not. */
+export function parseVoiceServiceAccount(
+  json: string,
+  location: string,
+): { ok: true; vertex: VoiceVertex } | { ok: false; message: string } {
+  let raw: Record<string, unknown>;
+  try {
+    raw = JSON.parse(json) as Record<string, unknown>;
+  } catch {
+    return { ok: false, message: "That is not a JSON key file." };
+  }
+  const str = (k: string) => (typeof raw[k] === "string" ? (raw[k] as string).trim() : "");
+  if (str("type") !== "service_account")
+    return { ok: false, message: "That file is not a service-account key." };
+  const clientEmail = str("client_email");
+  const privateKey = str("private_key");
+  const project = str("project_id");
+  if (!clientEmail || !privateKey.includes("PRIVATE KEY") || !project)
+    return { ok: false, message: "The key file is missing its account, key or project." };
+  if (!/^[a-z]+-[a-z]+\d$/.test(location))
+    return { ok: false, message: "Choose a region such as us-central1." };
+  const tokenUri = str("token_uri");
+  return {
+    ok: true,
+    vertex: {
+      project,
+      location,
+      serviceAccount: {
+        client_email: clientEmail,
+        private_key: privateKey,
+        ...(tokenUri ? { token_uri: tokenUri } : {}),
+      },
+    },
+  };
+}
+
+export async function writeVoiceServiceAccount(orgId: string, vertex: VoiceVertex) {
+  const { encryptSecret } = await import("../server/crypto");
+  const encrypted = encryptSecret(JSON.stringify(vertex));
+  await db
+    .insert(aiProviderCredentials)
+    .values({ orgId, provider: VOICE_VERTEX, apiKey: encrypted, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: [aiProviderCredentials.orgId, aiProviderCredentials.provider],
+      set: { apiKey: encrypted, updatedAt: new Date() },
+    });
+}
+
+export async function clearVoiceServiceAccount(orgId: string) {
+  await db
+    .delete(aiProviderCredentials)
+    .where(
+      and(eq(aiProviderCredentials.orgId, orgId), eq(aiProviderCredentials.provider, VOICE_VERTEX)),
+    );
+}
+
+/** The organisation's stored service account, decrypted (server only). */
+export async function readVoiceServiceAccount(orgId: string): Promise<VoiceVertex | null> {
+  const { decryptSecret } = await import("../server/crypto");
+  const [cred] = await db
+    .select({ apiKey: aiProviderCredentials.apiKey })
+    .from(aiProviderCredentials)
+    .where(
+      and(eq(aiProviderCredentials.orgId, orgId), eq(aiProviderCredentials.provider, VOICE_VERTEX)),
+    )
+    .limit(1);
+  if (!cred?.apiKey) return null;
+  try {
+    return JSON.parse(decryptSecret(cred.apiKey)) as VoiceVertex;
+  } catch {
+    return null;
+  }
+}
+
+/** Which voice credentials the organisation has stored — booleans only, for the UI. */
+export async function voiceCredentialStatus(
+  orgId: string,
+): Promise<{ serviceAccount: boolean; apiKey: boolean }> {
+  const rows = await db
+    .select({ provider: aiProviderCredentials.provider })
+    .from(aiProviderCredentials)
+    .where(eq(aiProviderCredentials.orgId, orgId));
+  const has = (p: string) => rows.some((r) => r.provider === p);
+  return { serviceAccount: has(VOICE_VERTEX), apiKey: has("google") };
 }

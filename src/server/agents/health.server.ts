@@ -64,6 +64,19 @@ export const HEALTH = {
   quietListingDays: 14,
   /** Role-limited CVs still kept this many days after they became due for erasure. */
   roleLimitedOverdueDays: 7,
+  /** Phone screening: a call still not placed this many hours after it was due. */
+  callOverdueHours: 3,
+  /** …a call still dialling / in progress this many minutes later (the worker stopped). */
+  callStuckMinutes: 45,
+  /** …calls that could not be placed (line or AI voice errors) in 24 h. */
+  callFailures24h: 3,
+  /** …with at least this many call attempts in 7 days, a pick-up share below this… */
+  minCalls7d: 5,
+  callAnswerShare: 0.4,
+  /** …and of the answered calls, a decline share at or above this. */
+  callDeclineShare: 0.5,
+  /** …answered calls that ended before any question was answered, in 7 days. */
+  shortCalls7d: 3,
   /** Re-evaluate at most this often (minutes). */
   evaluateEveryMinutes: 5,
 } as const;
@@ -609,6 +622,136 @@ export const RULES: Rule[] = [
           agentType: "*",
           title: `${x.failed} failed and ${x.stale} stale lifecycle event(s)`,
           detail: { failed: x.failed, stale: x.stale },
+        },
+      ];
+    },
+  },
+  {
+    id: "screening_call.not_placed",
+    element: "orchestrator",
+    severity: "serious",
+    description: `Phone screening calls are still not placed ${HEALTH.callOverdueHours} hours after they were due — the voice worker may not be running, or phone screening is no longer ready (switched off, no AI voice key, no phone line). Candidates wait meanwhile.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number }>(sql`
+        select count(*)::int n from screening_calls
+        where org_id = ${orgId} and status in ('approved', 'callback', 'no_answer', 'failed')
+          and due_at < now() - make_interval(hours => ${HEALTH.callOverdueHours})`);
+      const n = r[0]?.n ?? 0;
+      if (!n) return [];
+      return [
+        {
+          agentType: "screening_call",
+          title: `${n} phone screening call${n === 1 ? "" : "s"} overdue by more than ${HEALTH.callOverdueHours} hours`,
+          detail: { overdue: n },
+        },
+      ];
+    },
+  },
+  {
+    id: "screening_call.stuck",
+    element: "harness",
+    severity: "critical",
+    description: `A phone screening call has been dialling or in progress for more than ${HEALTH.callStuckMinutes} minutes — longer than any call may last. The voice worker stopped mid-call and has not recovered it.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number }>(sql`
+        select count(*)::int n from screening_calls
+        where org_id = ${orgId} and status in ('dialling', 'in_progress')
+          and updated_at < now() - make_interval(mins => ${HEALTH.callStuckMinutes})`);
+      const n = r[0]?.n ?? 0;
+      if (!n) return [];
+      return [
+        {
+          agentType: "screening_call",
+          title: `${n} phone screening call${n === 1 ? "" : "s"} stuck mid-call`,
+          detail: { stuck: n },
+        },
+      ];
+    },
+  },
+  {
+    id: "screening_call.failures",
+    element: "tools",
+    severity: "serious",
+    description: `${HEALTH.callFailures24h} or more phone screening calls in 24 hours could not be placed because of the phone line or the AI voice (not because nobody answered). Check the phone line and the organisation's AI voice key.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number }>(sql`
+        select count(*)::int n from screening_calls
+        where org_id = ${orgId} and last_error is not null
+          and updated_at >= now() - interval '24 hours'`);
+      const n = r[0]?.n ?? 0;
+      if (n < HEALTH.callFailures24h) return [];
+      return [
+        {
+          agentType: "screening_call",
+          title: `${n} phone screening calls could not be placed in 24 hours`,
+          detail: { failed: n },
+        },
+      ];
+    },
+  },
+  {
+    id: "screening_call.answer_rate",
+    element: "hitl",
+    severity: "warning",
+    description: `Fewer than ${Math.round(HEALTH.callAnswerShare * 100)}% of phone screening calls in 7 days were picked up (with at least ${HEALTH.minCalls7d} calls). Candidates may not recognise the number — ask for a recognisable caller ID, or check the calling hours.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ total: number; answered: number }>(sql`
+        select count(*)::int total, count(*) filter (where started_at is not null)::int answered
+        from screening_calls
+        where org_id = ${orgId} and attempt > 0 and updated_at >= now() - interval '7 days'
+          and status not in ('approved', 'requested', 'dialling', 'in_progress', 'cancelled')`);
+      const x = r[0];
+      if (!x || x.total < HEALTH.minCalls7d || x.answered / x.total >= HEALTH.callAnswerShare)
+        return [];
+      return [
+        {
+          agentType: "screening_call",
+          title: `Only ${x.answered} of ${x.total} phone screening calls were picked up in 7 days`,
+          detail: x,
+        },
+      ];
+    },
+  },
+  {
+    id: "screening_call.declines",
+    element: "hitl",
+    severity: "warning",
+    description: `Half or more of the candidates who picked up in 7 days declined the AI screening call (with at least ${HEALTH.minCalls7d} answered). Check how the assistant introduces itself, or whether these candidates prefer the written assessment.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ answered: number; declined: number }>(sql`
+        select count(*)::int answered,
+          count(*) filter (where status = 'consent_declined')::int declined
+        from screening_calls
+        where org_id = ${orgId} and started_at is not null and updated_at >= now() - interval '7 days'`);
+      const x = r[0];
+      if (!x || x.answered < HEALTH.minCalls7d || x.declined / x.answered < HEALTH.callDeclineShare)
+        return [];
+      return [
+        {
+          agentType: "screening_call",
+          title: `${x.declined} of ${x.answered} candidates declined the AI screening call in 7 days`,
+          detail: x,
+        },
+      ];
+    },
+  },
+  {
+    id: "screening_call.short_calls",
+    element: "skills",
+    severity: "warning",
+    description: `${HEALTH.shortCalls7d} or more phone screening calls in 7 days were picked up and agreed to but ended before any question was answered — the assistant may be ending calls early or failing to hear the candidate.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number }>(sql`
+        select count(*)::int n from screening_calls
+        where org_id = ${orgId} and status = 'completed' and consent_at is not null
+          and jsonb_array_length(answers) = 0 and updated_at >= now() - interval '7 days'`);
+      const n = r[0]?.n ?? 0;
+      if (n < HEALTH.shortCalls7d) return [];
+      return [
+        {
+          agentType: "screening_call",
+          title: `${n} screening calls ended before any question was answered`,
+          detail: { calls: n },
         },
       ];
     },

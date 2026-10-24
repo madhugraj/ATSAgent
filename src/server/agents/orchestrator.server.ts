@@ -338,6 +338,23 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
       );
   }
 
+  if (applicationId && e.type === "screening_call.ended") {
+    const p = e.payload as { status?: string };
+    const [app] = await db
+      .select({ stage: applications.stage })
+      .from(applications)
+      .where(and(eq(applications.id, applicationId), eq(applications.orgId, e.orgId)))
+      .limit(1);
+    if (app && ["shortlisted", "reserve", "on_hold"].includes(app.stage))
+      await dispatch(
+        "screening",
+        p.status === "completed"
+          ? `Candidate application ${applicationId} (${req.code} "${req.title}") took the AI screening call and the answers were graded. Read the result and add your proceed / hold recommendation as a candidate note. Do not move them to an interview round — a person decides.`
+          : `Candidate application ${applicationId} (${req.code} "${req.title}"): the AI screening call ${p.status === "consent_declined" ? "was declined by the candidate" : "could not happen"}. If no written assessment was sent, send it now.`,
+        { type: "application", id: applicationId },
+      );
+  }
+
   if (applicationId && e.type === "negotiation.agreed") {
     // A figure agreed with the candidate (their answer or a recorded call):
     // the Offer agent drafts (or revises a sent-back draft) at it.

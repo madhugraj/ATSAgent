@@ -71,6 +71,21 @@ const schema = z.object({
   S3_BUCKET: z.string().default("resumes"),
   S3_ACCESS_KEY_ID: z.string().optional(),
   S3_SECRET_ACCESS_KEY: z.string().optional(),
+
+  // Phone screening (docs/voice-screening-agent.md): the PBX extension the voice
+  // worker dials out from. Unset = phone screening is unavailable. The voice
+  // model itself uses each organisation's own credential, never one here.
+  SIP_SERVER: z.string().optional(),
+  SIP_PORT: z.coerce.number().int().min(1).max(65_535).default(5060),
+  SIP_USER: z.string().optional(),
+  SIP_PASSWORD: z.string().optional(),
+  SIP_AUTH_USER: z.string().optional(),
+  SIP_DOMAIN: z.string().optional(),
+  SIP_CALLER_NAME: z.string().max(40).optional(),
+  // Only when calls have one-way audio behind NAT.
+  SIP_PUBLIC_IP: z.string().optional(),
+  // Calls the voice worker holds at once (the PBX's channel limit).
+  VOICE_MAX_CONCURRENT: z.coerce.number().int().min(1).max(20).default(2),
 });
 
 // Some hosts expose the plain Postgres connection string under a different
@@ -103,12 +118,20 @@ if (!parsed.success) {
   if (meetingProvider && !e.OAUTH_STATE_SECRET) {
     problems.push(`${meetingProvider} is set but OAUTH_STATE_SECRET is not (min 32 chars).`);
   }
+  if (e.SIP_SERVER && !(e.SIP_USER && e.SIP_PASSWORD)) {
+    problems.push("SIP_SERVER is set but SIP_USER and SIP_PASSWORD are not both set.");
+  }
   if (problems.length) {
     throw new Error(`Invalid server environment:\n${problems.join("\n")}`);
   }
 }
 
 export const env = parsed.data;
+
+/** True when the voice worker has a PBX extension to dial out from. */
+export function sipConfigured(): boolean {
+  return Boolean(env.SIP_SERVER && env.SIP_USER && env.SIP_PASSWORD);
+}
 
 /** True when the org-level LinkedIn connect can run. */
 export function linkedinEnvConfigured(): boolean {

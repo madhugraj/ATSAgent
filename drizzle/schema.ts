@@ -1906,7 +1906,8 @@ export type AgentType =
   | "onboarding"
   | "followup"
   | "sourcing"
-  | "distribution";
+  | "distribution"
+  | "screening_call";
 export type AgentAutonomy = "suggest" | "act_and_notify" | "autonomous";
 export type AgentRunStatus =
   "queued" | "running" | "awaiting_human" | "done" | "failed" | "cancelled";
@@ -2646,4 +2647,146 @@ export const offerNegotiations = pgTable(
     decidedAt: timestamp("decided_at", { withTimezone: true }),
   },
   (t) => [index("offer_negotiations_app_idx").on(t.applicationId, t.createdAt)],
+);
+
+/* ------------------------------------------------------- phone screening */
+// docs/voice-screening-agent.md — migration 0046.
+
+/** Per organisation: whether candidates are screened by phone, and how. */
+export const phoneScreeningSettings = pgTable(
+  "phone_screening_settings",
+  {
+    orgId: uuid("org_id")
+      .primaryKey()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    enabled: boolean("enabled").notNull().default(false),
+    /** The name the AI assistant introduces itself with. */
+    assistantName: text("assistant_name").notNull().default("Saranya"),
+    /** Calling window, minutes after midnight in the organisation's time zone. */
+    windowStartMinute: integer("window_start_minute").notNull().default(600),
+    windowEndMinute: integer("window_end_minute").notNull().default(1140),
+    /** ISO weekdays it calls on (1 = Monday … 7 = Sunday). */
+    callDays: integer("call_days")
+      .array()
+      .notNull()
+      .default(sql`'{1,2,3,4,5,6}'`),
+    maxAttempts: integer("max_attempts").notNull().default(3),
+    maxMinutes: integer("max_minutes").notNull().default(15),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      "phone_screening_settings_assistant_name_check",
+      sql`char_length(${t.assistantName}) between 2 and 40`,
+    ),
+    check(
+      "phone_screening_settings_window_start_minute_check",
+      sql`${t.windowStartMinute} between 0 and 1439`,
+    ),
+    check(
+      "phone_screening_settings_window_end_minute_check",
+      sql`${t.windowEndMinute} between 1 and 1440`,
+    ),
+    check(
+      "phone_screening_settings_window_check",
+      sql`${t.windowEndMinute} > ${t.windowStartMinute}`,
+    ),
+    check("phone_screening_settings_max_attempts_check", sql`${t.maxAttempts} between 1 and 5`),
+    check("phone_screening_settings_max_minutes_check", sql`${t.maxMinutes} between 5 and 30`),
+  ],
+);
+
+export const SCREENING_CALL_STATUSES = [
+  "requested",
+  "approved",
+  "dialling",
+  "in_progress",
+  "completed",
+  "callback",
+  "no_answer",
+  "failed",
+  "consent_declined",
+  "cancelled",
+  "fell_back",
+] as const;
+export type ScreeningCallStatus = (typeof SCREENING_CALL_STATUSES)[number];
+
+/** One line of a call transcript. */
+export type ScreeningCallTurn = {
+  who: "caller" | "ai";
+  text: string;
+  at: string;
+  interrupted?: boolean;
+};
+
+/** What the candidate said for one kit question, as the call agent recorded it. */
+export type ScreeningCallAnswer = { question_id: string; summary: string; at: string };
+
+/**
+ * One phone screening of one application by the Screening call agent. The
+ * number is never copied here (read from the candidate when dialling); the
+ * transcript is kept only once the candidate consented.
+ */
+export const screeningCalls = pgTable(
+  "screening_calls",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    candidateId: uuid("candidate_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "cascade" }),
+    applicationId: uuid("application_id").references(() => applications.id, {
+      onDelete: "set null",
+    }),
+    requisitionId: uuid("requisition_id").references(() => requisitions.id, {
+      onDelete: "set null",
+    }),
+    kitId: uuid("kit_id").references(() => screeningKits.id, { onDelete: "set null" }),
+    /** The Screening agent run that asked for the call. */
+    requestedRunId: uuid("requested_run_id").references(() => agentRuns.id, {
+      onDelete: "set null",
+    }),
+    /** The call's own run (Screening call agent). */
+    agentRunId: uuid("agent_run_id").references(() => agentRuns.id, { onDelete: "set null" }),
+    requestedBy: uuid("requested_by").references(() => users.id, { onDelete: "set null" }),
+    status: text("status").$type<ScreeningCallStatus>().notNull().default("requested"),
+    attempt: integer("attempt").notNull().default(0),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    callbackAt: timestamp("callback_at", { withTimezone: true }),
+    phoneLast4: text("phone_last4"),
+    consentAt: timestamp("consent_at", { withTimezone: true }),
+    /** What the candidate said when agreeing or declining, as the assistant heard it. */
+    consentWords: text("consent_words"),
+    language: text("language"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    endReason: text("end_reason"),
+    durationS: integer("duration_s"),
+    transcript: jsonb("transcript")
+      .$type<ScreeningCallTurn[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    answers: jsonb("answers")
+      .$type<ScreeningCallAnswer[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    screeningRunId: uuid("screening_run_id").references(() => screeningRuns.id, {
+      onDelete: "set null",
+    }),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      "screening_calls_status_check",
+      sql`${t.status} in ('requested', 'approved', 'dialling', 'in_progress', 'completed', 'callback', 'no_answer', 'failed', 'consent_declined', 'cancelled', 'fell_back')`,
+    ),
+    index("screening_calls_due_idx").on(t.orgId, t.status, t.dueAt),
+    index("screening_calls_application_idx").on(t.applicationId, t.createdAt),
+    index("screening_calls_candidate_idx").on(t.candidateId),
+  ],
 );
