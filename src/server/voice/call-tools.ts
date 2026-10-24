@@ -18,7 +18,11 @@ export const END_REASONS = [
 export type EndReason = (typeof END_REASONS)[number];
 
 export const CALL_TOOL_INPUTS = {
-  record_consent: z.object({ granted: z.boolean() }),
+  record_consent: z.object({
+    granted: z.boolean(),
+    /** What the candidate said, as heard — the consent's own evidence. */
+    their_words: z.string().trim().min(1).max(300),
+  }),
   record_answer: z.object({
     question_id: z.string().min(1).max(20),
     summary: z.string().trim().min(1).max(600),
@@ -44,7 +48,7 @@ export const CALL_TOOL_NAMES = Object.keys(CALL_TOOL_INPUTS) as CallToolName[];
 
 export const CALL_TOOL_DESCRIPTIONS: Record<CallToolName, string> = {
   record_consent:
-    "Record whether the candidate agreed to the screening call now and to it being transcribed. granted true only if they clearly agreed to both.",
+    "Record whether the candidate agreed to the screening call now and to it being transcribed: granted true only if they clearly agreed to both; their_words is exactly what they said.",
   record_answer:
     "After the candidate answers one of the listed questions: the question's id and a faithful one or two sentence summary of what they said.",
   record_availability:
@@ -73,6 +77,7 @@ export type CallAvailabilityInput = z.infer<typeof CALL_TOOL_INPUTS.record_avail
 export type CallState = {
   consent: boolean | null;
   consentAt?: number;
+  consentWords?: string;
   answers: { question_id: string; summary: string; at: string }[];
   availability: CallAvailabilityInput | null;
   callback: { whenLocal: string | null } | null;
@@ -106,8 +111,9 @@ export function applyCallTool(
     return { ok: false, error: "Ask for and record the candidate's consent first." };
   switch (name as CallToolName) {
     case "record_consent": {
-      const { granted } = parsed.data as { granted: boolean };
+      const { granted, their_words } = parsed.data as { granted: boolean; their_words: string };
       state.consent = granted;
+      state.consentWords = their_words;
       if (granted) state.consentAt = now;
       return { ok: true };
     }

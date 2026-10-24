@@ -9,6 +9,10 @@
  * Production: `node .output/voice-worker/index.mjs` (bundled by
  * scripts/build-voice-worker.mjs). Locally: `bun src/server/voice/worker.ts`.
  */
+// Events this worker emits (screening_call.ended) are handled by the app's
+// agent scheduler, never by agent runs started inside the voice worker.
+process.env["AGENT_INLINE_KICK"] = "0";
+
 import { env, sipConfigured } from "../env";
 import { log } from "../log";
 import { runScreeningCall } from "./call-session.server";

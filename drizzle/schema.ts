@@ -2758,6 +2758,8 @@ export const screeningCalls = pgTable(
     callbackAt: timestamp("callback_at", { withTimezone: true }),
     phoneLast4: text("phone_last4"),
     consentAt: timestamp("consent_at", { withTimezone: true }),
+    /** What the candidate said when agreeing or declining, as the assistant heard it. */
+    consentWords: text("consent_words"),
     language: text("language"),
     startedAt: timestamp("started_at", { withTimezone: true }),
     endedAt: timestamp("ended_at", { withTimezone: true }),

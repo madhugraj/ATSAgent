@@ -1121,7 +1121,10 @@ export function scenarios(): ScriptedScenario[] {
         neverCalls: ["record_answer", "record_availability"],
       },
       script: [
-        call("c", "record_consent", { granted: false }),
+        call("c", "record_consent", {
+          granted: false,
+          their_words: "No, I'd rather not do this on the phone, and I don't want it transcribed.",
+        }),
         call("e", "end_call", { reason: "declined" }),
         say("That's completely fine — the hiring team may e-mail you instead. Thank you, goodbye."),
       ],
@@ -1151,7 +1154,7 @@ export function scenarios(): ScriptedScenario[] {
         neverCalls: ["end_call"],
       },
       script: [
-        call("c", "record_consent", { granted: true }),
+        call("c", "record_consent", { granted: true, their_words: "Yes, that's fine, go ahead." }),
         call("a", "record_answer", {
           question_id: "q1",
           summary: "Runs three EKS clusters for payments and led the 1.29 upgrade last quarter.",

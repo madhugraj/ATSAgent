@@ -48,6 +48,8 @@ create table if not exists screening_calls (
   callback_at timestamptz,
   phone_last4 text,
   consent_at timestamptz,
+  -- What the candidate said when agreeing or declining, as the assistant heard it.
+  consent_words text,
   language text,
   started_at timestamptz,
   ended_at timestamptz,
@@ -66,6 +68,9 @@ do $$ begin
     check (status in ('requested', 'approved', 'dialling', 'in_progress', 'completed',
       'callback', 'no_answer', 'failed', 'consent_declined', 'cancelled', 'fell_back'));
 exception when duplicate_object then null; end $$;
+
+-- Added before 0046 shipped; keeps databases that ran an earlier draft in step.
+alter table screening_calls add column if not exists consent_words text;
 
 create index if not exists screening_calls_due_idx
   on screening_calls (org_id, status, due_at);

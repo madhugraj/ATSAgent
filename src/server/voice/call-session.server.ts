@@ -381,6 +381,7 @@ async function placeCall(
     endedAt: new Date(endedAt),
     durationS: Math.round((endedAt - answeredAt) / 1000),
     consentAt: state.consent === true ? new Date(state.consentAt ?? answeredAt) : null,
+    consentWords: state.consentWords ?? null,
     transcript,
     answers: state.consent === true ? state.answers : [],
   };

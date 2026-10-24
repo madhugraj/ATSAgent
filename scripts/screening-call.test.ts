@@ -339,6 +339,10 @@ describe("the call brief", () => {
     expect(p).toContain("Asha Rao");
     expect(p).toMatch(/Never:[\s\S]*salary/);
     expect(p).toContain("record_availability");
+    expect(p).toContain(
+      'Your first sentence: "Hello, this is Saranya, an AI assistant calling from the hiring team at Yavar.',
+    );
+    expect(p).toContain("Never answer a question yourself");
   });
 
   test("a client role never names the client; known availability is not asked", () => {
@@ -363,7 +367,9 @@ describe("in-call tools", () => {
     expect(
       session.applyCallTool(s, "record_answer", { question_id: "q1", summary: "x" }, ids, 0),
     ).toMatchObject({ ok: false });
-    expect(session.applyCallTool(s, "record_consent", { granted: true }, ids, 0)).toEqual({
+    expect(
+      session.applyCallTool(s, "record_consent", { granted: true, their_words: "yes" }, ids, 0),
+    ).toEqual({
       ok: true,
     });
     expect(
@@ -467,7 +473,7 @@ describe("a whole call with a fake line", () => {
           },
           { say: "caller", text: "Yes, go ahead, that's fine." },
           { tool: "record_answer", args: { question_id: "q1", summary: "too early" } },
-          { tool: "record_consent", args: { granted: true } },
+          { tool: "record_consent", args: { granted: true, their_words: "Yes, go ahead." } },
           { say: "caller", text: "I run three EKS clusters." },
           {
             tool: "record_answer",
@@ -505,6 +511,7 @@ describe("a whole call with a fake line", () => {
     expect(c.answers.map((a) => a.question_id).sort()).toEqual(["q1", "q2"]);
     expect(c.transcript.length).toBe(5);
     expect(c.consentAt).not.toBeNull();
+    expect(c.consentWords).toBe("Yes, go ahead.");
     expect(c.screeningRunId).toBe(r.screeningRunId);
 
     const [graded] = await db
@@ -548,7 +555,7 @@ describe("a whole call with a fake line", () => {
         [
           { say: "ai", text: "Is now a good time? The call is transcribed." },
           { say: "caller", text: "No, please don't." },
-          { tool: "record_consent", args: { granted: false } },
+          { tool: "record_consent", args: { granted: false, their_words: "No, please don't." } },
           { tool: "end_call", args: { reason: "declined" } },
         ],
         { results: [] },
@@ -617,7 +624,7 @@ describe("a whole call with a fake line", () => {
     const line = new FakeLine();
     const voice = scriptedVoice(
       [
-        { tool: "record_consent", args: { granted: true } },
+        { tool: "record_consent", args: { granted: true, their_words: "Yes, go ahead." } },
         { say: "caller", text: "I run EKS." },
         { tool: "record_answer", args: { question_id: "q1", summary: "Runs EKS." } },
       ],

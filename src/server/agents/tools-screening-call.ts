@@ -78,6 +78,7 @@ async function applyToCall(ctx: ToolContext, name: CallToolName, input: unknown)
     .update(screeningCalls)
     .set({
       consentAt: state.consent === true ? (call.consentAt ?? new Date()) : null,
+      ...(state.consentWords ? { consentWords: state.consentWords } : {}),
       answers: state.consent === true ? state.answers : [],
       ...(state.consent === false ? { status: "consent_declined" as const } : {}),
       ...(state.callback ? { status: "callback" as const } : {}),
