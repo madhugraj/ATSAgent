@@ -228,3 +228,28 @@ as intended. Fixed what it showed (Screening call agent 1.1.2):
   and it moves on to what the candidate does bring.
 - **Indian English** for the session (`languageCode: "en-IN"`) — short replies
   had been transcribed as Spanish ("Sí, ya", "Ajá").
+
+### Step A.3 — from the fourth real call (2026-10-24)
+
+Indian English, recorded corrections and a single "continue?" all held. Fixed
+what it showed (Screening call agent 1.1.3), and pulled the grader's fairness
+rules forward from step B:
+
+- **Pay is asked afresh** — confirming figures it cannot see ("has anything
+  changed?") left the candidate asking "what do you have?".
+- **No debates or general knowledge** — it explained Go's history and benefits
+  when the candidate pushed back; now "a good question for the hiring team",
+  noted, one redirect, move on.
+- **A skip is respected** — "Of course", nothing recorded, next question (it
+  had rephrased and asked again).
+- **No praise** — it said "that's very comprehensive".
+- **Details mentioned in passing are recorded** (a company named mid-answer).
+- **The security rule no longer conflicts with skipping** a question (only the
+  consent cannot be skipped).
+- **Grader fairness (every screening grade, not only calls)**: only the
+  job-relevant content of answers to the listed questions counts — never tone,
+  manner, attitude, confidence, accent, fluency, grammar, language, hesitation,
+  asking back, pushing back or skipping; red flags only about job evidence; pay,
+  location and notice never considered; **blind grading** — the candidate's name
+  is removed from what the grader sees (`blindName`). The fourth call's grade had
+  cited "a confrontational communication style".

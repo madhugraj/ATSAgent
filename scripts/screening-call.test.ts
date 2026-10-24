@@ -23,10 +23,14 @@ process.env["SIP_USER"] ??= "3001";
 process.env["SIP_PASSWORD"] ??= "test-only";
 
 const realGateway = await import("../src/lib/ai-gateway.server");
+/** What the grader was last given (system rules and the prompt). */
+const lastGrade: { system?: string; prompt?: string } = {};
 mock.module("../src/lib/ai-gateway.server", () => ({
   ...realGateway,
-  aiJson: async (opts: { feature: string }) =>
-    opts.feature === "screening_grade"
+  aiJson: async (opts: { feature: string; system?: string; prompt?: string }) => {
+    if (opts.feature === "screening_grade")
+      Object.assign(lastGrade, { system: opts.system, prompt: opts.prompt });
+    return opts.feature === "screening_grade"
       ? {
           ok: true,
           data: {
@@ -56,7 +60,8 @@ mock.module("../src/lib/ai-gateway.server", () => ({
           provider: "google",
           usage: null,
         }
-      : { ok: false, status: 500, message: `no fixture for ${opts.feature}` },
+      : { ok: false, status: 500, message: `no fixture for ${opts.feature}` };
+  },
 }));
 
 const { db } = await import("../src/server/db");
@@ -351,13 +356,19 @@ describe("the call brief", () => {
     expect(p).toContain("written assessment by e-mail, or a call from a person");
     expect(p).toContain("Keep the payments platform reliable as it grows.");
     expect(p).toContain("What fits from their CV: Kubernetes, Go");
-    expect(p).toMatch(/Practical details, before anything technical[\s\S]*expected pay per year/);
+    expect(p).toMatch(/Practical details, before anything technical[\s\S]*expected pay — ask afresh/);
+    expect(p).toContain("or skip the consent, politely");
     expect(p).toContain("(their CV says Acme, about 7 years — confirm it rather than read it out)");
     expect(p).toContain("the one ending in gmail.com");
     expect(p).toContain("[q1] Tell me about running Kubernetes in production.");
     expect(p).not.toContain("expected CTC is above our budget");
     expect(p).toContain("reflect the gist back");
     expect(p).toContain("Never answer a question yourself");
+    expect(p).toContain('If they want to skip a question, say "Of course"');
+    expect(p).toContain("do not answer from general knowledge");
+    expect(p).toContain('not "great", "good", "impressive", "very comprehensive"');
+    expect(p).toContain("ask afresh even if it was given before");
+    expect(p).toContain("Whenever they mention a detail at any point in the call");
     expect(p).toContain("Discuss, judge or negotiate pay");
     expect(p).toContain("within two working days");
   });
@@ -371,12 +382,20 @@ describe("the call brief", () => {
       }),
     );
     expect(p).not.toContain("their notice period and the earliest date");
-    expect(p).not.toContain("their expected pay per year");
-    expect(p).toContain("has anything changed?");
+    expect(p).toContain("We have your notice period from earlier");
+    expect(p).toContain("ask afresh even if it was given before");
     expect(p).toContain("Never tell them a detail is not needed");
     expect(p).toContain("at most once in the whole call");
     expect(p).toContain("I'm calling at the time we agreed");
     expect(p).toContain("on behalf of a client");
+  });
+
+  test("blind grading: the candidate's name is removed, other words left alone", async () => {
+    const { blindName } = await import("../src/lib/screening.functions");
+    expect(
+      blindName("Speaking with Meera? Yes, MEERA Krishnan here. Meeranath.", "Meera Krishnan"),
+    ).toBe("Speaking with the candidate? Yes, the candidate here. Meeranath.");
+    expect(blindName("No name here.", "")).toBe("No name here.");
   });
 
   test("helpers: JD bullets, strengths, how they applied, calling hours", () => {
@@ -689,6 +708,10 @@ describe("a whole call with a fake line", () => {
     });
     expect(graded!.transcript).toContain("Candidate: I run three EKS clusters.");
     expect(graded!.transcript).not.toMatch(/lakhs|Chennai|go ahead/);
+    // Blind, content-only grading.
+    expect(lastGrade.system).toContain("Fairness rules (mandatory)");
+    expect(lastGrade.system).toMatch(/Never let tone, manner/);
+    expect(lastGrade.prompt).not.toMatch(/Meera|Krishnan/);
 
     // Pay goes to the HR-only record; the audit names fields, never amounts.
     const pay = await db

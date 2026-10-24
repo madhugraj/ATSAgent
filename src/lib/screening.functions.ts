@@ -237,6 +237,20 @@ export async function prepareScreeningKitForPairing(input: {
   return { kitId: row.id, questions: kit.questions, focus_summary: kit.focus_summary };
 }
 
+/** Replace the candidate's name (full and each part) with "the candidate" (pure; unit-tested). */
+export function blindName(text: string, fullName: string | null | undefined): string {
+  const parts = (fullName ?? "")
+    .split(/\s+/)
+    .map((p) => p.replace(/[^\p{L}'-]/gu, ""))
+    .filter((p) => p.length >= 2);
+  if (!parts.length) return text;
+  const escape = (p: string) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const full = parts.map(escape).join("\\s+");
+  return text
+    .replace(new RegExp(`\\b${full}\\b`, "giu"), "the candidate")
+    .replace(new RegExp(`\\b(${parts.map(escape).join("|")})\\b`, "giu"), "the candidate");
+}
+
 /**
  * Grade a screening against its kit and save the run — the typed answers, call
  * notes or a transcript. No request context: the screening-call worker uses it
@@ -262,15 +276,17 @@ export async function gradeScreeningForKit(input: {
     kit.requisitionId,
   );
 
+  // Blind grading: the grader never sees who the candidate is.
+  const blind = (t: string) => blindName(t, candidate.fullName);
   const grade = await gradeScreening({
     orgId: input.orgId,
     role: requisition?.title ?? "the role",
     jdText,
     mustHave: requisition?.mustHaveSkills ?? [],
-    candidateName: candidate.fullName,
+    candidateName: "the candidate",
     questions,
-    answers: input.answers,
-    transcript: input.transcript,
+    answers: input.answers.map((a) => ({ ...a, answer: blind(a.answer) })),
+    transcript: input.transcript ? blind(input.transcript) : null,
   });
 
   const matchScore =

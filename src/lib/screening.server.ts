@@ -241,9 +241,16 @@ export async function gradeScreening(input: {
       "quote the exact line of the answer you relied on in `evidence` (empty string when nothing was said), and " +
       "one sentence of rationale. Weight the overall screening_score by each question's weight, penalising " +
       "unanswered must-haves. When a transcript is supplied instead of per-question answers, find the part of the " +
-      "transcript that addresses each question. List concrete red_flags (contradiction with the CV, inflated " +
-      "claim, no specifics, notice/salary blocker). recommendation is 'advance', 'hold' or 'reject' with a reason " +
-      "a hiring manager can act on. Judge only what was said; never invent answers. " +
+      "transcript that addresses each question. List concrete red_flags about job-relevant evidence only " +
+      "(contradiction with the CV, an inflated or unsupported claim, no specifics on a must-have, a must-have " +
+      "they said they lack). recommendation is 'advance', 'hold' or 'reject' with a reason a hiring manager can " +
+      "act on. Judge only what was said; never invent answers.\n" +
+      "Fairness rules (mandatory): grade only the job-relevant content of the candidate's answers to the listed " +
+      "questions. Never let tone, manner, attitude, confidence, politeness, accent, fluency, grammar, language, " +
+      "pace, hesitation, asking questions back, disagreeing or pushing back, wanting to skip a question, or anything " +
+      "said outside the listed questions raise or lower a score, a verdict, a red flag or the recommendation — and " +
+      "never mention them. A skipped question is not_answered, nothing more. Do not consider pay, location, " +
+      "notice period, or any personal characteristic. " +
       "Return ONLY JSON: {screening_score, verdicts:[{question_id, verdict, score, evidence, rationale}], " +
       "rationale, red_flags:[string], recommendation, recommendation_reason}.",
     prompt: untrusted(
