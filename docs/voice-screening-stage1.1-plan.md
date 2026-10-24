@@ -276,3 +276,34 @@ answers were held to written-essay depth. Now:
   where the details are; never amounts).
 - `scripts/dev-agent-tick.ts` runs the agent scheduler locally (production uses
   the agent-tick cron) so events from the voice worker reach the agents.
+
+### The decision in the hiring desk (2026-10-24, part of step D)
+
+From HR's side, with five candidates screened the desk thread is where progress
+is followed and decisions are made — not the candidate page.
+
+- **Asked versus planned.** `record_answer` takes `declined` (the candidate chose
+  not to answer: asked, never graded); coverage stores `asked`, `plannedIds` and
+  `askedIds`, and every surface says it the same way (`coverageWords`): "2 asked
+  of 4 planned · both answered · 2 not reached on the call". Older runs read "2 of
+  4 planned questions answered". Screening call agent 1.1.6.
+- **Why this score.** The call's thread post carries a `screening_result` card
+  (score, coverage, confidence, recommendation) with a *Why this score* pop-up
+  (`getScreeningRationale`): each question's verdict, what they said, why, its
+  weight; the questions not reached; CV match and combined fit; how the score is
+  built. Never the transcript, pay or the AI engine.
+- **The decision as an approval card.** The Screening agent (1.10.0) ends with
+  `request_approval` subject `screening_decision` {applicationId, proceed | hold,
+  rationale} to the person it works for; the system adds the graded result to the
+  card. *Approve — move to interview (L1)* moves the candidate as that person
+  (`application.advanced` → the Interview coordinator books the round);
+  *Approve — put on hold* parks them; *Decline* keeps them in screening (reason
+  noted) or *Reject candidate* with a required reason. The agent can no longer
+  move anyone itself (`move_candidate` removed). Refused without a graded result,
+  and never two open decisions for one candidate; a candidate moved elsewhere
+  closes the card.
+- **Screening board.** The hiring journey's Screening step lists every
+  shortlisted or screened candidate — where they are ("Call booked for …", "On
+  the call now", "Your decision", "Moved to interview (L1)"), score,
+  recommendation and coverage — with *Decide* (jumps to the card) and *Why this
+  score*; it stays with the step after the first candidate moves on.

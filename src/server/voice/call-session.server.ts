@@ -88,6 +88,7 @@ export {
   CALL_TOOLS,
   callOutcome,
   END_REASONS,
+  freshCallState,
   type CallToolName,
   type EndReason,
 } from "./call-tools";
@@ -505,12 +506,24 @@ async function placeCall(
   });
 }
 
-/** answered / planned → how much a phone screen's grade can be trusted (pure; unit-tested). */
-export function callCoverage(planned: number, answered: number): ScreeningCoverage {
-  const share = planned > 0 ? answered / planned : 0;
+/**
+ * How much a phone screen's grade rests on (pure; unit-tested): planned, asked
+ * and answered. Confidence is answered / planned — high ≥ 75 %, medium ≥ 50 %.
+ * Questions not reached or declined are never graded, so they never lower the
+ * score; they only mean there is less evidence.
+ */
+export function callCoverage(
+  planned: string[],
+  asked: string[],
+  answered: number,
+): ScreeningCoverage {
+  const share = planned.length > 0 ? answered / planned.length : 0;
   return {
-    planned,
+    planned: planned.length,
+    asked: asked.length,
     answered,
+    plannedIds: planned,
+    askedIds: asked,
     confidence: share >= 0.75 ? "high" : share >= 0.5 ? "medium" : "low",
   };
 }
@@ -524,7 +537,7 @@ export function callCoverage(planned: number, answered: number): ScreeningCovera
 export async function gradeCallAnswers(input: {
   orgId: string;
   call: typeof screeningCalls.$inferSelect;
-  answers: { question_id: string; summary: string }[];
+  answers: { question_id: string; summary: string; declined?: boolean }[];
   /** The screening part of the call (after the practical details). */
   transcript: ScreeningCallTurn[];
   /** The screening questions the call planned to ask. */
@@ -532,7 +545,8 @@ export async function gradeCallAnswers(input: {
 }): Promise<string | null> {
   const { orgId, call } = input;
   const plannedSet = new Set(input.planned);
-  const answered = input.answers.filter((a) => plannedSet.has(a.question_id));
+  const asked = input.answers.filter((a) => plannedSet.has(a.question_id));
+  const answered = asked.filter((a) => !a.declined);
   if (!answered.length || !call.kitId) return null;
   const [kit] = await db
     .select()
@@ -551,7 +565,11 @@ export async function gradeCallAnswers(input: {
       createdBy: null,
       onlyQuestionIds: answered.map((a) => a.question_id),
       mode: "spoken",
-      coverage: callCoverage(input.planned.length, answered.length),
+      coverage: callCoverage(
+        input.planned,
+        asked.map((a) => a.question_id),
+        answered.length,
+      ),
     });
     return graded.run.id;
   } catch (e) {
@@ -564,7 +582,7 @@ export async function gradeCallAnswers(input: {
  * Tell the role's hiring-desk thread how the call went, in plain words, so the
  * team sees it where they follow the hiring journey.
  */
-async function postCallToThread(
+export async function postCallToThread(
   orgId: string,
   call: typeof screeningCalls.$inferSelect,
   status: ScreeningCallStatus,
@@ -585,6 +603,7 @@ async function postCallToThread(
   const name = row?.name ?? "The candidate";
   const mins = row?.durationS ? Math.max(1, Math.round(row.durationS / 60)) : null;
   let body: string;
+  let card: { type: "screening_result"; runId: string; applicationId: string } | undefined;
   if (status === "callback") {
     const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
     const tz = (await getOrgEmailSettings(orgId)).timezone;
@@ -599,12 +618,19 @@ async function postCallToThread(
           rec: screeningRuns.recommendation,
         })
         .from(screeningRuns)
-        .where(eq(screeningRuns.id, screeningRunId))
+        .where(and(eq(screeningRuns.id, screeningRunId), eq(screeningRuns.orgId, orgId)))
         .limit(1);
-      if (r?.coverage)
-        graded = `Screening score ${r.score}/100 from ${r.coverage.answered} of ${r.coverage.planned} questions answered (${r.coverage.confidence} confidence)${r.rec === "hold" ? " — probe further in the interview" : ""}.`;
+      if (r) {
+        const { coverageWords } = await import("@/lib/screening-coverage");
+        graded = `Screening score ${r.score}/100${r.coverage ? ` (${coverageWords(r.coverage)}; ${r.coverage.confidence} confidence)` : ""}${r.rec === "hold" ? " — probe further in the interview" : ""}.`;
+        card = {
+          type: "screening_result",
+          runId: screeningRunId,
+          applicationId: call.applicationId,
+        };
+      }
     }
-    body = `Had the AI screening call with ${name}${mins ? ` (${mins} min)` : ""}. ${graded} Practical details and pay are recorded for the HR team. The answers, the reasons for each score and the transcript are on the candidate's page, under Screening. A person decides who moves on.`;
+    body = `Had the AI screening call with ${name}${mins ? ` (${mins} min)` : ""}. ${graded} Practical details and pay are recorded for the HR team only. The Screening agent reviews it and asks you to decide who moves on.`;
   } else {
     const how: Record<string, string> = {
       not_interested: `${name} is not interested in the role.`,
@@ -618,7 +644,7 @@ async function postCallToThread(
   }
   await desk.postMessage(
     { id: convId, orgId },
-    { role: "agent", agentType: "screening_call", body },
+    { role: "agent", agentType: "screening_call", body, ...(card ? { card } : {}) },
   );
 }
 

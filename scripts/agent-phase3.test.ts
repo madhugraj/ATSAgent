@@ -46,6 +46,8 @@ const {
   orgMembers,
   organizations,
   requisitions,
+  screeningKits,
+  screeningRuns,
   userRoles,
   users,
 } = await import("../drizzle/schema");
@@ -458,5 +460,167 @@ describe("evaluation and the hiring decision", () => {
       resolveTask({ orgId, taskId: gate.id, userId: manager, decision: { status: "approved" } }),
     ).rejects.toThrow("moved on");
     expect(await stageOf(appId)).toBe("on_hold");
+  });
+});
+
+describe("the screening decision in the hiring desk", () => {
+  async function graded(name: string) {
+    const { appId, candidateId } = await application(name, "shortlisted");
+    const [kit] = await db
+      .insert(screeningKits)
+      .values({
+        orgId,
+        candidateId,
+        requisitionId: reqId,
+        applicationId: appId,
+        focusSummary: "x",
+        questions: [] as never,
+      })
+      .returning({ id: screeningKits.id });
+    await db.insert(screeningRuns).values({
+      orgId,
+      kitId: kit!.id,
+      candidateId,
+      requisitionId: reqId,
+      applicationId: appId,
+      inputKind: "phone_ai",
+      screeningScore: 63,
+      recommendation: "hold",
+      coverage: {
+        planned: 4,
+        asked: 2,
+        answered: 2,
+        plannedIds: ["q3", "q5", "q2", "q4"],
+        askedIds: ["q3", "q5"],
+        confidence: "medium",
+      },
+    });
+    return { appId, candidateId };
+  }
+
+  async function propose(appId: string, recommendation: "proceed" | "hold") {
+    await enable("screening");
+    const { runId } = await startRun({
+      orgId,
+      agentType: "screening",
+      principalUserId: recruiter,
+      goal: "x",
+      subjectType: "application",
+      subjectId: appId,
+    });
+    script.length = 0; // a paused earlier run leaves its closing reply unused
+    script.push(
+      call({
+        id: "d",
+        name: "request_approval",
+        args: {
+          title: "Screening decision",
+          summary: "Graded.",
+          assignee_role: "recruiter",
+          subject: {
+            type: "screening_decision",
+            applicationId: appId,
+            recommendation,
+            rationale: "Strong on PHI masking; probe evaluation tooling in L1.",
+          },
+        },
+      }),
+      say("done"),
+    );
+    await runAgentTick({ orgId });
+    return { runId, tasks: await openTasks(runId) };
+  }
+
+  const taskStatus = async (id: string) =>
+    (await db.select({ s: agentTasks.status }).from(agentTasks).where(eq(agentTasks.id, id)))[0]!.s;
+
+  test("goes to the person the agent works for, with the graded result stated by the system", async () => {
+    const { appId } = await graded("Madhu");
+    const { tasks } = await propose(appId, "proceed");
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]).toMatchObject({ kind: "gate", assigneeUserId: recruiter });
+    expect(tasks[0]!.body).toContain("PROCEED to the first interview round");
+    expect(tasks[0]!.body).toContain(
+      "Screening score: 63/100 (2 asked of 4 planned · both answered · 2 not reached on the call; medium confidence)",
+    );
+  });
+
+  test("approving proceed moves them to L1 — the Interview coordinator's cue", async () => {
+    const { appId } = await graded("Asha");
+    const { tasks } = await propose(appId, "proceed");
+    await resolveTask({
+      orgId,
+      taskId: tasks[0]!.id,
+      userId: recruiter,
+      decision: { status: "approved" },
+    });
+    expect(await stageOf(appId)).toBe("l1");
+    // The person's approval is the record, not the stale-request sweep its own move triggered.
+    expect(await taskStatus(tasks[0]!.id)).toBe("approved");
+    const [ev] = await db
+      .select()
+      .from(agentEvents)
+      .where(and(eq(agentEvents.orgId, orgId), eq(agentEvents.type, "application.advanced")));
+    expect(ev).toBeTruthy();
+  });
+
+  test("declining keeps them in screening with the reason; rejecting is the person's, with a reason", async () => {
+    const a = await graded("Ravi");
+    const first = await propose(a.appId, "proceed");
+    await resolveTask({
+      orgId,
+      taskId: first.tasks[0]!.id,
+      userId: recruiter,
+      decision: { status: "rejected", reason: "Want the written assessment too" },
+    });
+    expect(await stageOf(a.appId)).toBe("shortlisted");
+    const [note] = await db
+      .select()
+      .from(candidateNotes)
+      .where(eq(candidateNotes.candidateId, a.candidateId));
+    expect(note!.body).toContain("kept in screening");
+    expect(note!.body).toContain("Want the written assessment too");
+
+    await db.delete(agentRuns).where(eq(agentRuns.orgId, orgId));
+    const b = await graded("Kiran");
+    const second = await propose(b.appId, "hold");
+    await expect(
+      resolveTask({
+        orgId,
+        taskId: second.tasks[0]!.id,
+        userId: recruiter,
+        decision: { status: "rejected", rejectCandidate: true },
+      }),
+    ).rejects.toThrow("Say why");
+    await resolveTask({
+      orgId,
+      taskId: second.tasks[0]!.id,
+      userId: recruiter,
+      decision: {
+        status: "rejected",
+        rejectCandidate: true,
+        reason: "Evaluation depth below what the role needs",
+      },
+    });
+    expect(await stageOf(b.appId)).toBe("rejected");
+  });
+
+  test("no decision without a graded result, and never two for one candidate", async () => {
+    const { appId } = await application("Nila", "shortlisted");
+    expect((await propose(appId, "proceed")).tasks).toHaveLength(0);
+
+    const g = await graded("Tara");
+    expect((await propose(g.appId, "proceed")).tasks).toHaveLength(1);
+    expect((await propose(g.appId, "hold")).tasks).toHaveLength(0);
+  });
+
+  test("moving the candidate elsewhere closes the waiting decision", async () => {
+    const { appId } = await graded("Uma");
+    const { tasks } = await propose(appId, "proceed");
+    await moveStageCore(
+      { ...rec, orgId, userId: recruiter },
+      { applicationId: appId, toStage: "on_hold", reason: "Paused" },
+    );
+    expect(await taskStatus(tasks[0]!.id)).toBe("cancelled");
   });
 });

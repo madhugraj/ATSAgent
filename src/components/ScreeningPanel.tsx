@@ -16,6 +16,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ScoreChip } from "@/components/ats";
+import { coverageWords } from "@/lib/screening-coverage";
+import type { ScreeningCoverage } from "@db/schema";
 import { PhoneScreeningCalls } from "@/components/PhoneScreeningCalls";
 
 type Question = {
@@ -98,11 +100,7 @@ export function ScreeningPanel(props: {
   );
   const latest = kitRuns[0] ?? null;
   // A phone screen is graded only on the questions answered; this is what it rests on.
-  const coverage = (latest?.coverage ?? null) as {
-    planned: number;
-    answered: number;
-    confidence: "high" | "medium" | "low";
-  } | null;
+  const coverage = (latest?.coverage ?? null) as ScreeningCoverage | null;
   const latestVerdicts = useMemo<Verdict[]>(
     () => (Array.isArray(latest?.verdicts) ? (latest!.verdicts as unknown as Verdict[]) : []),
     [latest],
@@ -428,7 +426,7 @@ export function ScreeningPanel(props: {
               <ScoreChip score={latest.screening_score} />
               {coverage ? (
                 <p className="mt-1 text-xs text-muted-foreground">
-                  From {coverage.answered} of {coverage.planned} questions answered ·{" "}
+                  {coverageWords(coverage)} ·{" "}
                   <span className={coverage.confidence === "low" ? "text-amber-600" : ""}>
                     {coverage.confidence} confidence
                   </span>

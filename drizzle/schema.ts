@@ -1426,8 +1426,13 @@ export const screeningKits = pgTable(
 export type ScreeningCoverage = {
   /** Screening questions the call meant to ask. */
   planned: number;
+  /** Of those, how many were asked on the call (older runs: not recorded). */
+  asked?: number;
   /** Of those, how many the candidate answered (the grade uses only these). */
   answered: number;
+  /** The planned and the asked questions' ids — so the ones not reached can be named. */
+  plannedIds?: string[];
+  askedIds?: string[];
   /** answered / planned: high ≥ 75 %, medium ≥ 50 %, else low. */
   confidence: "high" | "medium" | "low";
 };
@@ -2761,7 +2766,13 @@ export type ScreeningCallDetails = {
 };
 
 /** What the candidate said for one kit question, as the call agent recorded it. */
-export type ScreeningCallAnswer = { question_id: string; summary: string; at: string };
+export type ScreeningCallAnswer = {
+  question_id: string;
+  summary: string;
+  at: string;
+  /** The candidate chose not to answer (asked, never graded). */
+  declined?: boolean;
+};
 
 /**
  * One phone screening of one application by the Screening call agent. The

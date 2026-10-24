@@ -23,7 +23,7 @@ export const HITL_TOOLS = {
   },
   request_approval: {
     description:
-      "Ask the responsible approver for a decision that only a person may make (requisition, JD or offer approval, offer release, rejection, hiring decision). Explain what you prepared and why. The run pauses until they decide.",
+      "Ask the responsible approver for a decision that only a person may make (requisition, JD or offer approval, offer release, rejection, screening decision, hiring decision). Explain what you prepared and why. The run pauses until they decide.",
     input: z.object({
       title: z.string().min(1).max(200),
       summary: z.string().min(1).max(4000),
@@ -44,6 +44,12 @@ export const HITL_TOOLS = {
             rationale: z.string().min(10).max(2000),
           }),
           z.object({
+            type: z.literal("screening_decision"),
+            applicationId: z.string().uuid(),
+            recommendation: z.enum(["proceed", "hold"]),
+            rationale: z.string().min(10).max(2000),
+          }),
+          z.object({
             type: z.literal("rejection"),
             items: z
               .array(
@@ -58,7 +64,7 @@ export const HITL_TOOLS = {
         ])
         .optional()
         .describe(
-          "What the approval is for. An offer, requisition or JD version: approving or declining in the inbox performs the real approval step, and the approver role comes from where the item is in its chain. A rejection batch: the listed candidates are rejected with their reasons only if the person approves.",
+          "What the approval is for. An offer, requisition or JD version: approving or declining in the inbox performs the real approval step, and the approver role comes from where the item is in its chain. A rejection batch: the listed candidates are rejected with their reasons only if the person approves. A screening decision (one candidate whose screening is graded): approving moves them to the first interview round (proceed) or on hold (hold); declining keeps them in screening.",
         ),
     }),
   },

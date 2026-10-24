@@ -36,6 +36,7 @@ import {
   matchScores,
   requisitions,
   type AgentType,
+  type ScreeningCoverage,
 } from "@db/schema";
 
 /* ------------------------------------------------------------------ slots */
@@ -1267,7 +1268,10 @@ export async function onTaskOpened(
         : task.kind === "gate"
           ? step
             ? `${step.replace(" · ", " — waiting for the ")}.`
-            : "This needs a decision."
+            : (task.proposedAction as { args?: { subject?: { type?: string } } } | null)?.args
+                  ?.subject?.type === "screening_decision"
+              ? "Screening is done for this candidate — who moves on is your decision."
+              : "This needs a decision."
           : revision
             ? `Revised as you asked ("${revision.reason}")${
                 revision.changes.length
@@ -1284,9 +1288,20 @@ export async function onTaskOpened(
       title: task.title,
       body,
       ...(() => {
-        const t = (task.proposedAction as { args?: { subject?: { type?: string } } } | null)?.args
-          ?.subject?.type;
-        return t ? { subjectType: t } : {};
+        const subj = (
+          task.proposedAction as {
+            args?: { subject?: { type?: string; applicationId?: string; recommendation?: string } };
+          } | null
+        )?.args?.subject;
+        if (!subj?.type) return {};
+        // A screening decision shows the graded result (and "Why this score") on its card.
+        return subj.type === "screening_decision"
+          ? {
+              subjectType: subj.type,
+              applicationId: subj.applicationId,
+              recommendation: subj.recommendation,
+            }
+          : { subjectType: subj.type };
       })(),
       ...(step ? { step } : {}),
       ...(repeated ? { repeated: true } : {}),
@@ -1420,7 +1435,27 @@ export type StageKey =
   | "offer"
   | "joining";
 
+/** One candidate on the screening board (the hiring journey's Screening step). */
+export type ScreeningBoardRow = {
+  applicationId: string;
+  name: string;
+  /** Where they are, in plain words ("Call booked Sat 24 Oct, 16:13", "Your decision"). */
+  status: string;
+  /** decide = waiting for a person; working = an agent or the candidate is on it; done; stopped. */
+  tone: "decide" | "working" | "done" | "stopped";
+  score: number | null;
+  /** "Proceed", "Probe further", "Hold". */
+  recommendation: string | null;
+  /** "2 asked of 4 planned · both answered". */
+  coverage: string | null;
+  runId: string | null;
+  /** The open screening decision, when one waits for a person. */
+  taskId: string | null;
+};
+
 export type DeskProgress = {
+  /** Each screened (or shortlisted) candidate's screening, live. */
+  screening?: ScreeningBoardRow[];
   /** The requisition was closed, rejected or deleted — the journey has ended. */
   ended?: { status: "closed" | "rejected" | "deleted"; reason: string | null; by: string | null };
   stages: { key: StageKey; label: string; state: "done" | "current" | "todo" }[];
@@ -1578,7 +1613,10 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
       current === s.key ? "current" : current === null ? "done" : "todo";
     return { key: s.key, label: s.label, state };
   });
-  if (current === null) return { stages, next: null };
+  // The screening board stays with the Screening step after the first candidate moves on.
+  const screening = conv.requisitionId ? await screeningBoard(conv.orgId, conv.requisitionId) : [];
+  const board = screening.length ? { screening } : {};
+  if (current === null) return { stages, next: null, ...board };
   const cur: StageKey = current;
 
   const TEXT: Record<StageKey, string> = {
@@ -1588,7 +1626,7 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
     candidates:
       "The Intake & matching agent searches the talent pool and posts a ranked list here.",
     screening:
-      'Pick candidates from the ranked list (or type "talk to the first 5"); the Screening agent prepares their screening — an AI screening call when your organisation screens by phone, otherwise the written assessment. Move the ones who pass to an interview round (Manual mode → Screening calls or the candidate page).',
+      'Pick candidates from the ranked list (or type "talk to the first 5"); the Screening agent prepares their screening — an AI screening call when your organisation screens by phone, otherwise the written assessment. When a candidate is graded it asks you here who moves on: approving moves them to an interview round.',
     interviews:
       "The Interview coordinator books the rounds. After each interview the interviewer submits a scorecard (My interviews).",
     decision:
@@ -1661,6 +1699,7 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
   }
   return {
     stages,
+    ...board,
     next: {
       stage: cur,
       text: TEXT[cur],
@@ -1671,6 +1710,172 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
       waitingForYou: Number(w?.n ?? 0),
     },
   };
+}
+
+type BoardFacts = {
+  stage: string;
+  call: string | null;
+  endReason: string | null;
+  dueAt: string | null;
+  assessment: string | null;
+  graded: boolean;
+  decisionOpen: boolean;
+};
+
+const ROUND_STAGES = new Set(["l1", "l2", "l3"]);
+const LATER_STAGES = new Set([
+  "offer",
+  "offer_pending",
+  "offer_released",
+  "offer_accepted",
+  "hired",
+  "joined",
+  "joining_deferred",
+]);
+
+/** Where one candidate's screening stands, in plain words (pure; unit-tested). */
+export function boardStatus(
+  f: BoardFacts,
+  at: (iso: string | null) => string,
+): { status: string; tone: ScreeningBoardRow["tone"] } {
+  if (ROUND_STAGES.has(f.stage))
+    return { status: `Moved to interview (${f.stage.toUpperCase()})`, tone: "done" };
+  if (LATER_STAGES.has(f.stage)) return { status: "Past interviews", tone: "done" };
+  if (f.stage === "rejected") return { status: "Not moving on", tone: "stopped" };
+  if (f.stage === "withdrawn") return { status: "Withdrew", tone: "stopped" };
+  if (f.decisionOpen) return { status: "Your decision", tone: "decide" };
+  if (f.stage === "on_hold") return { status: "On hold", tone: "stopped" };
+  switch (f.call) {
+    case "dialling":
+    case "in_progress":
+      return { status: "On the AI screening call now", tone: "working" };
+    case "requested":
+      return { status: "Call waiting for approval", tone: "decide" };
+    case "approved":
+      return { status: `Call arranged (from ${at(f.dueAt)})`, tone: "working" };
+    case "callback":
+      return { status: `Call booked for ${at(f.dueAt)}`, tone: "working" };
+    case "no_answer":
+    case "failed":
+      return { status: `Not reached — trying again ${at(f.dueAt)}`, tone: "working" };
+    case "completed":
+      if (f.endReason === "not_interested")
+        return { status: "Not interested in the role", tone: "stopped" };
+      return f.graded
+        ? { status: "Screened — the Screening agent is reviewing", tone: "working" }
+        : { status: "Called — nothing to grade", tone: "stopped" };
+    case "fell_back":
+      if (f.endReason === "prefers_human")
+        return { status: "Asked for a person to call", tone: "decide" };
+      break;
+  }
+  if (f.assessment === "completed")
+    return f.graded
+      ? { status: "Assessment done — the Screening agent is reviewing", tone: "working" }
+      : { status: "Assessment done", tone: "working" };
+  if (f.assessment === "sent") return { status: "Written assessment sent", tone: "working" };
+  if (f.assessment === "expired") return { status: "Assessment link closed", tone: "stopped" };
+  return { status: "Preparing screening", tone: "working" };
+}
+
+/**
+ * The role's screening board: everyone shortlisted or screened, with where
+ * their screening stands, the graded result and any decision waiting — so a
+ * team screening five people sees all five at a glance.
+ */
+async function screeningBoard(orgId: string, requisitionId: string): Promise<ScreeningBoardRow[]> {
+  const rows = (await db.execute(sql`
+    select a.id, c.full_name as name, a.stage,
+      sc.status as call, sc.end_reason, sc.due_at,
+      ca.status as assessment,
+      sr.id as run_id, sr.screening_score as score, sr.recommendation as rec,
+      sr.input_kind as kind, sr.coverage,
+      t.id as task_id
+    from applications a
+    join candidates c on c.id = a.candidate_id
+    left join lateral (
+      select status, end_reason, due_at from screening_calls
+      where application_id = a.id and org_id = ${orgId} and status <> 'cancelled'
+      order by created_at desc limit 1) sc on true
+    left join lateral (
+      select status from candidate_assessments
+      where candidate_id = a.candidate_id and requisition_id = a.requisition_id and org_id = ${orgId}
+      order by created_at desc limit 1) ca on true
+    left join lateral (
+      select id, screening_score, recommendation, input_kind, coverage from screening_runs
+      where application_id = a.id and org_id = ${orgId}
+      order by created_at desc limit 1) sr on true
+    left join lateral (
+      select id from agent_tasks
+      where org_id = ${orgId} and status = 'open' and kind = 'gate'
+        and proposed_action -> 'args' -> 'subject' ->> 'type' = 'screening_decision'
+        and proposed_action -> 'args' -> 'subject' ->> 'applicationId' = a.id::text
+      limit 1) t on true
+    where a.requisition_id = ${requisitionId} and a.org_id = ${orgId}
+      and (a.stage = 'shortlisted' or sc.status is not null or ca.status is not null or sr.id is not null)
+    order by c.full_name
+    limit 50`)) as unknown as {
+    id: string;
+    name: string;
+    stage: string;
+    call: string | null;
+    end_reason: string | null;
+    due_at: string | null;
+    assessment: string | null;
+    run_id: string | null;
+    score: number | null;
+    rec: string | null;
+    kind: string | null;
+    coverage: ScreeningCoverage | null;
+    task_id: string | null;
+  }[];
+  if (!rows.length) return [];
+  const tz = await orgTimeZone(orgId);
+  const at = (d: string | null) =>
+    d
+      ? new Date(d).toLocaleString("en-IN", {
+          weekday: "short",
+          day: "numeric",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+          timeZone: tz,
+        })
+      : "soon";
+  const { coverageWords } = await import("@/lib/screening-coverage");
+  return rows.map((r) => {
+    const { status, tone } = boardStatus(
+      {
+        stage: r.stage,
+        call: r.call,
+        endReason: r.end_reason,
+        dueAt: r.due_at,
+        assessment: r.assessment,
+        graded: Boolean(r.run_id),
+        decisionOpen: Boolean(r.task_id),
+      },
+      at,
+    );
+    return {
+      applicationId: r.id,
+      name: r.name,
+      status,
+      tone,
+      score: r.run_id ? r.score : null,
+      recommendation: !r.rec
+        ? null
+        : r.kind === "phone_ai" && r.rec === "hold"
+          ? "Probe further"
+          : r.rec === "proceed"
+            ? "Proceed"
+            : r.rec === "hold"
+              ? "Hold"
+              : "Not recommended",
+      coverage: r.coverage ? coverageWords(r.coverage) : null,
+      runId: r.run_id,
+      taskId: r.task_id,
+    };
+  });
 }
 
 /**
@@ -1741,7 +1946,7 @@ async function phoneCallWait(orgId: string, requisitionId: string): Promise<stri
     );
   if (screened.length)
     parts.push(
-      `Screened by phone: ${names(screened, (r) => `${r.name}${r.score != null ? ` (${r.score}/100)` : ""}`)} — review the call on the candidate page and move those who pass to an interview round.`,
+      `Screened by phone: ${names(screened, (r) => `${r.name}${r.score != null ? ` (${r.score}/100)` : ""}`)} — the Screening agent asks you here who moves on to an interview.`,
     );
   if (human.length) parts.push(`Asked for a person to call them: ${names(human)}.`);
   if (notInterested.length) parts.push(`Not interested in the role: ${names(notInterested)}.`);

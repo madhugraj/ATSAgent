@@ -53,6 +53,8 @@ export const CALL_TOOL_INPUTS = {
   record_answer: z.object({
     question_id: z.string().min(1).max(20),
     summary: z.string().trim().min(1).max(600),
+    /** They chose not to answer: asked, never graded and never held against them. */
+    declined: z.boolean().optional(),
   }),
   book_slot: z.object({
     when_local: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/),
@@ -69,7 +71,7 @@ export const CALL_TOOL_DESCRIPTIONS: Record<CallToolName, string> = {
   record_details:
     "Record the practical details the candidate told you, as they said them: current job title and company, total years of experience, where they live now, whether they are open to relocating, notice period in days, earliest joining date (YYYY-MM-DD), and current fixed pay, current variable pay and expected pay as rupees per year (e.g. 18 lakhs = 1800000) — only figures they actually stated; never calculate one. Anything about pay that is not a figure (a percentage hike, shares, bonuses) goes in pay_note in their words; anything else the hiring team should know (a time limit they set, skills they said are new to them) in candidate_note. Call it again as more details come; leave out anything they did not say. Never comment on the figures.",
   record_answer:
-    "After the candidate answers one of the listed screening questions: the question's id and a faithful one or two sentence summary of what the candidate said.",
+    "After you ask one of the listed screening questions: the question's id and a faithful one or two sentence summary of what the candidate said. If they chose not to answer it, set declined true and say so in the summary — it is never held against them.",
   book_slot:
     "The candidate cannot talk now and agreed a time for the call: when_local is that time as YYYY-MM-DDTHH:mm in the organisation's local time (see the current local time and the calling hours). A confirmation is e-mailed to them.",
   end_call:
@@ -97,7 +99,7 @@ export type CallState = {
   consentAt?: number;
   consentWords?: string;
   details: CallDetailsInput | null;
-  answers: { question_id: string; summary: string; at: string }[];
+  answers: { question_id: string; summary: string; at: string; declined?: boolean }[];
   booking: { whenLocal: string } | null;
   endReason: EndReason | null;
   /** How many more times the call may be moved to another time (undefined: no limit known). */
@@ -168,7 +170,7 @@ export function applyCallTool(
       return { ok: true, recorded: Object.keys(parsed.data as object) };
     }
     case "record_answer": {
-      const a = parsed.data as { question_id: string; summary: string };
+      const a = parsed.data as { question_id: string; summary: string; declined?: boolean };
       if (!questionIds.has(a.question_id))
         return { ok: false, error: "That is not one of the listed question ids." };
       state.answers = state.answers.filter((x) => x.question_id !== a.question_id);
@@ -176,8 +178,9 @@ export function applyCallTool(
         question_id: a.question_id,
         summary: a.summary,
         at: new Date(now).toISOString(),
+        ...(a.declined ? { declined: true } : {}),
       });
-      return { ok: true, answered: state.answers.length };
+      return { ok: true, asked: state.answers.length };
     }
     case "book_slot": {
       if (state.reschedulesLeft !== undefined && state.reschedulesLeft <= 0)
@@ -217,7 +220,7 @@ export function callOutcome(
   if (s.endReason === "prefers_human") return "prefers_human";
   if (s.consent === false || s.endReason === "declined") return "consent_declined";
   if (s.endReason === "not_interested") return "not_interested";
-  if (s.consent === true && (s.answers.length > 0 || s.endReason === "completed"))
+  if (s.consent === true && (s.answers.some((a) => !a.declined) || s.endReason === "completed"))
     return "completed";
   // Voicemail, silence, or they hung up before agreeing: try again later.
   return "no_answer";

@@ -4,6 +4,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { RECENT_MESSAGES, SCREENABLE, foldText, supersededMessages } from "@/lib/desk-view";
 import { AgentMarkdown } from "@/components/AgentMarkdown";
+import { ScreeningResultSummary, WhyThisScore } from "@/components/ScreeningRationale";
 import { z } from "zod";
 import {
   Bot,
@@ -624,6 +625,13 @@ function Card({
   if (card.type === "ranked_candidates")
     return <RankedCard card={card} conv={conv} onChanged={onChanged} />;
   if (card.type === "task") return <TaskCard card={card} conv={conv} onChanged={onChanged} />;
+  if (card.type === "screening_result")
+    return (
+      <ScreeningResultSummary
+        runId={String(card["runId"])}
+        applicationId={String(card["applicationId"])}
+      />
+    );
   if (card.type === "reasoning")
     return <Thinking why={card as unknown as Why} conv={conv} onChanged={onChanged} />;
   if (card.type === "jd") return <JdCard card={card} />;
@@ -922,6 +930,10 @@ function TaskCard({
   // A requisition in approval can be sent back for changes instead of declined for good.
   const sendable =
     kind === "gate" && (card["subjectType"] ?? conv.taskSubjects[taskId]) === "requisition";
+  // A screening decision: approve moves the candidate on; declining keeps them
+  // in screening or, with a reason, rejects them (the person's decision).
+  const screening = kind === "gate" && card["subjectType"] === "screening_decision";
+  const proceed = card["recommendation"] === "proceed";
   const status = conv.tasks[taskId] ?? "open";
   const details =
     conv.taskDetails[taskId] ??
@@ -958,6 +970,11 @@ function TaskCard({
         </Badge>
       </div>
       {card["revision"] ? <RevisionNote revision={card["revision"] as Revision} /> : null}
+      {screening && card["applicationId"] ? (
+        <div className="mt-2">
+          <ScreeningResultSummary applicationId={String(card["applicationId"])} />
+        </div>
+      ) : null}
       {details.length ? (
         <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 rounded-md bg-muted/40 p-2 text-xs">
           {details.map((d) => (
@@ -1015,47 +1032,93 @@ function TaskCard({
               rows={2}
               maxLength={1000}
               placeholder={
-                sendable
-                  ? "What should change? (e.g. social profiling 25%) — or why you are declining"
-                  : kind === "gate"
-                    ? "Why are you declining? (required — the agent and the team act on it)"
-                    : "Why? (optional — tells the agent what to change)"
+                screening
+                  ? "Why? (required — e.g. the evaluation depth is not enough for this role)"
+                  : sendable
+                    ? "What should change? (e.g. social profiling 25%) — or why you are declining"
+                    : kind === "gate"
+                      ? "Why are you declining? (required — the agent and the team act on it)"
+                      : "Why? (optional — tells the agent what to change)"
               }
               onChange={(e) => setWhy(e.target.value)}
             />
-            <div className="flex flex-wrap gap-2">
-              {sendable ? (
+            {screening ? (
+              <div className="flex flex-wrap gap-2">
                 <Button
                   size="sm"
+                  variant="outline"
                   disabled={busy || why.trim().length < 3}
-                  title="Back to draft with your change; the agent applies it and the approvals start over"
-                  onClick={() => decide({ status: "rejected", reason: why.trim(), changes: true })}
+                  title="Nothing moves; your reason is noted on the candidate"
+                  onClick={() => decide({ status: "rejected", reason: why.trim() })}
                 >
-                  Send back for changes
+                  Keep in screening
                 </Button>
-              ) : null}
-              <Button
-                size="sm"
-                variant="destructive"
-                disabled={busy || (kind === "gate" && why.trim().length < 3)}
-                onClick={() =>
-                  decide({
-                    status: "rejected",
-                    ...(why.trim() ? { reason: why.trim() } : {}),
-                  })
-                }
-              >
-                {sendable ? "Decline (final)" : "Decline"}
-              </Button>
-              <Button size="sm" variant="ghost" disabled={busy} onClick={() => setDeclining(false)}>
-                Back
-              </Button>
-            </div>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  disabled={busy || why.trim().length < 3}
+                  title="Rejects the candidate for this role, with your reason on record"
+                  onClick={() =>
+                    decide({ status: "rejected", reason: why.trim(), rejectCandidate: true })
+                  }
+                >
+                  Reject candidate
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => setDeclining(false)}
+                >
+                  Back
+                </Button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {sendable ? (
+                  <Button
+                    size="sm"
+                    disabled={busy || why.trim().length < 3}
+                    title="Back to draft with your change; the agent applies it and the approvals start over"
+                    onClick={() =>
+                      decide({ status: "rejected", reason: why.trim(), changes: true })
+                    }
+                  >
+                    Send back for changes
+                  </Button>
+                ) : null}
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  disabled={busy || (kind === "gate" && why.trim().length < 3)}
+                  onClick={() =>
+                    decide({
+                      status: "rejected",
+                      ...(why.trim() ? { reason: why.trim() } : {}),
+                    })
+                  }
+                >
+                  {sendable ? "Decline (final)" : "Decline"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => setDeclining(false)}
+                >
+                  Back
+                </Button>
+              </div>
+            )}
           </div>
         ) : (
           <div className="mt-2 flex flex-wrap gap-2">
             <Button size="sm" disabled={busy} onClick={() => decide({ status: "approved" })}>
-              Approve
+              {screening
+                ? proceed
+                  ? "Approve — move to interview (L1)"
+                  : "Approve — put on hold"
+                : "Approve"}
             </Button>
             {sendable ? (
               // A change is the common answer to a requisition in approval —
@@ -1070,7 +1133,7 @@ function TaskCard({
               </Button>
             ) : null}
             <Button size="sm" variant="outline" disabled={busy} onClick={() => setDeclining(true)}>
-              {sendable ? "Decline (final)" : "Decline"}
+              {screening ? "Decline" : sendable ? "Decline (final)" : "Decline"}
             </Button>
             <Link to="/agents" className="self-center text-xs text-primary underline">
               Review or edit in Agent decisions
@@ -1083,6 +1146,69 @@ function TaskCard({
 }
 
 /* ------------------------------------------------------------ progress */
+
+type BoardRow = NonNullable<DeskConversationView["progress"]["screening"]>[number];
+
+const BOARD_TONE: Record<BoardRow["tone"], string> = {
+  decide: "font-semibold text-primary",
+  working: "text-muted-foreground",
+  done: "text-emerald-600",
+  stopped: "text-muted-foreground",
+};
+
+/** Everyone in screening for this role at a glance: where they are, the score, what waits. */
+function ScreeningBoard({ rows }: { rows: BoardRow[] }) {
+  const waiting = rows.filter((r) => r.tone === "decide").length;
+  return (
+    <div
+      className="mt-1.5 rounded-md border border-border p-2 text-xs"
+      aria-label="Screening board"
+    >
+      <p className="mb-1 flex items-center justify-between font-medium">
+        <span>
+          {rows.length} {rows.length === 1 ? "candidate" : "candidates"} in screening
+        </span>
+        {waiting ? <span className="text-primary">{waiting} waiting for you</span> : null}
+      </p>
+      <ul className="divide-y divide-border">
+        {rows.map((r) => (
+          <li key={r.applicationId} className="py-1.5">
+            <div className="flex items-center gap-2">
+              <span className="min-w-0 flex-1 truncate font-medium">{r.name}</span>
+              {r.score != null ? (
+                <span className="num rounded border border-border px-1 font-semibold">
+                  {r.score}
+                </span>
+              ) : null}
+            </div>
+            <p className={BOARD_TONE[r.tone]}>{r.status}</p>
+            {r.recommendation || r.coverage ? (
+              <p className="text-muted-foreground">
+                {[r.recommendation, r.coverage].filter(Boolean).join(" · ")}
+              </p>
+            ) : null}
+            <div className="mt-0.5 flex flex-wrap gap-2">
+              {r.taskId ? (
+                <button
+                  type="button"
+                  className="font-medium text-primary underline"
+                  onClick={() =>
+                    document
+                      .querySelector(`[data-open-task="${r.taskId}"]`)
+                      ?.scrollIntoView({ block: "center", behavior: "smooth" })
+                  }
+                >
+                  Decide
+                </button>
+              ) : null}
+              {r.runId ? <WhyThisScore runId={r.runId} label="Why this score" link /> : null}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 function RetryButton({
   conv,
@@ -1233,6 +1359,9 @@ function JourneyPanel({ conv, onChanged }: { conv: DeskConversationView; onChang
                     ) : null}
                     {conv.activity ? <ActivityList a={conv.activity} /> : null}
                   </div>
+                ) : null}
+                {s.key === "screening" && p.screening?.length ? (
+                  <ScreeningBoard rows={p.screening} />
                 ) : null}
               </div>
             </li>

@@ -213,7 +213,7 @@ export function registerPhase2Agents(): void {
       "Reject a candidate — rejections are proposed, a person decides",
       "Use anything but the requisition's stated requirements as a rejection reason",
       "Move a candidate flagged for prompt injection",
-      "Move a candidate out of an interview round, an offer or a closed stage — or move anyone just to make another tool possible; if a tool refuses because of a candidate's stage, report it and stop",
+      "Move a candidate to another stage — a person decides who moves on, from the screening decision it asks for; if a tool refuses because of a candidate's stage, report it and stop",
     ],
     scope: {
       reads: [
@@ -274,7 +274,10 @@ export function registerPhase2Agents(): void {
     // a person or are not interested; booked calls wait for their time.
     // 1.9.1: a phone screen's score comes with its coverage and confidence; a low- or
     // medium-confidence phone score is never grounds to put someone on hold.
-    version: "1.9.1",
+    // 1.10.0: the recommendation becomes a decision for a person in the hiring desk
+    // (request_approval, subject screening_decision: proceed → L1, or hold) instead of a
+    // note only; the agent no longer moves anyone on hold itself.
+    version: "1.10.0",
     owner: "hr_head",
     responsibility:
       "Moves shortlisted candidates through screening: kits, AI screening calls, assessments, the pay & availability form, reminders and proceed / hold notes.",
@@ -287,19 +290,20 @@ export function registerPhase2Agents(): void {
     ],
     scope: {
       reads: ["shortlisted applications", "screening kits, calls and assessment results"],
-      writes: ["screening kits", "assessments", "candidate notes", "stage move to on hold"],
+      writes: ["screening kits", "assessments", "candidate notes"],
       external: [
         "candidate assessment invitations and reminders",
         "AI screening calls to shortlisted candidates (placed by the Screening call agent inside the organisation's calling window)",
         "the pay & availability form (answers go to TA and HR, not to this agent)",
       ],
     },
-    gates: ["general"],
+    gates: ["screening_decision", "general"],
     riskTier: "medium",
     evals: [
       "screening: prepares the kit and proposes the assessment",
       "screening: asks for a phone screening call when the organisation screens by phone",
       "screening: sends the written assessment when the call could not happen",
+      "screening: asks a person to decide after a graded phone screen",
     ],
     feature: "agent_screening",
     maxSteps: 20,
@@ -313,7 +317,6 @@ export function registerPhase2Agents(): void {
       "send_compensation_form",
       "remind_assessment",
       "add_candidate_note",
-      "move_candidate",
     ],
     system: [
       "You are the screening agent for one requisition. You move shortlisted candidates through screening.",
@@ -322,7 +325,7 @@ export function registerPhase2Agents(): void {
       "3. Phone screening: if phoneScreening.available and there is no phone call yet and no assessment was sent, request_screening_call (a person approves it unless you are Autonomous). If it is refused — no usable mobile number, or anything else — send_assessment instead. While a call is arranged, booked with the candidate or in progress (approved, dialling, in_progress, callback, no_answer, failed) do nothing more for that candidate now: the call will be placed and retried on its own.",
       "3a. After a call, by how it ended (phoneScreening.call.endReason): prefers_written, wrong_person, no_number or unreachable (fell_back), or consent_declined — send_assessment if none was sent. prefers_human — do not send the assessment; add_candidate_note that the candidate asked for a person from the team to call them. not_interested — add_candidate_note that they are not interested in the role; a person decides (never move or reject them for it). If phone screening is not available at all and no assessment was sent: send_assessment. Never remind about an assessment yourself: reminders, the overdue follow-up and closing the link are automatic.",
       "3b. If payDetails shows the expected CTC or notice period is not known and form is not_sent (or expired), send_compensation_form. Never ask about or state pay yourself; reminders are automatic.",
-      '4. When an assessment is completed or a screening call is graded: get_screening_status, then add_candidate_note with this structure (plain lines, no tables):\nRecommendation: Proceed / Hold — one sentence why.\nWritten assessment (direct evidence): score; the strongest and the weakest areas with their scores and a short quote of the evidence; strengths; red flags (or "none").\nCV match (automated, from the CV): score; each automated risk flag marked confirmed, contradicted (say by what) or unverified. Never present a CV flag as a concern when the assessment contradicts it; never invent a risk that neither source states.\nProbe in the screening call: 2–3 points tied to the weakest areas or unverified risks, pointing to the kit\'s questions where one already covers it.\nIf the evidence is clearly weak, move_candidate to on_hold with the reason; never reject. A phone screen (screeningCall.by phone_ai) is graded only on the questions the candidate answered: report its coverage and confidence beside the score, and when confidence is low or medium never move anyone on hold for it — recommend probing the uncovered areas in the interview.',
+      "4. When an assessment is completed or a screening call is graded: get_screening_status, then add_candidate_note with this structure (plain lines, no tables):\nRecommendation: Proceed / Hold — one sentence why.\nWritten assessment (direct evidence): score; the strongest and the weakest areas with their scores and a short quote of the evidence; strengths; red flags (or \"none\").\nCV match (automated, from the CV): score; each automated risk flag marked confirmed, contradicted (say by what) or unverified. Never present a CV flag as a concern when the assessment contradicts it; never invent a risk that neither source states.\nProbe in the screening call: 2–3 points tied to the weakest areas or unverified risks, pointing to the kit's questions where one already covers it.\nA phone screen (screeningCall.by phone_ai) is graded only on the questions the candidate answered: report its coverage and confidence beside the score, and when confidence is low or medium never recommend a hold for it — recommend proceeding and probing the uncovered areas in the interview.\n4a. Then ask the person to decide: request_approval with subject {type: 'screening_decision', applicationId, recommendation: 'proceed' or 'hold', rationale} — the rationale is two or three plain sentences on job-relevant evidence only (the scores, the strongest and weakest areas, what to probe). One request per candidate; if one is already waiting, do not ask again. Never move the candidate yourself and never reject: approving moves them to the first interview round (or on hold), and only a person may reject.",
       "5. Candidates who moved on to an interview round since you were asked are past screening: skip them. If a tool refuses because of a candidate's stage, note it in your summary and stop for that candidate — never move them to make it work.",
       "Finish with a summary table in plain text: candidate, kit, phone call, assessment status, recommendation.",
     ].join("\n"),
@@ -358,7 +361,9 @@ export function registerPhase2Agents(): void {
     // your profile", never "you applied through Hiring desk upload".
     // 1.1.5: a candidate may move the call at most the organisation's limit (default 2);
     // after that book_slot refuses and the written assessment or a person is offered.
-    version: "1.1.5",
+    // 1.1.6: a question the candidate chose not to answer is recorded as declined
+    // (asked, never graded), so the grade can say what was asked versus planned.
+    version: "1.1.6",
     owner: "hr_head",
     responsibility:
       "Holds one AI screening phone call with a shortlisted candidate the way an HR recruiter does: says who it is and why it is calling, asks consent, explains the role and why it called them, records their practical details (including the pay they state, for HR only) and their answers to the role's screening questions, or agrees a better time — nothing else.",

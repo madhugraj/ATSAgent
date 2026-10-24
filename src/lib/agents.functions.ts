@@ -123,6 +123,8 @@ const Decision = z.discriminatedUnion("status", [
     reason: z.string().max(2000).optional(),
     /** Send back for changes (requisitions in approval) instead of a final decline. */
     changes: z.boolean().optional(),
+    /** Decline a screening decision by rejecting the candidate (needs a reason). */
+    rejectCandidate: z.boolean().optional(),
   }),
   z.object({ status: z.literal("answered"), answer: z.string().min(1).max(4000) }),
 ]);

@@ -333,7 +333,7 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
     if (app && ["applied", "ai_screened", "shortlisted", "reserve", "on_hold"].includes(app.stage))
       await dispatch(
         "screening",
-        `Candidate application ${applicationId} (${req.code} "${req.title}") completed the written assessment${p.score != null ? ` (${p.score}/100)` : ""}. Read the result and add your proceed / hold recommendation as a candidate note, citing the scores and red flags. Do not move them to an interview round — a person decides.`,
+        `Candidate application ${applicationId} (${req.code} "${req.title}") completed the written assessment${p.score != null ? ` (${p.score}/100)` : ""}. Read the result, add your proceed / hold recommendation as a candidate note citing the scores and red flags, then ask a person to decide (request_approval, screening_decision). Never move them yourself — a person decides.`,
         { type: "application", id: applicationId },
       );
   }
@@ -349,7 +349,7 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
       await dispatch(
         "screening",
         p.status === "completed" && p.endReason !== "not_interested"
-          ? `Candidate application ${applicationId} (${req.code} "${req.title}") took the AI screening call and the answers were graded. Read the result and add your proceed / hold recommendation as a candidate note. Do not move them to an interview round — a person decides.`
+          ? `Candidate application ${applicationId} (${req.code} "${req.title}") took the AI screening call and the answers were graded. Read the result, add your proceed / hold recommendation as a candidate note, then ask a person to decide (request_approval, screening_decision). Never move them yourself — a person decides.`
           : `Candidate application ${applicationId} (${req.code} "${req.title}"): the AI screening call ended — ${p.endReason ?? p.status}. Act on how it ended as your instructions say (the written assessment, or a note for a person).`,
         { type: "application", id: applicationId },
       );

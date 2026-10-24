@@ -1073,6 +1073,50 @@ export function scenarios(): ScriptedScenario[] {
       ],
     },
     {
+      name: "screening: asks a person to decide after a graded phone screen",
+      agentType: "screening",
+      setup: async ({ orgId, userId }) => {
+        const requisitionId = await seedRequisition(orgId, userId, "approved");
+        const app = await seedApplication(orgId, requisitionId, "Meera", "shortlisted", 88);
+        const { candidateId } = await seedPhoneScreening(orgId, userId, app, {
+          status: "completed",
+          endReason: "completed",
+          consented: true,
+          graded: 74,
+        });
+        return { requisitionId, app, cand: candidateId };
+      },
+      goal: (d) =>
+        `Candidate application ${d["app"]} took the AI screening call and the answers were graded. Read the result, add your proceed / hold recommendation as a candidate note, then ask a person to decide (request_approval, screening_decision). Never move them yourself — a person decides. app=${d["app"]} cand=${d["cand"]}\n\nRequisition id: ${d["requisitionId"]}`,
+      decide: () => ({ status: "approved" }),
+      expect: {
+        status: "done",
+        calls: ["get_screening_status", "add_candidate_note", "request_approval"],
+        neverCalls: ["move_candidate", "send_assessment"],
+      },
+      script: [
+        (m) => call("s", "get_screening_status", { applicationId: fromGoal(m, "app") }),
+        (m) =>
+          call("n", "add_candidate_note", {
+            candidateId: fromGoal(m, "cand"),
+            note: "Recommendation: Proceed — 74/100 on the phone screen, both planned areas answered.",
+          }),
+        (m) =>
+          call("d", "request_approval", {
+            title: "Screening decision: Meera",
+            summary: "Phone screen 74/100 from both planned questions; proceed to L1.",
+            assignee_role: "recruiter",
+            subject: {
+              type: "screening_decision",
+              applicationId: fromGoal(m, "app"),
+              recommendation: "proceed",
+              rationale: "Strong on Kubernetes in production; probe incident ownership in L1.",
+            },
+          }),
+        say("Meera's phone screen is graded; I asked you to decide whether she moves to L1."),
+      ],
+    },
+    {
       name: "screening: sends the written assessment when the call could not happen",
       agentType: "screening",
       setup: async ({ orgId, userId }) => {
@@ -1291,10 +1335,10 @@ async function seedPhoneScreening(
   orgId: string,
   userId: string,
   applicationId: string,
-  call?: { status: string; endReason?: string; consented?: boolean },
-): Promise<void> {
+  call?: { status: string; endReason?: string; consented?: boolean; graded?: number },
+): Promise<{ candidateId: string }> {
   const { db } = await import("../../src/server/db");
-  const { applications, candidates, screeningCalls, screeningKits } =
+  const { applications, candidates, screeningCalls, screeningKits, screeningRuns } =
     await import("../../drizzle/schema");
   const { eq } = await import("drizzle-orm");
   const { setPhoneScreeningPolicyCore, DEFAULT_PHONE_SCREENING_POLICY } =
@@ -1344,6 +1388,51 @@ async function seedPhoneScreening(
       ] as never,
     })
     .returning({ id: screeningKits.id });
+  // A graded phone screen: both planned questions asked and answered.
+  const run =
+    call?.graded != null
+      ? (
+          await db
+            .insert(screeningRuns)
+            .values({
+              orgId,
+              kitId: kit!.id,
+              candidateId: app!.candidateId,
+              requisitionId: app!.requisitionId,
+              applicationId,
+              inputKind: "phone_ai",
+              screeningScore: call.graded,
+              recommendation: "proceed",
+              coverage: {
+                planned: 2,
+                asked: 2,
+                answered: 2,
+                plannedIds: ["q1", "q2"],
+                askedIds: ["q1", "q2"],
+                confidence: "high",
+              },
+              verdicts: [
+                {
+                  question_id: "q1",
+                  question: "Tell me about running Kubernetes in production.",
+                  verdict: "strong",
+                  score: 82,
+                  evidence: "Ran 40 clusters, led upgrades.",
+                  rationale: "Concrete production scale.",
+                },
+                {
+                  question_id: "q2",
+                  question: "Describe an incident you led.",
+                  verdict: "partial",
+                  score: 61,
+                  evidence: "Described a DNS outage; postmortem by someone else.",
+                  rationale: "Led the fix, not the follow-up.",
+                },
+              ] as never,
+            })
+            .returning({ id: screeningRuns.id })
+        )[0]
+      : undefined;
   if (call)
     await db.insert(screeningCalls).values({
       orgId,
@@ -1356,7 +1445,9 @@ async function seedPhoneScreening(
       attempt: 1,
       endReason: call.endReason ?? null,
       consentAt: call.consented ? new Date() : null,
+      ...(run ? { screeningRunId: run.id } : {}),
     });
+  return { candidateId: app!.candidateId };
 }
 
 /* ---------------------------------------------------------- seed helpers */

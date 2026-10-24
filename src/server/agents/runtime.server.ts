@@ -15,7 +15,7 @@
  *  - every write/external action and every human decision is audited.
  */
 import { rupees } from "@/lib/money";
-import { and, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { z } from "zod/v4";
 
 import {
@@ -44,6 +44,7 @@ import {
   offers,
   onboardingDocuments,
   requisitions,
+  screeningRuns,
   type AgentTaskKind,
   type AgentType,
 } from "@db/schema";
@@ -170,6 +171,13 @@ type HiringDecisionSubject = {
   rationale: string;
   expects?: string;
 };
+type ScreeningDecisionSubject = {
+  type: "screening_decision";
+  applicationId: string;
+  recommendation: "proceed" | "hold";
+  rationale: string;
+  expects?: string;
+};
 type OfferReleaseSubject = { type: "offer_release"; offerId: string; expects?: string };
 type DocumentValidationSubject = {
   type: "document_validation";
@@ -180,6 +188,7 @@ type GateSubject =
   | RecordSubject
   | RejectionSubject
   | HiringDecisionSubject
+  | ScreeningDecisionSubject
   | OfferReleaseSubject
   | DocumentValidationSubject;
 
@@ -193,6 +202,9 @@ const OFFER_NEXT: Record<string, "pending_cbo" | "approved"> = {
 };
 
 const DECISION_STAGES = new Set(["l1", "l2", "l3", "on_hold", "reserve", "offer_pending"]);
+
+/** Where a candidate still is "in screening" — a screening decision applies only here. */
+const SCREENING_STAGES = new Set(["applied", "ai_screened", "shortlisted", "reserve", "on_hold"]);
 
 const TERMINAL_STAGES = new Set(["rejected", "hired", "joined", "withdrawn", "no_show"]);
 
@@ -399,6 +411,72 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
       subject: { ...subject, expects: row.stage },
     };
   }
+  if (subject.type === "screening_decision") {
+    const [row] = await db
+      .select({
+        stage: applications.stage,
+        name: candidates.fullName,
+        code: requisitions.code,
+        title: requisitions.title,
+      })
+      .from(applications)
+      .innerJoin(candidates, eq(candidates.id, applications.candidateId))
+      .innerJoin(requisitions, eq(requisitions.id, applications.requisitionId))
+      .where(and(eq(applications.id, subject.applicationId), eq(applications.orgId, orgId)))
+      .limit(1);
+    if (!row) return { error: "Application not found." };
+    if (!SCREENING_STAGES.has(row.stage))
+      return {
+        error: `The candidate is ${row.stage}, past screening; a screening decision no longer applies.`,
+      };
+    if (subject.recommendation === "hold" && row.stage === "on_hold")
+      return { error: "The candidate is already on hold." };
+    // Stated by the system, not left to the agent: the graded result it rests on.
+    const [graded] = await db
+      .select({ score: screeningRuns.screeningScore, coverage: screeningRuns.coverage })
+      .from(screeningRuns)
+      .where(
+        and(eq(screeningRuns.orgId, orgId), eq(screeningRuns.applicationId, subject.applicationId)),
+      )
+      .orderBy(desc(screeningRuns.createdAt))
+      .limit(1);
+    if (!graded)
+      return {
+        error:
+          "No graded screening is on record for this candidate yet — wait for the call or the assessment to be graded.",
+      };
+    // One decision per candidate at a time: never a second card for the same person.
+    const [waiting] = await db
+      .select({ id: agentTasks.id })
+      .from(agentTasks)
+      .where(
+        and(
+          eq(agentTasks.orgId, orgId),
+          eq(agentTasks.status, "open"),
+          eq(agentTasks.kind, "gate"),
+          sql`${agentTasks.proposedAction} -> 'args' -> 'subject' ->> 'type' = 'screening_decision'`,
+          sql`${agentTasks.proposedAction} -> 'args' -> 'subject' ->> 'applicationId' = ${subject.applicationId}`,
+        ),
+      )
+      .limit(1);
+    if (waiting)
+      return { error: "A screening decision for this candidate is already waiting for a person." };
+    const { coverageWords } = await import("@/lib/screening-coverage");
+    const rests = graded.coverage
+      ? ` (${coverageWords(graded.coverage)}; ${graded.coverage.confidence} confidence)`
+      : "";
+    return {
+      role: null,
+      status: row.stage,
+      toPrincipal: true,
+      detail: `Screening decision for ${row.name} (${row.code} ${row.title}).\nRecommendation: ${subject.recommendation === "proceed" ? "PROCEED to the first interview round" : "HOLD"}\nScreening score: ${graded.score}/100${rests}\nWhy: ${subject.rationale}\n\n${
+        subject.recommendation === "proceed"
+          ? "Approve to move them to the first interview round — the Interview coordinator then books it."
+          : "Approve to put them on hold."
+      } Decline to keep them in screening, or to reject them with a reason.`,
+      subject: { ...subject, expects: row.stage },
+    };
+  }
   if (subject.type === "rejection") {
     const ids = subject.items.map((i) => i.applicationId);
     const rows = await db
@@ -569,6 +647,45 @@ async function performGate(
       toStage: subject.recommendation === "reject" ? "rejected" : "on_hold",
       reason: subject.rationale,
       note: note.trim() || null,
+    });
+    return;
+  }
+  if (subject.type === "screening_decision") {
+    const [app] = await db
+      .select({ stage: applications.stage, candidateId: applications.candidateId })
+      .from(applications)
+      .where(and(eq(applications.id, subject.applicationId), eq(applications.orgId, orgId)))
+      .limit(1);
+    if (!app) throw new Error("Application not found.");
+    if (subject.expects && app.stage !== subject.expects) {
+      throw new Error("This candidate has already moved on; refresh to see their current stage.");
+    }
+    const pipeline = await import("@/lib/pipeline.server");
+    if (decision.status === "approved") {
+      // A person's decision, made as that person: into L1 raises
+      // application.advanced and the Interview coordinator books the round.
+      await pipeline.moveStageCore(actor, {
+        applicationId: subject.applicationId,
+        toStage: subject.recommendation === "proceed" ? "l1" : "on_hold",
+        reason: subject.rationale,
+        note: decision.comment?.trim() || null,
+      });
+      return;
+    }
+    if (decision.status !== "rejected") return;
+    const why = decision.reason?.trim() || null;
+    if (decision.rejectCandidate) {
+      if (!why) throw new Error("Say why the candidate is not moving on — it is kept on record.");
+      await pipeline.moveStageCore(actor, {
+        applicationId: subject.applicationId,
+        toStage: "rejected",
+        reason: why,
+      });
+      return;
+    }
+    await pipeline.addCandidateNoteCore(actor, {
+      candidateId: app.candidateId,
+      body: `Screening recommendation (${subject.recommendation}) declined — kept in screening.${why ? ` Reason: ${why}` : ""}`,
     });
     return;
   }
@@ -876,6 +993,8 @@ export type TaskDecision =
       reason?: string | undefined;
       /** Sent back with changes to make (from the hiring desk), not refused outright. */
       changes?: boolean | undefined;
+      /** A screening decision declined by rejecting the candidate (a person's decision, with a reason). */
+      rejectCandidate?: boolean | undefined;
     }
   | { status: "answered"; answer: string };
 
@@ -2037,6 +2156,31 @@ export async function cancelStaleRequests(
       ),
     )
     .returning({ id: agentTasks.id, runId: agentTasks.runId });
+  // A screening decision waiting for a person no longer applies once the candidate moved.
+  const decisions = await db
+    .update(agentTasks)
+    .set({
+      status: "cancelled",
+      // "Decided outside the inbox": a person approving this very card moves the
+      // candidate too, and their decision then takes the task over (resolveTask).
+      response: {
+        status: "cancelled",
+        reason: `Decided outside the inbox: the candidate moved from ${fromStage} to ${toStage}.`,
+      } as never,
+      decidedAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(agentTasks.orgId, orgId),
+        eq(agentTasks.status, "open"),
+        eq(agentTasks.kind, "gate"),
+        sql`${agentTasks.proposedAction} -> 'args' -> 'subject' ->> 'type' = 'screening_decision'`,
+        sql`${agentTasks.proposedAction} -> 'args' -> 'subject' ->> 'applicationId' = ${applicationId}`,
+      ),
+    )
+    .returning({ id: agentTasks.id, runId: agentTasks.runId });
+  closed.push(...decisions);
   for (const t of closed) {
     await writeAudit({
       actor: "system:stage-change",

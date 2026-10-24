@@ -23,6 +23,7 @@ process.env["SIP_USER"] ??= "3001";
 process.env["SIP_PASSWORD"] ??= "test-only";
 
 const realGateway = await import("../src/lib/ai-gateway.server");
+const { coverageWords, notReached } = await import("../src/lib/screening-coverage");
 /** What the grader was last given (system rules and the prompt). */
 const lastGrade: { system?: string; prompt?: string } = {};
 mock.module("../src/lib/ai-gateway.server", () => ({
@@ -409,12 +410,57 @@ describe("the call brief", () => {
     expect(p).not.toContain("Call book_slot with the time they asked for");
   });
 
-  test("confidence follows how many planned questions were answered", () => {
-    expect(session.callCoverage(4, 4)).toEqual({ planned: 4, answered: 4, confidence: "high" });
-    expect(session.callCoverage(4, 3)).toMatchObject({ confidence: "high" });
-    expect(session.callCoverage(4, 2)).toMatchObject({ confidence: "medium" });
-    expect(session.callCoverage(4, 1)).toMatchObject({ confidence: "low" });
-    expect(session.callCoverage(0, 0)).toMatchObject({ confidence: "low" });
+  test("coverage: planned, asked and answered; confidence follows answered / planned", () => {
+    const four = ["q1", "q2", "q3", "q4"];
+    expect(session.callCoverage(four, four, 4)).toEqual({
+      planned: 4,
+      asked: 4,
+      answered: 4,
+      plannedIds: four,
+      askedIds: four,
+      confidence: "high",
+    });
+    expect(session.callCoverage(four, four, 3)).toMatchObject({ confidence: "high" });
+    expect(session.callCoverage(four, ["q1", "q2"], 2)).toMatchObject({ confidence: "medium" });
+    expect(session.callCoverage(four, ["q1"], 1)).toMatchObject({ confidence: "low" });
+    expect(session.callCoverage([], [], 0)).toMatchObject({ confidence: "low" });
+  });
+
+  test("coverage in words: asked versus planned, skips and questions not reached", () => {
+    const c = (asked: string[], answered: number) =>
+      session.callCoverage(["q1", "q2", "q3", "q4"], asked, answered);
+    expect(coverageWords(c(["q1", "q2"], 2))).toBe(
+      "2 asked of 4 planned · both answered · 2 not reached on the call",
+    );
+    expect(coverageWords(c(["q1", "q2", "q3", "q4"], 3))).toBe(
+      "4 asked of 4 planned · 3 answered, 1 skipped by the candidate",
+    );
+    expect(coverageWords(c(["q1", "q2", "q3", "q4"], 4))).toBe(
+      "4 asked of 4 planned · all answered",
+    );
+    expect(notReached(c(["q1", "q3"], 2))).toEqual(["q2", "q4"]);
+    // Older runs recorded only planned and answered.
+    expect(coverageWords({ planned: 4, answered: 2, confidence: "medium" })).toBe(
+      "2 of 4 planned questions answered",
+    );
+    expect(notReached({ planned: 4, answered: 2, confidence: "medium" })).toEqual([]);
+  });
+
+  test("a question the candidate declines is asked, never graded", () => {
+    const s = { ...session.freshCallState(), consent: true };
+    const ids = new Set(["q1", "q2"]);
+    expect(
+      session.applyCallTool(
+        s as never,
+        "record_answer",
+        { question_id: "q2", summary: "Preferred not to say.", declined: true },
+        ids,
+        0,
+      ),
+    ).toMatchObject({ ok: true, asked: 1 });
+    expect(s.answers[0]).toMatchObject({ question_id: "q2", declined: true });
+    // Only a declined question is not a completed screen.
+    expect(session.callOutcome(s)).toBe("no_answer");
   });
 
   test("helpers: JD bullets, strengths, how they applied, calling hours", () => {
@@ -495,7 +541,7 @@ describe("in-call tools", () => {
         ids,
         0,
       ),
-    ).toMatchObject({ ok: true, answered: 1 });
+    ).toMatchObject({ ok: true, asked: 1 });
     expect(s.answers[0]!.summary).toBe("again");
     expect(
       session.applyCallTool(s as never, "book_slot", { when_local: "monday 4pm" }, ids, 0),
@@ -766,7 +812,12 @@ describe("a whole call with a fake line", () => {
     expect(lastGrade.system).toContain("Spoken-answer rubric");
     expect(lastGrade.prompt).toContain('"question_id":"q1"');
     expect(lastGrade.prompt).not.toContain('"question_id":"q3"');
-    expect(graded!.coverage).toEqual({ planned: 2, answered: 2, confidence: "high" });
+    expect(graded!.coverage).toMatchObject({
+      planned: 2,
+      asked: 2,
+      answered: 2,
+      confidence: "high",
+    });
     // The desk thread hears how it went.
     const posted = await db
       .select({ agentType: hiringMessages.agentType, body: hiringMessages.body })
@@ -774,7 +825,15 @@ describe("a whole call with a fake line", () => {
       .where(eq(hiringMessages.conversationId, conv!.id));
     const fromCall = posted.filter((m) => m.agentType === "screening_call");
     expect(fromCall).toHaveLength(1);
-    expect(fromCall[0]!.body).toMatch(/from 2 of 2 questions answered \(high confidence\)/);
+    expect(fromCall[0]!.body).toContain("(2 asked of 2 planned · both answered; high confidence)");
+    // …with the result card that opens "Why this score".
+    const card = (
+      await db
+        .select({ card: hiringMessages.card })
+        .from(hiringMessages)
+        .where(eq(hiringMessages.conversationId, conv!.id))
+    ).find((m) => (m.card as { type?: string } | null)?.type === "screening_result");
+    expect(card?.card).toMatchObject({ runId: r.screeningRunId, applicationId: appId });
     // No amounts anywhere on the thread.
     expect(JSON.stringify(posted)).not.toMatch(/lakhs|3200000|2400000/);
 
