@@ -457,6 +457,30 @@ describe("rules", () => {
   });
 });
 
+describe("an agent going round in circles", () => {
+  test("a run that keeps asking people questions is flagged", async () => {
+    const id = await run("interview");
+    const ask = (n: number) =>
+      db.insert(agentTasks).values(
+        Array.from({ length: n }, () => ({
+          orgId,
+          runId: id,
+          kind: "clarification" as const,
+          title: "q",
+        })),
+      );
+    await ask(HEALTH.questionsPerRun - 1);
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "hitl.repeated_questions")).toBeUndefined();
+    await ask(1);
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "hitl.repeated_questions")).toMatchObject({
+      agentType: "interview",
+      severity: "warning",
+    });
+  });
+});
+
 describe("scheduler heartbeat", () => {
   test("a tick records liveness; an old tick reads as stopped", async () => {
     await heartbeatAndMaybeEvaluate({ claimed: 0 });

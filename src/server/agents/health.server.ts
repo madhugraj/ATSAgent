@@ -64,6 +64,8 @@ export const HEALTH = {
   quietListingDays: 14,
   /** Role-limited CVs still kept this many days after they became due for erasure. */
   roleLimitedOverdueDays: 7,
+  /** One run asking people this many questions (7 days) is going round in circles. */
+  questionsPerRun: 3,
   /** Phone screening: a call still not placed this many hours after it was due. */
   callOverdueHours: 3,
   /** …a call still dialling / in progress this many minutes later (the worker stopped). */
@@ -733,6 +735,27 @@ export const RULES: Rule[] = [
           detail: x,
         },
       ];
+    },
+  },
+  {
+    id: "hitl.repeated_questions",
+    element: "hitl",
+    severity: "warning",
+    description: `A run asked people ${HEALTH.questionsPerRun} or more questions in 7 days — the agent may be going round in circles (asking again instead of acting on the answer or handing off).`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ agent_type: string; runs: number; most: number }>(sql`
+        select r.agent_type, count(*)::int runs, max(q.n)::int most from (
+          select run_id, count(*) n from agent_tasks
+          where org_id = ${orgId} and kind = 'clarification'
+            and created_at >= now() - interval '7 days'
+          group by run_id having count(*) >= ${HEALTH.questionsPerRun}) q
+        join agent_runs r on r.id = q.run_id
+        group by r.agent_type`);
+      return r.map((x) => ({
+        agentType: x.agent_type,
+        title: `${x.runs} run${x.runs === 1 ? "" : "s"} asked people ${x.most} questions or more`,
+        detail: { runs: x.runs, mostQuestions: x.most },
+      }));
     },
   },
   {

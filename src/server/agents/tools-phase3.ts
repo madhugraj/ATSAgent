@@ -150,7 +150,7 @@ export function registerPhase3Tools(): void {
   registerTool({
     name: "list_panel_options",
     description:
-      "Who can interview for a requisition: active members holding hiring-manager or department-head roles, and members who interviewed for it before (with how many rounds).",
+      "Who can interview for a requisition: every active member of the organisation, best first — those who interviewed for it before (with how many rounds), then hiring managers and department heads, then everyone else. `basis` says why each is listed. Only people in this list can be invited.",
     input: z.object({ requisitionId: z.string().uuid() }),
     risk: "read",
     run: async (ctx, i) => {
@@ -197,17 +197,22 @@ export function registerPhase3Tools(): void {
         if (m.role) e.roles.push(m.role);
         byEmail.set(key, e);
       }
+      // Everyone active can interview; the order (and `basis`) says who fits best.
+      const rank = { past_rounds: 0, hiring_manager: 1, department_head: 1, member: 2 } as const;
       return [...byEmail.values()]
-        .map((m) => ({
-          ...m,
-          pastRounds: past.find((p) => p.email === m.email.toLowerCase())?.rounds ?? 0,
-        }))
-        .filter(
-          (m) =>
-            m.pastRounds > 0 ||
-            m.roles.some((r) => r === "hiring_manager" || r === "department_head"),
-        )
-        .sort((a, b) => b.pastRounds - a.pastRounds);
+        .map((m) => {
+          const pastRounds = past.find((p) => p.email === m.email.toLowerCase())?.rounds ?? 0;
+          const basis: keyof typeof rank =
+            pastRounds > 0
+              ? "past_rounds"
+              : m.roles.includes("hiring_manager")
+                ? "hiring_manager"
+                : m.roles.includes("department_head")
+                  ? "department_head"
+                  : "member";
+          return { ...m, pastRounds, basis };
+        })
+        .sort((a, b) => rank[a.basis] - rank[b.basis] || b.pastRounds - a.pastRounds);
     },
   });
 
