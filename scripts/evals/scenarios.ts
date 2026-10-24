@@ -3,7 +3,7 @@
  * a live model via scripts/agent-eval.ts, and against `script` (scripted
  * model replies) in CI via scripts/agent-eval.test.ts.
  */
-import { z } from "zod/v4";
+import { z } from "zod";
 
 import type { AgentStepResult } from "../../src/lib/ai-gateway.server";
 import type { AgentTool } from "../../src/server/agents/registry";
