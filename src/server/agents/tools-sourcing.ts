@@ -5,7 +5,7 @@
  * approves it unless the invitation template is pre-approved.
  */
 import { and, eq } from "drizzle-orm";
-import { z } from "zod/v4";
+import { z } from "zod";
 
 import { db } from "../db";
 import { organizations, requisitions } from "@db/schema";
