@@ -356,7 +356,9 @@ describe("the call brief", () => {
     expect(p).toContain("written assessment by e-mail, or a call from a person");
     expect(p).toContain("Keep the payments platform reliable as it grows.");
     expect(p).toContain("What fits from their CV: Kubernetes, Go");
-    expect(p).toMatch(/Practical details, before anything technical[\s\S]*expected pay — ask afresh/);
+    expect(p).toMatch(
+      /Practical details, before anything technical[\s\S]*expected pay — ask afresh/,
+    );
     expect(p).toContain("or skip the consent, politely");
     expect(p).toContain("(their CV says Acme, about 7 years — confirm it rather than read it out)");
     expect(p).toContain("the one ending in gmail.com");
@@ -408,6 +410,11 @@ describe("the call brief", () => {
     ).toEqual(["Kubernetes", "Go"]);
     expect(brief.appliedVia("apply")).toBe("our careers page");
     expect(brief.appliedVia("direct")).toBeNull();
+    expect(brief.appliedVia("hiring_desk")).toBeNull();
+    expect(brief.appliedVia("agent_talent_pool")).toBeNull();
+    expect(brief.callSystemPrompt(facts({ appliedVia: null, appliedOn: null }))).toContain(
+      "We came across your profile",
+    );
     expect(brief.callingHours(WIN)).toBe("Monday to Saturday, 10:00 to 19:00");
   });
 });

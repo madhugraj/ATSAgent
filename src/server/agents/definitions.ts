@@ -351,7 +351,10 @@ export function registerPhase2Agents(): void {
     // candidate); never answers general questions or debates (it explained Go's history);
     // respects a skipped question; no praise ("very comprehensive"); records details mentioned
     // in passing.
-    version: "1.1.3",
+    // 1.1.4 (agent-driven call): reads back the booked time the tool returns (it said
+    // "10:40 AM" for a 16:13 booking); a candidate the team added is told "we came across
+    // your profile", never "you applied through Hiring desk upload".
+    version: "1.1.4",
     owner: "hr_head",
     responsibility:
       "Holds one AI screening phone call with a shortlisted candidate the way an HR recruiter does: says who it is and why it is calling, asks consent, explains the role and why it called them, records their practical details (including the pay they state, for HR only) and their answers to the role's screening questions, or agrees a better time — nothing else.",

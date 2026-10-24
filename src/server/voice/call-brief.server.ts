@@ -169,10 +169,25 @@ export function strengthsFor(mustHave: string[], theirs: string[]): string[] {
   return [...new Set(fit)].slice(0, 4);
 }
 
-/** "Naukri", "our careers page" — how they applied, in words; null if unknown. */
+const INTERNAL_SOURCES = new Set([
+  "direct",
+  "unknown",
+  "hiring_desk",
+  "talent_pool",
+  "agent_talent_pool",
+  "browser_capture",
+  "capture",
+  "manual",
+  "upload",
+  "bulk_upload",
+  "hrms",
+]);
+
+/** "Naukri", "our careers page" — where they applied, in words; null if the team added them. */
 export function appliedVia(source: string | null | undefined): string | null {
   const s = (source ?? "").trim().toLowerCase();
-  if (!s || s === "direct" || s === "unknown") return null;
+  // Added by the team (uploaded, sourced from the pool, captured): they did not apply.
+  if (!s || INTERNAL_SOURCES.has(s) || s.startsWith("agent_")) return null;
   if (s === "apply" || s === "careers" || s === "careers_page") return "our careers page";
   if (s === "referral") return "a referral";
   const named = sourceLabel(s);

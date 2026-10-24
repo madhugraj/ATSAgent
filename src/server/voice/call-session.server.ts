@@ -281,6 +281,7 @@ async function placeCall(
   // details were last recorded: grading reads only what came after.
   let turns = 0;
   let detailsUpToTurn = 0;
+  let bookedAt: Date | null = null;
   // What the assistant has said so far: consent counts only after the disclosure.
   let aiSaid = "";
   let agentEnded!: () => void;
@@ -301,6 +302,13 @@ async function placeCall(
     onToolCall: async (c) => {
       const out = applyCallTool(state, c.name, c.args, questionIds, now(), aiSaid);
       if (c.name === "record_details" && out["ok"]) detailsUpToTurn = turns;
+      if (c.name === "book_slot" && out["ok"] && state.booking) {
+        // The time actually booked (moved into the calling hours if needed) — the
+        // assistant reads this back, never its own arithmetic.
+        bookedAt = callbackAt(state.booking.whenLocal, now(), policy, tz);
+        out["booked_for"] = spokenTime(bookedAt, tz);
+        out["say"] = `Repeat back exactly this time: ${out["booked_for"]}.`;
+      }
       if (c.name === "end_call" && out["ok"]) {
         // The goodbye is queued; let it play out before hanging up.
         for (let i = 0; i < 100 && line.pendingSeconds() > 0; i++)
@@ -424,7 +432,7 @@ async function placeCall(
 
   switch (outcome) {
     case "booked": {
-      const dueAt = callbackAt(state.booking?.whenLocal, endedAt, policy, tz);
+      const dueAt = bookedAt ?? callbackAt(state.booking?.whenLocal, endedAt, policy, tz);
       await confirmBooking(orgId, call, facts, policy, dueAt, tz);
       return finish(orgId, call, {
         status: "callback",
@@ -522,6 +530,21 @@ function publicDetails(d: CallState["details"]): ScreeningCallDetails {
   if (d.earliest_joining) out.earliestJoining = d.earliest_joining;
   if (d.candidate_note) out.note = d.candidate_note;
   return out;
+}
+
+/** "Saturday 24 October at 16:15" in the organisation's time zone — as the assistant says it. */
+function spokenTime(d: Date, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZone,
+  }).formatToParts(d);
+  const p = (t: string) => parts.find((x) => x.type === t)?.value ?? "";
+  return `${p("weekday")} ${p("day")} ${p("month")} at ${p("hour")}:${p("minute")}`;
 }
 
 /** E-mail the candidate the time they agreed, at the address on their CV. */
