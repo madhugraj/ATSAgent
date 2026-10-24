@@ -19,6 +19,15 @@ do $$ begin
 exception when duplicate_object then null; end $$;
 
 alter table screening_calls add column if not exists booked_by_candidate boolean not null default false;
+
+-- The voice worker's heartbeat: the web app learns a phone line is available
+-- from it, so only the worker ever holds the PBX credentials.
+create table if not exists voice_worker_heartbeat (
+  worker_id text primary key,
+  last_seen timestamptz not null default now(),
+  max_concurrent integer not null default 1,
+  calls_in_progress integer not null default 0
+);
 -- What the candidate said about their current role, experience, location and
 -- availability (never pay: pay goes only to the HR-only compensation record).
 alter table screening_calls add column if not exists details jsonb not null default '{}'::jsonb;

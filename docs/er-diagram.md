@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-85 tables across 9 domains.
+86 tables across 9 domains.
 
 ## Identity & access
 
@@ -1312,3 +1312,4 @@ erDiagram
 | `training_settings` | — | 6 | — |
 | `user_roles` | Identity & access | 4 | — |
 | `users` | Identity & access | 8 | (email) |
+| `voice_worker_heartbeat` | — | 4 | — |

@@ -2819,3 +2819,15 @@ export const screeningCalls = pgTable(
     index("screening_calls_candidate_idx").on(t.candidateId),
   ],
 );
+
+/**
+ * The voice worker's heartbeat (one row per worker process). The web app treats
+ * a recent beat as "a phone line is available", so only the worker holds the
+ * PBX credentials.
+ */
+export const voiceWorkerHeartbeat = pgTable("voice_worker_heartbeat", {
+  workerId: text("worker_id").primaryKey(),
+  lastSeen: timestamp("last_seen", { withTimezone: true }).notNull().defaultNow(),
+  maxConcurrent: integer("max_concurrent").notNull().default(1),
+  callsInProgress: integer("calls_in_progress").notNull().default(0),
+});

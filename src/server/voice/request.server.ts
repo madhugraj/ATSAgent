@@ -41,7 +41,7 @@ export async function checkScreeningCall(orgId: string, applicationId: string): 
   if (!ready.enabled)
     return { ok: false, reason: "Phone screening is switched off for this organisation." };
   if (!ready.phoneLine)
-    return { ok: false, reason: "This deployment has no phone line for calls yet." };
+    return { ok: false, reason: "The voice worker with its phone line is not running right now." };
   if (!ready.voice)
     return { ok: false, reason: "The organisation has not stored an AI voice key yet." };
 

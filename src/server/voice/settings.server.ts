@@ -4,9 +4,9 @@
  * and when. Defaults apply until the HR head saves a policy. Changes are
  * audited.
  */
-import { eq } from "drizzle-orm";
+import { eq, gt, sql } from "drizzle-orm";
 
-import { phoneScreeningSettings } from "@db/schema";
+import { phoneScreeningSettings, voiceWorkerHeartbeat } from "@db/schema";
 import { writeAudit } from "../audit";
 import { db } from "../db";
 import { sipConfigured } from "../env";
@@ -107,13 +107,34 @@ export async function setPhoneScreeningPolicyCore(
 export type PhoneScreeningReadiness = {
   /** The organisation switched phone screening on. */
   enabled: boolean;
-  /** This deployment has a phone line (PBX extension) configured. */
+  /** A voice worker with a phone line is running (it beat in the last two minutes). */
   phoneLine: boolean;
   /** The organisation stored a credential for the AI voice. */
   voice: boolean;
   /** All three: calls can be placed. */
   ready: boolean;
 };
+
+/** A voice worker beat in the last two minutes (it holds the phone line; the app does not). */
+export async function voiceWorkerAlive(now = new Date()): Promise<boolean> {
+  const [row] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(voiceWorkerHeartbeat)
+    .where(gt(voiceWorkerHeartbeat.lastSeen, new Date(now.getTime() - 120_000)));
+  return (row?.n ?? 0) > 0;
+}
+
+/** Record this worker's beat (called by the voice worker every poll). */
+export async function beat(workerId: string, maxConcurrent: number, callsInProgress: number) {
+  const now = new Date();
+  await db
+    .insert(voiceWorkerHeartbeat)
+    .values({ workerId, lastSeen: now, maxConcurrent, callsInProgress })
+    .onConflictDoUpdate({
+      target: voiceWorkerHeartbeat.workerId,
+      set: { lastSeen: now, maxConcurrent, callsInProgress },
+    });
+}
 
 /** Whether calls can be placed for the organisation, and what is missing. */
 export async function phoneScreeningReadiness(orgId: string): Promise<PhoneScreeningReadiness> {
@@ -122,7 +143,7 @@ export async function phoneScreeningReadiness(orgId: string): Promise<PhoneScree
     phoneScreeningPolicyOf(orgId),
     voiceCredentialStatus(orgId),
   ]);
-  const phoneLine = sipConfigured();
+  const phoneLine = sipConfigured() || (await voiceWorkerAlive());
   const voice = cred.serviceAccount || cred.apiKey;
   return { enabled: policy.enabled, phoneLine, voice, ready: policy.enabled && phoneLine && voice };
 }

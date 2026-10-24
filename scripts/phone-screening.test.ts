@@ -215,3 +215,14 @@ describe("readiness", () => {
     });
   });
 });
+
+describe("the voice worker's heartbeat", () => {
+  test("a beat in the last two minutes means a phone line is available", async () => {
+    const { voiceWorkerHeartbeat } = await import("../drizzle/schema");
+    const id = `test-${stamp}`;
+    await settings.beat(id, 2, 0);
+    expect(await settings.voiceWorkerAlive()).toBe(true);
+    expect(await settings.voiceWorkerAlive(new Date(Date.now() + 5 * 60_000))).toBe(false);
+    await db.delete(voiceWorkerHeartbeat).where(eq(voiceWorkerHeartbeat.workerId, id));
+  });
+});

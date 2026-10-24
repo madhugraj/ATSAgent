@@ -46,7 +46,8 @@ export function PhoneScreeningCard({ canEdit }: { canEdit: boolean }) {
     p.callDays.length > 0;
 
   const missing = [
-    !readiness.phoneLine && "a phone line for this deployment (set up by your administrator)",
+    !readiness.phoneLine &&
+      "the voice worker with its phone line is not running (your administrator starts it)",
     !readiness.voice && "an AI voice key (Integrations → AI model)",
   ].filter(Boolean) as string[];
 

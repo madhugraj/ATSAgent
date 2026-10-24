@@ -17,6 +17,7 @@ import { env, sipConfigured } from "../env";
 import { log } from "../log";
 import { runScreeningCall } from "./call-session.server";
 import { claimDueCalls, recoverStuckCalls } from "./dispatcher.server";
+import { beat } from "./settings.server";
 import { sipLine } from "./sip-line";
 
 const POLL_MS = 15_000;
@@ -24,8 +25,12 @@ const POLL_MS = 15_000;
 const inFlight = new Set<Promise<unknown>>();
 let stopping = false;
 
+// One heartbeat row per worker process (pod name in Kubernetes).
+const WORKER_ID = process.env["HOSTNAME"] || `worker-${process.pid}`;
+
 async function tick() {
   try {
+    await beat(WORKER_ID, env.VOICE_MAX_CONCURRENT, inFlight.size);
     const recovered = await recoverStuckCalls(new Date());
     if (recovered) log.warn("screening_call.recovered", { count: recovered });
     const claimed = await claimDueCalls(env.VOICE_MAX_CONCURRENT - inFlight.size);
