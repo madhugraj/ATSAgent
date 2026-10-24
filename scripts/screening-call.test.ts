@@ -464,6 +464,52 @@ describe("in-call tools", () => {
     expect(session.applyCallTool(s as never, "hire_them", {}, ids, 0)).toMatchObject({ ok: false });
   });
 
+  test("a yes counts only after the assistant said it is an AI and makes notes", () => {
+    expect(session.disclosureMissing("Hello, am I speaking with Meera?")).toMatch(/AI.*notes/);
+    expect(session.disclosureMissing("I'm Saranya, an AI recruiting assistant.")).toMatch(/notes/);
+    expect(
+      session.disclosureMissing("I'm an AI assistant and I'll make notes for the hiring team."),
+    ).toBeNull();
+    const s = fresh();
+    const yes = { granted: true, their_words: "Sure" };
+    expect(
+      session.applyCallTool(
+        s as never,
+        "record_consent",
+        yes,
+        ids,
+        0,
+        "Hello, is now a good time?",
+      ),
+    ).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/first tell them/),
+    });
+    expect(s.consent).toBeNull();
+    expect(
+      session.applyCallTool(
+        s as never,
+        "record_consent",
+        yes,
+        ids,
+        0,
+        "I'm an AI assistant; I'll make notes for the team.",
+      ),
+    ).toEqual({ ok: true });
+    // Declining needs no disclosure.
+    const t = fresh();
+    expect(
+      session.applyCallTool(
+        t as never,
+        "record_consent",
+        { granted: false, their_words: "No" },
+        ids,
+        0,
+        "",
+      ),
+    ).toEqual({ ok: true });
+  });
+
   test("details merge as they come; the model is told which fields, never the figures", () => {
     const s = { ...fresh(), consent: true };
     expect(
@@ -561,7 +607,7 @@ describe("a whole call with a fake line", () => {
           { say: "caller", text: "Yes, speaking." },
           {
             say: "ai",
-            text: "This is Saranya, an AI recruiting assistant with Yavar's team. Is now a good time?",
+            text: "This is Saranya, an AI recruiting assistant with Yavar's team. I'll make notes of our conversation for the hiring team. Is now a good time?",
           },
           { say: "caller", text: "Yes, go ahead, that's fine." },
           { tool: "record_answer", args: { question_id: "q1", summary: "too early" } },
@@ -579,6 +625,8 @@ describe("a whole call with a fake line", () => {
               expected_ctc: 3200000,
               current_location: "Chennai",
               total_experience_years: 7,
+              pay_note: "plus 10 lakhs in shares",
+              candidate_note: "Asked to keep it short.",
             },
           },
           { say: "ai", text: "Thank you, noted. Tell me about running Kubernetes in production." },
@@ -621,6 +669,7 @@ describe("a whole call with a fake line", () => {
       noticePeriodDays: 30,
       currentLocation: "Chennai",
       totalExperienceYears: 7,
+      note: "Asked to keep it short.",
     });
     expect(c.screeningRunId).toBe(r.screeningRunId);
 
@@ -650,6 +699,7 @@ describe("a whole call with a fake line", () => {
     });
     expect(Number(pay[0]!.currentFixed)).toBe(2400000);
     expect(Number(pay[0]!.expectedCtc)).toBe(3200000);
+    expect(pay[0]!.note).toBe("plus 10 lakhs in shares");
     const [audit] = await db
       .select({ actor: auditLog.actor, detail: auditLog.detail })
       .from(auditLog)
@@ -766,6 +816,10 @@ describe("a whole call with a fake line", () => {
     const line = new FakeLine();
     const voice = scriptedVoice(
       [
+        {
+          say: "ai",
+          text: "I'm an AI recruiting assistant and I'll make notes for the hiring team.",
+        },
         { tool: "record_consent", args: { granted: true, their_words: "Yes, go ahead." } },
         { say: "caller", text: "I run EKS." },
         { tool: "record_answer", args: { question_id: "q1", summary: "Runs EKS." } },

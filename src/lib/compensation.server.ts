@@ -574,6 +574,8 @@ export const CallDetailsFields = z
     earliestJoining: isoDate.nullable().optional(),
     currentLocation: z.string().trim().max(120).nullable().optional(),
     openToRelocate: z.boolean().nullable().optional(),
+    /** Pay said in words, not figures ("a 30% hike", "plus ₹10L in shares"). */
+    note: z.string().trim().max(1000).nullable().optional(),
   })
   .strict();
 export type CallDetails = z.infer<typeof CallDetailsFields>;

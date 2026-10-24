@@ -81,6 +81,7 @@ const DEFAULT_LIMITS: CallLimits = { ringMs: 45_000, silenceMs: 20_000, firstWor
 
 export {
   applyCallTool,
+  disclosureMissing,
   CALL_TOOL_INPUTS,
   CALL_TOOLS,
   callOutcome,
@@ -280,6 +281,8 @@ async function placeCall(
   // details were last recorded: grading reads only what came after.
   let turns = 0;
   let detailsUpToTurn = 0;
+  // What the assistant has said so far: consent counts only after the disclosure.
+  let aiSaid = "";
   let agentEnded!: () => void;
   const agentEnd = new Promise<void>((r) => (agentEnded = r));
 
@@ -291,11 +294,12 @@ async function placeCall(
     onInterrupted: () => line.clear(),
     onTurn: (t) => {
       turns++;
+      if (t.who === "ai") aiSaid += ` ${t.text}`;
       lastActivity = now();
       if (t.who === "caller") candidateSpoke = true;
     },
     onToolCall: async (c) => {
-      const out = applyCallTool(state, c.name, c.args, questionIds, now());
+      const out = applyCallTool(state, c.name, c.args, questionIds, now(), aiSaid);
       if (c.name === "record_details" && out["ok"]) detailsUpToTurn = turns;
       if (c.name === "end_call" && out["ok"]) {
         // The goodbye is queued; let it play out before hanging up.
@@ -410,6 +414,7 @@ async function placeCall(
       earliestJoining: d.earliest_joining ?? null,
       currentLocation: d.current_location ?? null,
       openToRelocate: d.open_to_relocate ?? null,
+      note: d.pay_note ?? null,
     }).catch((e) =>
       log.warn("screening_call.details_failed", { call_id: call.id, error: e as Error }),
     );
@@ -513,6 +518,7 @@ function publicDetails(d: CallState["details"]): ScreeningCallDetails {
   if (d.open_to_relocate != null) out.openToRelocate = d.open_to_relocate;
   if (d.notice_period_days != null) out.noticePeriodDays = d.notice_period_days;
   if (d.earliest_joining) out.earliestJoining = d.earliest_joining;
+  if (d.candidate_note) out.note = d.candidate_note;
   return out;
 }
 

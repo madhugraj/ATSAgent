@@ -97,6 +97,7 @@ async function applyToCall(ctx: ToolContext, name: CallToolName, input: unknown)
       earliestJoining: d.earliest_joining ?? null,
       currentLocation: d.current_location ?? null,
       openToRelocate: d.open_to_relocate ?? null,
+      note: d.pay_note ?? null,
     });
   }
   return out;

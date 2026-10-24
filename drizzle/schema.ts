@@ -2738,6 +2738,8 @@ export type ScreeningCallDetails = {
   openToRelocate?: boolean;
   noticePeriodDays?: number;
   earliestJoining?: string;
+  /** Anything else the candidate said the hiring team should know, in their words. */
+  note?: string;
 };
 
 /** What the candidate said for one kit question, as the call agent recorded it. */

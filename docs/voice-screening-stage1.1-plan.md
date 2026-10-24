@@ -189,3 +189,27 @@ then **D** (HR can see everything), **C**, **E**, **F**.
   details); Screening call agent 1.1.0, Screening agent 1.9.0; 3 new evals
   (booking, details without pay comment, rephrase instead of answer).
 - **Next:** a real call to judge the conversation, then step B.
+
+### Step A.1 — from the second real call (2026-10-24)
+
+The call held the new flow (identity first, who and why, role, details first,
+pay noted without comment, reflective listening, a polite close on request).
+Fixed what it showed (Screening call agent 1.1.1):
+
+- **Disclosure enforced in code**: a "yes" is refused until the assistant has
+  said it is an AI and that it makes notes (`disclosureMissing`, checked against
+  its own spoken lines) — it had skipped the note-taking line when the candidate
+  said they were busy.
+- **Signposting** of each part ("a quick overview of the role", "a few practical
+  details", "a few questions about your experience") — the candidate could not
+  tell a role overview from a question.
+- **A time the candidate sets is kept** (details and the one or two most
+  important questions, then close).
+- **Pay only as stated**: it had turned "a 30% hike" into a figure; figures are
+  recorded only when said, anything else (hike, shares) in `pay_note`
+  (HR-only); `candidate_note` keeps anything else the team should know.
+- **A poor fit is handled honestly**: acknowledge, say what the role centres on,
+  ask whether to continue, ask only questions that let them show what they
+  bring — never judge or discourage.
+- The "why them" part is skipped when nothing specific is on record, instead of
+  risking an invented reason.

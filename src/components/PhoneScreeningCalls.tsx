@@ -74,6 +74,7 @@ const DETAIL_LABEL: Record<string, string> = {
   openToRelocate: "Open to relocating",
   noticePeriodDays: "Notice (days)",
   earliestJoining: "Earliest joining",
+  note: "They said",
 };
 
 const WAITING = new Set(["requested", "approved", "callback", "no_answer", "failed"]);
