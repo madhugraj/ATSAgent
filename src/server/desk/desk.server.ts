@@ -1587,7 +1587,7 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
     candidates:
       "The Intake & matching agent searches the talent pool and posts a ranked list here.",
     screening:
-      'Pick candidates from the ranked list (or type "talk to the first 5"); the Screening agent prepares their screening. Move the ones who pass to an interview round (Manual mode → Screening calls or the candidate page).',
+      'Pick candidates from the ranked list (or type "talk to the first 5"); the Screening agent prepares their screening — an AI screening call when your organisation screens by phone, otherwise the written assessment. Move the ones who pass to an interview round (Manual mode → Screening calls or the candidate page).',
     interviews:
       "The Interview coordinator books the rounds. After each interview the interviewer submits a scorecard (My interviews).",
     decision:
@@ -1649,11 +1649,14 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
     TEXT.candidates =
       "The Intake & matching agent searched the pipeline and the talent pool and found no matching candidates yet. Add candidates (Manual mode → Talent pool or Careers inbox), then search again.";
   }
-  // Screening done by the agent: say what it is waiting for — the candidates'
-  // written assessments — instead of the generic instruction.
-  if (cur === "screening" && run?.status === "done" && conv.requisitionId) {
-    const waiting = await assessmentWait(conv.orgId, conv.requisitionId);
-    if (waiting) TEXT.screening = waiting;
+  // Screening: say what is happening — AI phone screening calls (live, booked,
+  // retrying, done) and the written assessments — instead of the generic instruction.
+  if (cur === "screening" && conv.requisitionId) {
+    const calls = await phoneCallWait(conv.orgId, conv.requisitionId);
+    const waiting =
+      run?.status === "done" ? await assessmentWait(conv.orgId, conv.requisitionId) : null;
+    const said = [calls, waiting].filter(Boolean).join(" ");
+    if (said) TEXT.screening = said;
   }
   return {
     stages,
@@ -1667,6 +1670,80 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
       waitingForYou: Number(w?.n ?? 0),
     },
   };
+}
+
+/**
+ * Where a role's AI phone screening calls stand, in words — the latest call
+ * per candidate: on the call now, arranged, booked with them, being retried,
+ * screened (with the score), or how it ended. Null when no call was asked for.
+ */
+async function phoneCallWait(orgId: string, requisitionId: string): Promise<string | null> {
+  const rows = (await db.execute(sql`
+    select distinct on (sc.application_id)
+      c.full_name as name, sc.status, sc.end_reason, sc.due_at, sc.booked_by_candidate as booked,
+      sr.screening_score as score
+    from screening_calls sc
+    join candidates c on c.id = sc.candidate_id
+    left join screening_runs sr on sr.id = sc.screening_run_id
+    where sc.org_id = ${orgId} and sc.requisition_id = ${requisitionId} and sc.status <> 'cancelled'
+    order by sc.application_id, sc.created_at desc`)) as unknown as {
+    name: string;
+    status: string;
+    end_reason: string | null;
+    due_at: string | null;
+    booked: boolean;
+    score: number | null;
+  }[];
+  if (!rows.length) return null;
+  const tz = await orgTimeZone(orgId);
+  const at = (d: string | null) =>
+    d
+      ? new Date(d).toLocaleString("en-IN", {
+          weekday: "short",
+          day: "numeric",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+          timeZone: tz,
+        })
+      : "soon";
+  const group = (pred: (r: (typeof rows)[number]) => boolean) => rows.filter(pred);
+  const names = (rs: typeof rows, f: (r: (typeof rows)[number]) => string = (r) => r.name) =>
+    rs.map(f).join(", ");
+  const live = group((r) => r.status === "dialling" || r.status === "in_progress");
+  const arranged = group((r) => r.status === "requested" || r.status === "approved");
+  const booked = group((r) => r.status === "callback");
+  const retrying = group((r) => r.status === "no_answer" || r.status === "failed");
+  const screened = group((r) => r.status === "completed" && r.end_reason !== "not_interested");
+  const notInterested = group((r) => r.status === "completed" && r.end_reason === "not_interested");
+  const human = group((r) => r.status === "fell_back" && r.end_reason === "prefers_human");
+  const written = group(
+    (r) =>
+      (r.status === "fell_back" && r.end_reason !== "prefers_human") ||
+      r.status === "consent_declined",
+  );
+  const parts: string[] = [];
+  if (live.length) parts.push(`On an AI screening call now: ${names(live)}.`);
+  if (arranged.length)
+    parts.push(
+      `AI screening call arranged: ${names(arranged, (r) => `${r.name} (from ${at(r.due_at)})`)}.`,
+    );
+  if (booked.length)
+    parts.push(
+      `Call time agreed with the candidate: ${names(booked, (r) => `${r.name} (${at(r.due_at)})`)}.`,
+    );
+  if (retrying.length)
+    parts.push(
+      `Not reached yet, trying again: ${names(retrying, (r) => `${r.name} (next ${at(r.due_at)})`)}.`,
+    );
+  if (screened.length)
+    parts.push(
+      `Screened by phone: ${names(screened, (r) => `${r.name}${r.score != null ? ` (${r.score}/100)` : ""}`)} — review the call on the candidate page and move those who pass to an interview round.`,
+    );
+  if (human.length) parts.push(`Asked for a person to call them: ${names(human)}.`);
+  if (notInterested.length) parts.push(`Not interested in the role: ${names(notInterested)}.`);
+  if (written.length) parts.push(`Written assessment instead of a call: ${names(written)}.`);
+  return parts.join(" ");
 }
 
 /**
