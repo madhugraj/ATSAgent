@@ -340,6 +340,21 @@ describe("the candidate chooses the time", () => {
     const of = (id: string) => mails.find((m) => m.idempotencyKey === `interview-slots:${id}`)!;
     expect(of(first.offerId).status).toBe("suppressed");
     expect(of(second.offerId).status).not.toBe("suppressed");
+    // Chosen before its e-mail went out: the e-mail is withdrawn too.
+    await db
+      .update(emailOutbox)
+      .set({ status: "queued" })
+      .where(eq(emailOutbox.idempotencyKey, `interview-slots:${second.offerId}`));
+    const [row] = await db
+      .select({ token: interviewSlotOffers.token })
+      .from(interviewSlotOffers)
+      .where(eq(interviewSlotOffers.id, second.offerId));
+    expect(await offers.chooseSlot(row!.token, second.slots[0]!)).toMatchObject({ booked: true });
+    const [after] = await db
+      .select()
+      .from(emailOutbox)
+      .where(eq(emailOutbox.idempotencyKey, `interview-slots:${second.offerId}`));
+    expect(after!.status).toBe("suppressed");
   });
 
   test("names fall back to the email; a booking without a meeting provider says so", async () => {

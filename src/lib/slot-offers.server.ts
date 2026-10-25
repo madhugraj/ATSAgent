@@ -165,22 +165,10 @@ export async function offerSlotsCore(
       ),
     )
     .returning({ id: interviewSlotOffers.id });
-  if (replaced.length) {
-    const { emailOutbox } = await import("@db/schema");
-    await db
-      .update(emailOutbox)
-      .set({ status: "suppressed" })
-      .where(
-        and(
-          eq(emailOutbox.orgId, orgId),
-          eq(emailOutbox.status, "queued"),
-          inArray(
-            emailOutbox.idempotencyKey,
-            replaced.map((r) => `interview-slots:${r.id}`),
-          ),
-        ),
-      );
-  }
+  await withdrawOfferEmails(
+    orgId,
+    replaced.map((r) => r.id),
+  );
   const expiresAt = new Date(
     Math.min(
       now + SLOT_OFFER.expiresHours * 3600_000,
@@ -246,6 +234,25 @@ export async function offerSlotsCore(
     expiresAt: expiresAt.toISOString(),
     checkedWith: probe.source,
   };
+}
+
+/** Withdraw the not-yet-sent "pick a time" e-mails of these offers (their links no longer work). */
+async function withdrawOfferEmails(orgId: string, offerIds: string[]): Promise<void> {
+  if (!offerIds.length) return;
+  const { emailOutbox } = await import("@db/schema");
+  await db
+    .update(emailOutbox)
+    .set({ status: "suppressed" })
+    .where(
+      and(
+        eq(emailOutbox.orgId, orgId),
+        eq(emailOutbox.status, "queued"),
+        inArray(
+          emailOutbox.idempotencyKey,
+          offerIds.map((id) => `interview-slots:${id}`),
+        ),
+      ),
+    );
 }
 
 async function byToken(token: string) {
@@ -400,6 +407,8 @@ async function bookOfferSlot(
     .where(and(eq(interviewSlotOffers.id, offer.id), eq(interviewSlotOffers.status, "offered")))
     .returning({ id: interviewSlotOffers.id });
   if (!claimed.length) return { booked: false, reason: "This time has already been booked." };
+  // Chosen (by link or on a call): its "pick a time" e-mail, if not sent yet, is withdrawn.
+  await withdrawOfferEmails(offer.orgId, [offer.id]);
 
   try {
     let meetingLink: string | null = null;

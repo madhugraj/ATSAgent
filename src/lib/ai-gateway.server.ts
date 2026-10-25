@@ -1731,7 +1731,8 @@ export function sumVoiceUsage(frames: LiveServerMessage["usageMetadata"][]): AiU
   return { promptTokens, completionTokens, totalTokens };
 }
 
-async function openVoiceSession(opts: {
+/** Exported for tests only (a local fake provider socket); callers use aiVoiceSession. */
+export async function openVoiceSession(opts: {
   orgId: string | null | undefined;
   feature: string;
   system: string;
@@ -1846,6 +1847,13 @@ async function openVoiceSession(opts: {
           flush("caller");
           flush("ai");
         }
+      }
+      // What was said so far is on record before any tool runs: a tool that checks
+      // the assistant's own words (e.g. it said it is an AI before a "yes" counts)
+      // must see the line it just spoke, not wait for its turn to finish.
+      if (msg.toolCall?.functionCalls?.length) {
+        flush("caller");
+        flush("ai");
       }
       for (const fc of msg.toolCall?.functionCalls ?? []) {
         const call: VoiceToolCall = { id: fc.id ?? "", name: fc.name ?? "", args: fc.args ?? {} };

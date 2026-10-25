@@ -203,3 +203,63 @@ describe("live voice session framing", () => {
     });
   });
 });
+
+describe("live voice session ordering", () => {
+  test("what the assistant said is on record before a tool runs", async () => {
+    const gw = await import("../src/lib/ai-gateway.server");
+    // A fake provider: setup, then the assistant speaks and calls a tool before its turn ends.
+    const server = Bun.serve({
+      port: 0,
+      fetch(req, srv) {
+        return srv.upgrade(req) ? undefined : new Response("no", { status: 400 });
+      },
+      websocket: {
+        message(ws, raw) {
+          const m = JSON.parse(String(raw));
+          if (m.setup) {
+            ws.send(JSON.stringify({ setupComplete: {} }));
+            ws.send(
+              JSON.stringify({
+                serverContent: {
+                  outputTranscription: { text: "I am an AI assistant and I will note the time." },
+                },
+              }),
+            );
+            ws.send(
+              JSON.stringify({
+                toolCall: { functionCalls: [{ id: "t1", name: "record_permission", args: {} }] },
+              }),
+            );
+          }
+        },
+      },
+    });
+    const seen: string[] = [];
+    let saidBeforeTool = "";
+    let ready!: (s: unknown) => void;
+    const opened = new Promise((r) => (ready = r));
+    const done = gw.openVoiceSession({
+      orgId: null,
+      feature: "scheduling_call",
+      system: "",
+      tools: [],
+      voice: "Kore",
+      config: { provider: "google", model: "fake", apiKey: null },
+      target: { url: `ws://127.0.0.1:${server.port}`, headers: {}, model: "fake" },
+      events: {
+        onTurn: (t) => seen.push(`${t.who}: ${t.text}`),
+        onToolCall: async () => {
+          saidBeforeTool = seen.join(" | ");
+          return { ok: true };
+        },
+      },
+      ready: (s) => ready(s),
+    });
+    const session = (await opened) as { close: () => Promise<unknown> };
+    for (let i = 0; i < 50 && !saidBeforeTool; i++) await new Promise((r) => setTimeout(r, 20));
+    await session.close();
+    await done;
+    server.stop(true);
+    expect(saidBeforeTool).toBe("ai: I am an AI assistant and I will note the time.");
+  });
+});

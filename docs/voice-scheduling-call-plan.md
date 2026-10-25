@@ -1,6 +1,6 @@
 # Voice scheduling call — plan (stage 1.2)
 
-Status: **S0–S1 built, S2 wired and run on a real call** (2026-10-25); S3–S4 to come. Decisions confirmed: the
+Status: **S0–S2 built; a real call booked an interview** (2026-10-25); S3–S4 to come. Decisions confirmed: the
 recommended defaults below. Builds on the AI screening call
 (`docs/voice-screening-agent.md`, `docs/voice-screening-stage1.1-plan.md`).
 
@@ -292,6 +292,27 @@ and the call.
   had no outbox cron. `scripts/dev-agent-tick.ts` now drains the outbox like
   the production cron. A newer offer for a round now withdraws the older
   offer's unsent e-mail (its link would no longer work).
+
+### S2.3 — first booking on a real call (2026-10-25, 10:22 IST)
+
+The candidate said hello, picked "Monday" from the three e-mailed times, and
+the assistant booked **Monday 26 October 16:00 IST** and read it back from the
+booking; the interview invite and the interviewer's brief went out within a
+minute; the thread and the audit trail (`interview.slot_chosen`, channel
+phone, with the call) recorded it. What the call showed, now fixed:
+
+- **"You have been repeating":** the disclosure check read the assistant's own
+  words, but the gateway added its line to the record only when its turn
+  finished — a tool call that came first saw no disclosure, so the assistant
+  was told to say it again. The gateway now records what was said before any
+  tool runs (tested against a fake provider socket; affects the screening
+  call too).
+- The reply nudge was timed from the candidate's first word and landed on the
+  model's own reply; it now runs 4 s after they stop talking.
+- An unclear "no" ("I am not very clear with your ask") is sent back once in
+  code (Scheduling call agent 1.2.1).
+- A booked offer's unsent "pick a time" e-mail is withdrawn (it would have
+  arrived after the booking with a dead link).
 
 ## Decisions (confirmed 2026-10-25)
 
