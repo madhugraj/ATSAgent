@@ -107,7 +107,7 @@ export async function loadSchedulingBrief(
     )
     .limit(1);
   if (!row) return null;
-  const { SLOT_OFFER, displayName } = await import("@/lib/slot-offers.server");
+  const { SLOT_OFFER } = await import("@/lib/slot-offers.server");
   const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
   const tz = (await getOrgEmailSettings(orgId)).timezone;
   const policy = await phoneScreeningPolicyOf(orgId);
@@ -129,7 +129,10 @@ export async function loadSchedulingBrief(
       roundLabel: `${ROUND[row.offer.level - 1] ?? `round ${row.offer.level}`} interview`,
       durationMins: row.offer.durationMins,
       format: FORMAT[row.offer.mode] ?? row.offer.mode,
-      interviewerName: displayName(row.offer.interviewerName, row.offer.interviewerEmail),
+      // A person's name, or "a member of the hiring team" — never a guess from an
+      // e-mail address ("agent-demo@…" was said as "Agent", heard as an AI interviewer).
+      interviewerName: row.offer.interviewerName?.trim() || "a member of the hiring team",
+      panelSize: 1 + (row.offer.panel?.length ?? 0),
       options: options.map((o) => ({ spoken: spokenWhen(o.at, tz), alternate: o.alternate })),
       maxMinutes: 4,
       isCallback: row.call.bookedByCandidate,

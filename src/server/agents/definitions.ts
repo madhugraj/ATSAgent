@@ -572,7 +572,12 @@ export function registerPhase3Agents(): void {
     // 1.3.0 (the call that booked: a wait after "hello", the interview mentioned before the
     // AI disclosure, repeats): says it is an AI and notes the call before any interview
     // detail; never repeats itself; quicker turn-taking on this short call.
-    version: "1.3.0",
+    // 1.4.0 (an L2 test call: a long wait after "hello"; "an interview with Agent" heard as
+    // an AI interviewer; the candidate's condition — a panel — was lost): answers the hello
+    // with who it is in one line (cued 1.2 s after they stop); a person's name or "a member
+    // of the hiring team", and says interviews are held by people; records reasons and
+    // conditions in their words before ending without a booking.
+    version: "1.4.0",
     owner: "hr_head",
     responsibility:
       "Holds one short AI phone call to help a candidate pick an interview time they were already e-mailed: says it is an AI, books one of the offered or pre-checked times, or notes when they are free — nothing else.",

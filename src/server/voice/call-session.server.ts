@@ -102,6 +102,8 @@ export function openingWatch(o: {
   lastHeard: () => number | null;
   aiSpoke: () => boolean;
   callerFirstMs: number;
+  /** After they stop talking, cue the assistant if it has not begun by then. */
+  replyNudgeMs?: number;
   tag: string;
   callId: string;
 }): () => void {
@@ -122,7 +124,7 @@ export function openingWatch(o: {
     const heard = o.lastHeard();
     if (heard !== null) {
       // Counted from when they stopped talking, not from their first word.
-      if (t - heard > REPLY_NUDGE_MS)
+      if (t - heard > (o.replyNudgeMs ?? REPLY_NUDGE_MS))
         nudge("(The person has answered the phone. Reply to them now.)");
       return;
     }

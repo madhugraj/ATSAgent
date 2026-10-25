@@ -314,6 +314,25 @@ describe("the in-call tools", () => {
     expect(outcome.scheduledEnd("opt_out", 1)).toBe("completed");
   });
 
+  test("a panel is said as a panel; no name means a member of the hiring team", () => {
+    const base = {
+      assistantName: "Saranya",
+      orgName: "Yavar",
+      candidateFirstName: "Meera",
+      roleTitle: "Platform SRE",
+      roundLabel: "second-round interview",
+      durationMins: 60,
+      format: "online (video call)",
+      options: [{ spoken: "Tuesday 27 October at 11:00", alternate: false }],
+      maxMinutes: 4,
+      isCallback: false,
+      callbackAllowed: true,
+    };
+    expect(
+      prompt.schedulingSystemPrompt({ ...base, interviewerName: "Priya", panelSize: 3 }),
+    ).toContain("with a panel of 3 from the hiring team, led by Priya.");
+  });
+
   test("bookable options: offered first, then ≤3 alternates; too soon or repeated dropped", () => {
     const now = Date.now();
     const soon = new Date(now + H).toISOString();
@@ -337,6 +356,7 @@ describe("the in-call tools", () => {
       durationMins: 60,
       format: "online (video call)",
       interviewerName: "Priya",
+      panelSize: 1,
       options: [
         { spoken: "Tuesday 27 October at 11:00", alternate: false },
         { spoken: "Thursday 29 October at 15:00", alternate: true },
@@ -348,11 +368,20 @@ describe("the in-call tools", () => {
     expect(p).toContain("1. Tuesday 27 October at 11:00");
     expect(p).toContain("call_back_later");
     // The AI disclosure and the note come before any interview detail.
-    const opening = p.slice(p.indexOf("2. In this order"));
-    expect(opening.indexOf("AI recruiting assistant")).toBeLessThan(opening.indexOf("interview"));
+    const opening = p.slice(p.indexOf("## The call"));
+    expect(opening).toContain(
+      '"Hello, this is Saranya, an AI recruiting assistant from Yavar — am I speaking with Meera?"',
+    );
+    expect(opening.indexOf("AI recruiting assistant")).toBeLessThan(
+      opening.indexOf("first-round interview"),
+    );
     expect(opening.indexOf("note this short call")).toBeLessThan(
       opening.indexOf("first-round interview"),
     );
+    // Interviews are held by people, and a reason is kept before ending without a booking.
+    expect(p).toContain("with Priya.");
+    expect(p).toContain("never by an AI");
+    expect(p).toMatch(/record_availability with exactly their words/);
     expect(p).toContain("Repeat yourself.");
     expect(p).toContain("2. Thursday 29 October at 15:00 (not in the e-mail — also free)");
     expect(p).toContain("AI recruiting assistant");
@@ -798,6 +827,16 @@ describe("a whole scheduling call (fake line)", () => {
     expect(
       await place(second.call.id, new FakeLine(), scriptedVoice(steps, { results: [] })),
     ).toMatchObject({ status: "fell_back" });
+  });
+
+  test("an interviewer without a name is a member of the hiring team, never an e-mail guess", async () => {
+    const { call, offer: of } = await arranged();
+    await db
+      .update(interviewSlotOffers)
+      .set({ interviewerName: null })
+      .where(eq(interviewSlotOffers.id, of.id));
+    const b = await brief.loadSchedulingBrief(orgId, call.id);
+    expect(b!.facts.interviewerName).toBe("a member of the hiring team");
   });
 
   test("picked by the link before the call: nobody is dialled", async () => {

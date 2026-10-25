@@ -327,6 +327,25 @@ phone, with the call) recorded it. What the call showed, now fixed:
   same day); the prompt also says never to repeat itself.
 - Scheduling call agent 1.3.0.
 
+### S2.5 — an L2 test call (2026-10-25, 11:22 IST)
+
+The candidate said "Hello." and waited; the assistant answered only after the
+4-second nudge ("This is a long wait…"). It then said the interview was "with
+Agent" (the interviewer has no name; the e-mail `agent-demo@…` was turned into
+"Agent"), which the candidate heard as an AI interviewer; she said she would
+join only with a panel, and that condition was not recorded. Now (Scheduling
+call agent 1.4.0):
+
+- It answers the hello with who it is, in one line ("Hello, this is Saranya,
+  an AI recruiting assistant from … — am I speaking with …?"), cued 1.2 s after
+  they stop talking if the model has not begun; the note and the purpose follow
+  once they confirm.
+- The interviewer is a person's name or "a member of the hiring team" — never a
+  guess from an e-mail; a panel is said as a panel; it says plainly that
+  interviews are held by people, never by an AI.
+- Before ending without a booking it records any reason or condition in the
+  candidate's words (`record_availability` → the thread and the coordinator).
+
 ## Decisions (confirmed 2026-10-25)
 
 1. **Wait before calling:** 24 hours after the e-mail (an organisation setting).

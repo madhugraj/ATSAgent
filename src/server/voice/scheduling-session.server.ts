@@ -59,6 +59,9 @@ import { phoneScreeningPolicyOf } from "./settings.server";
 
 type Call = typeof screeningCalls.$inferSelect;
 
+/** After the candidate's hello ends, cue the assistant if it has not begun by then. */
+export const SCHEDULING_REPLY_CUE_MS = 1_200;
+
 /** Turn-taking for a scheduling call: end of speech after half a second, high sensitivity. */
 export const SCHEDULING_TURN_TAKING = {
   silenceMs: 500,
@@ -270,6 +273,9 @@ async function place(
     lastHeard: () => lastHeardAt,
     aiSpoke: () => aiSpoke,
     callerFirstMs: limits.callerFirstMs,
+    // Real calls: the model often did not answer a plain "hello" on its own —
+    // cue it soon after they stop (its own turn-taking ends a turn after 0.5 s).
+    replyNudgeMs: SCHEDULING_REPLY_CUE_MS,
     tag: "scheduling_call",
     callId: call.id,
   });
