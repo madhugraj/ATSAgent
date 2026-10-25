@@ -569,7 +569,10 @@ export function registerPhase3Agents(): void {
     // and a second ask — only a clear no is a no.
     // 1.2.1 (a real call: "I am not very clear with your ask" was still taken as a no):
     // record_permission sends an unclear "no" back once, in code.
-    version: "1.2.1",
+    // 1.3.0 (the call that booked: a wait after "hello", the interview mentioned before the
+    // AI disclosure, repeats): says it is an AI and notes the call before any interview
+    // detail; never repeats itself; quicker turn-taking on this short call.
+    version: "1.3.0",
     owner: "hr_head",
     responsibility:
       "Holds one short AI phone call to help a candidate pick an interview time they were already e-mailed: says it is an AI, books one of the offered or pre-checked times, or notes when they are free — nothing else.",

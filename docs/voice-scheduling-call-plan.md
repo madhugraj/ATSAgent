@@ -314,6 +314,19 @@ phone, with the call) recorded it. What the call showed, now fixed:
 - A booked offer's unsent "pick a time" e-mail is withdrawn (it would have
   arrived after the booking with a dead link).
 
+### S2.4 — the candidate's feedback on the booking call (2026-10-25)
+
+- **A wait after "hello"** (the candidate said hello twice; the assistant began
+  ~9 s in): the scheduling call used the screening call's turn-taking (low
+  end-of-speech sensitivity, 1 s of silence — so thinking candidates are not cut
+  off). The scheduling call now has its own: high sensitivity, 0.5 s.
+- **The interview was mentioned before the AI disclosure and the note:** the
+  opening now says, in this order, that it is an AI assistant and notes the
+  call, then why it is calling, then one question.
+- **Repeats** came from the disclosure-check refusal (fixed in the gateway the
+  same day); the prompt also says never to repeat itself.
+- Scheduling call agent 1.3.0.
+
 ## Decisions (confirmed 2026-10-25)
 
 1. **Wait before calling:** 24 hours after the e-mail (an organisation setting).

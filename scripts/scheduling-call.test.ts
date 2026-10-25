@@ -347,6 +347,13 @@ describe("the in-call tools", () => {
     });
     expect(p).toContain("1. Tuesday 27 October at 11:00");
     expect(p).toContain("call_back_later");
+    // The AI disclosure and the note come before any interview detail.
+    const opening = p.slice(p.indexOf("2. In this order"));
+    expect(opening.indexOf("AI recruiting assistant")).toBeLessThan(opening.indexOf("interview"));
+    expect(opening.indexOf("note this short call")).toBeLessThan(
+      opening.indexOf("first-round interview"),
+    );
+    expect(p).toContain("Repeat yourself.");
     expect(p).toContain("2. Thursday 29 October at 15:00 (not in the e-mail — also free)");
     expect(p).toContain("AI recruiting assistant");
     expect(p).toMatch(/Book, suggest or agree any time that is not in your list/);
@@ -690,7 +697,11 @@ describe("a whole scheduling call (fake line)", () => {
     );
     expect(line.dialled).toBe("9840012345");
     expect(r).toMatchObject({ status: "completed", endReason: "booked" });
-    expect(seen.opts).toMatchObject({ feature: "scheduling_call", languageCode: "en-IN" });
+    expect(seen.opts).toMatchObject({
+      feature: "scheduling_call",
+      languageCode: "en-IN",
+      turnTaking: { silenceMs: 500, endOfSpeech: "high" },
+    });
     expect(seen.opts!.tools!.map((t) => t.name).sort()).toEqual([
       "book_interview_time",
       "call_back_later",
@@ -763,7 +774,7 @@ describe("a whole scheduling call (fake line)", () => {
         again,
       ),
     );
-    expect(again.opts!.system).toContain("you asked me to call you back");
+    expect(again.opts!.system).toContain("You asked me to call back to pick a time");
     expect(
       (again.results as { tool: string; out: Record<string, unknown> }[]).find(
         (x) => x.tool === "call_back_later",

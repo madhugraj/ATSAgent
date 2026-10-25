@@ -59,6 +59,13 @@ import { phoneScreeningPolicyOf } from "./settings.server";
 
 type Call = typeof screeningCalls.$inferSelect;
 
+/** Turn-taking for a scheduling call: end of speech after half a second, high sensitivity. */
+export const SCHEDULING_TURN_TAKING = {
+  silenceMs: 500,
+  endOfSpeech: "high" as const,
+  prefixPaddingMs: 300,
+};
+
 const WORDS: Record<string, string> = {
   booked: "The candidate picked an interview time on the call; it is booked.",
   callback: "The candidate asked to be called back shortly to pick a time.",
@@ -218,7 +225,9 @@ async function place(
     system,
     tools: SCHEDULING_TOOLS,
     voice: policy.voice,
-    turnTaking: { silenceMs: 1000, endOfSpeech: "low", prefixPaddingMs: 300 },
+    // Short answers on this call ("hello", "Monday works"): reply quickly. (The
+    // screening call waits longer — candidates pause to think there.)
+    turnTaking: SCHEDULING_TURN_TAKING,
     languageCode: "en-IN",
     events,
   });
