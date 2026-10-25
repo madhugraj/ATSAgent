@@ -364,7 +364,8 @@ export function registerPhase2Agents(): void {
     // after that book_slot refuses and the written assessment or a person is offered.
     // 1.1.6: a question the candidate chose not to answer is recorded as declined
     // (asked, never graded), so the grade can say what was asked versus planned.
-    version: "1.1.6",
+    // 1.1.7: lets the candidate say hello first (it spoke the moment they picked up).
+    version: "1.1.7",
     owner: "hr_head",
     responsibility:
       "Holds one AI screening phone call with a shortlisted candidate the way an HR recruiter does: says who it is and why it is calling, asks consent, explains the role and why it called them, records their practical details (including the pay they state, for HR only) and their answers to the role's screening questions, or agrees a better time — nothing else.",
@@ -563,7 +564,10 @@ export function registerPhase3Agents(): void {
     // 1.1.0 (first real call: the candidate asked to be called back in ten minutes to
     // check her calendar, and v1 could only point to the e-mail): one call-back per
     // offer, within three hours and inside calling hours, read back from the result.
-    version: "1.1.0",
+    // 1.2.0 (real calls: it spoke before the candidate said hello; "I'm not sure" ended the
+    // call): lets the candidate speak first; an unclear answer gets one plain explanation
+    // and a second ask — only a clear no is a no.
+    version: "1.2.0",
     owner: "hr_head",
     responsibility:
       "Holds one short AI phone call to help a candidate pick an interview time they were already e-mailed: says it is an AI, books one of the offered or pre-checked times, or notes when they are free — nothing else.",

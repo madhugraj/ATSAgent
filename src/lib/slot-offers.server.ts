@@ -10,7 +10,7 @@
  * role, the organisation, the interviewer's name and the times — nothing else
  * about the candidate or the organisation.
  */
-import { and, eq, lt, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, lt, sql, type SQL } from "drizzle-orm";
 
 import { db } from "../server/db";
 import {
@@ -151,8 +151,9 @@ export async function offerSlotsCore(
     throw new Error(`These times are not free: ${taken.join("; ")}. Use find_interview_slots.`);
   const probe = await busyFor(orgId, [member.email], slots[0]!, slots[0]!);
 
-  // A newer offer replaces an open one for the same round.
-  await db
+  // A newer offer replaces an open one for the same round — and its e-mail, if it
+  // has not gone out yet, is withdrawn (its link would no longer work).
+  const replaced = await db
     .update(interviewSlotOffers)
     .set({ status: "cancelled", updatedAt: new Date() })
     .where(
@@ -162,7 +163,24 @@ export async function offerSlotsCore(
         eq(interviewSlotOffers.level, input.level),
         eq(interviewSlotOffers.status, "offered"),
       ),
-    );
+    )
+    .returning({ id: interviewSlotOffers.id });
+  if (replaced.length) {
+    const { emailOutbox } = await import("@db/schema");
+    await db
+      .update(emailOutbox)
+      .set({ status: "suppressed" })
+      .where(
+        and(
+          eq(emailOutbox.orgId, orgId),
+          eq(emailOutbox.status, "queued"),
+          inArray(
+            emailOutbox.idempotencyKey,
+            replaced.map((r) => `interview-slots:${r.id}`),
+          ),
+        ),
+      );
+  }
   const expiresAt = new Date(
     Math.min(
       now + SLOT_OFFER.expiresHours * 3600_000,

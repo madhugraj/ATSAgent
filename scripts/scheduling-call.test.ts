@@ -610,7 +610,7 @@ describe("a whole scheduling call (fake line)", () => {
     session.runScreeningCall(orgId, callId, {
       line: () => line,
       voice,
-      limits: { silenceMs: 60_000, firstWordsMs: 60_000 },
+      limits: { silenceMs: 60_000, firstWordsMs: 60_000, callerFirstMs: 0 },
     });
 
   test("the candidate picks the second time: booked, read back, run closed", async () => {
@@ -780,5 +780,64 @@ describe("a whole scheduling call (fake line)", () => {
       .set({ status: "no_answer", attempt: 2 })
       .where(eq(screeningCalls.id, call.id));
     expect((await dispatcher.dueCalls(monday11)).map((r) => r.id)).not.toContain(call.id);
+  });
+});
+
+describe("who speaks first", () => {
+  const watch = (heard: () => boolean, aiSpoke: () => boolean, callerFirstMs: number) => {
+    const sent: string[] = [];
+    const stop = session.openingWatch({
+      session: { sendText: (t) => sent.push(t) },
+      heard,
+      aiSpoke,
+      callerFirstMs,
+      tag: "test",
+      callId: "t",
+    });
+    return { sent, stop };
+  };
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  test("the candidate says hello: no cue, and the assistant answers them", async () => {
+    let ai = false;
+    const w = watch(
+      () => true,
+      () => ai,
+      300,
+    );
+    await wait(500);
+    ai = true; // the model replied to their hello on its own
+    await wait(200);
+    w.stop();
+    expect(w.sent).toEqual([]);
+  });
+
+  test("they stay quiet: the assistant greets them after the wait", async () => {
+    let ai = false;
+    const w = watch(
+      () => false,
+      () => ai,
+      200,
+    );
+    await wait(100);
+    expect(w.sent).toEqual([]); // still waiting for their hello
+    await wait(300);
+    ai = true;
+    await wait(150);
+    w.stop();
+    expect(w.sent).toEqual([
+      "(The person picked up but has not said anything yet. Greet them now.)",
+    ]);
+  });
+
+  test("they said hello but the assistant stays silent: one nudge", async () => {
+    const w = watch(
+      () => true,
+      () => false,
+      60_000,
+    );
+    await wait(3_400);
+    w.stop();
+    expect(w.sent).toEqual(["(The person has answered the phone. Reply to them now.)"]);
   });
 });

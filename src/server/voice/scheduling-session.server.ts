@@ -29,8 +29,8 @@ import {
   type CallResult,
   closeCallRun,
   DEFAULT_LIMITS,
-  GREETING_NUDGE_MS,
   openCallRun,
+  openingWatch,
   rms,
   setCall,
   SPEECH_RMS,
@@ -248,15 +248,16 @@ async function place(
     }
     session.sendAudio(up.process(pcm));
   });
-  session.sendText("(The person has just picked up the phone. Begin.)");
   lastActivity = now();
-  // The assistant must speak first: if it has not within a few seconds (once seen
-  // on a real call — the model never answered the cue), give the cue again, once.
-  const nudge = setTimeout(() => {
-    if (aiSpoke) return;
-    log.warn("scheduling_call.no_greeting", { call_id: call.id });
-    session.sendText("(The person is on the line and waiting. Greet them now.)");
-  }, GREETING_NUDGE_MS);
+  // They speak first; the assistant answers (or greets them if they stay quiet).
+  const stopOpening = openingWatch({
+    session,
+    heard: () => candidateSpoke,
+    aiSpoke: () => aiSpoke,
+    callerFirstMs: limits.callerFirstMs,
+    tag: "scheduling_call",
+    callId: call.id,
+  });
 
   let watchdog: ReturnType<typeof setInterval> | null = null;
   const limitHit = new Promise<string>((resolve) => {
@@ -274,7 +275,7 @@ async function place(
     limitHit,
   ]);
   if (watchdog) clearInterval(watchdog);
-  clearTimeout(nudge);
+  stopOpening();
   await line.hangup().catch(() => undefined);
   line.close();
   const summary = await session.close();

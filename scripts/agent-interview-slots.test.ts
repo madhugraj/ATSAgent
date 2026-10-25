@@ -281,6 +281,21 @@ describe("the candidate chooses the time", () => {
     return { ...r, token: row!.token };
   }
 
+  async function offerSlotsAt(when: Date[]) {
+    return offers.offerSlotsCore(
+      orgId,
+      { userId, runId: null },
+      {
+        applicationId: app,
+        level: 1,
+        interviewerEmail: interviewer,
+        slots: when.map((d) => d.toISOString()),
+        durationMins: 60,
+        mode: "online",
+      },
+    );
+  }
+
   test("an offer emails the candidate a private link; a clashing time is refused", async () => {
     const o = await offer();
     expect(o.slots).toHaveLength(3);
@@ -311,6 +326,20 @@ describe("the candidate chooses the time", () => {
         },
       ),
     ).rejects.toThrow(/not free: .*another interview is booked then/);
+  });
+
+  test("a newer offer for the round withdraws the older one's unsent e-mail", async () => {
+    const first = await offer();
+    // Its e-mail has not gone out yet (e.g. the process that queued it exited first).
+    await db
+      .update(emailOutbox)
+      .set({ status: "queued" })
+      .where(eq(emailOutbox.idempotencyKey, `interview-slots:${first.offerId}`));
+    const second = await offerSlotsAt([weekdayAt(6), weekdayAt(7, 14)]);
+    const mails = await db.select().from(emailOutbox).where(eq(emailOutbox.orgId, orgId));
+    const of = (id: string) => mails.find((m) => m.idempotencyKey === `interview-slots:${id}`)!;
+    expect(of(first.offerId).status).toBe("suppressed");
+    expect(of(second.offerId).status).not.toBe("suppressed");
   });
 
   test("names fall back to the email; a booking without a meeting provider says so", async () => {

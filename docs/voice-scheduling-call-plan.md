@@ -279,6 +279,20 @@ and the call.
   assistant spoke; the go-ahead question was answered "I'm not sure", taken as
   a no → `not_now`; no transcript kept (no go-ahead). Not yet booked.
 
+### S2.2 — the candidate speaks first; e-mail delivery (2026-10-25)
+
+- From the real calls: the assistant spoke the moment the candidate picked up.
+  Both calls now wait for the candidate's hello (`openingWatch`): the model
+  answers their voice; if they say nothing for 5 s it greets them; if it stays
+  silent after either, one nudge. Screening call agent 1.1.7, Scheduling call
+  agent 1.2.0 (also: an unclear answer such as "I'm not sure" gets one plain
+  explanation and a second ask — only a clear no ends the call).
+- The interview-time e-mails were not delivered because the one-off script
+  that made the offers exited before the background send ran; the local stack
+  had no outbox cron. `scripts/dev-agent-tick.ts` now drains the outbox like
+  the production cron. A newer offer for a round now withdraws the older
+  offer's unsent e-mail (its link would no longer work).
+
 ## Decisions (confirmed 2026-10-25)
 
 1. **Wait before calling:** 24 hours after the e-mail (an organisation setting).

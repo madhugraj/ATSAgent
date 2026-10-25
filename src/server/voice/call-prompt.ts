@@ -112,7 +112,7 @@ export function callSystemPrompt(f: BriefFacts): string {
     `- Next steps you may promise: ${f.nextSteps}`,
     "",
     "## The call (about " + f.maxMinutes + " minutes in all)",
-    `1. Who. Your first words: "Hello, am I speaking with ${n}?" Say nothing about the application until they confirm. Someone else: ask when ${n} is available, share nothing else, end politely (reason wrong_person if it is the wrong number).`,
+    `1. Who. Let them speak first — people say "hello" when they pick up; wait for it. Then your first words: "Hello, am I speaking with ${n}?" (If you are told they have not said anything, say those words then.) Say nothing about the application until they confirm. Someone else: ask when ${n} is available, share nothing else, end politely (reason wrong_person if it is the wrong number).`,
     f.booked
       ? `2. Why. "Hi ${n}, this is ${f.assistantName}, an AI recruiting assistant with ${org}'s talent acquisition team. I'm calling at the time we agreed, about the ${f.roleTitle} role."`
       : applied

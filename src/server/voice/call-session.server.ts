@@ -77,15 +77,66 @@ export type CallLimits = {
   silenceMs: number;
   /** The candidate has not said anything this long after answering → voicemail / no one. */
   firstWordsMs: number;
+  /** Wait this long for the candidate's hello before the assistant greets them. */
+  callerFirstMs: number;
 };
 
-/** No assistant audio this long after the pickup → give the opening cue again (once). */
+/** No assistant audio this long after a cue → give it once more. */
 export const GREETING_NUDGE_MS = 6_000;
+/** After the candidate's hello, the assistant should answer within this. */
+export const REPLY_NUDGE_MS = 3_000;
+
+/**
+ * The candidate speaks first (they say "hello" when they pick up); the
+ * assistant answers them. If they say nothing for `callerFirstMs`, the
+ * assistant greets them; if the assistant stays silent after either, it gets
+ * one nudge (seen on a real call: the model never answered). Real clock.
+ * Returns a stop function.
+ */
+export function openingWatch(o: {
+  session: { sendText(text: string): void };
+  heard: () => boolean;
+  aiSpoke: () => boolean;
+  callerFirstMs: number;
+  tag: string;
+  callId: string;
+}): () => void {
+  const t0 = Date.now();
+  let heardAt: number | null = null;
+  let cuedAt: number | null = null;
+  let done = false;
+  const nudge = (text: string) => {
+    done = true;
+    log.warn(`${o.tag}.no_greeting`, { call_id: o.callId });
+    o.session.sendText(text);
+  };
+  const timer = setInterval(() => {
+    if (done || o.aiSpoke()) {
+      clearInterval(timer);
+      return;
+    }
+    const t = Date.now();
+    if (heardAt === null && o.heard()) heardAt = t;
+    if (heardAt !== null) {
+      if (t - heardAt > REPLY_NUDGE_MS)
+        nudge("(The person has answered the phone. Reply to them now.)");
+      return;
+    }
+    if (cuedAt === null && t - t0 >= o.callerFirstMs) {
+      cuedAt = t;
+      o.session.sendText("(The person picked up but has not said anything yet. Greet them now.)");
+    } else if (cuedAt !== null && t - cuedAt > GREETING_NUDGE_MS) {
+      nudge("(The person is on the line and waiting. Speak now.)");
+    }
+  }, 100);
+  return () => clearInterval(timer);
+}
 
 export const DEFAULT_LIMITS: CallLimits = {
   ringMs: 45_000,
   silenceMs: 20_000,
   firstWordsMs: 25_000,
+  callerFirstMs: 5_000,
 };
 
 export {
@@ -403,15 +454,16 @@ async function placeCall(
     }
     session.sendAudio(up.process(pcm));
   });
-  session.sendText("(The person has just picked up the phone. Begin.)");
   lastActivity = now();
-  // The assistant must speak first: if it has not within a few seconds (once seen
-  // on a real call — the model never answered the cue), give the cue again, once.
-  const nudge = setTimeout(() => {
-    if (aiSpoke) return;
-    log.warn("screening_call.no_greeting", { call_id: call.id });
-    session.sendText("(The person is on the line and waiting. Greet them now.)");
-  }, GREETING_NUDGE_MS);
+  // They speak first; the assistant answers (or greets them if they stay quiet).
+  const stopOpening = openingWatch({
+    session,
+    heard: () => candidateSpoke,
+    aiSpoke: () => aiSpoke,
+    callerFirstMs: limits.callerFirstMs,
+    tag: "screening_call",
+    callId: call.id,
+  });
 
   let watchdog: ReturnType<typeof setInterval> | null = null;
   const limitHit = new Promise<string>((resolve) => {
@@ -429,7 +481,7 @@ async function placeCall(
     limitHit,
   ]);
   if (watchdog) clearInterval(watchdog);
-  clearTimeout(nudge);
+  stopOpening();
   await line.hangup().catch(() => undefined);
   line.close();
   const summary = await session.close();

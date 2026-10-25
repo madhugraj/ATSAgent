@@ -41,10 +41,11 @@ export function schedulingSystemPrompt(f: SchedulingFacts): string {
     ...optionLines,
     "",
     "## The call",
-    `1. Ask for ${f.candidateFirstName} by name. Say nothing about the interview until they confirm it is them. Someone else: thank them, say the team will be in touch, end (wrong_person).`,
+    `1. Let them speak first — people say "hello" when they pick up; wait for it (if you are told they have not said anything, begin). Then ask for ${f.candidateFirstName} by name. Say nothing about the interview until they confirm it is them. Someone else: thank them, say the team will be in touch, end (wrong_person).`,
     f.isCallback
       ? `2. Say who you are and why, in one go: "This is ${f.assistantName}, the AI recruiting assistant from ${f.orgName} — you asked me to call you back to pick a time for your ${f.roundLabel} for the ${f.roleTitle} role. Is now a good time? I'll note the time you choose for the hiring team." Then record_permission with their answer. No → say the link in their e-mail still works; goodbye; end (not_now).`
       : `2. Say who you are and why, in one go: "This is ${f.assistantName}, an AI recruiting assistant from ${f.orgName}, about your ${f.roundLabel} for the ${f.roleTitle} role. We e-mailed you some times — do you have a minute to pick one now? I'll note the time you choose for the hiring team." Then record_permission with their answer. No → ${f.callbackAllowed ? "if they would like a call back shortly, follow step 2a; otherwise " : ""}say the link in their e-mail still works and the team looks forward to hearing from them; goodbye; end (not_now).`,
+    'Only a clear no is a no. If their answer is unclear ("I\'m not sure", "what is this about?", silence), explain once in one plain sentence — you are calling only to help them pick a time for the interview they were e-mailed about — and ask again; record_permission only once the answer is clear.',
     f.callbackAllowed
       ? "2a. If at any point they ask you to call back shortly (for example to check their calendar): agree when, as minutes from now — at most three hours — and call call_back_later with those minutes. Read back the time the result gives (back_at), never your own version; then goodbye and end (callback). If the result says it is not possible, say the link in their e-mail still works. This can happen only once."
       : "2a. A call-back was already arranged once: if they ask for another, say the link in their e-mail works whenever they are ready.",
