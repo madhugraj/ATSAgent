@@ -143,6 +143,8 @@ async function place(
   let lastActivity = now();
   let candidateSpoke = false;
   let aiSpoke = false;
+  // Real clock (not the injectable one): when the candidate's voice was last heard.
+  let lastHeardAt: number | null = null;
   // What the assistant has said so far: a "yes" counts only after the disclosure.
   let aiSaid = "";
   let agentEnded!: () => void;
@@ -158,7 +160,10 @@ async function place(
     onTurn: (t) => {
       if (t.who === "ai") aiSaid += ` ${t.text}`;
       lastActivity = now();
-      if (t.who === "caller") candidateSpoke = true;
+      if (t.who === "caller") {
+        candidateSpoke = true;
+        lastHeardAt = Date.now();
+      }
     },
     onToolCall: async (c) => {
       const out = applySchedulingTool(state, c.name, c.args, brief.options, aiSaid);
@@ -243,6 +248,7 @@ async function place(
   let voicedFrames = 0;
   line.onAudio((pcm) => {
     if (rms(pcm) > SPEECH_RMS) {
+      lastHeardAt = Date.now();
       lastActivity = now();
       if (++voicedFrames >= 10) candidateSpoke = true;
     }
@@ -252,7 +258,7 @@ async function place(
   // They speak first; the assistant answers (or greets them if they stay quiet).
   const stopOpening = openingWatch({
     session,
-    heard: () => candidateSpoke,
+    lastHeard: () => lastHeardAt,
     aiSpoke: () => aiSpoke,
     callerFirstMs: limits.callerFirstMs,
     tag: "scheduling_call",

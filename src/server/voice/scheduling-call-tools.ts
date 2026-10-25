@@ -26,6 +26,10 @@ export type SchedulingEndReason = (typeof SCHEDULING_END_REASONS)[number];
 /** At most this many options on one call: the e-mailed times plus up to three alternates. */
 export const MAX_OPTIONS = 8;
 
+/** Words that sound like confusion, not a refusal (pure; unit-tested). */
+export const UNCLEAR =
+  /not (very |so |really |quite )?(sure|clear)|unclear|confus|don'?t understand|didn'?t (get|catch|understand)|pardon|sorry\?|what (is|was|do you|are you)|who is this|which|\?\s*$/i;
+
 /** A call-back the candidate asks for: once per offer, within this many minutes. */
 export const CALLBACK_MAX_MINUTES = 180;
 
@@ -93,6 +97,8 @@ export type Availability = z.infer<typeof SCHEDULING_TOOL_INPUTS.record_availabi
 
 export type SchedulingCallState = {
   permission: boolean | null;
+  /** An unclear "no" was already sent back once (then a second one is taken as said). */
+  askedAgain?: boolean;
   permissionWords?: string;
   /** The option the candidate chose (1-based), once the booking went through. */
   booked: { option: number; at: string } | null;
@@ -144,6 +150,16 @@ export function applySchedulingTool(
           ok: false,
           error: `Not recorded: first tell them ${missing}, then ask again whether they have a minute.`,
         };
+      // Only a clear no is a no (real calls: "I'm not sure", "I am not very clear with
+      // your ask" were taken as refusals): send an unclear one back once.
+      if (!granted && !state.askedAgain && UNCLEAR.test(their_words)) {
+        state.askedAgain = true;
+        return {
+          ok: false,
+          error:
+            "Not recorded: that is not a clear no. In one plain sentence, say you are calling only to help them pick a time for the interview they were e-mailed about, then ask again whether they have a minute.",
+        };
+      }
       state.permission = granted;
       state.permissionWords = their_words;
       return { ok: true };

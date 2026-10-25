@@ -247,6 +247,57 @@ describe("the in-call tools", () => {
     ).toBe("callback");
   });
 
+  test("an unclear no is sent back once; a clear no is taken at once", () => {
+    const said = "This is Saranya, an AI recruiting assistant. I'll note the time you choose.";
+    const a = tools.freshSchedulingState();
+    for (const words of [
+      "I am not very clear with your ask.",
+      "I'm not sure.",
+      "Sorry, what is this?",
+    ]) {
+      const s = tools.freshSchedulingState();
+      expect(
+        tools.applySchedulingTool(
+          s,
+          "record_permission",
+          { granted: false, their_words: words },
+          options,
+          said,
+        ),
+      ).toMatchObject({ ok: false, error: expect.stringMatching(/not a clear no/) });
+    }
+    expect(
+      tools.applySchedulingTool(
+        a,
+        "record_permission",
+        { granted: false, their_words: "I'm not sure." },
+        options,
+        said,
+      ),
+    ).toMatchObject({ ok: false });
+    // Asked again and still a no: taken as said.
+    expect(
+      tools.applySchedulingTool(
+        a,
+        "record_permission",
+        { granted: false, their_words: "I'm not sure." },
+        options,
+        said,
+      ),
+    ).toEqual({ ok: true });
+    expect(a.permission).toBe(false);
+    const b = tools.freshSchedulingState();
+    expect(
+      tools.applySchedulingTool(
+        b,
+        "record_permission",
+        { granted: false, their_words: "No thanks, I'm driving." },
+        options,
+        said,
+      ),
+    ).toEqual({ ok: true });
+  });
+
   test("outcomes", () => {
     const base = { permission: true, booked: null, availability: null, endReason: null };
     expect(tools.schedulingOutcome({ ...base, endReason: "opt_out" })).toBe("opt_out");
@@ -784,11 +835,11 @@ describe("a whole scheduling call (fake line)", () => {
 });
 
 describe("who speaks first", () => {
-  const watch = (heard: () => boolean, aiSpoke: () => boolean, callerFirstMs: number) => {
+  const watch = (lastHeard: () => number | null, aiSpoke: () => boolean, callerFirstMs: number) => {
     const sent: string[] = [];
     const stop = session.openingWatch({
       session: { sendText: (t) => sent.push(t) },
-      heard,
+      lastHeard,
       aiSpoke,
       callerFirstMs,
       tag: "test",
@@ -800,8 +851,9 @@ describe("who speaks first", () => {
 
   test("the candidate says hello: no cue, and the assistant answers them", async () => {
     let ai = false;
+    const heardAt = Date.now();
     const w = watch(
-      () => true,
+      () => heardAt,
       () => ai,
       300,
     );
@@ -815,7 +867,7 @@ describe("who speaks first", () => {
   test("they stay quiet: the assistant greets them after the wait", async () => {
     let ai = false;
     const w = watch(
-      () => false,
+      () => null,
       () => ai,
       200,
     );
@@ -830,14 +882,20 @@ describe("who speaks first", () => {
     ]);
   });
 
-  test("they said hello but the assistant stays silent: one nudge", async () => {
+  test("no nudge while they are still talking; one once they stop and it stays silent", async () => {
+    let talking = true;
+    let stoppedAt = 0;
     const w = watch(
-      () => true,
+      () => (talking ? Date.now() : stoppedAt),
       () => false,
       60_000,
     );
-    await wait(3_400);
+    await wait(4_500); // a long hello: still talking, so nothing is sent
+    expect(w.sent).toEqual([]);
+    talking = false;
+    stoppedAt = Date.now();
+    await wait(4_400);
     w.stop();
     expect(w.sent).toEqual(["(The person has answered the phone. Reply to them now.)"]);
-  });
+  }, 15_000);
 });

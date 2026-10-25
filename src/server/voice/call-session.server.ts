@@ -83,8 +83,11 @@ export type CallLimits = {
 
 /** No assistant audio this long after a cue → give it once more. */
 export const GREETING_NUDGE_MS = 6_000;
-/** After the candidate's hello, the assistant should answer within this. */
-export const REPLY_NUDGE_MS = 3_000;
+/**
+ * After the candidate stops talking, the assistant should answer within this
+ * (the voice model waits ~1 s of silence, then thinks; nudging sooner talks over it).
+ */
+export const REPLY_NUDGE_MS = 4_000;
 
 /**
  * The candidate speaks first (they say "hello" when they pick up); the
@@ -95,14 +98,14 @@ export const REPLY_NUDGE_MS = 3_000;
  */
 export function openingWatch(o: {
   session: { sendText(text: string): void };
-  heard: () => boolean;
+  /** When the candidate's voice was last heard (ms), or null if never. */
+  lastHeard: () => number | null;
   aiSpoke: () => boolean;
   callerFirstMs: number;
   tag: string;
   callId: string;
 }): () => void {
   const t0 = Date.now();
-  let heardAt: number | null = null;
   let cuedAt: number | null = null;
   let done = false;
   const nudge = (text: string) => {
@@ -116,9 +119,10 @@ export function openingWatch(o: {
       return;
     }
     const t = Date.now();
-    if (heardAt === null && o.heard()) heardAt = t;
-    if (heardAt !== null) {
-      if (t - heardAt > REPLY_NUDGE_MS)
+    const heard = o.lastHeard();
+    if (heard !== null) {
+      // Counted from when they stopped talking, not from their first word.
+      if (t - heard > REPLY_NUDGE_MS)
         nudge("(The person has answered the phone. Reply to them now.)");
       return;
     }
@@ -357,6 +361,8 @@ async function placeCall(
   let lastActivity = now();
   let candidateSpoke = false;
   let aiSpoke = false;
+  // Real clock (not the injectable one): when the candidate's voice was last heard.
+  let lastHeardAt: number | null = null;
   // Transcript lines so far, and how many there were when the practical
   // details were last recorded: grading reads only what came after.
   let turns = 0;
@@ -378,7 +384,10 @@ async function placeCall(
       turns++;
       if (t.who === "ai") aiSaid += ` ${t.text}`;
       lastActivity = now();
-      if (t.who === "caller") candidateSpoke = true;
+      if (t.who === "caller") {
+        candidateSpoke = true;
+        lastHeardAt = Date.now();
+      }
     },
     onToolCall: async (c) => {
       const out = applyCallTool(state, c.name, c.args, questionIds, now(), aiSaid);
@@ -449,6 +458,7 @@ async function placeCall(
   line.onAudio((pcm) => {
     // The candidate talking counts as activity even before a transcript line arrives.
     if (rms(pcm) > SPEECH_RMS) {
+      lastHeardAt = Date.now();
       lastActivity = now();
       if (++voicedFrames >= 10) candidateSpoke = true;
     }
@@ -458,7 +468,7 @@ async function placeCall(
   // They speak first; the assistant answers (or greets them if they stay quiet).
   const stopOpening = openingWatch({
     session,
-    heard: () => candidateSpoke,
+    lastHeard: () => lastHeardAt,
     aiSpoke: () => aiSpoke,
     callerFirstMs: limits.callerFirstMs,
     tag: "screening_call",
