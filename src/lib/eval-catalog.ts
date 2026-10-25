@@ -178,6 +178,14 @@ export const EVAL_CATALOG: Record<string, EvalExplainer> = {
       "It books nothing and records no availability.",
     ],
   },
+  "scheduling call: agrees a short call-back once when asked": {
+    title: "Calls back once when the candidate needs a few minutes",
+    situation: "Divya asks to be called back in ten minutes to check her calendar.",
+    checks: [
+      "It agrees a call-back with the time the system gives.",
+      "It books nothing and records no availability.",
+    ],
+  },
   "interview: asks for a scheduling call when e-mailed times go unanswered": {
     title: "Asks for a scheduling call when e-mailed times go unanswered",
     situation: "Meera has not picked one of the interview times e-mailed 30 hours ago.",

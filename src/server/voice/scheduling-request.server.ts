@@ -133,7 +133,8 @@ export async function checkSchedulingCall(
       ),
     )
     .limit(1);
-  if (spoken)
+  // An agent never calls again about a round; a person on the team may decide to.
+  if (spoken && !opts.byPerson)
     return {
       ok: false,
       reason: "The assistant already spoke with them about this round; these times go by e-mail.",

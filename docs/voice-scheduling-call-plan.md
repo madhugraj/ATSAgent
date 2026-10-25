@@ -262,6 +262,23 @@ and the call.
   be called back in 10 minutes to check her calendar; v1 has no callbacks, so it
   pointed to the e-mail link and ended `not_now`. Nothing was booked.
 
+### S2.1 — one call-back, and a greeting nudge (2026-10-25)
+
+- Scheduling call agent 1.1.0: `call_back_later{minutes}` — once per offer,
+  5–180 minutes, inside calling hours; the result gives the time to read back.
+  On a live call it is saved only when the call ends (the call becomes a
+  `callback`, the dispatcher dials it then without using an attempt), and the
+  call-back opens with "you asked me to call you back". The thread is told.
+- A person may arrange another call after an earlier connected one (agents
+  still may not).
+- Both live calls give the opening cue once more if the assistant has not
+  spoken 6 seconds after the pickup (seen once: the model never answered the
+  cue and the call ended in silence; log `*.no_greeting`).
+- Real calls, 25 Oct: 09:50 — picked up, the model never spoke, ended on
+  silence (zero tokens; led to the nudge). 09:52 (with the nudge) — the
+  assistant spoke; the go-ahead question was answered "I'm not sure", taken as
+  a no → `not_now`; no transcript kept (no go-ahead). Not yet booked.
+
 ## Decisions (confirmed 2026-10-25)
 
 1. **Wait before calling:** 24 hours after the e-mail (an organisation setting).

@@ -560,7 +560,10 @@ export function registerPhase3Agents(): void {
     // not picked one of the e-mailed interview times — books one of those times (or a
     // pre-checked alternate) by number through the same core as the link, or notes when
     // they are free; honours "don't call me".
-    version: "1.0.0",
+    // 1.1.0 (first real call: the candidate asked to be called back in ten minutes to
+    // check her calendar, and v1 could only point to the e-mail): one call-back per
+    // offer, within three hours and inside calling hours, read back from the result.
+    version: "1.1.0",
     owner: "hr_head",
     responsibility:
       "Holds one short AI phone call to help a candidate pick an interview time they were already e-mailed: says it is an AI, books one of the offered or pre-checked times, or notes when they are free — nothing else.",
@@ -577,7 +580,7 @@ export function registerPhase3Agents(): void {
         "the e-mailed interview offer, its times and the call's pre-checked alternates — for one call",
       ],
       writes: [
-        "on the call: the candidate's go-ahead (with their words), the time they chose (booked through the e-mailed offer), when they are free, an opt-out from AI calls",
+        "on the call: the candidate's go-ahead (with their words), the time they chose (booked through the e-mailed offer), one short call-back they ask for, when they are free, an opt-out from AI calls",
       ],
       external: [
         "one short phone call to one candidate, within the organisation's calling window",
@@ -592,6 +595,7 @@ export function registerPhase3Agents(): void {
       "scheduling call: refuses to discuss pay or results and books nothing on request",
       "scheduling call: leaves no details on voicemail",
       "scheduling call: stops calling when asked not to be called",
+      "scheduling call: agrees a short call-back once when asked",
     ],
     feature: "agent_scheduling_call",
     maxSteps: 12,

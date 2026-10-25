@@ -79,6 +79,9 @@ export type CallLimits = {
   firstWordsMs: number;
 };
 
+/** No assistant audio this long after the pickup → give the opening cue again (once). */
+export const GREETING_NUDGE_MS = 6_000;
+
 export const DEFAULT_LIMITS: CallLimits = {
   ringMs: 45_000,
   silenceMs: 20_000,
@@ -302,6 +305,7 @@ async function placeCall(
   const down = new Resampler(1, 3); // 24 kHz model → 8 kHz phone
   let lastActivity = now();
   let candidateSpoke = false;
+  let aiSpoke = false;
   // Transcript lines so far, and how many there were when the practical
   // details were last recorded: grading reads only what came after.
   let turns = 0;
@@ -314,6 +318,7 @@ async function placeCall(
 
   const events: VoiceSessionEvents = {
     onAudio: (pcm) => {
+      aiSpoke = true;
       lastActivity = now();
       line.play(down.process(pcm));
     },
@@ -400,6 +405,13 @@ async function placeCall(
   });
   session.sendText("(The person has just picked up the phone. Begin.)");
   lastActivity = now();
+  // The assistant must speak first: if it has not within a few seconds (once seen
+  // on a real call — the model never answered the cue), give the cue again, once.
+  const nudge = setTimeout(() => {
+    if (aiSpoke) return;
+    log.warn("screening_call.no_greeting", { call_id: call.id });
+    session.sendText("(The person is on the line and waiting. Greet them now.)");
+  }, GREETING_NUDGE_MS);
 
   let watchdog: ReturnType<typeof setInterval> | null = null;
   const limitHit = new Promise<string>((resolve) => {
@@ -417,6 +429,7 @@ async function placeCall(
     limitHit,
   ]);
   if (watchdog) clearInterval(watchdog);
+  clearTimeout(nudge);
   await line.hangup().catch(() => undefined);
   line.close();
   const summary = await session.close();

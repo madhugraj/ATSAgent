@@ -29,6 +29,7 @@ import {
   type CallResult,
   closeCallRun,
   DEFAULT_LIMITS,
+  GREETING_NUDGE_MS,
   openCallRun,
   rms,
   setCall,
@@ -48,7 +49,9 @@ import {
 import { loadSchedulingBrief, spokenWhen } from "./scheduling-brief.server";
 import {
   bookByPhone,
+  callbackTime,
   noteAvailability,
+  saveCallback,
   SCHEDULING_MAX_ATTEMPTS,
 } from "./scheduling-outcome.server";
 import { schedulingSystemPrompt } from "./scheduling-prompt";
@@ -58,6 +61,7 @@ type Call = typeof screeningCalls.$inferSelect;
 
 const WORDS: Record<string, string> = {
   booked: "The candidate picked an interview time on the call; it is booked.",
+  callback: "The candidate asked to be called back shortly to pick a time.",
   availability_noted: "None of the times worked; the candidate's availability went to the team.",
   not_now: "Not a good time for the candidate; the e-mailed link stands.",
   declined: "The candidate did not want to pick a time on the call; the e-mailed link stands.",
@@ -130,12 +134,15 @@ async function place(
   const tz = (await getOrgEmailSettings(orgId)).timezone;
   const system = `Current local time: ${localNow(now(), tz)} (${tz}).\n\n${schedulingSystemPrompt(brief.facts)}`;
 
-  const state = freshSchedulingState();
+  const state = { ...freshSchedulingState(), callbackAllowed: call.reschedules < 1 };
+  // The agreed call-back time; saved when the call ends (never while it is live).
+  let callBackAt: Date | null = null;
   const line = deps.line();
   const up = new Resampler(2, 1); // 8 kHz phone → 16 kHz model
   const down = new Resampler(1, 3); // 24 kHz model → 8 kHz phone
   let lastActivity = now();
   let candidateSpoke = false;
+  let aiSpoke = false;
   // What the assistant has said so far: a "yes" counts only after the disclosure.
   let aiSaid = "";
   let agentEnded!: () => void;
@@ -143,6 +150,7 @@ async function place(
 
   const events: VoiceSessionEvents = {
     onAudio: (pcm) => {
+      aiSpoke = true;
       lastActivity = now();
       line.play(down.process(pcm));
     },
@@ -171,6 +179,17 @@ async function place(
           ok: true,
           booked_for: r.booked_for,
           say: `Repeat back exactly this time: ${r.booked_for}.`,
+        };
+      }
+      if (c.name === "call_back_later") {
+        const t = await callbackTime(orgId, call, (c.args as { minutes: number }).minutes, now());
+        if (!t.ok) return { ok: false, error: t.error };
+        state.callback = { minutes: (c.args as { minutes: number }).minutes };
+        callBackAt = t.at;
+        return {
+          ok: true,
+          back_at: t.back_at,
+          say: `Repeat back exactly this time: ${t.back_at}.`,
         };
       }
       if (c.name === "record_availability") {
@@ -231,6 +250,13 @@ async function place(
   });
   session.sendText("(The person has just picked up the phone. Begin.)");
   lastActivity = now();
+  // The assistant must speak first: if it has not within a few seconds (once seen
+  // on a real call — the model never answered the cue), give the cue again, once.
+  const nudge = setTimeout(() => {
+    if (aiSpoke) return;
+    log.warn("scheduling_call.no_greeting", { call_id: call.id });
+    session.sendText("(The person is on the line and waiting. Greet them now.)");
+  }, GREETING_NUDGE_MS);
 
   let watchdog: ReturnType<typeof setInterval> | null = null;
   const limitHit = new Promise<string>((resolve) => {
@@ -248,6 +274,7 @@ async function place(
     limitHit,
   ]);
   if (watchdog) clearInterval(watchdog);
+  clearTimeout(nudge);
   await line.hangup().catch(() => undefined);
   line.close();
   const summary = await session.close();
@@ -255,6 +282,7 @@ async function place(
   const result = schedulingOutcome(state);
   const endedAt = now();
   return settle(orgId, call, result, endedAt, {
+    callBackAt,
     endReason: state.endReason ?? (result === "no_answer" ? why : result),
     extra: {
       startedAt: new Date(answeredAt),
@@ -280,6 +308,7 @@ async function settle(
   o: {
     endReason?: string;
     lastError?: string | null;
+    callBackAt?: Date | null;
     extra?: Partial<typeof screeningCalls.$inferInsert>;
   } = {},
 ): Promise<CallResult> {
@@ -296,6 +325,9 @@ async function settle(
       status = "fell_back";
       words = WORDS["gave_up"]!;
     }
+  } else if (result === "callback" && o.callBackAt) {
+    status = "callback";
+    dueAt = o.callBackAt;
   } else if (result === "wrong_person" || result === "gave_up") {
     status = "fell_back";
   } else {
@@ -309,6 +341,7 @@ async function settle(
     dueAt,
     lastError: o.lastError ?? null,
   });
+  if (status === "callback" && dueAt) await saveCallback(orgId, call, dueAt);
   if (result === "opt_out") {
     const { recordAiCallOptOut } = await import("./opt-out.server");
     await recordAiCallOptOut({
@@ -324,14 +357,14 @@ async function settle(
       log.warn("scheduling_call.run_close_failed", { call_id: call.id, error: e as Error }),
     );
   if (status !== "no_answer" && result !== "booked" && result !== "availability_noted")
-    await postToThread(orgId, call, result === "gave_up" ? endReason : result).catch((e) =>
+    await postToThread(orgId, call, result === "gave_up" ? endReason : result, dueAt).catch((e) =>
       log.warn("scheduling_call.thread_post_failed", { call_id: call.id, error: e as Error }),
     );
   return { status, endReason, screeningRunId: null };
 }
 
 /** What the role's hiring-desk thread hears when a scheduling call booked nothing. */
-async function postToThread(orgId: string, call: Call, how: string) {
+async function postToThread(orgId: string, call: Call, how: string, dueAt: Date | null = null) {
   if (!call.applicationId) return;
   const desk = await import("../desk/desk.server");
   const convId = await desk.conversationForSubject(orgId, "application", call.applicationId);
@@ -344,6 +377,12 @@ async function postToThread(orgId: string, call: Call, how: string) {
     .where(eq(screeningCalls.id, call.id))
     .limit(1);
   const name = row?.name ?? "The candidate";
+  const at = dueAt
+    ? spokenWhen(
+        dueAt.toISOString(),
+        (await (await import("@/lib/email-outbox.server")).getOrgEmailSettings(orgId)).timezone,
+      )
+    : null;
   const round = row?.level ? `L${row.level} interview` : "interview";
   const said: Record<string, string> = {
     not_now: `${name} could not talk when the assistant called about their ${round} time; the e-mailed link still stands.`,
@@ -351,6 +390,7 @@ async function postToThread(orgId: string, call: Call, how: string) {
     opt_out: `${name} asked not to be called by the AI assistant. No AI call will dial them again; the e-mailed link for their ${round} still stands.`,
     wrong_person: `The scheduling call for ${name}'s ${round} reached someone else; the e-mailed link still stands.`,
     already_chosen: `${name} picked their ${round} time from the e-mail before the call, so no call was needed.`,
+    callback: `${name} asked the assistant to call back${at ? ` at ${at}` : " shortly"} to pick their ${round} time.`,
   };
   await desk.postMessage(
     { id: convId, orgId },

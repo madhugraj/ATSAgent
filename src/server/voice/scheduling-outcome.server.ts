@@ -52,12 +52,62 @@ export async function noteAvailability(orgId: string, call: Call, a: Availabilit
   await declineSlotsByOffer(orgId, call.slotOfferId, words);
 }
 
+/**
+ * The call-back the candidate asked for: once per offer (the call has not been
+ * moved before), at most three hours away and inside the calling hours.
+ * Returns the time to read back; writes nothing (see `saveCallback`).
+ */
+export async function callbackTime(
+  orgId: string,
+  call: Call,
+  minutes: number,
+  now = Date.now(),
+): Promise<{ ok: true; at: Date; back_at: string } | { ok: false; error: string }> {
+  if (call.reschedules >= 1)
+    return {
+      ok: false,
+      error:
+        "Not possible: a call-back was already arranged for these times. Point them to the link in their e-mail.",
+    };
+  const { phoneScreeningPolicyOf } = await import("./settings.server");
+  const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+  const { inWindow } = await import("./schedule");
+  const policy = await phoneScreeningPolicyOf(orgId);
+  const tz = (await getOrgEmailSettings(orgId)).timezone;
+  const at = new Date(now + Math.min(Math.max(minutes, 5), 180) * 60_000);
+  if (!inWindow(at.getTime(), policy, tz))
+    return {
+      ok: false,
+      error:
+        "Not possible: that is outside the calling hours. Point them to the link in their e-mail.",
+    };
+  return { ok: true, at, back_at: spokenWhen(at.toISOString(), tz) };
+}
+
+/** Make the call a call-back at `at` (the dispatcher dials it then; no attempt used). */
+export async function saveCallback(orgId: string, call: Call, at: Date): Promise<void> {
+  await db
+    .update(screeningCalls)
+    .set({
+      status: "callback",
+      endReason: "callback",
+      dueAt: at,
+      callbackAt: at,
+      bookedByCandidate: true,
+      reschedules: call.reschedules + 1,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(screeningCalls.id, call.id), eq(screeningCalls.orgId, orgId)));
+}
+
 /** Where a scheduling call's ending leaves it (pure; unit-tested). */
 export function scheduledEnd(
   reason: SchedulingEndReason,
   attempt: number,
 ): "completed" | "fell_back" | "retry" {
   switch (reason) {
+    case "callback":
+      return "completed"; // the call-back itself was saved when it was agreed
     case "booked":
     case "availability_noted":
     case "not_now":
@@ -100,13 +150,14 @@ export async function endSchedulingCall(
     .from(screeningCalls)
     .where(eq(screeningCalls.id, call.id))
     .limit(1);
-  if (current?.status === "completed") status = "completed";
+  // A booking or an agreed call-back already settled the call: keep it.
+  const settled = current?.status === "completed" || current?.status === "callback";
+  if (settled) status = current!.status;
   await db
     .update(screeningCalls)
     .set({
       status,
-      endReason: current?.status === "completed" && call.endReason ? call.endReason : reason,
-      dueAt,
+      ...(settled ? {} : { endReason: reason, dueAt }),
       endedAt: new Date(now),
       updatedAt: new Date(now),
     })

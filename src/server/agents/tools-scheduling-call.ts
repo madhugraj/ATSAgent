@@ -72,6 +72,7 @@ async function applyToCall(ctx: ToolContext, name: SchedulingToolName, input: un
     ...freshSchedulingState(),
     permission: call.consentAt ? true : call.consentWords ? false : null,
     booked: call.endReason === "booked" ? { option: 0, at: "" } : null,
+    callbackAllowed: call.reschedules < 1,
   };
   const out = applySchedulingTool(state, name, input, brief.options);
   if (!out.ok) throw new Error(out.error);
@@ -91,6 +92,12 @@ async function applyToCall(ctx: ToolContext, name: SchedulingToolName, input: un
       const r = await outcome.bookByPhone(ctx.orgId, call, out.book!);
       if (!r.ok) throw new Error(r.error);
       return r;
+    }
+    case "call_back_later": {
+      const t = await outcome.callbackTime(ctx.orgId, call, (input as { minutes: number }).minutes);
+      if (!t.ok) throw new Error(t.error);
+      await outcome.saveCallback(ctx.orgId, call, t.at);
+      return { ok: true, back_at: t.back_at };
     }
     case "record_availability":
       await outcome.noteAvailability(ctx.orgId, call, input as Availability);

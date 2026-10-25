@@ -20,6 +20,10 @@ export type SchedulingFacts = {
   options: { spoken: string; alternate: boolean }[];
   /** Hard limit for the call. */
   maxMinutes: number;
+  /** This is the call-back they asked for on an earlier call. */
+  isCallback: boolean;
+  /** A short call-back may still be agreed (once per offer). */
+  callbackAllowed: boolean;
 };
 
 export function schedulingSystemPrompt(f: SchedulingFacts): string {
@@ -38,7 +42,12 @@ export function schedulingSystemPrompt(f: SchedulingFacts): string {
     "",
     "## The call",
     `1. Ask for ${f.candidateFirstName} by name. Say nothing about the interview until they confirm it is them. Someone else: thank them, say the team will be in touch, end (wrong_person).`,
-    `2. Say who you are and why, in one go: "This is ${f.assistantName}, an AI recruiting assistant from ${f.orgName}, about your ${f.roundLabel} for the ${f.roleTitle} role. We e-mailed you some times — do you have a minute to pick one now? I'll note the time you choose for the hiring team." Then record_permission with their answer. No → say the link in their e-mail still works and the team looks forward to hearing from them; goodbye; end (not_now).`,
+    f.isCallback
+      ? `2. Say who you are and why, in one go: "This is ${f.assistantName}, the AI recruiting assistant from ${f.orgName} — you asked me to call you back to pick a time for your ${f.roundLabel} for the ${f.roleTitle} role. Is now a good time? I'll note the time you choose for the hiring team." Then record_permission with their answer. No → say the link in their e-mail still works; goodbye; end (not_now).`
+      : `2. Say who you are and why, in one go: "This is ${f.assistantName}, an AI recruiting assistant from ${f.orgName}, about your ${f.roundLabel} for the ${f.roleTitle} role. We e-mailed you some times — do you have a minute to pick one now? I'll note the time you choose for the hiring team." Then record_permission with their answer. No → ${f.callbackAllowed ? "if they would like a call back shortly, follow step 2a; otherwise " : ""}say the link in their e-mail still works and the team looks forward to hearing from them; goodbye; end (not_now).`,
+    f.callbackAllowed
+      ? "2a. If at any point they ask you to call back shortly (for example to check their calendar): agree when, as minutes from now — at most three hours — and call call_back_later with those minutes. Read back the time the result gives (back_at), never your own version; then goodbye and end (callback). If the result says it is not possible, say the link in their e-mail still works. This can happen only once."
+      : "2a. A call-back was already arranged once: if they ask for another, say the link in their e-mail works whenever they are ready.",
     `3. Offer the e-mailed times, at most three at a time, with the day, date and time (e.g. "Tuesday the 27th at 11:30 in the morning"). If none work, offer the others in your list, if there are any.`,
     "4. When they choose one, call book_interview_time with its number. Then read back the time the result gives (booked_for) — never your own version — and say the invite with the details is on its way by e-mail. If the result says it could not be booked, apologise briefly and offer another time from your list.",
     "5. If none of the times work: ask which days and times of day suit them, then record_availability in their words. Say the team will e-mail times that match.",
@@ -76,4 +85,6 @@ export const SCHEDULING_PROMPT_TEMPLATE = schedulingSystemPrompt({
     { spoken: "{alternate time}", alternate: true },
   ],
   maxMinutes: 4,
+  isCallback: false,
+  callbackAllowed: true,
 });

@@ -1269,6 +1269,36 @@ export function scenarios(): ScriptedScenario[] {
       ],
     },
     {
+      name: "scheduling call: agrees a short call-back once when asked",
+      agentType: "scheduling_call",
+      autonomy: "autonomous",
+      setup: async ({ orgId, userId }) => seedSchedulingCall(orgId, userId, "Divya"),
+      goal: (d) =>
+        [
+          "This is the scheduling call so far (text mode). Use your tools for what has happened, then reply with exactly what you would say next.",
+          `Times you may book: ${d["options"]}`,
+          "You: Hello, am I speaking with Divya?",
+          "Candidate: Yes.",
+          "You: This is Saranya, an AI recruiting assistant from the talent acquisition team, about your first-round interview for the Platform SRE role. We e-mailed you some times — do you have a minute to pick one now? I'll note the time you choose for the hiring team.",
+          "Candidate: Okay, what times are there?",
+          `You: I have ${d["first"]}, ${d["second"]}, or ${d["third"]}.`,
+          "Candidate: I need to check my calendar. Can you call me back in 10 minutes?",
+        ].join("\n"),
+      expect: {
+        status: "done",
+        calls: ["call_back_later"],
+        neverCalls: ["book_interview_time", "record_availability"],
+      },
+      script: [
+        call("p", "record_permission", {
+          granted: true,
+          their_words: "Okay, what times are there?",
+        }),
+        call("c", "call_back_later", { minutes: 10, their_words: "call me back in 10 minutes" }),
+        say("Of course — I'll call you back in ten minutes. Goodbye for now."),
+      ],
+    },
+    {
       name: "interview: asks for a scheduling call when e-mailed times go unanswered",
       agentType: "interview",
       setup: async ({ orgId, userId }) => {
@@ -1646,7 +1676,13 @@ async function seedOffer(
   if (o.schedulingOn)
     await db
       .update(phoneScreeningSettings)
-      .set({ schedulingEnabled: true })
+      // Calling hours all day, every day: a call-back's outcome must not depend on the clock.
+      .set({
+        schedulingEnabled: true,
+        windowStartMinute: 0,
+        windowEndMinute: 1440,
+        callDays: [1, 2, 3, 4, 5, 6, 7],
+      })
       .where(eq(phoneScreeningSettings.orgId, orgId));
   return { offerId: row!.id, slots };
 }

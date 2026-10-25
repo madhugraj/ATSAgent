@@ -11,6 +11,7 @@ import { disclosureMissing } from "./call-tools";
 
 export const SCHEDULING_END_REASONS = [
   "booked",
+  "callback",
   "availability_noted",
   "not_now",
   "declined",
@@ -25,6 +26,9 @@ export type SchedulingEndReason = (typeof SCHEDULING_END_REASONS)[number];
 /** At most this many options on one call: the e-mailed times plus up to three alternates. */
 export const MAX_OPTIONS = 8;
 
+/** A call-back the candidate asks for: once per offer, within this many minutes. */
+export const CALLBACK_MAX_MINUTES = 180;
+
 export const SCHEDULING_TOOL_INPUTS = {
   record_permission: z.object({
     granted: z.boolean(),
@@ -35,6 +39,11 @@ export const SCHEDULING_TOOL_INPUTS = {
     /** The number of the time in your list of options (1 = the first). */
     option: z.number().int().min(1).max(MAX_OPTIONS),
     their_words: z.string().trim().max(200).optional(),
+  }),
+  call_back_later: z.object({
+    /** How many minutes from now they asked to be called back (e.g. "in 10 minutes" = 10). */
+    minutes: z.number().int().min(5).max(CALLBACK_MAX_MINUTES),
+    their_words: z.string().trim().min(1).max(200),
   }),
   record_availability: z.object({
     /** When they are free, in their words ("weekday mornings after 10"). */
@@ -58,6 +67,8 @@ export const SCHEDULING_TOOL_DESCRIPTIONS: Record<SchedulingToolName, string> = 
     "Record whether the candidate has a minute now to pick an interview time (and agreed to a note of the time they choose): granted true only if they clearly agreed; their_words is exactly what they said.",
   book_interview_time:
     "Book the interview at one of the times in your list of options: option is that time's number. Only after the candidate clearly chose it. The result says the booked time to read back, or why it could not be booked (then offer another option).",
+  call_back_later:
+    "The candidate asked to be called back shortly (for example to check their calendar): minutes is how long from now they asked for (5 to 180). Allowed once; the result gives the exact time to read back, or says it is not possible (then point them to the e-mail link).",
   record_availability:
     "None of the options work: record when the candidate is free, in their words (and, if they said, which days and times of day). The team offers matching times by e-mail.",
   end_scheduling_call:
@@ -86,6 +97,10 @@ export type SchedulingCallState = {
   /** The option the candidate chose (1-based), once the booking went through. */
   booked: { option: number; at: string } | null;
   availability: Availability | null;
+  /** The call-back they asked for (minutes from now), once accepted by the caller. */
+  callback: { minutes: number } | null;
+  /** Whether a call-back may still be offered on this offer (once per offer). */
+  callbackAllowed?: boolean;
   endReason: SchedulingEndReason | null;
 };
 
@@ -93,6 +108,7 @@ export const freshSchedulingState = (): SchedulingCallState => ({
   permission: null,
   booked: null,
   availability: null,
+  callback: null,
   endReason: null,
 });
 
@@ -115,7 +131,8 @@ export function applySchedulingTool(
   if (!(name in SCHEDULING_TOOL_INPUTS)) return { ok: false, error: "Unknown tool." };
   const parsed = SCHEDULING_TOOL_INPUTS[name as SchedulingToolName].safeParse(args);
   if (!parsed.success) return { ok: false, error: "Those arguments are not valid." };
-  const needsPermission = name === "book_interview_time" || name === "record_availability";
+  const needsPermission =
+    name === "book_interview_time" || name === "record_availability" || name === "call_back_later";
   if (needsPermission && state.permission !== true)
     return { ok: false, error: "Ask whether they have a minute and record their answer first." };
   switch (name as SchedulingToolName) {
@@ -142,6 +159,16 @@ export function applySchedulingTool(
         };
       return { ok: true, book: at };
     }
+    case "call_back_later": {
+      if (state.callbackAllowed === false || state.callback)
+        return {
+          ok: false,
+          error:
+            "Not possible: a call-back was already arranged for these times. Point them to the link in their e-mail.",
+        };
+      const { minutes } = parsed.data as { minutes: number };
+      return { ok: true, callBackIn: minutes };
+    }
     case "record_availability": {
       state.availability = parsed.data as Availability;
       return { ok: true };
@@ -156,6 +183,7 @@ export function applySchedulingTool(
 
 export type SchedulingOutcome =
   | "booked"
+  | "callback"
   | "availability_noted"
   | "not_now"
   | "declined"
@@ -165,11 +193,14 @@ export type SchedulingOutcome =
 
 /** Where a finished scheduling call leaves things (pure; unit-tested). */
 export function schedulingOutcome(
-  s: Pick<SchedulingCallState, "permission" | "booked" | "availability" | "endReason">,
+  s: Pick<SchedulingCallState, "permission" | "booked" | "availability" | "endReason"> & {
+    callback?: SchedulingCallState["callback"];
+  },
 ): SchedulingOutcome {
   if (s.endReason === "opt_out") return "opt_out";
   if (s.endReason === "wrong_person") return "wrong_person";
   if (s.booked) return "booked";
+  if (s.callback) return "callback";
   if (s.availability) return "availability_noted";
   if (s.endReason === "declined") return "declined";
   if (s.permission === false || s.endReason === "not_now") return "not_now";

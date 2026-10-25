@@ -47,6 +47,13 @@ const session = await import("../src/server/voice/call-session.server");
 const dispatcher = await import("../src/server/voice/dispatcher.server");
 
 const stamp = Date.now();
+// Calling hours all day, every day, so call-back rules do not depend on the clock.
+const ALL_HOURS = {
+  ...settings.DEFAULT_PHONE_SCREENING_POLICY,
+  windowStartMinute: 0,
+  windowEndMinute: 1440,
+  callDays: [1, 2, 3, 4, 5, 6, 7],
+};
 const H = 3600_000;
 const interviewer = `sched-${stamp}@test.local`;
 let orgId: string;
@@ -99,7 +106,7 @@ beforeEach(async () => {
   await settings.setPhoneScreeningPolicyCore(
     orgId,
     { userId, memberEmail: interviewer },
-    { ...settings.DEFAULT_PHONE_SCREENING_POLICY, enabled: true, schedulingEnabled: true },
+    { ...ALL_HOURS, enabled: true, schedulingEnabled: true },
   );
 });
 
@@ -211,6 +218,35 @@ describe("the in-call tools", () => {
     });
   });
 
+  test("a call-back: once, 5 to 180 minutes, only after the go-ahead", () => {
+    const s = { ...tools.freshSchedulingState(), permission: true, callbackAllowed: true };
+    for (const minutes of [4, 181])
+      expect(
+        tools.applySchedulingTool(s, "call_back_later", { minutes, their_words: "x" }, options),
+      ).toMatchObject({ ok: false });
+    expect(
+      tools.applySchedulingTool(s, "call_back_later", { minutes: 10, their_words: "x" }, options),
+    ).toEqual({ ok: true, callBackIn: 10 });
+    const used = { ...tools.freshSchedulingState(), permission: true, callbackAllowed: false };
+    expect(
+      tools.applySchedulingTool(
+        used,
+        "call_back_later",
+        { minutes: 10, their_words: "x" },
+        options,
+      ),
+    ).toMatchObject({ ok: false, error: expect.stringMatching(/already arranged/) });
+    expect(
+      tools.schedulingOutcome({
+        permission: true,
+        booked: null,
+        availability: null,
+        callback: { minutes: 10 },
+        endReason: "callback",
+      }),
+    ).toBe("callback");
+  });
+
   test("outcomes", () => {
     const base = { permission: true, booked: null, availability: null, endReason: null };
     expect(tools.schedulingOutcome({ ...base, endReason: "opt_out" })).toBe("opt_out");
@@ -255,8 +291,11 @@ describe("the in-call tools", () => {
         { spoken: "Thursday 29 October at 15:00", alternate: true },
       ],
       maxMinutes: 4,
+      isCallback: false,
+      callbackAllowed: true,
     });
     expect(p).toContain("1. Tuesday 27 October at 11:00");
+    expect(p).toContain("call_back_later");
     expect(p).toContain("2. Thursday 29 October at 15:00 (not in the e-mail — also free)");
     expect(p).toContain("AI recruiting assistant");
     expect(p).toMatch(/Book, suggest or agree any time that is not in your list/);
@@ -335,6 +374,34 @@ describe("asking for a scheduling call", () => {
       ok: false,
       reason: expect.stringMatching(/asked not to be called/),
     });
+  });
+
+  test("one conversation per round for agents; a person may call again", async () => {
+    const { appId, candidateId } = await candidateApp();
+    const first = await offer(appId, { ageHours: 30 });
+    await db.insert(screeningCalls).values({
+      orgId,
+      candidateId,
+      applicationId: appId,
+      requisitionId: reqId,
+      purpose: "scheduling",
+      slotOfferId: first.id,
+      status: "completed",
+      endReason: "not_now",
+      consentAt: new Date(),
+    });
+    await db
+      .update(interviewSlotOffers)
+      .set({ status: "cancelled" })
+      .where(eq(interviewSlotOffers.id, first.id));
+    await offer(appId, { ageHours: 30, slots: [weekday(4), weekday(6)] });
+    expect(await request.checkSchedulingCall(orgId, appId)).toMatchObject({
+      ok: false,
+      reason: expect.stringMatching(/already spoke with them about this round/),
+    });
+    expect(
+      await request.checkSchedulingCall(orgId, appId, Date.now(), { byPerson: true }),
+    ).toMatchObject({ ok: true });
   });
 
   test("too close, or nobody to dial", async () => {
@@ -575,6 +642,7 @@ describe("a whole scheduling call (fake line)", () => {
     expect(seen.opts).toMatchObject({ feature: "scheduling_call", languageCode: "en-IN" });
     expect(seen.opts!.tools!.map((t) => t.name).sort()).toEqual([
       "book_interview_time",
+      "call_back_later",
       "end_scheduling_call",
       "record_availability",
       "record_permission",
@@ -593,6 +661,63 @@ describe("a whole scheduling call (fake line)", () => {
     expect(c!.consentWords).toBe("Sure, go ahead.");
     const [run] = await db.select().from(agentRuns).where(eq(agentRuns.id, c!.agentRunId!));
     expect(run).toMatchObject({ agentType: "scheduling_call", status: "done" });
+  });
+
+  test("a call-back in ten minutes: saved as the call's next time, once only", async () => {
+    const { call } = await arranged();
+    const seen: { opts?: VoiceOpts; results: unknown[] } = { results: [] };
+    const before = Date.now();
+    const r = await place(
+      call.id,
+      new FakeLine(),
+      scriptedVoice(
+        [
+          { say: "ai", text: DISCLOSE },
+          { say: "caller", text: "Okay, what are the times?" },
+          { tool: "record_permission", args: { granted: true, their_words: "Okay." } },
+          { say: "caller", text: "Call me back in 10 minutes, I need my calendar." },
+          { tool: "call_back_later", args: { minutes: 10, their_words: "in 10 minutes" } },
+          { tool: "end_scheduling_call", args: { reason: "callback" } },
+        ],
+        seen,
+      ),
+    );
+    expect(r).toMatchObject({ status: "callback" });
+    const back = (seen.results as { tool: string; out: Record<string, unknown> }[]).find(
+      (x) => x.tool === "call_back_later",
+    )!.out;
+    expect(back).toMatchObject({ ok: true, back_at: expect.stringMatching(/ at \d\d:\d\d$/) });
+    const [c] = await db.select().from(screeningCalls).where(eq(screeningCalls.id, call.id));
+    expect(c).toMatchObject({ status: "callback", reschedules: 1, bookedByCandidate: true });
+    const due = c!.dueAt!.getTime();
+    expect(due).toBeGreaterThanOrEqual(before + 10 * 60_000 - 1000);
+    expect(due).toBeLessThanOrEqual(Date.now() + 10 * 60_000 + 1000);
+
+    // The call-back itself: it says so, and a second call-back is refused.
+    await db
+      .update(screeningCalls)
+      .set({ status: "dialling" })
+      .where(eq(screeningCalls.id, call.id));
+    const again: { opts?: VoiceOpts; results: unknown[] } = { results: [] };
+    await place(
+      call.id,
+      new FakeLine(),
+      scriptedVoice(
+        [
+          { say: "ai", text: DISCLOSE },
+          { tool: "record_permission", args: { granted: true, their_words: "Yes." } },
+          { tool: "call_back_later", args: { minutes: 10, their_words: "again" } },
+          { tool: "end_scheduling_call", args: { reason: "not_now" } },
+        ],
+        again,
+      ),
+    );
+    expect(again.opts!.system).toContain("you asked me to call you back");
+    expect(
+      (again.results as { tool: string; out: Record<string, unknown> }[]).find(
+        (x) => x.tool === "call_back_later",
+      )!.out,
+    ).toMatchObject({ ok: false });
   });
 
   test("voicemail: tried once more, then the e-mailed link stands", async () => {

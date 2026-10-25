@@ -132,6 +132,8 @@ export async function loadSchedulingBrief(
       interviewerName: displayName(row.offer.interviewerName, row.offer.interviewerEmail),
       options: options.map((o) => ({ spoken: spokenWhen(o.at, tz), alternate: o.alternate })),
       maxMinutes: 4,
+      isCallback: row.call.bookedByCandidate,
+      callbackAllowed: row.call.reschedules < 1,
     },
   };
 }
