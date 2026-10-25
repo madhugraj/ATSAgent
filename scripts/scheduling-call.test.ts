@@ -32,6 +32,8 @@ const {
   organizations,
   requisitions,
   screeningCalls,
+  screeningKits,
+  screeningRuns,
   users,
 } = await import("../drizzle/schema");
 const tools = await import("../src/server/voice/scheduling-call-tools");
@@ -333,6 +335,42 @@ describe("the in-call tools", () => {
     ).toContain("with a panel of 3 from the hiring team, led by Priya.");
   });
 
+  test("where they stand: stages only — done, booked, this round of how many, what follows", () => {
+    expect(
+      brief.progressWords({
+        screened: true,
+        earlier: [{ level: 1, done: false, when: "Monday 26 October at 16:00" }],
+        level: 2,
+        totalRounds: 3,
+        roundName: "Role and ownership",
+      }),
+    ).toBe(
+      "You have completed the screening. Your first-round interview is booked for Monday 26 October at 16:00. This call is about the second-round interview (Role and ownership) — round 2 of three. After this round, the panel shares its feedback with the hiring team, who will e-mail you about the next step.",
+    );
+    expect(
+      brief.progressWords({
+        screened: true,
+        earlier: [
+          { level: 1, done: true, when: null },
+          { level: 2, done: true, when: null },
+        ],
+        level: 3,
+        totalRounds: 3,
+        roundName: null,
+      }),
+    ).toBe(
+      "You have completed the screening, the first-round interview and the second-round interview. This call is about the third-round interview — round 3 of three. It is the last interview round: after it, the hiring team makes its decision and will e-mail you.",
+    );
+    expect(
+      prompt.panelLine({
+        interviewerName: "Priya",
+        panelSize: 3,
+        panelNames: ["Priya", "Arun", "Kavitha"],
+      }),
+    ).toBe("a panel of 3 from the hiring team: Priya, Arun and Kavitha");
+    expect(prompt.panelLine({ interviewerName: "Priya", panelSize: 1 })).toBe("Priya");
+  });
+
   test("bookable options: offered first, then ≤3 alternates; too soon or repeated dropped", () => {
     const now = Date.now();
     const soon = new Date(now + H).toISOString();
@@ -380,7 +418,7 @@ describe("the in-call tools", () => {
     );
     // Interviews are held by people, and a reason is kept before ending without a booking.
     expect(p).toContain("with Priya.");
-    expect(p).toContain("never by an AI");
+    expect(p).toContain("never an AI");
     expect(p).toMatch(/record_availability with exactly their words/);
     expect(p).toContain("Repeat yourself.");
     expect(p).toContain("2. Thursday 29 October at 15:00 (not in the e-mail — also free)");
@@ -827,6 +865,79 @@ describe("a whole scheduling call (fake line)", () => {
     expect(
       await place(second.call.id, new FakeLine(), scriptedVoice(steps, { results: [] })),
     ).toMatchObject({ status: "fell_back" });
+  });
+
+  test("the brief tells a candidate with L1 booked where they stand for L2, with the panel", async () => {
+    const { appId, candidateId } = await candidateApp();
+    // Screened (a graded screening on record); L1 booked; an L2 offer with a panel of two.
+    const [kit] = await db
+      .insert(screeningKits)
+      .values({
+        orgId,
+        candidateId,
+        requisitionId: reqId,
+        applicationId: appId,
+        focusSummary: "x",
+        questions: [] as never,
+      })
+      .returning({ id: screeningKits.id });
+    await db.insert(screeningRuns).values({
+      orgId,
+      kitId: kit!.id,
+      candidateId,
+      requisitionId: reqId,
+      applicationId: appId,
+      inputKind: "phone_ai",
+      screeningScore: 70,
+    });
+    await db.insert(interviews).values({
+      orgId,
+      applicationId: appId,
+      level: 1,
+      interviewerEmail: interviewer,
+      scheduledAt: new Date(weekday(2)),
+      durationMins: 60,
+    });
+    const [of] = await db
+      .insert(interviewSlotOffers)
+      .values({
+        orgId,
+        applicationId: appId,
+        level: 2,
+        interviewerName: "Priya Natarajan",
+        interviewerEmail: interviewer,
+        panel: [{ name: "Arun Kumar", email: "arun@test.local" }],
+        slots: [weekday(5), weekday(6)],
+        token: `t-${Math.random().toString(36).slice(2)}x`,
+        expiresAt: new Date(Date.now() + 3 * 864e5),
+      })
+      .returning();
+    const [call] = await db
+      .insert(screeningCalls)
+      .values({
+        orgId,
+        candidateId,
+        applicationId: appId,
+        requisitionId: reqId,
+        purpose: "scheduling",
+        slotOfferId: of!.id,
+        status: "dialling",
+        attempt: 1,
+      })
+      .returning();
+    const b = (await brief.loadSchedulingBrief(orgId, call!.id))!;
+    expect(b.facts.progress).toMatch(
+      /^You have completed the screening\. Your first-round interview is booked for /,
+    );
+    expect(b.facts.progress).toContain("This call is about the second-round interview");
+    expect(prompt.panelLine(b.facts)).toBe(
+      "a panel of 2 from the hiring team: Priya Natarajan and Arun Kumar",
+    );
+    const p = prompt.schedulingSystemPrompt(b.facts);
+    expect(p).toContain("## Where they stand");
+    expect(p).toContain("help the candidate and the panel agree a time");
+    // Progress never carries the grade.
+    expect(b.facts.progress).not.toMatch(/70|score|verdict/i);
   });
 
   test("an interviewer without a name is a member of the hiring team, never an e-mail guess", async () => {

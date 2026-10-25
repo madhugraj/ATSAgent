@@ -577,10 +577,13 @@ export function registerPhase3Agents(): void {
     // with who it is in one line (cued 1.2 s after they stop); a person's name or "a member
     // of the hiring team", and says interviews are held by people; records reasons and
     // conditions in their words before ending without a booking.
-    version: "1.4.0",
+    // 1.5.0: tells the candidate where they stand (stages done or booked, this round of
+    // how many, what happens after — stated by the system, never scores or feedback) and
+    // frames the call as helping the candidate and the panel agree a time, naming the panel.
+    version: "1.5.0",
     owner: "hr_head",
     responsibility:
-      "Holds one short AI phone call to help a candidate pick an interview time they were already e-mailed: says it is an AI, books one of the offered or pre-checked times, or notes when they are free — nothing else.",
+      "Holds one short AI phone call to help a candidate and the interview panel agree a time the candidate was already e-mailed: says it is an AI, tells them where they stand in the process, books one of the offered or pre-checked times (free for the whole panel), or notes when they are free — nothing else.",
     mustNever: [
       "Say or imply it is a person",
       "Book or agree a time that is not in its list, or change the interviewer, length, format or place",

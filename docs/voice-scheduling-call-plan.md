@@ -346,6 +346,26 @@ call agent 1.4.0):
 - Before ending without a booking it records any reason or condition in the
   candidate's words (`record_availability` → the thread and the coordinator).
 
+### S2.6 — progress and the panel (2026-10-25)
+
+Product direction: the interview is between the candidate and the panel; the
+scheduling assistant only facilitates the time, and tells the candidate
+clearly where they stand. Scheduling call agent 1.5.0:
+
+- **Where they stand**, stated by the system (`progressWords`, from the role's
+  interview plan, their rounds and the screening on record): what they have
+  completed, earlier rounds booked (with when), which round this is of how
+  many (and its name), and what happens after — the panel's feedback goes to
+  the hiring team, or, after the last round, the hiring team decides. Never a
+  score, feedback, verdict or ranking. Said once they agree to talk.
+- **The panel**, by name ("a panel of 3 from the hiring team: Priya, Arun and
+  Kavitha"), or "led by …", or one interviewer; the call is framed as helping
+  the candidate and the panel agree a time, and the offered times are the ones
+  the whole panel is free (checked at offer, for the alternates and again at
+  booking, against every panel member's calendar and bookings).
+- Limit: the panel's real availability comes from their connected calendars
+  (Google / Microsoft 365); without one, only bookings in ATSIQ are seen.
+
 ## Decisions (confirmed 2026-10-25)
 
 1. **Wait before calling:** 24 hours after the e-mail (an organisation setting).

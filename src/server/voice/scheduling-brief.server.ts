@@ -9,6 +9,7 @@ import { and, eq } from "drizzle-orm";
 import {
   applications,
   candidates,
+  interviews,
   interviewSlotOffers,
   organizations,
   requisitions,
@@ -69,6 +70,47 @@ export function bookableOptions(
   return out.slice(0, MAX_OPTIONS);
 }
 
+const ORDINAL = ["first", "second", "third"];
+const NUMBER = ["one", "two", "three"];
+
+/**
+ * Where the candidate stands, in plain words the assistant may say (pure;
+ * unit-tested): screening done, earlier rounds done or booked, which round
+ * this is of how many, and what happens after. Never a score, feedback,
+ * verdict or ranking.
+ */
+export function progressWords(p: {
+  screened: boolean;
+  /** Earlier rounds: done (scored) or booked (with when, already spoken). */
+  earlier: { level: number; done: boolean; when: string | null }[];
+  level: number;
+  totalRounds: number;
+  roundName: string | null;
+}): string {
+  const round = (l: number) => `${ORDINAL[l - 1] ?? `round ${l}`}-round interview`;
+  const done = [
+    ...(p.screened ? ["the screening"] : []),
+    ...p.earlier.filter((r) => r.done).map((r) => `the ${round(r.level)}`),
+  ];
+  const booked = p.earlier.filter((r) => !r.done && r.when);
+  const parts: string[] = [];
+  if (done.length)
+    parts.push(
+      `You have completed ${done.length > 1 ? `${done.slice(0, -1).join(", ")} and ${done.at(-1)}` : done[0]}.`,
+    );
+  for (const r of booked) parts.push(`Your ${round(r.level)} is booked for ${r.when}.`);
+  const total = NUMBER[p.totalRounds - 1] ?? String(p.totalRounds);
+  parts.push(
+    `This call is about the ${round(p.level)}${p.roundName ? ` (${p.roundName})` : ""} — round ${p.level} of ${total}.`,
+  );
+  parts.push(
+    p.level >= p.totalRounds
+      ? "It is the last interview round: after it, the hiring team makes its decision and will e-mail you."
+      : "After this round, the panel shares its feedback with the hiring team, who will e-mail you about the next step.",
+  );
+  return parts.join(" ");
+}
+
 export type SchedulingBrief = {
   facts: SchedulingFacts;
   /** ISO start times, index = option number − 1. */
@@ -111,6 +153,40 @@ export async function loadSchedulingBrief(
   const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
   const tz = (await getOrgEmailSettings(orgId)).timezone;
   const policy = await phoneScreeningPolicyOf(orgId);
+  // Where they stand: the role's plan, their earlier rounds, the screening.
+  const { progressOf } = await import("@/lib/interview-plan.server");
+  const { screeningOnRecord } = await import("@/lib/pipeline.server");
+  const prog = await progressOf(orgId, row.offer.applicationId);
+  const booked = await db
+    .select({ level: interviews.level, at: interviews.scheduledAt, status: interviews.status })
+    .from(interviews)
+    .where(and(eq(interviews.orgId, orgId), eq(interviews.applicationId, row.offer.applicationId)));
+  const earlier = [...new Set(booked.map((b) => b.level))]
+    .filter((l) => l < row.offer.level)
+    .sort((a, b) => a - b)
+    .map((level) => {
+      const done = prog.rounds.some((r) => r.level === level && r.complete);
+      const next = booked.find(
+        (b) => b.level === level && b.at && !["cancelled", "no_show"].includes(b.status),
+      );
+      return {
+        level,
+        done,
+        when: !done && next?.at ? spokenWhen(next.at.toISOString(), tz) : null,
+      };
+    });
+  const planRound = prog.plan.rounds.find((r) => r.level === row.offer.level);
+  const progress = progressWords({
+    screened: await screeningOnRecord(orgId, row.offer.applicationId),
+    earlier,
+    level: row.offer.level,
+    totalRounds: prog.plan.rounds.length,
+    roundName: planRound?.name ?? null,
+  });
+  const panelNames = [
+    row.offer.interviewerName?.trim(),
+    ...(row.offer.panel ?? []).map((p) => p.name?.trim()),
+  ].filter((n): n is string => Boolean(n));
   const options = bookableOptions(
     row.offer.slots,
     row.call.alternates,
@@ -133,6 +209,8 @@ export async function loadSchedulingBrief(
       // e-mail address ("agent-demo@…" was said as "Agent", heard as an AI interviewer).
       interviewerName: row.offer.interviewerName?.trim() || "a member of the hiring team",
       panelSize: 1 + (row.offer.panel?.length ?? 0),
+      panelNames,
+      progress,
       options: options.map((o) => ({ spoken: spokenWhen(o.at, tz), alternate: o.alternate })),
       maxMinutes: 4,
       isCallback: row.call.bookedByCandidate,
