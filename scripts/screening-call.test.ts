@@ -356,7 +356,7 @@ describe("the call brief", () => {
     expect(p).toContain(
       "You are Saranya, an AI recruiting assistant with Yavar's talent acquisition team",
     );
-    expect(p).toContain('Let them speak first');
+    expect(p).toContain("Let them speak first");
     expect(p).toContain('Then your first words: "Hello, am I speaking with Meera?"');
     expect(p).toContain("you applied through Naukri on 20 October");
     expect(p).toContain("written assessment by e-mail, or a call from a person");
