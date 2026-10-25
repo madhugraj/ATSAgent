@@ -12,6 +12,7 @@
 - [x] Interview coordinator 1.8.0 (2026-10-25, found after the first screening approval): a role with no hiring manager made it ask for an e-mail in free text and then guess about a refused address; it now chooses from every active member (`list_panel_options` ranks past interviewers, hiring managers / department heads, then everyone), asks a person to pick by name, reports a refusal as the system said it, and never asks the same question twice; health rule `hitl.repeated_questions`
 - [ ] Stage 1.1 steps B–E: guardrails, recording, HR traceability, fairness
 - [ ] Pilot on one real requisition with HR reviewing the transcripts and grades
+- [ ] Stage 1.2: voice scheduling call — a short AI call that follows up an unanswered interview-time e-mail and books an offered or pre-checked time (plan: docs/voice-scheduling-call-plan.md)
 
 ## Distribution agent (2026-10-21)
 
