@@ -1,6 +1,7 @@
 # Voice scheduling call — plan (stage 1.2)
 
-Status: **plan, not built** (2026-10-25). Builds on the AI screening call
+Status: **S0 built** (2026-10-25); S1–S4 to come. Decisions confirmed: the
+recommended defaults below. Builds on the AI screening call
 (`docs/voice-screening-agent.md`, `docs/voice-screening-stage1.1-plan.md`).
 
 ## The problem
@@ -182,12 +183,30 @@ and the call.
 | S3 | Desk post, interviews board, candidate page | HR follows it from the thread alone |
 | S4 | Pilot on one requisition with HR listening to the first calls | — |
 
-## Decisions to confirm before S0
+## S0 — built (2026-10-25)
 
-1. **Wait before calling:** 24 hours after the e-mail (recommended), or sooner?
-2. **Alternates:** allow up to three pre-checked extra times on the call
-   (recommended), or only the e-mailed times?
-3. **Approval:** a person approves each scheduling call (recommended at first),
-   or pre-approve them for the organisation from the start?
-4. **Scope:** booking new rounds only (recommended for v1); moving an already
-   booked interview by phone comes later.
+- Migration `0048_scheduling_call.sql`: `screening_calls.purpose`,
+  `slot_offer_id` (required for a scheduling call) and `alternates` (≤ 3);
+  `phone_screening_settings.scheduling_enabled` / `scheduling_wait_hours`
+  (2–96, default 24); `candidates.ai_call_opt_out_at`.
+- Organisation → Phone screening: an *Interview scheduling calls* switch and
+  the wait in hours, saved and audited with the rest of the policy; the card
+  says it is used once scheduling calls are released.
+- The opt-out (`src/server/voice/opt-out.server.ts`): recorded from a call or
+  by the team (candidate page → AI phone screening), cancels waiting calls,
+  refused at request, claim and just before dialling (an opted-out call falls
+  back to the written assessment); cleared only by TA / HR head / CBO; both
+  audited.
+- `chooseSlotByOffer` books by offer id with the call's pre-checked alternates —
+  the same free/busy check, atomic claim, meeting link and invites as the link,
+  one booking per offer whichever comes first. The link alone never books an
+  alternate.
+- The dispatcher does not dial scheduling calls until S2.
+
+## Decisions (confirmed 2026-10-25)
+
+1. **Wait before calling:** 24 hours after the e-mail (an organisation setting).
+2. **Alternates:** up to three pre-checked extra times on the call.
+3. **Approval:** a person approves each scheduling call at first.
+4. **Scope:** booking new rounds only; moving an already booked interview by
+   phone comes later.

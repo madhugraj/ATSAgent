@@ -26,6 +26,8 @@ const Policy = z
     maxReschedules: z.number().int().min(0).max(5),
     voice: z.enum(["Kore", "Aoede", "Leda", "Zephyr", "Puck", "Charon", "Fenrir", "Orus"]),
     nextStepsText: z.string().trim().max(300).nullable(),
+    schedulingEnabled: z.boolean(),
+    schedulingWaitHours: z.number().int().min(2).max(96),
   })
   .refine((p) => p.windowEndMinute - p.windowStartMinute >= 60, {
     message: "The calling window must be at least an hour long.",

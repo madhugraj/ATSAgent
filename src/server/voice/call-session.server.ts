@@ -252,7 +252,11 @@ async function placeCall(
     return finish(orgId, call, { status: "fell_back", endReason: "no_kit", now: now() });
 
   const [app] = await db
-    .select({ phone: candidates.phone, stage: applications.stage })
+    .select({
+      phone: candidates.phone,
+      stage: applications.stage,
+      optedOut: candidates.aiCallOptOutAt,
+    })
     .from(applications)
     .innerJoin(candidates, eq(candidates.id, applications.candidateId))
     .where(and(eq(applications.id, call.applicationId), eq(applications.orgId, orgId)))
@@ -260,6 +264,9 @@ async function placeCall(
   const number = dialNumber(app?.phone);
   if (!app || !number)
     return finish(orgId, call, { status: "fell_back", endReason: "no_number", now: now() });
+  // Last check before dialling: they asked not to be called by the AI assistant.
+  if (app.optedOut)
+    return finish(orgId, call, { status: "fell_back", endReason: "opted_out", now: now() });
 
   const policy = await phoneScreeningPolicyOf(orgId);
   const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
@@ -638,6 +645,7 @@ export async function postCallToThread(
       prefers_written: `${name} chose the written assessment instead of the call.`,
       wrong_person: `The number on ${name}'s profile reached someone else.`,
       no_number: `${name} has no mobile number we can call.`,
+      opted_out: `${name} asked not to be called by the AI assistant.`,
       declined: `${name} preferred not to do the screening call.`,
     };
     body = `AI screening call: ${how[endReason] ?? (status === "consent_declined" ? how["declined"] : `${name} could not be reached after every attempt.`)} The Screening agent takes it from here.`;

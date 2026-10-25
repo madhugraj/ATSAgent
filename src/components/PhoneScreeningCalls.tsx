@@ -8,6 +8,8 @@ import { getPhoneScreening } from "@/lib/phone-screening.functions";
 import {
   callCandidateNow,
   cancelScreeningCall,
+  getAiCallOptOut,
+  setAiCallOptOut,
   listScreeningCalls,
 } from "@/lib/screening-calls.functions";
 import { Badge } from "@/components/ui/badge";
@@ -88,6 +90,12 @@ export function PhoneScreeningCalls(props: {
   const qc = useQueryClient();
   const callNow = useServerFn(callCandidateNow);
   const cancel = useServerFn(cancelScreeningCall);
+  const setOptOut = useServerFn(setAiCallOptOut);
+  const optOut = useQuery({
+    queryKey: ["ai_call_opt_out", props.candidateId],
+    queryFn: () => getAiCallOptOut({ data: { candidateId: props.candidateId } }),
+  });
+  const optedOutAt = optOut.data?.optedOutAt ?? null;
   const ready = useQuery({ queryKey: ["phone_screening"], queryFn: () => getPhoneScreening() });
   const calls = useQuery({
     queryKey: ["screening_calls", props.candidateId],
@@ -106,6 +114,7 @@ export function PhoneScreeningCalls(props: {
   if (!readiness?.enabled && !forRole.length) return null;
 
   const canCall =
+    !optedOutAt &&
     readiness?.ready &&
     props.hasKit &&
     (!latest || latest.status === "cancelled" || latest.status === "fell_back");
@@ -116,6 +125,7 @@ export function PhoneScreeningCalls(props: {
       await action();
       toast.success(done);
       await qc.invalidateQueries({ queryKey: ["screening_calls", props.candidateId] });
+      await qc.invalidateQueries({ queryKey: ["ai_call_opt_out", props.candidateId] });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "That did not work.");
     } finally {
@@ -162,6 +172,47 @@ export function PhoneScreeningCalls(props: {
             </Button>
           ) : null}
         </div>
+      </div>
+      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        {optedOutAt ? (
+          <>
+            <span className="font-medium text-foreground">
+              Asked not to be called by the AI assistant (
+              {new Date(optedOutAt).toLocaleDateString("en-IN", { dateStyle: "medium" })}) — no AI
+              call is placed to them.
+            </span>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 px-2 text-xs"
+              disabled={busy}
+              onClick={() =>
+                void run(
+                  () => setOptOut({ data: { candidateId: props.candidateId, optOut: false } }),
+                  "Recorded: they asked to be called again.",
+                )
+              }
+            >
+              They asked to be called again
+            </Button>
+          </>
+        ) : (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 px-2 text-xs"
+            disabled={busy}
+            title="The candidate told the team they don't want calls from the AI assistant"
+            onClick={() =>
+              void run(
+                () => setOptOut({ data: { candidateId: props.candidateId, optOut: true } }),
+                "Recorded: no AI calls to this candidate.",
+              )
+            }
+          >
+            Candidate asked not to be called by the AI
+          </Button>
+        )}
       </div>
       {readiness && !readiness.ready ? (
         <p className="mt-1 text-xs text-muted-foreground">

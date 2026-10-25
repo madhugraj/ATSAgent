@@ -252,6 +252,50 @@ export function PhoneScreeningCard({ canEdit }: { canEdit: boolean }) {
           />
         </div>
       </div>
+      <div className="space-y-2 rounded-md border border-border p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-medium">Interview scheduling calls</h3>
+          <div className="flex items-center gap-2">
+            <Label htmlFor="ps-scheduling" className="text-xs text-muted-foreground">
+              {p.schedulingEnabled ? "On" : "Off"}
+            </Label>
+            <Switch
+              id="ps-scheduling"
+              checked={p.schedulingEnabled}
+              disabled={!canEdit}
+              onCheckedChange={(schedulingEnabled) => set({ schedulingEnabled })}
+            />
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          When interview times e-mailed to a candidate go unanswered, the assistant can phone them
+          to pick one — only the times offered, or up to three more that are free for the
+          interviewers. It never changes the interviewer, format or length. A person approves each
+          call. Coming next: this setting is saved now and used once scheduling calls are released.
+        </p>
+        <div className="grid items-end gap-3 sm:grid-cols-4">
+          <div className="space-y-1">
+            <Label htmlFor="ps-wait" className="text-xs">
+              Call after (hours unanswered)
+            </Label>
+            <Input
+              id="ps-wait"
+              type="number"
+              min={2}
+              max={96}
+              disabled={!canEdit || !p.schedulingEnabled}
+              value={p.schedulingWaitHours}
+              onChange={(e) =>
+                set({ schedulingWaitHours: Math.min(96, Math.max(2, Number(e.target.value))) })
+              }
+            />
+          </div>
+          <p className="text-xs text-muted-foreground sm:col-span-3">
+            Only while the earliest offered time is still a day away. Candidates who asked not to be
+            called by the assistant are never phoned.
+          </p>
+        </div>
+      </div>
       {canEdit ? (
         <Button variant="outline" disabled={busy || !valid || !draft} onClick={() => void save()}>
           Save phone screening

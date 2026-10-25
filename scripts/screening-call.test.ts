@@ -71,6 +71,7 @@ const {
   agentEvents,
   applications,
   auditLog,
+  interviewSlotOffers,
   candidates,
   compensationDetails,
   emailOutbox,
@@ -1028,5 +1029,105 @@ describe("the dispatcher", () => {
       .where(eq(screeningCalls.id, callId));
     expect(await dispatcher.recoverStuckCalls(new Date())).toBe(1);
     expect(await callRow(callId)).toMatchObject({ status: "failed" });
+  });
+});
+
+describe("who is never called", () => {
+  test("a candidate who asked not to be called: waiting calls cancelled, never requested or dialled", async () => {
+    const optOut = await import("../src/server/voice/opt-out.server");
+    const request = await import("../src/server/voice/request.server");
+    const { callId, appId, candidateId } = await seedCall({ status: "approved", attempt: 0 });
+    expect(
+      await optOut.recordAiCallOptOut({
+        orgId,
+        candidateId,
+        source: "call",
+        actor: "screening call",
+        callId,
+      }),
+    ).toBe(1);
+    expect(await callRow(callId)).toMatchObject({ status: "cancelled" });
+    expect(await optOut.aiCallOptedOut(orgId, candidateId)).toBe(true);
+    // Recording it twice changes nothing and audits once.
+    expect(
+      await optOut.recordAiCallOptOut({ orgId, candidateId, source: "team", actor: "hr" }),
+    ).toBe(0);
+    const audits = await db
+      .select({ action: auditLog.action, detail: auditLog.detail })
+      .from(auditLog)
+      .where(and(eq(auditLog.orgId, orgId), eq(auditLog.entityId, candidateId)));
+    expect(audits.filter((a) => a.action === "candidate.ai_call_opt_out")).toHaveLength(1);
+
+    expect(await request.checkScreeningCall(orgId, appId)).toMatchObject({
+      ok: false,
+      reason: expect.stringMatching(/asked not to be called by the AI assistant/),
+    });
+    // Even a call that slipped through is never claimed or dialled.
+    await db
+      .update(screeningCalls)
+      .set({ status: "approved" })
+      .where(eq(screeningCalls.id, callId));
+    expect(await dispatcher.claimDueCalls(2, new Date(MONDAY_11))).toEqual([]);
+    expect(await dispatcher.claimCall(orgId, callId)).toBe(false);
+    await db
+      .update(screeningCalls)
+      .set({ status: "dialling" })
+      .where(eq(screeningCalls.id, callId));
+    const line = new FakeLine();
+    expect(await run(callId, line, scriptedVoice([], { results: [] }))).toMatchObject({
+      status: "fell_back",
+      endReason: "opted_out",
+    });
+    expect(line.dialled).toBeNull();
+
+    // They asked to be called again: a person clears it (audited).
+    expect(
+      await optOut.clearAiCallOptOut({ orgId, candidateId, actor: "hr", actorUserId: userId }),
+    ).toBe(true);
+    expect(await optOut.aiCallOptedOut(orgId, candidateId)).toBe(false);
+  });
+
+  test("scheduling calls wait for their agent; the database keeps their shape", async () => {
+    const { callId } = await seedCall({ status: "approved", attempt: 0 });
+    // Not without the offer it follows up.
+    let refused = false;
+    try {
+      await db
+        .update(screeningCalls)
+        .set({ purpose: "scheduling" })
+        .where(eq(screeningCalls.id, callId));
+    } catch {
+      refused = true;
+    }
+    expect(refused).toBe(true);
+    // At most three alternates.
+    refused = false;
+    try {
+      await db
+        .update(screeningCalls)
+        .set({ alternates: ["a", "b", "c", "d"] })
+        .where(eq(screeningCalls.id, callId));
+    } catch {
+      refused = true;
+    }
+    expect(refused).toBe(true);
+    // A scheduling call (with its offer) is not dialled before the Scheduling call agent ships.
+    const [offer] = await db
+      .insert(interviewSlotOffers)
+      .values({
+        orgId,
+        applicationId: (await callRow(callId)).applicationId!,
+        level: 1,
+        interviewerEmail: "panel@yavar.test",
+        slots: [new Date(MONDAY_11 + 2 * 864e5).toISOString()],
+        token: `t-${Math.random().toString(36).slice(2)}`,
+        expiresAt: new Date(MONDAY_11 + 864e5),
+      })
+      .returning({ id: interviewSlotOffers.id });
+    await db
+      .update(screeningCalls)
+      .set({ purpose: "scheduling", slotOfferId: offer!.id })
+      .where(eq(screeningCalls.id, callId));
+    expect(await dispatcher.claimDueCalls(2, new Date(MONDAY_11))).toEqual([]);
   });
 });

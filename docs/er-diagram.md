@@ -303,6 +303,7 @@ erDiagram
     text website_url "nullable"
     text x_url "nullable"
     boolean consent_given
+    timestamptz ai_call_opt_out_at "nullable"
     timestamptz created_at
     timestamptz role_match_checked_at "nullable"
     text external_id "nullable"
@@ -631,6 +632,8 @@ erDiagram
     integer max_attempts
     integer max_minutes
     integer max_reschedules
+    boolean scheduling_enabled
+    integer scheduling_wait_hours
     text voice
     text next_steps_text "nullable"
     uuid updated_by FK
@@ -664,6 +667,9 @@ erDiagram
     jsonb answers
     jsonb details
     uuid screening_run_id FK
+    text purpose
+    uuid slot_offer_id FK
+    jsonb alternates
     text last_error "nullable"
     timestamptz created_at
     timestamptz updated_at
@@ -697,6 +703,7 @@ erDiagram
   screening_calls }o--o| agent_runs : "agent_run_id"
   screening_calls }o--o| users : "requested_by"
   screening_calls }o--o| screening_runs : "screening_run_id"
+  screening_calls }o--o| interview_slot_offers : "slot_offer_id"
 ```
 
 ## Offers & onboarding
@@ -1179,6 +1186,7 @@ erDiagram
 | `screening_calls` | `requested_run_id` | `agent_runs` | no action |
 | `screening_calls` | `requisition_id` | `requisitions` | no action |
 | `screening_calls` | `screening_run_id` | `screening_runs` | no action |
+| `screening_calls` | `slot_offer_id` | `interview_slot_offers` | no action |
 | `screening_kits` | `application_id` | `applications` | no action |
 | `screening_kits` | `candidate_id` | `candidates` | cascade |
 | `screening_kits` | `org_id` | `organizations` | cascade |
@@ -1255,7 +1263,7 @@ erDiagram
 | `candidate_ownership_events` | Candidates & pipeline | 8 | — |
 | `candidate_referrals` | Candidates & pipeline | 11 | — |
 | `candidate_verifications` | Candidates & pipeline | 11 | — |
-| `candidates` | Candidates & pipeline | 42 | — |
+| `candidates` | Candidates & pipeline | 43 | — |
 | `capture_events` | Sourcing & integrations | 10 | — |
 | `comp_knowledge` | Intelligence | 17 | — |
 | `compensation_details` | — | 19 | — |
@@ -1290,13 +1298,13 @@ erDiagram
 | `org_members` | Organisations & masters | 12 | (orgId+email) |
 | `org_pool_shares` | Organisations & masters | 10 | (ownerOrg+partnerOrg) |
 | `organizations` | Organisations & masters | 26 | (slug), (capture_token), (capture_token_hash) |
-| `phone_screening_settings` | Screening & interviews | 13 | — |
+| `phone_screening_settings` | Screening & interviews | 15 | — |
 | `platform_admins` | Identity & access | 6 | (email) |
 | `product_catalogue_commercials` | Organisations & masters | 8 | — |
 | `requisition_board_postings` | — | 16 | (requisitionId+provider) |
 | `requisitions` | Requisitions & job content | 41 | (orgId+code) |
 | `salary_benchmarks` | Intelligence | 15 | — |
-| `screening_calls` | Screening & interviews | 30 | — |
+| `screening_calls` | Screening & interviews | 33 | — |
 | `screening_kits` | Screening & interviews | 11 | — |
 | `screening_prep_jobs` | Screening & interviews | 10 | (application_id) |
 | `screening_runs` | Screening & interviews | 23 | — |

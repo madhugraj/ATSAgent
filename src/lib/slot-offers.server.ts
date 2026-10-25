@@ -10,7 +10,7 @@
  * role, the organisation, the interviewer's name and the times — nothing else
  * about the candidate or the organisation.
  */
-import { and, eq, lt, sql } from "drizzle-orm";
+import { and, eq, lt, sql, type SQL } from "drizzle-orm";
 
 import { db } from "../server/db";
 import {
@@ -231,6 +231,16 @@ export async function offerSlotsCore(
 }
 
 async function byToken(token: string) {
+  return offerWhere(eq(interviewSlotOffers.token, token));
+}
+
+async function byOffer(orgId: string, offerId: string) {
+  return offerWhere(
+    and(eq(interviewSlotOffers.id, offerId), eq(interviewSlotOffers.orgId, orgId))!,
+  );
+}
+
+async function offerWhere(where: SQL) {
   const [o] = await db
     .select({
       offer: interviewSlotOffers,
@@ -244,7 +254,7 @@ async function byToken(token: string) {
     .innerJoin(requisitions, eq(requisitions.id, applications.requisitionId))
     .innerJoin(organizations, eq(organizations.id, interviewSlotOffers.orgId))
     .innerJoin(candidates, eq(candidates.id, applications.candidateId))
-    .where(eq(interviewSlotOffers.token, token))
+    .where(where)
     .limit(1);
   return o ?? null;
 }
@@ -297,14 +307,48 @@ export async function publicOffer(token: string): Promise<PublicOffer | null> {
 }
 
 /** The candidate picked a time: book it (or say plainly why it cannot be booked). */
-export async function chooseSlot(
-  token: string,
-  slot: string,
-): Promise<
-  { booked: true; at: string; hasMeetingLink: boolean } | { booked: false; reason: string }
-> {
+export type SlotChoice =
+  { booked: true; at: string; hasMeetingLink: boolean } | { booked: false; reason: string };
+
+/** How the candidate chose: the e-mailed link, or on an AI scheduling call. */
+type Channel =
+  | { by: "link" }
+  | {
+      by: "phone";
+      callId: string;
+      /** Extra times checked free when the call was asked for (≤ 3). */
+      alternates: string[];
+    };
+
+/** The candidate picked a time from the e-mailed link. */
+export async function chooseSlot(token: string, slot: string): Promise<SlotChoice> {
   const o = await byToken(token);
   if (!o) return { booked: false, reason: "This link is not valid." };
+  return bookOfferSlot(o, slot, { by: "link" });
+}
+
+/**
+ * The candidate picked a time on an AI scheduling call
+ * (docs/voice-scheduling-call-plan.md): the same checks, claim and booking as
+ * the link — one booking per offer whichever comes first — plus the call's
+ * pre-checked alternates.
+ */
+export async function chooseSlotByOffer(
+  orgId: string,
+  offerId: string,
+  slot: string,
+  call: { callId: string; alternates: string[] },
+): Promise<SlotChoice> {
+  const o = await byOffer(orgId, offerId);
+  if (!o) return { booked: false, reason: "That interview offer was not found." };
+  return bookOfferSlot(o, slot, { by: "phone", ...call });
+}
+
+async function bookOfferSlot(
+  o: NonNullable<Awaited<ReturnType<typeof byToken>>>,
+  slot: string,
+  channel: Channel,
+): Promise<SlotChoice> {
   const offer = o.offer;
   if (offer.status !== "offered" || offer.expiresAt.getTime() < Date.now())
     return {
@@ -312,7 +356,11 @@ export async function chooseSlot(
       reason: "This link is no longer open. The hiring team will be in touch.",
     };
   const at = new Date(slot);
-  if (!offer.slots.includes(at.toISOString()))
+  if (Number.isNaN(at.getTime()))
+    return { booked: false, reason: "Please choose one of the times offered." };
+  const allowed =
+    channel.by === "phone" ? [...offer.slots, ...channel.alternates.slice(0, 3)] : offer.slots;
+  if (!allowed.includes(at.toISOString()))
     return { booked: false, reason: "Please choose one of the times offered." };
   if (at.getTime() < Date.now() + SLOT_OFFER.pickLeadHours * 3600_000)
     return { booked: false, reason: "That time is too soon now — please choose a later one." };
@@ -356,7 +404,13 @@ export async function chooseSlot(
     }
     const { scheduleInterviewCore } = await import("./interviews.functions");
     const r = await scheduleInterviewCore(
-      { orgId: offer.orgId, actor: "candidate (chose the time)" },
+      {
+        orgId: offer.orgId,
+        actor:
+          channel.by === "phone"
+            ? "candidate (chose the time on an AI scheduling call)"
+            : "candidate (chose the time)",
+      },
       {
         applicationId: offer.applicationId,
         level: offer.level,
@@ -380,12 +434,18 @@ export async function chooseSlot(
       action: "interview.slot_chosen",
       entityType: "application",
       entityId: offer.applicationId,
-      detail: { offerId: offer.id, at: at.toISOString(), interviewId: r.interviewId },
+      detail: {
+        offerId: offer.id,
+        at: at.toISOString(),
+        interviewId: r.interviewId,
+        channel: channel.by,
+        ...(channel.by === "phone" ? { callId: channel.callId } : {}),
+      },
     });
     await tellThread(
       offer.orgId,
       o.requisitionId,
-      `${o.candidateName} chose ${await whenText(offer.orgId, at)} for their L${offer.level} interview with ${offer.interviewerName ?? offer.interviewerEmail}. It is booked${meetingLink ? " with a meeting link" : ""}, and both of them have their invites.`,
+      `${o.candidateName} chose ${await whenText(offer.orgId, at)}${channel.by === "phone" ? " on the AI scheduling call" : ""} for their L${offer.level} interview with ${offer.interviewerName ?? offer.interviewerEmail}. It is booked${meetingLink ? " with a meeting link" : ""}, and both of them have their invites.`,
     );
     return { booked: true, at: at.toISOString(), hasMeetingLink: Boolean(meetingLink) };
   } catch (e) {

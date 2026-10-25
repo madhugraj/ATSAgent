@@ -152,3 +152,52 @@ export const cancelScreeningCall = createServerFn({ method: "POST" })
     });
     return { ok: true };
   });
+
+/** When the candidate asked not to be called by the AI assistant (null: never). */
+export const getAiCallOptOut = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) => z.object({ candidateId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { candidates } = await import("@db/schema");
+    const [c] = await db
+      .select({ at: candidates.aiCallOptOutAt })
+      .from(candidates)
+      .where(and(eq(candidates.id, data.candidateId), eq(candidates.orgId, context.orgId)))
+      .limit(1);
+    return { optedOutAt: c?.at?.toISOString() ?? null };
+  });
+
+/**
+ * Record what the candidate told the team: don't call me with the AI assistant
+ * (waiting calls are cancelled), or they asked to be called again. Audited.
+ */
+export const setAiCallOptOut = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) =>
+    z.object({ candidateId: z.string().uuid(), optOut: z.boolean() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertRole(
+      context.userId,
+      context.orgId,
+      [...CALL_ROLES],
+      "Only TA, the HR head or the CBO can change this.",
+    );
+    const optOut = await import("../server/voice/opt-out.server");
+    if (data.optOut)
+      await optOut.recordAiCallOptOut({
+        orgId: context.orgId,
+        candidateId: data.candidateId,
+        source: "team",
+        actor: context.memberEmail,
+        actorUserId: context.userId,
+      });
+    else
+      await optOut.clearAiCallOptOut({
+        orgId: context.orgId,
+        candidateId: data.candidateId,
+        actor: context.memberEmail,
+        actorUserId: context.userId,
+      });
+    return { ok: true };
+  });

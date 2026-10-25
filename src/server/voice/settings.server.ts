@@ -27,6 +27,10 @@ export type PhoneScreeningPolicy = {
   voice: string;
   /** What candidates are told happens next; null = a plain default. */
   nextStepsText: string | null;
+  /** Scheduling calls: a follow-up call when e-mailed interview times go unanswered. */
+  schedulingEnabled: boolean;
+  /** Hours an e-mailed interview-time offer waits unanswered before that call (2–96). */
+  schedulingWaitHours: number;
 };
 
 /** Voices the assistant may use (the voice service's prebuilt voices). */
@@ -52,6 +56,8 @@ export const DEFAULT_PHONE_SCREENING_POLICY: PhoneScreeningPolicy = {
   maxReschedules: 2,
   voice: "Kore",
   nextStepsText: null,
+  schedulingEnabled: false,
+  schedulingWaitHours: 24,
 };
 
 export async function phoneScreeningPolicyOf(orgId: string): Promise<PhoneScreeningPolicy> {
@@ -72,6 +78,8 @@ export async function phoneScreeningPolicyOf(orgId: string): Promise<PhoneScreen
     maxReschedules: r.maxReschedules,
     voice: r.voice,
     nextStepsText: r.nextStepsText,
+    schedulingEnabled: r.schedulingEnabled,
+    schedulingWaitHours: r.schedulingWaitHours,
   };
 }
 

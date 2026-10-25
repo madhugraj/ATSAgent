@@ -367,6 +367,42 @@ describe("the candidate chooses the time", () => {
     expect(await offers.chooseSlot(o.token, o.slots[0]!)).toMatchObject({ booked: false });
   });
 
+  test("on an AI scheduling call: an offered time or a pre-checked alternate, nothing else", async () => {
+    const conv = await thread();
+    const o = await offer();
+    const alternate = weekdayAt(6, 15).toISOString();
+    const call = { callId: "00000000-0000-4000-8000-000000000001", alternates: [alternate] };
+    // A time never offered or pre-checked is refused, even by phone.
+    expect(
+      await offers.chooseSlotByOffer(orgId, o.offerId, weekdayAt(7).toISOString(), call),
+    ).toMatchObject({ booked: false, reason: "Please choose one of the times offered." });
+    // Another organisation cannot book this offer.
+    const other = await offers.chooseSlotByOffer(
+      "00000000-0000-4000-8000-000000000000",
+      o.offerId,
+      alternate,
+      call,
+    );
+    expect(other).toMatchObject({ booked: false });
+    // The alternate books like a link choice, said as a phone choice.
+    expect(await offers.chooseSlotByOffer(orgId, o.offerId, alternate, call)).toMatchObject({
+      booked: true,
+      at: alternate,
+    });
+    const [iv] = await db.select().from(interviews).where(eq(interviews.applicationId, app));
+    expect(iv!.scheduledAt.toISOString()).toBe(alternate);
+    expect((await lastDesk(conv.id))!.body).toMatch(/chose .* on the AI scheduling call/);
+    // One booking per offer: the e-mailed link no longer books.
+    expect(await offers.chooseSlot(o.token, o.slots[0]!)).toMatchObject({ booked: false });
+  });
+
+  test("the link alone never books a phone-only alternate", async () => {
+    const o = await offer();
+    expect(await offers.chooseSlot(o.token, weekdayAt(6, 15).toISOString())).toMatchObject({
+      booked: false,
+    });
+  });
+
   test("none of these work: the candidate's words reach the thread; the offer closes", async () => {
     const conv = await thread();
     const o = await offer();

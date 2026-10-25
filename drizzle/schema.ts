@@ -457,6 +457,8 @@ export const candidates = pgTable(
     websiteUrl: text("website_url"),
     xUrl: text("x_url"),
     consentGiven: boolean("consent_given").notNull().default(true),
+    /** The candidate asked not to be phoned by the AI assistant: no AI call dials them again. */
+    aiCallOptOutAt: timestamp("ai_call_opt_out_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     /** When this person was last checked against the open roles (new CV → open roles). */
     roleMatchCheckedAt: timestamp("role_match_checked_at", { withTimezone: true }),
@@ -2692,6 +2694,10 @@ export const phoneScreeningSettings = pgTable(
     maxMinutes: integer("max_minutes").notNull().default(10),
     /** Times a candidate may move the call to another time; then alternatives are offered. */
     maxReschedules: integer("max_reschedules").notNull().default(2),
+    /** Scheduling calls (a follow-up to an unanswered interview-time e-mail) switched on. */
+    schedulingEnabled: boolean("scheduling_enabled").notNull().default(false),
+    /** Hours an e-mailed interview-time offer waits unanswered before a scheduling call. */
+    schedulingWaitHours: integer("scheduling_wait_hours").notNull().default(24),
     /** The assistant's voice (one of the voice service's prebuilt voices). */
     voice: text("voice").notNull().default("Kore"),
     /** What the assistant tells candidates happens next (≤ 300 characters). */
@@ -2718,6 +2724,10 @@ export const phoneScreeningSettings = pgTable(
     ),
     check("phone_screening_settings_max_attempts_check", sql`${t.maxAttempts} between 1 and 5`),
     check("phone_screening_settings_max_minutes_check", sql`${t.maxMinutes} between 5 and 30`),
+    check(
+      "phone_screening_settings_scheduling_wait_check",
+      sql`${t.schedulingWaitHours} between 2 and 96`,
+    ),
     check(
       "phone_screening_settings_max_reschedules_check",
       sql`${t.maxReschedules} between 0 and 5`,
@@ -2766,6 +2776,8 @@ export type ScreeningCallDetails = {
 };
 
 /** What the candidate said for one kit question, as the call agent recorded it. */
+export type VoiceCallPurpose = "screening" | "scheduling";
+
 export type ScreeningCallAnswer = {
   question_id: string;
   summary: string;
@@ -2836,6 +2848,17 @@ export const screeningCalls = pgTable(
     screeningRunId: uuid("screening_run_id").references(() => screeningRuns.id, {
       onDelete: "set null",
     }),
+    /** screening = the AI screening call; scheduling = a call to pick an interview time. */
+    purpose: text("purpose").$type<VoiceCallPurpose>().notNull().default("screening"),
+    /** Scheduling: the e-mailed interview-time offer this call follows up. */
+    slotOfferId: uuid("slot_offer_id").references(() => interviewSlotOffers.id, {
+      onDelete: "set null",
+    }),
+    /** Scheduling: up to three extra start times (ISO) checked free when the call was asked for. */
+    alternates: jsonb("alternates")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     lastError: text("last_error"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -2848,6 +2871,16 @@ export const screeningCalls = pgTable(
     index("screening_calls_due_idx").on(t.orgId, t.status, t.dueAt),
     index("screening_calls_application_idx").on(t.applicationId, t.createdAt),
     index("screening_calls_candidate_idx").on(t.candidateId),
+    index("screening_calls_slot_offer_idx").on(t.slotOfferId),
+    check("screening_calls_purpose_check", sql`${t.purpose} in ('screening', 'scheduling')`),
+    check(
+      "screening_calls_alternates_check",
+      sql`jsonb_typeof(${t.alternates}) = 'array' and jsonb_array_length(${t.alternates}) <= 3`,
+    ),
+    check(
+      "screening_calls_scheduling_offer_check",
+      sql`${t.purpose} <> 'scheduling' or ${t.slotOfferId} is not null`,
+    ),
   ],
 );
 

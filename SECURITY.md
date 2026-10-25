@@ -41,6 +41,11 @@ We credit reporters in release notes on request.
   transcript is kept only after consent (no audio is stored), answers are accepted only for the kit's
   questions, and what it may write about the candidate is notice period and availability — the
   schema refuses pay fields (audited `compensation.recorded`, actor `agent:screening_call`).
+  A candidate who asks not to be called by the AI assistant (on a call, or told to the team) is
+  never requested, dialled or retried again — checked when a call is asked for, when it is claimed
+  and just before dialling — and calls already waiting are cancelled (audited
+  `candidate.ai_call_opt_out`; only TA, the HR head or the CBO can clear it, audited
+  `candidate.ai_call_opt_in`).
 - Rate limiting on all public HTTP routes and server-function RPCs (`src/server.ts`).
 - SSRF gate: server-side fetches of user-supplied URLs go through `src/server/safe-fetch.ts`.
 - Auditing: privileged actions append to `audit_log` (`src/server/audit.ts`).

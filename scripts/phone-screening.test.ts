@@ -102,6 +102,8 @@ describe("the organisation's phone screening policy", () => {
       maxReschedules: 1,
       voice: "Aoede",
       nextStepsText: "  we reply within two working days  ",
+      schedulingEnabled: true,
+      schedulingWaitHours: 36,
     };
     await settings.setPhoneScreeningPolicyCore(orgId, actor(), policy);
     expect(await settings.phoneScreeningPolicyOf(orgId)).toEqual({
@@ -123,6 +125,8 @@ describe("the organisation's phone screening policy", () => {
       { maxAttempts: 9 },
       { maxMinutes: 120 },
       { maxReschedules: 9 },
+      { schedulingWaitHours: 1 },
+      { schedulingWaitHours: 200 },
       { assistantName: "S" },
     ];
     for (const b of bad) {

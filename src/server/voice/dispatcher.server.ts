@@ -23,7 +23,12 @@ export async function dueCalls(now: Date, limit = 50) {
     select c.id, c.org_id
     from screening_calls c
     left join phone_screening_settings s on s.org_id = c.org_id
+    join candidates cand on cand.id = c.candidate_id
     where c.status in ('approved', 'callback', 'no_answer', 'failed')
+      -- Scheduling calls are placed once the Scheduling call agent ships (plan step S2).
+      and c.purpose = 'screening'
+      -- Never a candidate who asked not to be called by the AI assistant.
+      and cand.ai_call_opt_out_at is null
       and c.due_at is not null and c.due_at <= ${now.toISOString()}::timestamptz
       and (c.status = 'callback' or c.attempt < coalesce(s.max_attempts, 3))
     order by c.due_at
@@ -45,6 +50,7 @@ export async function claimCall(orgId: string, id: string): Promise<boolean> {
         eq(screeningCalls.id, id),
         eq(screeningCalls.orgId, orgId),
         inArray(screeningCalls.status, [...WAITING]),
+        sql`not exists (select 1 from candidates c where c.id = ${screeningCalls.candidateId} and c.ai_call_opt_out_at is not null)`,
       ),
     )
     .returning({ id: screeningCalls.id });

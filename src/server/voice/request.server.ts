@@ -53,6 +53,7 @@ export async function checkScreeningCall(orgId: string, applicationId: string): 
       requisitionId: applications.requisitionId,
       name: candidates.fullName,
       phone: candidates.phone,
+      optedOut: candidates.aiCallOptOutAt,
     })
     .from(applications)
     .innerJoin(candidates, eq(candidates.id, applications.candidateId))
@@ -63,6 +64,12 @@ export async function checkScreeningCall(orgId: string, applicationId: string): 
     return {
       ok: false,
       reason: `The candidate is ${app.stage.replace(/_/g, " ")}, not shortlisted.`,
+    };
+  if (app.optedOut)
+    return {
+      ok: false,
+      reason:
+        "The candidate asked not to be called by the AI assistant — send the written assessment instead.",
     };
   if (!dialNumber(app.phone))
     return {
