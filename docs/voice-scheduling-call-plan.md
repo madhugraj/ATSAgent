@@ -1,6 +1,6 @@
 # Voice scheduling call — plan (stage 1.2)
 
-Status: **S0 and S1 built** (2026-10-25); S2–S4 to come. Decisions confirmed: the
+Status: **S0–S1 built, S2 wired and run on a real call** (2026-10-25); S3–S4 to come. Decisions confirmed: the
 recommended defaults below. Builds on the AI screening call
 (`docs/voice-screening-agent.md`, `docs/voice-screening-stage1.1-plan.md`).
 
@@ -236,6 +236,31 @@ and the call.
   model pass; live: `EVAL_ONLY="scheduling" bun scripts/agent-eval.ts` with a
   test key). Health rules `scheduling_call.no_booking`, `ai_call.opt_outs`.
   Tests: `scripts/scheduling-call.test.ts`.
+
+## S2 — the live call (2026-10-25)
+
+- `runScreeningCall` hands a `purpose: scheduling` call to
+  `runSchedulingCall` (`scheduling-session.server.ts`): same SIP line, worker,
+  resamplers, watchdog and agent-run bookkeeping; feature `scheduling_call`;
+  4-minute limit. On the call, a chosen option is booked through
+  `chooseSlotByOffer` and the booked time is read back from the result; "none
+  of these work" goes down the decline path; opt-outs are recorded. The
+  transcript is kept only after the candidate's go-ahead.
+- A call is skipped (nobody dialled) if the time was already picked from the
+  e-mail, no time is left to offer, the candidate opted out, or there is no
+  number. Unanswered: once more after 2 hours, then the link stands. The
+  thread hears every ending that booked nothing (a booking or "none work" is
+  told by the link's own core).
+- The dispatcher dials scheduling calls only while the organisation keeps them
+  on, at most twice. One connected call per interview round (no call →
+  decline → re-offer → call loop).
+- A person arranging the call may call before the organisation's wait
+  (`byPerson`); agents always wait.
+- **Real call, 25 Oct 09:41 IST (demo org, 9940055051):** confirmed the person,
+  said it is an AI and will note the time, recorded the go-ahead, read the three
+  e-mailed times correctly, usage attributed to the run. The candidate asked to
+  be called back in 10 minutes to check her calendar; v1 has no callbacks, so it
+  pointed to the e-mail link and ended `not_now`. Nothing was booked.
 
 ## Decisions (confirmed 2026-10-25)
 

@@ -25,12 +25,14 @@ export async function dueCalls(now: Date, limit = 50) {
     left join phone_screening_settings s on s.org_id = c.org_id
     join candidates cand on cand.id = c.candidate_id
     where c.status in ('approved', 'callback', 'no_answer', 'failed')
-      -- Scheduling calls are placed once the Scheduling call agent ships (plan step S2).
-      and c.purpose = 'screening'
+      -- Scheduling calls only while the organisation keeps them switched on.
+      and (c.purpose = 'screening' or coalesce(s.scheduling_enabled, false))
       -- Never a candidate who asked not to be called by the AI assistant.
       and cand.ai_call_opt_out_at is null
       and c.due_at is not null and c.due_at <= ${now.toISOString()}::timestamptz
-      and (c.status = 'callback' or c.attempt < coalesce(s.max_attempts, 3))
+      -- A scheduling call is tried at most twice (SCHEDULING_MAX_ATTEMPTS).
+      and (c.status = 'callback'
+        or c.attempt < case when c.purpose = 'scheduling' then 2 else coalesce(s.max_attempts, 3) end)
     order by c.due_at
     limit ${limit}`);
 }

@@ -43,6 +43,8 @@ const settings = await import("../src/server/voice/settings.server");
 const gw = await import("../src/lib/ai-gateway.server");
 const registry = await import("../src/server/agents/registry");
 const { registerSchedulingCallTools } = await import("../src/server/agents/tools-scheduling-call");
+const session = await import("../src/server/voice/call-session.server");
+const dispatcher = await import("../src/server/voice/dispatcher.server");
 
 const stamp = Date.now();
 const H = 3600_000;
@@ -277,6 +279,10 @@ describe("asking for a scheduling call", () => {
       ok: false,
       reason: expect.stringMatching(/less than 24 hours ago; .* about 21 hours/),
     });
+    // A person arranging the call may call sooner; an agent never may.
+    expect(
+      await request.checkSchedulingCall(orgId, appId, Date.now(), { byPerson: true }),
+    ).toMatchObject({ ok: true, repeat: false });
     await db.delete(interviewSlotOffers).where(eq(interviewSlotOffers.id, fresh.id));
     // A repeat offer (the earlier one was declined) is called about at once.
     await offer(appId, { ageHours: 50, status: "declined" });
@@ -436,5 +442,218 @@ describe("on the call (text mode)", () => {
       .from(candidates)
       .where(eq(candidates.id, b.candidateId));
     expect(cand!.at).not.toBeNull();
+  });
+});
+
+/* ------------------------------------------------ a whole call, fake line */
+
+type VoiceOpts = Parameters<typeof gw.aiVoiceSession>[0];
+type Step =
+  { say: "ai" | "caller"; text: string } | { tool: string; args: Record<string, unknown> };
+
+class FakeLine implements session.PhoneLine {
+  dialled: string | null = null;
+  private resolveEnded!: () => void;
+  readonly ended = new Promise<void>((r) => (this.resolveEnded = r));
+  async dial(number: string) {
+    this.dialled = number;
+  }
+  onAudio() {}
+  play() {}
+  clear() {}
+  pendingSeconds() {
+    return 0;
+  }
+  async hangup() {}
+  close() {}
+  hangsUp() {
+    this.resolveEnded();
+  }
+}
+
+function scriptedVoice(steps: Step[], seen: { opts?: VoiceOpts; results: unknown[] }) {
+  return (async (opts: VoiceOpts) => {
+    seen.opts = opts;
+    const transcript: { who: "caller" | "ai"; text: string; at: string }[] = [];
+    let close!: (s: gw.VoiceSessionSummary) => void;
+    const done = new Promise<gw.VoiceSessionSummary>((r) => (close = r));
+    const summary = (): gw.VoiceSessionSummary => ({
+      transcript,
+      toolCalls: [],
+      usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+      closedBy: "client",
+      error: null,
+    });
+    const play = async () => {
+      for (const st of steps) {
+        if ("say" in st) {
+          const turn = { who: st.say, text: st.text, at: new Date().toISOString() };
+          transcript.push(turn);
+          opts.events?.onTurn?.(turn);
+        } else {
+          const out = await opts.events!.onToolCall!({ id: st.tool, name: st.tool, args: st.args });
+          seen.results.push({ tool: st.tool, out });
+        }
+        await new Promise((r) => setTimeout(r, 5));
+      }
+    };
+    return {
+      ok: true as const,
+      session: {
+        sendAudio() {},
+        sendText(text: string) {
+          if (text.includes("picked up")) void play();
+        },
+        close: async () => {
+          const x = summary();
+          close(x);
+          return x;
+        },
+        done,
+      },
+    };
+  }) as unknown as typeof gw.aiVoiceSession;
+}
+
+const DISCLOSE =
+  "This is Saranya, an AI recruiting assistant from Sched Org, about your first-round interview. Do you have a minute to pick a time? I'll note the time you choose for the hiring team.";
+
+describe("a whole scheduling call (fake line)", () => {
+  async function arranged(o: { attempt?: number } = {}) {
+    const { appId, candidateId } = await candidateApp();
+    const of = await offer(appId);
+    const [call] = await db
+      .insert(screeningCalls)
+      .values({
+        orgId,
+        candidateId,
+        applicationId: appId,
+        requisitionId: reqId,
+        purpose: "scheduling",
+        slotOfferId: of.id,
+        alternates: [weekday(7)],
+        requestedBy: userId,
+        status: "dialling",
+        attempt: o.attempt ?? 1,
+      })
+      .returning();
+    return { call: call!, offer: of, appId };
+  }
+  const place = (callId: string, line: FakeLine, voice: typeof gw.aiVoiceSession) =>
+    session.runScreeningCall(orgId, callId, {
+      line: () => line,
+      voice,
+      limits: { silenceMs: 60_000, firstWordsMs: 60_000 },
+    });
+
+  test("the candidate picks the second time: booked, read back, run closed", async () => {
+    const { call, offer: of, appId } = await arranged();
+    const line = new FakeLine();
+    const seen: { opts?: VoiceOpts; results: unknown[] } = { results: [] };
+    const r = await place(
+      call.id,
+      line,
+      scriptedVoice(
+        [
+          { say: "ai", text: "Hello, am I speaking with Meera?" },
+          { say: "caller", text: "Yes." },
+          // A "yes" before the disclosure is refused.
+          { tool: "record_permission", args: { granted: true, their_words: "Yes." } },
+          { say: "ai", text: DISCLOSE },
+          { say: "caller", text: "Sure, go ahead." },
+          { tool: "record_permission", args: { granted: true, their_words: "Sure, go ahead." } },
+          { say: "caller", text: "The second one." },
+          { tool: "book_interview_time", args: { option: 2 } },
+          { say: "ai", text: "Booked. Goodbye." },
+          { tool: "end_scheduling_call", args: { reason: "booked" } },
+        ],
+        seen,
+      ),
+    );
+    expect(line.dialled).toBe("9840012345");
+    expect(r).toMatchObject({ status: "completed", endReason: "booked" });
+    expect(seen.opts).toMatchObject({ feature: "scheduling_call", languageCode: "en-IN" });
+    expect(seen.opts!.tools!.map((t) => t.name).sort()).toEqual([
+      "book_interview_time",
+      "end_scheduling_call",
+      "record_availability",
+      "record_permission",
+    ]);
+    expect(seen.opts!.system).toContain(`2. ${brief.spokenWhen(of.slots[1]!, "Asia/Kolkata")}`);
+    const outs = seen.results as { tool: string; out: Record<string, unknown> }[];
+    expect(outs[0]!.out).toMatchObject({ ok: false });
+    expect(outs.find((x) => x.tool === "book_interview_time")!.out).toMatchObject({
+      ok: true,
+      booked_for: brief.spokenWhen(of.slots[1]!, "Asia/Kolkata"),
+    });
+    const [iv] = await db.select().from(interviews).where(eq(interviews.applicationId, appId));
+    expect(iv!.scheduledAt.toISOString()).toBe(of.slots[1]);
+    const [c] = await db.select().from(screeningCalls).where(eq(screeningCalls.id, call.id));
+    expect(c!.transcript.length).toBeGreaterThan(0);
+    expect(c!.consentWords).toBe("Sure, go ahead.");
+    const [run] = await db.select().from(agentRuns).where(eq(agentRuns.id, c!.agentRunId!));
+    expect(run).toMatchObject({ agentType: "scheduling_call", status: "done" });
+  });
+
+  test("voicemail: tried once more, then the e-mailed link stands", async () => {
+    const steps: Step[] = [
+      { say: "ai", text: "The talent acquisition team will try again later. Goodbye." },
+      { tool: "end_scheduling_call", args: { reason: "voicemail" } },
+    ];
+    const first = await arranged();
+    expect(
+      await place(first.call.id, new FakeLine(), scriptedVoice(steps, { results: [] })),
+    ).toMatchObject({ status: "no_answer" });
+    const [c1] = await db.select().from(screeningCalls).where(eq(screeningCalls.id, first.call.id));
+    expect(c1!.dueAt).not.toBeNull();
+    expect(c1!.transcript).toEqual([]); // nothing kept without their go-ahead
+    const second = await arranged({ attempt: 2 });
+    expect(
+      await place(second.call.id, new FakeLine(), scriptedVoice(steps, { results: [] })),
+    ).toMatchObject({ status: "fell_back" });
+  });
+
+  test("picked by the link before the call: nobody is dialled", async () => {
+    const { call, offer: of } = await arranged();
+    await db
+      .update(interviewSlotOffers)
+      .set({ status: "booked" })
+      .where(eq(interviewSlotOffers.id, of.id));
+    const line = new FakeLine();
+    expect(await place(call.id, line, scriptedVoice([], { results: [] }))).toMatchObject({
+      status: "fell_back",
+      endReason: "already_chosen",
+    });
+    expect(line.dialled).toBeNull();
+  });
+
+  test("the dispatcher dials scheduling calls only while switched on, at most twice", async () => {
+    const { call } = await arranged();
+    const monday11 = (() => {
+      const d = new Date(weekday(1));
+      while (d.getUTCDay() !== 1) d.setUTCDate(d.getUTCDate() + 1);
+      return d; // a Monday, 11:00 IST: inside the default window
+    })();
+    await db
+      .update(screeningCalls)
+      .set({ status: "approved", attempt: 0, dueAt: new Date(monday11.getTime() - 60_000) })
+      .where(eq(screeningCalls.id, call.id));
+    await settings.setPhoneScreeningPolicyCore(
+      orgId,
+      { userId, memberEmail: interviewer },
+      { ...settings.DEFAULT_PHONE_SCREENING_POLICY, enabled: true, schedulingEnabled: false },
+    );
+    expect((await dispatcher.dueCalls(monday11)).map((r) => r.id)).not.toContain(call.id);
+    await settings.setPhoneScreeningPolicyCore(
+      orgId,
+      { userId, memberEmail: interviewer },
+      { ...settings.DEFAULT_PHONE_SCREENING_POLICY, enabled: true, schedulingEnabled: true },
+    );
+    expect((await dispatcher.dueCalls(monday11)).map((r) => r.id)).toContain(call.id);
+    await db
+      .update(screeningCalls)
+      .set({ status: "no_answer", attempt: 2 })
+      .where(eq(screeningCalls.id, call.id));
+    expect((await dispatcher.dueCalls(monday11)).map((r) => r.id)).not.toContain(call.id);
   });
 });

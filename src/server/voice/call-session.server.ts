@@ -79,7 +79,11 @@ export type CallLimits = {
   firstWordsMs: number;
 };
 
-const DEFAULT_LIMITS: CallLimits = { ringMs: 45_000, silenceMs: 20_000, firstWordsMs: 25_000 };
+export const DEFAULT_LIMITS: CallLimits = {
+  ringMs: 45_000,
+  silenceMs: 20_000,
+  firstWordsMs: 25_000,
+};
 
 export {
   applyCallTool,
@@ -94,8 +98,8 @@ export {
 } from "./call-tools";
 
 /** Above this RMS (int16) a 20 ms frame is speech, not line noise. */
-const SPEECH_RMS = 600;
-function rms(pcm: Int16Array): number {
+export const SPEECH_RMS = 600;
+export function rms(pcm: Int16Array): number {
   let sum = 0;
   for (let i = 0; i < pcm.length; i++) sum += pcm[i]! * pcm[i]!;
   return Math.sqrt(sum / Math.max(1, pcm.length));
@@ -112,7 +116,7 @@ export type CallResult = {
   screeningRunId: string | null;
 };
 
-async function setCall(
+export async function setCall(
   id: string,
   orgId: string,
   values: Partial<typeof screeningCalls.$inferInsert>,
@@ -141,6 +145,11 @@ export async function runScreeningCall(
     .where(and(eq(screeningCalls.id, callId), eq(screeningCalls.orgId, orgId)))
     .limit(1);
   if (!call) throw new Error("Screening call not found");
+  // A call to pick an interview time is the Scheduling call agent's (same line, same worker).
+  if (call.purpose === "scheduling") {
+    const { runSchedulingCall } = await import("./scheduling-session.server");
+    return runSchedulingCall(orgId, call, deps);
+  }
   // Each attempt is one run of the Screening call agent (its ledger, trace and outcome).
   const runId = await openCallRun(orgId, call).catch((e) => {
     log.warn("screening_call.run_open_failed", { call_id: callId, error: e as Error });
@@ -175,9 +184,11 @@ export async function runScreeningCall(
  * leaves it alone; its principal is the person who asked for (or approved)
  * the call. Null when nobody is on record.
  */
-async function openCallRun(
+export async function openCallRun(
   orgId: string,
   call: typeof screeningCalls.$inferSelect,
+  agentType: "screening_call" | "scheduling_call" = "screening_call",
+  goal = `Phone screening call, attempt ${call.attempt}.`,
 ): Promise<string | null> {
   let principal = call.requestedBy;
   if (!principal && call.requestedRunId) {
@@ -192,7 +203,7 @@ async function openCallRun(
   await import("../agents");
   const { getAgent } = await import("../agents/registry");
   const { ensureDefinition } = await import("../agents/manifest.server");
-  const def = getAgent("screening_call");
+  const def = getAgent(agentType);
   if (!def) return null;
   const definition = await ensureDefinition(def);
   const now = new Date();
@@ -200,7 +211,7 @@ async function openCallRun(
     .insert(agentRuns)
     .values({
       orgId,
-      agentType: "screening_call",
+      agentType,
       status: "running",
       principalUserId: principal,
       subjectType: "application",
@@ -208,7 +219,7 @@ async function openCallRun(
       definitionId: definition.id,
       definitionVersion: definition.version,
       definitionHash: definition.hash,
-      goal: `Phone screening call, attempt ${call.attempt}.`,
+      goal,
       startedAt: now,
       leaseUntil: null,
     })
@@ -218,7 +229,7 @@ async function openCallRun(
 }
 
 /** Close the attempt's run with what happened (in plain words). */
-async function closeCallRun(runId: string, ok: boolean, result: string) {
+export async function closeCallRun(runId: string, ok: boolean, result: string) {
   const now = new Date();
   await db
     .update(agentRuns)

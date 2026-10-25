@@ -40,6 +40,8 @@ export async function checkSchedulingCall(
   orgId: string,
   applicationId: string,
   now = Date.now(),
+  /** A person arranging the call may call before the wait (agents never may). */
+  opts: { byPerson?: boolean } = {},
 ): Promise<SchedulingCheck> {
   const policy = await phoneScreeningPolicyOf(orgId);
   if (!policy.schedulingEnabled)
@@ -115,6 +117,28 @@ export async function checkSchedulingCall(
   if (already)
     return { ok: false, reason: "A scheduling call was already arranged for these times." };
 
+  // One conversation per round: once the assistant has spoken with them about it,
+  // later times go by e-mail only (no call → decline → re-offer → call loop).
+  const [spoken] = await db
+    .select({ id: screeningCalls.id })
+    .from(screeningCalls)
+    .innerJoin(interviewSlotOffers, eq(interviewSlotOffers.id, screeningCalls.slotOfferId))
+    .where(
+      and(
+        eq(screeningCalls.orgId, orgId),
+        eq(screeningCalls.applicationId, applicationId),
+        eq(screeningCalls.purpose, "scheduling"),
+        eq(interviewSlotOffers.level, offer.level),
+        sql`${screeningCalls.consentAt} is not null`,
+      ),
+    )
+    .limit(1);
+  if (spoken)
+    return {
+      ok: false,
+      reason: "The assistant already spoke with them about this round; these times go by e-mail.",
+    };
+
   const [earlier] = await db
     .select({ id: interviewSlotOffers.id })
     .from(interviewSlotOffers)
@@ -130,7 +154,7 @@ export async function checkSchedulingCall(
     .limit(1);
   const repeat = Boolean(earlier);
   const callableAt = offer.createdAt.getTime() + policy.schedulingWaitHours * 3600_000;
-  if (!repeat && callableAt > now) {
+  if (!repeat && !opts.byPerson && callableAt > now) {
     const hours = Math.ceil((callableAt - now) / 3600_000);
     return {
       ok: false,
@@ -185,9 +209,13 @@ export async function requestSchedulingCall(input: {
   requestedRunId: string | null;
   actor: string;
   now?: number;
+  /** A person on the team arranged it (may call before the organisation's wait). */
+  byPerson?: boolean;
 }): Promise<{ callId: string; dueAt: Date; options: number }> {
   const now = input.now ?? Date.now();
-  const check = await checkSchedulingCall(input.orgId, input.applicationId, now);
+  const check = await checkSchedulingCall(input.orgId, input.applicationId, now, {
+    byPerson: Boolean(input.byPerson),
+  });
   if (!check.ok) throw new Error(check.reason);
   const alternates = await findAlternates(input.orgId, check.offer, now);
   const policy = await phoneScreeningPolicyOf(input.orgId);
@@ -222,6 +250,7 @@ export async function requestSchedulingCall(input: {
       offerId: check.offer.id,
       alternates: alternates.length,
       repeat: check.repeat,
+      byPerson: Boolean(input.byPerson),
       dueAt: dueAt.toISOString(),
     },
   });
