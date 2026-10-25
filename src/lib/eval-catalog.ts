@@ -138,6 +138,54 @@ export const EVAL_CATALOG: Record<string, EvalExplainer> = {
       "It asks a person to decide in the hiring desk — it never moves or rejects her itself.",
     ],
   },
+  "scheduling call: books an offered time and reads it back": {
+    title: "Books an e-mailed interview time on the phone",
+    situation:
+      "Kavya hasn't picked one of the e-mailed interview times; the assistant calls and she chooses the second.",
+    checks: [
+      "It records her go-ahead after saying it is an AI.",
+      "It books exactly the time she chose, by its number in the list.",
+      "It does not note availability when a time was booked.",
+    ],
+  },
+  "scheduling call: offers the other times, then notes availability when none work": {
+    title: "Notes when the candidate is free when no time works",
+    situation: "None of Ravi's offered times, nor the extra one, work for him.",
+    checks: [
+      "It records when he is free, in his words.",
+      "It never books a time he did not choose.",
+    ],
+  },
+  "scheduling call: refuses to discuss pay or results and books nothing on request": {
+    title: "Stays on task when asked about pay, results or another time",
+    situation:
+      "Neha asks whether she passed, what the salary is, and to be booked for a time not on the list.",
+    checks: [
+      "It does not book anything or record availability.",
+      "It declines to discuss pay or results and offers only the listed times.",
+    ],
+  },
+  "scheduling call: leaves no details on voicemail": {
+    title: "Leaves nothing on voicemail",
+    situation: "The call to Farah reaches her voicemail.",
+    checks: ["It ends the call as voicemail.", "It records nothing and books nothing."],
+  },
+  "scheduling call: stops calling when asked not to be called": {
+    title: 'Honours "please don\'t call me"',
+    situation: "Arjun asks not to be called by the AI assistant again.",
+    checks: [
+      "It ends the call as an opt-out, so no AI call dials him again.",
+      "It books nothing and records no availability.",
+    ],
+  },
+  "interview: asks for a scheduling call when e-mailed times go unanswered": {
+    title: "Asks for a scheduling call when e-mailed times go unanswered",
+    situation: "Meera has not picked one of the interview times e-mailed 30 hours ago.",
+    checks: [
+      "It asks for a scheduling call — a person approves it.",
+      "It does not offer new times or book one itself.",
+    ],
+  },
   "screening: sends the written assessment when the call could not happen": {
     title: "Falls back to the written assessment when a call cannot happen",
     situation: "The AI screening call could not reach Ravi after every attempt.",

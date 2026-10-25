@@ -48,6 +48,8 @@ export const listScreeningCalls = createServerFn({ method: "POST" })
         and(
           eq(screeningCalls.orgId, context.orgId),
           eq(screeningCalls.candidateId, data.candidateId),
+          // Scheduling calls are shown with the interview (plan step S3).
+          eq(screeningCalls.purpose, "screening"),
         ),
       )
       .orderBy(desc(screeningCalls.createdAt))

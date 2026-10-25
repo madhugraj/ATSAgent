@@ -46,6 +46,11 @@ export type AgentTool<I = unknown> = {
    * goes back to the agent instead of an approval card. Must only read.
    */
   precheck?: (ctx: ToolContext, input: I) => Promise<string | null>;
+  /**
+   * Facts the system states on the approval card (never left to the agent),
+   * e.g. the interview times a scheduling call will offer. Must only read.
+   */
+  brief?: (ctx: ToolContext, input: I) => Promise<string>;
   run: (ctx: ToolContext, input: I) => Promise<unknown>;
 };
 

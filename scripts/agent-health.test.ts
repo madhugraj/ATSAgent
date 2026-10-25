@@ -457,6 +457,82 @@ describe("rules", () => {
   });
 });
 
+describe("scheduling call health", () => {
+  test("few bookings from connected scheduling calls, and AI-call opt-outs", async () => {
+    const { applications, candidates, interviewSlotOffers, requisitions, screeningCalls } =
+      await import("../drizzle/schema");
+    const [req] = await db
+      .insert(requisitions)
+      .values({
+        orgId,
+        code: `REQ-H-${Date.now()}`,
+        title: "x",
+        status: "approved",
+        createdBy: userId,
+      } as never)
+      .returning({ id: requisitions.id });
+    const [cand] = await db
+      .insert(candidates)
+      .values({ orgId, fullName: "Asha", email: `asha-${Date.now()}@h.local` } as never)
+      .returning({ id: candidates.id });
+    const [app] = await db
+      .insert(applications)
+      .values({ orgId, requisitionId: req!.id, candidateId: cand!.id, stage: "l1" } as never)
+      .returning({ id: applications.id });
+    const [offer] = await db
+      .insert(interviewSlotOffers)
+      .values({
+        orgId,
+        applicationId: app!.id,
+        level: 1,
+        interviewerEmail: "p@h.local",
+        slots: [new Date(Date.now() + 3 * 864e5).toISOString()],
+        token: `h-${Date.now()}`,
+        expiresAt: new Date(Date.now() + 864e5),
+      })
+      .returning({ id: interviewSlotOffers.id });
+    const calls = (n: number, endReason: string) =>
+      db.insert(screeningCalls).values(
+        Array.from({ length: n }, () => ({
+          orgId,
+          candidateId: cand!.id,
+          applicationId: app!.id,
+          purpose: "scheduling" as const,
+          slotOfferId: offer!.id,
+          status: "completed" as const,
+          consentAt: new Date(),
+          endReason,
+        })),
+      );
+    const ruleOf = async (rule: string) => (await open()).find((i) => i.rule === rule);
+    await calls(HEALTH.minSchedulingCalls7d, "availability_noted");
+    await evaluate();
+    expect(await ruleOf("scheduling_call.no_booking")).toMatchObject({
+      agentType: "scheduling_call",
+      severity: "warning",
+    });
+    await calls(HEALTH.minSchedulingCalls7d, "booked");
+    await evaluate();
+    expect(await ruleOf("scheduling_call.no_booking")).toBeUndefined();
+
+    for (let i = 0; i < HEALTH.aiCallOptOuts7d; i++)
+      await db.insert(auditLog).values({
+        orgId,
+        actor: "t",
+        action: "candidate.ai_call_opt_out",
+        entityType: "candidate",
+        entityId: cand!.id,
+        detail: {},
+      } as never);
+    await evaluate();
+    expect(await ruleOf("ai_call.opt_outs")).toMatchObject({ severity: "warning" });
+    await db.delete(screeningCalls).where(eq(screeningCalls.applicationId, app!.id));
+    await db.delete(applications).where(eq(applications.id, app!.id));
+    await db.delete(candidates).where(eq(candidates.id, cand!.id));
+    await db.delete(requisitions).where(eq(requisitions.id, req!.id));
+  });
+});
+
 describe("an agent going round in circles", () => {
   test("a run that keeps asking people questions is flagged", async () => {
     const id = await run("interview");

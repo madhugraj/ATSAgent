@@ -46,6 +46,7 @@ export const AI_FEATURES = [
   "agent_sourcing",
   "agent_distribution",
   "agent_screening_call",
+  "agent_scheduling_call",
   "agent_followup",
   // Hiring desk conversation turns (docs/agentic-plan.md §13.2).
   "hiring_desk",
@@ -55,6 +56,8 @@ export const AI_FEATURES = [
   "role_research",
   // Live voice: the screening call with a candidate (docs/voice-screening-agent.md).
   "screening_call",
+  // Live voice: the call to pick an interview time (docs/voice-scheduling-call-plan.md).
+  "scheduling_call",
 ] as const;
 
 export type AiFeature = (typeof AI_FEATURES)[number];

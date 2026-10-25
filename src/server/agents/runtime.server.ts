@@ -1667,7 +1667,7 @@ async function handleCall(
     const taskId = await openTask(run, {
       kind: "approval",
       title: tool.describe?.(parsed.data) ?? `Allow the agent to run ${tool.name}`,
-      body: "",
+      body: tool.brief ? await tool.brief(ctx, parsed.data).catch(() => "") : "",
       // Most approvals go to the person the agent works for; some tools name
       // the role that must approve them (e.g. job-board posts → HR head).
       assigneeRole: tool.approverRole ?? null,

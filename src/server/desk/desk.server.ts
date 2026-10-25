@@ -1498,6 +1498,7 @@ const AGENT_TITLE: Record<string, string> = {
   intake: "Intake & matching agent",
   screening: "Screening agent",
   screening_call: "Screening call agent",
+  scheduling_call: "Scheduling call agent",
   interview: "Interview coordinator",
   evaluation: "Evaluation agent",
   offer: "Offer agent",
@@ -1796,6 +1797,7 @@ async function screeningBoard(orgId: string, requisitionId: string): Promise<Scr
     left join lateral (
       select status, end_reason, due_at from screening_calls
       where application_id = a.id and org_id = ${orgId} and status <> 'cancelled'
+        and purpose = 'screening'
       order by created_at desc limit 1) sc on true
     left join lateral (
       select status from candidate_assessments
@@ -1893,6 +1895,7 @@ async function phoneCallWait(orgId: string, requisitionId: string): Promise<stri
     join candidates c on c.id = sc.candidate_id
     left join screening_runs sr on sr.id = sc.screening_run_id
     where sc.org_id = ${orgId} and sc.requisition_id = ${requisitionId} and sc.status <> 'cancelled'
+      and sc.purpose = 'screening'
     order by sc.application_id, sc.created_at desc`)) as unknown as {
     name: string;
     status: string;

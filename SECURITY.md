@@ -46,6 +46,10 @@ We credit reporters in release notes on request.
   and just before dialling — and calls already waiting are cancelled (audited
   `candidate.ai_call_opt_out`; only TA, the HR head or the CBO can clear it, audited
   `candidate.ai_call_opt_in`).
+  A scheduling call books only the e-mailed times or up to three alternates checked free when it
+  is arranged — by number, never a free-form time — through the same booking core as the
+  candidate's link (one booking per offer); a person approves each call (audited
+  `scheduling_call.requested`).
 - Rate limiting on all public HTTP routes and server-function RPCs (`src/server.ts`).
 - SSRF gate: server-side fetches of user-supplied URLs go through `src/server/safe-fetch.ts`.
 - Auditing: privileged actions append to `audit_log` (`src/server/audit.ts`).

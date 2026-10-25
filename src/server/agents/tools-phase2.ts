@@ -24,6 +24,7 @@ import {
 import { env } from "../env";
 import { registerTool, type ToolContext } from "./registry";
 import { registerScreeningCallTools } from "./tools-screening-call";
+import { registerSchedulingCallTools } from "./tools-scheduling-call";
 
 const actor = async (ctx: ToolContext) => {
   const { actorFor } = await import("@/lib/requisitions.server");
@@ -386,7 +387,11 @@ export function registerPhase2Tools(): void {
             })
             .from(screeningCalls)
             .where(
-              and(eq(screeningCalls.orgId, ctx.orgId), eq(screeningCalls.applicationId, app.id)),
+              and(
+                eq(screeningCalls.orgId, ctx.orgId),
+                eq(screeningCalls.applicationId, app.id),
+                eq(screeningCalls.purpose, "screening"),
+              ),
             )
             .orderBy(desc(screeningCalls.createdAt))
             .limit(1);
@@ -688,4 +693,5 @@ export function registerPhase2Tools(): void {
   });
 
   registerScreeningCallTools();
+  registerSchedulingCallTools();
 }

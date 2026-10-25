@@ -64,6 +64,12 @@ export const HEALTH = {
   quietListingDays: 14,
   /** Role-limited CVs still kept this many days after they became due for erasure. */
   roleLimitedOverdueDays: 7,
+  /** Scheduling calls: with at least this many connected calls in 7 days… */
+  minSchedulingCalls7d: 5,
+  /** …fewer than this share ending in a booking is flagged. */
+  schedulingBookedShare: 0.3,
+  /** Candidates asking not to be called by the AI assistant, in 7 days. */
+  aiCallOptOuts7d: 2,
   /** One run asking people this many questions (7 days) is going round in circles. */
   questionsPerRun: 3,
   /** Phone screening: a call still not placed this many hours after it was due. */
@@ -700,7 +706,8 @@ export const RULES: Rule[] = [
       const r = await rows<{ total: number; answered: number }>(sql`
         select count(*)::int total, count(*) filter (where started_at is not null)::int answered
         from screening_calls
-        where org_id = ${orgId} and attempt > 0 and updated_at >= now() - interval '7 days'
+        where org_id = ${orgId} and purpose = 'screening' and attempt > 0
+          and updated_at >= now() - interval '7 days'
           and status not in ('approved', 'requested', 'dialling', 'in_progress', 'cancelled')`);
       const x = r[0];
       if (!x || x.total < HEALTH.minCalls7d || x.answered / x.total >= HEALTH.callAnswerShare)
@@ -724,7 +731,8 @@ export const RULES: Rule[] = [
         select count(*)::int answered,
           count(*) filter (where status = 'consent_declined')::int declined
         from screening_calls
-        where org_id = ${orgId} and started_at is not null and updated_at >= now() - interval '7 days'`);
+        where org_id = ${orgId} and purpose = 'screening' and started_at is not null
+          and updated_at >= now() - interval '7 days'`);
       const x = r[0];
       if (!x || x.answered < HEALTH.minCalls7d || x.declined / x.answered < HEALTH.callDeclineShare)
         return [];
@@ -733,6 +741,52 @@ export const RULES: Rule[] = [
           agentType: "screening_call",
           title: `${x.declined} of ${x.answered} candidates declined the AI screening call in 7 days`,
           detail: x,
+        },
+      ];
+    },
+  },
+  {
+    id: "scheduling_call.no_booking",
+    element: "skills",
+    severity: "warning",
+    description: `Of ${HEALTH.minSchedulingCalls7d} or more scheduling calls in 7 days where the candidate agreed to pick a time, fewer than ${Math.round(HEALTH.schedulingBookedShare * 100)}% booked one — the offered times may not suit candidates, or the assistant may be struggling to book.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ connected: number; booked: number }>(sql`
+        select count(*)::int connected,
+          count(*) filter (where end_reason = 'booked')::int booked
+        from screening_calls
+        where org_id = ${orgId} and purpose = 'scheduling' and consent_at is not null
+          and status not in ('dialling', 'in_progress')
+          and updated_at >= now() - interval '7 days'`);
+      const x = r[0];
+      if (!x || x.connected < HEALTH.minSchedulingCalls7d) return [];
+      if (x.booked / x.connected >= HEALTH.schedulingBookedShare) return [];
+      return [
+        {
+          agentType: "scheduling_call",
+          title: `${x.booked} of ${x.connected} scheduling calls booked a time`,
+          detail: { connected: x.connected, booked: x.booked },
+        },
+      ];
+    },
+  },
+  {
+    id: "ai_call.opt_outs",
+    element: "skills",
+    severity: "warning",
+    description: `${HEALTH.aiCallOptOuts7d} or more candidates asked in 7 days not to be called by the AI assistant — review how the calls come across.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number }>(sql`
+        select count(*)::int n from audit_log
+        where org_id = ${orgId} and action = 'candidate.ai_call_opt_out'
+          and created_at >= now() - interval '7 days'`);
+      const n = r[0]?.n ?? 0;
+      if (n < HEALTH.aiCallOptOuts7d) return [];
+      return [
+        {
+          agentType: "scheduling_call",
+          title: `${n} candidates asked not to be called by the AI assistant`,
+          detail: { optOuts: n },
         },
       ];
     },
@@ -766,8 +820,8 @@ export const RULES: Rule[] = [
     evaluate: async (orgId) => {
       const r = await rows<{ n: number }>(sql`
         select count(*)::int n from screening_calls
-        where org_id = ${orgId} and status = 'completed' and consent_at is not null
-          and coalesce(end_reason, '') <> 'not_interested'
+        where org_id = ${orgId} and purpose = 'screening' and status = 'completed'
+          and consent_at is not null and coalesce(end_reason, '') <> 'not_interested'
           and jsonb_array_length(answers) = 0 and updated_at >= now() - interval '7 days'`);
       const n = r[0]?.n ?? 0;
       if (n < HEALTH.shortCalls7d) return [];

@@ -481,6 +481,25 @@ async function raiseUnanswered(
 export async function declineSlots(token: string, note: string): Promise<boolean> {
   const o = await byToken(token);
   if (!o || o.offer.status !== "offered") return false;
+  return declineOffer(o, note, "link");
+}
+
+/** None of the times worked on an AI scheduling call: the same path as the link. */
+export async function declineSlotsByOffer(
+  orgId: string,
+  offerId: string,
+  note: string,
+): Promise<boolean> {
+  const o = await byOffer(orgId, offerId);
+  if (!o || o.offer.status !== "offered") return false;
+  return declineOffer(o, note, "phone");
+}
+
+async function declineOffer(
+  o: NonNullable<Awaited<ReturnType<typeof byToken>>>,
+  note: string,
+  by: "link" | "phone",
+): Promise<boolean> {
   const clean = note.replace(/\s+/g, " ").trim().slice(0, 500);
   const done = await db
     .update(interviewSlotOffers)
@@ -494,12 +513,12 @@ export async function declineSlots(token: string, note: string): Promise<boolean
     action: "interview.slots_declined",
     entityType: "application",
     entityId: o.offer.applicationId,
-    detail: { offerId: o.offer.id },
+    detail: { offerId: o.offer.id, channel: by },
   });
   await tellThread(
     o.offer.orgId,
     o.requisitionId,
-    `${o.candidateName} said none of the offered times for their L${o.offer.level} interview work${clean ? `: "${clean}"` : "."} The Interview coordinator offers other times; or book a time with them directly on the Interviews page.`,
+    `${o.candidateName} said${by === "phone" ? " on the AI scheduling call that" : ""} none of the offered times for their L${o.offer.level} interview work${clean ? `: "${clean}"` : "."} The Interview coordinator offers other times; or book a time with them directly on the Interviews page.`,
   );
   await raiseUnanswered(
     o.offer.orgId,

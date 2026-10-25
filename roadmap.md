@@ -13,7 +13,8 @@
 - [ ] Stage 1.1 steps B–E: guardrails, recording, HR traceability, fairness
 - [ ] Pilot on one real requisition with HR reviewing the transcripts and grades
 - [x] Stage 1.2 S0 (2026-10-25, migration 0048): scheduling calls share the call table (`purpose`, the offer, ≤ 3 alternates); the organisation's scheduling switch and wait (default 24 h); the candidate's opt-out from AI calls, honoured at request, claim and dial (audited; the team can record or clear it on the candidate page); booking by offer id on the same core as the e-mailed link
-- [ ] Stage 1.2 S1–S4: the Scheduling call agent, a real call, the desk and interviews board, a pilot (docs/voice-scheduling-call-plan.md)
+- [x] Stage 1.2 S1 (2026-10-25): Scheduling call agent 1.0.0 (books an e-mailed or pre-checked time by number through the link's core, notes availability, honours opt-out; 5 evals); `request_scheduling_call` for the Interview coordinator 1.9.0 with every rule checked by the system and the times stated on the approval card; triggers (unanswered past the wait, and straight after a re-offer); health rules `scheduling_call.no_booking`, `ai_call.opt_outs`
+- [ ] Stage 1.2 S2–S4: a real scheduling call through the voice worker, the desk post and interviews board (and a "call me" choice for candidates), a pilot (docs/voice-scheduling-call-plan.md)
 
 ## Distribution agent (2026-10-21)
 

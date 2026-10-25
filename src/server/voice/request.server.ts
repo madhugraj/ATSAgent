@@ -95,7 +95,13 @@ export async function checkScreeningCall(orgId: string, applicationId: string): 
   const [last] = await db
     .select({ status: screeningCalls.status })
     .from(screeningCalls)
-    .where(and(eq(screeningCalls.orgId, orgId), eq(screeningCalls.applicationId, app.id)))
+    .where(
+      and(
+        eq(screeningCalls.orgId, orgId),
+        eq(screeningCalls.applicationId, app.id),
+        eq(screeningCalls.purpose, "screening"),
+      ),
+    )
     .orderBy(desc(screeningCalls.createdAt))
     .limit(1);
   if (last && (OPEN_CALL as readonly string[]).includes(last.status))
@@ -147,6 +153,7 @@ export async function requestScreeningCall(input: {
       and(
         eq(screeningCalls.orgId, input.orgId),
         eq(screeningCalls.applicationId, check.app.id),
+        eq(screeningCalls.purpose, "screening"),
         inArray(screeningCalls.status, [...OPEN_CALL]),
       ),
     )

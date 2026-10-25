@@ -39,6 +39,7 @@ async function callForRun(ctx: ToolContext) {
       and(
         eq(screeningCalls.orgId, ctx.orgId),
         eq(screeningCalls.status, "in_progress"),
+        eq(screeningCalls.purpose, "screening"),
         isNull(screeningCalls.agentRunId),
       ),
     )

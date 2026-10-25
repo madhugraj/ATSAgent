@@ -1,6 +1,6 @@
 # Voice scheduling call — plan (stage 1.2)
 
-Status: **S0 built** (2026-10-25); S1–S4 to come. Decisions confirmed: the
+Status: **S0 and S1 built** (2026-10-25); S2–S4 to come. Decisions confirmed: the
 recommended defaults below. Builds on the AI screening call
 (`docs/voice-screening-agent.md`, `docs/voice-screening-stage1.1-plan.md`).
 
@@ -202,6 +202,40 @@ and the call.
   one booking per offer whichever comes first. The link alone never books an
   alternate.
 - The dispatcher does not dial scheduling calls until S2.
+
+## S1 — built (2026-10-25)
+
+- **Scheduling call agent 1.0.0** (`scheduling_call`, risk tier medium, owner HR
+  head): its manifest is the call's prompt (`scheduling-prompt.ts`, rendered with
+  placeholders so the lock covers it). Tools (`scheduling-call-tools.ts`, pure):
+  `record_permission` (refused until it said it is an AI and will note the
+  time), `book_interview_time{option}` (a number from its list — a free-form
+  time is not even a valid argument), `record_availability`,
+  `end_scheduling_call{reason}`. In text mode they act on the in-progress
+  scheduling call: a booking goes through `chooseSlotByOffer`, "none of these
+  work" through the offer's decline path (`declineSlotsByOffer`), an opt-out
+  through `recordAiCallOptOut`; voicemail tries once more (2 attempts), then the
+  e-mail link stands (`scheduling-outcome.server.ts`).
+- **`request_scheduling_call`** for the Interview coordinator (1.9.0): every rule
+  is checked by the system (`scheduling-request.server.ts`): switched on and
+  calls placeable, an open offer, the organisation's wait (a repeat offer after
+  a decline or expiry is called about at once), the earliest time a day away,
+  a dialable mobile, no opt-out, one call per offer. A person approves it; the
+  approval card states the offered times (a new read-only `brief` hook on
+  tools). Up to three alternates free for the interviewers are found when the
+  call is arranged.
+- **Triggers:** the agent tick raises `interview.slots_no_reply` once per offer
+  unanswered past the wait → the coordinator asks for the call (and nothing
+  else); after a decline or expiry the coordinator re-offers times and asks
+  for the call straight away. *Asked to be phoned* is not built: there is no
+  place yet where a candidate's preference for a call is recorded (S3 can add
+  it to the time-choice page).
+- Screening queries (desk, board, health, the Screening agent's status, the
+  candidate page) now look at screening calls only.
+- Evals: 5 for the Scheduling call agent, 1 for the coordinator (scripted
+  model pass; live: `EVAL_ONLY="scheduling" bun scripts/agent-eval.ts` with a
+  test key). Health rules `scheduling_call.no_booking`, `ai_call.opt_outs`.
+  Tests: `scripts/scheduling-call.test.ts`.
 
 ## Decisions (confirmed 2026-10-25)
 

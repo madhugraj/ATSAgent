@@ -316,7 +316,16 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
     const p = e.payload as { level?: number; why?: string; note?: string | null };
     await dispatch(
       "interview",
-      `Candidate application ${applicationId} (${req.code} "${req.title}") did not take the offered L${p.level ?? "?"} interview times (${p.why === "expired" ? "the link expired unanswered" : "none of them work"}${p.note ? `: "${String(p.note).slice(0, 300)}"` : ""}). Offer different times — other days and times of day, honouring what they said — or ask a person if that is not possible.`,
+      `Candidate application ${applicationId} (${req.code} "${req.title}") did not take the offered L${p.level ?? "?"} interview times (${p.why === "expired" ? "the link expired unanswered" : "none of them work"}${p.note ? `: "${String(p.note).slice(0, 300)}"` : ""}). Offer different times — other days and times of day, honouring what they said — or ask a person if that is not possible. Once the new times are offered, ask for a scheduling call (request_scheduling_call) so the assistant phones them to pick one; if it is refused, leave it to the e-mail.`,
+      { type: "application", id: applicationId },
+    );
+  }
+
+  if (applicationId && e.type === "interview.slots_no_reply") {
+    const p = e.payload as { level?: number };
+    await dispatch(
+      "interview",
+      `Candidate application ${applicationId} (${req.code} "${req.title}") has not picked one of the L${p.level ?? "?"} interview times e-mailed to them. Ask for a scheduling call (request_scheduling_call) so the assistant phones them to pick one. If it is refused, leave it to the e-mail — do not offer new times.`,
       { type: "application", id: applicationId },
     );
   }
@@ -737,6 +746,14 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
     await expireOffers(opts.orgId);
   } catch (err) {
     log.warn("interview.slot_expiry_failed", { error: err as Error });
+  }
+  // E-mailed interview times unanswered past the organisation's wait: the
+  // Interview coordinator may ask for a scheduling call (once per offer).
+  try {
+    const { raiseUnansweredOffers } = await import("../voice/scheduling-request.server");
+    await raiseUnansweredOffers(Date.now(), opts.orgId);
+  } catch (err) {
+    log.warn("scheduling_call.trigger_failed", { error: err as Error });
   }
   // Training data older than each organisation's retention is deleted.
   try {
