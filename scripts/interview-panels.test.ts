@@ -6,17 +6,34 @@
  *  - the hiring manager is a registered member: resolved from a name or an
  *    e-mail, never guessed; the desk asks for it until it is;
  *  - invites are audited (an invite is a role grant).
+ *  P1: a plan cannot drop a round a candidate is in; the hiring manager is
+ *    picked from members, audited; the desk posts the plan, editable in place.
  * Run: DATABASE_URL=postgres://…/atsagent_test SESSION_SECRET=… bun test scripts/interview-panels.test.ts
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { and, eq } from "drizzle-orm";
 
 const { db } = await import("../src/server/db");
-const { auditLog, memberInterviewerProfiles, orgMembers, organizations, userRoles, users } =
-  await import("../drizzle/schema");
+const {
+  applications,
+  auditLog,
+  candidates,
+  hiringConversations,
+  hiringMessages,
+  interviews,
+  memberInterviewerProfiles,
+  orgMembers,
+  organizations,
+  requisitions,
+  userRoles,
+  users,
+} = await import("../drizzle/schema");
 const iv = await import("../src/lib/interviewers.server");
 const desk = await import("../src/server/desk/desk.server");
 const org = await import("../src/lib/org.functions");
+const plans = await import("../src/lib/interview-plan.server");
+const { defaultPlan } = await import("../src/lib/interview-plan");
+const hm = await import("../src/lib/role-hiring-manager.functions");
 
 const stamp = Date.now();
 const domain = `panels${stamp}.test`;
@@ -217,5 +234,112 @@ describe("invites", () => {
       .from(auditLog)
       .where(and(eq(auditLog.orgId, orgId), eq(auditLog.action, "member.invited")));
     expect(a!.detail).toEqual({ email: `saranya@${domain}`, role: "hr_head" });
+  });
+});
+
+describe("P1: the interview plan and the hiring manager per role", () => {
+  let reqId: string;
+  let appId: string;
+
+  beforeAll(async () => {
+    reqId = (
+      await db
+        .insert(requisitions)
+        .values({
+          orgId,
+          code: `REQ-P-${stamp}`,
+          title: "Head of AI",
+          location: "Chennai",
+          status: "approved",
+          mustHaveSkills: ["MLOps", "LLMs"],
+          createdBy: ownerId,
+        })
+        .returning({ id: requisitions.id })
+    )[0]!.id;
+    const [c] = await db
+      .insert(candidates)
+      .values({ orgId, fullName: "Test Candidate", email: `cand@${domain}` } as never)
+      .returning({ id: candidates.id });
+    appId = (
+      await db
+        .insert(applications)
+        .values({ orgId, requisitionId: reqId, candidateId: c!.id, stage: "l1" } as never)
+        .returning({ id: applications.id })
+    )[0]!.id;
+  });
+
+  test("a plan cannot drop a round a candidate is in or an interview is booked for", async () => {
+    const three = defaultPlan(["MLOps", "LLMs"]);
+    const one = { ...three, rounds: three.rounds.slice(0, 1) };
+    // The candidate is at L1: one round is fine.
+    await plans.savePlan(orgId, reqId, one);
+    // An L2 interview booked: one round is refused, two are fine.
+    await db.insert(interviews).values({
+      orgId,
+      applicationId: appId,
+      level: 2,
+      scheduledAt: new Date(Date.now() + 86_400_000),
+      status: "scheduled",
+    } as never);
+    expect(await plans.roundsInUse(orgId, reqId)).toBe(2);
+    await expect(plans.savePlan(orgId, reqId, one)).rejects.toThrow(/L2 is already in use/);
+    await plans.savePlan(orgId, reqId, { ...three, rounds: three.rounds.slice(0, 2) });
+    // A cancelled interview no longer holds the round.
+    await db
+      .update(interviews)
+      .set({ status: "cancelled" })
+      .where(eq(interviews.applicationId, appId));
+    expect(await plans.roundsInUse(orgId, reqId)).toBe(1);
+    // Another organisation's role is not touched.
+    await expect(plans.savePlan(otherOrgId, reqId, three)).rejects.toThrow(/not found/);
+  });
+
+  test("the hiring manager is picked from active members; audited; scoped", async () => {
+    const before = await hm.roleHiringManagerOf(orgId, reqId);
+    expect(before.memberId).toBeNull();
+    expect(before.options.slice(0, 2).map((o) => o.name)).toEqual([
+      "Arun Kumar",
+      "Priya Natarajan",
+    ]);
+    expect(await hm.setRoleHiringManagerCore(orgId, ownerId, reqId, members["priya"]!)).toEqual({
+      memberId: members["priya"],
+      name: "Priya Natarajan",
+    });
+    const [r] = await db
+      .select({ id: requisitions.hiringManagerMemberId, name: requisitions.hiringManager })
+      .from(requisitions)
+      .where(eq(requisitions.id, reqId));
+    expect(r).toEqual({ id: members["priya"]!, name: "Priya Natarajan" });
+    const [a] = await db
+      .select({ detail: auditLog.detail })
+      .from(auditLog)
+      .where(and(eq(auditLog.orgId, orgId), eq(auditLog.action, "requisition.hiring_manager_set")));
+    expect(a!.detail).toEqual({ member: `priya@${domain}` });
+    // Not a member of this organisation, or another organisation's role: refused.
+    await expect(
+      hm.setRoleHiringManagerCore(otherOrgId, ownerId, reqId, members["priya"]!),
+    ).rejects.toThrow(/active member/);
+    const [invited] = await db
+      .select({ id: orgMembers.id })
+      .from(orgMembers)
+      .where(and(eq(orgMembers.orgId, orgId), eq(orgMembers.status, "invited")));
+    if (invited)
+      await expect(hm.setRoleHiringManagerCore(orgId, ownerId, reqId, invited.id)).rejects.toThrow(
+        /active member/,
+      );
+  });
+
+  test("the desk posts the plan as a card the person edits in place", async () => {
+    const [conv] = await db
+      .insert(hiringConversations)
+      .values({ orgId, createdBy: ownerId, requisitionId: reqId, status: "active" } as never)
+      .returning();
+    await desk.showInterviewPlan(conv as never);
+    const [m] = await db
+      .select()
+      .from(hiringMessages)
+      .where(eq(hiringMessages.conversationId, conv!.id));
+    expect(m!.body).toMatch(/interview plan for this role: L1 Skills, L2 Role and ownership/);
+    expect(m!.card).toEqual({ type: "interview_plan", requisitionId: reqId });
   });
 });

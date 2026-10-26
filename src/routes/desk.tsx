@@ -33,6 +33,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { HiringManagerPicker } from "@/components/HiringManagerPicker";
+import { InterviewPlanCard } from "@/components/InterviewPlanCard";
 import { AGENT_LABEL } from "@/lib/agents.catalog";
 import { decideAgentTask, type AgentDecisionInput } from "@/lib/agents.functions";
 import {
@@ -635,6 +637,8 @@ function Card({
   if (card.type === "reasoning")
     return <Thinking why={card as unknown as Why} conv={conv} onChanged={onChanged} />;
   if (card.type === "jd") return <JdCard card={card} />;
+  if (card.type === "interview_plan")
+    return <InterviewPlanThreadCard requisitionId={String(card["requisitionId"])} />;
   if (card.type === "next_steps")
     return <NextStepsCard card={card} conv={conv} onChanged={onChanged} />;
   if (card.type === "rescore") return <RescoreCard card={card} conv={conv} onChanged={onChanged} />;
@@ -1971,6 +1975,29 @@ function BudgetPaused({
 }
 
 /** A job description shown in the thread: the saved text of one version. */
+/** The role's hiring manager and interview plan, editable in the thread. */
+function InterviewPlanThreadCard({ requisitionId }: { requisitionId: string }) {
+  return (
+    <div className="space-y-3 rounded-lg border border-border p-3 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="font-medium">Interview plan</p>
+        <Link
+          to="/requisitions/$id"
+          params={{ id: requisitionId }}
+          className="ml-auto text-xs text-primary hover:underline"
+        >
+          Open the requisition
+        </Link>
+      </div>
+      <div className="max-w-xs space-y-1">
+        <p className="text-xs text-muted-foreground">Hiring manager</p>
+        <HiringManagerPicker requisitionId={requisitionId} />
+      </div>
+      <InterviewPlanCard requisitionId={requisitionId} />
+    </div>
+  );
+}
+
 function JdCard({ card }: { card: DeskCardView }) {
   return (
     <div className="rounded-lg border border-border text-sm">

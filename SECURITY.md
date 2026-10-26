@@ -61,7 +61,8 @@ We credit reporters in release notes on request.
 - SSRF gate: server-side fetches of user-supplied URLs go through `src/server/safe-fetch.ts`.
 - Auditing: privileged actions append to `audit_log` (`src/server/audit.ts`), including member
   invites (`member.invited`) and interviewer-profile changes (`member.interviewer_profile.set`,
-  owner, CBO or HR head only).
+  owner, CBO or HR head only), a role's hiring manager (`requisition.hiring_manager_set`, an active
+  member only) and interview-plan changes (`requisition.interview_plan_updated`).
 - AI safety: untrusted CV, JD, profile and mail text is delimited before prompting; structured model
   responses are schema-validated before use. AI decisions retain evidence and permit audited human override.
 - AI usage ledger: every provider request is recorded in `ai_usage_events`

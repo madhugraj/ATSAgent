@@ -1,6 +1,6 @@
 # Interview panels — plan
 
-Status: **P0 built** (2026-10-26) — interviewer profiles, hiring manager as a member, the desk asks for it, invites audited. P1–P4 to come.
+Status: **P0 and P1 built** (2026-10-26). P0 — interviewer profiles, hiring manager as a member, the desk asks for it, invites audited. P1 — the plan in the desk thread (posted when the role is raised, and on "show the interview plan"), editable in place with the hiring manager; the hiring manager picked from members on the requisition page (audited, `requisition.hiring_manager_set`); a plan cannot drop a round a candidate is in or an interview is booked for. P2–P4 to come.
 
 Decisions (2026-10-26): test in the Yavar organisation; the role's hiring manager approves panels; one panel per role and round; weekly cap 4; members only.
 
@@ -24,8 +24,8 @@ area. The organisation's people, though, are registered once.
 - **The role.** A requisition's hiring manager is a free-text field
   (`requisitions.hiring_manager`), not a member; the hiring desk never asks for
   it. The interview plan — rounds, focus, competencies, panel size 1–3
-  (`src/lib/interview-plan.ts`) — has no editor in the app; every role runs on
-  the default plan unless an agent saves one.
+  (`src/lib/interview-plan.ts`) — is editable on the requisition page
+  (`InterviewPlanCard`) but not shown in the desk; most roles run on the default.
 - **The panel.** When a round is due, the Interview coordinator calls
   `list_panel_options` (every active member, ranked: past interviewers for the
   role, then hiring managers and department heads, then anyone) and picks
