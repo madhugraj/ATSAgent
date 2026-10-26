@@ -767,3 +767,51 @@ describe("phone screening health", () => {
     expect(await ruleOf("screening_call.short_calls")).toBeUndefined();
   });
 });
+
+describe("interview panels", () => {
+  test("candidates waiting for a round nobody is eligible to interview are flagged", async () => {
+    const {
+      applications,
+      candidates,
+      memberInterviewerProfiles,
+      orgMembers,
+      requisitions,
+      rolePanels,
+    } = await import("../drizzle/schema");
+    const [m] = await db
+      .insert(orgMembers)
+      .values({ orgId, userId, email: `health-${stamp}@test.local`, status: "active" } as never)
+      .returning({ id: orgMembers.id });
+    // The only registered interviewer takes L3 alone.
+    await db
+      .insert(memberInterviewerProfiles)
+      .values({ orgId, memberId: m!.id, active: true, rounds: [3] });
+    const [req] = await db
+      .insert(requisitions)
+      .values({ orgId, code: `H-P-${stamp}`, title: "Panel Test", status: "approved" } as never)
+      .returning({ id: requisitions.id });
+    const [cand] = await db
+      .insert(candidates)
+      .values({ orgId, fullName: "Panel Wait", email: `pw-${stamp}@cand.local` } as never)
+      .returning({ id: candidates.id });
+    await db
+      .insert(applications)
+      .values({ orgId, requisitionId: req!.id, candidateId: cand!.id, stage: "l1" } as never);
+    const rule = async () => (await open()).find((i) => i.rule === "interview.no_eligible_panel");
+    await evaluate();
+    expect(await rule()).toMatchObject({
+      agentType: "interview",
+      severity: "warning",
+      title: `Nobody is eligible to interview for H-P-${stamp} L1`,
+    });
+    // A person settled the panel: no longer flagged.
+    await db
+      .insert(rolePanels)
+      .values({ orgId, requisitionId: req!.id, level: 1, memberIds: [m!.id] });
+    await evaluate();
+    expect(await rule()).toBeUndefined();
+    await db.delete(requisitions).where(eq(requisitions.id, req!.id));
+    await db.delete(candidates).where(eq(candidates.id, cand!.id));
+    await db.delete(orgMembers).where(eq(orgMembers.id, m!.id));
+  });
+});

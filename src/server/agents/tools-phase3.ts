@@ -22,6 +22,7 @@ import {
   sourceIntegrations,
   userRoles,
 } from "@db/schema";
+import { assertRequisitionInOrg } from "../guards";
 import { registerTool, type ToolContext } from "./registry";
 
 const AppId = z.object({ applicationId: z.string().uuid() });
@@ -49,6 +50,24 @@ async function loadApplication(orgId: string, id: string) {
     .limit(1);
   if (!row) throw new Error("Application not found.");
   return row;
+}
+
+/** Agents offer and book times only with the round's approved panel (a reason, or null). */
+async function panelRefusal(
+  ctx: ToolContext,
+  i: {
+    applicationId: string;
+    level: number;
+    interviewerEmail: string;
+    panelEmails?: string[] | undefined;
+  },
+): Promise<string | null> {
+  const app = await loadApplication(ctx.orgId, i.applicationId);
+  const { panelMismatch } = await import("@/lib/panels.server");
+  return panelMismatch(ctx.orgId, app.requisitionId, i.level, [
+    i.interviewerEmail,
+    ...(i.panelEmails ?? []),
+  ]);
 }
 
 async function roundsOf(orgId: string, applicationId: string) {
@@ -150,69 +169,77 @@ export function registerPhase3Tools(): void {
   registerTool({
     name: "list_panel_options",
     description:
-      "Who can interview for a requisition: every active member of the organisation, best first — those who interviewed for it before (with how many rounds), then hiring managers and department heads, then everyone else. `basis` says why each is listed. Only people in this list can be invited.",
-    input: z.object({ requisitionId: z.string().uuid() }),
+      "Who can interview for one round of a requisition. `approved`: the round's approved panel (use exactly these people) or null. `waitingForDecision`: a proposed panel is waiting for a person. `eligible`: the people who may be proposed, best first — the round's competencies their registered areas cover, rounds they took for this role, then the lightest load (interviews in the next 7 days against their weekly limit). Only eligible people can be proposed.",
+    input: z.object({
+      requisitionId: z.string().uuid(),
+      level: z.number().int().min(1).max(3),
+    }),
     risk: "read",
     run: async (ctx, i) => {
-      const members = await db
-        .select({
-          userId: orgMembers.userId,
-          name: orgMembers.fullName,
-          email: orgMembers.email,
-          role: userRoles.role,
-        })
-        .from(orgMembers)
-        .leftJoin(
-          userRoles,
-          and(eq(userRoles.userId, orgMembers.userId), eq(userRoles.orgId, orgMembers.orgId)),
-        )
-        .where(and(eq(orgMembers.orgId, ctx.orgId), eq(orgMembers.status, "active")));
-      const past = await db
-        .select({
-          email: sql<string>`lower(${interviews.interviewerEmail})`,
-          rounds: sql<number>`count(*)::int`,
-        })
-        .from(interviews)
-        .innerJoin(applications, eq(applications.id, interviews.applicationId))
-        .where(
-          and(
-            eq(interviews.orgId, ctx.orgId),
-            eq(applications.requisitionId, i.requisitionId),
-            sql`${interviews.interviewerEmail} is not null`,
-          ),
-        )
-        .groupBy(sql`lower(${interviews.interviewerEmail})`);
-      const byEmail = new Map<
-        string,
-        { userId: string; name: string | null; email: string; roles: string[] }
-      >();
-      for (const m of members) {
-        const key = m.email.toLowerCase();
-        const e = byEmail.get(key) ?? {
-          userId: m.userId ?? "",
-          name: m.name,
-          email: m.email,
-          roles: [] as string[],
-        };
-        if (m.role) e.roles.push(m.role);
-        byEmail.set(key, e);
-      }
-      // Everyone active can interview; the order (and `basis`) says who fits best.
-      const rank = { past_rounds: 0, hiring_manager: 1, department_head: 1, member: 2 } as const;
-      return [...byEmail.values()]
-        .map((m) => {
-          const pastRounds = past.find((p) => p.email === m.email.toLowerCase())?.rounds ?? 0;
-          const basis: keyof typeof rank =
-            pastRounds > 0
-              ? "past_rounds"
-              : m.roles.includes("hiring_manager")
-                ? "hiring_manager"
-                : m.roles.includes("department_head")
-                  ? "department_head"
-                  : "member";
-          return { ...m, pastRounds, basis };
-        })
-        .sort((a, b) => rank[a.basis] - rank[b.basis] || b.pastRounds - a.pastRounds);
+      await assertRequisitionInOrg(i.requisitionId, ctx.orgId);
+      const { approvedPanel, eligibleInterviewers } = await import("@/lib/panels.server");
+      const approved = await approvedPanel(ctx.orgId, i.requisitionId, i.level);
+      const [waiting] = (await db.execute(sql`
+        select 1 from agent_tasks where org_id = ${ctx.orgId} and status = 'open' and kind = 'gate'
+          and proposed_action -> 'args' -> 'subject' ->> 'type' = 'panel_approval'
+          and proposed_action -> 'args' -> 'subject' ->> 'requisitionId' = ${i.requisitionId}
+          and (proposed_action -> 'args' -> 'subject' ->> 'level')::int = ${i.level}
+        limit 1`)) as unknown as unknown[];
+      const { registered, people, full } = await eligibleInterviewers(
+        ctx.orgId,
+        i.requisitionId,
+        i.level,
+      );
+      return {
+        level: i.level,
+        approved: approved?.members ?? null,
+        waitingForDecision: Boolean(waiting),
+        eligible: people,
+        ...(full.length ? { atWeeklyLimit: full } : {}),
+        ...(registered
+          ? {}
+          : {
+              note: "No interviewers are registered on the Team page; every active member is listed.",
+            }),
+      };
+    },
+  });
+
+  registerTool({
+    name: "propose_panel",
+    description:
+      "Propose who interviews for one round of a requisition — memberIds from list_panel_options' eligible list, at most the round's panel size, best fit first, with a one-line reason. A person (the role's hiring manager, else the HR head) approves it or changes the people; you are then told the approved panel. Approved panels are reused for every candidate of that role and round.",
+    input: z.object({
+      requisitionId: z.string().uuid(),
+      level: z.number().int().min(1).max(3),
+      memberIds: z.array(z.string().uuid()).min(1).max(3),
+      reason: z.string().min(10).max(600),
+    }),
+    risk: "write",
+    describe: (i) => `Interview panel for L${i.level}`,
+    precheck: async (ctx, i) => {
+      const { approvedPanel } = await import("@/lib/panels.server");
+      const p = await approvedPanel(ctx.orgId, i.requisitionId, i.level);
+      return p
+        ? `Round L${i.level} already has an approved panel (${p.members.map((m) => m.name).join(", ")}); use it. A person changes it, not you.`
+        : null;
+    },
+    proposes: async (ctx, i) => {
+      await assertRequisitionInOrg(i.requisitionId, ctx.orgId);
+      return {
+        title: `Who interviews for L${i.level}?`,
+        summary: i.reason,
+        subject: {
+          type: "panel_approval",
+          requisitionId: i.requisitionId,
+          level: i.level,
+          memberIds: i.memberIds,
+          reason: i.reason,
+        },
+      };
+    },
+    run: async () => {
+      throw new Error("A panel is decided by a person.");
     },
   });
 
@@ -236,6 +263,7 @@ export function registerPhase3Tools(): void {
     risk: "external",
     templateOf: () => "interview_invite",
     describe: (i) => `Book L${i.level} with ${i.interviewerEmail} at ${i.scheduledAt}`,
+    precheck: (ctx, i) => panelRefusal(ctx, i),
     run: async (ctx, i) => {
       const when = new Date(i.scheduledAt);
       if (Number.isNaN(when.getTime())) throw new Error("scheduledAt is not a valid date-time.");
@@ -370,8 +398,10 @@ export function registerPhase3Tools(): void {
     templateOf: () => "interview_slots",
     describe: (i) =>
       `Offer ${i.slots.length} L${i.level} interview times with ${i.interviewerEmail}`,
-    // Three offers for this round not taken up: a person calls the candidate.
+    // Only the round's approved panel; three offers not taken up: a person calls the candidate.
     precheck: async (ctx, i) => {
+      const off = await panelRefusal(ctx, i);
+      if (off) return off;
       const [r] = (await db.execute(sql`
         select count(*)::int n from interview_slot_offers
         where org_id = ${ctx.orgId} and application_id = ${i.applicationId}

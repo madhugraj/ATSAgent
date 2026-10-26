@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-87 tables across 9 domains.
+88 tables across 9 domains.
 
 ## Identity & access
 
@@ -1181,6 +1181,9 @@ erDiagram
 | `requisitions` | `department_id` | `departments` | no action |
 | `requisitions` | `hiring_manager_member_id` | `org_members` | no action |
 | `requisitions` | `org_id` | `organizations` | cascade |
+| `role_panels` | `approved_by` | `users` | no action |
+| `role_panels` | `org_id` | `organizations` | cascade |
+| `role_panels` | `requisition_id` | `requisitions` | cascade |
 | `salary_benchmarks` | `org_id` | `organizations` | cascade |
 | `salary_benchmarks` | `requisition_id` | `requisitions` | no action |
 | `screening_calls` | `agent_run_id` | `agent_runs` | no action |
@@ -1310,6 +1313,7 @@ erDiagram
 | `product_catalogue_commercials` | Organisations & masters | 8 | — |
 | `requisition_board_postings` | — | 16 | (requisitionId+provider) |
 | `requisitions` | Requisitions & job content | 42 | (orgId+code) |
+| `role_panels` | — | 8 | (requisitionId+level) |
 | `salary_benchmarks` | Intelligence | 15 | — |
 | `screening_calls` | Screening & interviews | 33 | — |
 | `screening_kits` | Screening & interviews | 11 | — |

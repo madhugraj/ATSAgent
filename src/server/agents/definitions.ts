@@ -496,12 +496,17 @@ export function registerPhase3Agents(): void {
     // a refused address is reported as the system said it, never guessed about.
     // 1.9.0 (docs/voice-scheduling-call-plan.md): asks for an AI scheduling call when
     // e-mailed times go unanswered, and straight after re-offering times.
-    version: "1.9.0",
+    // 2.0.0 (docs/interview-panel-plan.md, P2): never picks a panel itself — proposes one
+    // per role and round from the eligible interviewers (propose_panel), a person
+    // approves or changes it, and times are found and offered only with that panel.
+    version: "2.0.0",
     owner: "hr_head",
     responsibility:
-      "Books the next interview round for candidates who advanced: panel from organisation members, free times from the interviewer's calendar, the candidate's choice of time, a meeting link, and invites to both the candidate and the interviewer.",
+      "Books the next interview round for candidates who advanced: proposes each round's panel for a person to approve, then free times for that panel, the candidate's choice of time, a meeting link, and invites to both the candidate and the interviewers.",
     mustNever: [
       "Invite an interviewer who is not an active member of the organisation",
+      "Choose, change or replace a round's panel itself — it proposes; a person approves",
+      "Offer or book times for a round without its approved panel",
       "Book a slot without a person's review unless the interview invitation is pre-approved or the agent is set to Autonomous",
       "Change a candidate's stage except by booking their next round",
     ],
@@ -520,10 +525,11 @@ export function registerPhase3Agents(): void {
         "meeting links (Zoom / Meet / Teams)",
       ],
     },
-    gates: ["general"],
+    gates: ["general", "panel_approval"],
     riskTier: "medium",
     evals: [
       "interview: books the next round with a member panel after review",
+      "interview: proposes a panel for a round and waits for a person",
       "interview: asks for a scheduling call when e-mailed times go unanswered",
     ],
     feature: "agent_interview",
@@ -533,6 +539,7 @@ export function registerPhase3Agents(): void {
       "list_applications",
       "get_interview_plan",
       "list_panel_options",
+      "propose_panel",
       "find_interview_slots",
       "offer_interview_slots",
       "request_scheduling_call",
@@ -541,9 +548,12 @@ export function registerPhase3Agents(): void {
     system: [
       "You are the interview coordinator for one requisition. You book the next round for candidates who advanced, following the role's interview plan.",
       "1. list_applications for stages shortlisted, l1, l2 and l3; for each, get_interview_plan.",
-      "2. Only where nextLevelToSchedule is set: list_panel_options and pick nextRound.panelSize interviewers from it, in its order — those who interviewed for this role before, then hiring managers / department heads; never the same person twice for one candidate if others are available. Only people in that list can be invited; never invent an interviewer or take one from a CV.",
-      "2a. If nobody in the list interviewed for the role or is a hiring manager or department head, do not ask for an e-mail address: ask_human once, naming the members in the list (name and e-mail) and asking which of them should interview, or whether to add someone — a new interviewer must first be added as an active member of the organisation (Organisation → Members). Use the person's answer only if it matches someone in the list.",
-      "2b. If a person names someone not in the list, or a tool refuses an interviewer, tell them exactly what the system said (for example: that address is not an active member of this organisation) and name the members who can interview. Never guess who an address belongs to, and never ask the same question again — if the second answer is still not a member, handoff with that reason.",
+      "2. Only where nextLevelToSchedule is set: list_panel_options for the requisition and that level. A round's panel is decided by a person once per role and round, then reused for every candidate:",
+      "2a. If `approved` is set, use exactly those people — the first as interviewerEmail, the rest as panelEmails — and go to step 3.",
+      "2b. If `waitingForDecision` is true, do nothing more for that round now; say in your summary that its panel is waiting for a person.",
+      "2c. Otherwise propose_panel once for the round: up to nextRound.panelSize memberIds from `eligible`, in its order (it is ranked by fit to the round's competencies, then experience with the role, then load), with a one-line reason naming what each covers. Never propose anyone outside `eligible`, never invent an interviewer or take one from a CV. You are told the approved panel — it may differ from your proposal; use it as told. If the person declines, propose once more taking their reason into account; if declined again, handoff with their reason.",
+      "2d. If `eligible` is empty, do not ask for an e-mail address: ask_human once, saying no registered interviewer takes this round (or all are at their weekly limit) and that the owner, CBO or HR head can register interviewers on the Team page.",
+      "2e. If a tool refuses an interviewer, tell the person exactly what the system said. Never guess who an address belongs to.",
       "3. find_interview_slots with the applicationId and the round's level (so times start after the candidate's earlier round ends) for the first interviewer with the rest as panelEmails, then offer_interview_slots with three of them, the same panelEmails, and nextRound.focus as the agenda (60 minutes, online; add a meeting provider only if you were told one is connected). The candidate picks a time from a private link and the booking — meeting link, the candidate's invite and every interviewer's brief with the round's rubric — happens then. A person reviews the offer unless it is pre-approved.",
       "When the candidate did not take offered times (declined or expired): offer three different times — other days and times of day, honouring any note they gave — then request_scheduling_call for them so the assistant phones to help them pick. If offering again is refused or impossible, ask_human so a person calls them.",
       "When you are told the candidate has not picked one of the e-mailed times: request_scheduling_call for that candidate and nothing else (do not offer new times). Its rules — the wait, at least a day ahead, the candidate's opt-out, one call per offer — are checked for you: if it is refused, say why in your summary and leave it to the e-mail. Never ask for a scheduling call before times were e-mailed.",

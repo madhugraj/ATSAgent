@@ -19,7 +19,8 @@
 - [x] Voice agents' charter (2026-10-26): one written charter per voice agent — purpose, must say, may talk about, must never, hands to a person, tone; each rule held by code or by instruction — printed into every call, the source of each manifest's must-never, with a generated doc and tests; staff confidential (no panel, hiring manager or contact names on calls); Screening call agent 1.1.8, Scheduling call agent 1.6.0
 - [x] Interview panels P0: interviewer profiles on the Team page (areas, rounds, weekly cap; audited); a requisition's hiring manager is a registered member (`requisitions.hiring_manager_member_id`), asked for by the hiring desk and never guessed; invites audited
 - [x] Interview panels P1: the interview plan shown and edited in the desk thread (with the hiring manager); the hiring manager picked from members on the requisition page; a plan cannot drop a round in use
-- [ ] Interview panels P2–P4 (plan: docs/interview-panel-plan.md): interviewer profiles registered once by the admin; hiring manager as a member; an editable interview plan; the panel proposed per role and round, approved by a person, reused and changeable
+- [x] Interview panels P2: the coordinator proposes each round's panel (`propose_panel`), the role's hiring manager approves or changes it in the desk, `role_panels` reused per role and round; times only with the approved panel; health rule `interview.no_eligible_panel`
+- [ ] Interview panels P3–P4 (plan: docs/interview-panel-plan.md): interviewer profiles registered once by the admin; hiring manager as a member; an editable interview plan; the panel proposed per role and round, approved by a person, reused and changeable
 - [ ] Stage 1.2 S3–S4: the interviews board and candidate-page view, a "call me" choice and HR's "call now", a pilot (docs/voice-scheduling-call-plan.md)
 
 ## Distribution agent (2026-10-21)

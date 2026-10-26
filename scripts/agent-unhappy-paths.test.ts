@@ -466,6 +466,17 @@ describe("what the candidate hears", () => {
     const tool = getTool("offer_interview_slots")!;
     const ctx = { orgId, principalUserId: userId, runId: "x", agentType: "interview", actor: "t" };
     const again = { applicationId: appId, level: 1, interviewerEmail: email, slots: ["a", "b"] };
+    // Times are offered only with the round's approved panel.
+    expect(await tool.precheck!(ctx as never, again as never)).toMatch(/no approved panel/);
+    const { orgMembers, rolePanels } = await import("../drizzle/schema");
+    const [me] = await db
+      .select({ id: orgMembers.id })
+      .from(orgMembers)
+      .where(and(eq(orgMembers.orgId, orgId), eq(orgMembers.email, email)));
+    await db
+      .insert(rolePanels)
+      .values({ orgId, requisitionId: role, level: 1, memberIds: [me!.id] })
+      .onConflictDoNothing();
     expect(await tool.precheck!(ctx as never, again as never)).toBeNull();
     await mk(2, "expired");
     await mk(3, "declined");

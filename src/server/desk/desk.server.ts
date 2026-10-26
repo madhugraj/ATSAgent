@@ -1361,7 +1361,10 @@ export async function onTaskOpened(
             : (task.proposedAction as { args?: { subject?: { type?: string } } } | null)?.args
                   ?.subject?.type === "screening_decision"
               ? "Screening is done for this candidate — who moves on is your decision."
-              : "This needs a decision."
+              : (task.proposedAction as { args?: { subject?: { type?: string } } } | null)?.args
+                    ?.subject?.type === "panel_approval"
+                ? "Who interviews for this round is your decision — approve the panel or change the people."
+                : "This needs a decision."
           : revision
             ? `Revised as you asked ("${revision.reason}")${
                 revision.changes.length
@@ -1380,11 +1383,27 @@ export async function onTaskOpened(
       ...(() => {
         const subj = (
           task.proposedAction as {
-            args?: { subject?: { type?: string; applicationId?: string; recommendation?: string } };
+            args?: {
+              subject?: {
+                type?: string;
+                applicationId?: string;
+                recommendation?: string;
+                requisitionId?: string;
+                level?: number;
+                memberIds?: string[];
+              };
+            };
           } | null
         )?.args?.subject;
         if (!subj?.type) return {};
         // A screening decision shows the graded result (and "Why this score") on its card.
+        if (subj.type === "panel_approval")
+          return {
+            subjectType: subj.type,
+            requisitionId: subj.requisitionId,
+            level: subj.level,
+            memberIds: subj.memberIds,
+          };
         return subj.type === "screening_decision"
           ? {
               subjectType: subj.type,

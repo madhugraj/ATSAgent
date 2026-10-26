@@ -583,12 +583,14 @@ export function scenarios(): ScriptedScenario[] {
         const requisitionId = await seedRequisition(orgId, userId, "approved");
         const app = await seedApplication(orgId, requisitionId, "Ravi", "l1", 80);
         const { db } = await import("../../src/server/db");
-        const { orgMembers } = await import("../../drizzle/schema");
+        const { orgMembers, rolePanels } = await import("../../drizzle/schema");
         const { eq } = await import("drizzle-orm");
         const [m] = await db
-          .select({ email: orgMembers.email })
+          .select({ id: orgMembers.id, email: orgMembers.email })
           .from(orgMembers)
           .where(eq(orgMembers.userId, userId));
+        // The round's panel was approved by a person earlier.
+        await db.insert(rolePanels).values({ orgId, requisitionId, level: 1, memberIds: [m!.id] });
         return { requisitionId, app, interviewer: m!.email };
       },
       goal: (d) =>
@@ -612,6 +614,75 @@ export function scenarios(): ScriptedScenario[] {
             slots: (toolResult(m, "find_interview_slots")["slots"] as string[]).slice(0, 3),
           }),
         say("Offered Ravi three L1 times; he picks one from his link."),
+      ],
+    },
+    {
+      name: "interview: proposes a panel for a round and waits for a person",
+      agentType: "interview",
+      setup: async ({ orgId, userId }) => {
+        const requisitionId = await seedRequisition(orgId, userId, "approved");
+        const app = await seedApplication(orgId, requisitionId, "Asha", "l1", 82);
+        const { db } = await import("../../src/server/db");
+        const { memberInterviewerProfiles, orgMembers, requisitions } =
+          await import("../../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const [m] = await db
+          .select({ id: orgMembers.id })
+          .from(orgMembers)
+          .where(eq(orgMembers.userId, userId));
+        // Registered once by the admin; the role's hiring manager decides its panels.
+        await db.insert(memberInterviewerProfiles).values({
+          orgId,
+          memberId: m!.id,
+          active: true,
+          areas: ["Kubernetes", "Go"],
+          rounds: [1, 2, 3],
+        });
+        await db
+          .update(requisitions)
+          .set({ hiringManagerMemberId: m!.id })
+          .where(eq(requisitions.id, requisitionId));
+        return { requisitionId, app };
+      },
+      goal: (d) => `Book next rounds. app=${d["app"]}\n\nRequisition id: ${d["requisitionId"]}`,
+      decide: () => ({ status: "approved" }),
+      expect: {
+        status: "done",
+        calls: [
+          "list_panel_options",
+          "propose_panel",
+          "find_interview_slots",
+          "offer_interview_slots",
+        ],
+        neverCalls: ["schedule_interview"],
+      },
+      script: [
+        (m) => call("p", "get_interview_plan", { applicationId: fromGoal(m, "app") }),
+        (m) => call("l", "list_panel_options", { requisitionId: idFromGoal(m), level: 1 }),
+        (m) =>
+          call("pp", "propose_panel", {
+            requisitionId: idFromGoal(m),
+            level: 1,
+            memberIds: [
+              (toolResult(m, "list_panel_options")["eligible"] as { memberId: string }[])[0]!
+                .memberId,
+            ],
+            reason: "Assesses Kubernetes and Go, the round's competencies.",
+          }),
+        (m) =>
+          call("f", "find_interview_slots", {
+            applicationId: fromGoal(m, "app"),
+            level: 1,
+            interviewerEmail: approvedEmail(m),
+          }),
+        (m) =>
+          call("o", "offer_interview_slots", {
+            applicationId: fromGoal(m, "app"),
+            level: 1,
+            interviewerEmail: approvedEmail(m),
+            slots: (toolResult(m, "find_interview_slots")["slots"] as string[]).slice(0, 3),
+          }),
+        say("Proposed the L1 panel; once approved, offered Asha three L1 times."),
       ],
     },
     {
@@ -1763,6 +1834,12 @@ async function seedSchedulingCall(
 
 const firstUserMsg = (m: Msg[]) => m.find((x) => x.role === "user")!.content!;
 const idFromGoal = (m: Msg[]) => firstUserMsg(m).match(/Requisition id: ([0-9a-f-]{36})/)![1]!;
+/** The first interviewer of the approved panel, from what the agent was told. */
+const approvedEmail = (m: Msg[]) =>
+  [...m]
+    .reverse()
+    .find((x) => x.role === "tool" && (x as { name?: string }).name === "propose_panel")!
+    .content!.match(/panel is [^(]+\(([^)\s]+@[^)\s]+)\)/)![1]!;
 const fromGoal = (m: Msg[], key: string) =>
   firstUserMsg(m).match(new RegExp(`${key}=([0-9a-f-]{36})`))![1]!;
 

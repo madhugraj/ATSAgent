@@ -502,6 +502,57 @@ export const RULES: Rule[] = [
     },
   },
   {
+    id: "interview.no_eligible_panel",
+    element: "skills",
+    severity: "warning",
+    description:
+      "Candidates are waiting for an interview round that has no approved panel and nobody eligible to propose: no registered interviewer takes the round, or all are at their weekly limit. The owner, CBO or HR head can register interviewers on the Team page.",
+    evaluate: async (orgId) => {
+      const waiting = await rows<{
+        requisition_id: string;
+        code: string;
+        level: number;
+        n: number;
+      }>(sql`
+        select a.requisition_id, r.code, substring(a.stage::text from 2)::int as level,
+          count(*)::int n
+        from applications a join requisitions r on r.id = a.requisition_id and r.org_id = a.org_id
+        where a.org_id = ${orgId} and a.stage::text in ('l1', 'l2', 'l3')
+          and not exists (select 1 from interviews i where i.application_id = a.id
+            and i.org_id = ${orgId} and i.level = substring(a.stage::text from 2)::int
+            and i.status not in ('cancelled', 'no_show'))
+          and not exists (select 1 from role_panels p where p.org_id = ${orgId}
+            and p.requisition_id = a.requisition_id
+            and p.level = substring(a.stage::text from 2)::int)
+        group by a.requisition_id, r.code, a.stage
+        limit 50`);
+      const { eligibleInterviewers } = await import("@/lib/panels.server");
+      const stuck: {
+        requisition: string;
+        level: number;
+        waiting: number;
+        atWeeklyLimit: string[];
+      }[] = [];
+      for (const w of waiting) {
+        const e = await eligibleInterviewers(orgId, w.requisition_id, w.level).catch(() => null);
+        if (!e || e.people.length) continue;
+        stuck.push({ requisition: w.code, level: w.level, waiting: w.n, atWeeklyLimit: e.full });
+      }
+      if (!stuck.length) return [];
+      // One issue for the organisation; the rounds are in its detail.
+      return [
+        {
+          agentType: "interview",
+          title: `Nobody is eligible to interview for ${stuck
+            .slice(0, 3)
+            .map((x) => `${x.requisition} L${x.level}`)
+            .join(", ")}${stuck.length > 3 ? ` and ${stuck.length - 3} more` : ""}`,
+          detail: { rounds: stuck },
+        },
+      ];
+    },
+  },
+  {
     id: "interview.no_shows",
     element: "hitl",
     severity: "warning",

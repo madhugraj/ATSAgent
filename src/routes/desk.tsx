@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/dialog";
 import { HiringManagerPicker } from "@/components/HiringManagerPicker";
 import { InterviewPlanCard } from "@/components/InterviewPlanCard";
+import { getPanelChoices } from "@/lib/panels.functions";
 import { AGENT_LABEL } from "@/lib/agents.catalog";
 import { decideAgentTask, type AgentDecisionInput } from "@/lib/agents.functions";
 import {
@@ -938,6 +939,9 @@ function TaskCard({
   // in screening or, with a reason, rejects them (the person's decision).
   const screening = kind === "gate" && card["subjectType"] === "screening_decision";
   const proceed = card["recommendation"] === "proceed";
+  // A panel proposal: approve it, or change the people (the decider's choice).
+  const panel = kind === "gate" && card["subjectType"] === "panel_approval";
+  const [changing, setChanging] = useState(false);
   const status = conv.tasks[taskId] ?? "open";
   const details =
     conv.taskDetails[taskId] ??
@@ -1115,15 +1119,31 @@ function TaskCard({
               </div>
             )}
           </div>
+        ) : changing ? (
+          <PanelChange
+            requisitionId={String(card["requisitionId"])}
+            level={Number(card["level"])}
+            proposed={(card["memberIds"] as string[] | undefined) ?? []}
+            busy={busy}
+            onSave={(memberIds) => decide({ status: "approved", args: { memberIds } })}
+            onBack={() => setChanging(false)}
+          />
         ) : (
           <div className="mt-2 flex flex-wrap gap-2">
             <Button size="sm" disabled={busy} onClick={() => decide({ status: "approved" })}>
-              {screening
-                ? proceed
-                  ? "Approve — move to interview (L1)"
-                  : "Approve — put on hold"
-                : "Approve"}
+              {panel
+                ? "Approve this panel"
+                : screening
+                  ? proceed
+                    ? "Approve — move to interview (L1)"
+                    : "Approve — put on hold"
+                  : "Approve"}
             </Button>
+            {panel ? (
+              <Button size="sm" variant="outline" disabled={busy} onClick={() => setChanging(true)}>
+                Change the people
+              </Button>
+            ) : null}
             {sendable ? (
               // A change is the common answer to a requisition in approval —
               // offered directly, not hidden behind Decline.
@@ -1145,6 +1165,70 @@ function TaskCard({
           </div>
         )
       ) : null}
+    </div>
+  );
+}
+
+/** Pick the panel yourself: eligible interviewers first, then any active member. */
+function PanelChange(props: {
+  requisitionId: string;
+  level: number;
+  proposed: string[];
+  busy: boolean;
+  onSave: (memberIds: string[]) => void;
+  onBack: () => void;
+}) {
+  const q = useQuery({
+    queryKey: ["panel_choices", props.requisitionId, props.level],
+    queryFn: () =>
+      getPanelChoices({ data: { requisitionId: props.requisitionId, level: props.level } }),
+  });
+  const [picked, setPicked] = useState<string[]>(props.proposed);
+  const toggle = (id: string) =>
+    setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+  if (!q.data) return <p className="mt-2 text-xs text-muted-foreground">Loading interviewers…</p>;
+  const row = (m: { memberId: string; name: string; note?: string }) => (
+    <label key={m.memberId} className="flex items-center gap-2 text-xs">
+      <input
+        type="checkbox"
+        checked={picked.includes(m.memberId)}
+        disabled={!picked.includes(m.memberId) && picked.length >= 3}
+        onChange={() => toggle(m.memberId)}
+      />
+      <span className="font-medium">{m.name}</span>
+      {m.note ? <span className="text-muted-foreground">{m.note}</span> : null}
+    </label>
+  );
+  return (
+    <div className="mt-2 space-y-2 rounded-md border border-border p-2">
+      <p className="text-xs font-medium">Who interviews for L{props.level}? (one to three)</p>
+      {q.data.eligible.length ? (
+        <div className="space-y-1">{q.data.eligible.map(row)}</div>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          No registered interviewer takes this round — pick from the team below.
+        </p>
+      )}
+      {q.data.others.length ? (
+        <details className="text-xs">
+          <summary className="cursor-pointer text-muted-foreground">
+            Other members (not registered for this round)
+          </summary>
+          <div className="mt-1 space-y-1">{q.data.others.map(row)}</div>
+        </details>
+      ) : null}
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          disabled={props.busy || picked.length < 1 || picked.length > 3}
+          onClick={() => props.onSave(picked)}
+        >
+          Approve with these people
+        </Button>
+        <Button size="sm" variant="ghost" disabled={props.busy} onClick={props.onBack}>
+          Back
+        </Button>
+      </div>
     </div>
   );
 }

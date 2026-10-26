@@ -4,7 +4,7 @@
  * orchestrator — only the model is scripted.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 import type { AgentStepResult, AgentToolCall } from "../src/lib/ai-gateway.server";
 
@@ -231,7 +231,7 @@ describe("orchestration", () => {
 });
 
 describe("interview coordinator", () => {
-  test("books with a member under review; refuses non-members; queues the candidate invite", async () => {
+  test("books only the round's approved panel, under review; queues the candidate invite", async () => {
     await enable("interview", "suggest");
     const { appId } = await application("Ravi", "l1");
     const { runId } = await startRun({
@@ -243,40 +243,40 @@ describe("interview coordinator", () => {
       subjectId: reqId,
     });
     const when = new Date(Date.now() + 3 * 864e5).toISOString();
-    script.push(
+    const book = (id: string, interviewerEmail: string) =>
       call({
-        id: "x",
+        id,
         name: "schedule_interview",
-        args: {
-          applicationId: appId,
-          level: 1,
-          interviewerEmail: "outsider@else.where",
-          scheduledAt: when,
-        },
-      }),
-    );
-    await runAgentTick({ orgId });
-    const [outsiderTask] = await openTasks(runId);
-    expect(outsiderTask!.kind).toBe("approval"); // reviewed first…
-    await resolveTask({
-      orgId,
-      taskId: outsiderTask!.id,
-      userId: recruiter,
-      decision: { status: "approved" },
-    });
-    script.push(
-      call({
-        id: "y",
-        name: "schedule_interview",
-        args: { applicationId: appId, level: 1, interviewerEmail: managerEmail, scheduledAt: when },
-      }),
-    );
-    await runAgentTick({ orgId }); // …and still refused at execution: not a member
+        args: { applicationId: appId, level: 1, interviewerEmail, scheduledAt: when },
+      });
+    // No approved panel for the round yet: refused before anyone is asked.
+    const { getTool } = await import("../src/server/agents/registry");
+    const ctx = { orgId, principalUserId: recruiter, runId, agentType: "interview", actor: "t" };
     expect(
-      await db.select().from(interviews).where(eq(interviews.applicationId, appId)),
-    ).toHaveLength(0);
+      await getTool("schedule_interview")!.precheck!(
+        ctx as never,
+        { applicationId: appId, level: 1, interviewerEmail: managerEmail } as never,
+      ),
+    ).toMatch(/no approved panel/);
 
-    const [memberTask] = await openTasks(runId);
+    // A person approved the manager as the L1 panel (docs/interview-panel-plan.md, P2).
+    const { rolePanels } = await import("../drizzle/schema");
+    const [manager] = await db
+      .select({ id: orgMembers.id })
+      .from(orgMembers)
+      .where(and(eq(orgMembers.orgId, orgId), eq(orgMembers.email, managerEmail)));
+    await db
+      .insert(rolePanels)
+      .values({ orgId, requisitionId: reqId, level: 1, memberIds: [manager!.id] })
+      .onConflictDoNothing();
+    // Anyone else — a non-member included — is refused: not the approved panel.
+    script.push(book("y", "outsider@else.where"), book("z", managerEmail));
+    await runAgentTick({ orgId });
+    const tasks = await openTasks(runId);
+    expect(tasks).toHaveLength(1);
+    const [memberTask] = tasks;
+    expect(memberTask!.kind).toBe("approval"); // the approved panel, reviewed first
+    expect(JSON.stringify(memberTask!.proposedAction)).toContain(managerEmail);
     await resolveTask({
       orgId,
       taskId: memberTask!.id,
@@ -299,6 +299,71 @@ describe("interview coordinator", () => {
     expect(mails.find((m) => m.kind === "interviewer_brief")).toMatchObject({
       toEmail: managerEmail,
     });
+  });
+
+  test("a panel is proposed, never chosen: the hiring manager decides, even when autonomous", async () => {
+    await enable("interview", "autonomous");
+    const { rolePanels, requisitions } = await import("../drizzle/schema");
+    const memberOf = async (email: string) =>
+      (
+        await db
+          .select({ id: orgMembers.id })
+          .from(orgMembers)
+          .where(and(eq(orgMembers.orgId, orgId), eq(orgMembers.email, email)))
+      )[0]!.id;
+    const [rita, hari] = [await memberOf(recruiterEmail), await memberOf(managerEmail)];
+    await db
+      .update(requisitions)
+      .set({ hiringManagerMemberId: hari })
+      .where(eq(requisitions.id, reqId));
+    const { runId } = await startRun({
+      orgId,
+      agentType: "interview",
+      principalUserId: recruiter,
+      goal: "x",
+      subjectType: "requisition",
+      subjectId: reqId,
+    });
+    script.push(
+      call({
+        id: "pp",
+        name: "propose_panel",
+        args: { requisitionId: reqId, level: 2, memberIds: [rita], reason: "Rita knows the role." },
+      }),
+    );
+    await runAgentTick({ orgId });
+    const [task] = await openTasks(runId);
+    expect(task).toMatchObject({ kind: "gate", assigneeUserId: manager, assigneeRole: null });
+    expect(task!.body).toMatch(/Panel for L2/);
+    expect(task!.body).toMatch(/Decided by Hari Manager, the role's hiring manager/);
+    expect(
+      await db
+        .select()
+        .from(rolePanels)
+        .where(and(eq(rolePanels.requisitionId, reqId), eq(rolePanels.level, 2))),
+    ).toHaveLength(0);
+    // Only the hiring manager decides; they change the people.
+    await expect(
+      resolveTask({ orgId, taskId: task!.id, userId: recruiter, decision: { status: "approved" } }),
+    ).rejects.toThrow(/assigned to someone else/);
+    await resolveTask({
+      orgId,
+      taskId: task!.id,
+      userId: manager,
+      decision: { status: "approved", args: { memberIds: [hari] } },
+    });
+    const [panel] = await db
+      .select()
+      .from(rolePanels)
+      .where(and(eq(rolePanels.requisitionId, reqId), eq(rolePanels.level, 2)));
+    expect(panel).toMatchObject({ memberIds: [hari], approvedBy: manager, version: 1 });
+    // The agent is told the panel as approved, not as it proposed.
+    script.push(say("Waiting for times."));
+    await runAgentTick({ orgId });
+    const told = (await db.execute(sql`
+      select output ->> 'told' as told from agent_steps
+      where run_id = ${runId} and kind = 'decision'`)) as unknown as { told: string }[];
+    expect(told[0]!.told).toMatch(/Approved\. The L2 panel is Hari Manager/);
   });
 
   test("lists rounds that ended without a scorecard", async () => {

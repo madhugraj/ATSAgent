@@ -409,6 +409,35 @@ export const requisitions = pgTable(
   (t) => [uniqueIndex("requisitions_org_code_key").on(t.orgId, t.code)],
 );
 
+/**
+ * The approved interview panel for one role and round (docs/interview-panel-plan.md,
+ * P2): proposed by the Interview coordinator, approved or changed by a person,
+ * reused for every candidate of that role and round. `version` counts approvals.
+ */
+export const rolePanels = pgTable(
+  "role_panels",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    requisitionId: uuid("requisition_id")
+      .notNull()
+      .references(() => requisitions.id, { onDelete: "cascade" }),
+    level: integer("level").notNull(),
+    memberIds: uuid("member_ids").array().notNull(),
+    approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }).notNull().defaultNow(),
+    version: integer("version").notNull().default(1),
+  },
+  (t) => [
+    uniqueIndex("role_panels_requisition_level_key").on(t.requisitionId, t.level),
+    index("role_panels_org_idx").on(t.orgId),
+    check("role_panels_level_check", sql`${t.level} between 1 and 3`),
+    check("role_panels_members_check", sql`cardinality(${t.memberIds}) between 1 and 3`),
+  ],
+);
+
 export const jobDescriptions = pgTable("job_descriptions", {
   id: uuid("id").primaryKey().defaultRandom(),
   requisitionId: uuid("requisition_id")

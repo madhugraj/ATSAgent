@@ -162,6 +162,12 @@ type AgentRun = typeof agentRuns.$inferSelect;
 type PendingCall = { taskId: string; call: AgentToolCall };
 
 import { HITL_TOOLS, isHitl, type HitlName } from "./hitl";
+import {
+  approvedPanelWords,
+  panelGateFor,
+  performPanelGate,
+  type PanelApprovalSubject,
+} from "./panel-gate.server";
 
 /* --------------------------------------------- gates tied to real records */
 
@@ -191,6 +197,7 @@ type DocumentValidationSubject = {
   documentIds: string[];
 };
 type GateSubject =
+  | PanelApprovalSubject
   | RecordSubject
   | RejectionSubject
   | HiringDecisionSubject
@@ -220,6 +227,8 @@ type GateInfo = {
   status: string;
   /** Rejection batches go to the person the agent works for. */
   toPrincipal?: boolean;
+  /** A named person decides (e.g. a role's hiring manager approves its panels). */
+  assigneeUserId?: string;
   /** Server-built detail appended to the agent's summary. */
   detail?: string;
   subject?: GateSubject;
@@ -277,6 +286,7 @@ export function expectationLine(
 }
 
 async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | { error: string }> {
+  if (subject.type === "panel_approval") return panelGateFor(orgId, subject);
   if (subject.type === "offer" || subject.type === "offer_release") {
     const offerId = "offerId" in subject ? subject.offerId : subject.id;
     const [o] = await db
@@ -558,6 +568,7 @@ async function performGate(
   const org = await activeOrgOf(userId);
   if (!org || org.orgId !== orgId) throw new Error("You are not a member of this organisation.");
   const actor = { orgId, userId, memberEmail: org.memberEmail };
+  if (subject.type === "panel_approval") return performPanelGate(orgId, userId, subject, decision);
   if (subject.type === "offer" || subject.type === "offer_release") {
     const offerId = "offerId" in subject ? subject.offerId : subject.id;
     if (decision.status !== "approved") {
@@ -1625,51 +1636,22 @@ async function handleCall(
         "No person is available in a dry-run replay. Continue with your best judgement and state any assumption you make.",
       );
     }
-    const kind: AgentTaskKind = call.name === "ask_human" ? "clarification" : "gate";
     const data = parsed.data as {
       question?: string;
       title?: string;
       summary?: string;
       assignee_role?: AppRole;
     };
-    let assigneeRole: AppRole | null = data.assignee_role ?? null;
-    let args: unknown = call.args;
-    const subject = (parsed.data as { subject?: GateSubject }).subject;
-    let toPrincipal = false;
-    let detail = "";
-    if (call.name === "request_approval" && subject) {
-      const gate = await gateFor(run.orgId, subject);
-      if ("error" in gate) return toolError(gate.error, true);
-      if (run.mode === "replay") {
-        return simulated(run, call, seq, "Approval simulated as granted; nothing was changed.", {
-          gate: gate.role,
-        });
-      }
-      assigneeRole = gate.role;
-      toPrincipal = gate.toPrincipal ?? false;
-      detail = gate.detail ?? "";
-      args = {
-        ...(call.args as object),
-        subject: gate.subject ?? { ...subject, expects: gate.status },
-      };
-    }
-    const taskId = await openTask(run, {
-      kind,
+    return openDecision(run, call, seq, toolError, {
+      kind: call.name === "ask_human" ? "clarification" : "gate",
       title: data.title ?? "The agent has a question",
-      body: [data.summary ?? data.question ?? "", detail].filter(Boolean).join("\n\n"),
-      assigneeRole,
-      proposedAction: { toolCallId: call.id, name: call.name, args },
-      ...(toPrincipal ? { assigneeUserId: run.principalUserId } : {}),
+      summary: data.summary ?? data.question ?? "",
+      assigneeRole: data.assignee_role ?? null,
+      subject:
+        call.name === "request_approval"
+          ? (parsed.data as { subject?: GateSubject }).subject
+          : undefined,
     });
-    await recordStep(run, seq, {
-      kind: "tool",
-      toolName: call.name,
-      toolCallId: call.id,
-      status: "awaiting",
-      input: redactArgs(call.args),
-      output: { taskId },
-    });
-    return { kind: "pending", taskId };
   }
 
   const tool = allowed.has(call.name) ? getTool(call.name) : undefined;
@@ -1680,6 +1662,18 @@ async function handleCall(
   if (tool.precheck && tool.risk !== "read") {
     const refusal = await tool.precheck(ctx, parsed.data);
     if (refusal) return toolError(refusal, true);
+  }
+
+  // A proposal never runs by itself: whatever the autonomy, a person decides.
+  if (tool.proposes) {
+    const p = await tool.proposes(ctx, parsed.data);
+    return openDecision(run, call, seq, toolError, {
+      kind: "gate",
+      title: p.title,
+      summary: p.summary,
+      assigneeRole: null,
+      subject: p.subject as GateSubject,
+    });
   }
 
   const verdict = decideToolCall(tool.risk, policy, tool.templateOf?.(parsed.data) ?? null);
@@ -1720,6 +1714,62 @@ async function handleCall(
     kind: "message",
     message: await execute(run, ctx, tool.name, call, parsed.data, seq, notify),
   };
+}
+
+/**
+ * Ask a person: a question, or a decision on a gate. A gate subject is checked
+ * by the system first (who decides, the facts on the card, or a refusal).
+ */
+async function openDecision(
+  run: AgentRun,
+  call: AgentToolCall,
+  seq: number,
+  toolError: (message: string, refused?: boolean) => Promise<CallOutcome>,
+  d: {
+    kind: AgentTaskKind;
+    title: string;
+    summary: string;
+    assigneeRole: AppRole | null;
+    subject: GateSubject | undefined;
+  },
+): Promise<CallOutcome> {
+  let assigneeRole = d.assigneeRole;
+  let args: unknown = call.args;
+  let assigneeUserId: string | undefined;
+  let detail = "";
+  if (d.subject) {
+    const gate = await gateFor(run.orgId, d.subject);
+    if ("error" in gate) return toolError(gate.error, true);
+    if (run.mode === "replay") {
+      return simulated(run, call, seq, "Approval simulated as granted; nothing was changed.", {
+        gate: gate.role,
+      });
+    }
+    assigneeRole = gate.role;
+    assigneeUserId = gate.assigneeUserId ?? (gate.toPrincipal ? run.principalUserId : undefined);
+    detail = gate.detail ?? "";
+    args = {
+      ...(call.args as object),
+      subject: gate.subject ?? { ...d.subject, expects: gate.status },
+    };
+  }
+  const taskId = await openTask(run, {
+    kind: d.kind,
+    title: d.title,
+    body: [d.summary, detail].filter(Boolean).join("\n\n"),
+    assigneeRole,
+    proposedAction: { toolCallId: call.id, name: call.name, args },
+    ...(assigneeUserId ? { assigneeUserId } : {}),
+  });
+  await recordStep(run, seq, {
+    kind: "tool",
+    toolName: call.name,
+    toolCallId: call.id,
+    status: "awaiting",
+    input: redactArgs(call.args),
+    output: { taskId },
+  });
+  return { kind: "pending", taskId };
 }
 
 /** Dry-run replay: record a step the live run would have taken and tell the model it "happened". */
@@ -1895,8 +1945,12 @@ async function applyDecision(
     );
 
   // Gate approvals carry no tool to run — the human acted in the app.
-  if (isHitl(call.name)) {
+  if (isHitl(call.name) || task.kind === "gate") {
     const comment = response["comment"] ? ` Comment: ${String(response["comment"])}` : "";
+    const subject = (task.proposedAction as { args?: { subject?: GateSubject } } | null)?.args
+      ?.subject;
+    if (subject?.type === "panel_approval")
+      return told(`${await approvedPanelWords(task.orgId, subject)}${comment}`);
     return told(`Approved.${comment}`);
   }
   // An approved tool call runs with the (possibly edited) arguments, re-validated.

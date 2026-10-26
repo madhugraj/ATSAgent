@@ -194,6 +194,16 @@ export const EVAL_CATALOG: Record<string, EvalExplainer> = {
       "It books nothing and records nothing; it offers the listed times again.",
     ],
   },
+  "interview: proposes a panel for a round and waits for a person": {
+    title: "Proposes a round's panel and waits for a person",
+    situation:
+      "Asha is ready for her first interview round, and nobody has decided who interviews for it yet.",
+    checks: [
+      "It proposes a panel from the registered interviewers — it never picks one itself.",
+      "The role's hiring manager approves it before any times are found.",
+      "It offers Asha times with exactly the approved panel.",
+    ],
+  },
   "interview: asks for a scheduling call when e-mailed times go unanswered": {
     title: "Asks for a scheduling call when e-mailed times go unanswered",
     situation: "Meera has not picked one of the interview times e-mailed 30 hours ago.",
