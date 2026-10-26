@@ -12,7 +12,14 @@
  */
 import { and, eq, inArray, sql } from "drizzle-orm";
 
-import { orgMembers, requisitions, rolePanels } from "@db/schema";
+import {
+  applications,
+  interviews,
+  orgMembers,
+  requisitions,
+  rolePanels,
+  roundSubstitutes,
+} from "@db/schema";
 import { db } from "../server/db";
 
 export type EligibleInterviewer = {
@@ -229,21 +236,134 @@ export async function savePanel(
 }
 
 /**
- * Whether interviewers offered or booked for a round are its approved panel
- * (a reason to refuse, or null). Agents only offer times to an approved panel.
+ * The panel for one candidate's round: the role's approved panel with any
+ * approved substitutes for that candidate applied, in order. Null: no
+ * approved panel for the round yet.
+ */
+export async function roundPanel(
+  orgId: string,
+  applicationId: string,
+  level: number,
+): Promise<(ApprovedPanel & { substituted: { replaced: string; with: string }[] }) | null> {
+  const [app] = await db
+    .select({ requisitionId: applications.requisitionId })
+    .from(applications)
+    .where(and(eq(applications.id, applicationId), eq(applications.orgId, orgId)))
+    .limit(1);
+  if (!app) throw new Error("Application not found.");
+  const panel = await approvedPanel(orgId, app.requisitionId, level);
+  if (!panel) return null;
+  const subs = await db
+    .select({ replace: roundSubstitutes.replaceMemberId, with: roundSubstitutes.withMemberId })
+    .from(roundSubstitutes)
+    .where(
+      and(
+        eq(roundSubstitutes.orgId, orgId),
+        eq(roundSubstitutes.applicationId, applicationId),
+        eq(roundSubstitutes.level, level),
+      ),
+    );
+  if (!subs.length) return { ...panel, substituted: [] };
+  const withIds = subs.map((x) => x.with);
+  const people = await db
+    .select({
+      memberId: orgMembers.id,
+      name: sql<string>`coalesce(nullif(${orgMembers.fullName}, ''), ${orgMembers.email})`,
+      email: orgMembers.email,
+    })
+    .from(orgMembers)
+    .where(
+      and(
+        eq(orgMembers.orgId, orgId),
+        eq(orgMembers.status, "active"),
+        inArray(orgMembers.id, withIds),
+      ),
+    );
+  const substituted: { replaced: string; with: string }[] = [];
+  const members = panel.members.map((m) => {
+    const sub = subs.find((x) => x.replace === m.memberId);
+    const p = sub ? people.find((x) => x.memberId === sub.with) : undefined;
+    if (!p) return m;
+    substituted.push({ replaced: m.name, with: p.name });
+    return p;
+  });
+  return { ...panel, members, substituted };
+}
+
+/**
+ * Whether interviewers offered or booked for a candidate's round are its panel
+ * (the approved one, with that candidate's approved substitutes) — a reason
+ * to refuse, or null. Agents only offer times to that panel.
  */
 export async function panelMismatch(
   orgId: string,
-  requisitionId: string,
+  applicationId: string,
   level: number,
   emails: string[],
 ): Promise<string | null> {
-  const panel = await approvedPanel(orgId, requisitionId, level);
+  const panel = await roundPanel(orgId, applicationId, level);
   if (!panel)
     return `Round L${level} of this role has no approved panel yet. Call propose_panel for it and wait for the person's decision before finding or offering times.`;
   const want = panel.members.map((m) => m.email.toLowerCase()).sort();
   const got = [...new Set(emails.map((e) => e.toLowerCase()))].sort();
   if (want.join(",") !== got.join(","))
-    return `Use the approved L${level} panel — exactly ${panel.members.map((m) => `${m.name} (${m.email})`).join(", ")}: the first as interviewerEmail, the rest as panelEmails.`;
+    return `Use this candidate's L${level} panel — exactly ${panel.members.map((m) => `${m.name} (${m.email})`).join(", ")}: the first as interviewerEmail, the rest as panelEmails.`;
   return null;
+}
+
+/**
+ * Who could stand in for `replaceMemberId` on one candidate's round: eligible
+ * for the round, not already on it, best first. When the round is booked,
+ * `freeAtBookedTime` says whether they are free then (calendar + bookings).
+ */
+export async function substituteOptions(
+  orgId: string,
+  applicationId: string,
+  level: number,
+  replaceMemberId: string,
+): Promise<{
+  bookedAt: string | null;
+  options: (EligibleInterviewer & { freeAtBookedTime: boolean | null })[];
+}> {
+  const panel = await roundPanel(orgId, applicationId, level);
+  if (!panel) throw new Error(`Round L${level} has no approved panel yet.`);
+  if (!panel.members.some((m) => m.memberId === replaceMemberId))
+    throw new Error("That person is not on this candidate's panel for the round.");
+  const [app] = await db
+    .select({ requisitionId: applications.requisitionId })
+    .from(applications)
+    .where(and(eq(applications.id, applicationId), eq(applications.orgId, orgId)))
+    .limit(1);
+  const { people } = await eligibleInterviewers(orgId, app!.requisitionId, level);
+  const booked = await bookedRound(orgId, applicationId, level);
+  const { isFree } = await import("./calendar-availability.server");
+  const options = [];
+  for (const p of people) {
+    if (panel.members.some((m) => m.memberId === p.memberId)) continue;
+    const freeAtBookedTime = booked?.scheduledAt
+      ? (await isFree(orgId, p.email, booked.scheduledAt.toISOString(), booked.durationMins)).free
+      : null;
+    options.push({ ...p, freeAtBookedTime });
+  }
+  // Free at the booked time first (no change for the candidate), then the ranking.
+  options.sort((a, b) => Number(b.freeAtBookedTime === true) - Number(a.freeAtBookedTime === true));
+  return { bookedAt: booked?.scheduledAt?.toISOString() ?? null, options };
+}
+
+/** The candidate's booked, not-yet-held interview for a round (or null). */
+export async function bookedRound(orgId: string, applicationId: string, level: number) {
+  const [r] = await db
+    .select()
+    .from(interviews)
+    .where(
+      and(
+        eq(interviews.orgId, orgId),
+        eq(interviews.applicationId, applicationId),
+        eq(interviews.level, level),
+        inArray(interviews.status, ["scheduled", "rescheduled"]),
+        sql`${interviews.scheduledAt} > now()`,
+      ),
+    )
+    .limit(1);
+  return r ?? null;
 }

@@ -20,7 +20,8 @@
 - [x] Interview panels P0: interviewer profiles on the Team page (areas, rounds, weekly cap; audited); a requisition's hiring manager is a registered member (`requisitions.hiring_manager_member_id`), asked for by the hiring desk and never guessed; invites audited
 - [x] Interview panels P1: the interview plan shown and edited in the desk thread (with the hiring manager); the hiring manager picked from members on the requisition page; a plan cannot drop a round in use
 - [x] Interview panels P2: the coordinator proposes each round's panel (`propose_panel`), the role's hiring manager approves or changes it in the desk, `role_panels` reused per role and round; times only with the approved panel; health rule `interview.no_eligible_panel`
-- [ ] Interview panels P3–P4 (plan: docs/interview-panel-plan.md): interviewer profiles registered once by the admin; hiring manager as a member; an editable interview plan; the panel proposed per role and round, approved by a person, reused and changeable
+- [x] Interview panels P3: scorecards only from the start time; "Can't make it" on My interviews; a stand-in for one candidate proposed by the coordinator and approved by the hiring manager — the booked time kept when the stand-in is free, else new times offered; health rule `interview.unavailable_unresolved`
+- [ ] Interview panels P4 (plan: docs/interview-panel-plan.md): interviewer profiles registered once by the admin; hiring manager as a member; an editable interview plan; the panel proposed per role and round, approved by a person, reused and changeable
 - [ ] Stage 1.2 S3–S4: the interviews board and candidate-page view, a "call me" choice and HR's "call now", a pilot (docs/voice-scheduling-call-plan.md)
 
 ## Distribution agent (2026-10-21)

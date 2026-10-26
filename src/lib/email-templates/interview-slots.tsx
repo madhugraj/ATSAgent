@@ -15,6 +15,8 @@ interface Props {
   chooseUrl?: string;
   /** When the link stops working. */
   expiresText?: string;
+  /** A booked time these replace (it can no longer go ahead), in the organisation's time zone. */
+  replacesText?: string;
 }
 
 const { text, detail, link } = layoutStyles;
@@ -30,6 +32,7 @@ const Email = ({
   slotsText,
   chooseUrl,
   expiresText,
+  replacesText,
 }: Props) => (
   <EmailLayout
     preview={`Choose a time for your ${roundLabel} — ${jobTitle}`}
@@ -37,6 +40,12 @@ const Email = ({
     heading="Choose a time for your interview"
     greeting={candidateName ? `Hi ${candidateName},` : "Hello,"}
   >
+    {replacesText ? (
+      <p style={text}>
+        We are sorry: your interview booked for <strong>{replacesText}</strong> can no longer go
+        ahead at that time. Please choose a new time below — the earlier time is cancelled.
+      </p>
+    ) : null}
     <p style={text}>
       <strong>{orgName}</strong> would like to invite you to the <strong>{roundLabel}</strong> for{" "}
       <strong>{jobTitle}</strong>

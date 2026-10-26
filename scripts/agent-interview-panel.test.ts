@@ -129,7 +129,8 @@ beforeEach(async () => {
   await db.update(applications).set({ stage: "shortlisted" }).where(eq(applications.id, app));
 });
 
-async function book(level: number, panel: number[] = []) {
+/** Book a round; by default it has already been held (scorecards open at the start). */
+async function book(level: number, panel: number[] = [], held = true) {
   await iv.scheduleInterviewCore(
     { orgId, actor: "test" },
     {
@@ -147,7 +148,13 @@ async function book(level: number, panel: number[] = []) {
     .select()
     .from(interviews)
     .where(and(eq(interviews.applicationId, app), eq(interviews.level, level)));
-  return r!;
+  if (!held) return r!;
+  const [past] = await db
+    .update(interviews)
+    .set({ scheduledAt: new Date(Date.now() - (10 - level) * 3600_000) })
+    .where(eq(interviews.id, r!.id))
+    .returning();
+  return past!;
 }
 const events = async (type: string) =>
   db
@@ -234,6 +241,13 @@ describe("panels", () => {
         },
       ),
     ).rejects.toThrow(/Panel members must be active members/);
+  });
+
+  test("a scorecard opens only when the interview has started", async () => {
+    const r = await book(1, [], false);
+    await expect(iv.submitScorecardCore(ctx(A), card(1, "select", r.id))).rejects.toThrow(
+      /scorecards open once it has started/,
+    );
   });
 
   test("the round completes only when everyone has scored; one scorecard each; only the panel", async () => {

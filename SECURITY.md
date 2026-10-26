@@ -64,7 +64,10 @@ We credit reporters in release notes on request.
   owner, CBO or HR head only), a role's hiring manager (`requisition.hiring_manager_set`, an active
   member only) interview-plan changes (`requisition.interview_plan_updated`) and approved interview panels
   (`role_panel.approved`, decided by the role's hiring manager or the HR head — agents only propose
-  with `propose_panel`, a proposal tool that always opens a person's decision).
+  with `propose_panel`, a proposal tool that always opens a person's decision), stand-ins for one
+  candidate's round (`round_substitute.approved`, same deciders, proposed with `propose_substitute`)
+  and interviewers saying they cannot make a round (`interview.interviewer_unavailable`, only
+  someone on that round, before it starts).
 - AI safety: untrusted CV, JD, profile and mail text is delimited before prompting; structured model
   responses are schema-validated before use. AI decisions retain evidence and permit audited human override.
 - AI usage ledger: every provider request is recorded in `ai_usage_events`

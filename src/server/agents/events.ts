@@ -20,6 +20,7 @@ export type AgentEventType =
   | "onboarding.document_received"
   | "onboarding.document_rejected"
   | "interview.missed"
+  | "interview.panellist_unavailable"
   | "interview.slots_unanswered"
   | "interview.slots_no_reply"
   | "assessment.completed"

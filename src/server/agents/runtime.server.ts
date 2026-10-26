@@ -166,7 +166,10 @@ import {
   approvedPanelWords,
   panelGateFor,
   performPanelGate,
+  performSubstituteGate,
+  substituteGateFor,
   type PanelApprovalSubject,
+  type PanelSubstituteSubject,
 } from "./panel-gate.server";
 
 /* --------------------------------------------- gates tied to real records */
@@ -198,6 +201,7 @@ type DocumentValidationSubject = {
 };
 type GateSubject =
   | PanelApprovalSubject
+  | PanelSubstituteSubject
   | RecordSubject
   | RejectionSubject
   | HiringDecisionSubject
@@ -287,6 +291,7 @@ export function expectationLine(
 
 async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | { error: string }> {
   if (subject.type === "panel_approval") return panelGateFor(orgId, subject);
+  if (subject.type === "panel_substitute") return substituteGateFor(orgId, subject);
   if (subject.type === "offer" || subject.type === "offer_release") {
     const offerId = "offerId" in subject ? subject.offerId : subject.id;
     const [o] = await db
@@ -569,6 +574,8 @@ async function performGate(
   if (!org || org.orgId !== orgId) throw new Error("You are not a member of this organisation.");
   const actor = { orgId, userId, memberEmail: org.memberEmail };
   if (subject.type === "panel_approval") return performPanelGate(orgId, userId, subject, decision);
+  if (subject.type === "panel_substitute")
+    return performSubstituteGate(orgId, userId, org.memberEmail, subject, decision);
   if (subject.type === "offer" || subject.type === "offer_release") {
     const offerId = "offerId" in subject ? subject.offerId : subject.id;
     if (decision.status !== "approved") {

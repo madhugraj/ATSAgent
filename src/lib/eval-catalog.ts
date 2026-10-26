@@ -194,6 +194,15 @@ export const EVAL_CATALOG: Record<string, EvalExplainer> = {
       "It books nothing and records nothing; it offers the listed times again.",
     ],
   },
+  "interview: proposes a stand-in when a panellist can't make it": {
+    title: "Proposes a stand-in when an interviewer can't make it",
+    situation: "Dev, the round's interviewer, said he can't make Kiran's booked interview.",
+    checks: [
+      "It looks for registered interviewers who are free at the booked time.",
+      "It proposes one as a stand-in for Kiran only — a person approves it.",
+      "Kiran keeps the booked time; it does not offer new times.",
+    ],
+  },
   "interview: proposes a panel for a round and waits for a person": {
     title: "Proposes a round's panel and waits for a person",
     situation:

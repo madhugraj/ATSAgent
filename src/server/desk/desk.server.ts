@@ -1364,7 +1364,10 @@ export async function onTaskOpened(
               : (task.proposedAction as { args?: { subject?: { type?: string } } } | null)?.args
                     ?.subject?.type === "panel_approval"
                 ? "Who interviews for this round is your decision — approve the panel or change the people."
-                : "This needs a decision."
+                : (task.proposedAction as { args?: { subject?: { type?: string } } } | null)?.args
+                      ?.subject?.type === "panel_substitute"
+                  ? "A panellist can't make an interview — approve the stand-in, or decline and say who instead."
+                  : "This needs a decision."
           : revision
             ? `Revised as you asked ("${revision.reason}")${
                 revision.changes.length

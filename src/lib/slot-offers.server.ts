@@ -10,7 +10,7 @@
  * role, the organisation, the interviewer's name and the times — nothing else
  * about the candidate or the organisation.
  */
-import { and, eq, inArray, lt, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, sql, type SQL } from "drizzle-orm";
 
 import { interviewWith } from "./interview-with";
 
@@ -19,6 +19,7 @@ import {
   applications,
   candidates,
   interviewSlotOffers,
+  interviews,
   orgMembers,
   organizations,
   requisitions,
@@ -211,6 +212,22 @@ export async function offerSlotsCore(
   const { enqueueEmail, formatInOrgTZ, getOrgEmailSettings } =
     await import("./email-outbox.server");
   const tz = (await getOrgEmailSettings(orgId)).timezone;
+  // A booked time of this round that was cancelled before it came (e.g. the
+  // interviewer could not make it): the candidate is told it no longer stands.
+  const [dropped] = await db
+    .select({ at: interviews.scheduledAt })
+    .from(interviews)
+    .where(
+      and(
+        eq(interviews.orgId, orgId),
+        eq(interviews.applicationId, app.id),
+        eq(interviews.level, input.level),
+        eq(interviews.status, "cancelled"),
+        sql`${interviews.scheduledAt} > now()`,
+      ),
+    )
+    .orderBy(desc(interviews.scheduledAt))
+    .limit(1);
   await enqueueEmail({
     orgId,
     kind: "interview_slots",
@@ -228,6 +245,7 @@ export async function offerSlotsCore(
       slotsText: slots.map((d) => formatInOrgTZ(d, tz)).join("\n"),
       chooseUrl: `${site()}/schedule/${token}`,
       expiresText: formatInOrgTZ(expiresAt, tz),
+      ...(dropped?.at ? { replacesText: formatInOrgTZ(dropped.at, tz) } : {}),
     },
   });
   await writeAudit({

@@ -686,6 +686,84 @@ export function scenarios(): ScriptedScenario[] {
       ],
     },
     {
+      name: "interview: proposes a stand-in when a panellist can't make it",
+      agentType: "interview",
+      setup: async ({ orgId, userId }) => {
+        const requisitionId = await seedRequisition(orgId, userId, "approved");
+        const app = await seedApplication(orgId, requisitionId, "Kiran", "l1", 81);
+        const { db } = await import("../../src/server/db");
+        const { interviews, memberInterviewerProfiles, orgMembers, requisitions, rolePanels } =
+          await import("../../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const [me] = await db
+          .select({ id: orgMembers.id })
+          .from(orgMembers)
+          .where(eq(orgMembers.userId, userId));
+        // The approved L1 panel is Dev, who now can't make Kiran's booked interview.
+        const [dev] = await db
+          .insert(orgMembers)
+          .values({
+            orgId,
+            email: `dev-${orgId.slice(0, 8)}@eval.local`,
+            fullName: "Dev",
+            status: "active",
+          } as never)
+          .returning({ id: orgMembers.id, email: orgMembers.email });
+        await db
+          .insert(rolePanels)
+          .values({ orgId, requisitionId, level: 1, memberIds: [dev!.id] });
+        await db.insert(memberInterviewerProfiles).values({
+          orgId,
+          memberId: me!.id,
+          active: true,
+          areas: ["Kubernetes"],
+          rounds: [1, 2, 3],
+        });
+        await db
+          .update(requisitions)
+          .set({ hiringManagerMemberId: me!.id })
+          .where(eq(requisitions.id, requisitionId));
+        await db.insert(interviews).values({
+          orgId,
+          applicationId: app,
+          level: 1,
+          interviewer: "Dev",
+          interviewerEmail: dev!.email,
+          scheduledAt: new Date(Date.now() + 3 * 86_400_000),
+          status: "scheduled",
+          unavailable: [{ email: dev!.email, note: "On leave", at: new Date().toISOString() }],
+        } as never);
+        return { requisitionId, app, dev: dev!.id };
+      },
+      goal: (d) =>
+        `Dev (memberId ${d["dev"]}) cannot make the booked L1 interview of candidate application ${d["app"]}. Propose a stand-in for that candidate only: list_substitutes, then propose_substitute — someone free at the booked time if possible, so the candidate's time stays. Do not offer new times unless you are told the booking was cancelled. app=${d["app"]} dev=${d["dev"]}\n\nRequisition id: ${d["requisitionId"]}`,
+      decide: () => ({ status: "approved" }),
+      expect: {
+        status: "done",
+        calls: ["list_substitutes", "propose_substitute"],
+        neverCalls: ["offer_interview_slots", "schedule_interview", "propose_panel"],
+      },
+      script: [
+        (m) =>
+          call("s", "list_substitutes", {
+            applicationId: fromGoal(m, "app"),
+            level: 1,
+            replaceMemberId: fromGoal(m, "dev"),
+          }),
+        (m) =>
+          call("ps", "propose_substitute", {
+            applicationId: fromGoal(m, "app"),
+            level: 1,
+            replaceMemberId: fromGoal(m, "dev"),
+            withMemberId: (
+              toolResult(m, "list_substitutes")["options"] as { memberId: string }[]
+            )[0]!.memberId,
+            reason: "Dev is on leave; the stand-in is free at the booked time.",
+          }),
+        say("A stand-in was approved; Kiran keeps the booked time."),
+      ],
+    },
+    {
       name: "evaluation: debriefs and asks the hiring manager to decide",
       agentType: "evaluation",
       autonomy: "act_and_notify",

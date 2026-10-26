@@ -815,3 +815,53 @@ describe("interview panels", () => {
     await db.delete(orgMembers).where(eq(orgMembers.id, m!.id));
   });
 });
+
+describe("interviewers who can't make it", () => {
+  test("a booked interview within a day with an interviewer who can't make it is critical", async () => {
+    const { applications, candidates, interviews, requisitions } =
+      await import("../drizzle/schema");
+    const [req] = await db
+      .insert(requisitions)
+      .values({
+        orgId,
+        code: `H-U-${stamp}`,
+        title: "Unavailable Test",
+        status: "approved",
+      } as never)
+      .returning({ id: requisitions.id });
+    const [cand] = await db
+      .insert(candidates)
+      .values({ orgId, fullName: "Soon", email: `soon-${stamp}@cand.local` } as never)
+      .returning({ id: candidates.id });
+    const [app] = await db
+      .insert(applications)
+      .values({ orgId, requisitionId: req!.id, candidateId: cand!.id, stage: "l1" } as never)
+      .returning({ id: applications.id });
+    const [r] = await db
+      .insert(interviews)
+      .values({
+        orgId,
+        applicationId: app!.id,
+        level: 1,
+        interviewer: "Busy",
+        interviewerEmail: "busy@x.test",
+        scheduledAt: new Date(Date.now() + 5 * 3600_000),
+        status: "scheduled",
+        unavailable: [{ email: "busy@x.test", note: null, at: new Date().toISOString() }],
+      } as never)
+      .returning({ id: interviews.id });
+    const rule = async () =>
+      (await open()).find((i) => i.rule === "interview.unavailable_unresolved");
+    await evaluate();
+    expect(await rule()).toMatchObject({ agentType: "interview", severity: "critical" });
+    // A stand-in took their place: resolved.
+    await db
+      .update(interviews)
+      .set({ interviewer: "Stand-in", interviewerEmail: "standin@x.test" })
+      .where(eq(interviews.id, r!.id));
+    await evaluate();
+    expect(await rule()).toBeUndefined();
+    await db.delete(requisitions).where(eq(requisitions.id, req!.id));
+    await db.delete(candidates).where(eq(candidates.id, cand!.id));
+  });
+});

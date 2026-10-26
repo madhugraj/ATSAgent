@@ -8,6 +8,8 @@
  *  - invites are audited (an invite is a role grant).
  *  P2: eligibility (registered, round, weekly limit, ranked by fit); the panel
  *    gate's refusals, decider and stale proposals; only the approved panel is used.
+ *  P3: "can't make it" before the interview; a stand-in for one candidate keeps
+ *    the booked time when free, else the booking is cancelled for new times.
  *  P1: a plan cannot drop a round a candidate is in; the hiring manager is
  *    picked from members, audited; the desk posts the plan, editable in place.
  * Run: DATABASE_URL=postgres://…/atsagent_test SESSION_SECRET=… bun test scripts/interview-panels.test.ts
@@ -17,8 +19,10 @@ import { and, eq } from "drizzle-orm";
 
 const { db } = await import("../src/server/db");
 const {
+  agentEvents,
   applications,
   auditLog,
+  emailOutbox,
   candidates,
   hiringConversations,
   hiringMessages,
@@ -350,6 +354,7 @@ describe("P2: proposing and approving a round's panel", () => {
   const panels = () => import("../src/lib/panels.server");
   const gate = () => import("../src/server/agents/panel-gate.server");
   let reqId: string;
+  let p2App: string;
 
   beforeAll(async () => {
     reqId = (
@@ -414,6 +419,7 @@ describe("P2: proposing and approving a round's panel", () => {
       .insert(applications)
       .values({ orgId, requisitionId: reqId, candidateId: c!.id, stage: "l2" } as never)
       .returning({ id: applications.id });
+    p2App = a!.id;
     await db.insert(interviews).values({
       orgId,
       applicationId: a!.id,
@@ -468,7 +474,7 @@ describe("P2: proposing and approving a round's panel", () => {
       reason: "Fits",
       expects: "0",
     };
-    expect(await panelMismatch(orgId, reqId, 1, [`priya@${domain}`])).toMatch(/no approved panel/);
+    expect(await panelMismatch(orgId, p2App, 1, [`priya@${domain}`])).toMatch(/no approved panel/);
     await performPanelGate(orgId, ownerId, subject, { status: "rejected" });
     expect(await approvedPanel(orgId, reqId, 1)).toBeNull();
     await performPanelGate(orgId, ownerId, subject, { status: "approved" });
@@ -479,9 +485,9 @@ describe("P2: proposing and approving a round's panel", () => {
     expect(await approvedPanelWords(orgId, subject)).toMatch(
       /^Approved\. The L1 panel is Priya Natarajan/,
     );
-    expect(await panelMismatch(orgId, reqId, 1, [`PRIYA@${domain}`])).toBeNull();
-    expect(await panelMismatch(orgId, reqId, 1, [`arun@${domain}`])).toMatch(
-      /Use the approved L1 panel/,
+    expect(await panelMismatch(orgId, p2App, 1, [`PRIYA@${domain}`])).toBeNull();
+    expect(await panelMismatch(orgId, p2App, 1, [`arun@${domain}`])).toMatch(
+      /Use this candidate's L1 panel/,
     );
     // Proposed against version 0; the panel is now version 1.
     await expect(
@@ -513,5 +519,204 @@ describe("P2: proposing and approving a round's panel", () => {
         status: "approved",
       }),
     ).rejects.toThrow(/Requisition not found|active member/);
+  });
+});
+
+describe("P3: an interviewer can't make it; a stand-in for one candidate", () => {
+  const panels = () => import("../src/lib/panels.server");
+  const gate = () => import("../src/server/agents/panel-gate.server");
+  const ivf = () => import("../src/lib/interviews.functions");
+  let reqId: string;
+  let appId: string;
+  const at = new Date(Date.now() + 3 * 86_400_000);
+
+  async function bookRound(level: number, email: string, name: string, app = appId) {
+    const [r] = await db
+      .insert(interviews)
+      .values({
+        orgId,
+        applicationId: app,
+        level,
+        interviewer: name,
+        interviewerEmail: email,
+        scheduledAt: at,
+        durationMins: 60,
+        status: "scheduled",
+      } as never)
+      .returning();
+    return r!;
+  }
+
+  beforeAll(async () => {
+    reqId = (
+      await db
+        .insert(requisitions)
+        .values({
+          orgId,
+          code: `REQ-P3-${stamp}`,
+          title: "Head of AI",
+          location: "Chennai",
+          status: "approved",
+          mustHaveSkills: ["MLOps", "Leadership"],
+          createdBy: ownerId,
+          hiringManagerMemberId: members["priya"],
+        } as never)
+        .returning({ id: requisitions.id })
+    )[0]!.id;
+    const [c] = await db
+      .insert(candidates)
+      .values({ orgId, fullName: "Stand In", email: `standin@${domain}` } as never)
+      .returning({ id: candidates.id });
+    appId = (
+      await db
+        .insert(applications)
+        .values({ orgId, requisitionId: reqId, candidateId: c!.id, stage: "l1" } as never)
+        .returning({ id: applications.id })
+    )[0]!.id;
+    // Arun Kumar is the role's approved L1 panel; Priya takes L1 too.
+    const { savePanel } = await panels();
+    await savePanel(orgId, ownerId, reqId, 1, [members["arun"]!], false);
+  });
+
+  test("only someone on the round, before it starts; recorded once, audited, the coordinator told", async () => {
+    const { interviewerUnavailableCore } = await ivf();
+    const r = await bookRound(1, `arun@${domain}`, "Arun Kumar");
+    const who = (email: string) => ({ orgId, userId: ownerId, email });
+    await expect(
+      interviewerUnavailableCore(who(`priya@${domain}`), { interviewId: r.id, note: "" }),
+    ).rejects.toThrow(/Only an interviewer on this round/);
+    await interviewerUnavailableCore(who(`ARUN@${domain}`), {
+      interviewId: r.id,
+      note: "Travelling",
+    });
+    await expect(
+      interviewerUnavailableCore(who(`arun@${domain}`), { interviewId: r.id, note: "" }),
+    ).rejects.toThrow(/already said/);
+    const [row] = await db.select().from(interviews).where(eq(interviews.id, r.id));
+    expect(row!.status).toBe("scheduled"); // the candidate keeps their time for now
+    expect(row!.unavailable).toMatchObject([{ email: `arun@${domain}`, note: "Travelling" }]);
+    const [ev] = await db
+      .select()
+      .from(agentEvents)
+      .where(
+        and(eq(agentEvents.orgId, orgId), eq(agentEvents.type, "interview.panellist_unavailable")),
+      );
+    expect(ev!.payload).toMatchObject({ level: 1, memberId: members["arun"], name: "Arun Kumar" });
+    // Too late once the interview has started: that is "didn't happen".
+    await db
+      .update(interviews)
+      .set({ scheduledAt: new Date(Date.now() - 60_000), unavailable: [] })
+      .where(eq(interviews.id, r.id));
+    await expect(
+      interviewerUnavailableCore(who(`arun@${domain}`), { interviewId: r.id, note: "" }),
+    ).rejects.toThrow(/already started/);
+    await db.update(interviews).set({ scheduledAt: at }).where(eq(interviews.id, r.id));
+  });
+
+  test("a free stand-in keeps the booked time: swapped in, briefed, audited", async () => {
+    const { substituteOptions, roundPanel, panelMismatch } = await panels();
+    const { substituteGateFor, performSubstituteGate } = await gate();
+    const opts = await substituteOptions(orgId, appId, 1, members["arun"]!);
+    expect(opts.bookedAt).toBe(at.toISOString());
+    expect(opts.options.map((o) => [o.name, o.freeAtBookedTime])).toEqual([
+      ["Priya Natarajan", true],
+    ]);
+    const subject = {
+      type: "panel_substitute" as const,
+      applicationId: appId,
+      level: 1,
+      replaceMemberId: members["arun"]!,
+      withMemberId: members["priya"]!,
+      reason: "Arun is travelling",
+    };
+    expect(
+      await substituteGateFor(orgId, { ...subject, withMemberId: members["arunb"]! }),
+    ).toMatchObject({ error: expect.stringMatching(/Only eligible interviewers/) });
+    const g = await substituteGateFor(orgId, subject);
+    if ("error" in g) throw new Error(g.error);
+    expect(g.detail).toMatch(/Priya Natarajan replaces Arun Kumar for this candidate only/);
+    expect(g.detail).toMatch(/the time stays and the candidate sees no change/);
+    // A stale card is refused.
+    await expect(
+      performSubstituteGate(
+        orgId,
+        ownerId,
+        `owner@${domain}`,
+        { ...subject, expects: "none" },
+        {
+          status: "approved",
+        },
+      ),
+    ).rejects.toThrow(/changed since this was proposed/);
+    await performSubstituteGate(orgId, ownerId, `owner@${domain}`, g.subject, {
+      status: "approved",
+    });
+    const [row] = await db
+      .select()
+      .from(interviews)
+      .where(and(eq(interviews.applicationId, appId), eq(interviews.level, 1)));
+    expect(row).toMatchObject({
+      status: "scheduled",
+      interviewerEmail: `priya@${domain}`,
+      interviewer: "Priya Natarajan",
+    });
+    expect(row!.scheduledAt!.toISOString()).toBe(at.toISOString());
+    expect((await roundPanel(orgId, appId, 1))!.members.map((m) => m.name)).toEqual([
+      "Priya Natarajan",
+    ]);
+    expect(await panelMismatch(orgId, appId, 1, [`priya@${domain}`])).toBeNull();
+    const briefs = await db
+      .select({ to: emailOutbox.toEmail })
+      .from(emailOutbox)
+      .where(and(eq(emailOutbox.orgId, orgId), eq(emailOutbox.kind, "interviewer_brief")));
+    expect(briefs.map((b) => b.to)).toContain(`priya@${domain}`);
+    const [a] = await db
+      .select({ detail: auditLog.detail })
+      .from(auditLog)
+      .where(and(eq(auditLog.orgId, orgId), eq(auditLog.action, "round_substitute.approved")));
+    expect(a!.detail).toMatchObject({ outcome: "swapped", with: `priya@${domain}` });
+  });
+
+  test("a stand-in who is busy then: the booking is cancelled and new times are offered", async () => {
+    const { savePanel } = await panels();
+    const { substituteGateFor, performSubstituteGate } = await gate();
+    await savePanel(orgId, ownerId, reqId, 2, [members["priya"]!], false);
+    await iv.setInterviewerProfileCore(orgId, actor(), members["arun"]!, {
+      active: true,
+      areas: ["Leadership"],
+      rounds: [2],
+      weeklyCap: 10,
+    });
+    const r = await bookRound(2, `priya@${domain}`, "Priya Natarajan");
+    // Arun Kumar is already interviewing someone else at that time.
+    const [c] = await db
+      .insert(candidates)
+      .values({ orgId, fullName: "Other", email: `other@${domain}` } as never)
+      .returning({ id: candidates.id });
+    const [other] = await db
+      .insert(applications)
+      .values({ orgId, requisitionId: reqId, candidateId: c!.id, stage: "l1" } as never)
+      .returning({ id: applications.id });
+    await bookRound(1, `arun@${domain}`, "Arun Kumar", other!.id);
+    const g = await substituteGateFor(orgId, {
+      type: "panel_substitute",
+      applicationId: appId,
+      level: 2,
+      replaceMemberId: members["priya"]!,
+      withMemberId: members["arun"]!,
+      reason: "Priya is away",
+    });
+    if ("error" in g) throw new Error(g.error);
+    expect(g.detail).toMatch(/is not free then, so that time is cancelled/);
+    await performSubstituteGate(orgId, ownerId, `owner@${domain}`, g.subject, {
+      status: "approved",
+    });
+    const [row] = await db.select().from(interviews).where(eq(interviews.id, r.id));
+    expect(row!.status).toBe("cancelled");
+    const missed = await db
+      .select()
+      .from(agentEvents)
+      .where(and(eq(agentEvents.orgId, orgId), eq(agentEvents.type, "interview.missed")));
+    expect(missed.length).toBeGreaterThan(0);
   });
 });

@@ -744,8 +744,51 @@ export const interviews = pgTable(
     /** Why a round did not happen (no-show / cancelled), in a person's words. */
     outcomeNote: text("outcome_note"),
     completedAt: timestamp("completed_at", { withTimezone: true }),
+    /** Interviewers who said they cannot make this booked round (migration 0051). */
+    unavailable: jsonb("unavailable")
+      .$type<{ email: string; note: string | null; at: string }[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
   },
   (t) => [index("interviews_interviewer_email_idx").on(sql`lower(${t.interviewerEmail})`)],
+);
+
+/**
+ * For one candidate's round only, a panellist replaced by another member
+ * (docs/interview-panel-plan.md, P3): proposed by the Interview coordinator,
+ * approved by a person. The role's approved panel is unchanged.
+ */
+export const roundSubstitutes = pgTable(
+  "round_substitutes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    level: integer("level").notNull(),
+    replaceMemberId: uuid("replace_member_id")
+      .notNull()
+      .references(() => orgMembers.id, { onDelete: "cascade" }),
+    withMemberId: uuid("with_member_id")
+      .notNull()
+      .references(() => orgMembers.id, { onDelete: "cascade" }),
+    reason: text("reason"),
+    approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("round_substitutes_round_member_key").on(
+      t.applicationId,
+      t.level,
+      t.replaceMemberId,
+    ),
+    index("round_substitutes_org_idx").on(t.orgId),
+    check("round_substitutes_level_check", sql`${t.level} between 1 and 3`),
+    check("round_substitutes_distinct_check", sql`${t.replaceMemberId} <> ${t.withMemberId}`),
+  ],
 );
 
 /**

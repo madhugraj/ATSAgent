@@ -499,7 +499,10 @@ export function registerPhase3Agents(): void {
     // 2.0.0 (docs/interview-panel-plan.md, P2): never picks a panel itself — proposes one
     // per role and round from the eligible interviewers (propose_panel), a person
     // approves or changes it, and times are found and offered only with that panel.
-    version: "2.0.0",
+    // 2.1.0 (P3): a panellist who can't make a booked interview, or is away for a
+    // candidate's window, gets a stand-in for that candidate only (propose_substitute),
+    // decided by a person; the candidate's time stays when the stand-in is free then.
+    version: "2.1.0",
     owner: "hr_head",
     responsibility:
       "Books the next interview round for candidates who advanced: proposes each round's panel for a person to approve, then free times for that panel, the candidate's choice of time, a meeting link, and invites to both the candidate and the interviewers.",
@@ -507,6 +510,7 @@ export function registerPhase3Agents(): void {
       "Invite an interviewer who is not an active member of the organisation",
       "Choose, change or replace a round's panel itself — it proposes; a person approves",
       "Offer or book times for a round without its approved panel",
+      "Replace a panellist for a candidate itself — it proposes a stand-in; a person approves",
       "Book a slot without a person's review unless the interview invitation is pre-approved or the agent is set to Autonomous",
       "Change a candidate's stage except by booking their next round",
     ],
@@ -525,11 +529,12 @@ export function registerPhase3Agents(): void {
         "meeting links (Zoom / Meet / Teams)",
       ],
     },
-    gates: ["general", "panel_approval"],
+    gates: ["general", "panel_approval", "panel_substitute"],
     riskTier: "medium",
     evals: [
       "interview: books the next round with a member panel after review",
       "interview: proposes a panel for a round and waits for a person",
+      "interview: proposes a stand-in when a panellist can't make it",
       "interview: asks for a scheduling call when e-mailed times go unanswered",
     ],
     feature: "agent_interview",
@@ -540,6 +545,8 @@ export function registerPhase3Agents(): void {
       "get_interview_plan",
       "list_panel_options",
       "propose_panel",
+      "list_substitutes",
+      "propose_substitute",
       "find_interview_slots",
       "offer_interview_slots",
       "request_scheduling_call",
@@ -554,6 +561,8 @@ export function registerPhase3Agents(): void {
       "2c. Otherwise propose_panel once for the round: up to nextRound.panelSize memberIds from `eligible`, in its order (it is ranked by fit to the round's competencies, then experience with the role, then load), with a one-line reason naming what each covers. Never propose anyone outside `eligible`, never invent an interviewer or take one from a CV. You are told the approved panel — it may differ from your proposal; use it as told. If the person declines, propose once more taking their reason into account; if declined again, handoff with their reason.",
       "2d. If `eligible` is empty, do not ask for an e-mail address: ask_human once, saying no registered interviewer takes this round (or all are at their weekly limit) and that the owner, CBO or HR head can register interviewers on the Team page.",
       "2e. If a tool refuses an interviewer, tell the person exactly what the system said. Never guess who an address belongs to.",
+      "2f. A candidate's own panel: call list_panel_options with their applicationId too — `approved` then includes any stand-in approved for them; use it for their times.",
+      "2g. Stand-ins (one candidate's round only): when told a panellist cannot make a booked interview, or when find_interview_slots finds no times for the panel because one person is away, list_substitutes for that person and propose_substitute once — prefer someone with freeAtBookedTime true so the candidate keeps their time. A person decides. If approved and you are told the booking was cancelled, offer new times with the candidate's panel; if approved and the booking stays, do nothing more. If declined, handoff with the person's reason.",
       "3. find_interview_slots with the applicationId and the round's level (so times start after the candidate's earlier round ends) for the first interviewer with the rest as panelEmails, then offer_interview_slots with three of them, the same panelEmails, and nextRound.focus as the agenda (60 minutes, online; add a meeting provider only if you were told one is connected). The candidate picks a time from a private link and the booking — meeting link, the candidate's invite and every interviewer's brief with the round's rubric — happens then. A person reviews the offer unless it is pre-approved.",
       "When the candidate did not take offered times (declined or expired): offer three different times — other days and times of day, honouring any note they gave — then request_scheduling_call for them so the assistant phones to help them pick. If offering again is refused or impossible, ask_human so a person calls them.",
       "When you are told the candidate has not picked one of the e-mailed times: request_scheduling_call for that candidate and nothing else (do not offer new times). Its rules — the wait, at least a day ahead, the candidate's opt-out, one call per offer — are checked for you: if it is refused, say why in your summary and leave it to the e-mail. Never ask for a scheduling call before times were e-mailed.",

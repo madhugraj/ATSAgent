@@ -70,6 +70,8 @@ export const HEALTH = {
   schedulingBookedShare: 0.3,
   /** Candidates asking not to be called by the AI assistant, in 7 days. */
   aiCallOptOuts7d: 2,
+  /** A booked interview this close with an interviewer who said they can't make it (hours). */
+  unavailableLeadHours: 24,
   /** Model replies cut off at the output limit without acting, in 24 h. */
   cutOffReplies24h: 2,
   /** One run asking people this many questions (7 days) is going round in circles. */
@@ -548,6 +550,31 @@ export const RULES: Rule[] = [
             .map((x) => `${x.requisition} L${x.level}`)
             .join(", ")}${stuck.length > 3 ? ` and ${stuck.length - 3} more` : ""}`,
           detail: { rounds: stuck },
+        },
+      ];
+    },
+  },
+  {
+    id: "interview.unavailable_unresolved",
+    element: "hitl",
+    severity: "critical",
+    description: `A booked interview starts within ${HEALTH.unavailableLeadHours} hours and an interviewer on it said they cannot make it — no stand-in has been approved and it has not been moved. Approve or arrange a stand-in, or cancel the round so new times are offered.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number; first: string }>(sql`
+        select count(*)::int n, min(scheduled_at)::text first from interviews
+        where org_id = ${orgId} and status in ('scheduled', 'rescheduled')
+          and scheduled_at > now()
+          and scheduled_at < now() + make_interval(hours => ${HEALTH.unavailableLeadHours})
+          and exists (select 1 from jsonb_array_elements(unavailable) u
+            where lower(u ->> 'email') = lower(interviewer_email)
+              or panel @> jsonb_build_array(jsonb_build_object('email', u ->> 'email')))`);
+      const x = r[0];
+      if (!x?.n) return [];
+      return [
+        {
+          agentType: "interview",
+          title: `${x.n} interview(s) soon with an interviewer who can't make it`,
+          detail: { interviews: x.n, firstStartsAt: x.first },
         },
       ];
     },

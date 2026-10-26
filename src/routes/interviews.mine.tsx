@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { CalendarPlus, Loader2, Lock, Video } from "lucide-react";
 
 import {
+  interviewerUnavailable,
   markInterviewOutcome,
   myInterviews,
   submitScorecard,
@@ -75,6 +76,21 @@ function MyInterviewsPage() {
   function openScorecard(round: MyInterview) {
     setOpenId(round.id);
     setForm({ ratings: {}, verdict: "select", focus: "", comments: "", reason: "" });
+  }
+
+  const cannot = useServerFn(interviewerUnavailable);
+  async function cannotMakeIt(round: MyInterview) {
+    const note = window.prompt(
+      "You can't make this interview? A stand-in will be proposed to the hiring manager; the candidate keeps their time if the stand-in is free. Anything to add? (optional)",
+    );
+    if (note === null) return;
+    try {
+      await cannot({ data: { interviewId: round.id, note } });
+      toast.success("Recorded — a stand-in will be arranged");
+      qc.invalidateQueries({ queryKey: ["my_interviews"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not record this");
+    }
   }
 
   const outcome = useServerFn(markInterviewOutcome);
@@ -172,6 +188,9 @@ function MyInterviewsPage() {
         <div className="space-y-4">
           {rounds.map((round) => {
             const when = round.scheduled_at ? new Date(round.scheduled_at) : null;
+            // Scorecards and "didn't happen" are for after the start; before it, "can't make it".
+            const started = !when || when.getTime() <= Date.now();
+            const booked = ["scheduled", "rescheduled"].includes(round.status);
             const isOpen = openId === round.id;
             const names = round.competencies.length
               ? round.competencies
@@ -247,7 +266,22 @@ function MyInterviewsPage() {
                         <CalendarPlus className="size-4" /> Add to calendar
                       </Button>
                     ) : null}
-                    {!round.submitted && ["scheduled", "rescheduled"].includes(round.status) ? (
+                    {booked && !started ? (
+                      round.i_cannot_make_it ? (
+                        <span className="text-xs text-muted-foreground">
+                          You can&apos;t make it — a stand-in is being arranged
+                        </span>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void cannotMakeIt(round)}
+                        >
+                          Can&apos;t make it
+                        </Button>
+                      )
+                    ) : null}
+                    {!round.submitted && booked && started ? (
                       <Select value="" onValueChange={(v) => void didNotHappen(round, v as never)}>
                         <SelectTrigger className="h-8 w-auto text-xs">
                           <SelectValue placeholder="Didn't happen?" />
@@ -264,6 +298,13 @@ function MyInterviewsPage() {
                     {["cancelled", "no_show"].includes(round.status) ? null : round.submitted ? (
                       <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                         <Lock className="size-3.5" /> Scored
+                      </span>
+                    ) : !started ? (
+                      <span
+                        className="flex items-center gap-1.5 text-xs text-muted-foreground"
+                        title="A scorecard records what happened in the interview"
+                      >
+                        <Lock className="size-3.5" /> Scorecard opens when it starts
                       </span>
                     ) : (
                       <Button

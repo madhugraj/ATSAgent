@@ -303,6 +303,15 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
     );
   }
 
+  if (e.type === "interview.panellist_unavailable" && applicationId) {
+    const p = e.payload as { level?: number; memberId?: string; name?: string; when?: string };
+    await dispatch(
+      "interview",
+      `${p.name ?? "A panellist"} (memberId ${p.memberId}) cannot make the booked L${p.level ?? "?"} interview of candidate application ${applicationId} (${req.code} "${req.title}") on ${p.when ?? "its booked time"}. Propose a stand-in for that candidate only: list_substitutes, then propose_substitute — someone free at the booked time if possible, so the candidate's time stays. Do not offer new times unless you are told the booking was cancelled.`,
+      { type: "application", id: applicationId },
+    );
+  }
+
   if (e.type === "interview.missed" && applicationId) {
     const p = e.payload as { level?: number; outcome?: string };
     await dispatch(

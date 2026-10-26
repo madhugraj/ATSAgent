@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-88 tables across 9 domains.
+89 tables across 9 domains.
 
 ## Identity & access
 
@@ -573,6 +573,7 @@ erDiagram
     jsonb panel
     text outcome_note "nullable"
     timestamptz completed_at "nullable"
+    jsonb unavailable
   }
   screening_kits {
     uuid id PK
@@ -1184,6 +1185,11 @@ erDiagram
 | `role_panels` | `approved_by` | `users` | no action |
 | `role_panels` | `org_id` | `organizations` | cascade |
 | `role_panels` | `requisition_id` | `requisitions` | cascade |
+| `round_substitutes` | `application_id` | `applications` | cascade |
+| `round_substitutes` | `approved_by` | `users` | no action |
+| `round_substitutes` | `org_id` | `organizations` | cascade |
+| `round_substitutes` | `replace_member_id` | `org_members` | cascade |
+| `round_substitutes` | `with_member_id` | `org_members` | cascade |
 | `salary_benchmarks` | `org_id` | `organizations` | cascade |
 | `salary_benchmarks` | `requisition_id` | `requisitions` | no action |
 | `screening_calls` | `agent_run_id` | `agent_runs` | no action |
@@ -1292,7 +1298,7 @@ erDiagram
 | `inbox_messages` | Sourcing & integrations | 16 | — |
 | `integration_credentials` | Sourcing & integrations | 4 | — |
 | `interview_slot_offers` | — | 22 | (token) |
-| `interviews` | Screening & interviews | 16 | — |
+| `interviews` | Screening & interviews | 17 | — |
 | `job_descriptions` | Requisitions & job content | 17 | — |
 | `job_index_notifications` | — | 10 | — |
 | `master_items` | Organisations & masters | 8 | — |
@@ -1314,6 +1320,7 @@ erDiagram
 | `requisition_board_postings` | — | 16 | (requisitionId+provider) |
 | `requisitions` | Requisitions & job content | 42 | (orgId+code) |
 | `role_panels` | — | 8 | (requisitionId+level) |
+| `round_substitutes` | — | 9 | — |
 | `salary_benchmarks` | Intelligence | 15 | — |
 | `screening_calls` | Screening & interviews | 33 | — |
 | `screening_kits` | Screening & interviews | 11 | — |

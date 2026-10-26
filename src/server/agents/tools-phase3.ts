@@ -64,10 +64,7 @@ async function panelRefusal(
 ): Promise<string | null> {
   const app = await loadApplication(ctx.orgId, i.applicationId);
   const { panelMismatch } = await import("@/lib/panels.server");
-  return panelMismatch(ctx.orgId, app.requisitionId, i.level, [
-    i.interviewerEmail,
-    ...(i.panelEmails ?? []),
-  ]);
+  return panelMismatch(ctx.orgId, app.id, i.level, [i.interviewerEmail, ...(i.panelEmails ?? [])]);
 }
 
 async function roundsOf(orgId: string, applicationId: string) {
@@ -169,16 +166,26 @@ export function registerPhase3Tools(): void {
   registerTool({
     name: "list_panel_options",
     description:
-      "Who can interview for one round of a requisition. `approved`: the round's approved panel (use exactly these people) or null. `waitingForDecision`: a proposed panel is waiting for a person. `eligible`: the people who may be proposed, best first — the round's competencies their registered areas cover, rounds they took for this role, then the lightest load (interviews in the next 7 days against their weekly limit). Only eligible people can be proposed.",
+      "Who can interview for one round of a requisition. `approved`: the round's approved panel (with applicationId: that candidate's panel, including approved stand-ins) — use exactly these people — or null. `waitingForDecision`: a proposed panel is waiting for a person. `eligible`: the people who may be proposed, best first — the round's competencies their registered areas cover, rounds they took for this role, then the lightest load (interviews in the next 7 days against their weekly limit). Only eligible people can be proposed.",
     input: z.object({
       requisitionId: z.string().uuid(),
       level: z.number().int().min(1).max(3),
+      /** A candidate: `approved` is their panel, with any approved stand-ins. */
+      applicationId: z.string().uuid().optional(),
     }),
     risk: "read",
     run: async (ctx, i) => {
       await assertRequisitionInOrg(i.requisitionId, ctx.orgId);
-      const { approvedPanel, eligibleInterviewers } = await import("@/lib/panels.server");
-      const approved = await approvedPanel(ctx.orgId, i.requisitionId, i.level);
+      const { approvedPanel, eligibleInterviewers, roundPanel } =
+        await import("@/lib/panels.server");
+      if (i.applicationId) {
+        const app = await loadApplication(ctx.orgId, i.applicationId);
+        if (app.requisitionId !== i.requisitionId)
+          throw new Error("That candidate is not on this requisition.");
+      }
+      const approved = i.applicationId
+        ? await roundPanel(ctx.orgId, i.applicationId, i.level)
+        : await approvedPanel(ctx.orgId, i.requisitionId, i.level);
       const [waiting] = (await db.execute(sql`
         select 1 from agent_tasks where org_id = ${ctx.orgId} and status = 'open' and kind = 'gate'
           and proposed_action -> 'args' -> 'subject' ->> 'type' = 'panel_approval'
@@ -240,6 +247,56 @@ export function registerPhase3Tools(): void {
     },
     run: async () => {
       throw new Error("A panel is decided by a person.");
+    },
+  });
+
+  registerTool({
+    name: "list_substitutes",
+    description:
+      "Who could stand in for one panellist on one candidate's round (someone who cannot make it, or is away for the candidate's window): eligible interviewers for the round not already on it, best first. When the round is booked, `freeAtBookedTime` says whether each is free then — prefer someone who is, so the candidate's time stays.",
+    input: AppId.extend({
+      level: z.number().int().min(1).max(3),
+      replaceMemberId: z.string().uuid(),
+    }),
+    risk: "read",
+    run: async (ctx, i) => {
+      await loadApplication(ctx.orgId, i.applicationId);
+      const { substituteOptions } = await import("@/lib/panels.server");
+      const r = await substituteOptions(ctx.orgId, i.applicationId, i.level, i.replaceMemberId);
+      const tz = await orgZone(ctx.orgId);
+      return { ...r, bookedLocal: r.bookedAt ? localWhen(r.bookedAt, tz) : null };
+    },
+  });
+
+  registerTool({
+    name: "propose_substitute",
+    description:
+      "Propose a stand-in for one panellist on one candidate's round only (the role's panel is unchanged) — withMemberId from list_substitutes, with a one-line reason. A person (the role's hiring manager, else the HR head) decides. If approved and the round is booked: when the stand-in is free at that time the booking stays; otherwise the booking is cancelled and you are asked to offer new times.",
+    input: AppId.extend({
+      level: z.number().int().min(1).max(3),
+      replaceMemberId: z.string().uuid(),
+      withMemberId: z.string().uuid(),
+      reason: z.string().min(10).max(600),
+    }),
+    risk: "write",
+    describe: (i) => `Stand-in for an L${i.level} interview`,
+    proposes: async (ctx, i) => {
+      await loadApplication(ctx.orgId, i.applicationId);
+      return {
+        title: `Stand-in for an L${i.level} interview`,
+        summary: i.reason,
+        subject: {
+          type: "panel_substitute",
+          applicationId: i.applicationId,
+          level: i.level,
+          replaceMemberId: i.replaceMemberId,
+          withMemberId: i.withMemberId,
+          reason: i.reason,
+        },
+      };
+    },
+    run: async () => {
+      throw new Error("A stand-in is decided by a person.");
     },
   });
 
