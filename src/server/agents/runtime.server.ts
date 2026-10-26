@@ -1034,7 +1034,11 @@ export async function resolveTask(input: {
   if (!task) throw new Error("Task not found");
   if (task.status !== "open") throw new Error("This task has already been decided.");
   if (task.assigneeUserId && task.assigneeUserId !== input.userId) {
-    throw new Error("This task is assigned to someone else.");
+    // The named person decides; the organisation's owner may too (as the desk shows).
+    const { activeOrgOf } = await import("@/lib/auth.middleware");
+    const org = await activeOrgOf(input.userId);
+    if (!org || org.orgId !== input.orgId || !org.isOwner)
+      throw new Error("This task is assigned to someone else.");
   }
   if (task.assigneeRole) await assertRole(input.userId, input.orgId, task.assigneeRole as AppRole);
   const { decision } = input;
