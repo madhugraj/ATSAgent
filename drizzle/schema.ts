@@ -234,6 +234,44 @@ export const orgMembers = pgTable(
   ],
 );
 
+/** Who interviews, on what, how often — registered once by the admin (docs/interview-panel-plan.md). */
+export const memberInterviewerProfiles = pgTable(
+  "member_interviewer_profiles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    memberId: uuid("member_id")
+      .notNull()
+      .references(() => orgMembers.id, { onDelete: "cascade" }),
+    active: boolean("active").notNull().default(true),
+    /** Skills and competencies they assess, matched to a round's competencies. */
+    areas: text("areas")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    /** Interview rounds they take (1–3). */
+    rounds: integer("rounds")
+      .array()
+      .notNull()
+      .default(sql`'{1,2,3}'::integer[]`),
+    weeklyCap: integer("weekly_cap").notNull().default(4),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("member_interviewer_profiles_member_key").on(t.memberId),
+    index("member_interviewer_profiles_org_idx").on(t.orgId, t.active),
+    check("member_interviewer_profiles_weekly_cap_check", sql`${t.weeklyCap} between 1 and 20`),
+    check(
+      "member_interviewer_profiles_rounds_check",
+      sql`${t.rounds} <@ array[1,2,3] and cardinality(${t.rounds}) >= 1`,
+    ),
+    check("member_interviewer_profiles_areas_check", sql`cardinality(${t.areas}) <= 20`),
+  ],
+);
+
 export const userRoles = pgTable(
   "user_roles",
   {
@@ -320,6 +358,10 @@ export const requisitions = pgTable(
     experienceMax: integer("experience_max").notNull().default(5),
     budgetCtc: numeric("budget_ctc", { precision: 14, scale: 2 }).notNull().default("0"),
     hiringManager: text("hiring_manager"),
+    /** The role's hiring manager as a member (approves its interview panels). */
+    hiringManagerMemberId: uuid("hiring_manager_member_id").references(() => orgMembers.id, {
+      onDelete: "set null",
+    }),
     mustHaveSkills: text("must_have_skills")
       .array()
       .notNull()

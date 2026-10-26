@@ -111,6 +111,17 @@ beforeAll(async () => {
     isOwner: false,
   });
   await db.insert(userRoles).values({ userId: recruiter, orgId, role: "recruiter" });
+  // The role's hiring manager is a registered member (docs/interview-panel-plan.md, P0).
+  const [hm] = await db
+    .insert(orgMembers)
+    .values({
+      orgId,
+      email: `hm-${stamp}@test.local`,
+      fullName: "Priya Natarajan",
+      status: "active",
+    })
+    .returning({ id: orgMembers.id });
+  Object.assign(complete, { hiringManager: "Priya Natarajan", hiringManagerMemberId: hm!.id });
 
   const [r] = await db
     .insert(requisitions)
@@ -260,7 +271,7 @@ describe("slot filling", () => {
     );
     expect(s.mustHaveSkills).toEqual(["React"]);
     expect([s.experienceMin, s.experienceMax]).toEqual([4, 8]);
-    expect(desk.missingSlots(s)).toEqual(["location", "workMode", "openings"]);
+    expect(desk.missingSlots(s)).toEqual(["location", "workMode", "openings", "hiringManager"]);
   });
 
   test("asks one question at a time, then shows similar roles", async () => {
@@ -271,6 +282,7 @@ describe("slot filling", () => {
         location: "Chennai",
         workMode: "onsite",
         openings: 1,
+        hiringManager: "Priya Natarajan",
       },
       reply: "How many years of experience should candidates have?",
     });
@@ -321,7 +333,7 @@ const complete = {
   experienceMax: 6,
   openings: 1,
   mustHaveSkills: ["React", "Node.js"],
-};
+} as Record<string, unknown>;
 
 async function confirming() {
   const conv = await newConversation();
@@ -994,7 +1006,12 @@ describe("delegating to the market, and showing the desk's thinking", () => {
     expect(card.understood).toEqual(
       expect.arrayContaining([{ label: "Role", value: "UI/UX Engineer" }]),
     );
-    expect(card.missing).toEqual(["experience", "number of openings", "must-have skills"]);
+    expect(card.missing).toEqual([
+      "experience",
+      "number of openings",
+      "must-have skills",
+      "hiring manager",
+    ]);
     expect(card.next).toMatch(/experience/);
   });
 
@@ -1002,7 +1019,13 @@ describe("delegating to the market, and showing the desk's thinking", () => {
     const conv = await newConversation();
     await db
       .update(hiringConversations)
-      .set({ slots: uiux as never })
+      .set({
+        slots: {
+          ...uiux,
+          hiringManager: complete.hiringManager,
+          hiringManagerMemberId: complete.hiringManagerMemberId,
+        } as never,
+      })
       .where(eq(hiringConversations.id, conv.id));
     researchResult = { ok: true, data: proposal, grounded: true, usage: null };
     const before = researchCalls;
@@ -1035,7 +1058,13 @@ describe("delegating to the market, and showing the desk's thinking", () => {
     const conv = await newConversation();
     await db
       .update(hiringConversations)
-      .set({ slots: uiux as never })
+      .set({
+        slots: {
+          ...uiux,
+          hiringManager: complete.hiringManager,
+          hiringManagerMemberId: complete.hiringManagerMemberId,
+        } as never,
+      })
       .where(eq(hiringConversations.id, conv.id));
     await desk.postMessage(conv, {
       role: "desk",

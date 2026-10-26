@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-86 tables across 9 domains.
+87 tables across 9 domains.
 
 ## Identity & access
 
@@ -203,6 +203,7 @@ erDiagram
     integer experience_max
     numeric budget_ctc
     text hiring_manager "nullable"
+    uuid hiring_manager_member_id FK
     text must_have_skills
     text good_to_have_skills
     text responsibilities "nullable"
@@ -271,6 +272,7 @@ erDiagram
 
   requisitions }o--o| organizations : "org_id · cascade"
   requisitions }o--o| departments : "department_id"
+  requisitions }o--o| org_members : "hiring_manager_member_id"
   requisitions }o--o| users : "created_by"
   job_descriptions }o--|| requisitions : "requisition_id · cascade"
   job_descriptions }o--o| organizations : "org_id · cascade"
@@ -1149,6 +1151,9 @@ erDiagram
 | `master_items` | `org_id` | `organizations` | cascade |
 | `match_scores` | `application_id` | `applications` | cascade |
 | `match_scores` | `org_id` | `organizations` | cascade |
+| `member_interviewer_profiles` | `member_id` | `org_members` | cascade |
+| `member_interviewer_profiles` | `org_id` | `organizations` | cascade |
+| `member_interviewer_profiles` | `updated_by` | `users` | no action |
 | `notification_states` | `org_id` | `organizations` | cascade |
 | `notification_states` | `user_id` | `users` | cascade |
 | `offer_negotiations` | `application_id` | `applications` | cascade |
@@ -1174,6 +1179,7 @@ erDiagram
 | `requisition_board_postings` | `requisition_id` | `requisitions` | cascade |
 | `requisitions` | `created_by` | `users` | no action |
 | `requisitions` | `department_id` | `departments` | no action |
+| `requisitions` | `hiring_manager_member_id` | `org_members` | no action |
 | `requisitions` | `org_id` | `organizations` | cascade |
 | `salary_benchmarks` | `org_id` | `organizations` | cascade |
 | `salary_benchmarks` | `requisition_id` | `requisitions` | no action |
@@ -1288,6 +1294,7 @@ erDiagram
 | `job_index_notifications` | — | 10 | — |
 | `master_items` | Organisations & masters | 8 | — |
 | `match_scores` | Candidates & pipeline | 26 | — |
+| `member_interviewer_profiles` | — | 9 | (member_id) |
 | `notification_states` | — | 7 | — |
 | `offer_negotiations` | — | 21 | — |
 | `offers` | Offers & onboarding | 14 | — |
@@ -1302,7 +1309,7 @@ erDiagram
 | `platform_admins` | Identity & access | 6 | (email) |
 | `product_catalogue_commercials` | Organisations & masters | 8 | — |
 | `requisition_board_postings` | — | 16 | (requisitionId+provider) |
-| `requisitions` | Requisitions & job content | 41 | (orgId+code) |
+| `requisitions` | Requisitions & job content | 42 | (orgId+code) |
 | `salary_benchmarks` | Intelligence | 15 | — |
 | `screening_calls` | Screening & interviews | 33 | — |
 | `screening_kits` | Screening & interviews | 11 | — |

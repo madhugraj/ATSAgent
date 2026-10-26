@@ -2,6 +2,8 @@ import { Link } from "@tanstack/react-router";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
+import { InterviewerProfileCell } from "@/components/InterviewerProfileCell";
+import { listInterviewerProfiles } from "@/lib/interviewers.functions";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -157,6 +159,16 @@ function Team() {
   } | null>(null);
 
   const members = useQuery({ queryKey: ["org_members"], queryFn: () => fetchMembers({}) });
+  // Who interviews, on what (docs/interview-panel-plan.md).
+  const fetchInterviewers = useServerFn(listInterviewerProfiles);
+  const interviewerRows = useQuery({
+    queryKey: ["interviewer_profiles"],
+    queryFn: () => fetchInterviewers(),
+  });
+  const interviewers = new Map(
+    (interviewerRows.data ?? []).map((r) => [r.memberId, r.profile] as const),
+  );
+  const canManageInterviewers = canAdmin || myRoles.includes("hr_head");
   const all = members.data ?? [];
 
   const rolesOf = (m: OrgMember) => (m.userId ? m.roles : m.invitedRole ? [m.invitedRole] : []);
@@ -458,6 +470,7 @@ function Team() {
                   <th className="p-3 text-left font-medium">Title</th>
                   <th className="p-3 text-left font-medium">Status</th>
                   <th className="p-3 text-left font-medium">Roles (click to edit)</th>
+                  <th className="p-3 text-left font-medium">Interviews</th>
                   <th className="p-3 text-left font-medium">Joined</th>
                   <th className="w-12 p-3" />
                 </tr>
@@ -567,6 +580,14 @@ function Team() {
                             })}
                           </PopoverContent>
                         </Popover>
+                      </td>
+                      <td className="p-3">
+                        <InterviewerProfileCell
+                          memberId={m.id}
+                          name={m.fullName || m.email}
+                          profile={interviewers.get(m.id)}
+                          canEdit={canManageInterviewers}
+                        />
                       </td>
                       <td className="num p-3 text-muted-foreground">
                         {m.joinedAt ? new Date(m.joinedAt).toLocaleDateString() : "—"}

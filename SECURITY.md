@@ -59,7 +59,9 @@ We credit reporters in release notes on request.
   call and the source of its must-never list.
 - Rate limiting on all public HTTP routes and server-function RPCs (`src/server.ts`).
 - SSRF gate: server-side fetches of user-supplied URLs go through `src/server/safe-fetch.ts`.
-- Auditing: privileged actions append to `audit_log` (`src/server/audit.ts`).
+- Auditing: privileged actions append to `audit_log` (`src/server/audit.ts`), including member
+  invites (`member.invited`) and interviewer-profile changes (`member.interviewer_profile.set`,
+  owner, CBO or HR head only).
 - AI safety: untrusted CV, JD, profile and mail text is delimited before prompting; structured model
   responses are schema-validated before use. AI decisions retain evidence and permit audited human override.
 - AI usage ledger: every provider request is recorded in `ai_usage_events`

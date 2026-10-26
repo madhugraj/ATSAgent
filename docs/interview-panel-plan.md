@@ -1,6 +1,8 @@
 # Interview panels — plan
 
-Status: **plan, not built** (2026-10-26). For review before any code.
+Status: **P0 built** (2026-10-26) — interviewer profiles, hiring manager as a member, the desk asks for it, invites audited. P1–P4 to come.
+
+Decisions (2026-10-26): test in the Yavar organisation; the role's hiring manager approves panels; one panel per role and round; weekly cap 4; members only.
 
 ## The problem
 

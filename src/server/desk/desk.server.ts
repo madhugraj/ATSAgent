@@ -70,6 +70,10 @@ export const DeskSlots = z.object({
   researchRole: z.boolean().optional(),
   /** Set by the desk once the JD-detail question has been asked. */
   jdDetailsAsked: z.boolean().optional(),
+  /** The hiring manager as the person named them (a name or an e-mail). */
+  hiringManager: z.string().trim().min(2).max(120).optional(),
+  /** Set by the system only: the registered member that name resolved to. */
+  hiringManagerMemberId: z.string().uuid().optional(),
 });
 export type DeskSlots = z.infer<typeof DeskSlots>;
 
@@ -81,6 +85,8 @@ export const REQUIRED_SLOTS = [
   "experience",
   "openings",
   "mustHaveSkills",
+  // A registered member: they approve the role's interview panels (docs/interview-panel-plan.md).
+  "hiringManager",
 ] as const;
 export type RequiredSlot = (typeof REQUIRED_SLOTS)[number];
 
@@ -91,14 +97,67 @@ const FALLBACK_QUESTION: Record<RequiredSlot, string> = {
   experience: "How many years of experience should candidates have (for example 3–6)?",
   openings: "How many people do you need for this role?",
   mustHaveSkills: "Which skills are must-haves for this role?",
+  hiringManager: "Who is the hiring manager for this role? They approve its interview panels.",
 };
 
 export function missingSlots(s: DeskSlots): RequiredSlot[] {
   return REQUIRED_SLOTS.filter((k) => {
     if (k === "experience") return s.experienceMin === undefined;
     if (k === "mustHaveSkills") return !s.mustHaveSkills?.length;
+    if (k === "hiringManager") return !s.hiringManagerMemberId;
     return s[k] === undefined;
   });
+}
+
+/** Active members who can be a role's hiring manager: hiring managers and department heads first. */
+export async function hiringManagerOptions(
+  orgId: string,
+): Promise<{ memberId: string; name: string; email: string }[]> {
+  const rows = (await db.execute(sql`
+    select m.id, coalesce(nullif(m.full_name, ''), m.email) as name, m.email,
+      exists (select 1 from user_roles r where r.user_id = m.user_id and r.org_id = m.org_id
+        and r.role in ('hiring_manager', 'department_head')) as manager
+    from org_members m
+    where m.org_id = ${orgId} and m.status = 'active'
+    order by manager desc, name`)) as unknown as {
+    id: string;
+    name: string;
+    email: string;
+    manager: boolean;
+  }[];
+  const managers = rows.filter((r) => r.manager);
+  return (managers.length ? managers : rows).map((r) => ({
+    memberId: r.id,
+    name: r.name,
+    email: r.email,
+  }));
+}
+
+/**
+ * The registered member a person meant by "the hiring manager is …" — by e-mail,
+ * or by name (whole name, or a unique first name). Null when nobody matches, or
+ * more than one does: the desk then asks again; it never guesses.
+ */
+export async function resolveHiringManager(
+  orgId: string,
+  said: string,
+): Promise<{ memberId: string; name: string } | null> {
+  const want = said.trim().toLowerCase();
+  const rows = (await db.execute(sql`
+    select id, coalesce(nullif(full_name, ''), email) as name, lower(email) as email,
+      lower(coalesce(full_name, '')) as full_name
+    from org_members where org_id = ${orgId} and status = 'active'`)) as unknown as {
+    id: string;
+    name: string;
+    email: string;
+    full_name: string;
+  }[];
+  const exact = rows.filter((r) => r.email === want || (r.full_name && r.full_name === want));
+  const pick =
+    exact.length === 1
+      ? exact
+      : rows.filter((r) => r.full_name && r.full_name.split(/\s+/)[0] === want.split(/\s+/)[0]);
+  return pick.length === 1 ? { memberId: pick[0]!.id, name: pick[0]!.name } : null;
 }
 
 /** Merge newly extracted details over the known ones; empty values never erase. */
@@ -301,7 +360,7 @@ const SYSTEM = [
   "",
   "You are the hiring desk of an applicant tracking system. A recruiter describes a hiring need in a chat.",
   "Each turn, return JSON with:",
-  '- "slots": only the hiring details the LATEST message states or changes (omit the rest). Fields: roleTitle, location, workMode (onsite|hybrid|remote — "office"/"WFO" means onsite, "WFH"/"work from home" means remote; a message that says "hybrid" sets hybrid even next to a city), experienceMin, experienceMax (years), openings, mustHaveSkills, goodToHaveSkills (short skill names), budgetLpaMax (lakhs per annum — the budget; when a band is given as well, the budget is the figure called budget, not the top of the band), bandLpaMin and bandLpaMax (a pay band the person gives, lakhs per annum; only when stated), maxNoticeDays, employmentType (full_time|contract|internship), urgency (immediate|within_a_month|flexible). "a candidate" means openings 1. Expand obvious role shorthands (e.g. "Full stack" → "Full Stack Developer"). Never invent values that were not said.',
+  '- "slots": only the hiring details the LATEST message states or changes (omit the rest). Fields: roleTitle, location, workMode (onsite|hybrid|remote — "office"/"WFO" means onsite, "WFH"/"work from home" means remote; a message that says "hybrid" sets hybrid even next to a city), experienceMin, experienceMax (years), openings, mustHaveSkills, goodToHaveSkills (short skill names), budgetLpaMax (lakhs per annum — the budget; when a band is given as well, the budget is the figure called budget, not the top of the band), bandLpaMin and bandLpaMax (a pay band the person gives, lakhs per annum; only when stated), maxNoticeDays, employmentType (full_time|contract|internship), urgency (immediate|within_a_month|flexible), hiringManager (the person who manages this hire, exactly as named — a name or an e-mail; never guess one, and never set hiringManagerMemberId). "a candidate" means openings 1. Expand obvious role shorthands (e.g. "Full stack" → "Full Stack Developer"). Never invent values that were not said.',
   '- JD details (only when the person gives them): responsibilities (their key responsibilities, as text), reportingTo, successMeasures (what success looks like), education. If they ask you to fill these from the market / research / "you decide", set researchRole true.',
   '- "command": {"type":"none"} unless the person asks to act: "talk to / screen / call the first 5" → {"type":"screen","top":5}; "screen 1, 3 and 4" → {"type":"screen","ranks":[1,3,4]}; "create a new role" → {"type":"new_role"}; "use REQ-2026-014" → {"type":"use_existing","code":"REQ-2026-014"}.',
   '- "command" also: "close / cancel / delete / withdraw this role" → {"type":"close_role"}.',
@@ -336,6 +395,9 @@ export async function runTurn(
   const prompt = [
     `CURRENT DETAILS: ${JSON.stringify(slots)}`,
     `MISSING (ask in this order): ${missingSlots(slots).join(", ") || "none"}`,
+    `HIRING MANAGERS ON THE TEAM (offer these by name when asking for the hiring manager): ${
+      (await hiringManagerOptions(orgId)).map((m) => m.name).join(", ") || "none registered yet"
+    }`,
     `STAGE: ${conv.status}`,
     `OPEN PROPOSAL: ${open ? `yes — ${JSON.stringify({ ...open.proposal, sources: undefined, reasoning: undefined })} (if the person asks for changes to it, put the changed full lists in "slots")` : "no"}`,
     `OPEN REQUESTS (from agents in this thread): ${
@@ -605,7 +667,7 @@ export async function createNewRole(
         s.bandLpaMin !== undefined && s.bandLpaMax !== undefined ? s.bandLpaMax * 100_000 : null,
       maxNoticePeriodDays: s.maxNoticeDays ?? null,
       workAuthorizationRequired: null,
-      hiringManager: null,
+      hiringManager: s.hiringManager ?? null,
       mustHaveSkills: s.mustHaveSkills ?? [],
       goodToHaveSkills: s.goodToHaveSkills ?? [],
       responsibilities: jdBrief(s),
@@ -617,6 +679,12 @@ export async function createNewRole(
     },
     "draft",
   );
+  // The hiring manager as a member (resolved when the person named them).
+  if (s.hiringManagerMemberId)
+    await db
+      .update(requisitions)
+      .set({ hiringManagerMemberId: s.hiringManagerMemberId })
+      .where(and(eq(requisitions.id, created.id), eq(requisitions.orgId, conv.orgId)));
   await db
     .update(hiringConversations)
     .set({
@@ -996,7 +1064,20 @@ async function handleUserMessageInner(
   }
   const { turn } = res;
   const before = conv.slots as DeskSlots;
-  const slots = mergeSlots(before, turn.slots);
+  delete turn.slots.hiringManagerMemberId; // set only by the system, below
+  let slots = mergeSlots(before, turn.slots);
+  // The hiring manager must be a registered member: resolve the name they gave.
+  let hiringManagerNote: string | null = null;
+  if (turn.slots.hiringManager) {
+    const hm = await resolveHiringManager(conv.orgId, turn.slots.hiringManager);
+    if (hm) slots = { ...slots, hiringManager: hm.name, hiringManagerMemberId: hm.memberId };
+    else {
+      const { hiringManager: _drop, hiringManagerMemberId: _id, ...rest } = slots;
+      slots = rest;
+      const options = (await hiringManagerOptions(conv.orgId)).map((m) => m.name);
+      hiringManagerNote = `I couldn't find "${turn.slots.hiringManager}" on your team — the hiring manager has to be a registered member (the admin adds people on the Team page).${options.length ? ` Hiring managers on your team: ${options.join(", ")}.` : ""}`;
+    }
+  }
   await db
     .update(hiringConversations)
     .set({
@@ -1007,6 +1088,7 @@ async function handleUserMessageInner(
     })
     .where(eq(hiringConversations.id, conv.id));
   conv = { ...conv, slots: slots as never };
+  if (hiringManagerNote) await postMessage(conv, { role: "desk", body: hiringManagerNote });
   const understood = changedSlots(before, slots);
   // The person edited the proposed details themselves: the open proposal is superseded,
   // so a later "ok" cannot overwrite their edits with it.
@@ -2795,6 +2877,7 @@ const SLOT_LABEL: Record<string, string> = {
   reportingTo: "Reports to",
   successMeasures: "Success after 12 months",
   education: "Education",
+  hiringManager: "Hiring manager",
 };
 const REQUIRED_LABEL: Record<RequiredSlot, string> = {
   roleTitle: "role",
@@ -2803,6 +2886,7 @@ const REQUIRED_LABEL: Record<RequiredSlot, string> = {
   experience: "experience",
   openings: "number of openings",
   mustHaveSkills: "must-have skills",
+  hiringManager: "hiring manager",
 };
 
 /** What the latest message changed, as label / value lines (the desk's "understood"). */
