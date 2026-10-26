@@ -577,7 +577,9 @@ export function registerPhase3Agents(): void {
     // frames the call as helping the candidate and the panel agree a time, naming the panel.
     // 1.6.0: staff are confidential — never names the panel or the hiring team, only how
     // many; the voice agents' charter printed into the call; plain, formal tone.
-    version: "1.6.0",
+    // 1.6.1: one wording with the invite e-mail and the time-choice page — "the hiring
+    // team" / "a panel of N from the hiring team".
+    version: "1.6.1",
     owner: "hr_head",
     responsibility:
       "Holds one short AI phone call to help a candidate and the interview panel agree a time the candidate was already e-mailed: says it is an AI, tells them where they stand in the process, books one of the offered or pre-checked times (free for the whole panel), or notes when they are free — nothing else.",

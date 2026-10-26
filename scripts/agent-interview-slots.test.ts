@@ -416,9 +416,11 @@ describe("the candidate chooses the time", () => {
       orgName: "Slots Org",
       jobTitle: "UI/UX Engineer",
       roundLabel: "L1 interview",
-      interviewerName: "Priya",
+      withText: "the hiring team",
       status: "offered",
     });
+    // Staff are confidential: no interviewer's name or e-mail on the public page.
+    expect(JSON.stringify(p)).not.toMatch(/Priya|Natarajan|panel-/);
     expect(p.slots).toHaveLength(3);
     expect(JSON.stringify(p)).not.toMatch(/asha|Raman|@/i);
     expect(await offers.publicOffer("0".repeat(64))).toBeNull();
@@ -448,6 +450,18 @@ describe("the candidate chooses the time", () => {
     expect((brief.templateData as Record<string, string>)["candidateName"]).toBe("Asha Raman");
     expect((brief.attachments as { filename: string }[])[0]!.filename).toMatch(/\.ics$/);
     expect((await lastDesk(conv.id))!.body).toMatch(/^Asha Raman chose .* It is booked/);
+    // The candidate's invite and its calendar file say who it is with, never a name.
+    const invite = (
+      await db.select().from(emailOutbox).where(eq(emailOutbox.kind, "interview_invite"))
+    ).find((m) => m.orgId === orgId)!;
+    expect(invite.toEmail).toMatch(/^asha-/);
+    expect((invite.templateData as Record<string, string>)["withText"]).toBe("the hiring team");
+    const ics = Buffer.from(
+      (invite.attachments as { contentBase64: string }[])[0]!.contentBase64,
+      "base64",
+    ).toString("utf8");
+    expect(ics).toContain("With: the hiring team");
+    expect(JSON.stringify(invite.templateData) + ics).not.toMatch(/Priya|Natarajan|panel-\d/);
     expect(await offers.chooseSlot(o.token, o.slots[0]!)).toMatchObject({ booked: false });
   });
 

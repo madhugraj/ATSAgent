@@ -12,6 +12,8 @@
  */
 import { and, eq, inArray, lt, sql, type SQL } from "drizzle-orm";
 
+import { interviewWith } from "./interview-with";
+
 import { db } from "../server/db";
 import {
   applications,
@@ -322,7 +324,8 @@ export type PublicOffer = {
   roundLabel: string;
   durationMins: number;
   mode: string;
-  interviewerName: string | null;
+  /** "the hiring team" / "a panel of N from the hiring team" — never a name. */
+  withText: string;
   timeZone: string;
   status: "offered" | "booked" | "declined" | "expired" | "cancelled";
   slots: string[];
@@ -345,9 +348,8 @@ export async function publicOffer(token: string): Promise<PublicOffer | null> {
     roundLabel: `L${o.offer.level} interview`,
     durationMins: o.offer.durationMins,
     mode: o.offer.mode,
-    // First name only on the public page.
-    interviewerName:
-      displayName(o.offer.interviewerName, o.offer.interviewerEmail).split(/\s+/)[0] ?? null,
+    // Never who on the public page — staff are confidential.
+    withText: interviewWith(1 + (o.offer.panel?.length ?? 0)),
     timeZone: (await getOrgEmailSettings(o.offer.orgId)).timezone,
     status: expired ? "expired" : (o.offer.status as PublicOffer["status"]),
     slots: o.offer.status === "offered" && !expired ? pickable : [],

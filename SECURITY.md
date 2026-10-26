@@ -50,7 +50,9 @@ We credit reporters in release notes on request.
   is arranged — by number, never a free-form time — through the same booking core as the
   candidate's link (one booking per offer); a person approves each call (audited
   `scheduling_call.requested`).
-  Staff are confidential on calls: neither voice agent names or describes the hiring manager,
+  Staff are confidential to candidates: the interview invite e-mail, its calendar file and the
+  time-choice page say only who an interview is with ("the hiring team" / "a panel of N from the
+  hiring team", `src/lib/interview-with.ts`), never a name; and on calls neither voice agent names or describes the hiring manager,
   recruiters or the interview panel — the call's facts carry only how many interviewers there are,
   and the only contact given is the organisation's mailbox. Each voice agent's dos and don'ts are
   one charter (`src/server/voice/charter.ts`, `docs/voice-agents-charter.md`), printed into every

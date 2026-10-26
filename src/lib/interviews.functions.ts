@@ -802,18 +802,19 @@ export async function scheduleInterviewCore(
       const whereText = data.meetingLink?.trim() || null;
       const modeLabel =
         data.mode === "online" ? "Online" : data.mode === "onsite" ? "Onsite" : "Phone";
+      // Who it is with, never who (staff are confidential): the hiring team or a panel of N.
+      const { interviewWith } = await import("./interview-with");
+      const withText = interviewWith(
+        (data.interviewerEmail?.trim() || data.interviewer?.trim() ? 1 : 0) +
+          (data.panel?.length ?? 0),
+      );
       const ics = buildIcs({
         uid: `interview-${interviewId}@atsiq`,
         title: `${roundLabel}: ${ctxRow?.jobTitle ?? "Role"}${
           ctxRow?.orgName ? ` (${ctxRow.orgName})` : ""
         }`,
         description:
-          [
-            data.interviewer?.trim() ? `Interviewer: ${data.interviewer.trim()}` : null,
-            data.agenda?.trim() || null,
-          ]
-            .filter(Boolean)
-            .join("\n") || null,
+          [`With: ${withText}`, data.agenda?.trim() || null].filter(Boolean).join("\n") || null,
         location: whereText ?? (data.mode === "onsite" ? (ctxRow?.orgName ?? null) : null),
         startsAt: scheduledAt.toISOString(),
         durationMins: data.durationMins,
@@ -832,7 +833,7 @@ export async function scheduleInterviewCore(
         modeLabel,
       };
       if (whereText) templateData["whereText"] = whereText;
-      if (data.interviewer?.trim()) templateData["interviewerName"] = data.interviewer.trim();
+      templateData["withText"] = withText;
       if (data.agenda?.trim()) templateData["agenda"] = data.agenda.trim();
       await enqueueEmail({
         orgId: ctx.orgId,

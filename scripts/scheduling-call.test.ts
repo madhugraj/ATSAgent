@@ -362,7 +362,7 @@ describe("the in-call tools", () => {
       "You have completed the screening, the first-round interview and the second-round interview. This call is about the third-round interview — round 3 of three. It is the last interview round: after it, the hiring team makes its decision and will e-mail you.",
     );
     expect(prompt.panelLine({ panelSize: 3 })).toBe("a panel of 3 from the hiring team");
-    expect(prompt.panelLine({ panelSize: 1 })).toBe("a member of the hiring team");
+    expect(prompt.panelLine({ panelSize: 1 })).toBe("the hiring team");
   });
 
   test("bookable options: offered first, then ≤3 alternates; too soon or repeated dropped", () => {
@@ -410,7 +410,7 @@ describe("the in-call tools", () => {
       opening.indexOf("first-round interview"),
     );
     // Interviews are held by people, and a reason is kept before ending without a booking.
-    expect(p).toContain("with a member of the hiring team.");
+    expect(p).toContain("with the hiring team.");
     expect(p).toContain("never an AI");
     expect(p).toMatch(/record_availability with exactly their words/);
     expect(p).toContain("Repeat yourself.");

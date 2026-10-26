@@ -5,6 +5,7 @@
  * call, and placeholders in the manifest (so the agents lock covers the rules).
  */
 
+import { interviewWith } from "@/lib/interview-with";
 import { charterBlock, SCHEDULING_CALL_CHARTER } from "./charter";
 
 export type SchedulingFacts = {
@@ -34,12 +35,10 @@ export type SchedulingFacts = {
 /** "Priya" / "a panel of 3 from the hiring team: Priya, Arun and Kavitha" (pure). */
 /**
  * Who the interview is with, without naming anyone (staff are confidential):
- * "a member of the hiring team" / "a panel of 2 from the hiring team" (pure).
+ * "the hiring team" / "a panel of 2 from the hiring team" (pure).
  */
 export function panelLine(f: Pick<SchedulingFacts, "panelSize">): string {
-  return f.panelSize > 1
-    ? `a panel of ${f.panelSize} from the hiring team`
-    : "a member of the hiring team";
+  return interviewWith(f.panelSize);
 }
 
 export function schedulingSystemPrompt(f: SchedulingFacts): string {
