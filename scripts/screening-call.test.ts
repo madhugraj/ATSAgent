@@ -333,7 +333,6 @@ describe("the call brief", () => {
     appliedOn: "20 October",
     booked: false,
     reschedulesLeft: 2,
-    contactName: "Asha Rao",
     contactEmail: "careers@yavar.test",
     candidateFirstName: "Meera",
     cv: { currentCompany: "Acme", experienceYears: 7, location: "Bengaluru" },

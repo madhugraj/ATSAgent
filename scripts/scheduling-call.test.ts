@@ -316,7 +316,7 @@ describe("the in-call tools", () => {
     expect(outcome.scheduledEnd("opt_out", 1)).toBe("completed");
   });
 
-  test("a panel is said as a panel; no name means a member of the hiring team", () => {
+  test("a panel is said as a panel — how many, never who", () => {
     const base = {
       assistantName: "Saranya",
       orgName: "Yavar",
@@ -330,9 +330,9 @@ describe("the in-call tools", () => {
       isCallback: false,
       callbackAllowed: true,
     };
-    expect(
-      prompt.schedulingSystemPrompt({ ...base, interviewerName: "Priya", panelSize: 3 }),
-    ).toContain("with a panel of 3 from the hiring team, led by Priya.");
+    const p = prompt.schedulingSystemPrompt({ ...base, panelSize: 3 });
+    expect(p).toContain("with a panel of 3 from the hiring team.");
+    expect(p).toContain("Never name or describe anyone on the panel");
   });
 
   test("where they stand: stages only — done, booked, this round of how many, what follows", () => {
@@ -361,14 +361,8 @@ describe("the in-call tools", () => {
     ).toBe(
       "You have completed the screening, the first-round interview and the second-round interview. This call is about the third-round interview — round 3 of three. It is the last interview round: after it, the hiring team makes its decision and will e-mail you.",
     );
-    expect(
-      prompt.panelLine({
-        interviewerName: "Priya",
-        panelSize: 3,
-        panelNames: ["Priya", "Arun", "Kavitha"],
-      }),
-    ).toBe("a panel of 3 from the hiring team: Priya, Arun and Kavitha");
-    expect(prompt.panelLine({ interviewerName: "Priya", panelSize: 1 })).toBe("Priya");
+    expect(prompt.panelLine({ panelSize: 3 })).toBe("a panel of 3 from the hiring team");
+    expect(prompt.panelLine({ panelSize: 1 })).toBe("a member of the hiring team");
   });
 
   test("bookable options: offered first, then ≤3 alternates; too soon or repeated dropped", () => {
@@ -393,7 +387,6 @@ describe("the in-call tools", () => {
       roundLabel: "first-round interview",
       durationMins: 60,
       format: "online (video call)",
-      interviewerName: "Priya",
       panelSize: 1,
       options: [
         { spoken: "Tuesday 27 October at 11:00", alternate: false },
@@ -417,7 +410,7 @@ describe("the in-call tools", () => {
       opening.indexOf("first-round interview"),
     );
     // Interviews are held by people, and a reason is kept before ending without a booking.
-    expect(p).toContain("with Priya.");
+    expect(p).toContain("with a member of the hiring team.");
     expect(p).toContain("never an AI");
     expect(p).toMatch(/record_availability with exactly their words/);
     expect(p).toContain("Repeat yourself.");
@@ -952,24 +945,14 @@ describe("a whole scheduling call (fake line)", () => {
       /^You have completed the screening\. Your first-round interview is booked for /,
     );
     expect(b.facts.progress).toContain("This call is about the second-round interview");
-    expect(prompt.panelLine(b.facts)).toBe(
-      "a panel of 2 from the hiring team: Priya Natarajan and Arun Kumar",
-    );
+    expect(prompt.panelLine(b.facts)).toBe("a panel of 2 from the hiring team");
     const p = prompt.schedulingSystemPrompt(b.facts);
+    // Staff are confidential: no interviewer's name or e-mail reaches the call.
+    expect(p).not.toMatch(/Priya|Natarajan|Arun|Kumar|@test\.local/);
     expect(p).toContain("## Where they stand");
     expect(p).toContain("help the candidate and the panel agree a time");
     // Progress never carries the grade.
     expect(b.facts.progress).not.toMatch(/70|score|verdict/i);
-  });
-
-  test("an interviewer without a name is a member of the hiring team, never an e-mail guess", async () => {
-    const { call, offer: of } = await arranged();
-    await db
-      .update(interviewSlotOffers)
-      .set({ interviewerName: null })
-      .where(eq(interviewSlotOffers.id, of.id));
-    const b = await brief.loadSchedulingBrief(orgId, call.id);
-    expect(b!.facts.interviewerName).toBe("a member of the hiring team");
   });
 
   test("picked by the link before the call: nobody is dialled", async () => {

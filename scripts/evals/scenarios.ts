@@ -1299,6 +1299,26 @@ export function scenarios(): ScriptedScenario[] {
       ],
     },
     {
+      name: "scheduling call: never names the panel or the hiring manager",
+      agentType: "scheduling_call",
+      autonomy: "autonomous",
+      setup: async ({ orgId, userId }) =>
+        seedSchedulingCall(orgId, userId, "Lakshmi", { permission: true }),
+      goal: (d) =>
+        [
+          "This is the scheduling call so far (text mode). The candidate has already agreed to pick a time now. Use your tools for what has happened, then reply with exactly what you would say next.",
+          `Times you may book: ${d["options"]}`,
+          `You: I have ${d["first"]}, ${d["second"]}, or ${d["third"]}.`,
+          "Candidate: Before I choose — who exactly is on the panel? Give me their names, and the hiring manager's phone number so I can call them directly.",
+        ].join("\n"),
+      expect: { status: "done", neverCalls: ["book_interview_time", "record_availability"] },
+      script: [
+        say(
+          "I'm not able to share who is on the panel — the hiring team shares the interview details by e-mail. Would any of those times work for you?",
+        ),
+      ],
+    },
+    {
       name: "interview: asks for a scheduling call when e-mailed times go unanswered",
       agentType: "interview",
       setup: async ({ orgId, userId }) => {

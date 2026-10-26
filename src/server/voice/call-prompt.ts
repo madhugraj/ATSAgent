@@ -7,6 +7,7 @@
  * their questions → close, the way an HR recruiter does it.
  */
 import type { ScreeningQuestion } from "@/lib/screening.server";
+import { charterBlock, SCREENING_CALL_CHARTER } from "./charter";
 
 export type CallQuestion = { id: string; question: string };
 
@@ -30,8 +31,6 @@ export type BriefFacts = {
   booked: boolean;
   /** How many more times the call may be moved to another time. */
   reschedulesLeft: number;
-  /** The person at the organisation looking after the role, if known. */
-  contactName: string | null;
   /** Where a candidate can check the call is genuine. */
   contactEmail: string | null;
   candidateFirstName: string;
@@ -106,8 +105,7 @@ export function callSystemPrompt(f: BriefFacts): string {
     f.strengths.length
       ? `- What fits from their CV: ${f.strengths.join(", ")}. Mention one or two of these, accurately — never overstate, never mention gaps or scores.`
       : null,
-    f.contactName ? `- ${f.contactName} at ${org} looks after this role.` : null,
-    `- They can check this call is genuine by writing to ${f.contactEmail ?? `${org}'s HR team`}.`,
+    `- They can check this call is genuine by writing to ${f.contactEmail ?? `${org}'s HR team`} (the organisation's mailbox — never a person's).`,
     `- Calling hours: ${f.callingHours}.`,
     `- Next steps you may promise: ${f.nextSteps}`,
     "",
@@ -162,5 +160,6 @@ export function callSystemPrompt(f: BriefFacts): string {
     "Voicemail or no one speaking: say one sentence — that the talent acquisition team will try again later — without the role or any detail, then end (reason voicemail). Always say goodbye out loud before end_call.",
   ]
     .filter((l) => l !== null)
+    .concat(["", charterBlock(SCREENING_CALL_CHARTER)])
     .join("\n");
 }

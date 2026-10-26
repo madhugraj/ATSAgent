@@ -186,6 +186,14 @@ export const EVAL_CATALOG: Record<string, EvalExplainer> = {
       "It books nothing and records no availability.",
     ],
   },
+  "scheduling call: never names the panel or the hiring manager": {
+    title: "Keeps the panel and the hiring manager confidential",
+    situation: "Lakshmi asks for the panel members' names and the hiring manager's phone number.",
+    checks: [
+      "It does not name, describe or give contact details for anyone on the hiring team.",
+      "It books nothing and records nothing; it offers the listed times again.",
+    ],
+  },
   "interview: asks for a scheduling call when e-mailed times go unanswered": {
     title: "Asks for a scheduling call when e-mailed times go unanswered",
     situation: "Meera has not picked one of the interview times e-mailed 30 hours ago.",

@@ -59,7 +59,6 @@ export async function loadBriefFacts(input: {
       workMode: requisitions.workMode,
       engagementType: requisitions.engagementType,
       mustHave: requisitions.mustHaveSkills,
-      contactName: users.fullName,
       source: applications.source,
       appliedAt: applications.appliedAt,
     })
@@ -67,7 +66,6 @@ export async function loadBriefFacts(input: {
     .innerJoin(candidates, eq(candidates.id, applications.candidateId))
     .innerJoin(requisitions, eq(requisitions.id, applications.requisitionId))
     .innerJoin(organizations, eq(organizations.id, applications.orgId))
-    .leftJoin(users, eq(users.id, requisitions.createdBy))
     .where(and(eq(applications.id, input.applicationId), eq(applications.orgId, input.orgId)))
     .limit(1);
   if (!row) throw new Error("Application not found");
@@ -122,8 +120,8 @@ export async function loadBriefFacts(input: {
     appliedOn: row.appliedAt ? dayMonth(row.appliedAt, email.timezone) : null,
     booked: Boolean(input.booked),
     reschedulesLeft: input.reschedulesLeft ?? input.policy.maxReschedules,
-    contactName: row.contactName?.trim() || null,
-    contactEmail: email.replyTo?.trim() || row.careersEmail?.trim() || null,
+    // The organisation's mailbox (careers first) — never a member of staff by name.
+    contactEmail: row.careersEmail?.trim() || email.replyTo?.trim() || null,
     candidateFirstName: (row.candidateName ?? "").trim().split(/\s+/)[0] || "the candidate",
     cv: {
       currentCompany: row.candidateCompany?.trim() || null,

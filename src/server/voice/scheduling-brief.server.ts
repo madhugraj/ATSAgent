@@ -183,10 +183,6 @@ export async function loadSchedulingBrief(
     totalRounds: prog.plan.rounds.length,
     roundName: planRound?.name ?? null,
   });
-  const panelNames = [
-    row.offer.interviewerName?.trim(),
-    ...(row.offer.panel ?? []).map((p) => p.name?.trim()),
-  ].filter((n): n is string => Boolean(n));
   const options = bookableOptions(
     row.offer.slots,
     row.call.alternates,
@@ -205,11 +201,8 @@ export async function loadSchedulingBrief(
       roundLabel: `${ROUND[row.offer.level - 1] ?? `round ${row.offer.level}`} interview`,
       durationMins: row.offer.durationMins,
       format: FORMAT[row.offer.mode] ?? row.offer.mode,
-      // A person's name, or "a member of the hiring team" — never a guess from an
-      // e-mail address ("agent-demo@…" was said as "Agent", heard as an AI interviewer).
-      interviewerName: row.offer.interviewerName?.trim() || "a member of the hiring team",
+      // How many interviewers — never who (staff are confidential).
       panelSize: 1 + (row.offer.panel?.length ?? 0),
-      panelNames,
       progress,
       options: options.map((o) => ({ spoken: spokenWhen(o.at, tz), alternate: o.alternate })),
       maxMinutes: 4,
