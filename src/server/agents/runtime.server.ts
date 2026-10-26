@@ -1184,7 +1184,15 @@ export type TickCounts = {
 /** One scheduler tick: reclaim expired leases, claim queued runs, drive them. */
 /** `orgId` limits the tick to one organisation (eval harness); the scheduler omits it. */
 export async function runAgentTick(
-  opts: { max?: number; orgId?: string } = {},
+  opts: {
+    max?: number;
+    orgId?: string;
+    /**
+     * Drive only this run — no events, no sweeps, no other runs (evals: a sweep
+     * starting another run would take the scripted model's replies).
+     */
+    onlyRunId?: string;
+  } = {},
 ): Promise<TickCounts> {
   const max = Math.min(Math.max(opts.max ?? 10, 1), 50);
   const counts: TickCounts = {
@@ -1199,14 +1207,15 @@ export async function runAgentTick(
   const now = new Date();
 
   // 0. Turn lifecycle events into agent runs and close gates decided elsewhere.
-  try {
-    const { processAgentEvents } = await import("./orchestrator.server");
-    counts.events = (await processAgentEvents(opts.orgId ? { orgId: opts.orgId } : {})).processed;
-    const { scheduleSweeps } = await import("./orchestrator.server");
-    await scheduleSweeps(opts.orgId ? { orgId: opts.orgId } : {});
-  } catch (e) {
-    log.error("agent.orchestrator.failed", { error: e instanceof Error ? e : String(e) });
-  }
+  if (!opts.onlyRunId)
+    try {
+      const { processAgentEvents } = await import("./orchestrator.server");
+      counts.events = (await processAgentEvents(opts.orgId ? { orgId: opts.orgId } : {})).processed;
+      const { scheduleSweeps } = await import("./orchestrator.server");
+      await scheduleSweeps(opts.orgId ? { orgId: opts.orgId } : {});
+    } catch (e) {
+      log.error("agent.orchestrator.failed", { error: e instanceof Error ? e : String(e) });
+    }
 
   // 1. Reclaim runs whose worker died mid-turn; give up after MAX_ATTEMPTS.
   const expired = await db
@@ -1262,6 +1271,7 @@ export async function runAgentTick(
         // A dry-run replay changes nothing, so it does not need the agent switched on.
         sql`(${agentRuns.mode} = 'replay' or exists (${switchedOn}))`,
         opts.orgId ? eq(agentRuns.orgId, opts.orgId) : undefined,
+        opts.onlyRunId ? eq(agentRuns.id, opts.onlyRunId) : undefined,
       ),
     )
     .orderBy(agentRuns.updatedAt)
