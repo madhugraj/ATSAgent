@@ -434,7 +434,7 @@ describe("asking for a scheduling call", () => {
     const fresh = await offer(appId, { ageHours: 3 });
     expect(await request.checkSchedulingCall(orgId, appId)).toMatchObject({
       ok: false,
-      reason: expect.stringMatching(/less than 24 hours ago; .* about 21 hours/),
+      reason: expect.stringMatching(/has not had its chance yet; .* about 21 hours/),
     });
     // A person arranging the call may call sooner; an agent never may.
     expect(
@@ -546,10 +546,15 @@ describe("asking for a scheduling call", () => {
 
   test("too close, or nobody to dial", async () => {
     const a = await candidateApp();
-    await offer(a.appId, { slots: [new Date(Date.now() + 10 * H).toISOString(), weekday(3)] });
+    await offer(a.appId, {
+      slots: [
+        new Date(Date.now() + 1 * H).toISOString(),
+        new Date(Date.now() + 3 * H).toISOString(),
+      ],
+    });
     expect(await request.checkSchedulingCall(orgId, a.appId)).toMatchObject({
       ok: false,
-      reason: expect.stringMatching(/less than a day away/),
+      reason: expect.stringMatching(/less than four hours away/),
     });
     const b = await candidateApp({ phone: "+1 415 555 0100" });
     await offer(b.appId);
@@ -557,6 +562,34 @@ describe("asking for a scheduling call", () => {
       ok: false,
       reason: expect.stringMatching(/no Indian mobile/),
     });
+  });
+
+  test("timing: the organisation's wait, or six hours before the link closes — never within two hours", () => {
+    const t0 = new Date("2026-10-26T05:00:00Z");
+    const at = (createdAt: Date, expiresAt: Date) =>
+      new Date(request.callableAt({ createdAt, expiresAt }, 24)).toISOString();
+    // A link open for days: after the 24-hour wait.
+    expect(at(t0, new Date(t0.getTime() + 72 * H))).toBe("2026-10-27T05:00:00.000Z");
+    // A link closing in 21 h (first time tomorrow morning): 6 h before it closes.
+    expect(at(t0, new Date(t0.getTime() + 21 * H))).toBe("2026-10-26T20:00:00.000Z");
+    // A link closing in 7 h: never sooner than 2 h after the e-mail.
+    expect(at(t0, new Date(t0.getTime() + 7 * H))).toBe("2026-10-26T07:00:00.000Z");
+  });
+
+  test("an offer whose link closes soon is called about before the wait is over", async () => {
+    const { appId } = await candidateApp();
+    const o = await offer(appId, { ageHours: 3 });
+    await db
+      .update(interviewSlotOffers)
+      .set({ expiresAt: new Date(Date.now() + 5 * H) })
+      .where(eq(interviewSlotOffers.id, o.id));
+    expect(await request.checkSchedulingCall(orgId, appId)).toMatchObject({ ok: true });
+    await request.raiseUnansweredOffers(Date.now(), orgId);
+    const ev = await db
+      .select({ payload: agentEvents.payload })
+      .from(agentEvents)
+      .where(and(eq(agentEvents.orgId, orgId), eq(agentEvents.type, "interview.slots_no_reply")));
+    expect(ev.map((e) => (e.payload as { offerId: string }).offerId)).toContain(o.id);
   });
 
   test("the trigger: an offer unanswered past the wait raises one event", async () => {

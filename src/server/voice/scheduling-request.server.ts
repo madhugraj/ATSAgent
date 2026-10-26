@@ -3,11 +3,13 @@
  * (docs/voice-scheduling-call-plan.md). Every rule is checked here, by the
  * system — never left to the agent:
  *  - scheduling calls switched on, and calls can be placed (line + voice key);
- *  - an open e-mailed offer for the candidate, whose earliest bookable time is
- *    still at least a day away;
- *  - the offer has waited the organisation's hours unanswered — or it is a
- *    repeat offer (an earlier one for this round was declined or expired),
- *    which is called about straight away;
+ *  - an open e-mailed offer for the candidate with at least one time still
+ *    four hours or more away;
+ *  - the offer has had its chance by e-mail: the organisation's hours have
+ *    passed unanswered, or its link closes within six hours (offers expire two
+ *    hours before their first time, often within a day) — never sooner than two
+ *    hours after it was sent; a repeat offer (an earlier one for this round was
+ *    declined or expired) is called about straight away;
  *  - an Indian mobile on file, and the candidate has not opted out of AI calls;
  *  - one scheduling call per offer.
  */
@@ -22,7 +24,22 @@ import { phoneScreeningPolicyOf, phoneScreeningReadiness } from "./settings.serv
 
 type InterviewSlotOffer = typeof interviewSlotOffers.$inferSelect;
 
-const DAY = 864e5;
+const HOUR = 3_600_000;
+/** A call is worth placing only while a time at least this far ahead is left to book. */
+export const CALL_MIN_LEAD_MS = 4 * HOUR;
+/** …and is due once the e-mailed link closes within this, whatever the organisation's wait. */
+export const CALL_BEFORE_EXPIRY_MS = 6 * HOUR;
+/** …but never sooner than this after the e-mail went out. */
+export const CALL_MIN_AFTER_EMAIL_MS = 2 * HOUR;
+
+/** When an e-mailed offer may be followed by a call (pure; unit-tested). */
+export function callableAt(o: { createdAt: Date; expiresAt: Date }, waitHours: number): number {
+  const created = o.createdAt.getTime();
+  return Math.max(
+    created + CALL_MIN_AFTER_EMAIL_MS,
+    Math.min(created + waitHours * HOUR, o.expiresAt.getTime() - CALL_BEFORE_EXPIRY_MS),
+  );
+}
 const TERMINAL = ["rejected", "hired", "joined", "withdrawn", "no_show"];
 
 export type SchedulingCheck =
@@ -99,12 +116,11 @@ export async function checkSchedulingCall(
   const { roundNotYet } = await import("@/lib/slot-offers.server");
   const notYet = roundNotYet(app.stage, offer.level);
   if (notYet) return { ok: false, reason: notYet };
-  const earliest = Math.min(...offer.slots.map((s) => new Date(s).getTime()));
-  if (earliest < now + DAY)
+  if (!offer.slots.some((s) => new Date(s).getTime() >= now + CALL_MIN_LEAD_MS))
     return {
       ok: false,
       reason:
-        "The earliest offered time is less than a day away — too close for a call; a person can phone them.",
+        "Every offered time is less than four hours away — too close for a call; a person can phone them.",
     };
 
   const [already] = await db
@@ -158,12 +174,12 @@ export async function checkSchedulingCall(
     )
     .limit(1);
   const repeat = Boolean(earlier);
-  const callableAt = offer.createdAt.getTime() + policy.schedulingWaitHours * 3600_000;
-  if (!repeat && !opts.byPerson && callableAt > now) {
-    const hours = Math.ceil((callableAt - now) / 3600_000);
+  const dueAt = callableAt(offer, policy.schedulingWaitHours);
+  if (!repeat && !opts.byPerson && dueAt > now) {
+    const hours = Math.ceil((dueAt - now) / HOUR);
     return {
       ok: false,
-      reason: `The times were e-mailed less than ${policy.schedulingWaitHours} hours ago; a call can be asked for in about ${hours} hour${hours === 1 ? "" : "s"}.`,
+      reason: `The e-mail has not had its chance yet; a call can be asked for in about ${hours} hour${hours === 1 ? "" : "s"}.`,
     };
   }
   return {
@@ -185,6 +201,7 @@ export async function findAlternates(
   now = Date.now(),
 ): Promise<string[]> {
   const { findFreeSlots, roundNotBefore } = await import("@/lib/calendar-availability.server");
+  const { SLOT_OFFER } = await import("@/lib/slot-offers.server");
   const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
   const timeZone = (await getOrgEmailSettings(orgId)).timezone;
   const r = await findFreeSlots(orgId, {
@@ -196,10 +213,13 @@ export async function findAlternates(
     notBefore: await roundNotBefore(orgId, offer.applicationId, offer.level),
   });
   const offered = new Set(offer.slots.map((s) => new Date(s).toISOString()));
-  return r.slots
-    .map((s) => new Date(s).toISOString())
-    .filter((s) => !offered.has(s) && new Date(s).getTime() >= now + DAY)
-    .slice(0, 3);
+  return (
+    r.slots
+      .map((s) => new Date(s).toISOString())
+      // Extra times keep the e-mail's own lead time.
+      .filter((s) => !offered.has(s) && new Date(s).getTime() >= now + SLOT_OFFER.leadHours * HOUR)
+      .slice(0, 3)
+  );
 }
 
 /**
@@ -276,7 +296,11 @@ export async function raiseUnansweredOffers(now = Date.now(), orgId?: string): P
       and s.enabled and s.scheduling_enabled
       ${orgId ? sql`and o.org_id = ${orgId}` : sql``}
       and o.expires_at > ${new Date(now).toISOString()}::timestamptz
-      and o.created_at <= ${new Date(now).toISOString()}::timestamptz - make_interval(hours => s.scheduling_wait_hours)
+      -- Its chance by e-mail: the organisation's wait, or its link closing within 6 h
+      -- (never sooner than 2 h after it was sent); checkSchedulingCall has the same rule.
+      and o.created_at <= ${new Date(now).toISOString()}::timestamptz - interval '2 hours'
+      and (o.created_at <= ${new Date(now).toISOString()}::timestamptz - make_interval(hours => s.scheduling_wait_hours)
+        or o.expires_at <= ${new Date(now).toISOString()}::timestamptz + interval '6 hours')
       and not exists (select 1 from screening_calls c where c.slot_offer_id = o.id and c.status <> 'cancelled')
       and not exists (
         select 1 from agent_events e

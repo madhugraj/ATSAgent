@@ -382,6 +382,21 @@ in L1, and nothing refused it. Now:
 - A declined offer's unsent e-mail is withdrawn too (this call's would have
   gone out two minutes later with a dead link; it was withdrawn by hand first).
 
+### S2.8 — call timing vs short-lived offers (2026-10-26)
+
+The fresh Head of AI test showed the original timing could never fire for the
+offers the Interview coordinator makes: it offers the earliest free times (often
+the next morning), the link closes two hours before the first time, so it
+expired before the 24-hour wait ended — and "the earliest time at least a day
+away" refused the call anyway. Now (`callableAt`, `checkSchedulingCall`,
+`raiseUnansweredOffers`):
+
+- A call is due after the organisation's wait **or** six hours before the link
+  closes, whichever is first — never sooner than two hours after the e-mail.
+- It is allowed while at least one offered time is four hours or more away (the
+  call offers only the times still bookable); extra times keep the e-mail's
+  12-hour lead.
+
 ## Decisions (confirmed 2026-10-25)
 
 1. **Wait before calling:** 24 hours after the e-mail (an organisation setting).
