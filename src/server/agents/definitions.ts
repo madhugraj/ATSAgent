@@ -584,7 +584,10 @@ export function registerPhase3Agents(): void {
     // many; the voice agents' charter printed into the call; plain, formal tone.
     // 1.6.1: one wording with the invite e-mail and the time-choice page — "the hiring
     // team" / "a panel of N from the hiring team".
-    version: "1.6.1",
+    // 1.7.0 (the fresh Head of AI test): answers "am I shortlisted?" from where they stand
+    // instead of sending it to e-mail; the go-ahead counts only from an answer to the
+    // question, in the words heard; "the interviewer" for one person, "the panel" for more.
+    version: "1.7.0",
     owner: "hr_head",
     responsibility:
       "Holds one short AI phone call to help a candidate and the interview panel agree a time the candidate was already e-mailed: says it is an AI, tells them where they stand in the process, books one of the offered or pre-checked times (free for the whole panel), or notes when they are free — nothing else.",

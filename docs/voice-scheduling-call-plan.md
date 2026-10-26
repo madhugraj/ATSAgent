@@ -397,6 +397,22 @@ away" refused the call anyway. Now (`callableAt`, `checkSchedulingCall`,
   call offers only the times still bookable); extra times keep the e-mail's
   12-hour lead.
 
+### S2.9 — from the fresh test's scheduling call (2026-10-26)
+
+The call itself worked (no names, where she stands, the e-mailed times then the
+extra ones, refused a time not on its list, kept "evenings 5–6 p.m." — and the
+coordinator then e-mailed evening times; a second call was refused by the
+one-conversation-per-round rule). Fixed (Scheduling call agent 1.7.0):
+
+- "Am I shortlisted?" was sent to e-mail; questions about where they stand are
+  now answered plainly from the system's statement.
+- The go-ahead was recorded from the answer to "am I speaking with …?". On a
+  live call it now counts only from what the candidate says after the assistant
+  asks a question once its disclosure is complete, and the words kept are the
+  words heard.
+- "The panel shares its feedback" for a single interviewer — now "the
+  interviewer shares their feedback" (a panel only when there is one).
+
 ## Decisions (confirmed 2026-10-25)
 
 1. **Wait before calling:** 24 hours after the e-mail (an organisation setting).

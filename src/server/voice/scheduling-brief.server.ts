@@ -86,6 +86,8 @@ export function progressWords(p: {
   level: number;
   totalRounds: number;
   roundName: string | null;
+  /** How many interviewers this round has: one person or a panel. */
+  panelSize?: number;
 }): string {
   const round = (l: number) => `${ORDINAL[l - 1] ?? `round ${l}`}-round interview`;
   const done = [
@@ -106,7 +108,7 @@ export function progressWords(p: {
   parts.push(
     p.level >= p.totalRounds
       ? "It is the last interview round: after it, the hiring team makes its decision and will e-mail you."
-      : "After this round, the panel shares its feedback with the hiring team, who will e-mail you about the next step.",
+      : `After this round, ${(p.panelSize ?? 1) > 1 ? "the panel shares its" : "the interviewer shares their"} feedback with the hiring team, who will e-mail you about the next step.`,
   );
   return parts.join(" ");
 }
@@ -182,6 +184,7 @@ export async function loadSchedulingBrief(
     level: row.offer.level,
     totalRounds: prog.plan.rounds.length,
     roundName: planRound?.name ?? null,
+    panelSize: 1 + (row.offer.panel?.length ?? 0),
   });
   const options = bookableOptions(
     row.offer.slots,

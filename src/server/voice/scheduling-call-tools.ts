@@ -133,6 +133,12 @@ export function applySchedulingTool(
   args: unknown,
   options: string[],
   aiSaid?: string,
+  /**
+   * On a live call: what the candidate said since the assistant last asked a
+   * question after its disclosure — the go-ahead must come from there (a real
+   * call recorded the answer to "am I speaking with …?" as the go-ahead).
+   */
+  heardAfterAsk?: string,
 ): { ok: true; book?: string; [k: string]: unknown } | { ok: false; error: string } {
   if (!(name in SCHEDULING_TOOL_INPUTS)) return { ok: false, error: "Unknown tool." };
   const parsed = SCHEDULING_TOOL_INPUTS[name as SchedulingToolName].safeParse(args);
@@ -150,6 +156,12 @@ export function applySchedulingTool(
           ok: false,
           error: `Not recorded: first tell them ${missing}, then ask again whether they have a minute.`,
         };
+      if (heardAfterAsk !== undefined && !heardAfterAsk.trim())
+        return {
+          ok: false,
+          error:
+            "Not recorded: ask whether they have a minute now and wait for their answer — record what they say to that question.",
+        };
       // Only a clear no is a no (real calls: "I'm not sure", "I am not very clear with
       // your ask" were taken as refusals): send an unclear one back once.
       if (!granted && !state.askedAgain && UNCLEAR.test(their_words)) {
@@ -161,7 +173,10 @@ export function applySchedulingTool(
         };
       }
       state.permission = granted;
-      state.permissionWords = their_words;
+      // On a live call, the words actually heard in answer — not the model's version.
+      state.permissionWords = heardAfterAsk?.trim()
+        ? heardAfterAsk.trim().slice(0, 300)
+        : their_words;
       return { ok: true };
     }
     case "book_interview_time": {

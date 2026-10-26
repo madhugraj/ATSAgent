@@ -46,6 +46,7 @@ import {
   type Availability,
   type SchedulingOutcome,
 } from "./scheduling-call-tools";
+import { disclosureMissing } from "./call-tools";
 import { loadSchedulingBrief, spokenWhen } from "./scheduling-brief.server";
 import {
   bookByPhone,
@@ -157,6 +158,9 @@ async function place(
   let lastHeardAt: number | null = null;
   // What the assistant has said so far: a "yes" counts only after the disclosure.
   let aiSaid = "";
+  // What the candidate said since the assistant's latest question after its
+  // disclosure (null until it has asked one) — the go-ahead comes from here.
+  let heardAfterAsk: string | null = null;
   let agentEnded!: () => void;
   const agentEnd = new Promise<void>((r) => (agentEnded = r));
 
@@ -168,7 +172,10 @@ async function place(
     },
     onInterrupted: () => line.clear(),
     onTurn: (t) => {
-      if (t.who === "ai") aiSaid += ` ${t.text}`;
+      if (t.who === "ai") {
+        aiSaid += ` ${t.text}`;
+        if (t.text.includes("?") && !disclosureMissing(aiSaid)) heardAfterAsk = "";
+      } else if (heardAfterAsk !== null) heardAfterAsk += ` ${t.text}`;
       lastActivity = now();
       if (t.who === "caller") {
         candidateSpoke = true;
@@ -176,7 +183,14 @@ async function place(
       }
     },
     onToolCall: async (c) => {
-      const out = applySchedulingTool(state, c.name, c.args, brief.options, aiSaid);
+      const out = applySchedulingTool(
+        state,
+        c.name,
+        c.args,
+        brief.options,
+        aiSaid,
+        heardAfterAsk ?? "",
+      );
       if (!out.ok) return out;
       if (c.name === "record_permission") {
         await setCall(call.id, orgId, {

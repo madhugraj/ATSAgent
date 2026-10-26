@@ -300,6 +300,34 @@ describe("the in-call tools", () => {
     ).toEqual({ ok: true });
   });
 
+  test("on a live call the go-ahead comes only from an answer to the question, in the words heard", () => {
+    const said =
+      "This is Saranya, an AI recruiting assistant. I'll note this short call. Do you have a minute now?";
+    const s = tools.freshSchedulingState();
+    // Nothing said since the question (e.g. only "Yes, it's me" to "am I speaking with…?").
+    expect(
+      tools.applySchedulingTool(
+        s,
+        "record_permission",
+        { granted: true, their_words: "Yeah, Madhumathi here." },
+        options,
+        said,
+        "",
+      ),
+    ).toMatchObject({ ok: false, error: expect.stringMatching(/wait for their answer/) });
+    expect(
+      tools.applySchedulingTool(
+        s,
+        "record_permission",
+        { granted: true, their_words: "she agreed" },
+        options,
+        said,
+        " Yeah.",
+      ),
+    ).toEqual({ ok: true });
+    expect(s.permissionWords).toBe("Yeah.");
+  });
+
   test("outcomes", () => {
     const base = { permission: true, booked: null, availability: null, endReason: null };
     expect(tools.schedulingOutcome({ ...base, endReason: "opt_out" })).toBe("opt_out");
@@ -343,6 +371,7 @@ describe("the in-call tools", () => {
         level: 2,
         totalRounds: 3,
         roundName: "Role and ownership",
+        panelSize: 3,
       }),
     ).toBe(
       "You have completed the screening. Your first-round interview is booked for Monday 26 October at 16:00. This call is about the second-round interview (Role and ownership) — round 2 of three. After this round, the panel shares its feedback with the hiring team, who will e-mail you about the next step.",
@@ -361,6 +390,16 @@ describe("the in-call tools", () => {
     ).toBe(
       "You have completed the screening, the first-round interview and the second-round interview. This call is about the third-round interview — round 3 of three. It is the last interview round: after it, the hiring team makes its decision and will e-mail you.",
     );
+    // One interviewer is "the interviewer", never "the panel".
+    expect(
+      brief.progressWords({
+        screened: true,
+        earlier: [],
+        level: 1,
+        totalRounds: 3,
+        roundName: null,
+      }),
+    ).toContain("After this round, the interviewer shares their feedback with the hiring team");
     expect(prompt.panelLine({ panelSize: 3 })).toBe("a panel of 3 from the hiring team");
     expect(prompt.panelLine({ panelSize: 1 })).toBe("the hiring team");
   });
@@ -398,6 +437,8 @@ describe("the in-call tools", () => {
     });
     expect(p).toContain("1. Tuesday 27 October at 11:00");
     expect(p).toContain("call_back_later");
+    expect(p).toContain("2c. Questions about where they stand");
+    expect(p).toContain("Never send these to e-mail.");
     // The AI disclosure and the note come before any interview detail.
     const opening = p.slice(p.indexOf("## The call"));
     expect(opening).toContain(
@@ -895,6 +936,41 @@ describe("a whole scheduling call (fake line)", () => {
         (x) => x.tool === "call_back_later",
       )!.out,
     ).toMatchObject({ ok: false });
+  });
+
+  test("a 'yes' to who they are is not the go-ahead", async () => {
+    const { call } = await arranged();
+    const seen: { opts?: VoiceOpts; results: unknown[] } = { results: [] };
+    await place(
+      call.id,
+      new FakeLine(),
+      scriptedVoice(
+        [
+          { say: "caller", text: "Hello." },
+          {
+            say: "ai",
+            text: "Hello, this is Saranya, an AI recruiting assistant — am I speaking with Meera?",
+          },
+          { say: "caller", text: "Yeah, Meera here." },
+          { tool: "record_permission", args: { granted: true, their_words: "Yeah, Meera here." } },
+          {
+            say: "ai",
+            text: "Thank you. I'll note this short call for the hiring team. Do you have a minute now?",
+          },
+          { say: "caller", text: "Yes, go ahead." },
+          { tool: "record_permission", args: { granted: true, their_words: "yes" } },
+          { tool: "end_scheduling_call", args: { reason: "not_now" } },
+        ],
+        seen,
+      ),
+    );
+    const outs = (seen.results as { tool: string; out: Record<string, unknown> }[]).filter(
+      (x) => x.tool === "record_permission",
+    );
+    expect(outs[0]!.out).toMatchObject({ ok: false });
+    expect(outs[1]!.out).toEqual({ ok: true });
+    const [c] = await db.select().from(screeningCalls).where(eq(screeningCalls.id, call.id));
+    expect(c!.consentWords).toBe("Yes, go ahead.");
   });
 
   test("voicemail: tried once more, then the e-mailed link stands", async () => {

@@ -44,8 +44,8 @@
     "hash": "23c41a8a09824500f4ab51faeddb24142284f8b281f030d5c89f47cabcef2d27"
   },
   "scheduling_call": {
-    "version": "1.6.1",
-    "hash": "721d41a682f0bb4195f52ef2c69346c1ce54363daa72ad465256592aa8b29f9c"
+    "version": "1.7.0",
+    "hash": "2464c84c14303edb07f873a77a9af7e0c0c6bda2ecfc78de985b6ec82aa1fc96"
   },
   "screening": {
     "version": "1.10.1",
