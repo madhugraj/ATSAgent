@@ -533,6 +533,29 @@ describe("scheduling call health", () => {
   });
 });
 
+describe("replies cut off at the length limit", () => {
+  test("flagged once they repeat", async () => {
+    const id = await run("screening");
+    const cut = (seq: number) =>
+      db.insert(agentSteps).values({
+        runId: id,
+        orgId,
+        seq,
+        kind: "model",
+        status: "ok",
+        output: { stopReason: "max_tokens" },
+      } as never);
+    await cut(1);
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "harness.cut_off_replies")).toBeUndefined();
+    await cut(2);
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "harness.cut_off_replies")).toMatchObject({
+      agentType: "screening",
+    });
+  });
+});
+
 describe("an agent going round in circles", () => {
   test("a run that keeps asking people questions is flagged", async () => {
     const id = await run("interview");

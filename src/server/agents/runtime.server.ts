@@ -152,6 +152,12 @@ export function compactForModel(transcript: AgentMessage[], keep = 8, max = 700)
   });
 }
 
+/** Said to the model once when its reply was cut off at the output limit without a tool call. */
+export const CUT_OFF_NUDGE =
+  "Your last reply was cut off at the length limit before you did anything. Do not think out loud or repeat your reasoning: call the next tool now, or, if you are finished, reply with a short summary.";
+export const CUT_OFF_MESSAGE =
+  "The agent's replies were cut off at the length limit twice without acting. Try again; if it repeats, the agent's instructions need a look.";
+
 type AgentRun = typeof agentRuns.$inferSelect;
 type PendingCall = { taskId: string; call: AgentToolCall };
 
@@ -1492,6 +1498,19 @@ async function driveRun(run: AgentRun): Promise<"done" | "awaiting" | "yielded" 
     transcript.push({ role: "assistant", content: res.text, toolCalls: res.toolCalls });
 
     if (!res.toolCalls.length) {
+      // Cut off at the output limit is not an answer (a real run thought aloud until it
+      // ran out, never called its tool and was marked done with the fragment as its
+      // summary): nudge once, then fail with the reason instead of a false "done".
+      if (res.stopReason === "max_tokens") {
+        const nudged = transcript.some((m) => m.role === "user" && m.content === CUT_OFF_NUDGE);
+        if (nudged) {
+          await save(run, transcript, null, stepCount, tokensUsed);
+          await finish(run, "failed", null, CUT_OFF_MESSAGE);
+          return "failed";
+        }
+        transcript.push({ role: "user", content: CUT_OFF_NUDGE });
+        continue;
+      }
       await save(run, transcript, null, stepCount, tokensUsed);
       await finish(run, "done", res.text.trim() || "Done.", null);
       return "done";

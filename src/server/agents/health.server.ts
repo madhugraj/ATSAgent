@@ -70,6 +70,8 @@ export const HEALTH = {
   schedulingBookedShare: 0.3,
   /** Candidates asking not to be called by the AI assistant, in 7 days. */
   aiCallOptOuts7d: 2,
+  /** Model replies cut off at the output limit without acting, in 24 h. */
+  cutOffReplies24h: 2,
   /** One run asking people this many questions (7 days) is going round in circles. */
   questionsPerRun: 3,
   /** Phone screening: a call still not placed this many hours after it was due. */
@@ -789,6 +791,25 @@ export const RULES: Rule[] = [
           detail: { optOuts: n },
         },
       ];
+    },
+  },
+  {
+    id: "harness.cut_off_replies",
+    element: "harness",
+    severity: "warning",
+    description: `${HEALTH.cutOffReplies24h} or more replies in 24 hours were cut off at the output limit without acting — the agent may be thinking out loud instead of using its tools; its instructions need a look.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ agent_type: string; n: number }>(sql`
+        select r.agent_type, count(*)::int n from agent_steps s
+        join agent_runs r on r.id = s.run_id
+        where r.org_id = ${orgId} and s.kind = 'model' and s.output ->> 'stopReason' = 'max_tokens'
+          and s.created_at >= now() - interval '24 hours'
+        group by r.agent_type having count(*) >= ${HEALTH.cutOffReplies24h}`);
+      return r.map((x) => ({
+        agentType: x.agent_type,
+        title: `${x.n} replies were cut off at the length limit`,
+        detail: { cutOff: x.n },
+      }));
     },
   },
   {

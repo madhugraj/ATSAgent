@@ -48,12 +48,12 @@
     "hash": "721d41a682f0bb4195f52ef2c69346c1ce54363daa72ad465256592aa8b29f9c"
   },
   "screening": {
-    "version": "1.10.0",
-    "hash": "4728d87487f4d19b59d4e49a0c352e487b51feeb90267bd0e5ac6f1189e1836f"
+    "version": "1.10.1",
+    "hash": "e89d68f1276da7e38a0e1c362509fed20758c3816384d800d3105dfe367d2305"
   },
   "screening_call": {
-    "version": "1.1.8",
-    "hash": "55e23186d210c12b7b8af4267c2b0149e0449109967aa124fb35ff2f75f449cd"
+    "version": "1.1.9",
+    "hash": "aff051c4575b995c3695414a96ce38a79022b3f08d8b54bd7075a5be59f396c4"
   },
   "sourcing": {
     "version": "1.0.1",

@@ -233,6 +233,30 @@ describe("agent runtime", () => {
     ]);
   });
 
+  test("a reply cut off at the length limit is not an answer: one nudge, then a clear failure", async () => {
+    const cut = (text: string): AgentStepResult => ({ ...say(text), stopReason: "max_tokens" });
+    const rt = await import("../src/server/agents/runtime.server");
+    // Cut off once, then it acts and finishes.
+    const a = await start();
+    script.push(
+      cut("Wait, let me think about who should approve…"),
+      call({ id: "c1", name: "lookup", args: { id: "R1" } }),
+      say("All done."),
+    );
+    await runAgentTick();
+    expect((await runRow(a.runId)).status).toBe("done");
+    expect((await runRow(a.runId)).result).toBe("All done.");
+    expect(seen[1]!.messages.at(-1)).toEqual({ role: "user", content: rt.CUT_OFF_NUDGE });
+    // Cut off twice: failed with the reason, never "done" with the fragment.
+    const b = await start();
+    script.push(cut("Wait…"), cut("Wait, again…"));
+    await runAgentTick();
+    expect(await runRow(b.runId)).toMatchObject({
+      status: "failed",
+      lastError: rt.CUT_OFF_MESSAGE,
+    });
+  });
+
   test("write tools wait for approval under `suggest`, then run with edited args", async () => {
     const { runId } = await start();
     script.push(call({ id: "w1", name: "save_draft", args: { text: "v1" } }));

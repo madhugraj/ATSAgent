@@ -85,9 +85,9 @@ export function callSystemPrompt(f: BriefFacts): string {
         ? ` (their CV says${f.cv.currentCompany ? ` ${f.cv.currentCompany}` : ""}${f.cv.experienceYears != null ? `, about ${f.cv.experienceYears} years` : ""} — confirm it rather than read it out)`
         : ""),
     `where they live now${f.cv.location ? ` (CV: ${f.cv.location})` : ""}, and — if that is not ${f.place || "where the role is based"} — whether they would relocate or commute`,
-    f.known.notice
-      ? 'their notice period — it is already on record, so confirm it: "We have your notice period from earlier — is that still the same?"'
-      : "their notice period and the earliest date they could join",
+    // Always asked afresh, never "we have it on record": a real candidate asked how we
+    // knew, and "I cannot disclose the figure I have" sounded evasive.
+    "their notice period and the earliest date they could join — ask plainly; never say you have it on record",
     // Pay is always asked afresh: confirming figures the assistant cannot see does not work.
     'their current pay (fixed and variable, per year) and their expected pay — ask afresh even if it was given before ("so our notes are up to date"); you never know or state any figure',
   ].filter(Boolean) as string[];

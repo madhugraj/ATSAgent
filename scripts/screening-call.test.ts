@@ -388,8 +388,9 @@ describe("the call brief", () => {
         forClient: true,
       }),
     );
-    expect(p).not.toContain("their notice period and the earliest date");
-    expect(p).toContain("We have your notice period from earlier");
+    // The notice period is always asked plainly — never "we have it on record".
+    expect(p).toContain("never say you have it on record");
+    expect(p).not.toContain("We have your notice period from earlier");
     expect(p).toContain("ask afresh even if it was given before");
     expect(p).toContain("Never tell them a detail is not needed");
     expect(p).toContain("at most once in the whole call");

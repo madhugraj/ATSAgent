@@ -1,0 +1,10 @@
+const { db } = await import("../src/server/db");
+const { sql } = await import("drizzle-orm");
+const [c] = (await db.execute(sql`select started_at, duration_s, status, end_reason, consent_words, transcript, answers, details, screening_run_id from screening_calls where id = '04356baf-0b45-41d5-9cd9-d4fc83f3ec5a'`)) as any[];
+const t0 = new Date(c.started_at).getTime();
+console.log(`status ${c.status} / ${c.end_reason}, ${c.duration_s}s, consent: "${c.consent_words}"`);
+for (const t of c.transcript) console.log(((new Date(t.at).getTime() - t0) / 1000).toFixed(0).padStart(4), t.who.padEnd(6), t.interrupted ? "[cut]" : "     ", t.text);
+console.log("answers:", JSON.stringify(c.answers.map((a: any) => [a.question_id, a.declined ?? false, a.summary])));
+console.log("details:", JSON.stringify(c.details));
+if (c.screening_run_id) console.log(JSON.stringify(await db.execute(sql`select screening_score, match_score, combined_score, recommendation, coverage from screening_runs where id = ${c.screening_run_id}`)));
+process.exit(0);
