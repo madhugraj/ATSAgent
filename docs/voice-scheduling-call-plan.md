@@ -366,6 +366,22 @@ clearly where they stand. Scheduling call agent 1.5.0:
 - Limit: the panel's real availability comes from their connected calendars
   (Google / Microsoft 365); without one, only bookings in ATSIQ are seen.
 
+### S2.7 — a panel call, and a round too early (2026-10-26, 09:00 IST)
+
+With a second named member (Arun Kumar) the call ran as designed: the hello
+answered with who it is, the note and purpose, where she stands, "a panel of two
+people from the hiring team, led by Arun Kumar", the times, and her reason kept
+when none suited. Her reason exposed a real gap: *"I have not even completed my
+first level of interview"* — the test had offered L2 times while she was still
+in L1, and nothing refused it. Now:
+
+- Times are offered only for the round the candidate is in — the one a person
+  moved them into (stage L1/L2/L3), or round 1 from the shortlist
+  (`roundNotYet`, in `offerSlotsCore`); a scheduling call is never placed about a
+  later round (also checked in `checkSchedulingCall`, for older offers).
+- A declined offer's unsent e-mail is withdrawn too (this call's would have
+  gone out two minutes later with a dead link; it was withdrawn by hand first).
+
 ## Decisions (confirmed 2026-10-25)
 
 1. **Wait before calling:** 24 hours after the e-mail (an organisation setting).

@@ -529,6 +529,28 @@ describe("asking for a scheduling call", () => {
     ).toMatchObject({ ok: true });
   });
 
+  test("never about a later round than the one they are in", async () => {
+    const { appId } = await candidateApp(); // in round 1
+    const [later] = await db
+      .insert(interviewSlotOffers)
+      .values({
+        orgId,
+        applicationId: appId,
+        level: 2,
+        interviewerName: "Priya Natarajan",
+        interviewerEmail: interviewer,
+        slots: [weekday(4), weekday(5)],
+        token: `t-${Math.random().toString(36).slice(2)}y`,
+        expiresAt: new Date(Date.now() + 3 * 864e5),
+        createdAt: new Date(Date.now() - 30 * H),
+      })
+      .returning();
+    expect(later).toBeTruthy();
+    expect(
+      await request.checkSchedulingCall(orgId, appId, Date.now(), { byPerson: true }),
+    ).toMatchObject({ ok: false, reason: expect.stringMatching(/in round 1; times for round 2/) });
+  });
+
   test("too close, or nobody to dial", async () => {
     const a = await candidateApp();
     await offer(a.appId, { slots: [new Date(Date.now() + 10 * H).toISOString(), weekday(3)] });

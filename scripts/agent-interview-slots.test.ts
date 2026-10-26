@@ -170,6 +170,8 @@ describe("free slots", () => {
       scheduledAt: new Date(r1.slots[0]!),
       durationMins: 60,
     });
+    // A person moved them on to round 2 (times are offered only for their current round).
+    await db.update(applications).set({ stage: "l2" }).where(eq(applications.id, app));
     await offers.offerSlotsCore(
       orgId,
       { userId, runId: null },
@@ -240,7 +242,8 @@ describe("free slots", () => {
     });
     expect(r.slots.length).toBeGreaterThan(0);
     for (const s of r.slots) expect(Date.parse(s)).toBeGreaterThanOrEqual(nb!.getTime());
-    // Offering L2 before L1 has happened is refused.
+    // In round 2 now, L2 times before L1 has ended are still refused.
+    await db.update(applications).set({ stage: "l2" }).where(eq(applications.id, app));
     await expect(
       offers.offerSlotsCore(
         orgId,
@@ -355,6 +358,43 @@ describe("the candidate chooses the time", () => {
       .from(emailOutbox)
       .where(eq(emailOutbox.idempotencyKey, `interview-slots:${second.offerId}`));
     expect(after!.status).toBe("suppressed");
+  });
+
+  test("only the round they are in: no round-2 times while they are in round 1", async () => {
+    expect(offers.roundNotYet("l1", 1)).toBeNull();
+    expect(offers.roundNotYet("shortlisted", 1)).toBeNull();
+    expect(offers.roundNotYet("l2", 2)).toBeNull();
+    expect(offers.roundNotYet("l1", 2)).toMatch(/in round 1; times for round 2/);
+    expect(offers.roundNotYet("shortlisted", 2)).toMatch(/in round 1/);
+    expect(offers.roundNotYet("rejected", 1)).toMatch(/cannot be offered/);
+    await expect(
+      offers.offerSlotsCore(
+        orgId,
+        { userId, runId: null },
+        {
+          applicationId: app,
+          level: 2,
+          interviewerEmail: interviewer,
+          slots: [weekdayAt(6).toISOString(), weekdayAt(7).toISOString()],
+          durationMins: 60,
+          mode: "online",
+        },
+      ),
+    ).rejects.toThrow(/in round 1; times for round 2/);
+  });
+
+  test("none of these work: the unsent e-mail is withdrawn with the offer", async () => {
+    const o = await offer();
+    await db
+      .update(emailOutbox)
+      .set({ status: "queued" })
+      .where(eq(emailOutbox.idempotencyKey, `interview-slots:${o.offerId}`));
+    expect(await offers.declineSlots(o.token, "not this week")).toBe(true);
+    const [m] = await db
+      .select()
+      .from(emailOutbox)
+      .where(eq(emailOutbox.idempotencyKey, `interview-slots:${o.offerId}`));
+    expect(m!.status).toBe("suppressed");
   });
 
   test("names fall back to the email; a booking without a meeting provider says so", async () => {

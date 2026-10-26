@@ -95,6 +95,10 @@ export async function checkSchedulingCall(
       ok: false,
       reason: "No interview times are waiting for this candidate — offer times first.",
     };
+  // Only for the round they are in (an older offer for a later round is never called about).
+  const { roundNotYet } = await import("@/lib/slot-offers.server");
+  const notYet = roundNotYet(app.stage, offer.level);
+  if (notYet) return { ok: false, reason: notYet };
   const earliest = Math.min(...offer.slots.map((s) => new Date(s).getTime()));
   if (earliest < now + DAY)
     return {

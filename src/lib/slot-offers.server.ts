@@ -131,6 +131,15 @@ export async function offerSlotsCore(
         "No screening is on record for this candidate. Screen them first, or a person moves them into the interview round with a reason.",
       );
   }
+  {
+    const [st] = await db
+      .select({ stage: applications.stage })
+      .from(applications)
+      .where(eq(applications.id, app.id))
+      .limit(1);
+    const why = roundNotYet(st?.stage ?? "", input.level);
+    if (why) throw new Error(why);
+  }
 
   // Every offered time must still be free for the interviewer, and after the
   // candidate's earlier rounds.
@@ -234,6 +243,22 @@ export async function offerSlotsCore(
     expiresAt: expiresAt.toISOString(),
     checkedWith: probe.source,
   };
+}
+
+/**
+ * Times may be offered only for the round the candidate is in — the one a
+ * person moved them into (stage L1/L2/L3), or round 1 from the shortlist —
+ * never a later round before the earlier one is done (pure; unit-tested).
+ * Returns why not, or null.
+ */
+export function roundNotYet(stage: string, level: number): string | null {
+  const m = stage.match(/^l([123])$/);
+  const current = m ? Number(m[1]) : stage === "shortlisted" ? 1 : null;
+  if (current === null)
+    return `Interview times cannot be offered while the candidate is ${stage.replace(/_/g, " ")}.`;
+  if (level > current)
+    return `The candidate is in round ${current}; times for round ${level} can be offered only once a person moves them on to it, after round ${current} is done.`;
+  return null;
 }
 
 /** Withdraw the not-yet-sent "pick a time" e-mails of these offers (their links no longer work). */
@@ -534,6 +559,7 @@ async function declineOffer(
     .where(and(eq(interviewSlotOffers.id, o.offer.id), eq(interviewSlotOffers.status, "offered")))
     .returning({ id: interviewSlotOffers.id });
   if (!done.length) return false;
+  await withdrawOfferEmails(o.offer.orgId, [o.offer.id]);
   await writeAudit({
     actor: "candidate",
     orgId: o.offer.orgId,
