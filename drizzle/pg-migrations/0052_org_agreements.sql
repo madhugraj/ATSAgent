@@ -1,4 +1,4 @@
--- 0046_org_agreements.sql — an organisation's acceptance of the Terms of
+-- 0052_org_agreements.sql — an organisation's acceptance of the Terms of
 -- Service, Privacy Policy and Data Processing Agreement (src/lib/legal).
 --
 -- One row per (organisation, document, version). Registration records the

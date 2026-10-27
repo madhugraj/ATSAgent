@@ -1,5 +1,5 @@
 /**
- * Organisation agreements (migration 0046), against the disposable database:
+ * Organisation agreements (migration 0052), against the disposable database:
  *  - registration input is refused without an accepted, signed agreement;
  *  - acceptance is stored per document and version with the signatory's
  *    name, title and email, the IP only as an HMAC, and is audited;

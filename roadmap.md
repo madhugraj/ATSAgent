@@ -3,7 +3,7 @@
 ## Organisation agreements (2026-10-27)
 
 - [x] Versioned Terms of Service, Privacy Policy and Data Processing Agreement in one registry (`src/lib/legal/`), with public `/terms` and `/dpa` pages beside `/privacy`; Terms and DPA are marked as drafts for legal review and describe only what the platform does today (open points are marked "For legal review")
-- [x] Migration 0046 `org_agreements`: one row per organisation, document and version, with the signatory's user, name, title and email, the time, and the request IP as an HMAC only
+- [x] Migration 0052 `org_agreements`: one row per organisation, document and version, with the signatory's user, name, title and email, the time, and the request IP as an HMAC only
 - [x] Registration needs an Agreements step (signatory name, title and the acceptance box); `createOrganization` refuses without it or with a stale version, records the acceptance and audits `org.agreement.accepted`
 - [x] Existing organisations and new versions: the owner gets a blocking accept step on next sign-in; other members see "Waiting for your organisation's owner"
 - [x] Platform console → Organisation agreements: which organisation accepted which version, when and by whom, with history
