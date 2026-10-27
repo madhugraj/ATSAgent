@@ -22,6 +22,8 @@ export type RequestContext = {
   parentSpanId?: string;
   /** Whether the caller asked for this trace to be sampled. */
   sampled: boolean;
+  /** Set when the client hung up mid-request (see src/lib/error-capture.ts). */
+  clientAborted?: boolean;
 };
 
 const scope = new AsyncLocalStorage<RequestContext>();

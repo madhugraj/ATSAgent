@@ -4,7 +4,7 @@
  * and the /metrics endpoint, SLO maths, persisted SLI minutes, the Service
  * health data and burn-rate alerts — against the disposable local database.
  */
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
 import { and, eq, gte, inArray } from "drizzle-orm";
 
 const { db } = await import("../src/server/db");
@@ -15,6 +15,39 @@ const hm = await import("../src/server/http-metrics");
 const slo = await import("../src/server/slo");
 const sloServer = await import("../src/server/slo.server");
 const { log } = await import("../src/server/log");
+
+/**
+ * Stand-in for the TanStack Start handler: `/boom` fails like a real SSR
+ * error, `/gone` like a render the browser abandoned (Node's abortIncoming),
+ * `/_serverFn/gone` like a server function whose client hung up. Each logs
+ * through console.error and answers h3's swallowed-error 500, as h3 does.
+ */
+function nodeAbortError(): Error {
+  const e = new Error("aborted") as Error & { code: string };
+  e.code = "ECONNRESET";
+  e.stack = "Error: aborted\n    at abortIncoming (node:_http_server:912:17)";
+  return e;
+}
+mock.module("@tanstack/react-start/server-entry", () => ({
+  default: {
+    fetch: async (request: Request) => {
+      const path = new URL(request.url).pathname;
+      if (path === "/_serverFn/gone") {
+        console.error("Server Fn Error!", nodeAbortError());
+        return new Response("{}", {
+          status: 500,
+          headers: { "content-type": "application/json", "x-tss-serialized": "true" },
+        });
+      }
+      const err = path === "/gone" ? nodeAbortError() : new Error("render exploded");
+      console.error(Object.assign(new Error("HTTPError", { cause: err }), { status: 500 }));
+      return new Response(JSON.stringify({ status: 500, unhandled: true, message: "HTTPError" }), {
+        status: 500,
+        headers: { "content-type": "application/json" },
+      });
+    },
+  },
+}));
 
 /** Capture stdout/stderr JSON lines written while `fn` runs. */
 async function captureLogs(
@@ -411,5 +444,50 @@ describe("server entry", () => {
     });
     expect(typeof req!["duration_ms"]).toBe("number");
     delete process.env["METRICS_TOKEN"];
+  });
+
+  test("a client that hangs up is a 499 info line, not an SSR error or a bad SLI event", async () => {
+    const server = (await import("../src/server")).default;
+    const hmNow = Date.now();
+    hm.resetHttpMetrics();
+    const call = (path: string) =>
+      server.fetch(new Request(`http://localhost${path}`, { method: "POST" }), {}, {});
+
+    let gone!: Response;
+    let fnGone!: Response;
+    let boom!: Response;
+    const lines = await captureLogs(async () => {
+      gone = await call("/gone");
+      fnGone = await call("/_serverFn/gone");
+      boom = await call("/boom");
+    });
+    const byRoute = (route: string) => lines.filter((l) => l["http_route"] === route);
+
+    // Abandoned page render: one info line, status 499, no ssr_error.
+    expect(gone.status).toBe(499);
+    expect(byRoute("/gone")).toHaveLength(1);
+    expect(byRoute("/gone")[0]).toMatchObject({
+      severity: "INFO",
+      msg: "http.request",
+      http_status: 499,
+      status_class: "4xx",
+      client_aborted: true,
+    });
+    // Abandoned server function: 499 in the log, no fn_error.
+    const fn = byRoute("/_serverFn/:fn")[0]!;
+    expect(fn).toMatchObject({ severity: "INFO", http_status: 499, client_aborted: true });
+    expect(fn["fn_error"]).toBeUndefined();
+    expect(fnGone.status).toBe(500); // the framework's reply to a client that is already gone
+    // A real SSR failure still is one.
+    expect(boom.status).toBe(500);
+    expect(lines.filter((l) => l["msg"] === "http.ssr_error")).toHaveLength(1);
+    expect(byRoute("/boom")[0]).toMatchObject({ severity: "ERROR", http_status: 500 });
+    expect(byRoute("/boom")[0]!["client_aborted"]).toBeUndefined();
+
+    // The server-function availability SLI sees the abort as good, not bad.
+    const minutes = hm.drainClosedSliMinutes(hmNow + 120_000);
+    const fnMinute = minutes.find((m) => m.routeGroup === "server_fn");
+    expect(fnMinute).toMatchObject({ requests: 1, errors: 0 });
+    hm.resetHttpMetrics();
   });
 });

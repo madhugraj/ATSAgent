@@ -2,7 +2,7 @@ import "./lib/error-capture";
 
 import { timingSafeEqual } from "node:crypto";
 
-import { consumeLastCapturedError } from "./lib/error-capture";
+import { consumeLastCapturedError, isClientAbort } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 import {
   OPENMETRICS_CONTENT_TYPE,
@@ -17,6 +17,7 @@ import {
 import { log } from "./server/log";
 import {
   contextFromHeaders,
+  currentRequest,
   formatTraceparent,
   withRequestContext,
   type RequestContext,
@@ -39,7 +40,10 @@ async function getServerEntry(): Promise<ServerEntry> {
 
 // h3 swallows in-handler throws into a normal 500 Response with body
 // {"unhandled":true,"message":"HTTPError"} — try/catch alone never fires for those.
-async function normalizeCatastrophicSsrResponse(response: Response): Promise<Response> {
+async function normalizeCatastrophicSsrResponse(
+  response: Response,
+  request: Request,
+): Promise<Response> {
   if (response.status < 500) return response;
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.includes("application/json")) return response;
@@ -48,6 +52,12 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
   if (!isH3SwallowedErrorBody(body)) return response;
 
   const captured = consumeLastCapturedError();
+  const trace = currentRequest();
+  if (trace?.clientAborted || request.signal.aborted || isClientAbort(captured)) {
+    // The browser left mid-render (navigated away): nothing failed on our side.
+    if (trace) trace.clientAborted = true;
+    return new Response(null, { status: 499 });
+  }
   log.error("http.ssr_error", {
     error: captured instanceof Error ? captured : `h3 swallowed SSR error: ${body}`,
   });
@@ -263,7 +273,10 @@ async function handle(request: Request, url: URL, env: unknown, ctx: unknown): P
 
     const handler = await getServerEntry();
     const response = await handler.fetch(request, env, ctx);
-    return await applySecurityHeaders(await normalizeCatastrophicSsrResponse(response), request);
+    return await applySecurityHeaders(
+      await normalizeCatastrophicSsrResponse(response, request),
+      request,
+    );
   } catch (error) {
     log.error("http.unhandled", { error: error instanceof Error ? error : String(error) });
     console.error(error);
@@ -305,7 +318,8 @@ export default {
       const durationMs = Math.round(performance.now() - started);
       // A client that hung up gets a 500 from h3; count it as 499 (client closed),
       // not as a server failure against the availability SLO.
-      const status = request.signal.aborted && response.status >= 500 ? 499 : response.status;
+      const aborted = trace.clientAborted || request.signal.aborted;
+      const status = aborted && response.status >= 500 ? 499 : response.status;
       recordRequest({ group, method: request.method, status, durationMs });
       if (group !== "static") {
         const fields = {
@@ -317,7 +331,9 @@ export default {
           status_class: statusClass(status),
           duration_ms: durationMs,
           // A thrown server-function error is serialised by the framework as a 500.
-          fn_error: response.headers.get("x-tss-serialized") === "true" ? true : undefined,
+          fn_error:
+            status >= 500 && response.headers.get("x-tss-serialized") === "true" ? true : undefined,
+          client_aborted: aborted ? true : undefined,
         };
         if (status >= 500) log.error("http.request", fields);
         else if (durationMs > 10_000) log.warn("http.request", fields);
