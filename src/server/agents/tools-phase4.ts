@@ -7,7 +7,7 @@
  */
 import { rupees } from "@/lib/money";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
-import { z } from "zod/v4";
+import { z } from "zod";
 
 import { db } from "../db";
 import {

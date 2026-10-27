@@ -1,5 +1,10 @@
 # Roadmap
 
+## Dependency security (2026-10-24)
+
+- [x] zod 4 (GHSA-mrhx-c7xc-m3w5, memory exhaustion on oversized constrained collections): all schemas import `zod`; ids are checked as RFC 9562 UUIDs everywhere (the local demo fixture ids were made valid); every agent got a patch version because its generated tool contracts changed wording only
+- [x] DOMPurify pinned to 3.4.17 or later through `overrides` (pulled in by jsPDF; GHSA-cg2g-xh64-v4q7, GHSA-mrv2-3pqr-j5jr)
+
 ## Distribution agent (2026-10-21)
 
 - [x] Hand posting with the companion (2026-10-22): the Distribution agent 1.1.0 plans roles for portals a person posts on ("waiting to be posted"); ATSIQ Capture 1.16.0 on Internshala and Apna lists them, fills the portal's form in the person's own signed-in browser (never submits), records the posting from the portal's own listing page, and sends applicants into the role credited to the portal (`/api/public/distribution`, capture `channel`); the daily check chases postings still waiting after 2 days

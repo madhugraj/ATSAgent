@@ -9,7 +9,7 @@
  * judges real fit; this only decides who is worth scoring.
  */
 import { and, eq, sql } from "drizzle-orm";
-import { z } from "zod/v4";
+import { z } from "zod";
 
 import { aiJson } from "@/lib/ai-gateway.server";
 import { db } from "../db";
