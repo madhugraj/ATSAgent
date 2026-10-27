@@ -5,7 +5,7 @@
  * human decision (request_approval with a rejection subject), never a tool.
  */
 import { and, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
-import { z } from "zod/v4";
+import { z } from "zod";
 
 import { db } from "../db";
 import {
