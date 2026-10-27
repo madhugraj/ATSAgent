@@ -1,0 +1,25 @@
+{
+  "displayName": "ATSIQ — app raised an SLO burn alert",
+  "documentation": {
+    "content": "The app's own burn-rate evaluator (src/server/slo.server.ts, every few minutes on the agent scheduler tick) logged `slo.burn_alert`. It covers all three SLOs, including agent run success, which Cloud Monitoring cannot see from request logs. Details: Platform → Service health.",
+    "mimeType": "text/markdown"
+  },
+  "severity": "ERROR",
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "slo.burn_alert log line",
+      "conditionMatchedLog": {
+        "filter": "resource.type=\"k8s_container\" AND resource.labels.container_name=\"atsiq\" AND jsonPayload.msg=\"slo.burn_alert\"",
+        "labelExtractors": {
+          "slo": "EXTRACT(jsonPayload.slo)",
+          "severity": "EXTRACT(jsonPayload.severity)"
+        }
+      }
+    }
+  ],
+  "alertStrategy": {
+    "notificationRateLimit": { "period": "3600s" },
+    "autoClose": "3600s"
+  }
+}

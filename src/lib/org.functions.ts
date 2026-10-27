@@ -7,6 +7,7 @@ import { db } from "../server/db";
 import { emailVerified } from "../server/claims";
 import { departments, masterItems, orgMembers, organizations, userRoles } from "@db/schema";
 import { registrableDomain, workEmailProblem } from "@/lib/work-email";
+import { AgreementAcceptanceInput } from "@/lib/legal/acceptance";
 
 export type AppRole =
   "recruiter" | "hiring_manager" | "department_head" | "hr_head" | "president_cbo";
@@ -212,7 +213,7 @@ export const claimInvite = createServerFn({ method: "POST" })
     return { ok: true, orgId: invite.orgId };
   });
 
-const CreateInput = z.object({
+export const CreateInput = z.object({
   name: z.string().trim().min(2).max(120),
   legalName: z.string().trim().min(2, "Registered legal name is required").max(160),
   industry: z.string().trim().min(2, "Industry is required").max(80),
@@ -237,6 +238,8 @@ const CreateInput = z.object({
       }),
     )
     .default([]),
+  /** Terms, Privacy Policy and DPA acceptance by the registering signatory — required. */
+  agreement: AgreementAcceptanceInput,
 });
 
 /**
@@ -256,6 +259,10 @@ export const createOrganization = createServerFn({ method: "POST" })
       throw new Error("Confirm your work email address before registering an organisation.");
     const problem = workEmailProblem(email);
     if (problem) throw new Error(problem);
+
+    // The agreement must be the current version before anything is created.
+    const agreements = await import("../server/org-agreements.server");
+    agreements.assertCurrentVersions(data.agreement.versions);
 
     const [existing] = await db
       .select({ orgId: orgMembers.orgId })
@@ -321,6 +328,8 @@ export const createOrganization = createServerFn({ method: "POST" })
       orgId: org.id,
       userId: context.userId,
       email,
+      fullName: data.agreement.signatoryName.trim(),
+      title: data.agreement.signatoryTitle.trim(),
       status: "active",
       isOwner: true,
       joinedAt: new Date(),
@@ -328,6 +337,17 @@ export const createOrganization = createServerFn({ method: "POST" })
     await db
       .insert(userRoles)
       .values({ userId: context.userId, role: "president_cbo", orgId: org.id });
+
+    const { getRequest } = await import("@tanstack/react-start/server");
+    const { clientIp } = await import("../server/client-ip");
+    const request = getRequest();
+    await agreements.recordAgreementAcceptance({
+      orgId: org.id,
+      userId: context.userId,
+      email,
+      acceptance: data.agreement,
+      ipHash: agreements.hashIp(request ? clientIp(request) : null),
+    });
 
     const departmentsToCreate = data.departments.filter((d) => d.name.trim());
     if (departmentsToCreate.length) {

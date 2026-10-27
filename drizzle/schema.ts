@@ -16,6 +16,7 @@ import {
   boolean,
   check,
   date,
+  doublePrecision,
   index,
   integer,
   jsonb,
@@ -231,6 +232,36 @@ export const orgMembers = pgTable(
       .where(sql`${t.userId} is not null`),
     index("org_members_user_idx").on(t.userId),
     index("org_members_email_idx").on(sql`lower(${t.email})`),
+  ],
+);
+
+/**
+ * An organisation's acceptance of a versioned legal document (Terms of
+ * Service, Privacy Policy, Data Processing Agreement — src/lib/legal). One row
+ * per document version accepted; a new version needs a new row, so the owner
+ * is asked again. The signatory's name, title and email are copied so the
+ * record survives the user being removed; the IP is kept only as an HMAC.
+ */
+export const orgAgreements = pgTable(
+  "org_agreements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    version: text("version").notNull(),
+    acceptedBy: uuid("accepted_by").references(() => users.id, { onDelete: "set null" }),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }).notNull().defaultNow(),
+    accepterName: text("accepter_name").notNull(),
+    accepterTitle: text("accepter_title").notNull(),
+    accepterEmail: text("accepter_email").notNull(),
+    ipHash: text("ip_hash"),
+  },
+  (t) => [
+    check("org_agreements_kind_check", sql`${t.kind} in ('terms','privacy','dpa')`),
+    uniqueIndex("org_agreements_org_kind_version_key").on(t.orgId, t.kind, t.version),
+    index("org_agreements_org_idx").on(t.orgId, t.acceptedAt),
   ],
 );
 
@@ -3010,3 +3041,60 @@ export const voiceWorkerHeartbeat = pgTable("voice_worker_heartbeat", {
   maxConcurrent: integer("max_concurrent").notNull().default(1),
   callsInProgress: integer("calls_in_progress").notNull().default(0),
 });
+
+/* --------------------------------------------- service SLOs (0053) */
+
+/**
+ * Per-minute request SLI counts, one row per app instance and route group
+ * (src/server/http-metrics.ts → src/server/slo.server.ts). Low-cardinality by
+ * design: no paths, ids, orgs or users. Kept 35 days.
+ */
+export const serviceRequestMinutes = pgTable(
+  "service_request_minutes",
+  {
+    minute: timestamp("minute", { withTimezone: true }).notNull(),
+    instanceId: text("instance_id").notNull(),
+    /** server_fn | page | api_public | api_auth */
+    routeGroup: text("route_group").notNull(),
+    requests: integer("requests").notNull().default(0),
+    /** Answered with a 5xx status. */
+    errors: integer("errors").notNull().default(0),
+    /** Slower than LATENCY_THRESHOLD_MS (src/server/slo.ts). */
+    slow: integer("slow").notNull().default(0),
+    /** Non-cumulative counts per DURATION_BUCKETS bound, last entry +Inf. */
+    latency: integer("latency")
+      .array()
+      .notNull()
+      .default(sql`'{}'::integer[]`),
+  },
+  (t) => [
+    primaryKey({ columns: [t.minute, t.instanceId, t.routeGroup] }),
+    index("service_request_minutes_minute_idx").on(t.minute),
+  ],
+);
+
+/** Burn-rate alerts on the platform SLOs (src/server/slo.ts); one open row per SLO. */
+export const sloAlerts = pgTable(
+  "slo_alerts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    slo: text("slo").notNull(),
+    /** serious | critical */
+    severity: text("severity").notNull(),
+    /** open | resolved */
+    status: text("status").notNull().default("open"),
+    burnRate: doublePrecision("burn_rate").notNull(),
+    windowMinutes: integer("window_minutes").notNull(),
+    openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    /** When this severity was last pushed to the alert channels. */
+    notifiedAt: timestamp("notified_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("slo_alerts_open_uq")
+      .on(t.slo)
+      .where(sql`status = 'open'`),
+    index("slo_alerts_opened_idx").on(t.openedAt),
+  ],
+);

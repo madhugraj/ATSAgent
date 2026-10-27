@@ -402,6 +402,14 @@ export const updateOrganizationAsSuperUser = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+/** Which organisations accepted which Terms / Privacy / DPA version, when and by whom. */
+export const listOrgAgreementsAsSuperUser = createServerFn({ method: "GET" })
+  .middleware([requirePlatformAdmin])
+  .handler(async () => {
+    const { listAllOrgAgreements } = await import("../server/org-agreements.server");
+    return listAllOrgAgreements();
+  });
+
 /** Roster of one tenant, so a super user can fix or remove a user in any organisation. */
 export const listOrgUsersAsSuperUser = createServerFn({ method: "GET" })
   .middleware([requirePlatformAdmin])

@@ -90,8 +90,10 @@ export const MANUAL_SECTIONS: ManualSection[] = [
       "Sign up with your work email address. Free or disposable mailboxes (gmail, outlook, yahoo, temporary domains) are rejected — the domain proves the organisation is genuine.",
       "Confirm your email from the verification message sent to that inbox.",
       "Complete the registration wizard: organisation name, registered legal name, industry, headquarters country and city, reporting currency, careers inbox, plus at least one department and one location. All of these are mandatory.",
+      "On the last step, Agreements, review the Terms of Service, Privacy Policy and Data Processing Agreement (each opens in a new tab, with its version), enter your full name and job title as the signatory, and tick the box confirming you are authorised to accept them for the organisation. The organisation cannot be created without this; your name, title, work email, the versions and the time are recorded.",
       "Your organisation is then queued for review and you see the 'Awaiting platform approval' screen. It refreshes itself — you do not need to sign out and back in.",
       "A platform super admin approves or rejects the registration. You receive an acknowledgement email either way, and approval opens the workspace on your next screen refresh.",
+      "When one of these documents gets a new version, the organisation owner is asked to review and accept it on their next sign-in before the workspace opens. Other users see 'Waiting for your organisation's owner' until the owner has accepted; the screen updates itself.",
     ],
   },
   {
@@ -380,6 +382,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
     steps: [
       "Review the pending registration queue and approve or reject organisations; the registering owner is emailed the decision.",
       "See every organisation's live statistics: members, requisitions, candidates, interviews, offers and hires.",
+      "Organisation agreements shows, for every organisation, which Terms of Service, Privacy Policy and Data Processing Agreement version it accepted, when, and by whom (name, title, work email), with the full history and which organisations still have to accept the current versions.",
       "Edit an organisation profile, archive and restore it, or permanently delete it — deletion is irreversible, requires the exact organisation name and also removes login accounts left without any other membership.",
       "Manage the super-admin allowlist by email.",
       "Open Product catalogue (/catalogue) to govern platform-level product and commercial definitions. Organisation members cannot access this page.",

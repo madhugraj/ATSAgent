@@ -68,6 +68,14 @@ We credit reporters in release notes on request.
   candidate's round (`round_substitute.approved`, same deciders, proposed with `propose_substitute`)
   and interviewers saying they cannot make a round (`interview.interviewer_unavailable`, only
   someone on that round, before it starts).
+- Observability data: request logs, metrics and SLO tables hold ids, route templates (ids replaced
+  by `:id`), status, durations and counts only — never request bodies, candidate content, prompts,
+  tokens from URLs or vendor/model names. Metric labels are a fixed low-cardinality set
+  (`route_group`, `method`, `status_class`). `/metrics` is off unless `METRICS_TOKEN` is set, then
+  requires it as a bearer token (constant-time compare) and is rate-limited like other public paths.
+  The Service health page and its server function are platform-admin only; SLO alert webhooks are
+  HMAC-signed and sent through `safeFetch`; SLO alert notifications are audited. Incoming
+  `traceparent` headers are validated and only their ids are reused.
 - AI safety: untrusted CV, JD, profile and mail text is delimited before prompting; structured model
   responses are schema-validated before use. AI decisions retain evidence and permit audited human override.
 - AI usage ledger: every provider request is recorded in `ai_usage_events`
@@ -160,6 +168,18 @@ webhook signing secret are stored with `encryptSecret` and never returned to the
 alert webhooks are signed with HMAC-SHA256 (`X-ATSAgent-Signature: sha256=<hex>`). Exported spans
 and alerts carry ids, rule names, statuses, timings and token counts only — no goals, prompts,
 candidate content or model names.
+
+## Organisation agreements
+
+An organisation cannot be created without its registering signatory accepting the current Terms of
+Service, Privacy Policy and Data Processing Agreement (`src/lib/legal/`): `createOrganization`
+validates the acceptance and refuses versions that are not current, and every acceptance is stored in
+`org_agreements` (migration 0052) with the signatory's user, name, title, work email and time, and is
+audited as `org.agreement.accepted`. The request IP is kept only as an HMAC-SHA256 keyed with
+`SESSION_SECRET`, never in the clear. Re-acceptance of a new version is owner-only
+(`requireOrgOwner`) and scoped to the owner's organisation; until it is done the workspace shows a
+blocking step (owner) or a waiting screen (members). The cross-tenant view is `requirePlatformAdmin`.
+Rows are deleted with the organisation; the audit entries remain.
 
 ## Training data
 

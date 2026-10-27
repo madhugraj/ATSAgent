@@ -1,0 +1,20 @@
+{
+  "displayName": "ATSIQ — agent scheduler tick missing",
+  "documentation": {
+    "content": "No `/api/public/agent-tick` request has been logged for 10 minutes. Without the tick, agent runs, health rules and SLO burn alerts stop. Check the Cloud Scheduler job (infra/DEPLOYMENT-HANDOFF.md §7).",
+    "mimeType": "text/markdown"
+  },
+  "severity": "ERROR",
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "agent-tick absent for 10 min",
+      "conditionPrometheusQueryLanguage": {
+        "query": "absent_over_time(logging_googleapis_com:user_atsiq_agent_ticks[10m])",
+        "duration": "0s",
+        "evaluationInterval": "60s"
+      }
+    }
+  ],
+  "alertStrategy": { "autoClose": "3600s" }
+}
