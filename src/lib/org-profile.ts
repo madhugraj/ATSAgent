@@ -177,15 +177,19 @@ export function nameKeys(people: Person[]): string[] {
 /**
  * Why this text may not be kept because it names or contacts a person, or
  * null. `names` comes from `nameKeys` over the organisation's members and
- * HRMS employees.
+ * HRMS employees. `orgNames` (the organisation's own and legal name) are taken
+ * out of the text first: a person whose name is part of the organisation's name
+ * ("Agent Demo" in "Agent Demo Org") is not named by naming the organisation.
  */
-export function staffReason(text: string, names: string[]): string | null {
+export function staffReason(text: string, names: string[], orgNames: string[] = []): string | null {
   if (EMAIL.test(text))
     return "It contains an e-mail address. The profile never holds contact details — describe roles by title.";
   const phone = text.match(PHONE)?.[0];
   if (phone && phone.replace(/\D/g, "").length >= 10)
     return "It contains a phone number. The profile never holds contact details — describe roles by title.";
-  const hay = ` ${norm(text)} `;
+  let hay = ` ${norm(text)} `;
+  for (const o of orgNames.map(norm).filter((o) => o.split(" ").length >= 2))
+    hay = hay.split(` ${o} `).join(" ");
   const hit = names.find((n) => hay.includes(` ${n} `));
   if (hit)
     return `It names a member of staff (${hit.replace(/\b\p{L}/gu, (c) => c.toUpperCase())}). The profile describes people by title, never by name.`;
@@ -204,6 +208,7 @@ export type Refusal = { section: string; itemId: string; text: string; reason: s
 export function checkSections(
   input: OrgProfileSections,
   names: string[],
+  orgNames: string[] = [],
 ): { sections: OrgProfileSections; refused: Refusal[]; problems: string[] } {
   const sections: OrgProfileSections = {};
   const refused: Refusal[] = [];
@@ -223,7 +228,7 @@ export function checkSections(
         continue;
       }
       const itemId = String(raw?.id ?? "").slice(0, 64) || crypto.randomUUID();
-      const reason = payFigureReason(text) ?? staffReason(text, names);
+      const reason = payFigureReason(text) ?? staffReason(text, names, orgNames);
       if (reason) {
         refused.push({ section: key, itemId, text, reason });
         continue;

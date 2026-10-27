@@ -164,6 +164,19 @@ describe("refusals (pure)", () => {
     expect(pure.staffReason("Reporting to the Head of Nursing", names)).toBeNull();
   });
 
+  test("the organisation's own name is not a person's (a member named like the organisation)", () => {
+    const names = pure.nameKeys([{ name: "Agent Demo" }, { name: "Priya Raman" }]);
+    const org = ["Agent Demo Org", "Agent Demo Org Pvt Ltd"];
+    expect(
+      pure.staffReason("Agent Demo Org builds AI hiring software in India", names, org),
+    ).toBeNull();
+    // Still refused when the person is named on their own, or alongside the organisation.
+    expect(pure.staffReason("The AI team is led by Agent Demo", names, org)).toMatch(/Agent Demo/);
+    expect(pure.staffReason("Agent Demo Org: hiring is led by Priya Raman", names, org)).toMatch(
+      /Priya Raman/,
+    );
+  });
+
   test("sections: unknown refused, internal-only forced internal, limits", () => {
     const out = pure.checkSections(
       {

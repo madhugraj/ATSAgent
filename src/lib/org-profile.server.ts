@@ -19,6 +19,7 @@ import {
   orgMembers,
   orgProfileVersions,
   orgProfiles,
+  organizations,
   users,
 } from "@db/schema";
 import { looksLikeInjection } from "../server/agents/injection";
@@ -59,6 +60,16 @@ async function versionOf(orgId: string, versionId: string): Promise<VersionRow> 
     .limit(1);
   if (!v) throw new Error("Profile version not found.");
   return v;
+}
+
+/** The organisation's own and legal name: naming the organisation is not naming a person. */
+export async function orgNamesOf(orgId: string): Promise<string[]> {
+  const [o] = await db
+    .select({ name: organizations.name, legalName: organizations.legalName })
+    .from(organizations)
+    .where(eq(organizations.id, orgId))
+    .limit(1);
+  return [o?.name, o?.legalName].filter((n): n is string => Boolean(n));
 }
 
 /** Full names of the organisation's people (members and HRMS employees), for the refusal. */
@@ -187,6 +198,7 @@ export async function saveDraftCore(
   const { sections, refused, problems } = checkSections(
     input.sections,
     await staffNameKeys(actor.orgId),
+    await orgNamesOf(actor.orgId),
   );
   if (refused.length || problems.length) {
     await audit(actor, "items_refused", v.id, {
