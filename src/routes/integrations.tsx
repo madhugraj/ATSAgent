@@ -1011,6 +1011,11 @@ function CapturePanel() {
           In LinkedIn Recruiter open a job, choose the applicants view, then press Start sweep in
           the companion.
         </li>
+        <li>
+          On Internshala or Apna, signed in to your own employer account, open “post a job”: the
+          companion lists the roles the Distribution agent planned there, fills the form for you to
+          check and submit, records the posting, and sends applicants into the role.
+        </li>
       </ol>
 
       <p className="mt-3 text-xs text-muted-foreground">

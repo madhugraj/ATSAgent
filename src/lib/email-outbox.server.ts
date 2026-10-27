@@ -81,17 +81,37 @@ export function formatInOrgTZ(date: Date, timezone: string): string {
   }
 }
 
+/**
+ * Where a candidate's reply should go: the reply-to set in Candidate emails,
+ * else the organisation's careers e-mail, else its own careers inbox address
+ * — which files CVs and pre-onboarding documents on its own. Never the
+ * no-reply sender, so a "reply with your documents" always reaches someone.
+ */
+export async function careersReplyAddress(
+  orgId: string,
+  settings?: EmailSettingsEffective,
+): Promise<string | null> {
+  const s = settings ?? (await getOrgEmailSettings(orgId));
+  if (s.replyTo) return s.replyTo;
+  const [org] = await db
+    .select({
+      careersEmail: organizations.careersEmail,
+      inboxSlug: organizations.inboxSlug,
+      slug: organizations.slug,
+    })
+    .from(organizations)
+    .where(eq(organizations.id, orgId))
+    .limit(1);
+  if (org?.careersEmail) return org.careersEmail;
+  const { inboxAddress } = await import("./local-inbox.server");
+  return inboxAddress(org?.inboxSlug ?? org?.slug ?? null);
+}
+
 async function resolveReplyTo(
   orgId: string,
   settings: EmailSettingsEffective,
 ): Promise<string | null> {
-  if (settings.replyTo) return settings.replyTo;
-  const [org] = await db
-    .select({ careersEmail: organizations.careersEmail })
-    .from(organizations)
-    .where(eq(organizations.id, orgId))
-    .limit(1);
-  return org?.careersEmail ?? null;
+  return careersReplyAddress(orgId, settings);
 }
 
 /** Marks queued stage updates superseded by a newer one for the same applications. */

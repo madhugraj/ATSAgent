@@ -225,7 +225,7 @@ see the SLOs on **Platform → Service health**. Support can find any request fr
 - **Rebuild the Capture companion before each deploy**: `public/atsiq-capture.zip`
   is gitignored, so it is not updated by pulls — regenerate it from the
   extension source whenever `extension/` changes:
-  `cd extension && zip -q ../public/atsiq-capture.zip manifest.json background.js popup.js popup.html`.
+  `cd extension && zip -q ../public/atsiq-capture.zip manifest.json background.js popup.js popup.html portal-fill.js`.
   The Integrations "Download the companion" button serves this file verbatim.
 - `SECRET_ENCRYPTION_KEY` decrypts organisation-level AI/integration
   credentials. Back it up; rotating it requires re-encrypting stored values.

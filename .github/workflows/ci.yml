@@ -144,3 +144,5 @@ jobs:
         run: bun test scripts/interview-panels.test.ts
       - name: Organisation agreements (Terms, Privacy, DPA acceptance)
         run: bun test scripts/org-agreements.test.ts
+      - name: Companion portal form filler (field matching)
+        run: bun test scripts/portal-fill.test.ts

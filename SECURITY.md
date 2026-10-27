@@ -153,7 +153,11 @@ Job Hai — `candidates.pool_use = 'role_only'`, migration 0045) are never added
 searched, matched, invited or shown through a consortium pool share, and are erased 30 days after
 their roles are over — only after the HR head approves the Distribution agent's request, even for
 an Autonomous agent (audited `candidate.erase_role_limited`, counts only; health rule
-`distribution.role_limited_retention` flags any kept a week longer). Tracked apply links keep only known channel names (`?src=`), so a link cannot invent a source.
+`distribution.role_limited_retention` flags any kept a week longer). The ATSIQ Capture companion posts on portals with no integration (Internshala, Apna) only in the
+person's own signed-in browser and only when they press it: it fills the form and never submits,
+never stores or sends a portal password or session, and records a posting
+(`/api/public/distribution`, capture-key authenticated, rate-limited, CORS-allowlisted) only with a
+listing link on that portal's own domain. Tracked apply links keep only known channel names (`?src=`), so a link cannot invent a source.
 Including a role on a feed, recording a hand posting and switching Google listing are
 `hr_head`-gated and audited.
 

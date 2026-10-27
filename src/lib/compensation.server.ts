@@ -105,6 +105,12 @@ export type CompensationView = {
   updatedAt: string | null;
   /** Expected CTC and notice period are both known: an offer can be drafted. */
   complete: boolean;
+  /**
+   * The expected CTC comes only from the talent-pool profile — never given or
+   * confirmed for this application (it may be from an earlier process). An
+   * offer is not built on it until the candidate confirms it.
+   */
+  unconfirmed: boolean;
 };
 
 type DetailRow = typeof compensationDetails.$inferSelect;
@@ -152,6 +158,7 @@ export function mergeCompensation(
         : null,
     updatedAt: sorted[0]?.createdAt.toISOString() ?? null,
     complete: expected != null && notice != null,
+    unconfirmed: !expectedRow && profile.expectedCtc != null,
   };
 }
 

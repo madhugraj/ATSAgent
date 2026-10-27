@@ -89,7 +89,7 @@ export const EVAL_CATALOG: Record<string, EvalExplainer> = {
       checks: [
         "It looks at where the role is live and which portals worked for the organisation before.",
         "It asks the HR head to list the role on the Jooble and Adzuna job feeds — nothing goes out before that approval.",
-        "For portals with no integration (here Naukri and Apna) it does not post itself: it reminds a person, pointing to the ready text on the role's page.",
+        "For portals with no integration (here Naukri and Apna) it does not post itself: it marks the role as waiting to be posted there and reminds a person, whose browser extension fills the portal's form.",
       ],
     },
   "distribution: chases a quiet portal and asks before erasing role-limited CVs": {

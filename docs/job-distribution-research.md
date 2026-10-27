@@ -67,6 +67,17 @@ page are not limited, whatever link they followed. The data-use reading of
 each portal's terms is conservative — have the organisation's counsel
 confirm it.
 
+### Posting on portals with no integration (ATSIQ Capture)
+
+The Distribution agent plans a role for a portal; on Internshala and Apna the
+person opens the portal's "post a job" page in their own signed-in browser
+and the ATSIQ Capture companion fills the form, which they check and submit
+themselves; the companion then records the posting from the listing page and
+can send applicants into the role (credited to the portal). ATSIQ never logs
+in, stores a portal password or submits on anyone's behalf — consistent with
+the portals' terms on automated access. Job Hai's terms cover browser
+plug-ins too, so it is not supported without Info Edge's written consent.
+
 ## Business steps (not code)
 
 - LinkedIn: partner application form — https://business.linkedin.com/talent-solutions/ats-partners/partner-application

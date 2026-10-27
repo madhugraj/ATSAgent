@@ -136,6 +136,7 @@
     <datalist id="site-options">
       <option value="https://atsiq.yavar.ai"></option>
       <option value="http://localhost:8080"></option>
+      <option value="http://localhost:9000"></option>
     </datalist>
 
     <label for="token">Capture key</label>
@@ -150,6 +151,22 @@
     <button id="send">Capture this page</button>
     <button id="save" class="ghost">Save settings</button>
     <div id="status"></div>
+
+    <section id="post" style="display: none">
+      <hr />
+      <h2>Post on <span id="portalName">this portal</span></h2>
+      <p class="hint" style="margin-top: 0">
+        Roles the Distribution agent planned for this portal. Open the portal's “post a job” page,
+        then fill it from ATSIQ. You review and submit it yourself — ATSIQ never signs in or presses
+        the portal's buttons.
+      </p>
+      <label for="role">Role</label>
+      <select id="role"></select>
+      <button id="fill">Fill this form</button>
+      <button id="recordPosted" class="ghost">I've submitted it — record the posting</button>
+      <button id="sendApplicant" class="ghost">Send this applicant to the role</button>
+      <div id="postStatus" class="hint"></div>
+    </section>
 
     <hr />
 
