@@ -5,7 +5,7 @@
  * suite needs no database (an explicit `config` skips key lookup).
  */
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { z } from "zod/v4";
+import { z } from "zod";
 
 import type { AgentMessage, AgentToolSpec, AiConfig } from "../src/lib/ai-gateway.server";
 

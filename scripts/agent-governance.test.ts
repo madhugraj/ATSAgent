@@ -7,7 +7,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { and, eq, inArray } from "drizzle-orm";
-import { z } from "zod/v4";
+import { z } from "zod";
 
 import type { AgentStepResult, AgentToolCall } from "../src/lib/ai-gateway.server";
 
