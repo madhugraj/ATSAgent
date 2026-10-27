@@ -125,6 +125,18 @@ alert webhooks are signed with HMAC-SHA256 (`X-ATSAgent-Signature: sha256=<hex>`
 and alerts carry ids, rule names, statuses, timings and token counts only — no goals, prompts,
 candidate content or model names.
 
+## Organisation agreements
+
+An organisation cannot be created without its registering signatory accepting the current Terms of
+Service, Privacy Policy and Data Processing Agreement (`src/lib/legal/`): `createOrganization`
+validates the acceptance and refuses versions that are not current, and every acceptance is stored in
+`org_agreements` (migration 0046) with the signatory's user, name, title, work email and time, and is
+audited as `org.agreement.accepted`. The request IP is kept only as an HMAC-SHA256 keyed with
+`SESSION_SECRET`, never in the clear. Re-acceptance of a new version is owner-only
+(`requireOrgOwner`) and scoped to the owner's organisation; until it is done the workspace shows a
+blocking step (owner) or a waiting screen (members). The cross-tenant view is `requirePlatformAdmin`.
+Rows are deleted with the organisation; the audit entries remain.
+
 ## Training data
 
 `training_inferences` and `training_feedback` hold prompts and outputs that

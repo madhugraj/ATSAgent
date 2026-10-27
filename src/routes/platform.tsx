@@ -11,6 +11,7 @@ import {
   deleteOrgUserAsSuperUser,
   deleteOrganizationAsSuperUser,
   listAllOrganizations,
+  listOrgAgreementsAsSuperUser,
   listOrgUsersAsSuperUser,
   listPlatformAdmins,
   removePlatformAdmin,
@@ -19,6 +20,7 @@ import {
   updateOrganizationAsSuperUser,
 } from "@/lib/platform.functions";
 import { usePlatform } from "@/hooks/usePlatform";
+import { AGREEMENT_KINDS, AGREEMENTS } from "@/lib/legal/agreements";
 import { EmptyState, PageHeader, StatCard } from "@/components/ats";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -68,6 +70,7 @@ function Platform() {
   const fetchOrgUsers = useServerFn(listOrgUsersAsSuperUser);
   const deleteUser = useServerFn(deleteOrgUserAsSuperUser);
   const dropOrg = useServerFn(deleteOrganizationAsSuperUser);
+  const fetchAgreements = useServerFn(listOrgAgreementsAsSuperUser);
 
   const [busy, setBusy] = useState<string | null>(null);
   const [q, setQ] = useState("");
@@ -95,6 +98,11 @@ function Platform() {
     queryFn: () => fetchAdmins({}),
     enabled: isSuperUser,
   });
+  const agreements = useQuery({
+    queryKey: ["platform_org_agreements"],
+    queryFn: () => fetchAgreements({}),
+    enabled: isSuperUser,
+  });
   const orgUsers = useQuery({
     queryKey: ["platform_org_users", usersOf?.id],
     queryFn: () => fetchOrgUsers({ data: { orgId: usersOf!.id } }),
@@ -106,6 +114,7 @@ function Platform() {
     try {
       await fn();
       qc.invalidateQueries({ queryKey: ["platform_orgs"] });
+      qc.invalidateQueries({ queryKey: ["platform_org_agreements"] });
       qc.invalidateQueries({ queryKey: ["platform_admins"] });
       qc.invalidateQueries({ queryKey: ["platform_org_users"] });
       toast.success(ok);
@@ -367,6 +376,8 @@ function Platform() {
           </div>
         )}
       </section>
+
+      <AgreementsPanel rows={agreements.data ?? []} loading={agreements.isLoading} />
 
       <section className="panel space-y-3 p-4">
         <h2 className="text-sm font-semibold">Super users</h2>
@@ -645,6 +656,108 @@ function PendingQueue({
           </div>
         ))}
       </div>
+    </section>
+  );
+}
+
+type AgreementRow = Awaited<ReturnType<typeof listOrgAgreementsAsSuperUser>>[number];
+
+/** Which organisations accepted which Terms / Privacy / DPA version, when and by whom. */
+function AgreementsPanel({ rows, loading }: { rows: AgreementRow[]; loading: boolean }) {
+  const outstanding = rows.filter((r) => r.outstanding.length > 0 && r.status !== "rejected");
+  const fmt = (iso: string) =>
+    new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  return (
+    <section className="panel space-y-3 p-4">
+      <div>
+        <h2 className="text-sm font-semibold">Organisation agreements</h2>
+        <p className="text-xs text-muted-foreground">
+          Current versions:{" "}
+          {AGREEMENT_KINDS.map((k) => `${AGREEMENTS[k].title} ${AGREEMENTS[k].version}`).join(
+            " · ",
+          )}
+          . {outstanding.length} organisation{outstanding.length === 1 ? "" : "s"} still to accept
+          the current versions — their owner is asked on next sign-in.
+        </p>
+      </div>
+      {loading ? (
+        <p className="text-xs text-muted-foreground">Loading agreements…</p>
+      ) : rows.length === 0 ? (
+        <p className="text-xs text-muted-foreground">No organisations yet.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-left text-xs text-muted-foreground">
+              <tr className="border-b border-border">
+                <th className="py-2 pr-3 font-medium">Organisation</th>
+                {AGREEMENT_KINDS.map((k) => (
+                  <th key={k} className="py-2 pr-3 font-medium">
+                    {AGREEMENTS[k].shortTitle}
+                  </th>
+                ))}
+                <th className="py-2 pr-3 font-medium">Last accepted by</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => {
+                const last = r.history[0];
+                return (
+                  <tr key={r.orgId} className="border-b border-border/60 align-top">
+                    <td className="py-2 pr-3">
+                      <div className="font-medium">{r.name}</div>
+                      <div className="text-xs text-muted-foreground">{r.status}</div>
+                    </td>
+                    {AGREEMENT_KINDS.map((k) => {
+                      const latest = r.history.find((h) => h.kind === k);
+                      const current = !r.outstanding.includes(k);
+                      return (
+                        <td key={k} className="py-2 pr-3">
+                          {latest ? (
+                            <div className="space-y-0.5">
+                              <Badge variant={current ? "secondary" : "outline"} className="num">
+                                {latest.version}
+                                {current ? "" : " · outdated"}
+                              </Badge>
+                              <div className="text-xs text-muted-foreground">
+                                {fmt(latest.acceptedAt)}
+                              </div>
+                            </div>
+                          ) : (
+                            <Badge variant="outline">Not accepted</Badge>
+                          )}
+                        </td>
+                      );
+                    })}
+                    <td className="py-2 pr-3">
+                      {last ? (
+                        <details className="text-xs">
+                          <summary className="cursor-pointer">
+                            <span className="text-sm">{last.accepterName}</span>
+                            <span className="text-muted-foreground">
+                              {" "}
+                              · {last.accepterTitle} · {last.accepterEmail}
+                            </span>
+                          </summary>
+                          <ul className="mt-1 space-y-0.5 text-muted-foreground">
+                            {r.history.map((h) => (
+                              <li key={`${h.kind}:${h.version}`} className="num">
+                                {AGREEMENTS[h.kind].shortTitle} {h.version} — {h.accepterName} (
+                                {h.accepterEmail}), {fmt(h.acceptedAt)}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </section>
   );
 }

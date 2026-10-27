@@ -125,3 +125,5 @@ jobs:
         run: bun test scripts/job-distribution.test.ts
       - name: Distribution agent (portal credit, role-limited CVs, daily check)
         run: bun test scripts/distribution-agent.test.ts
+      - name: Organisation agreements (Terms, Privacy, DPA acceptance)
+        run: bun test scripts/org-agreements.test.ts

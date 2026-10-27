@@ -21,6 +21,7 @@ const DOMAINS = {
   audit_log: "Identity & access",
   organizations: "Organisations & masters",
   org_members: "Organisations & masters",
+  org_agreements: "Organisations & masters",
   org_pool_shares: "Organisations & masters",
   org_linkedin_connections: "Organisations & masters",
   departments: "Organisations & masters",
