@@ -1,0 +1,20 @@
+{
+  "displayName": "ATSIQ — server-function availability: slow burn (ticket)",
+  "documentation": {
+    "content": "Server-function 5xx ratio is burning the 30-day 99 % budget at ≥ 6× over both 6 h and 30 min (5 % of the month's budget in 6 h). Targets: src/server/slo.ts.",
+    "mimeType": "text/markdown"
+  },
+  "severity": "WARNING",
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "5xx ratio > 6 × 1 % over 6 h and 30 min",
+      "conditionPrometheusQueryLanguage": {
+        "query": "(sum(rate(logging_googleapis_com:user_atsiq_http_requests{route_group=\"server_fn\",status_class=\"5xx\"}[6h])) / sum(rate(logging_googleapis_com:user_atsiq_http_requests{route_group=\"server_fn\"}[6h])) > 0.06) and (sum(rate(logging_googleapis_com:user_atsiq_http_requests{route_group=\"server_fn\",status_class=\"5xx\"}[30m])) / sum(rate(logging_googleapis_com:user_atsiq_http_requests{route_group=\"server_fn\"}[30m])) > 0.06)",
+        "duration": "300s",
+        "evaluationInterval": "60s"
+      }
+    }
+  ],
+  "alertStrategy": { "autoClose": "21600s" }
+}

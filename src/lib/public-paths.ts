@@ -2,7 +2,7 @@
 // legal pages and candidate-facing apply/assess/pay/schedule links arrive with no session —
 // gating them behind the sign-in screen made them unreachable. Consumed by
 // every gate in __root.tsx (AuthGate, OrgGate), not just the first one.
-const PUBLIC_PATHS = new Set(["/auth/reset", "/privacy", "/cookies"]);
+const PUBLIC_PATHS = new Set(["/auth/reset", "/privacy", "/terms", "/dpa", "/cookies"]);
 
 export function isPublicPath(pathname: string): boolean {
   return (

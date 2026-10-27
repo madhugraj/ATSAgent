@@ -6,7 +6,7 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { and, eq } from "drizzle-orm";
-import { z } from "zod/v4";
+import { z } from "zod";
 
 import { db } from "../server/db";
 import { userRoles, users } from "@db/schema";

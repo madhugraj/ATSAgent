@@ -38,6 +38,7 @@ const { ingestCandidate } = await import("../src/lib/intake.server");
 const { addApplicationsCore } = await import("../src/lib/pipeline.server");
 const dist = await import("../src/server/agents/distribution-agent.server");
 const { getTool } = await import("../src/server/agents/registry");
+const { closePostingsForRequisition } = await import("../src/server/boards/publish.server");
 const { decideToolCall } = await import("../src/server/agents/policy");
 
 const stamp = Date.now();
@@ -409,5 +410,103 @@ describe("the daily check", () => {
     expect(r).toHaveLength(1);
     expect(r[0]!.subjectId).toBeNull();
     expect(r[0]!.goal).toMatch(/^Daily check/);
+  });
+});
+
+/* --------------------------------------------------- planned hand postings */
+
+describe("hand postings planned by the agent, posted in the person's browser", () => {
+  test("planning, the extension's queue, recording only from the portal, withdrawal on close", async () => {
+    const dist2 = await import("../src/server/distribution/distribution.server");
+    const r = await role("approved", { responsibilities: "Run it. Mail jobs@acme.example." });
+    const actorA = { memberEmail: "agent:distribution", userId };
+    // Live postings are left alone.
+    await dist2.markPosted(orgId, actorA, r, "naukri", "https://www.naukri.com/job/1");
+    const plan = await dist2.planHandPosting(orgId, actorA, r, ["internshala", "apna", "naukri"]);
+    expect(plan).toEqual({ planned: ["Internshala", "Apna"], alreadyLive: ["Naukri"] });
+    await expect(dist2.planHandPosting(orgId, actorA, r, ["jooble"])).rejects.toThrow(
+      /Unknown channel/,
+    );
+
+    const q = await dist2.handPostingQueue(orgId, "apna");
+    expect(q.roles).toHaveLength(1);
+    expect(q.roles[0]).toMatchObject({ requisitionId: r, status: "waiting" });
+    expect(q.roles[0]!.fields).toMatchObject({
+      title: "Platform SRE",
+      applyUrl: null,
+      openings: 1,
+    });
+    expect(q.roles[0]!.fields.description).not.toMatch(/jobs@acme/);
+    expect(JSON.stringify(q)).not.toMatch(/budget|band|weight/i);
+
+    const ext = { memberEmail: "ATSIQ Capture (paired browser)", userId: null };
+    await expect(
+      dist2.markPosted(orgId, ext, r, "apna", "https://evil.example/apna", "browser_extension"),
+    ).rejects.toThrow(/from the Apna listing page/);
+    await dist2.markPosted(
+      orgId,
+      ext,
+      r,
+      "apna",
+      "https://employer.apna.co/jobs/42",
+      "browser_extension",
+    );
+    expect((await dist2.handPostingQueue(orgId, "apna")).roles[0]!.status).toBe("posted");
+
+    // Two days on, Internshala still waits: the daily check names it.
+    await db
+      .update(requisitionBoardPostings)
+      .set({ updatedAt: days(3) })
+      .where(eq(requisitionBoardPostings.requisitionId, r));
+    expect((await dist.cvInflow(orgId)).waitingToBePosted.map((w) => w.channel)).toEqual([
+      "internshala",
+    ]);
+
+    // Closing the role withdraws what was planned but never posted.
+    await closePostingsForRequisition({
+      orgId,
+      actor: { memberEmail: "x", userId },
+      requisitionId: r,
+    });
+    const rows = await db
+      .select({
+        provider: requisitionBoardPostings.provider,
+        status: requisitionBoardPostings.status,
+      })
+      .from(requisitionBoardPostings)
+      .where(eq(requisitionBoardPostings.requisitionId, r));
+    expect(Object.fromEntries(rows.map((x) => [x.provider, x.status]))).toMatchObject({
+      internshala: "withdrawn",
+      apna: "closed",
+    });
+  });
+
+  test("the companion endpoint needs the organisation's capture key", async () => {
+    const { Route } = await import("../src/routes/api/public/distribution");
+    const post = (body: unknown) =>
+      (
+        Route.options as unknown as {
+          server: { handlers: { POST: (a: { request: Request }) => Promise<Response> } };
+        }
+      ).server.handlers.POST({
+        request: new Request("http://x/api/public/distribution", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      });
+    expect((await post({ action: "queue", token: "x".repeat(30), channel: "apna" })).status).toBe(
+      401,
+    );
+    expect((await post({ action: "nope" })).status).toBe(400);
+    const { createHash, randomBytes } = await import("node:crypto");
+    const key = randomBytes(24).toString("hex");
+    await db
+      .update(organizations)
+      .set({ captureTokenHash: createHash("sha256").update(key).digest("hex") })
+      .where(eq(organizations.id, orgId));
+    const ok = await post({ action: "queue", token: key, channel: "internshala" });
+    expect(ok.status).toBe(200);
+    expect(((await ok.json()) as { channel: { name: string } }).channel.name).toBe("Internshala");
   });
 });

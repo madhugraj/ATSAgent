@@ -288,6 +288,14 @@ describe("pure", () => {
       complete: false,
     });
     expect(comp.mergeCompensation([], none)).toMatchObject({ source: null, complete: false });
+    // Only on the profile (maybe an earlier process): complete, but not confirmed for this role.
+    expect(
+      comp.mergeCompensation([], {
+        currentCtc: null,
+        expectedCtc: "9000000",
+        noticePeriodDays: 30,
+      }),
+    ).toMatchObject({ source: "candidate_profile", complete: true, unconfirmed: true });
   });
 
   test("joining date: not in the past, within a year", () => {

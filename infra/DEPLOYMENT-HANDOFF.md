@@ -202,6 +202,20 @@ first sweep backfills every shortlisted candidate missing a kit (AI cost: one
 `screening_kit` call per candidate on the organisation's own key, throttled to ≤100
 per sweep, fully ledgered in `ai_usage_events`).
 
+### 7a. Monitoring and alerting (after the first deploy)
+
+Apply the Cloud Monitoring dashboard, log-based metrics and alert policies in
+`infra/monitoring/` (steps in `infra/monitoring/README.md`) and wire them to the
+on-call notification channel. They page on server-function error-budget burn
+(1 h / 5 min at 14.4×; ticket at 6 h / 30 min at 6×), p95 latency above 2.5 s, a
+missing `agent-tick` (the scheduler also drives the SLO evaluator) and any
+`slo.burn_alert` the app logs. Optional secrets: `METRICS_TOKEN` (enables the
+token-protected `/metrics` OpenMetrics endpoint), `PLATFORM_ALERT_WEBHOOK_URL` +
+`PLATFORM_ALERT_WEBHOOK_SECRET` (signed SLO alert webhook), and set
+`GOOGLE_CLOUD_PROJECT` so log lines group under their trace. Platform super admins
+see the SLOs on **Platform → Service health**. Support can find any request from the
+`x-request-id` response header: `jsonPayload.trace_id="<id>"` in Logs Explorer.
+
 ## 8. Notes & gotchas
 
 - **Do not run `drizzle-kit migrate` against this database.** The schema path is
@@ -211,7 +225,7 @@ per sweep, fully ledgered in `ai_usage_events`).
 - **Rebuild the Capture companion before each deploy**: `public/atsiq-capture.zip`
   is gitignored, so it is not updated by pulls — regenerate it from the
   extension source whenever `extension/` changes:
-  `cd extension && zip -q ../public/atsiq-capture.zip manifest.json background.js popup.js popup.html`.
+  `cd extension && zip -q ../public/atsiq-capture.zip manifest.json background.js popup.js popup.html portal-fill.js`.
   The Integrations "Download the companion" button serves this file verbatim.
 - `SECRET_ENCRYPTION_KEY` decrypts organisation-level AI/integration
   credentials. Back it up; rotating it requires re-encrypting stored values.

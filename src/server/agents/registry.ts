@@ -5,7 +5,7 @@
  * the run's principal so `assertRole` and org predicates apply exactly as for
  * that person. Agents only see the tools their definition lists.
  */
-import type { z } from "zod/v4";
+import type { z } from "zod";
 
 import type { AiFeature } from "../ai-usage";
 import type { AgentType } from "@db/schema";
@@ -46,12 +46,34 @@ export type AgentTool<I = unknown> = {
    * goes back to the agent instead of an approval card. Must only read.
    */
   precheck?: (ctx: ToolContext, input: I) => Promise<string | null>;
+  /**
+   * Facts the system states on the approval card (never left to the agent),
+   * e.g. the interview times a scheduling call will offer. Must only read.
+   */
+  brief?: (ctx: ToolContext, input: I) => Promise<string>;
+  /**
+   * A proposal tool (propose_*): calling it never runs anything — it opens a
+   * person's decision on `subject` (a gate; the system checks it and states
+   * the facts), whatever the agent's autonomy. `run` is not called.
+   */
+  proposes?: (
+    ctx: ToolContext,
+    input: I,
+  ) => Promise<{ title: string; summary: string; subject: unknown }>;
   run: (ctx: ToolContext, input: I) => Promise<unknown>;
 };
 
 /** Kinds of human decision an agent may ask for with request_approval. */
 export type GateKind =
-  "requisition" | "jd" | "rejection" | "hiring_decision" | "org_profile" | "general";
+  | "requisition"
+  | "jd"
+  | "rejection"
+  | "screening_decision"
+  | "hiring_decision"
+  | "panel_approval"
+  | "panel_substitute"
+  | "org_profile"
+  | "general";
 
 /**
  * Agent manifest (docs/agentic-plan.md §6): the single, versioned source of an

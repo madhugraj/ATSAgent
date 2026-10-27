@@ -1,0 +1,20 @@
+{
+  "displayName": "ATSIQ — server-function p95 latency above 2.5 s",
+  "documentation": {
+    "content": "p95 of server-function requests has been above the 2.5 s SLO threshold for 15 minutes. Check Cloud SQL CPU/connections on the ATSIQ dashboard and slow `http.request` lines (duration_ms > 2500). Targets: src/server/slo.ts.",
+    "mimeType": "text/markdown"
+  },
+  "severity": "WARNING",
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "server_fn p95 > 2500 ms for 15 min",
+      "conditionPrometheusQueryLanguage": {
+        "query": "histogram_quantile(0.95, sum by (le) (rate(logging_googleapis_com:user_atsiq_http_request_latency_bucket{route_group=\"server_fn\"}[10m]))) > 2500",
+        "duration": "900s",
+        "evaluationInterval": "60s"
+      }
+    }
+  ],
+  "alertStrategy": { "autoClose": "3600s" }
+}

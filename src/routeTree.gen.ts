@@ -16,6 +16,7 @@ import { Route as CollaborationRouteImport } from './routes/collaboration'
 import { Route as CookiesRouteImport } from './routes/cookies'
 import { Route as DeskRouteImport } from './routes/desk'
 import { Route as DistributionRouteImport } from './routes/distribution'
+import { Route as DpaRouteImport } from './routes/dpa'
 import { Route as HelpRouteImport } from './routes/help'
 import { Route as HiringCostRouteImport } from './routes/hiring-cost'
 import { Route as IjpRouteImport } from './routes/ijp'
@@ -29,12 +30,14 @@ import { Route as OrganisationRouteImport } from './routes/organisation'
 import { Route as PlatformRouteImport } from './routes/platform'
 import { Route as PlatformAgentsRouteImport } from './routes/platform-agents'
 import { Route as PlatformAiUsageRouteImport } from './routes/platform-ai-usage'
+import { Route as PlatformHealthRouteImport } from './routes/platform-health'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as RoiRouteImport } from './routes/roi'
 import { Route as ScreeningRouteImport } from './routes/screening'
 import { Route as TeamRouteImport } from './routes/team'
 import { Route as TemplatesRouteImport } from './routes/templates'
+import { Route as TermsRouteImport } from './routes/terms'
 import { Route as AgentsIndexRouteImport } from './routes/agents.index'
 import { Route as AgentsObservabilityRouteImport } from './routes/agents.observability'
 import { Route as AgentsRegisterRouteImport } from './routes/agents.register'
@@ -63,6 +66,7 @@ import { Route as ApiAuthSessionRouteImport } from './routes/api/auth/session'
 import { Route as ApiPublicAgentTickRouteImport } from './routes/api/public/agent-tick'
 import { Route as ApiPublicBoardSyncRouteImport } from './routes/api/public/board-sync'
 import { Route as ApiPublicCaptureRouteImport } from './routes/api/public/capture'
+import { Route as ApiPublicDistributionRouteImport } from './routes/api/public/distribution'
 import { Route as ApiPublicInboundEmailRouteImport } from './routes/api/public/inbound-email'
 import { Route as ApiPublicInboxSyncRouteImport } from './routes/api/public/inbox-sync'
 import { Route as ApiPublicProcessEmailOutboxRouteImport } from './routes/api/public/process-email-outbox'
@@ -109,6 +113,11 @@ const DeskRoute = DeskRouteImport.update({
 const DistributionRoute = DistributionRouteImport.update({
   id: '/distribution',
   path: '/distribution',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DpaRoute = DpaRouteImport.update({
+  id: '/dpa',
+  path: '/dpa',
   getParentRoute: () => rootRouteImport,
 } as any)
 const HelpRoute = HelpRouteImport.update({
@@ -176,6 +185,11 @@ const PlatformAiUsageRoute = PlatformAiUsageRouteImport.update({
   path: '/platform-ai-usage',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PlatformHealthRoute = PlatformHealthRouteImport.update({
+  id: '/platform-health',
+  path: '/platform-health',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PrivacyRoute = PrivacyRouteImport.update({
   id: '/privacy',
   path: '/privacy',
@@ -204,6 +218,11 @@ const TeamRoute = TeamRouteImport.update({
 const TemplatesRoute = TemplatesRouteImport.update({
   id: '/templates',
   path: '/templates',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TermsRoute = TermsRouteImport.update({
+  id: '/terms',
+  path: '/terms',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgentsIndexRoute = AgentsIndexRouteImport.update({
@@ -346,6 +365,11 @@ const ApiPublicCaptureRoute = ApiPublicCaptureRouteImport.update({
   path: '/api/public/capture',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicDistributionRoute = ApiPublicDistributionRouteImport.update({
+  id: '/api/public/distribution',
+  path: '/api/public/distribution',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicInboundEmailRoute = ApiPublicInboundEmailRouteImport.update({
   id: '/api/public/inbound-email',
   path: '/api/public/inbound-email',
@@ -422,6 +446,7 @@ export interface FileRoutesByFullPath {
   '/cookies': typeof CookiesRoute
   '/desk': typeof DeskRoute
   '/distribution': typeof DistributionRoute
+  '/dpa': typeof DpaRoute
   '/help': typeof HelpRoute
   '/hiring-cost': typeof HiringCostRoute
   '/ijp': typeof IjpRoute
@@ -435,12 +460,14 @@ export interface FileRoutesByFullPath {
   '/platform': typeof PlatformRoute
   '/platform-agents': typeof PlatformAgentsRoute
   '/platform-ai-usage': typeof PlatformAiUsageRoute
+  '/platform-health': typeof PlatformHealthRoute
   '/privacy': typeof PrivacyRoute
   '/reports': typeof ReportsRoute
   '/roi': typeof RoiRoute
   '/screening': typeof ScreeningRoute
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
+  '/terms': typeof TermsRoute
   '/agents/observability': typeof AgentsObservabilityRoute
   '/agents/register': typeof AgentsRegisterRoute
   '/agents/settings': typeof AgentsSettingsRoute
@@ -469,6 +496,7 @@ export interface FileRoutesByFullPath {
   '/api/public/agent-tick': typeof ApiPublicAgentTickRoute
   '/api/public/board-sync': typeof ApiPublicBoardSyncRoute
   '/api/public/capture': typeof ApiPublicCaptureRoute
+  '/api/public/distribution': typeof ApiPublicDistributionRoute
   '/api/public/inbound-email': typeof ApiPublicInboundEmailRoute
   '/api/public/inbox-sync': typeof ApiPublicInboxSyncRoute
   '/api/public/process-email-outbox': typeof ApiPublicProcessEmailOutboxRoute
@@ -490,6 +518,7 @@ export interface FileRoutesByTo {
   '/cookies': typeof CookiesRoute
   '/desk': typeof DeskRoute
   '/distribution': typeof DistributionRoute
+  '/dpa': typeof DpaRoute
   '/help': typeof HelpRoute
   '/hiring-cost': typeof HiringCostRoute
   '/ijp': typeof IjpRoute
@@ -503,12 +532,14 @@ export interface FileRoutesByTo {
   '/platform': typeof PlatformRoute
   '/platform-agents': typeof PlatformAgentsRoute
   '/platform-ai-usage': typeof PlatformAiUsageRoute
+  '/platform-health': typeof PlatformHealthRoute
   '/privacy': typeof PrivacyRoute
   '/reports': typeof ReportsRoute
   '/roi': typeof RoiRoute
   '/screening': typeof ScreeningRoute
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
+  '/terms': typeof TermsRoute
   '/agents/observability': typeof AgentsObservabilityRoute
   '/agents/register': typeof AgentsRegisterRoute
   '/agents/settings': typeof AgentsSettingsRoute
@@ -537,6 +568,7 @@ export interface FileRoutesByTo {
   '/api/public/agent-tick': typeof ApiPublicAgentTickRoute
   '/api/public/board-sync': typeof ApiPublicBoardSyncRoute
   '/api/public/capture': typeof ApiPublicCaptureRoute
+  '/api/public/distribution': typeof ApiPublicDistributionRoute
   '/api/public/inbound-email': typeof ApiPublicInboundEmailRoute
   '/api/public/inbox-sync': typeof ApiPublicInboxSyncRoute
   '/api/public/process-email-outbox': typeof ApiPublicProcessEmailOutboxRoute
@@ -559,6 +591,7 @@ export interface FileRoutesById {
   '/cookies': typeof CookiesRoute
   '/desk': typeof DeskRoute
   '/distribution': typeof DistributionRoute
+  '/dpa': typeof DpaRoute
   '/help': typeof HelpRoute
   '/hiring-cost': typeof HiringCostRoute
   '/ijp': typeof IjpRoute
@@ -572,12 +605,14 @@ export interface FileRoutesById {
   '/platform': typeof PlatformRoute
   '/platform-agents': typeof PlatformAgentsRoute
   '/platform-ai-usage': typeof PlatformAiUsageRoute
+  '/platform-health': typeof PlatformHealthRoute
   '/privacy': typeof PrivacyRoute
   '/reports': typeof ReportsRoute
   '/roi': typeof RoiRoute
   '/screening': typeof ScreeningRoute
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
+  '/terms': typeof TermsRoute
   '/agents/observability': typeof AgentsObservabilityRoute
   '/agents/register': typeof AgentsRegisterRoute
   '/agents/settings': typeof AgentsSettingsRoute
@@ -606,6 +641,7 @@ export interface FileRoutesById {
   '/api/public/agent-tick': typeof ApiPublicAgentTickRoute
   '/api/public/board-sync': typeof ApiPublicBoardSyncRoute
   '/api/public/capture': typeof ApiPublicCaptureRoute
+  '/api/public/distribution': typeof ApiPublicDistributionRoute
   '/api/public/inbound-email': typeof ApiPublicInboundEmailRoute
   '/api/public/inbox-sync': typeof ApiPublicInboxSyncRoute
   '/api/public/process-email-outbox': typeof ApiPublicProcessEmailOutboxRoute
@@ -629,6 +665,7 @@ export interface FileRouteTypes {
     | '/cookies'
     | '/desk'
     | '/distribution'
+    | '/dpa'
     | '/help'
     | '/hiring-cost'
     | '/ijp'
@@ -642,12 +679,14 @@ export interface FileRouteTypes {
     | '/platform'
     | '/platform-agents'
     | '/platform-ai-usage'
+    | '/platform-health'
     | '/privacy'
     | '/reports'
     | '/roi'
     | '/screening'
     | '/team'
     | '/templates'
+    | '/terms'
     | '/agents/observability'
     | '/agents/register'
     | '/agents/settings'
@@ -676,6 +715,7 @@ export interface FileRouteTypes {
     | '/api/public/agent-tick'
     | '/api/public/board-sync'
     | '/api/public/capture'
+    | '/api/public/distribution'
     | '/api/public/inbound-email'
     | '/api/public/inbox-sync'
     | '/api/public/process-email-outbox'
@@ -697,6 +737,7 @@ export interface FileRouteTypes {
     | '/cookies'
     | '/desk'
     | '/distribution'
+    | '/dpa'
     | '/help'
     | '/hiring-cost'
     | '/ijp'
@@ -710,12 +751,14 @@ export interface FileRouteTypes {
     | '/platform'
     | '/platform-agents'
     | '/platform-ai-usage'
+    | '/platform-health'
     | '/privacy'
     | '/reports'
     | '/roi'
     | '/screening'
     | '/team'
     | '/templates'
+    | '/terms'
     | '/agents/observability'
     | '/agents/register'
     | '/agents/settings'
@@ -744,6 +787,7 @@ export interface FileRouteTypes {
     | '/api/public/agent-tick'
     | '/api/public/board-sync'
     | '/api/public/capture'
+    | '/api/public/distribution'
     | '/api/public/inbound-email'
     | '/api/public/inbox-sync'
     | '/api/public/process-email-outbox'
@@ -765,6 +809,7 @@ export interface FileRouteTypes {
     | '/cookies'
     | '/desk'
     | '/distribution'
+    | '/dpa'
     | '/help'
     | '/hiring-cost'
     | '/ijp'
@@ -778,12 +823,14 @@ export interface FileRouteTypes {
     | '/platform'
     | '/platform-agents'
     | '/platform-ai-usage'
+    | '/platform-health'
     | '/privacy'
     | '/reports'
     | '/roi'
     | '/screening'
     | '/team'
     | '/templates'
+    | '/terms'
     | '/agents/observability'
     | '/agents/register'
     | '/agents/settings'
@@ -812,6 +859,7 @@ export interface FileRouteTypes {
     | '/api/public/agent-tick'
     | '/api/public/board-sync'
     | '/api/public/capture'
+    | '/api/public/distribution'
     | '/api/public/inbound-email'
     | '/api/public/inbox-sync'
     | '/api/public/process-email-outbox'
@@ -834,6 +882,7 @@ export interface RootRouteChildren {
   CookiesRoute: typeof CookiesRoute
   DeskRoute: typeof DeskRoute
   DistributionRoute: typeof DistributionRoute
+  DpaRoute: typeof DpaRoute
   HelpRoute: typeof HelpRoute
   HiringCostRoute: typeof HiringCostRoute
   IjpRoute: typeof IjpRoute
@@ -847,12 +896,14 @@ export interface RootRouteChildren {
   PlatformRoute: typeof PlatformRoute
   PlatformAgentsRoute: typeof PlatformAgentsRoute
   PlatformAiUsageRoute: typeof PlatformAiUsageRoute
+  PlatformHealthRoute: typeof PlatformHealthRoute
   PrivacyRoute: typeof PrivacyRoute
   ReportsRoute: typeof ReportsRoute
   RoiRoute: typeof RoiRoute
   ScreeningRoute: typeof ScreeningRoute
   TeamRoute: typeof TeamRoute
   TemplatesRoute: typeof TemplatesRoute
+  TermsRoute: typeof TermsRoute
   AgentsObservabilityRoute: typeof AgentsObservabilityRoute
   AgentsRegisterRoute: typeof AgentsRegisterRoute
   AgentsSettingsRoute: typeof AgentsSettingsRoute
@@ -881,6 +932,7 @@ export interface RootRouteChildren {
   ApiPublicAgentTickRoute: typeof ApiPublicAgentTickRoute
   ApiPublicBoardSyncRoute: typeof ApiPublicBoardSyncRoute
   ApiPublicCaptureRoute: typeof ApiPublicCaptureRoute
+  ApiPublicDistributionRoute: typeof ApiPublicDistributionRoute
   ApiPublicInboundEmailRoute: typeof ApiPublicInboundEmailRoute
   ApiPublicInboxSyncRoute: typeof ApiPublicInboxSyncRoute
   ApiPublicProcessEmailOutboxRoute: typeof ApiPublicProcessEmailOutboxRoute
@@ -944,6 +996,13 @@ declare module '@tanstack/react-router' {
       path: '/distribution'
       fullPath: '/distribution'
       preLoaderRoute: typeof DistributionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/dpa': {
+      id: '/dpa'
+      path: '/dpa'
+      fullPath: '/dpa'
+      preLoaderRoute: typeof DpaRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/help': {
@@ -1037,6 +1096,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PlatformAiUsageRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/platform-health': {
+      id: '/platform-health'
+      path: '/platform-health'
+      fullPath: '/platform-health'
+      preLoaderRoute: typeof PlatformHealthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/privacy': {
       id: '/privacy'
       path: '/privacy'
@@ -1077,6 +1143,13 @@ declare module '@tanstack/react-router' {
       path: '/templates'
       fullPath: '/templates'
       preLoaderRoute: typeof TemplatesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/terms': {
+      id: '/terms'
+      path: '/terms'
+      fullPath: '/terms'
+      preLoaderRoute: typeof TermsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/agents/': {
@@ -1275,6 +1348,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicCaptureRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/distribution': {
+      id: '/api/public/distribution'
+      path: '/api/public/distribution'
+      fullPath: '/api/public/distribution'
+      preLoaderRoute: typeof ApiPublicDistributionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/inbound-email': {
       id: '/api/public/inbound-email'
       path: '/api/public/inbound-email'
@@ -1370,6 +1450,7 @@ const rootRouteChildren: RootRouteChildren = {
   CookiesRoute: CookiesRoute,
   DeskRoute: DeskRoute,
   DistributionRoute: DistributionRoute,
+  DpaRoute: DpaRoute,
   HelpRoute: HelpRoute,
   HiringCostRoute: HiringCostRoute,
   IjpRoute: IjpRoute,
@@ -1383,12 +1464,14 @@ const rootRouteChildren: RootRouteChildren = {
   PlatformRoute: PlatformRoute,
   PlatformAgentsRoute: PlatformAgentsRoute,
   PlatformAiUsageRoute: PlatformAiUsageRoute,
+  PlatformHealthRoute: PlatformHealthRoute,
   PrivacyRoute: PrivacyRoute,
   ReportsRoute: ReportsRoute,
   RoiRoute: RoiRoute,
   ScreeningRoute: ScreeningRoute,
   TeamRoute: TeamRoute,
   TemplatesRoute: TemplatesRoute,
+  TermsRoute: TermsRoute,
   AgentsObservabilityRoute: AgentsObservabilityRoute,
   AgentsRegisterRoute: AgentsRegisterRoute,
   AgentsSettingsRoute: AgentsSettingsRoute,
@@ -1417,6 +1500,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicAgentTickRoute: ApiPublicAgentTickRoute,
   ApiPublicBoardSyncRoute: ApiPublicBoardSyncRoute,
   ApiPublicCaptureRoute: ApiPublicCaptureRoute,
+  ApiPublicDistributionRoute: ApiPublicDistributionRoute,
   ApiPublicInboundEmailRoute: ApiPublicInboundEmailRoute,
   ApiPublicInboxSyncRoute: ApiPublicInboxSyncRoute,
   ApiPublicProcessEmailOutboxRoute: ApiPublicProcessEmailOutboxRoute,

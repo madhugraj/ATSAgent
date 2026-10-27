@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "build": "vite build",
+    "build": "vite build && bun scripts/build-voice-worker.mjs",
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "lint": "eslint .",
@@ -14,7 +14,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node scripts/migrate-pg.mjs",
     "db:local": "bash scripts/local-db.sh",
-    "test": "bun test scripts/agent-gateway.test.ts && bun test scripts/integration.verify.test.ts && bun test scripts/agent-runtime.test.ts && bun test scripts/agent-eval.test.ts && bun test scripts/agent-phase1.test.ts && bun test scripts/agent-phase2.test.ts && bun test scripts/agent-phase3.test.ts && bun test scripts/agent-phase4.test.ts && bun test scripts/agent-governance.test.ts && bun test scripts/agent-health.test.ts",
+    "test": "bun test scripts/agent-gateway.test.ts && bun test scripts/integration.verify.test.ts && bun test scripts/agent-runtime.test.ts && bun test scripts/agent-eval.test.ts && bun test scripts/agent-phase1.test.ts && bun test scripts/agent-phase2.test.ts && bun test scripts/agent-phase3.test.ts && bun test scripts/agent-phase4.test.ts && bun test scripts/agent-governance.test.ts && bun test scripts/agent-health.test.ts && bun test scripts/observability.test.ts",
     "agents:lock": "bun scripts/agents-lock.ts",
     "eval:agents": "bun scripts/agent-eval.ts",
     "test:e2e": "bun scripts/local-e2e/e2e-check.ts",
@@ -26,7 +26,8 @@
     "nanoid": "^3.3.18",
     "brace-expansion": "^1.1.18",
     "seroval": "^1.6.8",
-    "source-map-js": "^1.2.2"
+    "source-map-js": "^1.2.2",
+    "dompurify": "^3.4.17"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1130.0",
@@ -96,7 +97,7 @@
     "vaul": "^1.1.2",
     "vite-tsconfig-paths": "^6.0.2",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
-    "zod": "^3.24.2"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@eslint/js": "^9.32.0",

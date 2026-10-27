@@ -8,7 +8,12 @@
  *
  * Rules: pass ids and short summaries only — never CV, document, mail or
  * prompt text, never secrets, never vendor/model names in user-facing paths.
+ *
+ * Inside an HTTP request (src/server.ts) every line also carries the
+ * request's `trace_id` / `span_id` (src/server/request-context.ts) unless the
+ * caller passes its own — an agent run's lines keep the run's trace.
  */
+import { currentRequest } from "./request-context";
 
 export type LogFields = {
   trace_id?: string;
@@ -25,6 +30,8 @@ type Level = "debug" | "info" | "warn" | "error";
 const LEVELS: Record<Level, number> = { debug: 10, info: 20, warn: 30, error: 40 };
 const MIN = LEVELS[(process.env["LOG_LEVEL"] as Level) ?? "info"] ?? LEVELS.info;
 const MAX_FIELD_CHARS = 500;
+/** On GCP, Cloud Logging groups lines by this field and links them to the trace. */
+const GCP_PROJECT = process.env["GOOGLE_CLOUD_PROJECT"] ?? process.env["GCP_PROJECT"] ?? "";
 
 function clean(fields: LogFields): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -39,11 +46,24 @@ function clean(fields: LogFields): Record<string, unknown> {
 
 function emit(level: Level, msg: string, fields: LogFields) {
   if (LEVELS[level] < MIN) return;
+  const req = currentRequest();
+  const body = {
+    ...(req ? { trace_id: req.traceId, span_id: req.spanId } : {}),
+    ...clean(fields),
+  };
+  // One form everywhere: agent runs store the trace as a uuid; logs, the
+  // response header and OTLP export use the 32-hex W3C form.
+  const traceId =
+    typeof body.trace_id === "string" ? body.trace_id.replace(/-/g, "").toLowerCase() : "";
+  if (traceId) body.trace_id = traceId;
   const line = JSON.stringify({
     severity: level.toUpperCase(),
     time: new Date().toISOString(),
     msg,
-    ...clean(fields),
+    ...body,
+    ...(GCP_PROJECT && traceId
+      ? { "logging.googleapis.com/trace": `projects/${GCP_PROJECT}/traces/${traceId}` }
+      : {}),
   });
   if (level === "error" || level === "warn") process.stderr.write(`${line}\n`);
   else process.stdout.write(`${line}\n`);

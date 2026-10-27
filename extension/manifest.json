@@ -1,15 +1,31 @@
 {
   "manifest_version": 3,
   "name": "ATSIQ Capture",
-  "version": "1.15.0",
-  "description": "Capture the job description or CV you are looking at, or run a guided sweep of a LinkedIn Recruiter applicant list, straight into ATSIQ.",
-  "permissions": ["activeTab", "tabs", "storage", "scripting", "downloads"],
+  "version": "1.16.0",
+  "description": "Capture the CV or job description you are looking at, run a guided sweep of a LinkedIn Recruiter applicant list, and post roles on job portals you are signed in to (Internshala, Apna) \u2014 straight into ATSIQ.",
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "storage",
+    "scripting",
+    "downloads"
+  ],
   "host_permissions": [
     "http://localhost:8080/*",
     "https://atsiq.yavar.ai/*",
     "https://*.linkedin.com/*",
-    "https://*.licdn.com/*"
+    "https://*.licdn.com/*",
+    "http://localhost:9000/*",
+    "https://internshala.com/*",
+    "https://*.internshala.com/*",
+    "https://apna.co/*",
+    "https://*.apna.co/*"
   ],
-  "background": { "service_worker": "background.js" },
-  "action": { "default_popup": "popup.html", "default_title": "ATSIQ Capture" }
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "ATSIQ Capture"
+  }
 }

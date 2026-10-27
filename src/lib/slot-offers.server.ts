@@ -10,13 +10,16 @@
  * role, the organisation, the interviewer's name and the times — nothing else
  * about the candidate or the organisation.
  */
-import { and, eq, lt, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, sql, type SQL } from "drizzle-orm";
+
+import { interviewWith } from "./interview-with";
 
 import { db } from "../server/db";
 import {
   applications,
   candidates,
   interviewSlotOffers,
+  interviews,
   orgMembers,
   organizations,
   requisitions,
@@ -131,6 +134,15 @@ export async function offerSlotsCore(
         "No screening is on record for this candidate. Screen them first, or a person moves them into the interview round with a reason.",
       );
   }
+  {
+    const [st] = await db
+      .select({ stage: applications.stage })
+      .from(applications)
+      .where(eq(applications.id, app.id))
+      .limit(1);
+    const why = roundNotYet(st?.stage ?? "", input.level);
+    if (why) throw new Error(why);
+  }
 
   // Every offered time must still be free for the interviewer, and after the
   // candidate's earlier rounds.
@@ -151,8 +163,9 @@ export async function offerSlotsCore(
     throw new Error(`These times are not free: ${taken.join("; ")}. Use find_interview_slots.`);
   const probe = await busyFor(orgId, [member.email], slots[0]!, slots[0]!);
 
-  // A newer offer replaces an open one for the same round.
-  await db
+  // A newer offer replaces an open one for the same round — and its e-mail, if it
+  // has not gone out yet, is withdrawn (its link would no longer work).
+  const replaced = await db
     .update(interviewSlotOffers)
     .set({ status: "cancelled", updatedAt: new Date() })
     .where(
@@ -162,7 +175,12 @@ export async function offerSlotsCore(
         eq(interviewSlotOffers.level, input.level),
         eq(interviewSlotOffers.status, "offered"),
       ),
-    );
+    )
+    .returning({ id: interviewSlotOffers.id });
+  await withdrawOfferEmails(
+    orgId,
+    replaced.map((r) => r.id),
+  );
   const expiresAt = new Date(
     Math.min(
       now + SLOT_OFFER.expiresHours * 3600_000,
@@ -194,6 +212,22 @@ export async function offerSlotsCore(
   const { enqueueEmail, formatInOrgTZ, getOrgEmailSettings } =
     await import("./email-outbox.server");
   const tz = (await getOrgEmailSettings(orgId)).timezone;
+  // A booked time of this round that was cancelled before it came (e.g. the
+  // interviewer could not make it): the candidate is told it no longer stands.
+  const [dropped] = await db
+    .select({ at: interviews.scheduledAt })
+    .from(interviews)
+    .where(
+      and(
+        eq(interviews.orgId, orgId),
+        eq(interviews.applicationId, app.id),
+        eq(interviews.level, input.level),
+        eq(interviews.status, "cancelled"),
+        sql`${interviews.scheduledAt} > now()`,
+      ),
+    )
+    .orderBy(desc(interviews.scheduledAt))
+    .limit(1);
   await enqueueEmail({
     orgId,
     kind: "interview_slots",
@@ -211,6 +245,7 @@ export async function offerSlotsCore(
       slotsText: slots.map((d) => formatInOrgTZ(d, tz)).join("\n"),
       chooseUrl: `${site()}/schedule/${token}`,
       expiresText: formatInOrgTZ(expiresAt, tz),
+      ...(dropped?.at ? { replacesText: formatInOrgTZ(dropped.at, tz) } : {}),
     },
   });
   await writeAudit({
@@ -230,7 +265,52 @@ export async function offerSlotsCore(
   };
 }
 
+/**
+ * Times may be offered only for the round the candidate is in — the one a
+ * person moved them into (stage L1/L2/L3), or round 1 from the shortlist —
+ * never a later round before the earlier one is done (pure; unit-tested).
+ * Returns why not, or null.
+ */
+export function roundNotYet(stage: string, level: number): string | null {
+  const m = stage.match(/^l([123])$/);
+  const current = m ? Number(m[1]) : stage === "shortlisted" ? 1 : null;
+  if (current === null)
+    return `Interview times cannot be offered while the candidate is ${stage.replace(/_/g, " ")}.`;
+  if (level > current)
+    return `The candidate is in round ${current}; times for round ${level} can be offered only once a person moves them on to it, after round ${current} is done.`;
+  return null;
+}
+
+/** Withdraw the not-yet-sent "pick a time" e-mails of these offers (their links no longer work). */
+async function withdrawOfferEmails(orgId: string, offerIds: string[]): Promise<void> {
+  if (!offerIds.length) return;
+  const { emailOutbox } = await import("@db/schema");
+  await db
+    .update(emailOutbox)
+    .set({ status: "suppressed" })
+    .where(
+      and(
+        eq(emailOutbox.orgId, orgId),
+        eq(emailOutbox.status, "queued"),
+        inArray(
+          emailOutbox.idempotencyKey,
+          offerIds.map((id) => `interview-slots:${id}`),
+        ),
+      ),
+    );
+}
+
 async function byToken(token: string) {
+  return offerWhere(eq(interviewSlotOffers.token, token));
+}
+
+async function byOffer(orgId: string, offerId: string) {
+  return offerWhere(
+    and(eq(interviewSlotOffers.id, offerId), eq(interviewSlotOffers.orgId, orgId))!,
+  );
+}
+
+async function offerWhere(where: SQL) {
   const [o] = await db
     .select({
       offer: interviewSlotOffers,
@@ -244,7 +324,7 @@ async function byToken(token: string) {
     .innerJoin(requisitions, eq(requisitions.id, applications.requisitionId))
     .innerJoin(organizations, eq(organizations.id, interviewSlotOffers.orgId))
     .innerJoin(candidates, eq(candidates.id, applications.candidateId))
-    .where(eq(interviewSlotOffers.token, token))
+    .where(where)
     .limit(1);
   return o ?? null;
 }
@@ -262,7 +342,8 @@ export type PublicOffer = {
   roundLabel: string;
   durationMins: number;
   mode: string;
-  interviewerName: string | null;
+  /** "the hiring team" / "a panel of N from the hiring team" — never a name. */
+  withText: string;
   timeZone: string;
   status: "offered" | "booked" | "declined" | "expired" | "cancelled";
   slots: string[];
@@ -285,9 +366,8 @@ export async function publicOffer(token: string): Promise<PublicOffer | null> {
     roundLabel: `L${o.offer.level} interview`,
     durationMins: o.offer.durationMins,
     mode: o.offer.mode,
-    // First name only on the public page.
-    interviewerName:
-      displayName(o.offer.interviewerName, o.offer.interviewerEmail).split(/\s+/)[0] ?? null,
+    // Never who on the public page — staff are confidential.
+    withText: interviewWith(1 + (o.offer.panel?.length ?? 0)),
     timeZone: (await getOrgEmailSettings(o.offer.orgId)).timezone,
     status: expired ? "expired" : (o.offer.status as PublicOffer["status"]),
     slots: o.offer.status === "offered" && !expired ? pickable : [],
@@ -297,14 +377,48 @@ export async function publicOffer(token: string): Promise<PublicOffer | null> {
 }
 
 /** The candidate picked a time: book it (or say plainly why it cannot be booked). */
-export async function chooseSlot(
-  token: string,
-  slot: string,
-): Promise<
-  { booked: true; at: string; hasMeetingLink: boolean } | { booked: false; reason: string }
-> {
+export type SlotChoice =
+  { booked: true; at: string; hasMeetingLink: boolean } | { booked: false; reason: string };
+
+/** How the candidate chose: the e-mailed link, or on an AI scheduling call. */
+type Channel =
+  | { by: "link" }
+  | {
+      by: "phone";
+      callId: string;
+      /** Extra times checked free when the call was asked for (≤ 3). */
+      alternates: string[];
+    };
+
+/** The candidate picked a time from the e-mailed link. */
+export async function chooseSlot(token: string, slot: string): Promise<SlotChoice> {
   const o = await byToken(token);
   if (!o) return { booked: false, reason: "This link is not valid." };
+  return bookOfferSlot(o, slot, { by: "link" });
+}
+
+/**
+ * The candidate picked a time on an AI scheduling call
+ * (docs/voice-scheduling-call-plan.md): the same checks, claim and booking as
+ * the link — one booking per offer whichever comes first — plus the call's
+ * pre-checked alternates.
+ */
+export async function chooseSlotByOffer(
+  orgId: string,
+  offerId: string,
+  slot: string,
+  call: { callId: string; alternates: string[] },
+): Promise<SlotChoice> {
+  const o = await byOffer(orgId, offerId);
+  if (!o) return { booked: false, reason: "That interview offer was not found." };
+  return bookOfferSlot(o, slot, { by: "phone", ...call });
+}
+
+async function bookOfferSlot(
+  o: NonNullable<Awaited<ReturnType<typeof byToken>>>,
+  slot: string,
+  channel: Channel,
+): Promise<SlotChoice> {
   const offer = o.offer;
   if (offer.status !== "offered" || offer.expiresAt.getTime() < Date.now())
     return {
@@ -312,7 +426,11 @@ export async function chooseSlot(
       reason: "This link is no longer open. The hiring team will be in touch.",
     };
   const at = new Date(slot);
-  if (!offer.slots.includes(at.toISOString()))
+  if (Number.isNaN(at.getTime()))
+    return { booked: false, reason: "Please choose one of the times offered." };
+  const allowed =
+    channel.by === "phone" ? [...offer.slots, ...channel.alternates.slice(0, 3)] : offer.slots;
+  if (!allowed.includes(at.toISOString()))
     return { booked: false, reason: "Please choose one of the times offered." };
   if (at.getTime() < Date.now() + SLOT_OFFER.pickLeadHours * 3600_000)
     return { booked: false, reason: "That time is too soon now — please choose a later one." };
@@ -334,6 +452,8 @@ export async function chooseSlot(
     .where(and(eq(interviewSlotOffers.id, offer.id), eq(interviewSlotOffers.status, "offered")))
     .returning({ id: interviewSlotOffers.id });
   if (!claimed.length) return { booked: false, reason: "This time has already been booked." };
+  // Chosen (by link or on a call): its "pick a time" e-mail, if not sent yet, is withdrawn.
+  await withdrawOfferEmails(offer.orgId, [offer.id]);
 
   try {
     let meetingLink: string | null = null;
@@ -356,7 +476,13 @@ export async function chooseSlot(
     }
     const { scheduleInterviewCore } = await import("./interviews.functions");
     const r = await scheduleInterviewCore(
-      { orgId: offer.orgId, actor: "candidate (chose the time)" },
+      {
+        orgId: offer.orgId,
+        actor:
+          channel.by === "phone"
+            ? "candidate (chose the time on an AI scheduling call)"
+            : "candidate (chose the time)",
+      },
       {
         applicationId: offer.applicationId,
         level: offer.level,
@@ -380,12 +506,18 @@ export async function chooseSlot(
       action: "interview.slot_chosen",
       entityType: "application",
       entityId: offer.applicationId,
-      detail: { offerId: offer.id, at: at.toISOString(), interviewId: r.interviewId },
+      detail: {
+        offerId: offer.id,
+        at: at.toISOString(),
+        interviewId: r.interviewId,
+        channel: channel.by,
+        ...(channel.by === "phone" ? { callId: channel.callId } : {}),
+      },
     });
     await tellThread(
       offer.orgId,
       o.requisitionId,
-      `${o.candidateName} chose ${await whenText(offer.orgId, at)} for their L${offer.level} interview with ${offer.interviewerName ?? offer.interviewerEmail}. It is booked${meetingLink ? " with a meeting link" : ""}, and both of them have their invites.`,
+      `${o.candidateName} chose ${await whenText(offer.orgId, at)}${channel.by === "phone" ? " on the AI scheduling call" : ""} for their L${offer.level} interview with ${offer.interviewerName ?? offer.interviewerEmail}. It is booked${meetingLink ? " with a meeting link" : ""}, and both of them have their invites.`,
     );
     return { booked: true, at: at.toISOString(), hasMeetingLink: Boolean(meetingLink) };
   } catch (e) {
@@ -421,6 +553,25 @@ async function raiseUnanswered(
 export async function declineSlots(token: string, note: string): Promise<boolean> {
   const o = await byToken(token);
   if (!o || o.offer.status !== "offered") return false;
+  return declineOffer(o, note, "link");
+}
+
+/** None of the times worked on an AI scheduling call: the same path as the link. */
+export async function declineSlotsByOffer(
+  orgId: string,
+  offerId: string,
+  note: string,
+): Promise<boolean> {
+  const o = await byOffer(orgId, offerId);
+  if (!o || o.offer.status !== "offered") return false;
+  return declineOffer(o, note, "phone");
+}
+
+async function declineOffer(
+  o: NonNullable<Awaited<ReturnType<typeof byToken>>>,
+  note: string,
+  by: "link" | "phone",
+): Promise<boolean> {
   const clean = note.replace(/\s+/g, " ").trim().slice(0, 500);
   const done = await db
     .update(interviewSlotOffers)
@@ -428,18 +579,19 @@ export async function declineSlots(token: string, note: string): Promise<boolean
     .where(and(eq(interviewSlotOffers.id, o.offer.id), eq(interviewSlotOffers.status, "offered")))
     .returning({ id: interviewSlotOffers.id });
   if (!done.length) return false;
+  await withdrawOfferEmails(o.offer.orgId, [o.offer.id]);
   await writeAudit({
     actor: "candidate",
     orgId: o.offer.orgId,
     action: "interview.slots_declined",
     entityType: "application",
     entityId: o.offer.applicationId,
-    detail: { offerId: o.offer.id },
+    detail: { offerId: o.offer.id, channel: by },
   });
   await tellThread(
     o.offer.orgId,
     o.requisitionId,
-    `${o.candidateName} said none of the offered times for their L${o.offer.level} interview work${clean ? `: "${clean}"` : "."} The Interview coordinator offers other times; or book a time with them directly on the Interviews page.`,
+    `${o.candidateName} said${by === "phone" ? " on the AI scheduling call that" : ""} none of the offered times for their L${o.offer.level} interview work${clean ? `: "${clean}"` : "."} The Interview coordinator offers other times; or book a time with them directly on the Interviews page.`,
   );
   await raiseUnanswered(
     o.offer.orgId,

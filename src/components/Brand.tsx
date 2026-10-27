@@ -34,6 +34,12 @@ export function BrandFooter() {
           <Link to="/privacy" className="hover:text-foreground hover:underline">
             Privacy Policy
           </Link>
+          <Link to="/terms" className="hover:text-foreground hover:underline">
+            Terms
+          </Link>
+          <Link to="/dpa" className="hover:text-foreground hover:underline">
+            Data Processing Agreement
+          </Link>
           <Link to="/cookies" className="hover:text-foreground hover:underline">
             Cookies Policy
           </Link>

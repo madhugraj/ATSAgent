@@ -10,6 +10,8 @@ import { createOrganization, type AppRole } from "@/lib/org.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AgreementFields } from "@/components/AgreementFields";
+import { EMPTY_AGREEMENT, agreementMissing, agreementPayload } from "@/lib/legal/acceptance";
 
 const ROLE_OPTIONS: { role: AppRole; label: string }[] = [
   { role: "recruiter", label: "Recruiter" },
@@ -20,12 +22,12 @@ const ROLE_OPTIONS: { role: AppRole; label: string }[] = [
 ];
 
 const BANDS = ["1-50", "51-200", "201-1000", "1001-5000", "5001-20000", "20000+"];
-const STEPS = ["Organisation", "Departments", "Locations", "Invite your team"];
+const STEPS = ["Organisation", "Departments", "Locations", "Invite your team", "Agreements"];
 
 type DeptDraft = { name: string; headName: string };
 type InviteDraft = { email: string; role: AppRole; title: string };
 
-/** Four-step setup that stands up a brand-new organisation from scratch. */
+/** Five-step setup that stands up a brand-new organisation from scratch. */
 export function OnboardingWizard({ onDone }: { onDone: () => void }) {
   const qc = useQueryClient();
   const create = useServerFn(createOrganization);
@@ -52,6 +54,8 @@ export function OnboardingWizard({ onDone }: { onDone: () => void }) {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<AppRole>("recruiter");
   const [inviteTitle, setInviteTitle] = useState("");
+  const [agreement, setAgreement] = useState(EMPTY_AGREEMENT);
+  const agreementGaps = agreementMissing(agreement);
 
   const step0Missing = [
     !name.trim() && "Organisation name",
@@ -84,6 +88,7 @@ export function OnboardingWizard({ onDone }: { onDone: () => void }) {
           departments: departments.filter((d) => d.name.trim()),
           locations: locations.filter(Boolean),
           invites,
+          agreement: agreementPayload(agreement),
         },
       });
       await qc.invalidateQueries();
@@ -384,6 +389,21 @@ export function OnboardingWizard({ onDone }: { onDone: () => void }) {
             </div>
           ) : null}
 
+          {step === 4 ? (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Your organisation is the controller of the candidate and employee data it brings
+                into ATSIQ; Yavar AI processes it on your behalf. Review the documents below — the
+                person registering must be authorised to accept them for the organisation.
+              </p>
+              <AgreementFields
+                value={agreement}
+                onChange={setAgreement}
+                orgName={legalName || name}
+              />
+            </div>
+          ) : null}
+
           <div className="flex items-center justify-between border-t border-border pt-4">
             <Button
               variant="ghost"
@@ -403,13 +423,24 @@ export function OnboardingWizard({ onDone }: { onDone: () => void }) {
             {step === 2 && !step2Ok ? (
               <p className="text-xs text-muted-foreground">Add at least one hiring location.</p>
             ) : null}
+            {step === 4 && agreementGaps.length ? (
+              <p className="text-xs text-muted-foreground">
+                Still needed: {agreementGaps.join(", ")}
+              </p>
+            ) : null}
             {step < STEPS.length - 1 ? (
               <Button disabled={!canContinue} onClick={() => setStep((s) => s + 1)}>
                 Continue
               </Button>
             ) : (
               <Button
-                disabled={busy || step0Missing.length > 0 || !step1Ok || !step2Ok}
+                disabled={
+                  busy ||
+                  step0Missing.length > 0 ||
+                  !step1Ok ||
+                  !step2Ok ||
+                  agreementGaps.length > 0
+                }
                 onClick={finish}
               >
                 {busy ? "Creating…" : "Create organisation"}

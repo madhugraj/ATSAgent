@@ -1,0 +1,181 @@
+{
+  "displayName": "ATSIQ — service health",
+  "mosaicLayout": {
+    "columns": 12,
+    "tiles": [
+      {
+        "width": 6,
+        "height": 4,
+        "xPos": 0,
+        "yPos": 0,
+        "widget": {
+          "title": "Requests / s by route group",
+          "xyChart": {
+            "dataSets": [
+              {
+                "plotType": "STACKED_AREA",
+                "timeSeriesQuery": {
+                  "prometheusQuery": "sum by (route_group) (rate(logging_googleapis_com:user_atsiq_http_requests{route_group!=\"static\"}[5m]))"
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "width": 6,
+        "height": 4,
+        "xPos": 6,
+        "yPos": 0,
+        "widget": {
+          "title": "Server-function 5xx ratio (SLO 1 %)",
+          "xyChart": {
+            "dataSets": [
+              {
+                "plotType": "LINE",
+                "timeSeriesQuery": {
+                  "prometheusQuery": "sum(rate(logging_googleapis_com:user_atsiq_http_requests{route_group=\"server_fn\",status_class=\"5xx\"}[5m])) / sum(rate(logging_googleapis_com:user_atsiq_http_requests{route_group=\"server_fn\"}[5m]))"
+                }
+              }
+            ],
+            "thresholds": [{ "value": 0.01, "label": "SLO budget rate" }]
+          }
+        }
+      },
+      {
+        "width": 6,
+        "height": 4,
+        "xPos": 0,
+        "yPos": 4,
+        "widget": {
+          "title": "p95 latency by route group (ms; SLO 2500 ms for server_fn)",
+          "xyChart": {
+            "dataSets": [
+              {
+                "plotType": "LINE",
+                "timeSeriesQuery": {
+                  "prometheusQuery": "histogram_quantile(0.95, sum by (route_group, le) (rate(logging_googleapis_com:user_atsiq_http_request_latency_bucket{route_group!=\"static\"}[5m])))"
+                }
+              }
+            ],
+            "thresholds": [{ "value": 2500, "label": "server_fn SLO" }]
+          }
+        }
+      },
+      {
+        "width": 6,
+        "height": 4,
+        "xPos": 6,
+        "yPos": 4,
+        "widget": {
+          "title": "Status classes / s",
+          "xyChart": {
+            "dataSets": [
+              {
+                "plotType": "STACKED_BAR",
+                "timeSeriesQuery": {
+                  "prometheusQuery": "sum by (status_class) (rate(logging_googleapis_com:user_atsiq_http_requests{route_group!=\"static\"}[5m]))"
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "width": 4,
+        "height": 4,
+        "xPos": 0,
+        "yPos": 8,
+        "widget": {
+          "title": "SLO burn alerts raised (app)",
+          "xyChart": {
+            "dataSets": [
+              {
+                "plotType": "STACKED_BAR",
+                "timeSeriesQuery": {
+                  "prometheusQuery": "sum by (slo, severity) (increase(logging_googleapis_com:user_atsiq_slo_burn_alerts[1h]))"
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "width": 4,
+        "height": 4,
+        "xPos": 4,
+        "yPos": 8,
+        "widget": {
+          "title": "Container CPU (cores)",
+          "xyChart": {
+            "dataSets": [
+              {
+                "plotType": "LINE",
+                "timeSeriesQuery": {
+                  "prometheusQuery": "sum by (pod_name) (rate(kubernetes_io:container_cpu_core_usage_time{container_name=\"atsiq\"}[5m]))"
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "width": 4,
+        "height": 4,
+        "xPos": 8,
+        "yPos": 8,
+        "widget": {
+          "title": "Container memory (bytes)",
+          "xyChart": {
+            "dataSets": [
+              {
+                "plotType": "LINE",
+                "timeSeriesQuery": {
+                  "prometheusQuery": "sum by (pod_name) (kubernetes_io:container_memory_used_bytes{container_name=\"atsiq\",memory_type=\"non-evictable\"})"
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "width": 6,
+        "height": 4,
+        "xPos": 0,
+        "yPos": 12,
+        "widget": {
+          "title": "Cloud SQL CPU utilisation",
+          "xyChart": {
+            "dataSets": [
+              {
+                "plotType": "LINE",
+                "timeSeriesQuery": {
+                  "prometheusQuery": "avg by (database_id) (cloudsql_googleapis_com:database_cpu_utilization)"
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "width": 6,
+        "height": 4,
+        "xPos": 6,
+        "yPos": 12,
+        "widget": {
+          "title": "Cloud SQL connections",
+          "xyChart": {
+            "dataSets": [
+              {
+                "plotType": "LINE",
+                "timeSeriesQuery": {
+                  "prometheusQuery": "sum by (database_id) (cloudsql_googleapis_com:database_postgresql_num_backends)"
+                }
+              }
+            ]
+          }
+        }
+      }
+    ]
+  }
+}

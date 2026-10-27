@@ -32,10 +32,50 @@ We credit reporters in release notes on request.
   server-validated allowlist and is never inferred from browser storage.
 - Secrets: `SECRET_ENCRYPTION_KEY` encrypts stored credentials (AES-256-GCM); OAuth state
   is HMAC-signed with required secrets; no secret values are committed. Every organisation supplies
-  its own AI provider key, and no deployment-level AI key is used as a fallback.
+  its own AI provider key, and no deployment-level AI key is used as a fallback. That includes the
+  AI voice for phone screening: the organisation's Google API key or a Vertex AI service-account key
+  it uploads (validated, stored encrypted, reported to the browser only as "stored"; saving and
+  removing it are audited `ai.voice_credential.save` / `.remove`). The PBX extension the voice
+  worker dials from (`SIP_*`) is deployment configuration; phone numbers are never logged.
+  On a call the assistant says it is an AI; nothing is recorded before the candidate consents, the
+  transcript is kept only after consent (no audio is stored), answers are accepted only for the kit's
+  questions, and what it may write about the candidate is notice period and availability — the
+  schema refuses pay fields (audited `compensation.recorded`, actor `agent:screening_call`).
+  A candidate who asks not to be called by the AI assistant (on a call, or told to the team) is
+  never requested, dialled or retried again — checked when a call is asked for, when it is claimed
+  and just before dialling — and calls already waiting are cancelled (audited
+  `candidate.ai_call_opt_out`; only TA, the HR head or the CBO can clear it, audited
+  `candidate.ai_call_opt_in`).
+  A scheduling call books only the e-mailed times or up to three alternates checked free when it
+  is arranged — by number, never a free-form time — through the same booking core as the
+  candidate's link (one booking per offer); a person approves each call (audited
+  `scheduling_call.requested`).
+  Staff are confidential to candidates: the interview invite e-mail, its calendar file and the
+  time-choice page say only who an interview is with ("the hiring team" / "a panel of N from the
+  hiring team", `src/lib/interview-with.ts`), never a name; and on calls neither voice agent names or describes the hiring manager,
+  recruiters or the interview panel — the call's facts carry only how many interviewers there are,
+  and the only contact given is the organisation's mailbox. Each voice agent's dos and don'ts are
+  one charter (`src/server/voice/charter.ts`, `docs/voice-agents-charter.md`), printed into every
+  call and the source of its must-never list.
 - Rate limiting on all public HTTP routes and server-function RPCs (`src/server.ts`).
 - SSRF gate: server-side fetches of user-supplied URLs go through `src/server/safe-fetch.ts`.
-- Auditing: privileged actions append to `audit_log` (`src/server/audit.ts`).
+- Auditing: privileged actions append to `audit_log` (`src/server/audit.ts`), including member
+  invites (`member.invited`) and interviewer-profile changes (`member.interviewer_profile.set`,
+  owner, CBO or HR head only), a role's hiring manager (`requisition.hiring_manager_set`, an active
+  member only) interview-plan changes (`requisition.interview_plan_updated`) and approved interview panels
+  (`role_panel.approved`, decided by the role's hiring manager or the HR head — agents only propose
+  with `propose_panel`, a proposal tool that always opens a person's decision), stand-ins for one
+  candidate's round (`round_substitute.approved`, same deciders, proposed with `propose_substitute`)
+  and interviewers saying they cannot make a round (`interview.interviewer_unavailable`, only
+  someone on that round, before it starts).
+- Observability data: request logs, metrics and SLO tables hold ids, route templates (ids replaced
+  by `:id`), status, durations and counts only — never request bodies, candidate content, prompts,
+  tokens from URLs or vendor/model names. Metric labels are a fixed low-cardinality set
+  (`route_group`, `method`, `status_class`). `/metrics` is off unless `METRICS_TOKEN` is set, then
+  requires it as a bearer token (constant-time compare) and is rate-limited like other public paths.
+  The Service health page and its server function are platform-admin only; SLO alert webhooks are
+  HMAC-signed and sent through `safeFetch`; SLO alert notifications are audited. Incoming
+  `traceparent` headers are validated and only their ids are reused.
 - AI safety: untrusted CV, JD, profile and mail text is delimited before prompting; structured model
   responses are schema-validated before use. AI decisions retain evidence and permit audited human override.
 - AI usage ledger: every provider request is recorded in `ai_usage_events`
@@ -113,7 +153,11 @@ Job Hai — `candidates.pool_use = 'role_only'`, migration 0045) are never added
 searched, matched, invited or shown through a consortium pool share, and are erased 30 days after
 their roles are over — only after the HR head approves the Distribution agent's request, even for
 an Autonomous agent (audited `candidate.erase_role_limited`, counts only; health rule
-`distribution.role_limited_retention` flags any kept a week longer). Tracked apply links keep only known channel names (`?src=`), so a link cannot invent a source.
+`distribution.role_limited_retention` flags any kept a week longer). The ATSIQ Capture companion posts on portals with no integration (Internshala, Apna) only in the
+person's own signed-in browser and only when they press it: it fills the form and never submits,
+never stores or sends a portal password or session, and records a posting
+(`/api/public/distribution`, capture-key authenticated, rate-limited, CORS-allowlisted) only with a
+listing link on that portal's own domain. Tracked apply links keep only known channel names (`?src=`), so a link cannot invent a source.
 Including a role on a feed, recording a hand posting and switching Google listing are
 `hr_head`-gated and audited.
 
@@ -136,6 +180,18 @@ webhook signing secret are stored with `encryptSecret` and never returned to the
 alert webhooks are signed with HMAC-SHA256 (`X-ATSAgent-Signature: sha256=<hex>`). Exported spans
 and alerts carry ids, rule names, statuses, timings and token counts only — no goals, prompts,
 candidate content or model names.
+
+## Organisation agreements
+
+An organisation cannot be created without its registering signatory accepting the current Terms of
+Service, Privacy Policy and Data Processing Agreement (`src/lib/legal/`): `createOrganization`
+validates the acceptance and refuses versions that are not current, and every acceptance is stored in
+`org_agreements` (migration 0052) with the signatory's user, name, title, work email and time, and is
+audited as `org.agreement.accepted`. The request IP is kept only as an HMAC-SHA256 keyed with
+`SESSION_SECRET`, never in the clear. Re-acceptance of a new version is owner-only
+(`requireOrgOwner`) and scoped to the owner's organisation; until it is done the workspace shows a
+blocking step (owner) or a waiting screen (members). The cross-tenant view is `requirePlatformAdmin`.
+Rows are deleted with the organisation; the audit entries remain.
 
 ## Training data
 

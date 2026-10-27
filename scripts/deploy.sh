@@ -84,7 +84,7 @@ mkdir -p "$WORK/ctx"
 git archive "$SHA" | tar -x -C "$WORK/ctx" 2>/dev/null || fail "cannot archive $SHA — is it committed/pushed?"
 if [ ! -f "$WORK/ctx/public/atsiq-capture.zip" ]; then
   echo "  companion zip missing — rebuilding from extension/"
-  ( cd extension && zip -qr "$WORK/ctx/public/atsiq-capture.zip" manifest.json background.js popup.js popup.html )
+  ( cd extension && zip -qr "$WORK/ctx/public/atsiq-capture.zip" manifest.json background.js popup.js popup.html portal-fill.js )
 fi
 COPYFILE_DISABLE=1 tar --exclude='._*' -czf "$WORK/ctx.tgz" -C "$WORK/ctx" .
 echo "  context: $(du -h "$WORK/ctx.tgz" | cut -f1)"
@@ -133,6 +133,15 @@ if [ "$MODE" = "deploy" ]; then
   kubectl -n "$NS" rollout status deploy/atsiq --timeout=300s \
     || { echo "Rollout failed — rolling back:"; kubectl -n "$NS" set image deploy/atsiq atsiq="$PREV"; kubectl -n "$NS" rollout status deploy/atsiq --timeout=300s; fail "rolled back to $PREV."; }
   echo "  previous image (rollback if needed): $PREV"
+  # The voice worker (phone screening) runs the same image with its own command
+  # (node /app/.output/voice-worker/index.mjs). Its Deployment and Secret are
+  # created by a person (DEPLOYMENT-GCP.md); roll it only when it exists. A
+  # rollout waits for calls in progress to finish (terminationGracePeriodSeconds).
+  if kubectl -n "$NS" get deploy atsiq-voice-worker >/dev/null 2>&1; then
+    kubectl -n "$NS" set image deploy/atsiq-voice-worker voice-worker="$IMAGE"
+    kubectl -n "$NS" rollout status deploy/atsiq-voice-worker --timeout=2400s \
+      || echo "  WARNING: voice worker rollout did not finish — check deploy/atsiq-voice-worker."
+  fi
 fi
 
 # ---------------------------------------------------------------- smoke

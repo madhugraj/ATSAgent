@@ -4,7 +4,7 @@
  * orchestrator — only the model is scripted.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 import type { AgentStepResult, AgentToolCall } from "../src/lib/ai-gateway.server";
 
@@ -46,6 +46,8 @@ const {
   orgMembers,
   organizations,
   requisitions,
+  screeningKits,
+  screeningRuns,
   userRoles,
   users,
 } = await import("../drizzle/schema");
@@ -229,7 +231,7 @@ describe("orchestration", () => {
 });
 
 describe("interview coordinator", () => {
-  test("books with a member under review; refuses non-members; queues the candidate invite", async () => {
+  test("books only the round's approved panel, under review; queues the candidate invite", async () => {
     await enable("interview", "suggest");
     const { appId } = await application("Ravi", "l1");
     const { runId } = await startRun({
@@ -241,40 +243,40 @@ describe("interview coordinator", () => {
       subjectId: reqId,
     });
     const when = new Date(Date.now() + 3 * 864e5).toISOString();
-    script.push(
+    const book = (id: string, interviewerEmail: string) =>
       call({
-        id: "x",
+        id,
         name: "schedule_interview",
-        args: {
-          applicationId: appId,
-          level: 1,
-          interviewerEmail: "outsider@else.where",
-          scheduledAt: when,
-        },
-      }),
-    );
-    await runAgentTick({ orgId });
-    const [outsiderTask] = await openTasks(runId);
-    expect(outsiderTask!.kind).toBe("approval"); // reviewed first…
-    await resolveTask({
-      orgId,
-      taskId: outsiderTask!.id,
-      userId: recruiter,
-      decision: { status: "approved" },
-    });
-    script.push(
-      call({
-        id: "y",
-        name: "schedule_interview",
-        args: { applicationId: appId, level: 1, interviewerEmail: managerEmail, scheduledAt: when },
-      }),
-    );
-    await runAgentTick({ orgId }); // …and still refused at execution: not a member
+        args: { applicationId: appId, level: 1, interviewerEmail, scheduledAt: when },
+      });
+    // No approved panel for the round yet: refused before anyone is asked.
+    const { getTool } = await import("../src/server/agents/registry");
+    const ctx = { orgId, principalUserId: recruiter, runId, agentType: "interview", actor: "t" };
     expect(
-      await db.select().from(interviews).where(eq(interviews.applicationId, appId)),
-    ).toHaveLength(0);
+      await getTool("schedule_interview")!.precheck!(
+        ctx as never,
+        { applicationId: appId, level: 1, interviewerEmail: managerEmail } as never,
+      ),
+    ).toMatch(/no approved panel/);
 
-    const [memberTask] = await openTasks(runId);
+    // A person approved the manager as the L1 panel (docs/interview-panel-plan.md, P2).
+    const { rolePanels } = await import("../drizzle/schema");
+    const [manager] = await db
+      .select({ id: orgMembers.id })
+      .from(orgMembers)
+      .where(and(eq(orgMembers.orgId, orgId), eq(orgMembers.email, managerEmail)));
+    await db
+      .insert(rolePanels)
+      .values({ orgId, requisitionId: reqId, level: 1, memberIds: [manager!.id] })
+      .onConflictDoNothing();
+    // Anyone else — a non-member included — is refused: not the approved panel.
+    script.push(book("y", "outsider@else.where"), book("z", managerEmail));
+    await runAgentTick({ orgId });
+    const tasks = await openTasks(runId);
+    expect(tasks).toHaveLength(1);
+    const [memberTask] = tasks;
+    expect(memberTask!.kind).toBe("approval"); // the approved panel, reviewed first
+    expect(JSON.stringify(memberTask!.proposedAction)).toContain(managerEmail);
     await resolveTask({
       orgId,
       taskId: memberTask!.id,
@@ -297,6 +299,71 @@ describe("interview coordinator", () => {
     expect(mails.find((m) => m.kind === "interviewer_brief")).toMatchObject({
       toEmail: managerEmail,
     });
+  });
+
+  test("a panel is proposed, never chosen: the hiring manager decides, even when autonomous", async () => {
+    await enable("interview", "autonomous");
+    const { rolePanels, requisitions } = await import("../drizzle/schema");
+    const memberOf = async (email: string) =>
+      (
+        await db
+          .select({ id: orgMembers.id })
+          .from(orgMembers)
+          .where(and(eq(orgMembers.orgId, orgId), eq(orgMembers.email, email)))
+      )[0]!.id;
+    const [rita, hari] = [await memberOf(recruiterEmail), await memberOf(managerEmail)];
+    await db
+      .update(requisitions)
+      .set({ hiringManagerMemberId: hari })
+      .where(eq(requisitions.id, reqId));
+    const { runId } = await startRun({
+      orgId,
+      agentType: "interview",
+      principalUserId: recruiter,
+      goal: "x",
+      subjectType: "requisition",
+      subjectId: reqId,
+    });
+    script.push(
+      call({
+        id: "pp",
+        name: "propose_panel",
+        args: { requisitionId: reqId, level: 2, memberIds: [rita], reason: "Rita knows the role." },
+      }),
+    );
+    await runAgentTick({ orgId });
+    const [task] = await openTasks(runId);
+    expect(task).toMatchObject({ kind: "gate", assigneeUserId: manager, assigneeRole: null });
+    expect(task!.body).toMatch(/Panel for L2/);
+    expect(task!.body).toMatch(/Decided by Hari Manager, the role's hiring manager/);
+    expect(
+      await db
+        .select()
+        .from(rolePanels)
+        .where(and(eq(rolePanels.requisitionId, reqId), eq(rolePanels.level, 2))),
+    ).toHaveLength(0);
+    // Only the hiring manager decides; they change the people.
+    await expect(
+      resolveTask({ orgId, taskId: task!.id, userId: recruiter, decision: { status: "approved" } }),
+    ).rejects.toThrow(/assigned to someone else/);
+    await resolveTask({
+      orgId,
+      taskId: task!.id,
+      userId: manager,
+      decision: { status: "approved", args: { memberIds: [hari] } },
+    });
+    const [panel] = await db
+      .select()
+      .from(rolePanels)
+      .where(and(eq(rolePanels.requisitionId, reqId), eq(rolePanels.level, 2)));
+    expect(panel).toMatchObject({ memberIds: [hari], approvedBy: manager, version: 1 });
+    // The agent is told the panel as approved, not as it proposed.
+    script.push(say("Waiting for times."));
+    await runAgentTick({ orgId });
+    const told = (await db.execute(sql`
+      select output ->> 'told' as told from agent_steps
+      where run_id = ${runId} and kind = 'decision'`)) as unknown as { told: string }[];
+    expect(told[0]!.told).toMatch(/Approved\. The L2 panel is Hari Manager/);
   });
 
   test("lists rounds that ended without a scorecard", async () => {
@@ -458,5 +525,167 @@ describe("evaluation and the hiring decision", () => {
       resolveTask({ orgId, taskId: gate.id, userId: manager, decision: { status: "approved" } }),
     ).rejects.toThrow("moved on");
     expect(await stageOf(appId)).toBe("on_hold");
+  });
+});
+
+describe("the screening decision in the hiring desk", () => {
+  async function graded(name: string) {
+    const { appId, candidateId } = await application(name, "shortlisted");
+    const [kit] = await db
+      .insert(screeningKits)
+      .values({
+        orgId,
+        candidateId,
+        requisitionId: reqId,
+        applicationId: appId,
+        focusSummary: "x",
+        questions: [] as never,
+      })
+      .returning({ id: screeningKits.id });
+    await db.insert(screeningRuns).values({
+      orgId,
+      kitId: kit!.id,
+      candidateId,
+      requisitionId: reqId,
+      applicationId: appId,
+      inputKind: "phone_ai",
+      screeningScore: 63,
+      recommendation: "hold",
+      coverage: {
+        planned: 4,
+        asked: 2,
+        answered: 2,
+        plannedIds: ["q3", "q5", "q2", "q4"],
+        askedIds: ["q3", "q5"],
+        confidence: "medium",
+      },
+    });
+    return { appId, candidateId };
+  }
+
+  async function propose(appId: string, recommendation: "proceed" | "hold") {
+    await enable("screening");
+    const { runId } = await startRun({
+      orgId,
+      agentType: "screening",
+      principalUserId: recruiter,
+      goal: "x",
+      subjectType: "application",
+      subjectId: appId,
+    });
+    script.length = 0; // a paused earlier run leaves its closing reply unused
+    script.push(
+      call({
+        id: "d",
+        name: "request_approval",
+        args: {
+          title: "Screening decision",
+          summary: "Graded.",
+          assignee_role: "recruiter",
+          subject: {
+            type: "screening_decision",
+            applicationId: appId,
+            recommendation,
+            rationale: "Strong on PHI masking; probe evaluation tooling in L1.",
+          },
+        },
+      }),
+      say("done"),
+    );
+    await runAgentTick({ orgId });
+    return { runId, tasks: await openTasks(runId) };
+  }
+
+  const taskStatus = async (id: string) =>
+    (await db.select({ s: agentTasks.status }).from(agentTasks).where(eq(agentTasks.id, id)))[0]!.s;
+
+  test("goes to the person the agent works for, with the graded result stated by the system", async () => {
+    const { appId } = await graded("Madhu");
+    const { tasks } = await propose(appId, "proceed");
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]).toMatchObject({ kind: "gate", assigneeUserId: recruiter });
+    expect(tasks[0]!.body).toContain("PROCEED to the first interview round");
+    expect(tasks[0]!.body).toContain(
+      "Screening score: 63/100 (2 asked of 4 planned · both answered · 2 not reached on the call; medium confidence)",
+    );
+  });
+
+  test("approving proceed moves them to L1 — the Interview coordinator's cue", async () => {
+    const { appId } = await graded("Asha");
+    const { tasks } = await propose(appId, "proceed");
+    await resolveTask({
+      orgId,
+      taskId: tasks[0]!.id,
+      userId: recruiter,
+      decision: { status: "approved" },
+    });
+    expect(await stageOf(appId)).toBe("l1");
+    // The person's approval is the record, not the stale-request sweep its own move triggered.
+    expect(await taskStatus(tasks[0]!.id)).toBe("approved");
+    const [ev] = await db
+      .select()
+      .from(agentEvents)
+      .where(and(eq(agentEvents.orgId, orgId), eq(agentEvents.type, "application.advanced")));
+    expect(ev).toBeTruthy();
+  });
+
+  test("declining keeps them in screening with the reason; rejecting is the person's, with a reason", async () => {
+    const a = await graded("Ravi");
+    const first = await propose(a.appId, "proceed");
+    await resolveTask({
+      orgId,
+      taskId: first.tasks[0]!.id,
+      userId: recruiter,
+      decision: { status: "rejected", reason: "Want the written assessment too" },
+    });
+    expect(await stageOf(a.appId)).toBe("shortlisted");
+    const [note] = await db
+      .select()
+      .from(candidateNotes)
+      .where(eq(candidateNotes.candidateId, a.candidateId));
+    expect(note!.body).toContain("kept in screening");
+    expect(note!.body).toContain("Want the written assessment too");
+
+    await db.delete(agentRuns).where(eq(agentRuns.orgId, orgId));
+    const b = await graded("Kiran");
+    const second = await propose(b.appId, "hold");
+    await expect(
+      resolveTask({
+        orgId,
+        taskId: second.tasks[0]!.id,
+        userId: recruiter,
+        decision: { status: "rejected", rejectCandidate: true },
+      }),
+    ).rejects.toThrow("Say why");
+    await resolveTask({
+      orgId,
+      taskId: second.tasks[0]!.id,
+      userId: recruiter,
+      decision: {
+        status: "rejected",
+        rejectCandidate: true,
+        reason: "Evaluation depth below what the role needs",
+      },
+    });
+    expect(await stageOf(b.appId)).toBe("rejected");
+  });
+
+  test("no decision without a graded result, and never two for one candidate", async () => {
+    const { appId } = await application("Nila", "shortlisted");
+    expect((await propose(appId, "proceed")).tasks).toHaveLength(0);
+
+    const g = await graded("Tara");
+    expect((await propose(g.appId, "proceed")).tasks).toHaveLength(1);
+    expect((await propose(g.appId, "hold")).tasks).toHaveLength(0);
+  });
+
+  test("moving the candidate elsewhere closes the waiting decision", async () => {
+    const { appId } = await graded("Uma");
+    const { tasks } = await propose(appId, "proceed");
+    await moveStageCore(
+      { ...rec, orgId, userId: recruiter },
+      { applicationId: appId, toStage: "on_hold", reason: "Paused" },
+    );
+    expect(await taskStatus(tasks[0]!.id)).toBe("cancelled");
   });
 });

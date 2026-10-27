@@ -1,0 +1,29 @@
+# Optional: scrape /metrics with Google Managed Prometheus instead of (or as
+# well as) the log-based metrics. Requires METRICS_TOKEN in the app's env and
+# the same value in the Secret below. Metric names: atsiq_http_requests_total,
+# atsiq_http_request_duration_seconds, atsiq_http_requests_in_flight.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: atsiq-metrics-token
+type: Opaque
+stringData:
+  token: REPLACE_WITH_METRICS_TOKEN
+---
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: atsiq
+spec:
+  selector:
+    matchLabels: { app: atsiq }
+  endpoints:
+    - port: 3000
+      path: /metrics
+      interval: 60s
+      authorization:
+        type: Bearer
+        credentials:
+          secret:
+            name: atsiq-metrics-token
+            key: token

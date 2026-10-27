@@ -140,6 +140,16 @@ async function finalist(stage = "l3") {
       source: "apply",
     })
     .returning({ id: applications.id });
+  // Confirmed for this application (the pay & availability form), not just on the profile.
+  const { compensationDetails } = await import("../drizzle/schema");
+  await db.insert(compensationDetails).values({
+    orgId,
+    applicationId: a!.id,
+    candidateId: c!.id,
+    expectedCtc: "3200000",
+    noticePeriodDays: 60,
+    source: "candidate_form",
+  });
   return { appId: a!.id, candidateId: c!.id };
 }
 
@@ -382,6 +392,46 @@ describe("offer agent", () => {
     await processAgentEvents({ orgId });
     const [task] = await db.select().from(agentTasks).where(eq(agentTasks.runId, runId));
     expect(task).toMatchObject({ status: "approved", decidedBy: ids["hr"] });
+  });
+});
+
+describe("candidate requests reach a person", () => {
+  test("pay figures only on the talent-pool profile are confirmed before an offer", async () => {
+    const { compensationDetails } = await import("../drizzle/schema");
+    const { offerReadiness } = await import("../src/server/agents/tools-phase4");
+    const { appId } = await finalist();
+    // Remove the figures confirmed for this application: only the profile's remain.
+    await db.delete(compensationDetails).where(eq(compensationDetails.applicationId, appId));
+    const why = await offerReadiness(
+      { orgId, runId: "00000000-0000-0000-0000-000000000000" },
+      appId,
+    );
+    expect(why).toMatch(/talent-pool profile.*send_compensation_form/s);
+    const form = registry.getTool("send_compensation_form")!;
+    expect(
+      await form.precheck!(
+        { orgId, runId: "x", principalUserId: ids["recruiter"]!, agentType: "offer", actor: "t" },
+        { applicationId: appId } as never,
+      ),
+    ).toBeNull();
+  });
+
+  test("replies go to the careers inbox when no reply-to or careers e-mail is set", async () => {
+    const { careersReplyAddress } = await import("../src/lib/email-outbox.server");
+    expect(await careersReplyAddress(orgId)).toBe(`careers-${stamp}@p4.test`);
+    const [o] = await db
+      .insert(organizations)
+      .values({
+        name: "No Mail Org",
+        slug: `nomail-${stamp}`,
+        inboxSlug: `nomail-${stamp}`,
+      } as never)
+      .returning({ id: organizations.id });
+    try {
+      expect(await careersReplyAddress(o!.id)).toMatch(new RegExp(`^nomail-${stamp}@`));
+    } finally {
+      await db.delete(organizations).where(eq(organizations.id, o!.id));
+    }
   });
 });
 

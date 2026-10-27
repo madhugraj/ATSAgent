@@ -15,7 +15,6 @@
 
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { z as zodV4 } from "zod/v4";
 
 import { db } from "../server/db";
 import { aiProviderCredentials, aiSettings } from "@db/schema";
@@ -1043,11 +1042,11 @@ const AGENT_STEP_TIMEOUT_MS = 120_000;
 const AGENT_MAX_OUTPUT_TOKENS = 8192;
 
 /**
- * JSON Schema for a tool's input, from a zod v4 schema (`import { z } from "zod/v4"`).
+ * JSON Schema for a tool's input, from a zod schema.
  * The `$schema` marker is dropped: providers want the bare object schema.
  */
 export function toolParameters(schema: unknown): Record<string, unknown> {
-  const json = (zodV4.toJSONSchema(schema as never) ?? {}) as Record<string, unknown>;
+  const json = (z.toJSONSchema(schema as never) ?? {}) as Record<string, unknown>;
   delete json["$schema"];
   return json;
 }
@@ -1422,7 +1421,7 @@ export function withToday(system: string, now = new Date()): string {
 function outputSchemaOf(schema: unknown): unknown {
   if (!schema) return null;
   try {
-    return zodV4.toJSONSchema(schema as never);
+    return z.toJSONSchema(schema as never);
   } catch {
     return null;
   }
@@ -1504,4 +1503,607 @@ export async function aiAgentStep(
       latencyMs,
     }),
   );
+}
+
+/* --------------------------------------------------- live voice sessions */
+
+// A phone call with the live speech model (docs/voice-screening-agent.md).
+// Same rules as every other call here: the organisation's own key, one ledger
+// row with the tokens the provider reported (summed over the session's usage
+// frames — never estimated), and training capture behind the organisation's
+// consent. The model name never leaves the server.
+
+const VOICE_ENDPOINT =
+  "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
+export const DEFAULT_VOICE_MODEL = "gemini-3.8-live";
+
+/** A Google Cloud service-account key (the JSON file's fields we use). */
+export type VertexServiceAccount = {
+  client_email: string;
+  private_key: string;
+  token_uri?: string;
+};
+/** Reach the live model through Vertex AI with a service account instead of an API key. */
+export type VoiceVertex = {
+  project: string;
+  location: string;
+  serviceAccount: VertexServiceAccount;
+};
+
+/** A one-hour OAuth access token for a service account (JWT bearer grant). */
+async function vertexAccessToken(sa: VertexServiceAccount): Promise<string> {
+  const { createSign } = await import("node:crypto");
+  const tokenUri = sa.token_uri ?? "https://oauth2.googleapis.com/token";
+  const now = Math.floor(Date.now() / 1000);
+  const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  const unsigned = `${b64({ alg: "RS256", typ: "JWT" })}.${b64({
+    iss: sa.client_email,
+    scope: "https://www.googleapis.com/auth/cloud-platform",
+    aud: tokenUri,
+    iat: now,
+    exp: now + 3600,
+  })}`;
+  const signature = createSign("RSA-SHA256").update(unsigned).sign(sa.private_key, "base64url");
+  const res = await fetch(tokenUri, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion: `${unsigned}.${signature}`,
+    }),
+  });
+  const out = (await res.json().catch(() => ({}))) as { access_token?: string };
+  if (!res.ok || !out.access_token)
+    throw new Error(`service-account sign-in failed (${res.status})`);
+  return out.access_token;
+}
+
+/** Where a live session connects: endpoint, auth header and the model's resource name. */
+type VoiceTarget = { url: string; headers: Record<string, string>; model: string };
+
+export type VoiceToolSpec = {
+  name: string;
+  description: string;
+  /** JSON Schema of the arguments; omit for none. */
+  parameters?: Record<string, unknown>;
+};
+
+export type VoiceToolCall = { id: string; name: string; args: Record<string, unknown> };
+
+export type VoiceTurn = { who: "caller" | "ai"; text: string; at: string; interrupted?: boolean };
+
+export type VoiceSessionEvents = {
+  /** 24 kHz PCM16 speech to play. */
+  onAudio?: (pcm24k: Int16Array) => void;
+  /** The caller talked over the model: drop queued speech. */
+  onInterrupted?: () => void;
+  /** A finished transcript line (either side). */
+  onTurn?: (turn: VoiceTurn) => void;
+  /** A tool call; the returned object is sent back as the tool's response. */
+  onToolCall?: (call: VoiceToolCall) => Promise<Record<string, unknown>> | Record<string, unknown>;
+  /** The provider asked to close the session soon. */
+  onGoAway?: (timeLeft: string) => void;
+};
+
+export type VoiceSessionSummary = {
+  transcript: VoiceTurn[];
+  toolCalls: VoiceToolCall[];
+  usage: AiUsage | null;
+  closedBy: "client" | "provider" | "error";
+  error: string | null;
+};
+
+export type VoiceSession = {
+  /** 16 kHz PCM16 audio from the caller. */
+  sendAudio(pcm16k: Int16Array): void;
+  /** A text nudge to the model (e.g. "the person has picked up"). */
+  sendText(text: string): void;
+  /** Close and wait for the ledger row; returns what was said and done. */
+  close(): Promise<VoiceSessionSummary>;
+  /** Resolves when the session ends for any reason. */
+  done: Promise<VoiceSessionSummary>;
+};
+
+type LiveServerMessage = {
+  setupComplete?: unknown;
+  serverContent?: {
+    modelTurn?: { parts?: { inlineData?: { data?: string; mimeType?: string } }[] };
+    inputTranscription?: { text?: string };
+    outputTranscription?: { text?: string };
+    interrupted?: boolean;
+    turnComplete?: boolean;
+  };
+  toolCall?: { functionCalls?: { id?: string; name?: string; args?: Record<string, unknown> }[] };
+  usageMetadata?: {
+    promptTokenCount?: number;
+    /** API-key endpoint. */
+    responseTokenCount?: number;
+    /** Vertex AI. */
+    candidatesTokenCount?: number;
+    thoughtsTokenCount?: number;
+    totalTokenCount?: number;
+  };
+  goAway?: { timeLeft?: string };
+  error?: { message?: string };
+};
+
+function pcm16ToBase64(pcm: Int16Array): string {
+  return Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength).toString("base64");
+}
+
+function base64ToPcm16(b64: string): Int16Array {
+  const buf = Buffer.from(b64, "base64");
+  const out = new Int16Array(buf.length >> 1);
+  for (let i = 0; i < out.length; i++) out[i] = buf.readInt16LE(i * 2);
+  return out;
+}
+
+/**
+ * How the live model takes turns: how long a silence ends the caller's turn
+ * and how readily it decides they stopped. A phone conversation needs it to
+ * wait through thinking pauses rather than jump in.
+ */
+export type VoiceTurnTaking = {
+  /** Silence that ends the caller's turn (ms). */
+  silenceMs: number;
+  /** "low" waits longer before deciding the caller finished. */
+  endOfSpeech: "low" | "high";
+  /** Audio kept from just before speech is detected (ms). */
+  prefixPaddingMs: number;
+};
+
+/** The setup frame for a live session; `model` is the full resource name (exported for tests). */
+export function voiceSetupMessage(opts: {
+  model: string;
+  system: string;
+  tools: VoiceToolSpec[];
+  voice: string;
+  turnTaking?: VoiceTurnTaking;
+  /** BCP-47 language of the conversation, e.g. "en-IN" (recognition and speech). */
+  languageCode?: string;
+}) {
+  return {
+    setup: {
+      model: opts.model,
+      generationConfig: {
+        responseModalities: ["AUDIO"],
+        speechConfig: {
+          voiceConfig: { prebuiltVoiceConfig: { voiceName: opts.voice } },
+          ...(opts.languageCode ? { languageCode: opts.languageCode } : {}),
+        },
+      },
+      systemInstruction: { parts: [{ text: opts.system }] },
+      tools: opts.tools.length
+        ? [
+            {
+              // Full JSON Schema, as on the text path (aiAgentStep).
+              functionDeclarations: opts.tools.map((t) => ({
+                name: t.name,
+                description: t.description,
+                ...(t.parameters ? { parametersJsonSchema: t.parameters } : {}),
+              })),
+            },
+          ]
+        : [],
+      inputAudioTranscription: {},
+      outputAudioTranscription: {},
+      ...(opts.turnTaking
+        ? {
+            realtimeInputConfig: {
+              automaticActivityDetection: {
+                endOfSpeechSensitivity:
+                  opts.turnTaking.endOfSpeech === "low"
+                    ? "END_SENSITIVITY_LOW"
+                    : "END_SENSITIVITY_HIGH",
+                silenceDurationMs: opts.turnTaking.silenceMs,
+                prefixPaddingMs: opts.turnTaking.prefixPaddingMs,
+              },
+            },
+          }
+        : {}),
+    },
+  };
+}
+
+/**
+ * The session's usage: one frame per model turn, summed. As in
+ * readGoogleStream, thought tokens are billed output — prefer
+ * `totalTokenCount − promptTokenCount`, else response (or candidates) +
+ * thoughts. Null when the provider sent no usage at all.
+ */
+export function sumVoiceUsage(frames: LiveServerMessage["usageMetadata"][]): AiUsage | null {
+  const seen = frames.filter((f): f is NonNullable<typeof f> => Boolean(f));
+  if (!seen.length) return null;
+  let promptTokens = 0;
+  let completionTokens = 0;
+  let totalTokens = 0;
+  for (const f of seen) {
+    const prompt = f.promptTokenCount ?? 0;
+    const output =
+      f.totalTokenCount != null
+        ? Math.max(0, f.totalTokenCount - prompt)
+        : (f.responseTokenCount ?? f.candidatesTokenCount ?? 0) + (f.thoughtsTokenCount ?? 0);
+    promptTokens += prompt;
+    completionTokens += output;
+    totalTokens += f.totalTokenCount ?? prompt + output;
+  }
+  return { promptTokens, completionTokens, totalTokens };
+}
+
+/** Exported for tests only (a local fake provider socket); callers use aiVoiceSession. */
+export async function openVoiceSession(opts: {
+  orgId: string | null | undefined;
+  feature: string;
+  system: string;
+  tools: VoiceToolSpec[];
+  voice: string;
+  turnTaking?: VoiceTurnTaking | undefined;
+  languageCode?: string | undefined;
+  config: AiConfig;
+  target: VoiceTarget;
+  events: VoiceSessionEvents;
+  /** Resolves with the session once the provider confirms setup. */
+  ready: (s: VoiceSession | { ok: false; status: number; message: string }) => void;
+}): Promise<VoiceSessionSummary> {
+  const cfg = opts.config;
+  const startedAt = Date.now();
+  const transcript: VoiceTurn[] = [];
+  const toolCalls: VoiceToolCall[] = [];
+  const usageFrames: LiveServerMessage["usageMetadata"][] = [];
+  let heard = "";
+  let said = "";
+  let closedBy: VoiceSessionSummary["closedBy"] = "provider";
+  let error: string | null = null;
+  let isReady = false;
+
+  const flush = (who: VoiceTurn["who"], interrupted = false) => {
+    const text = (who === "caller" ? heard : said).trim();
+    if (who === "caller") heard = "";
+    else said = "";
+    if (!text) return;
+    const turn: VoiceTurn = {
+      who,
+      text,
+      at: new Date().toISOString(),
+      ...(interrupted ? { interrupted } : {}),
+    };
+    transcript.push(turn);
+    opts.events.onTurn?.(turn);
+  };
+
+  // undici (Node 22) and Bun both accept headers here; credentials stay out of the URL.
+  const ws = new (
+    WebSocket as unknown as new (
+      url: string,
+      init: { headers: Record<string, string> },
+    ) => WebSocket
+  )(opts.target.url, { headers: opts.target.headers });
+  ws.binaryType = "arraybuffer";
+  const setupTimer = setTimeout(() => {
+    if (isReady) return;
+    error = "setup timed out";
+    ws.close();
+  }, 15_000);
+  const send = (m: unknown) => {
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m));
+  };
+
+  const session: VoiceSession = {
+    sendAudio: (pcm) =>
+      send({
+        realtimeInput: { audio: { data: pcm16ToBase64(pcm), mimeType: "audio/pcm;rate=16000" } },
+      }),
+    sendText: (text) => send({ realtimeInput: { text } }),
+    close: async () => {
+      closedBy = "client";
+      ws.close(1000);
+      return done;
+    },
+    done: undefined as unknown as Promise<VoiceSessionSummary>,
+  };
+
+  const done = new Promise<VoiceSessionSummary>((resolve) => {
+    ws.addEventListener("open", () =>
+      send(
+        voiceSetupMessage({
+          model: opts.target.model,
+          system: opts.system,
+          tools: opts.tools,
+          voice: opts.voice,
+          ...(opts.turnTaking ? { turnTaking: opts.turnTaking } : {}),
+          ...(opts.languageCode ? { languageCode: opts.languageCode } : {}),
+        }),
+      ),
+    );
+    ws.addEventListener("message", async (ev) => {
+      let msg: LiveServerMessage;
+      try {
+        const raw =
+          typeof ev.data === "string" ? ev.data : new TextDecoder().decode(ev.data as ArrayBuffer);
+        msg = JSON.parse(raw) as LiveServerMessage;
+      } catch {
+        return;
+      }
+      if (msg.setupComplete !== undefined && !isReady) {
+        isReady = true;
+        opts.ready(session);
+      }
+      if (msg.usageMetadata) usageFrames.push(msg.usageMetadata);
+      const sc = msg.serverContent;
+      if (sc) {
+        if (sc.inputTranscription?.text) heard += sc.inputTranscription.text;
+        for (const part of sc.modelTurn?.parts ?? [])
+          if (part.inlineData?.data) opts.events.onAudio?.(base64ToPcm16(part.inlineData.data));
+        if (sc.outputTranscription?.text) {
+          flush("caller");
+          said += sc.outputTranscription.text;
+        }
+        if (sc.interrupted) {
+          opts.events.onInterrupted?.();
+          flush("ai", true);
+        }
+        if (sc.turnComplete) {
+          flush("caller");
+          flush("ai");
+        }
+      }
+      // What was said so far is on record before any tool runs: a tool that checks
+      // the assistant's own words (e.g. it said it is an AI before a "yes" counts)
+      // must see the line it just spoke, not wait for its turn to finish.
+      if (msg.toolCall?.functionCalls?.length) {
+        flush("caller");
+        flush("ai");
+      }
+      for (const fc of msg.toolCall?.functionCalls ?? []) {
+        const call: VoiceToolCall = { id: fc.id ?? "", name: fc.name ?? "", args: fc.args ?? {} };
+        toolCalls.push(call);
+        let response: Record<string, unknown>;
+        try {
+          response = (await opts.events.onToolCall?.(call)) ?? { ok: true };
+        } catch (e) {
+          response = { ok: false, error: (e as Error).message };
+        }
+        send({ toolResponse: { functionResponses: [{ id: call.id, name: call.name, response }] } });
+      }
+      if (msg.goAway) opts.events.onGoAway?.(msg.goAway.timeLeft ?? "");
+      if (msg.error?.message) error = msg.error.message;
+    });
+    ws.addEventListener("error", () => {
+      error ??= "connection error";
+      closedBy = "error";
+    });
+    ws.addEventListener("close", (ev) => {
+      clearTimeout(setupTimer);
+      flush("caller");
+      flush("ai");
+      if (!isReady) {
+        // Vendor-neutral on purpose: the reason stays in the ledger row.
+        error ??= ev.reason || `closed before setup (${ev.code})`;
+        opts.ready({
+          ok: false,
+          status: 502,
+          message: "The AI voice service could not be reached.",
+        });
+      } else if (ev.code !== 1000 && closedBy !== "client") {
+        error ??= ev.reason || `closed (${ev.code})`;
+      }
+      resolve({ transcript, toolCalls, usage: sumVoiceUsage(usageFrames), closedBy, error });
+    });
+  });
+  session.done = done;
+
+  const summary = await done;
+  await logUsage(opts.feature, cfg, opts.orgId, {
+    status: summary.error && summary.closedBy !== "client" ? "error" : "ok",
+    attempt: 1,
+    startedAt,
+    usage: summary.usage,
+    message: summary.error,
+  });
+  return summary;
+}
+
+/**
+ * Open a live voice session for the organisation. Resolves once the provider
+ * confirmed setup (audio can flow), or with an error; the ledger row and
+ * training capture are written when the session ends.
+ */
+export async function aiVoiceSession(opts: {
+  orgId: string | null | undefined;
+  feature: string;
+  system: string;
+  tools?: VoiceToolSpec[];
+  voice?: string;
+  turnTaking?: VoiceTurnTaking;
+  languageCode?: string;
+  /** Force a key/model instead of the organisation's saved Google key (scripts, tests). */
+  config?: AiConfig;
+  /** Use Vertex AI with a service account instead of an API key (`config.model` still applies). */
+  vertex?: VoiceVertex;
+  events?: VoiceSessionEvents;
+}): Promise<{ ok: true; session: VoiceSession } | { ok: false; status: number; message: string }> {
+  const unavailable = {
+    ok: false as const,
+    status: 401,
+    message:
+      "Phone screening needs the organisation's AI voice key. Add it on the Integrations page.",
+  };
+  let config: AiConfig;
+  let target: VoiceTarget;
+  // The organisation's stored service account wins over its API key.
+  const vertex =
+    opts.vertex ?? (!opts.config && opts.orgId ? await readVoiceServiceAccount(opts.orgId) : null);
+  if (vertex) {
+    const v = vertex;
+    config = { provider: "google", model: opts.config?.model ?? DEFAULT_VOICE_MODEL, apiKey: null };
+    let token: string;
+    try {
+      token = await vertexAccessToken(v.serviceAccount);
+    } catch (e) {
+      console.error("[ai-voice] vertex sign-in failed", (e as Error).message);
+      return { ...unavailable, status: 502, message: "The AI voice service could not be reached." };
+    }
+    target = {
+      url: `wss://${v.location}-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1.LlmBidiService/BidiGenerateContent`,
+      headers: { Authorization: `Bearer ${token}` },
+      model: `projects/${v.project}/locations/${v.location}/publishers/google/models/${config.model}`,
+    };
+  } else {
+    config = opts.config ?? {
+      provider: "google",
+      model: DEFAULT_VOICE_MODEL,
+      apiKey: opts.orgId ? await readProviderKey(opts.orgId, "google") : null,
+    };
+    if (config.provider !== "google" || !config.apiKey) return unavailable;
+    target = {
+      url: VOICE_ENDPOINT,
+      headers: { "x-goog-api-key": config.apiKey },
+      model: `models/${config.model}`,
+    };
+  }
+  const system = withToday(opts.system);
+  const tools = opts.tools ?? [];
+  const { withInferenceCapture } = await capture();
+  return new Promise((resolveReady) => {
+    let opened: VoiceSession | null = null;
+    // Ends after the ledger row and training capture are written.
+    const finished = withInferenceCapture(
+      () =>
+        openVoiceSession({
+          orgId: opts.orgId,
+          feature: opts.feature,
+          system,
+          tools,
+          voice: opts.voice ?? "Kore",
+          turnTaking: opts.turnTaking,
+          languageCode: opts.languageCode,
+          config,
+          target,
+          events: opts.events ?? {},
+          ready: (s) => {
+            if (!("sendAudio" in s)) return resolveReady(s);
+            opened = s;
+            resolveReady({
+              ok: true,
+              session: {
+                ...s,
+                done: finished,
+                close: async () => {
+                  await opened!.close();
+                  return finished;
+                },
+              },
+            });
+          },
+        }),
+      (r, latencyMs) => ({
+        orgId: opts.orgId,
+        callKind: "voice",
+        feature: opts.feature,
+        provider: config.provider,
+        model: config.model,
+        request: { system, tools },
+        response: { transcript: r.transcript, toolCalls: r.toolCalls },
+        status: r.error && r.closedBy !== "client" ? "error" : "ok",
+        errorMessage: r.error,
+        promptTokens: r.usage?.promptTokens ?? null,
+        completionTokens: r.usage?.completionTokens ?? null,
+        latencyMs,
+      }),
+    );
+  });
+}
+
+/* ---------------------------------------------- voice credentials (BYO) */
+
+// The organisation's own credential for the live voice model: its Google API
+// key (saved like any other key), or a Vertex AI service account stored here,
+// encrypted, under its own provider name. No platform credential exists.
+
+const VOICE_VERTEX = "google_vertex";
+
+/** Validate a service-account JSON key file; returns what is stored, or why not. */
+export function parseVoiceServiceAccount(
+  json: string,
+  location: string,
+): { ok: true; vertex: VoiceVertex } | { ok: false; message: string } {
+  let raw: Record<string, unknown>;
+  try {
+    raw = JSON.parse(json) as Record<string, unknown>;
+  } catch {
+    return { ok: false, message: "That is not a JSON key file." };
+  }
+  const str = (k: string) => (typeof raw[k] === "string" ? (raw[k] as string).trim() : "");
+  if (str("type") !== "service_account")
+    return { ok: false, message: "That file is not a service-account key." };
+  const clientEmail = str("client_email");
+  const privateKey = str("private_key");
+  const project = str("project_id");
+  if (!clientEmail || !privateKey.includes("PRIVATE KEY") || !project)
+    return { ok: false, message: "The key file is missing its account, key or project." };
+  if (!/^[a-z]+-[a-z]+\d$/.test(location))
+    return { ok: false, message: "Choose a region such as us-central1." };
+  const tokenUri = str("token_uri");
+  return {
+    ok: true,
+    vertex: {
+      project,
+      location,
+      serviceAccount: {
+        client_email: clientEmail,
+        private_key: privateKey,
+        ...(tokenUri ? { token_uri: tokenUri } : {}),
+      },
+    },
+  };
+}
+
+export async function writeVoiceServiceAccount(orgId: string, vertex: VoiceVertex) {
+  const { encryptSecret } = await import("../server/crypto");
+  const encrypted = encryptSecret(JSON.stringify(vertex));
+  await db
+    .insert(aiProviderCredentials)
+    .values({ orgId, provider: VOICE_VERTEX, apiKey: encrypted, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: [aiProviderCredentials.orgId, aiProviderCredentials.provider],
+      set: { apiKey: encrypted, updatedAt: new Date() },
+    });
+}
+
+export async function clearVoiceServiceAccount(orgId: string) {
+  await db
+    .delete(aiProviderCredentials)
+    .where(
+      and(eq(aiProviderCredentials.orgId, orgId), eq(aiProviderCredentials.provider, VOICE_VERTEX)),
+    );
+}
+
+/** The organisation's stored service account, decrypted (server only). */
+export async function readVoiceServiceAccount(orgId: string): Promise<VoiceVertex | null> {
+  const { decryptSecret } = await import("../server/crypto");
+  const [cred] = await db
+    .select({ apiKey: aiProviderCredentials.apiKey })
+    .from(aiProviderCredentials)
+    .where(
+      and(eq(aiProviderCredentials.orgId, orgId), eq(aiProviderCredentials.provider, VOICE_VERTEX)),
+    )
+    .limit(1);
+  if (!cred?.apiKey) return null;
+  try {
+    return JSON.parse(decryptSecret(cred.apiKey)) as VoiceVertex;
+  } catch {
+    return null;
+  }
+}
+
+/** Which voice credentials the organisation has stored — booleans only, for the UI. */
+export async function voiceCredentialStatus(
+  orgId: string,
+): Promise<{ serviceAccount: boolean; apiKey: boolean }> {
+  const rows = await db
+    .select({ provider: aiProviderCredentials.provider })
+    .from(aiProviderCredentials)
+    .where(eq(aiProviderCredentials.orgId, orgId));
+  const has = (p: string) => rows.some((r) => r.provider === p);
+  return { serviceAccount: has(VOICE_VERTEX), apiKey: has("google") };
 }

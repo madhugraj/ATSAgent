@@ -7,6 +7,7 @@ import { db } from "../server/db";
 import { emailVerified } from "../server/claims";
 import { departments, masterItems, orgMembers, organizations, userRoles } from "@db/schema";
 import { registrableDomain, workEmailProblem } from "@/lib/work-email";
+import { AgreementAcceptanceInput } from "@/lib/legal/acceptance";
 
 export type AppRole =
   "recruiter" | "hiring_manager" | "department_head" | "hr_head" | "president_cbo";
@@ -212,7 +213,7 @@ export const claimInvite = createServerFn({ method: "POST" })
     return { ok: true, orgId: invite.orgId };
   });
 
-const CreateInput = z.object({
+export const CreateInput = z.object({
   name: z.string().trim().min(2).max(120),
   legalName: z.string().trim().min(2, "Registered legal name is required").max(160),
   industry: z.string().trim().min(2, "Industry is required").max(80),
@@ -237,6 +238,8 @@ const CreateInput = z.object({
       }),
     )
     .default([]),
+  /** Terms, Privacy Policy and DPA acceptance by the registering signatory — required. */
+  agreement: AgreementAcceptanceInput,
 });
 
 /**
@@ -256,6 +259,10 @@ export const createOrganization = createServerFn({ method: "POST" })
       throw new Error("Confirm your work email address before registering an organisation.");
     const problem = workEmailProblem(email);
     if (problem) throw new Error(problem);
+
+    // The agreement must be the current version before anything is created.
+    const agreements = await import("../server/org-agreements.server");
+    agreements.assertCurrentVersions(data.agreement.versions);
 
     const [existing] = await db
       .select({ orgId: orgMembers.orgId })
@@ -321,6 +328,8 @@ export const createOrganization = createServerFn({ method: "POST" })
       orgId: org.id,
       userId: context.userId,
       email,
+      fullName: data.agreement.signatoryName.trim(),
+      title: data.agreement.signatoryTitle.trim(),
       status: "active",
       isOwner: true,
       joinedAt: new Date(),
@@ -328,6 +337,17 @@ export const createOrganization = createServerFn({ method: "POST" })
     await db
       .insert(userRoles)
       .values({ userId: context.userId, role: "president_cbo", orgId: org.id });
+
+    const { getRequest } = await import("@tanstack/react-start/server");
+    const { clientIp } = await import("../server/client-ip");
+    const request = getRequest();
+    await agreements.recordAgreementAcceptance({
+      orgId: org.id,
+      userId: context.userId,
+      email,
+      acceptance: data.agreement,
+      ipHash: agreements.hashIp(request ? clientIp(request) : null),
+    });
 
     const departmentsToCreate = data.departments.filter((d) => d.name.trim());
     if (departmentsToCreate.length) {
@@ -522,71 +542,95 @@ export const inviteMember = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const orgId = await assertAdmin(context.userId);
-    const [org] = await db
-      .select({ status: organizations.status })
-      .from(organizations)
-      .where(eq(organizations.id, orgId))
-      .limit(1);
-    if ((org?.status ?? "active") !== "active")
-      throw new Error(
-        "Your organisation is not approved yet — internal users can be added after approval.",
-      );
-    const email = data.email.toLowerCase();
-    const problem = workEmailProblem(email);
-    if (problem) throw new Error(problem);
-
-    // The owner's verified domain defines who counts as an internal user.
-    const [owner] = await db
-      .select({ email: orgMembers.email })
-      .from(orgMembers)
-      .where(and(eq(orgMembers.orgId, orgId), eq(orgMembers.isOwner, true)))
-      .limit(1);
-    if (owner?.email && registrableDomain(owner.email) !== registrableDomain(email))
-      throw new Error(
-        `Only ${registrableDomain(owner.email)} addresses can be invited into this organisation.`,
-      );
-
-    const [existingUser] = await db
-      .select({ id: orgMembers.id })
-      .from(orgMembers)
-      .where(and(eq(orgMembers.orgId, orgId), ilike(orgMembers.email, email)))
-      .limit(1);
-    if (existingUser) throw new Error("That email is already on the roster.");
-
-    const [row] = await db
-      .insert(orgMembers)
-      .values({
-        orgId,
-        email,
-        fullName: data.fullName.trim() || null,
-        title: data.title.trim() || null,
-        invitedRole: data.role,
-        invitedBy: context.userId,
-        status: "invited",
-      })
-      .returning({ id: orgMembers.id });
-
-    const [orgRow] = await db
-      .select({ name: organizations.name })
-      .from(organizations)
-      .where(eq(organizations.id, orgId))
-      .limit(1);
-    const [inviter] = await db
-      .select({ fullName: orgMembers.fullName, email: orgMembers.email })
-      .from(orgMembers)
-      .where(and(eq(orgMembers.userId, context.userId), eq(orgMembers.orgId, orgId)))
-      .limit(1);
-    await notifyInvitedMember({
-      email,
-      orgName: orgRow?.name ?? "your organisation",
-      role: data.role,
-      title: data.title.trim() || null,
-      inviteeName: data.fullName.trim() || null,
-      inviterName: inviter?.fullName ?? inviter?.email ?? null,
-      memberId: row?.id ?? null,
-    });
-    return { ok: true, notified: true };
+    return inviteMemberCore(orgId, context.userId, data);
   });
+
+/**
+ * Invite a person into the organisation with one approval role (the caller has
+ * checked the inviter is an admin). Company-domain gate as before; audited
+ * `member.invited` — an invite is a role grant.
+ */
+export async function inviteMemberCore(
+  orgId: string,
+  inviterUserId: string,
+  data: { email: string; role: AppRole; title: string; fullName: string },
+): Promise<{ ok: true; notified: true }> {
+  const context = { userId: inviterUserId };
+  const [org] = await db
+    .select({ status: organizations.status })
+    .from(organizations)
+    .where(eq(organizations.id, orgId))
+    .limit(1);
+  if ((org?.status ?? "active") !== "active")
+    throw new Error(
+      "Your organisation is not approved yet — internal users can be added after approval.",
+    );
+  const email = data.email.toLowerCase();
+  const problem = workEmailProblem(email);
+  if (problem) throw new Error(problem);
+
+  // The owner's verified domain defines who counts as an internal user.
+  const [owner] = await db
+    .select({ email: orgMembers.email })
+    .from(orgMembers)
+    .where(and(eq(orgMembers.orgId, orgId), eq(orgMembers.isOwner, true)))
+    .limit(1);
+  if (owner?.email && registrableDomain(owner.email) !== registrableDomain(email))
+    throw new Error(
+      `Only ${registrableDomain(owner.email)} addresses can be invited into this organisation.`,
+    );
+
+  const [existingUser] = await db
+    .select({ id: orgMembers.id })
+    .from(orgMembers)
+    .where(and(eq(orgMembers.orgId, orgId), ilike(orgMembers.email, email)))
+    .limit(1);
+  if (existingUser) throw new Error("That email is already on the roster.");
+
+  const [row] = await db
+    .insert(orgMembers)
+    .values({
+      orgId,
+      email,
+      fullName: data.fullName.trim() || null,
+      title: data.title.trim() || null,
+      invitedRole: data.role,
+      invitedBy: context.userId,
+      status: "invited",
+    })
+    .returning({ id: orgMembers.id });
+
+  const [orgRow] = await db
+    .select({ name: organizations.name })
+    .from(organizations)
+    .where(eq(organizations.id, orgId))
+    .limit(1);
+  const [inviter] = await db
+    .select({ fullName: orgMembers.fullName, email: orgMembers.email })
+    .from(orgMembers)
+    .where(and(eq(orgMembers.userId, context.userId), eq(orgMembers.orgId, orgId)))
+    .limit(1);
+  await notifyInvitedMember({
+    email,
+    orgName: orgRow?.name ?? "your organisation",
+    role: data.role,
+    title: data.title.trim() || null,
+    inviteeName: data.fullName.trim() || null,
+    inviterName: inviter?.fullName ?? inviter?.email ?? null,
+    memberId: row?.id ?? null,
+  });
+  const { writeAudit } = await import("../server/audit");
+  await writeAudit({
+    actor: inviter?.email ?? `user:${inviterUserId}`,
+    actorUserId: inviterUserId,
+    orgId,
+    action: "member.invited",
+    entityType: "org_member",
+    entityId: row?.id ?? null,
+    detail: { email, role: data.role },
+  });
+  return { ok: true, notified: true };
+}
 
 export const setMemberRole = createServerFn({ method: "POST" })
   .middleware([requireIdentity])

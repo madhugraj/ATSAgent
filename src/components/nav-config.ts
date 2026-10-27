@@ -260,6 +260,12 @@ export const NAV_GROUPS: NavGroup[] = [
         show: (c) => c.isSuperUser,
       },
       {
+        to: "/platform-health",
+        label: "Service health",
+        icon: Activity,
+        show: (c) => c.isSuperUser,
+      },
+      {
         to: "/catalogue",
         label: "Product catalogue",
         icon: BookMarked,
