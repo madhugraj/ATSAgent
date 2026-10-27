@@ -16,6 +16,7 @@ import { Route as CollaborationRouteImport } from './routes/collaboration'
 import { Route as CookiesRouteImport } from './routes/cookies'
 import { Route as DeskRouteImport } from './routes/desk'
 import { Route as DistributionRouteImport } from './routes/distribution'
+import { Route as DpaRouteImport } from './routes/dpa'
 import { Route as HelpRouteImport } from './routes/help'
 import { Route as HiringCostRouteImport } from './routes/hiring-cost'
 import { Route as IjpRouteImport } from './routes/ijp'
@@ -35,6 +36,7 @@ import { Route as RoiRouteImport } from './routes/roi'
 import { Route as ScreeningRouteImport } from './routes/screening'
 import { Route as TeamRouteImport } from './routes/team'
 import { Route as TemplatesRouteImport } from './routes/templates'
+import { Route as TermsRouteImport } from './routes/terms'
 import { Route as AgentsIndexRouteImport } from './routes/agents.index'
 import { Route as AgentsObservabilityRouteImport } from './routes/agents.observability'
 import { Route as AgentsRegisterRouteImport } from './routes/agents.register'
@@ -109,6 +111,11 @@ const DeskRoute = DeskRouteImport.update({
 const DistributionRoute = DistributionRouteImport.update({
   id: '/distribution',
   path: '/distribution',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DpaRoute = DpaRouteImport.update({
+  id: '/dpa',
+  path: '/dpa',
   getParentRoute: () => rootRouteImport,
 } as any)
 const HelpRoute = HelpRouteImport.update({
@@ -204,6 +211,11 @@ const TeamRoute = TeamRouteImport.update({
 const TemplatesRoute = TemplatesRouteImport.update({
   id: '/templates',
   path: '/templates',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TermsRoute = TermsRouteImport.update({
+  id: '/terms',
+  path: '/terms',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgentsIndexRoute = AgentsIndexRouteImport.update({
@@ -422,6 +434,7 @@ export interface FileRoutesByFullPath {
   '/cookies': typeof CookiesRoute
   '/desk': typeof DeskRoute
   '/distribution': typeof DistributionRoute
+  '/dpa': typeof DpaRoute
   '/help': typeof HelpRoute
   '/hiring-cost': typeof HiringCostRoute
   '/ijp': typeof IjpRoute
@@ -441,6 +454,7 @@ export interface FileRoutesByFullPath {
   '/screening': typeof ScreeningRoute
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
+  '/terms': typeof TermsRoute
   '/agents/observability': typeof AgentsObservabilityRoute
   '/agents/register': typeof AgentsRegisterRoute
   '/agents/settings': typeof AgentsSettingsRoute
@@ -490,6 +504,7 @@ export interface FileRoutesByTo {
   '/cookies': typeof CookiesRoute
   '/desk': typeof DeskRoute
   '/distribution': typeof DistributionRoute
+  '/dpa': typeof DpaRoute
   '/help': typeof HelpRoute
   '/hiring-cost': typeof HiringCostRoute
   '/ijp': typeof IjpRoute
@@ -509,6 +524,7 @@ export interface FileRoutesByTo {
   '/screening': typeof ScreeningRoute
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
+  '/terms': typeof TermsRoute
   '/agents/observability': typeof AgentsObservabilityRoute
   '/agents/register': typeof AgentsRegisterRoute
   '/agents/settings': typeof AgentsSettingsRoute
@@ -559,6 +575,7 @@ export interface FileRoutesById {
   '/cookies': typeof CookiesRoute
   '/desk': typeof DeskRoute
   '/distribution': typeof DistributionRoute
+  '/dpa': typeof DpaRoute
   '/help': typeof HelpRoute
   '/hiring-cost': typeof HiringCostRoute
   '/ijp': typeof IjpRoute
@@ -578,6 +595,7 @@ export interface FileRoutesById {
   '/screening': typeof ScreeningRoute
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
+  '/terms': typeof TermsRoute
   '/agents/observability': typeof AgentsObservabilityRoute
   '/agents/register': typeof AgentsRegisterRoute
   '/agents/settings': typeof AgentsSettingsRoute
@@ -629,6 +647,7 @@ export interface FileRouteTypes {
     | '/cookies'
     | '/desk'
     | '/distribution'
+    | '/dpa'
     | '/help'
     | '/hiring-cost'
     | '/ijp'
@@ -648,6 +667,7 @@ export interface FileRouteTypes {
     | '/screening'
     | '/team'
     | '/templates'
+    | '/terms'
     | '/agents/observability'
     | '/agents/register'
     | '/agents/settings'
@@ -697,6 +717,7 @@ export interface FileRouteTypes {
     | '/cookies'
     | '/desk'
     | '/distribution'
+    | '/dpa'
     | '/help'
     | '/hiring-cost'
     | '/ijp'
@@ -716,6 +737,7 @@ export interface FileRouteTypes {
     | '/screening'
     | '/team'
     | '/templates'
+    | '/terms'
     | '/agents/observability'
     | '/agents/register'
     | '/agents/settings'
@@ -765,6 +787,7 @@ export interface FileRouteTypes {
     | '/cookies'
     | '/desk'
     | '/distribution'
+    | '/dpa'
     | '/help'
     | '/hiring-cost'
     | '/ijp'
@@ -784,6 +807,7 @@ export interface FileRouteTypes {
     | '/screening'
     | '/team'
     | '/templates'
+    | '/terms'
     | '/agents/observability'
     | '/agents/register'
     | '/agents/settings'
@@ -834,6 +858,7 @@ export interface RootRouteChildren {
   CookiesRoute: typeof CookiesRoute
   DeskRoute: typeof DeskRoute
   DistributionRoute: typeof DistributionRoute
+  DpaRoute: typeof DpaRoute
   HelpRoute: typeof HelpRoute
   HiringCostRoute: typeof HiringCostRoute
   IjpRoute: typeof IjpRoute
@@ -853,6 +878,7 @@ export interface RootRouteChildren {
   ScreeningRoute: typeof ScreeningRoute
   TeamRoute: typeof TeamRoute
   TemplatesRoute: typeof TemplatesRoute
+  TermsRoute: typeof TermsRoute
   AgentsObservabilityRoute: typeof AgentsObservabilityRoute
   AgentsRegisterRoute: typeof AgentsRegisterRoute
   AgentsSettingsRoute: typeof AgentsSettingsRoute
@@ -944,6 +970,13 @@ declare module '@tanstack/react-router' {
       path: '/distribution'
       fullPath: '/distribution'
       preLoaderRoute: typeof DistributionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/dpa': {
+      id: '/dpa'
+      path: '/dpa'
+      fullPath: '/dpa'
+      preLoaderRoute: typeof DpaRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/help': {
@@ -1077,6 +1110,13 @@ declare module '@tanstack/react-router' {
       path: '/templates'
       fullPath: '/templates'
       preLoaderRoute: typeof TemplatesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/terms': {
+      id: '/terms'
+      path: '/terms'
+      fullPath: '/terms'
+      preLoaderRoute: typeof TermsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/agents/': {
@@ -1370,6 +1410,7 @@ const rootRouteChildren: RootRouteChildren = {
   CookiesRoute: CookiesRoute,
   DeskRoute: DeskRoute,
   DistributionRoute: DistributionRoute,
+  DpaRoute: DpaRoute,
   HelpRoute: HelpRoute,
   HiringCostRoute: HiringCostRoute,
   IjpRoute: IjpRoute,
@@ -1389,6 +1430,7 @@ const rootRouteChildren: RootRouteChildren = {
   ScreeningRoute: ScreeningRoute,
   TeamRoute: TeamRoute,
   TemplatesRoute: TemplatesRoute,
+  TermsRoute: TermsRoute,
   AgentsObservabilityRoute: AgentsObservabilityRoute,
   AgentsRegisterRoute: AgentsRegisterRoute,
   AgentsSettingsRoute: AgentsSettingsRoute,

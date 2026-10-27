@@ -235,6 +235,74 @@ export const orgMembers = pgTable(
   ],
 );
 
+/**
+ * An organisation's acceptance of a versioned legal document (Terms of
+ * Service, Privacy Policy, Data Processing Agreement — src/lib/legal). One row
+ * per document version accepted; a new version needs a new row, so the owner
+ * is asked again. The signatory's name, title and email are copied so the
+ * record survives the user being removed; the IP is kept only as an HMAC.
+ */
+export const orgAgreements = pgTable(
+  "org_agreements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    version: text("version").notNull(),
+    acceptedBy: uuid("accepted_by").references(() => users.id, { onDelete: "set null" }),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }).notNull().defaultNow(),
+    accepterName: text("accepter_name").notNull(),
+    accepterTitle: text("accepter_title").notNull(),
+    accepterEmail: text("accepter_email").notNull(),
+    ipHash: text("ip_hash"),
+  },
+  (t) => [
+    check("org_agreements_kind_check", sql`${t.kind} in ('terms','privacy','dpa')`),
+    uniqueIndex("org_agreements_org_kind_version_key").on(t.orgId, t.kind, t.version),
+    index("org_agreements_org_idx").on(t.orgId, t.acceptedAt),
+  ],
+);
+
+/** Who interviews, on what, how often — registered once by the admin (docs/interview-panel-plan.md). */
+export const memberInterviewerProfiles = pgTable(
+  "member_interviewer_profiles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    memberId: uuid("member_id")
+      .notNull()
+      .references(() => orgMembers.id, { onDelete: "cascade" }),
+    active: boolean("active").notNull().default(true),
+    /** Skills and competencies they assess, matched to a round's competencies. */
+    areas: text("areas")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    /** Interview rounds they take (1–3). */
+    rounds: integer("rounds")
+      .array()
+      .notNull()
+      .default(sql`'{1,2,3}'::integer[]`),
+    weeklyCap: integer("weekly_cap").notNull().default(4),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("member_interviewer_profiles_member_key").on(t.memberId),
+    index("member_interviewer_profiles_org_idx").on(t.orgId, t.active),
+    check("member_interviewer_profiles_weekly_cap_check", sql`${t.weeklyCap} between 1 and 20`),
+    check(
+      "member_interviewer_profiles_rounds_check",
+      sql`${t.rounds} <@ array[1,2,3] and cardinality(${t.rounds}) >= 1`,
+    ),
+    check("member_interviewer_profiles_areas_check", sql`cardinality(${t.areas}) <= 20`),
+  ],
+);
+
 export const userRoles = pgTable(
   "user_roles",
   {
@@ -321,6 +389,10 @@ export const requisitions = pgTable(
     experienceMax: integer("experience_max").notNull().default(5),
     budgetCtc: numeric("budget_ctc", { precision: 14, scale: 2 }).notNull().default("0"),
     hiringManager: text("hiring_manager"),
+    /** The role's hiring manager as a member (approves its interview panels). */
+    hiringManagerMemberId: uuid("hiring_manager_member_id").references(() => orgMembers.id, {
+      onDelete: "set null",
+    }),
     mustHaveSkills: text("must_have_skills")
       .array()
       .notNull()
@@ -366,6 +438,35 @@ export const requisitions = pgTable(
     workAuthorizationRequired: text("work_authorization_required"),
   },
   (t) => [uniqueIndex("requisitions_org_code_key").on(t.orgId, t.code)],
+);
+
+/**
+ * The approved interview panel for one role and round (docs/interview-panel-plan.md,
+ * P2): proposed by the Interview coordinator, approved or changed by a person,
+ * reused for every candidate of that role and round. `version` counts approvals.
+ */
+export const rolePanels = pgTable(
+  "role_panels",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    requisitionId: uuid("requisition_id")
+      .notNull()
+      .references(() => requisitions.id, { onDelete: "cascade" }),
+    level: integer("level").notNull(),
+    memberIds: uuid("member_ids").array().notNull(),
+    approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }).notNull().defaultNow(),
+    version: integer("version").notNull().default(1),
+  },
+  (t) => [
+    uniqueIndex("role_panels_requisition_level_key").on(t.requisitionId, t.level),
+    index("role_panels_org_idx").on(t.orgId),
+    check("role_panels_level_check", sql`${t.level} between 1 and 3`),
+    check("role_panels_members_check", sql`cardinality(${t.memberIds}) between 1 and 3`),
+  ],
 );
 
 export const jobDescriptions = pgTable("job_descriptions", {
@@ -458,6 +559,8 @@ export const candidates = pgTable(
     websiteUrl: text("website_url"),
     xUrl: text("x_url"),
     consentGiven: boolean("consent_given").notNull().default(true),
+    /** The candidate asked not to be phoned by the AI assistant: no AI call dials them again. */
+    aiCallOptOutAt: timestamp("ai_call_opt_out_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     /** When this person was last checked against the open roles (new CV → open roles). */
     roleMatchCheckedAt: timestamp("role_match_checked_at", { withTimezone: true }),
@@ -672,8 +775,51 @@ export const interviews = pgTable(
     /** Why a round did not happen (no-show / cancelled), in a person's words. */
     outcomeNote: text("outcome_note"),
     completedAt: timestamp("completed_at", { withTimezone: true }),
+    /** Interviewers who said they cannot make this booked round (migration 0051). */
+    unavailable: jsonb("unavailable")
+      .$type<{ email: string; note: string | null; at: string }[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
   },
   (t) => [index("interviews_interviewer_email_idx").on(sql`lower(${t.interviewerEmail})`)],
+);
+
+/**
+ * For one candidate's round only, a panellist replaced by another member
+ * (docs/interview-panel-plan.md, P3): proposed by the Interview coordinator,
+ * approved by a person. The role's approved panel is unchanged.
+ */
+export const roundSubstitutes = pgTable(
+  "round_substitutes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    level: integer("level").notNull(),
+    replaceMemberId: uuid("replace_member_id")
+      .notNull()
+      .references(() => orgMembers.id, { onDelete: "cascade" }),
+    withMemberId: uuid("with_member_id")
+      .notNull()
+      .references(() => orgMembers.id, { onDelete: "cascade" }),
+    reason: text("reason"),
+    approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("round_substitutes_round_member_key").on(
+      t.applicationId,
+      t.level,
+      t.replaceMemberId,
+    ),
+    index("round_substitutes_org_idx").on(t.orgId),
+    check("round_substitutes_level_check", sql`${t.level} between 1 and 3`),
+    check("round_substitutes_distinct_check", sql`${t.replaceMemberId} <> ${t.withMemberId}`),
+  ],
 );
 
 /**
@@ -1006,7 +1152,8 @@ export type EmailOutboxKind =
   | "interviewer_brief"
   | "interview_slots"
   | "compensation_form"
-  | "offer_negotiation";
+  | "offer_negotiation"
+  | "screening_call_booked";
 export type EmailOutboxStatus = "queued" | "sent" | "failed" | "suppressed";
 export type EmailOutboxAttachment = {
   filename: string;
@@ -1422,6 +1569,21 @@ export const screeningKits = pgTable(
   ],
 );
 
+/** How much of a phone screening a grade rests on. */
+export type ScreeningCoverage = {
+  /** Screening questions the call meant to ask. */
+  planned: number;
+  /** Of those, how many were asked on the call (older runs: not recorded). */
+  asked?: number;
+  /** Of those, how many the candidate answered (the grade uses only these). */
+  answered: number;
+  /** The planned and the asked questions' ids — so the ones not reached can be named. */
+  plannedIds?: string[];
+  askedIds?: string[];
+  /** answered / planned: high ≥ 75 %, medium ≥ 50 %, else low. */
+  confidence: "high" | "medium" | "low";
+};
+
 /** One graded screening attempt against a kit (typed answers, notes or audio). */
 export const screeningRuns = pgTable(
   "screening_runs",
@@ -1461,6 +1623,8 @@ export const screeningRuns = pgTable(
     rationale: text("rationale"),
     recommendation: text("recommendation"),
     recommendationReason: text("recommendation_reason"),
+    /** Phone screening: what the grade rests on (graded only on the questions covered). */
+    coverage: jsonb("coverage").$type<ScreeningCoverage | null>(),
     engine: jsonb("engine")
       .notNull()
       .default(sql`'{}'::jsonb`),
@@ -1907,7 +2071,9 @@ export type AgentType =
   | "onboarding"
   | "followup"
   | "sourcing"
-  | "distribution";
+  | "distribution"
+  | "screening_call"
+  | "scheduling_call";
 export type AgentAutonomy = "suggest" | "act_and_notify" | "autonomous";
 export type AgentRunStatus =
   "queued" | "running" | "awaiting_human" | "done" | "failed" | "cancelled";
@@ -2333,7 +2499,7 @@ export const trainingSettings = pgTable(
   ],
 );
 
-export type TrainingCallKind = "json" | "research" | "agent_step";
+export type TrainingCallKind = "json" | "research" | "agent_step" | "voice";
 
 /** One model call: what it was given and what it returned. */
 export const trainingInferences = pgTable(
@@ -2648,6 +2814,233 @@ export const offerNegotiations = pgTable(
   },
   (t) => [index("offer_negotiations_app_idx").on(t.applicationId, t.createdAt)],
 );
+
+/* ------------------------------------------------------- phone screening */
+// docs/voice-screening-agent.md — migration 0046.
+
+/** Per organisation: whether candidates are screened by phone, and how. */
+export const phoneScreeningSettings = pgTable(
+  "phone_screening_settings",
+  {
+    orgId: uuid("org_id")
+      .primaryKey()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    enabled: boolean("enabled").notNull().default(false),
+    /** The name the AI assistant introduces itself with. */
+    assistantName: text("assistant_name").notNull().default("Saranya"),
+    /** Calling window, minutes after midnight in the organisation's time zone. */
+    windowStartMinute: integer("window_start_minute").notNull().default(600),
+    windowEndMinute: integer("window_end_minute").notNull().default(1140),
+    /** ISO weekdays it calls on (1 = Monday … 7 = Sunday). */
+    callDays: integer("call_days")
+      .array()
+      .notNull()
+      .default(sql`'{1,2,3,4,5,6}'`),
+    maxAttempts: integer("max_attempts").notNull().default(3),
+    maxMinutes: integer("max_minutes").notNull().default(10),
+    /** Times a candidate may move the call to another time; then alternatives are offered. */
+    maxReschedules: integer("max_reschedules").notNull().default(2),
+    /** Scheduling calls (a follow-up to an unanswered interview-time e-mail) switched on. */
+    schedulingEnabled: boolean("scheduling_enabled").notNull().default(false),
+    /** Hours an e-mailed interview-time offer waits unanswered before a scheduling call. */
+    schedulingWaitHours: integer("scheduling_wait_hours").notNull().default(24),
+    /** The assistant's voice (one of the voice service's prebuilt voices). */
+    voice: text("voice").notNull().default("Kore"),
+    /** What the assistant tells candidates happens next (≤ 300 characters). */
+    nextStepsText: text("next_steps_text"),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      "phone_screening_settings_assistant_name_check",
+      sql`char_length(${t.assistantName}) between 2 and 40`,
+    ),
+    check(
+      "phone_screening_settings_window_start_minute_check",
+      sql`${t.windowStartMinute} between 0 and 1439`,
+    ),
+    check(
+      "phone_screening_settings_window_end_minute_check",
+      sql`${t.windowEndMinute} between 1 and 1440`,
+    ),
+    check(
+      "phone_screening_settings_window_check",
+      sql`${t.windowEndMinute} > ${t.windowStartMinute}`,
+    ),
+    check("phone_screening_settings_max_attempts_check", sql`${t.maxAttempts} between 1 and 5`),
+    check("phone_screening_settings_max_minutes_check", sql`${t.maxMinutes} between 5 and 30`),
+    check(
+      "phone_screening_settings_scheduling_wait_check",
+      sql`${t.schedulingWaitHours} between 2 and 96`,
+    ),
+    check(
+      "phone_screening_settings_max_reschedules_check",
+      sql`${t.maxReschedules} between 0 and 5`,
+    ),
+    check(
+      "phone_screening_settings_next_steps_check",
+      sql`${t.nextStepsText} is null or char_length(${t.nextStepsText}) <= 300`,
+    ),
+  ],
+);
+
+export const SCREENING_CALL_STATUSES = [
+  "requested",
+  "approved",
+  "dialling",
+  "in_progress",
+  "completed",
+  "callback",
+  "no_answer",
+  "failed",
+  "consent_declined",
+  "cancelled",
+  "fell_back",
+] as const;
+export type ScreeningCallStatus = (typeof SCREENING_CALL_STATUSES)[number];
+
+/** One line of a call transcript. */
+export type ScreeningCallTurn = {
+  who: "caller" | "ai";
+  text: string;
+  at: string;
+  interrupted?: boolean;
+};
+
+/** Practical details the candidate gave on the call (pay is kept elsewhere, HR-only). */
+export type ScreeningCallDetails = {
+  currentTitle?: string;
+  currentCompany?: string;
+  totalExperienceYears?: number;
+  currentLocation?: string;
+  openToRelocate?: boolean;
+  noticePeriodDays?: number;
+  earliestJoining?: string;
+  /** Anything else the candidate said the hiring team should know, in their words. */
+  note?: string;
+};
+
+/** What the candidate said for one kit question, as the call agent recorded it. */
+export type VoiceCallPurpose = "screening" | "scheduling";
+
+export type ScreeningCallAnswer = {
+  question_id: string;
+  summary: string;
+  at: string;
+  /** The candidate chose not to answer (asked, never graded). */
+  declined?: boolean;
+};
+
+/**
+ * One phone screening of one application by the Screening call agent. The
+ * number is never copied here (read from the candidate when dialling); the
+ * transcript is kept only once the candidate consented.
+ */
+export const screeningCalls = pgTable(
+  "screening_calls",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    candidateId: uuid("candidate_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "cascade" }),
+    applicationId: uuid("application_id").references(() => applications.id, {
+      onDelete: "set null",
+    }),
+    requisitionId: uuid("requisition_id").references(() => requisitions.id, {
+      onDelete: "set null",
+    }),
+    kitId: uuid("kit_id").references(() => screeningKits.id, { onDelete: "set null" }),
+    /** The Screening agent run that asked for the call. */
+    requestedRunId: uuid("requested_run_id").references(() => agentRuns.id, {
+      onDelete: "set null",
+    }),
+    /** The call's own run (Screening call agent). */
+    agentRunId: uuid("agent_run_id").references(() => agentRuns.id, { onDelete: "set null" }),
+    requestedBy: uuid("requested_by").references(() => users.id, { onDelete: "set null" }),
+    status: text("status").$type<ScreeningCallStatus>().notNull().default("requested"),
+    attempt: integer("attempt").notNull().default(0),
+    /** The candidate agreed this time on an earlier call (an expected call, not a cold one). */
+    bookedByCandidate: boolean("booked_by_candidate").notNull().default(false),
+    /** Times the candidate moved this call to another time. */
+    reschedules: integer("reschedules").notNull().default(0),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    callbackAt: timestamp("callback_at", { withTimezone: true }),
+    phoneLast4: text("phone_last4"),
+    consentAt: timestamp("consent_at", { withTimezone: true }),
+    /** What the candidate said when agreeing or declining, as the assistant heard it. */
+    consentWords: text("consent_words"),
+    language: text("language"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    endReason: text("end_reason"),
+    durationS: integer("duration_s"),
+    transcript: jsonb("transcript")
+      .$type<ScreeningCallTurn[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    answers: jsonb("answers")
+      .$type<ScreeningCallAnswer[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /** Current role, experience, location, availability as said on the call — never pay. */
+    details: jsonb("details")
+      .$type<ScreeningCallDetails>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    screeningRunId: uuid("screening_run_id").references(() => screeningRuns.id, {
+      onDelete: "set null",
+    }),
+    /** screening = the AI screening call; scheduling = a call to pick an interview time. */
+    purpose: text("purpose").$type<VoiceCallPurpose>().notNull().default("screening"),
+    /** Scheduling: the e-mailed interview-time offer this call follows up. */
+    slotOfferId: uuid("slot_offer_id").references(() => interviewSlotOffers.id, {
+      onDelete: "set null",
+    }),
+    /** Scheduling: up to three extra start times (ISO) checked free when the call was asked for. */
+    alternates: jsonb("alternates")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      "screening_calls_status_check",
+      sql`${t.status} in ('requested', 'approved', 'dialling', 'in_progress', 'completed', 'callback', 'no_answer', 'failed', 'consent_declined', 'cancelled', 'fell_back')`,
+    ),
+    index("screening_calls_due_idx").on(t.orgId, t.status, t.dueAt),
+    index("screening_calls_application_idx").on(t.applicationId, t.createdAt),
+    index("screening_calls_candidate_idx").on(t.candidateId),
+    index("screening_calls_slot_offer_idx").on(t.slotOfferId),
+    check("screening_calls_purpose_check", sql`${t.purpose} in ('screening', 'scheduling')`),
+    check(
+      "screening_calls_alternates_check",
+      sql`jsonb_typeof(${t.alternates}) = 'array' and jsonb_array_length(${t.alternates}) <= 3`,
+    ),
+    check(
+      "screening_calls_scheduling_offer_check",
+      sql`${t.purpose} <> 'scheduling' or ${t.slotOfferId} is not null`,
+    ),
+  ],
+);
+
+/**
+ * The voice worker's heartbeat (one row per worker process). The web app treats
+ * a recent beat as "a phone line is available", so only the worker holds the
+ * PBX credentials.
+ */
+export const voiceWorkerHeartbeat = pgTable("voice_worker_heartbeat", {
+  workerId: text("worker_id").primaryKey(),
+  lastSeen: timestamp("last_seen", { withTimezone: true }).notNull().defaultNow(),
+  maxConcurrent: integer("max_concurrent").notNull().default(1),
+  callsInProgress: integer("calls_in_progress").notNull().default(0),
+});
 
 /* --------------------------------------------- service SLOs (0053) */
 

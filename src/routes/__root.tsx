@@ -126,6 +126,8 @@ function RootShell({ children }: { children: ReactNode }) {
   );
 }
 
+const LEGAL_PATHS = new Set(["/privacy", "/terms", "/dpa", "/cookies"]);
+
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -138,9 +140,8 @@ function RootComponent() {
     pathname.startsWith("/schedule/") ||
     pathname.startsWith("/offer/") ||
     pathname.startsWith("/apply/") ||
-    pathname === "/privacy" ||
-    pathname === "/cookies";
-  const isLegal = pathname === "/privacy" || pathname === "/cookies";
+    LEGAL_PATHS.has(pathname);
+  const isLegal = LEGAL_PATHS.has(pathname);
 
   if (isPublic) {
     return (

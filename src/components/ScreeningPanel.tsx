@@ -16,6 +16,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ScoreChip } from "@/components/ats";
+import { coverageWords } from "@/lib/screening-coverage";
+import type { ScreeningCoverage } from "@db/schema";
+import { PhoneScreeningCalls } from "@/components/PhoneScreeningCalls";
 
 type Question = {
   id: string;
@@ -96,6 +99,8 @@ export function ScreeningPanel(props: {
     [runs.data, kit?.id],
   );
   const latest = kitRuns[0] ?? null;
+  // A phone screen is graded only on the questions answered; this is what it rests on.
+  const coverage = (latest?.coverage ?? null) as ScreeningCoverage | null;
   const latestVerdicts = useMemo<Verdict[]>(
     () => (Array.isArray(latest?.verdicts) ? (latest!.verdicts as unknown as Verdict[]) : []),
     [latest],
@@ -242,6 +247,14 @@ export function ScreeningPanel(props: {
           </Button>
         </div>
       </div>
+
+      {reqId ? (
+        <PhoneScreeningCalls
+          candidateId={props.candidateId}
+          requisitionId={reqId}
+          hasKit={Boolean(kit && kit.requisition_id === reqId && questions.length)}
+        />
+      ) : null}
 
       {!props.roles.length ? (
         <p className="mt-3 text-sm text-muted-foreground">
@@ -407,8 +420,18 @@ export function ScreeningPanel(props: {
         <div className="mt-4 rounded-lg border border-primary/30 bg-primary/5 p-3">
           <div className="flex flex-wrap items-center gap-4">
             <div>
-              <p className="text-xs text-muted-foreground">Screening</p>
+              <p className="text-xs text-muted-foreground">
+                {latest.input_kind === "phone_ai" ? "AI phone screen" : "Screening"}
+              </p>
               <ScoreChip score={latest.screening_score} />
+              {coverage ? (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {coverageWords(coverage)} ·{" "}
+                  <span className={coverage.confidence === "low" ? "text-amber-600" : ""}>
+                    {coverage.confidence} confidence
+                  </span>
+                </p>
+              ) : null}
             </div>
             {latest.match_score !== null ? (
               <div>
@@ -423,7 +446,11 @@ export function ScreeningPanel(props: {
               </div>
             ) : null}
             <div className="text-xs">
-              <p className="font-semibold capitalize">{latest.recommendation}</p>
+              <p className="font-semibold capitalize">
+                {latest.input_kind === "phone_ai" && latest.recommendation === "hold"
+                  ? "Probe further"
+                  : latest.recommendation}
+              </p>
               <p className="text-muted-foreground">{latest.recommendation_reason}</p>
             </div>
           </div>

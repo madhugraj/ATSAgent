@@ -40,6 +40,7 @@ import {
 } from "@/lib/matching.functions";
 import { balanceWeights, extractResumeText } from "@/lib/cv-extract";
 import { InterviewPlanCard } from "@/components/InterviewPlanCard";
+import { HiringManagerPicker } from "@/components/HiringManagerPicker";
 import { RoleCostCard } from "@/components/HiringCost";
 import { intakeCvs, type IntakeStatus } from "@/lib/cv-intake";
 import { rankPool } from "@/lib/shortlist";
@@ -1611,7 +1612,9 @@ function RequisitionDetail() {
             <h2 className="font-semibold">Interview plan</h2>
             <p className="mb-3 text-xs text-muted-foreground">
               The rounds for this role, what each one rates (from the must-haves) and how many
-              interviewers sit on it. Interviewers see this rubric in their brief and scorecard.
+              interviewers sit on it. Interviewers see this rubric in their brief and scorecard; the
+              hiring manager approves each round&apos;s panel. A round a candidate is already in
+              cannot be removed.
             </p>
             <InterviewPlanCard requisitionId={r.id} />
           </section>
@@ -1734,7 +1737,7 @@ function RequisitionDetail() {
               </div>
               <div>
                 <Label className="text-xs text-muted-foreground">Hiring manager</Label>
-                <p>{r.hiring_manager ?? "—"}</p>
+                <HiringManagerPicker requisitionId={r.id} />
               </div>
             </div>
           </section>

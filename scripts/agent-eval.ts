@@ -5,6 +5,9 @@
  *   EVAL_PROVIDER=openai|anthropic|google EVAL_API_KEY=... EVAL_MODEL=... \
  *   bun scripts/agent-eval.ts
  *
+ * EVAL_ONLY=<text> runs only the scenarios whose name contains it (e.g.
+ * EVAL_ONLY="scheduling call").
+ *
  * Uses a throwaway organisation per scenario on a local database. The key is
  * a test key supplied by the person running the eval; it is never stored.
  * Exits non-zero when any scenario fails.
@@ -21,6 +24,13 @@ if (!provider || !apiKey || !model) {
   process.exit(2);
 }
 
+// Phone screening evals: a phone line on paper (nothing is dialled in an eval)
+// and a key to store the organisation's voice credential with.
+process.env["SIP_SERVER"] ??= "127.0.0.1";
+process.env["SIP_USER"] ??= "eval";
+process.env["SIP_PASSWORD"] ??= "eval";
+process.env["SECRET_ENCRYPTION_KEY"] ??= Buffer.alloc(32, 7).toString("base64");
+
 const { setEvalModelOverride } = await import("../src/server/agents/runtime.server");
 const { resetRegistry } = await import("../src/server/agents/registry");
 const { runScenario } = await import("../src/server/agents/eval.server");
@@ -29,7 +39,8 @@ const { sql } = await import("../src/server/db");
 
 setEvalModelOverride({ provider, model, apiKey });
 let failed = 0;
-for (const s of scenarios()) {
+const only = process.env["EVAL_ONLY"]?.toLowerCase();
+for (const s of scenarios().filter((x) => !only || x.name.toLowerCase().includes(only))) {
   resetRegistry();
   const r = await runScenario(s);
   if (!r.passed) failed++;

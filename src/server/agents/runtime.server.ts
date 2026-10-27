@@ -15,7 +15,7 @@
  *  - every write/external action and every human decision is audited.
  */
 import { rupees } from "@/lib/money";
-import { and, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import {
@@ -45,6 +45,7 @@ import {
   offers,
   onboardingDocuments,
   requisitions,
+  screeningRuns,
   type AgentTaskKind,
   type AgentType,
 } from "@db/schema";
@@ -152,10 +153,25 @@ export function compactForModel(transcript: AgentMessage[], keep = 8, max = 700)
   });
 }
 
+/** Said to the model once when its reply was cut off at the output limit without a tool call. */
+export const CUT_OFF_NUDGE =
+  "Your last reply was cut off at the length limit before you did anything. Do not think out loud or repeat your reasoning: call the next tool now, or, if you are finished, reply with a short summary.";
+export const CUT_OFF_MESSAGE =
+  "The agent's replies were cut off at the length limit twice without acting. Try again; if it repeats, the agent's instructions need a look.";
+
 type AgentRun = typeof agentRuns.$inferSelect;
 type PendingCall = { taskId: string; call: AgentToolCall };
 
 import { HITL_TOOLS, isHitl, type HitlName } from "./hitl";
+import {
+  approvedPanelWords,
+  panelGateFor,
+  performPanelGate,
+  performSubstituteGate,
+  substituteGateFor,
+  type PanelApprovalSubject,
+  type PanelSubstituteSubject,
+} from "./panel-gate.server";
 
 /* --------------------------------------------- gates tied to real records */
 
@@ -171,6 +187,13 @@ type HiringDecisionSubject = {
   rationale: string;
   expects?: string;
 };
+type ScreeningDecisionSubject = {
+  type: "screening_decision";
+  applicationId: string;
+  recommendation: "proceed" | "hold";
+  rationale: string;
+  expects?: string;
+};
 type OfferReleaseSubject = { type: "offer_release"; offerId: string; expects?: string };
 type DocumentValidationSubject = {
   type: "document_validation";
@@ -178,9 +201,12 @@ type DocumentValidationSubject = {
   documentIds: string[];
 };
 type GateSubject =
+  | PanelApprovalSubject
+  | PanelSubstituteSubject
   | RecordSubject
   | RejectionSubject
   | HiringDecisionSubject
+  | ScreeningDecisionSubject
   | OfferReleaseSubject
   | DocumentValidationSubject;
 
@@ -195,6 +221,9 @@ const OFFER_NEXT: Record<string, "pending_cbo" | "approved"> = {
 
 const DECISION_STAGES = new Set(["l1", "l2", "l3", "on_hold", "reserve", "offer_pending"]);
 
+/** Where a candidate still is "in screening" — a screening decision applies only here. */
+const SCREENING_STAGES = new Set(["applied", "ai_screened", "shortlisted", "reserve", "on_hold"]);
+
 const TERMINAL_STAGES = new Set(["rejected", "hired", "joined", "withdrawn", "no_show"]);
 
 /** Which role must decide `subject` now, or why it is not awaiting approval. */
@@ -203,6 +232,8 @@ type GateInfo = {
   status: string;
   /** Rejection batches go to the person the agent works for. */
   toPrincipal?: boolean;
+  /** A named person decides (e.g. a role's hiring manager approves its panels). */
+  assigneeUserId?: string;
   /** Server-built detail appended to the agent's summary. */
   detail?: string;
   subject?: GateSubject;
@@ -260,6 +291,8 @@ export function expectationLine(
 }
 
 async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | { error: string }> {
+  if (subject.type === "panel_approval") return panelGateFor(orgId, subject);
+  if (subject.type === "panel_substitute") return substituteGateFor(orgId, subject);
   if (subject.type === "offer" || subject.type === "offer_release") {
     const offerId = "offerId" in subject ? subject.offerId : subject.id;
     const [o] = await db
@@ -400,6 +433,72 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
       subject: { ...subject, expects: row.stage },
     };
   }
+  if (subject.type === "screening_decision") {
+    const [row] = await db
+      .select({
+        stage: applications.stage,
+        name: candidates.fullName,
+        code: requisitions.code,
+        title: requisitions.title,
+      })
+      .from(applications)
+      .innerJoin(candidates, eq(candidates.id, applications.candidateId))
+      .innerJoin(requisitions, eq(requisitions.id, applications.requisitionId))
+      .where(and(eq(applications.id, subject.applicationId), eq(applications.orgId, orgId)))
+      .limit(1);
+    if (!row) return { error: "Application not found." };
+    if (!SCREENING_STAGES.has(row.stage))
+      return {
+        error: `The candidate is ${row.stage}, past screening; a screening decision no longer applies.`,
+      };
+    if (subject.recommendation === "hold" && row.stage === "on_hold")
+      return { error: "The candidate is already on hold." };
+    // Stated by the system, not left to the agent: the graded result it rests on.
+    const [graded] = await db
+      .select({ score: screeningRuns.screeningScore, coverage: screeningRuns.coverage })
+      .from(screeningRuns)
+      .where(
+        and(eq(screeningRuns.orgId, orgId), eq(screeningRuns.applicationId, subject.applicationId)),
+      )
+      .orderBy(desc(screeningRuns.createdAt))
+      .limit(1);
+    if (!graded)
+      return {
+        error:
+          "No graded screening is on record for this candidate yet — wait for the call or the assessment to be graded.",
+      };
+    // One decision per candidate at a time: never a second card for the same person.
+    const [waiting] = await db
+      .select({ id: agentTasks.id })
+      .from(agentTasks)
+      .where(
+        and(
+          eq(agentTasks.orgId, orgId),
+          eq(agentTasks.status, "open"),
+          eq(agentTasks.kind, "gate"),
+          sql`${agentTasks.proposedAction} -> 'args' -> 'subject' ->> 'type' = 'screening_decision'`,
+          sql`${agentTasks.proposedAction} -> 'args' -> 'subject' ->> 'applicationId' = ${subject.applicationId}`,
+        ),
+      )
+      .limit(1);
+    if (waiting)
+      return { error: "A screening decision for this candidate is already waiting for a person." };
+    const { coverageWords } = await import("@/lib/screening-coverage");
+    const rests = graded.coverage
+      ? ` (${coverageWords(graded.coverage)}; ${graded.coverage.confidence} confidence)`
+      : "";
+    return {
+      role: null,
+      status: row.stage,
+      toPrincipal: true,
+      detail: `Screening decision for ${row.name} (${row.code} ${row.title}).\nRecommendation: ${subject.recommendation === "proceed" ? "PROCEED to the first interview round" : "HOLD"}\nScreening score: ${graded.score}/100${rests}\nWhy: ${subject.rationale}\n\n${
+        subject.recommendation === "proceed"
+          ? "Approve to move them to the first interview round — the Interview coordinator then books it."
+          : "Approve to put them on hold."
+      } Decline to keep them in screening, or to reject them with a reason.`,
+      subject: { ...subject, expects: row.stage },
+    };
+  }
   if (subject.type === "rejection") {
     const ids = subject.items.map((i) => i.applicationId);
     const rows = await db
@@ -475,6 +574,9 @@ async function performGate(
   const org = await activeOrgOf(userId);
   if (!org || org.orgId !== orgId) throw new Error("You are not a member of this organisation.");
   const actor = { orgId, userId, memberEmail: org.memberEmail };
+  if (subject.type === "panel_approval") return performPanelGate(orgId, userId, subject, decision);
+  if (subject.type === "panel_substitute")
+    return performSubstituteGate(orgId, userId, org.memberEmail, subject, decision);
   if (subject.type === "offer" || subject.type === "offer_release") {
     const offerId = "offerId" in subject ? subject.offerId : subject.id;
     if (decision.status !== "approved") {
@@ -570,6 +672,45 @@ async function performGate(
       toStage: subject.recommendation === "reject" ? "rejected" : "on_hold",
       reason: subject.rationale,
       note: note.trim() || null,
+    });
+    return;
+  }
+  if (subject.type === "screening_decision") {
+    const [app] = await db
+      .select({ stage: applications.stage, candidateId: applications.candidateId })
+      .from(applications)
+      .where(and(eq(applications.id, subject.applicationId), eq(applications.orgId, orgId)))
+      .limit(1);
+    if (!app) throw new Error("Application not found.");
+    if (subject.expects && app.stage !== subject.expects) {
+      throw new Error("This candidate has already moved on; refresh to see their current stage.");
+    }
+    const pipeline = await import("@/lib/pipeline.server");
+    if (decision.status === "approved") {
+      // A person's decision, made as that person: into L1 raises
+      // application.advanced and the Interview coordinator books the round.
+      await pipeline.moveStageCore(actor, {
+        applicationId: subject.applicationId,
+        toStage: subject.recommendation === "proceed" ? "l1" : "on_hold",
+        reason: subject.rationale,
+        note: decision.comment?.trim() || null,
+      });
+      return;
+    }
+    if (decision.status !== "rejected") return;
+    const why = decision.reason?.trim() || null;
+    if (decision.rejectCandidate) {
+      if (!why) throw new Error("Say why the candidate is not moving on — it is kept on record.");
+      await pipeline.moveStageCore(actor, {
+        applicationId: subject.applicationId,
+        toStage: "rejected",
+        reason: why,
+      });
+      return;
+    }
+    await pipeline.addCandidateNoteCore(actor, {
+      candidateId: app.candidateId,
+      body: `Screening recommendation (${subject.recommendation}) declined — kept in screening.${why ? ` Reason: ${why}` : ""}`,
     });
     return;
   }
@@ -881,6 +1022,8 @@ export type TaskDecision =
       reason?: string | undefined;
       /** Sent back with changes to make (from the hiring desk), not refused outright. */
       changes?: boolean | undefined;
+      /** A screening decision declined by rejecting the candidate (a person's decision, with a reason). */
+      rejectCandidate?: boolean | undefined;
     }
   | { status: "answered"; answer: string };
 
@@ -903,7 +1046,11 @@ export async function resolveTask(input: {
   if (!task) throw new Error("Task not found");
   if (task.status !== "open") throw new Error("This task has already been decided.");
   if (task.assigneeUserId && task.assigneeUserId !== input.userId) {
-    throw new Error("This task is assigned to someone else.");
+    // The named person decides; the organisation's owner may too (as the desk shows).
+    const { activeOrgOf } = await import("@/lib/auth.middleware");
+    const org = await activeOrgOf(input.userId);
+    if (!org || org.orgId !== input.orgId || !org.isOwner)
+      throw new Error("This task is assigned to someone else.");
   }
   if (task.assigneeRole) await assertRole(input.userId, input.orgId, task.assigneeRole as AppRole);
   const { decision } = input;
@@ -1064,7 +1211,15 @@ export type TickCounts = {
 /** One scheduler tick: reclaim expired leases, claim queued runs, drive them. */
 /** `orgId` limits the tick to one organisation (eval harness); the scheduler omits it. */
 export async function runAgentTick(
-  opts: { max?: number; orgId?: string } = {},
+  opts: {
+    max?: number;
+    orgId?: string;
+    /**
+     * Drive only this run — no events, no sweeps, no other runs (evals: a sweep
+     * starting another run would take the scripted model's replies).
+     */
+    onlyRunId?: string;
+  } = {},
 ): Promise<TickCounts> {
   const max = Math.min(Math.max(opts.max ?? 10, 1), 50);
   const counts: TickCounts = {
@@ -1079,14 +1234,15 @@ export async function runAgentTick(
   const now = new Date();
 
   // 0. Turn lifecycle events into agent runs and close gates decided elsewhere.
-  try {
-    const { processAgentEvents } = await import("./orchestrator.server");
-    counts.events = (await processAgentEvents(opts.orgId ? { orgId: opts.orgId } : {})).processed;
-    const { scheduleSweeps } = await import("./orchestrator.server");
-    await scheduleSweeps(opts.orgId ? { orgId: opts.orgId } : {});
-  } catch (e) {
-    log.error("agent.orchestrator.failed", { error: e instanceof Error ? e : String(e) });
-  }
+  if (!opts.onlyRunId)
+    try {
+      const { processAgentEvents } = await import("./orchestrator.server");
+      counts.events = (await processAgentEvents(opts.orgId ? { orgId: opts.orgId } : {})).processed;
+      const { scheduleSweeps } = await import("./orchestrator.server");
+      await scheduleSweeps(opts.orgId ? { orgId: opts.orgId } : {});
+    } catch (e) {
+      log.error("agent.orchestrator.failed", { error: e instanceof Error ? e : String(e) });
+    }
 
   // 1. Reclaim runs whose worker died mid-turn; give up after MAX_ATTEMPTS.
   const expired = await db
@@ -1142,6 +1298,7 @@ export async function runAgentTick(
         // A dry-run replay changes nothing, so it does not need the agent switched on.
         sql`(${agentRuns.mode} = 'replay' or exists (${switchedOn}))`,
         opts.orgId ? eq(agentRuns.orgId, opts.orgId) : undefined,
+        opts.onlyRunId ? eq(agentRuns.id, opts.onlyRunId) : undefined,
       ),
     )
     .orderBy(agentRuns.updatedAt)
@@ -1381,6 +1538,19 @@ async function driveRun(run: AgentRun): Promise<"done" | "awaiting" | "yielded" 
     transcript.push({ role: "assistant", content: res.text, toolCalls: res.toolCalls });
 
     if (!res.toolCalls.length) {
+      // Cut off at the output limit is not an answer (a real run thought aloud until it
+      // ran out, never called its tool and was marked done with the fragment as its
+      // summary): nudge once, then fail with the reason instead of a false "done".
+      if (res.stopReason === "max_tokens") {
+        const nudged = transcript.some((m) => m.role === "user" && m.content === CUT_OFF_NUDGE);
+        if (nudged) {
+          await save(run, transcript, null, stepCount, tokensUsed);
+          await finish(run, "failed", null, CUT_OFF_MESSAGE);
+          return "failed";
+        }
+        transcript.push({ role: "user", content: CUT_OFF_NUDGE });
+        continue;
+      }
       await save(run, transcript, null, stepCount, tokensUsed);
       await finish(run, "done", res.text.trim() || "Done.", null);
       return "done";
@@ -1485,51 +1655,22 @@ async function handleCall(
         "No person is available in a dry-run replay. Continue with your best judgement and state any assumption you make.",
       );
     }
-    const kind: AgentTaskKind = call.name === "ask_human" ? "clarification" : "gate";
     const data = parsed.data as {
       question?: string;
       title?: string;
       summary?: string;
       assignee_role?: AppRole;
     };
-    let assigneeRole: AppRole | null = data.assignee_role ?? null;
-    let args: unknown = call.args;
-    const subject = (parsed.data as { subject?: GateSubject }).subject;
-    let toPrincipal = false;
-    let detail = "";
-    if (call.name === "request_approval" && subject) {
-      const gate = await gateFor(run.orgId, subject);
-      if ("error" in gate) return toolError(gate.error, true);
-      if (run.mode === "replay") {
-        return simulated(run, call, seq, "Approval simulated as granted; nothing was changed.", {
-          gate: gate.role,
-        });
-      }
-      assigneeRole = gate.role;
-      toPrincipal = gate.toPrincipal ?? false;
-      detail = gate.detail ?? "";
-      args = {
-        ...(call.args as object),
-        subject: gate.subject ?? { ...subject, expects: gate.status },
-      };
-    }
-    const taskId = await openTask(run, {
-      kind,
+    return openDecision(run, call, seq, toolError, {
+      kind: call.name === "ask_human" ? "clarification" : "gate",
       title: data.title ?? "The agent has a question",
-      body: [data.summary ?? data.question ?? "", detail].filter(Boolean).join("\n\n"),
-      assigneeRole,
-      proposedAction: { toolCallId: call.id, name: call.name, args },
-      ...(toPrincipal ? { assigneeUserId: run.principalUserId } : {}),
+      summary: data.summary ?? data.question ?? "",
+      assigneeRole: data.assignee_role ?? null,
+      subject:
+        call.name === "request_approval"
+          ? (parsed.data as { subject?: GateSubject }).subject
+          : undefined,
     });
-    await recordStep(run, seq, {
-      kind: "tool",
-      toolName: call.name,
-      toolCallId: call.id,
-      status: "awaiting",
-      input: redactArgs(call.args),
-      output: { taskId },
-    });
-    return { kind: "pending", taskId };
   }
 
   const tool = allowed.has(call.name) ? getTool(call.name) : undefined;
@@ -1540,6 +1681,18 @@ async function handleCall(
   if (tool.precheck && tool.risk !== "read") {
     const refusal = await tool.precheck(ctx, parsed.data);
     if (refusal) return toolError(refusal, true);
+  }
+
+  // A proposal never runs by itself: whatever the autonomy, a person decides.
+  if (tool.proposes) {
+    const p = await tool.proposes(ctx, parsed.data);
+    return openDecision(run, call, seq, toolError, {
+      kind: "gate",
+      title: p.title,
+      summary: p.summary,
+      assigneeRole: null,
+      subject: p.subject as GateSubject,
+    });
   }
 
   const verdict = decideToolCall(tool.risk, policy, tool.templateOf?.(parsed.data) ?? null);
@@ -1556,7 +1709,7 @@ async function handleCall(
     const taskId = await openTask(run, {
       kind: "approval",
       title: tool.describe?.(parsed.data) ?? `Allow the agent to run ${tool.name}`,
-      body: "",
+      body: tool.brief ? await tool.brief(ctx, parsed.data).catch(() => "") : "",
       // Most approvals go to the person the agent works for; some tools name
       // the role that must approve them (e.g. job-board posts → HR head).
       assigneeRole: tool.approverRole ?? null,
@@ -1580,6 +1733,62 @@ async function handleCall(
     kind: "message",
     message: await execute(run, ctx, tool.name, call, parsed.data, seq, notify),
   };
+}
+
+/**
+ * Ask a person: a question, or a decision on a gate. A gate subject is checked
+ * by the system first (who decides, the facts on the card, or a refusal).
+ */
+async function openDecision(
+  run: AgentRun,
+  call: AgentToolCall,
+  seq: number,
+  toolError: (message: string, refused?: boolean) => Promise<CallOutcome>,
+  d: {
+    kind: AgentTaskKind;
+    title: string;
+    summary: string;
+    assigneeRole: AppRole | null;
+    subject: GateSubject | undefined;
+  },
+): Promise<CallOutcome> {
+  let assigneeRole = d.assigneeRole;
+  let args: unknown = call.args;
+  let assigneeUserId: string | undefined;
+  let detail = "";
+  if (d.subject) {
+    const gate = await gateFor(run.orgId, d.subject);
+    if ("error" in gate) return toolError(gate.error, true);
+    if (run.mode === "replay") {
+      return simulated(run, call, seq, "Approval simulated as granted; nothing was changed.", {
+        gate: gate.role,
+      });
+    }
+    assigneeRole = gate.role;
+    assigneeUserId = gate.assigneeUserId ?? (gate.toPrincipal ? run.principalUserId : undefined);
+    detail = gate.detail ?? "";
+    args = {
+      ...(call.args as object),
+      subject: gate.subject ?? { ...d.subject, expects: gate.status },
+    };
+  }
+  const taskId = await openTask(run, {
+    kind: d.kind,
+    title: d.title,
+    body: [d.summary, detail].filter(Boolean).join("\n\n"),
+    assigneeRole,
+    proposedAction: { toolCallId: call.id, name: call.name, args },
+    ...(assigneeUserId ? { assigneeUserId } : {}),
+  });
+  await recordStep(run, seq, {
+    kind: "tool",
+    toolName: call.name,
+    toolCallId: call.id,
+    status: "awaiting",
+    input: redactArgs(call.args),
+    output: { taskId },
+  });
+  return { kind: "pending", taskId };
 }
 
 /** Dry-run replay: record a step the live run would have taken and tell the model it "happened". */
@@ -1755,8 +1964,12 @@ async function applyDecision(
     );
 
   // Gate approvals carry no tool to run — the human acted in the app.
-  if (isHitl(call.name)) {
+  if (isHitl(call.name) || task.kind === "gate") {
     const comment = response["comment"] ? ` Comment: ${String(response["comment"])}` : "";
+    const subject = (task.proposedAction as { args?: { subject?: GateSubject } } | null)?.args
+      ?.subject;
+    if (subject?.type === "panel_approval")
+      return told(`${await approvedPanelWords(task.orgId, subject)}${comment}`);
     return told(`Approved.${comment}`);
   }
   // An approved tool call runs with the (possibly edited) arguments, re-validated.
@@ -2045,6 +2258,31 @@ export async function cancelStaleRequests(
       ),
     )
     .returning({ id: agentTasks.id, runId: agentTasks.runId });
+  // A screening decision waiting for a person no longer applies once the candidate moved.
+  const decisions = await db
+    .update(agentTasks)
+    .set({
+      status: "cancelled",
+      // "Decided outside the inbox": a person approving this very card moves the
+      // candidate too, and their decision then takes the task over (resolveTask).
+      response: {
+        status: "cancelled",
+        reason: `Decided outside the inbox: the candidate moved from ${fromStage} to ${toStage}.`,
+      } as never,
+      decidedAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(agentTasks.orgId, orgId),
+        eq(agentTasks.status, "open"),
+        eq(agentTasks.kind, "gate"),
+        sql`${agentTasks.proposedAction} -> 'args' -> 'subject' ->> 'type' = 'screening_decision'`,
+        sql`${agentTasks.proposedAction} -> 'args' -> 'subject' ->> 'applicationId' = ${applicationId}`,
+      ),
+    )
+    .returning({ id: agentTasks.id, runId: agentTasks.runId });
+  closed.push(...decisions);
   for (const t of closed) {
     await writeAudit({
       actor: "system:stage-change",

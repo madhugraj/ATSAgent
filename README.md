@@ -16,6 +16,7 @@ ATSIQ by Yavar AI is an enterprise recruiting intelligence platform. It combines
 ## Product scope
 
 - Organisation registration, platform approval, role-based access and tenant lifecycle controls
+- Versioned Terms of Service, Privacy Policy and Data Processing Agreement (`src/lib/legal/`, `/terms`, `/privacy`, `/dpa`): accepted by a named signatory at registration, re-accepted by the owner when a version changes, recorded in `org_agreements`, audited and visible on the platform console
 - Requisition, JD and offer approval workflows with immutable decision trails
 - Pre-onboarding document collection, agent extraction and HR validation gating offer release
 - Public applications, careers-inbox intake, bulk CV parsing and ATSIQ Capture for deep LinkedIn Recruiter collection
@@ -24,6 +25,7 @@ ATSIQ by Yavar AI is an enterprise recruiting intelligence platform. It combines
 - Candidate email notifications (acknowledgment, stage update, interview invitation, offer) with per-organisation toggles
 - Explainable JD↔CV scoring, social-claim verification and recruiter overrides
 - Contextual screening kits, private audio transcription, grading and interview scorecards
+- AI phone screening (optional, per organisation): the Screening call agent phones shortlisted candidates through the organisation's PBX line and its own AI voice key — says it is an AI, asks consent, asks the kit's questions (never pay), retries and takes callbacks within calling hours, falls back to the written assessment; only the answered questions are graded, and the hiring desk shows the result with *Why this score* and asks a person who moves on (`docs/voice-screening-agent.md`)
 - Google Meet, Microsoft Teams and Zoom meeting integrations
 - Talent pool ownership, referrals, deduplication, internal job postings and reusable organisation knowledge
 - Live compensation research with cited evidence and saved organisation corrections
