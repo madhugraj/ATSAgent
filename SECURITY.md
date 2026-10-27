@@ -117,6 +117,18 @@ an Autonomous agent (audited `candidate.erase_role_limited`, counts only; health
 Including a role on a feed, recording a hand posting and switching Google listing are
 `hr_head`-gated and audited.
 
+The organisation profile (`org_profiles`, `org_profile_versions`, migration 0054) is written by the
+HR head, CBO or owner and approved, sent back or declined only by the HR head or an owner
+(`assertRole('hr_head')`, which the owner passes), server-side — from the Profile page or an
+agent's approval card (gate subject `org_profile`), never by an agent. Before anything is saved,
+lines carrying a pay figure (a money amount, LPA/CTC, lakh/crore/k or a percentage next to a pay
+word) or a staff member's name, e-mail or phone number (organisation members and HRMS employees)
+are refused with the reason; the audit entry records the reasons, not the text. Text that reads
+like instructions to an AI is flagged to the approver. Approved versions are never edited; every
+draft, edit, submission, decision and change to the "require an approved profile" setting is
+audited (`org_profile.*`). That setting is enforced in `createRequisitionCore`, so the requisition
+page, the hiring desk and the Requisition agent are all refused alike.
+
 Agent telemetry leaves the platform only to destinations an organisation configures (HR head /
 CBO / owner, audited as `agent.telemetry.updated`): OpenTelemetry trace export and alert webhooks
 are sent through `safeFetch` (https only, private ranges blocked), collector header values and the

@@ -1,5 +1,17 @@
 # Roadmap
 
+## Organisation profile — O0 (2026-10-27)
+
+Plan: `docs/org-context-agent-plan.md` (decided 2026-10-27).
+
+- [x] Organisation → Profile (`/org-profile`): the profile in eleven sections, each line marked Candidates or Internal (Structure, Tone of voice and Never say are always internal); written by the HR head, CBO or owner; versions, a diff against the approved version and every candidate-visible line shown before approval (migration 0054)
+- [x] Approved, sent back or declined by the HR head or an owner; approved versions never change; the next draft starts from the approved one; every step audited (`org_profile.*`)
+- [x] Pay figures (amounts, LPA, lakh/crore/k or % next to a pay word) and staff names, e-mails and phone numbers (members and HRMS employees) refused with the reason; nothing is saved
+- [x] The `org_profile` gate: an agent's approval request for a profile version is decided on its card (desk or Waiting for you: approve, send back, decline) by the HR head or owner, server-side; a decision on the Profile page closes the waiting request
+- [x] Soft gate: the hiring desk and the requisition page warn while no profile is approved; an organisation setting (HR head / owner, audited) refuses new requisitions until one is
+- [ ] O1: the Organisation context agent (organisation desk, own website through `safeFetchText`, documents with OCR); the `request_approval` subject `org_profile` lands with it, since that schema is part of every agent's manifest hash
+- [ ] O2: agents read the approved profile (`orgContextFor`), monthly website re-read, health rules; O3 domain packs; O4 voice agents
+
 ## Distribution agent (2026-10-21)
 
 - [x] Distribution agent v1.0.0 (owner HR head): advertises approved roles across the job portals by the route each allows — requests feed listings (HR head approves; pre-approvable per feed for Autonomous), reminds a person to post where no integration exists with the role's ready text — and runs a daily check: CVs arriving by portal, listings quiet for a week, unread careers-inbox mail, portal CVs with no role

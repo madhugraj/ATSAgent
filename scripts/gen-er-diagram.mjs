@@ -26,6 +26,8 @@ const DOMAINS = {
   departments: "Organisations & masters",
   master_items: "Organisations & masters",
   product_catalogue_commercials: "Organisations & masters",
+  org_profiles: "Organisations & masters",
+  org_profile_versions: "Organisations & masters",
   requisitions: "Requisitions & job content",
   job_descriptions: "Requisitions & job content",
   content_templates: "Requisitions & job content",

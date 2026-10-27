@@ -4,6 +4,7 @@ import {
   Bot,
   BookMarked,
   BookOpen,
+  BookOpenText,
   Brain,
   Briefcase,
   Building2,
@@ -226,6 +227,12 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: "/team", label: "Users & roles", icon: ShieldCheck, show: (c) => c.governance },
       { to: "/organisation", label: "Organisation", icon: Building2, show: (c) => c.isOwner },
+      {
+        to: "/org-profile",
+        label: "Organisation profile",
+        icon: BookOpenText,
+        show: (c) => c.governance,
+      },
       { to: "/integrations", label: "Integrations", icon: Plug, show: (c) => c.governance },
       { to: "/masters", label: "Master data", icon: Database, show: (c) => c.governance },
       {

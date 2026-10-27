@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 
 import { EmptyState, PageHeader } from "@/components/ats";
+import { OrgProfileNotice } from "@/components/OrgProfileNotice";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -104,7 +105,10 @@ function DeskPage() {
           </Button>
         }
       />
-      <div className="mt-4 grid gap-4 lg:grid-cols-[280px_1fr]">
+      <div className="mt-4">
+        <OrgProfileNotice />
+      </div>
+      <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
         <aside className="panel h-fit max-h-[70vh] overflow-y-auto p-2">
           {list.isLoading ? (
             <p className="p-3 text-sm text-muted-foreground">Loading…</p>
@@ -919,9 +923,11 @@ function TaskCard({
 }) {
   const taskId = String(card["taskId"]);
   const kind = String(card["kind"]);
-  // A requisition in approval can be sent back for changes instead of declined for good.
+  // A requisition in approval, or an organisation profile version, can be sent
+  // back for changes instead of declined for good.
+  const subjectType = card["subjectType"] ?? conv.taskSubjects[taskId];
   const sendable =
-    kind === "gate" && (card["subjectType"] ?? conv.taskSubjects[taskId]) === "requisition";
+    kind === "gate" && (subjectType === "requisition" || subjectType === "org_profile");
   const status = conv.tasks[taskId] ?? "open";
   const details =
     conv.taskDetails[taskId] ??

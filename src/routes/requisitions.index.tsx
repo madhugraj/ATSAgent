@@ -29,6 +29,7 @@ import { findDuplicateRequisitions } from "@/lib/jd-dedupe";
 import { errorToastMessage } from "@/lib/errors";
 import { suggestRoleProfile } from "@/lib/role-profile.functions";
 import { EmptyState, PageHeader, SkillPills, StatusBadge, inr } from "@/components/ats";
+import { OrgProfileNotice } from "@/components/OrgProfileNotice";
 import { MarketBenchmarkPanel } from "@/components/MarketBenchmark";
 import { CreatableSelect, MasterSelect, TokenPicker } from "@/components/pickers";
 import { Button } from "@/components/ui/button";
@@ -621,6 +622,10 @@ function Requisitions() {
           </Dialog>
         }
       />
+
+      <div className="mt-4">
+        <OrgProfileNotice />
+      </div>
 
       <DepartmentBudgets />
 

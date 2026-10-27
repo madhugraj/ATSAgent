@@ -60,6 +60,8 @@ export type AgentTaskView = {
   /** Proposed tool call; args as pretty JSON so the reviewer can read and edit them. */
   action: { name: string; argsJson: string } | null;
   assigneeRole: string | null;
+  /** What a gate decides (e.g. "requisition", "org_profile"), when it is tied to a record. */
+  subjectType: string | null;
   createdAt: string;
 };
 
@@ -93,7 +95,10 @@ export const listAgentTasks = createServerFn({ method: "GET" })
       .orderBy(agentTasks.createdAt)
       .limit(200);
     return rows.map((r) => {
-      const a = r.proposedAction as { name?: string; args?: unknown } | null;
+      const a = r.proposedAction as {
+        name?: string;
+        args?: { subject?: { type?: string } } | unknown;
+      } | null;
       return {
         id: r.id,
         kind: r.kind,
@@ -107,6 +112,10 @@ export const listAgentTasks = createServerFn({ method: "GET" })
             ? { name: a.name, argsJson: JSON.stringify(a.args ?? {}, null, 2) }
             : null,
         assigneeRole: r.assigneeRole,
+        subjectType:
+          r.kind === "gate"
+            ? ((a?.args as { subject?: { type?: string } } | undefined)?.subject?.type ?? null)
+            : null,
         createdAt: r.createdAt.toISOString(),
       };
     });

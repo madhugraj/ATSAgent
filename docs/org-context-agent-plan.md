@@ -1,6 +1,7 @@
 # Organisation context agent — plan
 
-Status: **decided, O0 next** (decisions recorded 2026-10-27; see the end).
+Status: **O0 built** (2026-10-27; migration `0054_org_profile.sql`); O1 next.
+Decisions recorded 2026-10-27 (see the end).
 Nothing is built. Builds on the
 agent framework (`docs/agentic-plan.md` §4–§6), the hiring desk (§13.2) and the
 voice agents' charter (`src/server/voice/charter.ts`, on
@@ -456,6 +457,40 @@ shows a one-line notice with a link while no profile is approved.
 | O3 | Domain packs (banking, healthcare provider, technology, generic) and overlays, with the reviewer flow; Intake and Screening kit consume them. Packs ship as **drafts** in each organisation until its named reviewer approves | a nursing role's kit carries the registration question; a bank role's scoring weighs domain experience; an unapproved pack is not read |
 | O4 | Voice briefs and charter change; Interview / Offer / Onboarding norms and policies | evals: the call says what the organisation does and keeps internal items out |
 | O5 | Pilot with one finance and one healthcare organisation, HR reviewing the first versions | — |
+
+## O0 — built (2026-10-27)
+
+- **Migration `0054_org_profile.sql`** (0046–0053 are taken on open branches):
+  `org_profile_versions` (numbered, status draft / pending / changes_requested /
+  approved / declined / superseded, at most one open version per organisation)
+  and `org_profiles` (current approved version, `require_profile`). The website,
+  re-read, source, pack and `agent_runs.org_profile_version_id` columns come with
+  the milestones that use them.
+- **Organisation profile page** (`/org-profile`, linked from Organisation and the
+  Administration menu): the eleven sections with each line's visibility, versions,
+  the diff against the approved version and every candidate-visible line;
+  write / submit / discard for the HR head, CBO or owner; approve / send back /
+  decline for the HR head or owner. Core: `src/lib/org-profile.server.ts`; shape,
+  refusals and diff: `src/lib/org-profile.ts`.
+- **Refusals** before anything is saved, with the reason on the line: money
+  amounts, LPA / CTC figures, lakh / crore / k or a percentage next to a pay word;
+  e-mails, phone numbers and the full names of members and HRMS employees.
+- **The gate**: `GateKind` `org_profile`; the runtime's gate lookup states the
+  changes and every candidate-visible line on the card, and the decision runs
+  `decideVersionCore` as the person (desk card and Waiting for you both offer
+  *Send back for changes*). A decision on the Profile page closes a waiting agent
+  request. **Deferred to O1:** adding `org_profile` to the `request_approval`
+  input schema (`src/server/agents/hitl.ts`) — that schema is part of every
+  agent's manifest hash, so it would bump all 13 agents now for a subject no
+  agent can use yet; it lands with the Organisation context agent.
+- **Soft and hard gate** (decision 1) built in O0: a notice on the hiring desk and
+  the requisition page while no profile is approved; the "require" setting is
+  enforced in `createRequisitionCore`, so the page, the desk and the Requisition
+  agent are refused alike.
+- **Audit**: `org_profile.draft_started`, `edited`, `items_refused` (reasons only),
+  `submitted`, `approved`, `sent_back`, `declined`, `draft_discarded`,
+  `require_changed`.
+- **Tests**: `scripts/org-profile.test.ts` (16, disposable database).
 
 ## Decisions (2026-10-27)
 
