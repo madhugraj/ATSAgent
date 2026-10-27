@@ -175,5 +175,5 @@ Service level objectives are defined in `src/server/slo.ts`: server-function ava
 
 Cloud Monitoring dashboard and alert policies are kept as code in `infra/monitoring/` (log-based metrics, dashboard JSON, burn-rate / latency / scheduler-stalled / app-burn-alert policies, optional Managed Prometheus `PodMonitoring` for `/metrics`). Apply them with the steps in `infra/monitoring/README.md` after the first deploy, and register the notification channel for on-call. Metric labels are fixed and low-cardinality (`route_group`, `method`, `status_class`); never add route, id, org or user labels.
 
-Each replica writes its per-minute request counts to `service_request_minutes` (migration `0046_service_slo.sql`, kept 35 days), so the SLO panel covers all replicas.
+Each replica writes its per-minute request counts to `service_request_minutes` (migration `0053_service_slo.sql`, kept 35 days), so the SLO panel covers all replicas.
 

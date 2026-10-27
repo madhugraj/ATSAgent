@@ -4,7 +4,7 @@
 
 - [x] Request correlation: per-request W3C trace context (`traceparent` accepted and returned, `x-request-id`), carried by every log line in the request; agent runs started from a request join its trace, and lines written while a run executes carry the run's trace; logs use one 32-hex trace form (also on the run trail)
 - [x] One `http.request` log line per request (route template, route group, status class, duration); in-process request counters and latency histogram on a token-protected, rate-limited OpenMetrics `/metrics`; fixed low-cardinality label set, documented
-- [x] SLOs in one file (`src/server/slo.ts`): server-function availability and latency, agent run success; per-minute SLI counts per replica (migration `0046`); Platform → Service health with SLI vs objective, error budget and burn rates; multi-window burn-rate alerts to platform admins (e-mail, signed webhook, log line, audit)
+- [x] SLOs in one file (`src/server/slo.ts`): server-function availability and latency, agent run success; per-minute SLI counts per replica (migration `0053`); Platform → Service health with SLI vs objective, error budget and burn rates; multi-window burn-rate alerts to platform admins (e-mail, signed webhook, log line, audit)
 - [x] Cloud Monitoring as code (`infra/monitoring/`): log-based metrics, dashboard, burn-rate / latency / scheduler-stalled / app-alert policies, optional Managed Prometheus scrape; `scripts/observability.test.ts` (14 tests)
 - [ ] Not built: outbound `traceparent` on calls to integrations and AI providers; Cloud Trace span export for HTTP requests; no voice worker exists in this repository to propagate context into
 

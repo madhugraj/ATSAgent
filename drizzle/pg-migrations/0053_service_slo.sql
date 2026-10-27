@@ -1,4 +1,4 @@
--- 0046_service_slo.sql — request SLIs and SLO burn-rate alerts.
+-- 0053_service_slo.sql — request SLIs and SLO burn-rate alerts.
 --
 -- service_request_minutes: per-minute request counts per app instance and
 -- route group (server_fn | page | api_public | api_auth), written by each
@@ -7,7 +7,8 @@
 -- slo_alerts: multi-window burn-rate alerts on the SLOs in src/server/slo.ts,
 -- at most one open row per SLO.
 --
--- Idempotent: re-running is a no-op.
+-- Idempotent: re-running is a no-op (databases that applied it under its
+-- earlier name 0046_service_slo.sql re-run it harmlessly).
 
 create table if not exists service_request_minutes (
   minute timestamptz not null,

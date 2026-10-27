@@ -2649,7 +2649,7 @@ export const offerNegotiations = pgTable(
   (t) => [index("offer_negotiations_app_idx").on(t.applicationId, t.createdAt)],
 );
 
-/* --------------------------------------------- service SLOs (0046) */
+/* --------------------------------------------- service SLOs (0053) */
 
 /**
  * Per-minute request SLI counts, one row per app instance and route group

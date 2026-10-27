@@ -303,20 +303,23 @@ export default {
 
       // Time to response headers; streamed bodies may still be flowing.
       const durationMs = Math.round(performance.now() - started);
-      recordRequest({ group, method: request.method, status: response.status, durationMs });
+      // A client that hung up gets a 500 from h3; count it as 499 (client closed),
+      // not as a server failure against the availability SLO.
+      const status = request.signal.aborted && response.status >= 500 ? 499 : response.status;
+      recordRequest({ group, method: request.method, status, durationMs });
       if (group !== "static") {
         const fields = {
           http_method: request.method,
           http_route: routeTemplate(url.pathname),
           route_group: group,
           server_fn: serverFnId(url.pathname),
-          http_status: response.status,
-          status_class: statusClass(response.status),
+          http_status: status,
+          status_class: statusClass(status),
           duration_ms: durationMs,
           // A thrown server-function error is serialised by the framework as a 500.
           fn_error: response.headers.get("x-tss-serialized") === "true" ? true : undefined,
         };
-        if (response.status >= 500) log.error("http.request", fields);
+        if (status >= 500) log.error("http.request", fields);
         else if (durationMs > 10_000) log.warn("http.request", fields);
         else log.info("http.request", fields);
       }
