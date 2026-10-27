@@ -98,6 +98,9 @@ export async function createRequisitionCore(
   f: RequisitionFields,
   status: "draft" | "pending_dh",
 ): Promise<{ id: string; code: string }> {
+  // The organisation may insist on an approved organisation profile first.
+  const { assertProfileAllowsRequisition } = await import("./org-profile.server");
+  await assertProfileAllowsRequisition(actor.orgId);
   const year = new Date().getFullYear();
   const [latest] = await db
     .select({ code: requisitions.code })

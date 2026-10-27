@@ -3098,3 +3098,76 @@ export const sloAlerts = pgTable(
     index("slo_alerts_opened_idx").on(t.openedAt),
   ],
 );
+
+/**
+ * The organisation profile (docs/org-context-agent-plan.md): numbered
+ * versions written by a person (later the Organisation context agent) and
+ * approved by the HR head or the owner. Approved versions never change.
+ * Items never hold pay figures or staff names (refused in code).
+ */
+export type OrgProfileItemRow = {
+  id: string;
+  text: string;
+  /** candidate: may be said to or written for candidates; internal: agents' internal work only. */
+  visibility: "candidate" | "internal";
+  /** Where it came from: a person typed it (O0), the website or a document (later). */
+  source: {
+    kind: "person" | "website" | "document" | "conversation";
+    ref?: string;
+    quote?: string;
+  };
+};
+export type OrgProfileVersionStatus =
+  "draft" | "pending" | "changes_requested" | "approved" | "declined" | "superseded";
+
+export const orgProfileVersions = pgTable(
+  "org_profile_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    status: text("status").$type<OrgProfileVersionStatus>().notNull().default("draft"),
+    /** { [sectionKey]: OrgProfileItemRow[] } */
+    sections: jsonb("sections")
+      .$type<Record<string, OrgProfileItemRow[]>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    injectionFlagged: boolean("injection_flagged").notNull().default(false),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    agentRunId: uuid("agent_run_id").references(() => agentRuns.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    submittedBy: uuid("submitted_by").references(() => users.id, { onDelete: "set null" }),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    decidedBy: uuid("decided_by").references(() => users.id, { onDelete: "set null" }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decisionNote: text("decision_note"),
+  },
+  (t) => [
+    check(
+      "org_profile_versions_status_check",
+      sql`${t.status} in ('draft', 'pending', 'changes_requested', 'approved', 'declined', 'superseded')`,
+    ),
+    uniqueIndex("org_profile_versions_org_version_key").on(t.orgId, t.version),
+    uniqueIndex("org_profile_versions_one_open_key")
+      .on(t.orgId)
+      .where(sql`${t.status} in ('draft', 'pending', 'changes_requested')`),
+  ],
+);
+
+/** One row per organisation: the approved version agents read, and the hard gate. */
+export const orgProfiles = pgTable("org_profiles", {
+  orgId: uuid("org_id")
+    .primaryKey()
+    .references(() => organizations.id, { onDelete: "cascade" }),
+  currentVersionId: uuid("current_version_id").references(() => orgProfileVersions.id, {
+    onDelete: "set null",
+  }),
+  /** No requisition is raised until a version is approved. */
+  requireProfile: boolean("require_profile").notNull().default(false),
+  updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});

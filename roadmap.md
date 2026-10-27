@@ -46,6 +46,18 @@
 - [x] zod 4 (GHSA-mrhx-c7xc-m3w5, memory exhaustion on oversized constrained collections): all schemas import `zod`; ids are checked as RFC 9562 UUIDs everywhere (the local demo fixture ids were made valid); every agent got a patch version because its generated tool contracts changed wording only
 - [x] DOMPurify pinned to 3.4.17 or later through `overrides` (pulled in by jsPDF; GHSA-cg2g-xh64-v4q7, GHSA-mrv2-3pqr-j5jr)
 
+## Organisation profile — O0 (2026-10-27)
+
+Plan: `docs/org-context-agent-plan.md` (decided 2026-10-27).
+
+- [x] Organisation → Profile (`/org-profile`): the profile in eleven sections, each line marked Candidates or Internal (Structure, Tone of voice and Never say are always internal); written by the HR head, CBO or owner; versions, a diff against the approved version and every candidate-visible line shown before approval (migration 0054)
+- [x] Approved, sent back or declined by the HR head or an owner; approved versions never change; the next draft starts from the approved one; every step audited (`org_profile.*`)
+- [x] Pay figures (amounts, LPA, lakh/crore/k or % next to a pay word) and staff names, e-mails and phone numbers (members and HRMS employees) refused with the reason; nothing is saved
+- [x] The `org_profile` gate: an agent's approval request for a profile version is decided on its card (desk or Waiting for you: approve, send back, decline) by the HR head or owner, server-side; a decision on the Profile page closes the waiting request
+- [x] Soft gate: the hiring desk and the requisition page warn while no profile is approved; an organisation setting (HR head / owner, audited) refuses new requisitions until one is
+- [ ] O1: the Organisation context agent (organisation desk, own website through `safeFetchText`, documents with OCR); the `request_approval` subject `org_profile` lands with it, since that schema is part of every agent's manifest hash
+- [ ] O2: agents read the approved profile (`orgContextFor`), monthly website re-read, health rules; O3 domain packs; O4 voice agents
+
 ## Distribution agent (2026-10-21)
 
 - [x] Hand posting with the companion (2026-10-22): the Distribution agent 1.1.0 plans roles for portals a person posts on ("waiting to be posted"); ATSIQ Capture 1.16.0 on Internshala and Apna lists them, fills the portal's form in the person's own signed-in browser (never submits), records the posting from the portal's own listing page, and sends applicants into the role credited to the portal (`/api/public/distribution`, capture `channel`); the daily check chases postings still waiting after 2 days

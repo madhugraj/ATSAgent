@@ -160,6 +160,7 @@ Rules:
   Matching engine (/matching), Interviews (/interviews), My interviews (/interviews/mine),
   Offers (/offers), IJP (/ijp), Reports (/reports), Users & roles (/team),
   Integrations (/integrations), Master data (/masters), Organisation (/organisation),
+  Organisation profile (/org-profile),
   Platform console (/platform, product-owner super users only).
 - User administration lives on Users & roles (/team): the organisation owner can invite
   people, grant or revoke roles, pause (disable) access, and permanently delete a member

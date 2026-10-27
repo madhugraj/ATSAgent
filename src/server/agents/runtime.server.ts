@@ -15,6 +15,8 @@
  *  - every write/external action and every human decision is audited.
  */
 import { rupees } from "@/lib/money";
+import { candidateVisible, diffSections } from "@/lib/org-profile";
+import type { OrgProfileItemRow } from "@db/schema";
 import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 
@@ -200,7 +202,10 @@ type DocumentValidationSubject = {
   applicationId: string;
   documentIds: string[];
 };
+/** An organisation profile version waiting for the HR head or owner (docs/org-context-agent-plan.md). */
+type OrgProfileSubject = { type: "org_profile"; versionId: string; expects?: string };
 type GateSubject =
+  | OrgProfileSubject
   | PanelApprovalSubject
   | PanelSubstituteSubject
   | RecordSubject
@@ -290,7 +295,66 @@ export function expectationLine(
   return `\n\nThe candidate expects ${rupees(pay.expectedCtc)} (from ${from}); this offer ${where}.${hike}${pay.noticePeriodDays != null ? ` Notice period ${pay.noticePeriodDays} days.` : ""}${pay.competingOffers ? " They have other offers in hand." : ""}`;
 }
 
+/**
+ * What the approver of a profile version sees, stated by the system: the
+ * changes against the approved version and every item candidates may hear.
+ */
+export function orgProfileDetail(
+  approved: Record<string, OrgProfileItemRow[]> | null,
+  version: {
+    version: number;
+    sections: Record<string, OrgProfileItemRow[]>;
+    injectionFlagged: boolean;
+  },
+): string {
+  const diff = diffSections(approved, version.sections);
+  const lines = [`Organisation profile, version ${version.version}.`];
+  if (!approved) lines.push("No approved profile yet — this would be the first.");
+  for (const d of diff) {
+    const parts = [
+      d.added.length ? `${d.added.length} added` : "",
+      d.changed.length ? `${d.changed.length} changed` : "",
+      d.removed.length ? `${d.removed.length} removed` : "",
+    ].filter(Boolean);
+    lines.push(`• ${d.title}: ${parts.join(", ")}`);
+  }
+  if (approved && !diff.length) lines.push("No changes against the approved version.");
+  const visible = candidateVisible(version.sections);
+  lines.push(
+    "",
+    visible.length
+      ? `Candidates may hear or read (${visible.length}):\n${visible.map((v) => `• ${v.title}: ${v.text}`).join("\n")}`
+      : "Nothing in it is marked for candidates.",
+  );
+  if (version.injectionFlagged)
+    lines.push(
+      "",
+      "Warning: some text looks like instructions to an AI — read it before approving.",
+    );
+  lines.push(
+    "",
+    "Approve to make it the profile every agent works from; send back with what to change; or decline.",
+  );
+  return lines.join("\n");
+}
+
 async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | { error: string }> {
+  if (subject.type === "org_profile") {
+    const { pendingVersion } = await import("@/lib/org-profile.server");
+    const found = await pendingVersion(orgId, subject.versionId);
+    if (!found) return { error: "Organisation profile version not found." };
+    if (found.version.status !== "pending")
+      return {
+        error: `This profile version is ${found.version.status.replace("_", " ")}, not waiting for approval.`,
+      };
+    return {
+      // The owner passes assertRole for an hr_head task, so either may decide.
+      role: "hr_head",
+      status: "pending",
+      detail: orgProfileDetail(found.approved?.sections ?? null, found.version),
+      subject: { type: "org_profile", versionId: subject.versionId, expects: "pending" },
+    };
+  }
   if (subject.type === "panel_approval") return panelGateFor(orgId, subject);
   if (subject.type === "panel_substitute") return substituteGateFor(orgId, subject);
   if (subject.type === "offer" || subject.type === "offer_release") {
@@ -574,6 +638,25 @@ async function performGate(
   const org = await activeOrgOf(userId);
   if (!org || org.orgId !== orgId) throw new Error("You are not a member of this organisation.");
   const actor = { orgId, userId, memberEmail: org.memberEmail };
+  if (subject.type === "org_profile") {
+    const { decideVersionCore } = await import("@/lib/org-profile.server");
+    const note =
+      decision.status === "approved"
+        ? (decision.comment ?? null)
+        : decision.status === "rejected"
+          ? decision.reason?.trim() || null
+          : null;
+    if (decision.status === "approved") {
+      await decideVersionCore(actor, { versionId: subject.versionId, decision: "approve", note });
+    } else if (decision.status === "rejected") {
+      await decideVersionCore(actor, {
+        versionId: subject.versionId,
+        decision: decision.changes ? "send_back" : "decline",
+        note: note ?? "",
+      });
+    }
+    return;
+  }
   if (subject.type === "panel_approval") return performPanelGate(orgId, userId, subject, decision);
   if (subject.type === "panel_substitute")
     return performSubstituteGate(orgId, userId, org.memberEmail, subject, decision);

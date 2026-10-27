@@ -32,6 +32,7 @@ ATSIQ by Yavar AI is an enterprise recruiting intelligence platform. It combines
 - Pay discussions before the letter: a call brief and a person-approved message when the candidate expects more than the approved ceiling
 - Pay & availability collected at screening through a private candidate form (HR-only), so offers are built on the candidate's stated expectation and notice period
 - CHRO dashboard, reports, Talent Brain ontology and Return on Individual capability-to-goal planning
+- Organisation profile: what the organisation does and how it hires, each line marked for candidates or internal use, versioned and approved by the HR head or owner — pay figures and staff names are refused (`docs/org-context-agent-plan.md`)
 - Guided first-login journey in the HR copilot, mirrored by the in-app manual
 - Hiring desk: describe a hiring need in a chat; agents gather the details, reuse or create the role, rank candidates and line up screening, with every decision shown in the thread
 - Hiring agents (opt-in, human-in-the-loop): Copilot, Requisition, JD, Publishing, Intake & matching, Screening, Follow-up, Interview coordinator, Evaluation, Offer, Pre-onboarding & release and Sourcing and Distribution agents with a Decisions inbox, agent register, observability and health engine, per-organisation autonomy settings with measured recommendations, dry-run replays, alert e-mail / webhooks, optional OpenTelemetry trace export and agent activity tracing — see `docs/agentic-plan.md`
@@ -61,6 +62,7 @@ ATSIQ by Yavar AI is an enterprise recruiting intelligence platform. It combines
 
 - `docs/testing-guide.md` — step-by-step local test script for the agents, hiring desk, observability and platform console (everything except voice)
 - `docs/agentic-plan.md` — the plan for turning ATSIQ into a multi-agent, human-in-the-loop hiring system (requisition → offer release)
+- `docs/org-context-agent-plan.md` — the organisation profile and the Organisation context agent that keeps it (O0 built)
 - `docs/er-diagram.md` — entity-relationship diagram for all tables, generated from `drizzle/schema.ts` (`node scripts/gen-er-diagram.mjs`)
 - `DEPLOYMENT-GCP.md` and `infra/DEPLOYMENT-HANDOFF.md` — deployment runbooks
 - `SECURITY.md` — security policy and secure-development baseline

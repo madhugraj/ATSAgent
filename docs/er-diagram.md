@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-92 tables across 9 domains.
+94 tables across 9 domains.
 
 ## Identity & access
 
@@ -71,7 +71,7 @@ erDiagram
 
 ## Organisations & masters
 
-`organizations`, `org_members`, `org_agreements`, `departments`, `master_items`, `org_linkedin_connections`, `product_catalogue_commercials`, `org_pool_shares`
+`organizations`, `org_members`, `org_agreements`, `departments`, `master_items`, `org_linkedin_connections`, `product_catalogue_commercials`, `org_pool_shares`, `org_profile_versions`, `org_profiles`
 
 ```mermaid
 erDiagram
@@ -184,6 +184,31 @@ erDiagram
     timestamptz responded_at "nullable"
     timestamptz revoked_at "nullable"
   }
+  org_profile_versions {
+    uuid id PK
+    uuid org_id FK
+    integer version
+    text status
+    jsonb sections
+    boolean injection_flagged
+    uuid created_by FK
+    uuid agent_run_id FK
+    timestamptz created_at
+    uuid updated_by FK
+    timestamptz updated_at
+    uuid submitted_by FK
+    timestamptz submitted_at "nullable"
+    uuid decided_by FK
+    timestamptz decided_at "nullable"
+    text decision_note "nullable"
+  }
+  org_profiles {
+    uuid org_id PK,FK
+    uuid current_version_id FK
+    boolean require_profile
+    uuid updated_by FK
+    timestamptz updated_at
+  }
 
   org_members }o--|| organizations : "org_id · cascade"
   org_members }o--o| users : "user_id · cascade"
@@ -194,6 +219,15 @@ erDiagram
   org_linkedin_connections }o--|| organizations : "org_id · cascade"
   org_pool_shares }o--|| organizations : "owner_org · cascade"
   org_pool_shares }o--|| organizations : "partner_org · cascade"
+  org_profile_versions }o--|| organizations : "org_id · cascade"
+  org_profile_versions }o--o| users : "created_by"
+  org_profile_versions }o--o| agent_runs : "agent_run_id"
+  org_profile_versions }o--o| users : "updated_by"
+  org_profile_versions }o--o| users : "submitted_by"
+  org_profile_versions }o--o| users : "decided_by"
+  org_profiles }o--|| organizations : "org_id · cascade"
+  org_profiles }o--o| org_profile_versions : "current_version_id"
+  org_profiles }o--o| users : "updated_by"
 ```
 
 ## Requisitions & job content
@@ -1190,6 +1224,15 @@ erDiagram
 | `org_members` | `user_id` | `users` | cascade |
 | `org_pool_shares` | `owner_org` | `organizations` | cascade |
 | `org_pool_shares` | `partner_org` | `organizations` | cascade |
+| `org_profile_versions` | `agent_run_id` | `agent_runs` | no action |
+| `org_profile_versions` | `created_by` | `users` | no action |
+| `org_profile_versions` | `decided_by` | `users` | no action |
+| `org_profile_versions` | `org_id` | `organizations` | cascade |
+| `org_profile_versions` | `submitted_by` | `users` | no action |
+| `org_profile_versions` | `updated_by` | `users` | no action |
+| `org_profiles` | `current_version_id` | `org_profile_versions` | no action |
+| `org_profiles` | `org_id` | `organizations` | cascade |
+| `org_profiles` | `updated_by` | `users` | no action |
 | `phone_screening_settings` | `org_id` | `organizations` | cascade |
 | `phone_screening_settings` | `updated_by` | `users` | no action |
 | `requisition_board_postings` | `org_id` | `organizations` | cascade |
@@ -1330,6 +1373,8 @@ erDiagram
 | `org_linkedin_connections` | Organisations & masters | 11 | — |
 | `org_members` | Organisations & masters | 12 | (orgId+email) |
 | `org_pool_shares` | Organisations & masters | 10 | (ownerOrg+partnerOrg) |
+| `org_profile_versions` | Organisations & masters | 16 | (orgId+version) |
+| `org_profiles` | Organisations & masters | 5 | — |
 | `organizations` | Organisations & masters | 26 | (slug), (capture_token), (capture_token_hash) |
 | `phone_screening_settings` | Screening & interviews | 15 | — |
 | `platform_admins` | Identity & access | 6 | (email) |

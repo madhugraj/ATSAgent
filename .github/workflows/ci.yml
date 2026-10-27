@@ -146,3 +146,5 @@ jobs:
         run: bun test scripts/org-agreements.test.ts
       - name: Companion portal form filler (field matching)
         run: bun test scripts/portal-fill.test.ts
+      - name: Organisation profile (versions, approval gate, pay and name refusals)
+        run: bun test scripts/org-profile.test.ts

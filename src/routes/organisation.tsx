@@ -93,9 +93,14 @@ function OrganisationSettings() {
         <span className="text-muted-foreground">
           Next setup step: invite your team and assign the approval roles.
         </span>
-        <Button asChild size="sm" variant="outline">
-          <Link to="/team">Users &amp; roles</Link>
-        </Button>
+        <div className="flex gap-2">
+          <Button asChild size="sm" variant="outline">
+            <Link to="/org-profile">Organisation profile</Link>
+          </Button>
+          <Button asChild size="sm" variant="outline">
+            <Link to="/team">Users &amp; roles</Link>
+          </Button>
+        </div>
       </div>
       <PageHeader
         eyebrow="Administration"

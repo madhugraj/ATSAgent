@@ -320,6 +320,18 @@ function TaskCard({ task }: { task: AgentTaskView }) {
               {busy ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}{" "}
               Approve
             </Button>
+            {task.subjectType === "org_profile" ? (
+              // A profile version is usually sent back with what to change.
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy || note.trim().length < 3}
+                title="Write what should change in the note first"
+                onClick={() => decide({ status: "rejected", reason: note.trim(), changes: true })}
+              >
+                Send back for changes
+              </Button>
+            ) : null}
             <Button
               size="sm"
               variant="outline"

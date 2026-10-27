@@ -30,6 +30,13 @@ export const FIRST_RUN_JOURNEY = [
     access: "governance",
   },
   {
+    title: "Describe your organisation",
+    to: "/org-profile",
+    detail:
+      "The HR head, CBO or an owner writes the organisation profile — what you do, products, customers, domain and regulators, locations, culture, hiring norms and policies — and marks each line for candidates or internal use. The HR head or an owner approves it; it is the context hiring agents will work from. Pay figures and staff names are never kept.",
+    access: "governance",
+  },
+  {
     title: "Open an approved role",
     to: "/requisitions",
     detail:
@@ -123,7 +130,9 @@ export const MANUAL_SECTIONS: ManualSection[] = [
       "Job boards: each board card (LinkedIn, Indeed, Naukri) carries a connect panel and an Enterprise connection checklist. LinkedIn is a one-time company sign-in; Naukri and Indeed take the client keys from the partner onboarding pack, and one press of Connect saves them and verifies them against the board's token endpoint — the card title turns green when it connects. The checklist covers the connection test, the application webhook URL (press Set up, then give that exact URL to the board), what the board's contract actually opens, and live postings/applications; a board whose partner pack has not landed shows a pending line, never a fake tick, and each panel has a ready-to-send request note for the board's account manager. Connecting, disconnecting, publishing to boards and rotating the webhook URL are HR-head actions and are audited.",
       "HRMS sync: on the HRMS tab, connect Keka or greytHR with the keys from your HR admin portal, press Test and then Sync now. Your employee master — departments, titles, leavers — is pulled into ATSIQ and refreshed automatically, so hiring managers, interviewers and internal candidates come straight from your HR system. Your HRMS stays the source of truth; ATSIQ keeps a read-only copy, and disconnecting a platform deletes its synced employee data.",
       "Candidate emails: on the emails tab, choose which automatic emails candidates receive — application acknowledgment, stage update, interview invitation and offer notification — and set a reply-to address and timezone. Delivery runs through the platform's own mail relay, so there is nothing to configure per organisation; toggles apply from the next event onward and nothing is retro-sent.",
-      "Organisation (/organisation): keep the organisation profile, currency and careers inbox current. The owner can also archive the organisation here — archiving locks everyone out but deletes nothing.",
+      "Organisation (/organisation): keep the organisation's registered details, currency and careers inbox current. The owner can also archive the organisation here — archiving locks everyone out but deletes nothing.",
+      "Organisation profile (/org-profile): what your organisation does and how it hires, in sections — About, Products and services, Customers and markets, Domain and regulators, Locations and work modes, Structure, Culture and values, Hiring norms, Policies that affect hiring, Tone of voice and Never say to candidates. The HR head, the CBO or an owner presses Write the profile (or Change the profile), adds lines and marks each one Candidates or Internal (Structure, Tone of voice and Never say are always internal). Lines with a pay figure (an amount, LPA, lakh/crore or a percentage about pay) or a staff member's name, e-mail or phone number are refused with the reason and nothing is saved — describe your pay philosophy in words and people by title. Submit for approval sends it to the HR head or an owner, who sees what changed against the approved version and every line candidates may hear, then approves, sends it back with what to change, or declines. Approved versions never change; the next change starts a new draft from the approved one, and every step is audited.",
+      "Require an approved profile before roles are raised (on the Organisation profile page, HR head or owner): off by default — roles can be raised, and the hiring desk and the requisition page show a warning that agents lack your organisation's context. On: no requisition is raised (by a person, the desk or the Requisition agent) until a profile is approved.",
       "AI provider: choose the provider and model used for matching, scoring, verification and the copilot on the Integrations page. Every organisation must supply its own key; ATSIQ never substitutes a shared platform key. Test the connection before running batches.",
     ],
   },

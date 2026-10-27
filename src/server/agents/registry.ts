@@ -72,6 +72,7 @@ export type GateKind =
   | "hiring_decision"
   | "panel_approval"
   | "panel_substitute"
+  | "org_profile"
   | "general";
 
 /**
