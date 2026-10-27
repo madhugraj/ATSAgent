@@ -87,6 +87,8 @@ export type MyInterview = {
   panel: string[];
   /** Panel members who have not scored yet (when I have). */
   waiting_for: string[];
+  /** I said I cannot make this booked round (a stand-in is being arranged). */
+  i_cannot_make_it: boolean;
 };
 
 /** Every interview assigned to the signed-in user, newest first. */
@@ -109,6 +111,7 @@ export const myInterviews = createServerFn({ method: "GET" })
         interviewer: interviews.interviewer,
         interviewerEmail: interviews.interviewerEmail,
         panel: interviews.panel,
+        unavailable: interviews.unavailable,
       })
       .from(interviews)
       .where(
@@ -195,6 +198,7 @@ export const myInterviews = createServerFn({ method: "GET" })
         waiting_for: members
           .filter((m) => !by.includes(m.email.toLowerCase()))
           .map((m) => m.name ?? m.email),
+        i_cannot_make_it: (r.unavailable ?? []).some((u) => u.email === email),
       };
     });
   });
@@ -273,6 +277,7 @@ export async function submitScorecardCore(
         level: interviews.level,
         status: interviews.status,
         applicationId: interviews.applicationId,
+        scheduledAt: interviews.scheduledAt,
       })
       .from(interviews)
       .where(and(eq(interviews.orgId, ctx.orgId), eq(interviews.id, data.interviewId)))
@@ -280,6 +285,15 @@ export async function submitScorecardCore(
     if (!r || r.applicationId !== app.id) throw new Error("Interview round not found.");
     if (["cancelled", "no_show"].includes(r.status))
       throw new Error("This round did not take place, so it cannot be scored.");
+    // A scorecard records what happened in the interview: not before it starts.
+    if (r.scheduledAt && r.scheduledAt.getTime() > now.getTime()) {
+      const { getOrgEmailSettings } = await import("./email-outbox.server");
+      const { localWhen } = await import("./local-time");
+      const tz = (await getOrgEmailSettings(ctx.orgId)).timezone;
+      throw new Error(
+        `This interview starts ${localWhen(r.scheduledAt, tz)} — scorecards open once it has started.`,
+      );
+    }
     const { emailsOf } = await import("./interview-plan.server");
     const panel = emailsOf(r);
     if (panel.length && !panel.includes(me)) {
@@ -615,6 +629,122 @@ export const markInterviewOutcome = createServerFn({ method: "POST" })
     ),
   );
 
+/* --------------------------------------------- an interviewer can't make it */
+
+const UnavailableInput = z.object({
+  interviewId: z.string().uuid(),
+  note: z.string().trim().max(500).default(""),
+});
+
+/**
+ * An interviewer on a booked round says, before it starts, that they cannot
+ * make it (docs/interview-panel-plan.md, P3). The booking stands for now — the
+ * candidate is not disturbed; the hiring desk thread is told, and the
+ * Interview coordinator proposes a stand-in for a person to approve.
+ */
+export async function interviewerUnavailableCore(
+  ctx: { orgId: string; userId: string; email: string },
+  data: z.infer<typeof UnavailableInput>,
+): Promise<{ ok: true }> {
+  const me = ctx.email.trim().toLowerCase();
+  const [r] = await db
+    .select({
+      id: interviews.id,
+      status: interviews.status,
+      level: interviews.level,
+      scheduledAt: interviews.scheduledAt,
+      applicationId: interviews.applicationId,
+      interviewerEmail: interviews.interviewerEmail,
+      panel: interviews.panel,
+      unavailable: interviews.unavailable,
+      requisitionId: applications.requisitionId,
+      candidateName: candidates.fullName,
+    })
+    .from(interviews)
+    .innerJoin(applications, eq(applications.id, interviews.applicationId))
+    .innerJoin(candidates, eq(candidates.id, applications.candidateId))
+    .where(and(eq(interviews.orgId, ctx.orgId), eq(interviews.id, data.interviewId)))
+    .limit(1);
+  if (!r) throw new Error("Interview round not found.");
+  const { emailsOf } = await import("./interview-plan.server");
+  if (!emailsOf(r).includes(me)) throw new Error("Only an interviewer on this round can say this.");
+  if (!["scheduled", "rescheduled"].includes(r.status) || !r.scheduledAt)
+    throw new Error("Only a booked round can be changed.");
+  if (r.scheduledAt.getTime() <= Date.now())
+    throw new Error('This interview has already started — use "Didn\'t happen?" instead.');
+  if ((r.unavailable ?? []).some((u) => u.email === me))
+    throw new Error("You have already said you cannot make it; a stand-in is being arranged.");
+  const [member] = await db
+    .select({
+      id: orgMembers.id,
+      name: sql<string>`coalesce(nullif(${orgMembers.fullName}, ''), ${orgMembers.email})`,
+    })
+    .from(orgMembers)
+    .where(and(eq(orgMembers.orgId, ctx.orgId), sql`lower(${orgMembers.email}) = ${me}`))
+    .limit(1);
+  await db
+    .update(interviews)
+    .set({
+      unavailable: [
+        ...(r.unavailable ?? []),
+        { email: me, note: data.note || null, at: new Date().toISOString() },
+      ],
+    })
+    .where(and(eq(interviews.orgId, ctx.orgId), eq(interviews.id, r.id)));
+  const { writeAudit } = await import("../server/audit");
+  await writeAudit({
+    actor: ctx.email,
+    actorUserId: ctx.userId,
+    orgId: ctx.orgId,
+    action: "interview.interviewer_unavailable",
+    entityType: "interview",
+    entityId: r.id,
+    detail: { level: r.level, note: data.note || null },
+  });
+  const { getOrgEmailSettings } = await import("./email-outbox.server");
+  const { localWhen } = await import("./local-time");
+  const when = localWhen(r.scheduledAt, (await getOrgEmailSettings(ctx.orgId)).timezone);
+  const name = member?.name ?? ctx.email;
+  const { emitAgentEvent } = await import("../server/agents/events");
+  await emitAgentEvent({
+    orgId: ctx.orgId,
+    type: "interview.panellist_unavailable",
+    subjectType: "application",
+    subjectId: r.applicationId,
+    actorUserId: ctx.userId,
+    payload: {
+      requisitionId: r.requisitionId,
+      level: r.level,
+      interviewId: r.id,
+      memberId: member?.id ?? null,
+      name,
+      when,
+    },
+  });
+  try {
+    const desk = await import("../server/desk/desk.server");
+    const conv = await desk.conversationForRequisition(ctx.orgId, r.requisitionId);
+    if (conv)
+      await desk.postMessage(conv, {
+        role: "desk",
+        body: `${name} cannot make ${r.candidateName}'s L${r.level} interview on ${when}${data.note ? ` ("${data.note}")` : ""}. The booking stands for now; the Interview coordinator proposes a stand-in for you to approve.`,
+      });
+  } catch {
+    /* the thread is a courtesy; the audit trail has the record */
+  }
+  return { ok: true };
+}
+
+export const interviewerUnavailable = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((data: unknown) => UnavailableInput.parse(data))
+  .handler(async ({ data, context }) =>
+    interviewerUnavailableCore(
+      { orgId: context.orgId, userId: context.userId, email: actorOf(context) },
+      data,
+    ),
+  );
+
 /* ------------------------------------------------------------- scheduling */
 
 export const ScheduleInput = z.object({
@@ -802,18 +932,19 @@ export async function scheduleInterviewCore(
       const whereText = data.meetingLink?.trim() || null;
       const modeLabel =
         data.mode === "online" ? "Online" : data.mode === "onsite" ? "Onsite" : "Phone";
+      // Who it is with, never who (staff are confidential): the hiring team or a panel of N.
+      const { interviewWith } = await import("./interview-with");
+      const withText = interviewWith(
+        (data.interviewerEmail?.trim() || data.interviewer?.trim() ? 1 : 0) +
+          (data.panel?.length ?? 0),
+      );
       const ics = buildIcs({
         uid: `interview-${interviewId}@atsiq`,
         title: `${roundLabel}: ${ctxRow?.jobTitle ?? "Role"}${
           ctxRow?.orgName ? ` (${ctxRow.orgName})` : ""
         }`,
         description:
-          [
-            data.interviewer?.trim() ? `Interviewer: ${data.interviewer.trim()}` : null,
-            data.agenda?.trim() || null,
-          ]
-            .filter(Boolean)
-            .join("\n") || null,
+          [`With: ${withText}`, data.agenda?.trim() || null].filter(Boolean).join("\n") || null,
         location: whereText ?? (data.mode === "onsite" ? (ctxRow?.orgName ?? null) : null),
         startsAt: scheduledAt.toISOString(),
         durationMins: data.durationMins,
@@ -832,7 +963,7 @@ export async function scheduleInterviewCore(
         modeLabel,
       };
       if (whereText) templateData["whereText"] = whereText;
-      if (data.interviewer?.trim()) templateData["interviewerName"] = data.interviewer.trim();
+      templateData["withText"] = withText;
       if (data.agenda?.trim()) templateData["agenda"] = data.agenda.trim();
       await enqueueEmail({
         orgId: ctx.orgId,

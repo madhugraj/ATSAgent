@@ -36,6 +36,7 @@ import {
   matchScores,
   requisitions,
   type AgentType,
+  type ScreeningCoverage,
 } from "@db/schema";
 
 /* ------------------------------------------------------------------ slots */
@@ -69,6 +70,10 @@ export const DeskSlots = z.object({
   researchRole: z.boolean().optional(),
   /** Set by the desk once the JD-detail question has been asked. */
   jdDetailsAsked: z.boolean().optional(),
+  /** The hiring manager as the person named them (a name or an e-mail). */
+  hiringManager: z.string().trim().min(2).max(120).optional(),
+  /** Set by the system only: the registered member that name resolved to. */
+  hiringManagerMemberId: z.string().uuid().optional(),
 });
 export type DeskSlots = z.infer<typeof DeskSlots>;
 
@@ -80,6 +85,8 @@ export const REQUIRED_SLOTS = [
   "experience",
   "openings",
   "mustHaveSkills",
+  // A registered member: they approve the role's interview panels (docs/interview-panel-plan.md).
+  "hiringManager",
 ] as const;
 export type RequiredSlot = (typeof REQUIRED_SLOTS)[number];
 
@@ -90,14 +97,67 @@ const FALLBACK_QUESTION: Record<RequiredSlot, string> = {
   experience: "How many years of experience should candidates have (for example 3–6)?",
   openings: "How many people do you need for this role?",
   mustHaveSkills: "Which skills are must-haves for this role?",
+  hiringManager: "Who is the hiring manager for this role? They approve its interview panels.",
 };
 
 export function missingSlots(s: DeskSlots): RequiredSlot[] {
   return REQUIRED_SLOTS.filter((k) => {
     if (k === "experience") return s.experienceMin === undefined;
     if (k === "mustHaveSkills") return !s.mustHaveSkills?.length;
+    if (k === "hiringManager") return !s.hiringManagerMemberId;
     return s[k] === undefined;
   });
+}
+
+/** Active members who can be a role's hiring manager: hiring managers and department heads first. */
+export async function hiringManagerOptions(
+  orgId: string,
+): Promise<{ memberId: string; name: string; email: string }[]> {
+  const rows = (await db.execute(sql`
+    select m.id, coalesce(nullif(m.full_name, ''), m.email) as name, m.email,
+      exists (select 1 from user_roles r where r.user_id = m.user_id and r.org_id = m.org_id
+        and r.role in ('hiring_manager', 'department_head')) as manager
+    from org_members m
+    where m.org_id = ${orgId} and m.status = 'active'
+    order by manager desc, name`)) as unknown as {
+    id: string;
+    name: string;
+    email: string;
+    manager: boolean;
+  }[];
+  const managers = rows.filter((r) => r.manager);
+  return (managers.length ? managers : rows).map((r) => ({
+    memberId: r.id,
+    name: r.name,
+    email: r.email,
+  }));
+}
+
+/**
+ * The registered member a person meant by "the hiring manager is …" — by e-mail,
+ * or by name (whole name, or a unique first name). Null when nobody matches, or
+ * more than one does: the desk then asks again; it never guesses.
+ */
+export async function resolveHiringManager(
+  orgId: string,
+  said: string,
+): Promise<{ memberId: string; name: string } | null> {
+  const want = said.trim().toLowerCase();
+  const rows = (await db.execute(sql`
+    select id, coalesce(nullif(full_name, ''), email) as name, lower(email) as email,
+      lower(coalesce(full_name, '')) as full_name
+    from org_members where org_id = ${orgId} and status = 'active'`)) as unknown as {
+    id: string;
+    name: string;
+    email: string;
+    full_name: string;
+  }[];
+  const exact = rows.filter((r) => r.email === want || (r.full_name && r.full_name === want));
+  const pick =
+    exact.length === 1
+      ? exact
+      : rows.filter((r) => r.full_name && r.full_name.split(/\s+/)[0] === want.split(/\s+/)[0]);
+  return pick.length === 1 ? { memberId: pick[0]!.id, name: pick[0]!.name } : null;
 }
 
 /** Merge newly extracted details over the known ones; empty values never erase. */
@@ -269,6 +329,8 @@ const Command = z.discriminatedUnion("type", [
   z.object({ type: z.literal("close_role") }),
   /** "Show me the JD": post the role's latest job description into the thread. */
   z.object({ type: z.literal("show_jd") }),
+  /** "Show the interview plan / rounds / panel size": post the role's plan, editable in place. */
+  z.object({ type: z.literal("show_interview_plan") }),
   /** The person delegated details to market research ("as per market", "you decide"). */
   z.object({
     type: z.literal("research"),
@@ -300,12 +362,13 @@ const SYSTEM = [
   "",
   "You are the hiring desk of an applicant tracking system. A recruiter describes a hiring need in a chat.",
   "Each turn, return JSON with:",
-  '- "slots": only the hiring details the LATEST message states or changes (omit the rest). Fields: roleTitle, location, workMode (onsite|hybrid|remote — "office"/"WFO" means onsite, "WFH"/"work from home" means remote; a message that says "hybrid" sets hybrid even next to a city), experienceMin, experienceMax (years), openings, mustHaveSkills, goodToHaveSkills (short skill names), budgetLpaMax (lakhs per annum — the budget; when a band is given as well, the budget is the figure called budget, not the top of the band), bandLpaMin and bandLpaMax (a pay band the person gives, lakhs per annum; only when stated), maxNoticeDays, employmentType (full_time|contract|internship), urgency (immediate|within_a_month|flexible). "a candidate" means openings 1. Expand obvious role shorthands (e.g. "Full stack" → "Full Stack Developer"). Never invent values that were not said.',
+  '- "slots": only the hiring details the LATEST message states or changes (omit the rest). Fields: roleTitle, location, workMode (onsite|hybrid|remote — "office"/"WFO" means onsite, "WFH"/"work from home" means remote; a message that says "hybrid" sets hybrid even next to a city), experienceMin, experienceMax (years), openings, mustHaveSkills, goodToHaveSkills (short skill names), budgetLpaMax (lakhs per annum — the budget; when a band is given as well, the budget is the figure called budget, not the top of the band), bandLpaMin and bandLpaMax (a pay band the person gives, lakhs per annum; only when stated), maxNoticeDays, employmentType (full_time|contract|internship), urgency (immediate|within_a_month|flexible), hiringManager (the person who manages this hire, exactly as named — a name or an e-mail; never guess one, and never set hiringManagerMemberId). "a candidate" means openings 1. Expand obvious role shorthands (e.g. "Full stack" → "Full Stack Developer"). Never invent values that were not said.',
   '- JD details (only when the person gives them): responsibilities (their key responsibilities, as text), reportingTo, successMeasures (what success looks like), education. If they ask you to fill these from the market / research / "you decide", set researchRole true.',
   '- "command": {"type":"none"} unless the person asks to act: "talk to / screen / call the first 5" → {"type":"screen","top":5}; "screen 1, 3 and 4" → {"type":"screen","ranks":[1,3,4]}; "create a new role" → {"type":"new_role"}; "use REQ-2026-014" → {"type":"use_existing","code":"REQ-2026-014"}.',
   '- "command" also: "close / cancel / delete / withdraw this role" → {"type":"close_role"}.',
   '- When the person delegates a detail to you or to the market ("as per market needs", "you decide", "what does the market say?", "pick it up from research") → {"type":"research","fields":[...]} with the fields they delegated: "skills", "experience" and/or "budget". (JD details are not a research command — for those set researchRole true as above.) When OPEN PROPOSAL is yes and they agree ("ok", "yes", "use these", "go ahead") → {"type":"accept"}.',
   '- "show / see / open / read the JD (job description)" → {"type":"show_jd"}; the system posts the full text. Never summarise the JD instead or send the person elsewhere to read it.',
+  '- "show / change the interview plan, the rounds, the panel size, what a round rates, or who the hiring manager is" → {"type":"show_interview_plan"}; the system posts the plan, which the person edits right in the card. Never describe or change the plan yourself.',
   '- Templates: whenever the person names or asks about a template ("use the Yavar template", "which template did you use?"), return {"type":"feedback","text":"<their words>","template":"<the name as they said it>"} — even when no request is open. The system checks the templates (by name and by content) and answers. Never state from memory or from earlier messages which templates exist; FACTS lists them.',
   '- When OPEN REQUESTS lists a request and the person comments on it, objects to it or asks for a change ("give more weight to experience", "budget is too high", "use Pune instead") — or answers an agent\'s question — → {"type":"feedback","text":"<what they want, faithfully, in their words>"}. The system sends it to the agent, which revises and asks again. This includes a job description waiting for approval: "use the X template", "make it shorter", "add a section on Y" are feedback (changes to the JD), not an approval decision; when they name a template add "template":"<the name as they said it>".',
   '- The reply must never promise an action ("I\'ll benchmark…", "I\'ll check…"): the desk acts only through commands, and the system reports what it did. With a research command the reply can be empty.',
@@ -335,6 +398,9 @@ export async function runTurn(
   const prompt = [
     `CURRENT DETAILS: ${JSON.stringify(slots)}`,
     `MISSING (ask in this order): ${missingSlots(slots).join(", ") || "none"}`,
+    `HIRING MANAGERS ON THE TEAM (offer these by name when asking for the hiring manager): ${
+      (await hiringManagerOptions(orgId)).map((m) => m.name).join(", ") || "none registered yet"
+    }`,
     `STAGE: ${conv.status}`,
     `OPEN PROPOSAL: ${open ? `yes — ${JSON.stringify({ ...open.proposal, sources: undefined, reasoning: undefined })} (if the person asks for changes to it, put the changed full lists in "slots")` : "no"}`,
     `OPEN REQUESTS (from agents in this thread): ${
@@ -604,7 +670,7 @@ export async function createNewRole(
         s.bandLpaMin !== undefined && s.bandLpaMax !== undefined ? s.bandLpaMax * 100_000 : null,
       maxNoticePeriodDays: s.maxNoticeDays ?? null,
       workAuthorizationRequired: null,
-      hiringManager: null,
+      hiringManager: s.hiringManager ?? null,
       mustHaveSkills: s.mustHaveSkills ?? [],
       goodToHaveSkills: s.goodToHaveSkills ?? [],
       responsibilities: jdBrief(s),
@@ -616,6 +682,12 @@ export async function createNewRole(
     },
     "draft",
   );
+  // The hiring manager as a member (resolved when the person named them).
+  if (s.hiringManagerMemberId)
+    await db
+      .update(requisitions)
+      .set({ hiringManagerMemberId: s.hiringManagerMemberId })
+      .where(and(eq(requisitions.id, created.id), eq(requisitions.orgId, conv.orgId)));
   await db
     .update(hiringConversations)
     .set({
@@ -640,6 +712,7 @@ export async function createNewRole(
     body: `Created draft ${created.code} for ${describeNeed(s)}.${reuse ? ` Once it is approved, the approved job description of ${reuse.code} will be reused — no new JD approval needed.` : ""}`,
     card: { type: "requisition", requisitionId: created.id, code: created.code },
   });
+  await showInterviewPlan(conv, true);
   await startForThread(
     conv,
     "requisition",
@@ -995,7 +1068,20 @@ async function handleUserMessageInner(
   }
   const { turn } = res;
   const before = conv.slots as DeskSlots;
-  const slots = mergeSlots(before, turn.slots);
+  delete turn.slots.hiringManagerMemberId; // set only by the system, below
+  let slots = mergeSlots(before, turn.slots);
+  // The hiring manager must be a registered member: resolve the name they gave.
+  let hiringManagerNote: string | null = null;
+  if (turn.slots.hiringManager) {
+    const hm = await resolveHiringManager(conv.orgId, turn.slots.hiringManager);
+    if (hm) slots = { ...slots, hiringManager: hm.name, hiringManagerMemberId: hm.memberId };
+    else {
+      const { hiringManager: _drop, hiringManagerMemberId: _id, ...rest } = slots;
+      slots = rest;
+      const options = (await hiringManagerOptions(conv.orgId)).map((m) => m.name);
+      hiringManagerNote = `I couldn't find "${turn.slots.hiringManager}" on your team — the hiring manager has to be a registered member (the admin adds people on the Team page).${options.length ? ` Hiring managers on your team: ${options.join(", ")}.` : ""}`;
+    }
+  }
   await db
     .update(hiringConversations)
     .set({
@@ -1006,6 +1092,7 @@ async function handleUserMessageInner(
     })
     .where(eq(hiringConversations.id, conv.id));
   conv = { ...conv, slots: slots as never };
+  if (hiringManagerNote) await postMessage(conv, { role: "desk", body: hiringManagerNote });
   const understood = changedSlots(before, slots);
   // The person edited the proposed details themselves: the open proposal is superseded,
   // so a later "ok" cannot overwrite their edits with it.
@@ -1045,6 +1132,10 @@ async function handleUserMessageInner(
   }
   if (cmd.type === "show_jd") {
     await showJd(conv, understood);
+    return;
+  }
+  if (cmd.type === "show_interview_plan") {
+    await showInterviewPlan(conv);
     return;
   }
   if (cmd.type === "close_role") {
@@ -1267,7 +1358,16 @@ export async function onTaskOpened(
         : task.kind === "gate"
           ? step
             ? `${step.replace(" · ", " — waiting for the ")}.`
-            : "This needs a decision."
+            : (task.proposedAction as { args?: { subject?: { type?: string } } } | null)?.args
+                  ?.subject?.type === "screening_decision"
+              ? "Screening is done for this candidate — who moves on is your decision."
+              : (task.proposedAction as { args?: { subject?: { type?: string } } } | null)?.args
+                    ?.subject?.type === "panel_approval"
+                ? "Who interviews for this round is your decision — approve the panel or change the people."
+                : (task.proposedAction as { args?: { subject?: { type?: string } } } | null)?.args
+                      ?.subject?.type === "panel_substitute"
+                  ? "A panellist can't make an interview — approve the stand-in, or decline and say who instead."
+                  : "This needs a decision."
           : revision
             ? `Revised as you asked ("${revision.reason}")${
                 revision.changes.length
@@ -1284,9 +1384,36 @@ export async function onTaskOpened(
       title: task.title,
       body,
       ...(() => {
-        const t = (task.proposedAction as { args?: { subject?: { type?: string } } } | null)?.args
-          ?.subject?.type;
-        return t ? { subjectType: t } : {};
+        const subj = (
+          task.proposedAction as {
+            args?: {
+              subject?: {
+                type?: string;
+                applicationId?: string;
+                recommendation?: string;
+                requisitionId?: string;
+                level?: number;
+                memberIds?: string[];
+              };
+            };
+          } | null
+        )?.args?.subject;
+        if (!subj?.type) return {};
+        // A screening decision shows the graded result (and "Why this score") on its card.
+        if (subj.type === "panel_approval")
+          return {
+            subjectType: subj.type,
+            requisitionId: subj.requisitionId,
+            level: subj.level,
+            memberIds: subj.memberIds,
+          };
+        return subj.type === "screening_decision"
+          ? {
+              subjectType: subj.type,
+              applicationId: subj.applicationId,
+              recommendation: subj.recommendation,
+            }
+          : { subjectType: subj.type };
       })(),
       ...(step ? { step } : {}),
       ...(repeated ? { repeated: true } : {}),
@@ -1420,7 +1547,27 @@ export type StageKey =
   | "offer"
   | "joining";
 
+/** One candidate on the screening board (the hiring journey's Screening step). */
+export type ScreeningBoardRow = {
+  applicationId: string;
+  name: string;
+  /** Where they are, in plain words ("Call booked Sat 24 Oct, 16:13", "Your decision"). */
+  status: string;
+  /** decide = waiting for a person; working = an agent or the candidate is on it; done; stopped. */
+  tone: "decide" | "working" | "done" | "stopped";
+  score: number | null;
+  /** "Proceed", "Probe further", "Hold". */
+  recommendation: string | null;
+  /** "2 asked of 4 planned · both answered". */
+  coverage: string | null;
+  runId: string | null;
+  /** The open screening decision, when one waits for a person. */
+  taskId: string | null;
+};
+
 export type DeskProgress = {
+  /** Each screened (or shortlisted) candidate's screening, live. */
+  screening?: ScreeningBoardRow[];
   /** The requisition was closed, rejected or deleted — the journey has ended. */
   ended?: { status: "closed" | "rejected" | "deleted"; reason: string | null; by: string | null };
   stages: { key: StageKey; label: string; state: "done" | "current" | "todo" }[];
@@ -1462,6 +1609,8 @@ const AGENT_TITLE: Record<string, string> = {
   jd: "JD agent",
   intake: "Intake & matching agent",
   screening: "Screening agent",
+  screening_call: "Screening call agent",
+  scheduling_call: "Scheduling call agent",
   interview: "Interview coordinator",
   evaluation: "Evaluation agent",
   offer: "Offer agent",
@@ -1577,7 +1726,10 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
       current === s.key ? "current" : current === null ? "done" : "todo";
     return { key: s.key, label: s.label, state };
   });
-  if (current === null) return { stages, next: null };
+  // The screening board stays with the Screening step after the first candidate moves on.
+  const screening = conv.requisitionId ? await screeningBoard(conv.orgId, conv.requisitionId) : [];
+  const board = screening.length ? { screening } : {};
+  if (current === null) return { stages, next: null, ...board };
   const cur: StageKey = current;
 
   const TEXT: Record<StageKey, string> = {
@@ -1587,7 +1739,7 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
     candidates:
       "The Intake & matching agent searches the talent pool and posts a ranked list here.",
     screening:
-      'Pick candidates from the ranked list (or type "talk to the first 5"); the Screening agent prepares their screening. Move the ones who pass to an interview round (Manual mode → Screening calls or the candidate page).',
+      'Pick candidates from the ranked list (or type "talk to the first 5"); the Screening agent prepares their screening — an AI screening call when your organisation screens by phone, otherwise the written assessment. When a candidate is graded it asks you here who moves on: approving moves them to an interview round.',
     interviews:
       "The Interview coordinator books the rounds. After each interview the interviewer submits a scorecard (My interviews).",
     decision:
@@ -1649,14 +1801,18 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
     TEXT.candidates =
       "The Intake & matching agent searched the pipeline and the talent pool and found no matching candidates yet. Add candidates (Manual mode → Talent pool or Careers inbox), then search again.";
   }
-  // Screening done by the agent: say what it is waiting for — the candidates'
-  // written assessments — instead of the generic instruction.
-  if (cur === "screening" && run?.status === "done" && conv.requisitionId) {
-    const waiting = await assessmentWait(conv.orgId, conv.requisitionId);
-    if (waiting) TEXT.screening = waiting;
+  // Screening: say what is happening — AI phone screening calls (live, booked,
+  // retrying, done) and the written assessments — instead of the generic instruction.
+  if (cur === "screening" && conv.requisitionId) {
+    const calls = await phoneCallWait(conv.orgId, conv.requisitionId);
+    const waiting =
+      run?.status === "done" ? await assessmentWait(conv.orgId, conv.requisitionId) : null;
+    const said = [calls, waiting].filter(Boolean).join(" ");
+    if (said) TEXT.screening = said;
   }
   return {
     stages,
+    ...board,
     next: {
       stage: cur,
       text: TEXT[cur],
@@ -1667,6 +1823,250 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
       waitingForYou: Number(w?.n ?? 0),
     },
   };
+}
+
+type BoardFacts = {
+  stage: string;
+  call: string | null;
+  endReason: string | null;
+  dueAt: string | null;
+  assessment: string | null;
+  graded: boolean;
+  decisionOpen: boolean;
+};
+
+const ROUND_STAGES = new Set(["l1", "l2", "l3"]);
+const LATER_STAGES = new Set([
+  "offer",
+  "offer_pending",
+  "offer_released",
+  "offer_accepted",
+  "hired",
+  "joined",
+  "joining_deferred",
+]);
+
+/** Where one candidate's screening stands, in plain words (pure; unit-tested). */
+export function boardStatus(
+  f: BoardFacts,
+  at: (iso: string | null) => string,
+): { status: string; tone: ScreeningBoardRow["tone"] } {
+  if (ROUND_STAGES.has(f.stage))
+    return { status: `Moved to interview (${f.stage.toUpperCase()})`, tone: "done" };
+  if (LATER_STAGES.has(f.stage)) return { status: "Past interviews", tone: "done" };
+  if (f.stage === "rejected") return { status: "Not moving on", tone: "stopped" };
+  if (f.stage === "withdrawn") return { status: "Withdrew", tone: "stopped" };
+  if (f.decisionOpen) return { status: "Your decision", tone: "decide" };
+  if (f.stage === "on_hold") return { status: "On hold", tone: "stopped" };
+  switch (f.call) {
+    case "dialling":
+    case "in_progress":
+      return { status: "On the AI screening call now", tone: "working" };
+    case "requested":
+      return { status: "Call waiting for approval", tone: "decide" };
+    case "approved":
+      return { status: `Call arranged (from ${at(f.dueAt)})`, tone: "working" };
+    case "callback":
+      return { status: `Call booked for ${at(f.dueAt)}`, tone: "working" };
+    case "no_answer":
+    case "failed":
+      return { status: `Not reached — trying again ${at(f.dueAt)}`, tone: "working" };
+    case "completed":
+      if (f.endReason === "not_interested")
+        return { status: "Not interested in the role", tone: "stopped" };
+      return f.graded
+        ? { status: "Screened — the Screening agent is reviewing", tone: "working" }
+        : { status: "Called — nothing to grade", tone: "stopped" };
+    case "fell_back":
+      if (f.endReason === "prefers_human")
+        return { status: "Asked for a person to call", tone: "decide" };
+      break;
+  }
+  if (f.assessment === "completed")
+    return f.graded
+      ? { status: "Assessment done — the Screening agent is reviewing", tone: "working" }
+      : { status: "Assessment done", tone: "working" };
+  if (f.assessment === "sent") return { status: "Written assessment sent", tone: "working" };
+  if (f.assessment === "expired") return { status: "Assessment link closed", tone: "stopped" };
+  return { status: "Preparing screening", tone: "working" };
+}
+
+/**
+ * The role's screening board: everyone shortlisted or screened, with where
+ * their screening stands, the graded result and any decision waiting — so a
+ * team screening five people sees all five at a glance.
+ */
+async function screeningBoard(orgId: string, requisitionId: string): Promise<ScreeningBoardRow[]> {
+  const rows = (await db.execute(sql`
+    select a.id, c.full_name as name, a.stage,
+      sc.status as call, sc.end_reason, sc.due_at,
+      ca.status as assessment,
+      sr.id as run_id, sr.screening_score as score, sr.recommendation as rec,
+      sr.input_kind as kind, sr.coverage,
+      t.id as task_id
+    from applications a
+    join candidates c on c.id = a.candidate_id
+    left join lateral (
+      select status, end_reason, due_at from screening_calls
+      where application_id = a.id and org_id = ${orgId} and status <> 'cancelled'
+        and purpose = 'screening'
+      order by created_at desc limit 1) sc on true
+    left join lateral (
+      select status from candidate_assessments
+      where candidate_id = a.candidate_id and requisition_id = a.requisition_id and org_id = ${orgId}
+      order by created_at desc limit 1) ca on true
+    left join lateral (
+      select id, screening_score, recommendation, input_kind, coverage from screening_runs
+      where application_id = a.id and org_id = ${orgId}
+      order by created_at desc limit 1) sr on true
+    left join lateral (
+      select id from agent_tasks
+      where org_id = ${orgId} and status = 'open' and kind = 'gate'
+        and proposed_action -> 'args' -> 'subject' ->> 'type' = 'screening_decision'
+        and proposed_action -> 'args' -> 'subject' ->> 'applicationId' = a.id::text
+      limit 1) t on true
+    where a.requisition_id = ${requisitionId} and a.org_id = ${orgId}
+      and (a.stage = 'shortlisted' or sc.status is not null or ca.status is not null or sr.id is not null)
+    order by c.full_name
+    limit 50`)) as unknown as {
+    id: string;
+    name: string;
+    stage: string;
+    call: string | null;
+    end_reason: string | null;
+    due_at: string | null;
+    assessment: string | null;
+    run_id: string | null;
+    score: number | null;
+    rec: string | null;
+    kind: string | null;
+    coverage: ScreeningCoverage | null;
+    task_id: string | null;
+  }[];
+  if (!rows.length) return [];
+  const tz = await orgTimeZone(orgId);
+  const at = (d: string | null) =>
+    d
+      ? new Date(d).toLocaleString("en-IN", {
+          weekday: "short",
+          day: "numeric",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+          timeZone: tz,
+        })
+      : "soon";
+  const { coverageWords } = await import("@/lib/screening-coverage");
+  return rows.map((r) => {
+    const { status, tone } = boardStatus(
+      {
+        stage: r.stage,
+        call: r.call,
+        endReason: r.end_reason,
+        dueAt: r.due_at,
+        assessment: r.assessment,
+        graded: Boolean(r.run_id),
+        decisionOpen: Boolean(r.task_id),
+      },
+      at,
+    );
+    return {
+      applicationId: r.id,
+      name: r.name,
+      status,
+      tone,
+      score: r.run_id ? r.score : null,
+      recommendation: !r.rec
+        ? null
+        : r.kind === "phone_ai" && r.rec === "hold"
+          ? "Probe further"
+          : r.rec === "proceed"
+            ? "Proceed"
+            : r.rec === "hold"
+              ? "Hold"
+              : "Not recommended",
+      coverage: r.coverage ? coverageWords(r.coverage) : null,
+      runId: r.run_id,
+      taskId: r.task_id,
+    };
+  });
+}
+
+/**
+ * Where a role's AI phone screening calls stand, in words — the latest call
+ * per candidate: on the call now, arranged, booked with them, being retried,
+ * screened (with the score), or how it ended. Null when no call was asked for.
+ */
+async function phoneCallWait(orgId: string, requisitionId: string): Promise<string | null> {
+  const rows = (await db.execute(sql`
+    select distinct on (sc.application_id)
+      c.full_name as name, sc.status, sc.end_reason, sc.due_at, sc.booked_by_candidate as booked,
+      sc.reschedules,
+      sr.screening_score as score
+    from screening_calls sc
+    join candidates c on c.id = sc.candidate_id
+    left join screening_runs sr on sr.id = sc.screening_run_id
+    where sc.org_id = ${orgId} and sc.requisition_id = ${requisitionId} and sc.status <> 'cancelled'
+      and sc.purpose = 'screening'
+    order by sc.application_id, sc.created_at desc`)) as unknown as {
+    name: string;
+    status: string;
+    end_reason: string | null;
+    due_at: string | null;
+    booked: boolean;
+    reschedules: number;
+    score: number | null;
+  }[];
+  if (!rows.length) return null;
+  const tz = await orgTimeZone(orgId);
+  const at = (d: string | null) =>
+    d
+      ? new Date(d).toLocaleString("en-IN", {
+          weekday: "short",
+          day: "numeric",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+          timeZone: tz,
+        })
+      : "soon";
+  const group = (pred: (r: (typeof rows)[number]) => boolean) => rows.filter(pred);
+  const names = (rs: typeof rows, f: (r: (typeof rows)[number]) => string = (r) => r.name) =>
+    rs.map(f).join(", ");
+  const live = group((r) => r.status === "dialling" || r.status === "in_progress");
+  const arranged = group((r) => r.status === "requested" || r.status === "approved");
+  const booked = group((r) => r.status === "callback");
+  const retrying = group((r) => r.status === "no_answer" || r.status === "failed");
+  const screened = group((r) => r.status === "completed" && r.end_reason !== "not_interested");
+  const notInterested = group((r) => r.status === "completed" && r.end_reason === "not_interested");
+  const human = group((r) => r.status === "fell_back" && r.end_reason === "prefers_human");
+  const written = group(
+    (r) =>
+      (r.status === "fell_back" && r.end_reason !== "prefers_human") ||
+      r.status === "consent_declined",
+  );
+  const parts: string[] = [];
+  if (live.length) parts.push(`On an AI screening call now: ${names(live)}.`);
+  if (arranged.length)
+    parts.push(
+      `AI screening call arranged: ${names(arranged, (r) => `${r.name} (from ${at(r.due_at)})`)}.`,
+    );
+  if (booked.length)
+    parts.push(
+      `Call time agreed with the candidate: ${names(booked, (r) => `${r.name} (${at(r.due_at)}${r.reschedules > 1 ? `, moved ${r.reschedules} times` : ""})`)}.`,
+    );
+  if (retrying.length)
+    parts.push(
+      `Not reached yet, trying again: ${names(retrying, (r) => `${r.name} (next ${at(r.due_at)})`)}.`,
+    );
+  if (screened.length)
+    parts.push(
+      `Screened by phone: ${names(screened, (r) => `${r.name}${r.score != null ? ` (${r.score}/100)` : ""}`)} — the Screening agent asks you here who moves on to an interview.`,
+    );
+  if (human.length) parts.push(`Asked for a person to call them: ${names(human)}.`);
+  if (notInterested.length) parts.push(`Not interested in the role: ${names(notInterested)}.`);
+  if (written.length) parts.push(`Written assessment instead of a call: ${names(written)}.`);
+  return parts.join(" ");
 }
 
 /**
@@ -2507,6 +2907,7 @@ const SLOT_LABEL: Record<string, string> = {
   reportingTo: "Reports to",
   successMeasures: "Success after 12 months",
   education: "Education",
+  hiringManager: "Hiring manager",
 };
 const REQUIRED_LABEL: Record<RequiredSlot, string> = {
   roleTitle: "role",
@@ -2515,6 +2916,7 @@ const REQUIRED_LABEL: Record<RequiredSlot, string> = {
   experience: "experience",
   openings: "number of openings",
   mustHaveSkills: "must-have skills",
+  hiringManager: "hiring manager",
 };
 
 /** What the latest message changed, as label / value lines (the desk's "understood"). */
@@ -3317,6 +3719,30 @@ async function jdTemplateFacts(orgId: string, requisitionId: string | null): Pro
 }
 
 /** Post the role's latest job description (full text) into the thread. */
+/**
+ * The role's interview plan and hiring manager, posted into the thread as a
+ * card the person edits in place (docs/interview-panel-plan.md, P1).
+ */
+export async function showInterviewPlan(conv: Conversation, justCreated = false): Promise<void> {
+  if (!conv.requisitionId) {
+    await postMessage(conv, {
+      role: "desk",
+      body: "The interview plan comes with the requisition — I'll show it once the role is raised.",
+    });
+    return;
+  }
+  const { planFor } = await import("@/lib/interview-plan.server");
+  const { plan, saved } = await planFor(conv.orgId, conv.requisitionId);
+  const rounds = plan.rounds.map((r) => `L${r.level} ${r.name}`).join(", ");
+  await postMessage(conv, {
+    role: "desk",
+    body: justCreated
+      ? `The interview plan for this role, from its must-haves: ${rounds}. Change the rounds, what each one rates or the panel size here before interviews start; the hiring manager approves each round's panel.`
+      : `The interview plan for this role${saved ? "" : " (the default from its must-haves)"}: ${rounds}. Edit it here.`,
+    card: { type: "interview_plan", requisitionId: conv.requisitionId },
+  });
+}
+
 export async function showJd(
   conv: Conversation,
   understood: { label: string; value: string }[] = [],

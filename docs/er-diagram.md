@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-84 tables across 9 domains.
+90 tables across 9 domains.
 
 ## Identity & access
 
@@ -217,6 +217,7 @@ erDiagram
     integer experience_max
     numeric budget_ctc
     text hiring_manager "nullable"
+    uuid hiring_manager_member_id FK
     text must_have_skills
     text good_to_have_skills
     text responsibilities "nullable"
@@ -285,6 +286,7 @@ erDiagram
 
   requisitions }o--o| organizations : "org_id · cascade"
   requisitions }o--o| departments : "department_id"
+  requisitions }o--o| org_members : "hiring_manager_member_id"
   requisitions }o--o| users : "created_by"
   job_descriptions }o--|| requisitions : "requisition_id · cascade"
   job_descriptions }o--o| organizations : "org_id · cascade"
@@ -317,6 +319,7 @@ erDiagram
     text website_url "nullable"
     text x_url "nullable"
     boolean consent_given
+    timestamptz ai_call_opt_out_at "nullable"
     timestamptz created_at
     timestamptz role_match_checked_at "nullable"
     text external_id "nullable"
@@ -553,7 +556,7 @@ erDiagram
 
 ## Screening & interviews
 
-`ai_interviews`, `interviews`, `screening_kits`, `screening_runs`, `screening_prep_jobs`
+`ai_interviews`, `interviews`, `screening_kits`, `screening_runs`, `screening_prep_jobs`, `phone_screening_settings`, `screening_calls`
 
 ```mermaid
 erDiagram
@@ -584,6 +587,7 @@ erDiagram
     jsonb panel
     text outcome_note "nullable"
     timestamptz completed_at "nullable"
+    jsonb unavailable
   }
   screening_kits {
     uuid id PK
@@ -618,6 +622,7 @@ erDiagram
     text rationale "nullable"
     text recommendation "nullable"
     text recommendation_reason "nullable"
+    jsonb coverage "nullable"
     jsonb engine
     uuid created_by "nullable"
     timestamptz created_at
@@ -630,6 +635,58 @@ erDiagram
     uuid requisition_id FK
     text status
     integer attempts
+    text last_error "nullable"
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  phone_screening_settings {
+    uuid org_id PK,FK
+    boolean enabled
+    text assistant_name
+    integer window_start_minute
+    integer window_end_minute
+    integer call_days
+    integer max_attempts
+    integer max_minutes
+    integer max_reschedules
+    boolean scheduling_enabled
+    integer scheduling_wait_hours
+    text voice
+    text next_steps_text "nullable"
+    uuid updated_by FK
+    timestamptz updated_at
+  }
+  screening_calls {
+    uuid id PK
+    uuid org_id FK
+    uuid candidate_id FK
+    uuid application_id FK
+    uuid requisition_id FK
+    uuid kit_id FK
+    uuid requested_run_id FK
+    uuid agent_run_id FK
+    uuid requested_by FK
+    text status
+    integer attempt
+    boolean booked_by_candidate
+    integer reschedules
+    timestamptz due_at "nullable"
+    timestamptz callback_at "nullable"
+    text phone_last4 "nullable"
+    timestamptz consent_at "nullable"
+    text consent_words "nullable"
+    text language "nullable"
+    timestamptz started_at "nullable"
+    timestamptz ended_at "nullable"
+    text end_reason "nullable"
+    integer duration_s "nullable"
+    jsonb transcript
+    jsonb answers
+    jsonb details
+    uuid screening_run_id FK
+    text purpose
+    uuid slot_offer_id FK
+    jsonb alternates
     text last_error "nullable"
     timestamptz created_at
     timestamptz updated_at
@@ -652,6 +709,18 @@ erDiagram
   screening_prep_jobs }o--|| applications : "application_id · cascade"
   screening_prep_jobs }o--|| candidates : "candidate_id · cascade"
   screening_prep_jobs }o--|| requisitions : "requisition_id · cascade"
+  phone_screening_settings }o--|| organizations : "org_id · cascade"
+  phone_screening_settings }o--o| users : "updated_by"
+  screening_calls }o--|| organizations : "org_id · cascade"
+  screening_calls }o--|| candidates : "candidate_id · cascade"
+  screening_calls }o--o| applications : "application_id"
+  screening_calls }o--o| requisitions : "requisition_id"
+  screening_calls }o--o| screening_kits : "kit_id"
+  screening_calls }o--o| agent_runs : "requested_run_id"
+  screening_calls }o--o| agent_runs : "agent_run_id"
+  screening_calls }o--o| users : "requested_by"
+  screening_calls }o--o| screening_runs : "screening_run_id"
+  screening_calls }o--o| interview_slot_offers : "slot_offer_id"
 ```
 
 ## Offers & onboarding
@@ -1097,6 +1166,9 @@ erDiagram
 | `master_items` | `org_id` | `organizations` | cascade |
 | `match_scores` | `application_id` | `applications` | cascade |
 | `match_scores` | `org_id` | `organizations` | cascade |
+| `member_interviewer_profiles` | `member_id` | `org_members` | cascade |
+| `member_interviewer_profiles` | `org_id` | `organizations` | cascade |
+| `member_interviewer_profiles` | `updated_by` | `users` | no action |
 | `notification_states` | `org_id` | `organizations` | cascade |
 | `notification_states` | `user_id` | `users` | cascade |
 | `offer_negotiations` | `application_id` | `applications` | cascade |
@@ -1118,13 +1190,34 @@ erDiagram
 | `org_members` | `user_id` | `users` | cascade |
 | `org_pool_shares` | `owner_org` | `organizations` | cascade |
 | `org_pool_shares` | `partner_org` | `organizations` | cascade |
+| `phone_screening_settings` | `org_id` | `organizations` | cascade |
+| `phone_screening_settings` | `updated_by` | `users` | no action |
 | `requisition_board_postings` | `org_id` | `organizations` | cascade |
 | `requisition_board_postings` | `requisition_id` | `requisitions` | cascade |
 | `requisitions` | `created_by` | `users` | no action |
 | `requisitions` | `department_id` | `departments` | no action |
+| `requisitions` | `hiring_manager_member_id` | `org_members` | no action |
 | `requisitions` | `org_id` | `organizations` | cascade |
+| `role_panels` | `approved_by` | `users` | no action |
+| `role_panels` | `org_id` | `organizations` | cascade |
+| `role_panels` | `requisition_id` | `requisitions` | cascade |
+| `round_substitutes` | `application_id` | `applications` | cascade |
+| `round_substitutes` | `approved_by` | `users` | no action |
+| `round_substitutes` | `org_id` | `organizations` | cascade |
+| `round_substitutes` | `replace_member_id` | `org_members` | cascade |
+| `round_substitutes` | `with_member_id` | `org_members` | cascade |
 | `salary_benchmarks` | `org_id` | `organizations` | cascade |
 | `salary_benchmarks` | `requisition_id` | `requisitions` | no action |
+| `screening_calls` | `agent_run_id` | `agent_runs` | no action |
+| `screening_calls` | `application_id` | `applications` | no action |
+| `screening_calls` | `candidate_id` | `candidates` | cascade |
+| `screening_calls` | `kit_id` | `screening_kits` | no action |
+| `screening_calls` | `org_id` | `organizations` | cascade |
+| `screening_calls` | `requested_by` | `users` | no action |
+| `screening_calls` | `requested_run_id` | `agent_runs` | no action |
+| `screening_calls` | `requisition_id` | `requisitions` | no action |
+| `screening_calls` | `screening_run_id` | `screening_runs` | no action |
+| `screening_calls` | `slot_offer_id` | `interview_slot_offers` | no action |
 | `screening_kits` | `application_id` | `applications` | no action |
 | `screening_kits` | `candidate_id` | `candidates` | cascade |
 | `screening_kits` | `org_id` | `organizations` | cascade |
@@ -1201,7 +1294,7 @@ erDiagram
 | `candidate_ownership_events` | Candidates & pipeline | 8 | — |
 | `candidate_referrals` | Candidates & pipeline | 11 | — |
 | `candidate_verifications` | Candidates & pipeline | 11 | — |
-| `candidates` | Candidates & pipeline | 42 | — |
+| `candidates` | Candidates & pipeline | 43 | — |
 | `capture_events` | Sourcing & integrations | 10 | — |
 | `comp_knowledge` | Intelligence | 17 | — |
 | `compensation_details` | — | 19 | — |
@@ -1221,11 +1314,12 @@ erDiagram
 | `inbox_messages` | Sourcing & integrations | 16 | — |
 | `integration_credentials` | Sourcing & integrations | 4 | — |
 | `interview_slot_offers` | — | 22 | (token) |
-| `interviews` | Screening & interviews | 16 | — |
+| `interviews` | Screening & interviews | 17 | — |
 | `job_descriptions` | Requisitions & job content | 17 | — |
 | `job_index_notifications` | — | 10 | — |
 | `master_items` | Organisations & masters | 8 | — |
 | `match_scores` | Candidates & pipeline | 26 | — |
+| `member_interviewer_profiles` | — | 9 | (member_id) |
 | `notification_states` | — | 7 | — |
 | `offer_negotiations` | — | 21 | — |
 | `offers` | Offers & onboarding | 14 | — |
@@ -1237,14 +1331,18 @@ erDiagram
 | `org_members` | Organisations & masters | 12 | (orgId+email) |
 | `org_pool_shares` | Organisations & masters | 10 | (ownerOrg+partnerOrg) |
 | `organizations` | Organisations & masters | 26 | (slug), (capture_token), (capture_token_hash) |
+| `phone_screening_settings` | Screening & interviews | 15 | — |
 | `platform_admins` | Identity & access | 6 | (email) |
 | `product_catalogue_commercials` | Organisations & masters | 8 | — |
 | `requisition_board_postings` | — | 16 | (requisitionId+provider) |
-| `requisitions` | Requisitions & job content | 41 | (orgId+code) |
+| `requisitions` | Requisitions & job content | 42 | (orgId+code) |
+| `role_panels` | — | 8 | (requisitionId+level) |
+| `round_substitutes` | — | 9 | — |
 | `salary_benchmarks` | Intelligence | 15 | — |
+| `screening_calls` | Screening & interviews | 33 | — |
 | `screening_kits` | Screening & interviews | 11 | — |
 | `screening_prep_jobs` | Screening & interviews | 10 | (application_id) |
-| `screening_runs` | Screening & interviews | 22 | — |
+| `screening_runs` | Screening & interviews | 23 | — |
 | `sessions` | Identity & access | 8 | (token_hash) |
 | `skill_edges` | Intelligence | 8 | — |
 | `skill_evidence` | Intelligence | 9 | — |
@@ -1260,3 +1358,4 @@ erDiagram
 | `training_settings` | — | 6 | — |
 | `user_roles` | Identity & access | 4 | — |
 | `users` | Identity & access | 8 | (email) |
+| `voice_worker_heartbeat` | — | 4 | — |

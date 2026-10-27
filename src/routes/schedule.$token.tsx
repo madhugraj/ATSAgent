@@ -150,9 +150,8 @@ function SchedulePage() {
       <CalendarCheck className="size-7 text-primary" />
       <h1 className="mt-3 text-xl font-semibold">Choose your interview time</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        {o.roundLabel} for <strong>{o.jobTitle}</strong> with {o.orgName}
-        {o.interviewerName ? ` (with ${o.interviewerName})` : ""} · {o.durationMins} minutes ·{" "}
-        {o.mode}. Times are shown in your time zone.
+        {o.roundLabel} for <strong>{o.jobTitle}</strong> at {o.orgName}, with {o.withText} ·{" "}
+        {o.durationMins} minutes · {o.mode}. Times are shown in your time zone.
       </p>
       <div className="mt-5 space-y-2" role="radiogroup" aria-label="Interview times">
         {o.slots.map((s) => (

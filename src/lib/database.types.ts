@@ -574,6 +574,7 @@ export type Database = {
           added_by: string | null;
           career_metrics: Json | null;
           consent_given: boolean;
+          ai_call_opt_out_at: string | null;
           created_at: string;
           current_ctc: number | null;
           current_department: string | null;
@@ -617,6 +618,7 @@ export type Database = {
           added_by?: string | null;
           career_metrics?: Json | null;
           consent_given?: boolean;
+          ai_call_opt_out_at?: string | null;
           created_at?: string;
           current_ctc?: number | null;
           current_department?: string | null;
@@ -660,6 +662,7 @@ export type Database = {
           added_by?: string | null;
           career_metrics?: Json | null;
           consent_given?: boolean;
+          ai_call_opt_out_at?: string | null;
           created_at?: string;
           current_ctc?: number | null;
           current_department?: string | null;
@@ -2354,6 +2357,7 @@ export type Database = {
           audio_path: string | null;
           candidate_id: string;
           combined_score: number | null;
+          coverage: Json | null
           created_at: string;
           created_by: string | null;
           engine: Json;
@@ -2378,6 +2382,7 @@ export type Database = {
           audio_path?: string | null;
           candidate_id: string;
           combined_score?: number | null;
+          coverage?: Json | null
           created_at?: string;
           created_by?: string | null;
           engine?: Json;
@@ -2402,6 +2407,7 @@ export type Database = {
           audio_path?: string | null;
           candidate_id?: string;
           combined_score?: number | null;
+          coverage?: Json | null
           created_at?: string;
           created_by?: string | null;
           engine?: Json;
