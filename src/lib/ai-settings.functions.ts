@@ -57,6 +57,11 @@ export const getAiSettings = createServerFn({ method: "POST" })
         anthropic: await hasProviderKey(context.orgId, "anthropic"),
         google: await hasProviderKey(context.orgId, "google"),
       },
+      // Phone screening's AI voice: booleans only, never the credential.
+      voice: await (async () => {
+        const { voiceCredentialStatus } = await import("./ai-gateway.server");
+        return voiceCredentialStatus(context.orgId);
+      })(),
     };
   });
 

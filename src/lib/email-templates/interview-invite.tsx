@@ -16,7 +16,8 @@ interface Props {
   modeLabel?: string;
   /** Meeting link or venue address. */
   whereText?: string;
-  interviewerName?: string;
+  /** "the hiring team" / "a panel of 3 from the hiring team" — never a name. */
+  withText?: string;
   agenda?: string;
 }
 
@@ -31,7 +32,7 @@ const Email = ({
   durationMins,
   modeLabel,
   whereText,
-  interviewerName,
+  withText,
   agenda,
 }: Props) => (
   <EmailLayout
@@ -59,7 +60,7 @@ const Email = ({
         )}
       </p>
     ) : null}
-    {interviewerName ? <p style={detail}>Interviewer: {interviewerName}</p> : null}
+    {withText ? <p style={detail}>With: {withText}</p> : null}
     {agenda ? <p style={text}>{agenda}</p> : null}
     <p style={text}>
       A calendar invite (.ics) is attached — please accept it so the slot is held for you. If the
@@ -85,7 +86,7 @@ export const template = {
     durationMins: "60",
     modeLabel: "Online",
     whereText: "https://teams.microsoft.com/l/meetup-join/example",
-    interviewerName: "Ravi Kumar",
+    withText: "a panel of 2 from the hiring team",
     agenda: "Technical discussion on backend architecture and system design.",
   },
 } satisfies TemplateEntry;

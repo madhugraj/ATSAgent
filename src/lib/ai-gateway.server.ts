@@ -1638,34 +1638,69 @@ function base64ToPcm16(b64: string): Int16Array {
   return out;
 }
 
+/**
+ * How the live model takes turns: how long a silence ends the caller's turn
+ * and how readily it decides they stopped. A phone conversation needs it to
+ * wait through thinking pauses rather than jump in.
+ */
+export type VoiceTurnTaking = {
+  /** Silence that ends the caller's turn (ms). */
+  silenceMs: number;
+  /** "low" waits longer before deciding the caller finished. */
+  endOfSpeech: "low" | "high";
+  /** Audio kept from just before speech is detected (ms). */
+  prefixPaddingMs: number;
+};
+
 /** The setup frame for a live session; `model` is the full resource name (exported for tests). */
 export function voiceSetupMessage(opts: {
   model: string;
   system: string;
   tools: VoiceToolSpec[];
   voice: string;
+  turnTaking?: VoiceTurnTaking;
+  /** BCP-47 language of the conversation, e.g. "en-IN" (recognition and speech). */
+  languageCode?: string;
 }) {
   return {
     setup: {
       model: opts.model,
       generationConfig: {
         responseModalities: ["AUDIO"],
-        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: opts.voice } } },
+        speechConfig: {
+          voiceConfig: { prebuiltVoiceConfig: { voiceName: opts.voice } },
+          ...(opts.languageCode ? { languageCode: opts.languageCode } : {}),
+        },
       },
       systemInstruction: { parts: [{ text: opts.system }] },
       tools: opts.tools.length
         ? [
             {
+              // Full JSON Schema, as on the text path (aiAgentStep).
               functionDeclarations: opts.tools.map((t) => ({
                 name: t.name,
                 description: t.description,
-                ...(t.parameters ? { parameters: t.parameters } : {}),
+                ...(t.parameters ? { parametersJsonSchema: t.parameters } : {}),
               })),
             },
           ]
         : [],
       inputAudioTranscription: {},
       outputAudioTranscription: {},
+      ...(opts.turnTaking
+        ? {
+            realtimeInputConfig: {
+              automaticActivityDetection: {
+                endOfSpeechSensitivity:
+                  opts.turnTaking.endOfSpeech === "low"
+                    ? "END_SENSITIVITY_LOW"
+                    : "END_SENSITIVITY_HIGH",
+                silenceDurationMs: opts.turnTaking.silenceMs,
+                prefixPaddingMs: opts.turnTaking.prefixPaddingMs,
+              },
+            },
+          }
+        : {}),
     },
   };
 }
@@ -1695,12 +1730,15 @@ export function sumVoiceUsage(frames: LiveServerMessage["usageMetadata"][]): AiU
   return { promptTokens, completionTokens, totalTokens };
 }
 
-async function openVoiceSession(opts: {
+/** Exported for tests only (a local fake provider socket); callers use aiVoiceSession. */
+export async function openVoiceSession(opts: {
   orgId: string | null | undefined;
   feature: string;
   system: string;
   tools: VoiceToolSpec[];
   voice: string;
+  turnTaking?: VoiceTurnTaking | undefined;
+  languageCode?: string | undefined;
   config: AiConfig;
   target: VoiceTarget;
   events: VoiceSessionEvents;
@@ -1772,6 +1810,8 @@ async function openVoiceSession(opts: {
           system: opts.system,
           tools: opts.tools,
           voice: opts.voice,
+          ...(opts.turnTaking ? { turnTaking: opts.turnTaking } : {}),
+          ...(opts.languageCode ? { languageCode: opts.languageCode } : {}),
         }),
       ),
     );
@@ -1806,6 +1846,13 @@ async function openVoiceSession(opts: {
           flush("caller");
           flush("ai");
         }
+      }
+      // What was said so far is on record before any tool runs: a tool that checks
+      // the assistant's own words (e.g. it said it is an AI before a "yes" counts)
+      // must see the line it just spoke, not wait for its turn to finish.
+      if (msg.toolCall?.functionCalls?.length) {
+        flush("caller");
+        flush("ai");
       }
       for (const fc of msg.toolCall?.functionCalls ?? []) {
         const call: VoiceToolCall = { id: fc.id ?? "", name: fc.name ?? "", args: fc.args ?? {} };
@@ -1867,6 +1914,8 @@ export async function aiVoiceSession(opts: {
   system: string;
   tools?: VoiceToolSpec[];
   voice?: string;
+  turnTaking?: VoiceTurnTaking;
+  languageCode?: string;
   /** Force a key/model instead of the organisation's saved Google key (scripts, tests). */
   config?: AiConfig;
   /** Use Vertex AI with a service account instead of an API key (`config.model` still applies). */
@@ -1881,8 +1930,11 @@ export async function aiVoiceSession(opts: {
   };
   let config: AiConfig;
   let target: VoiceTarget;
-  if (opts.vertex) {
-    const v = opts.vertex;
+  // The organisation's stored service account wins over its API key.
+  const vertex =
+    opts.vertex ?? (!opts.config && opts.orgId ? await readVoiceServiceAccount(opts.orgId) : null);
+  if (vertex) {
+    const v = vertex;
     config = { provider: "google", model: opts.config?.model ?? DEFAULT_VOICE_MODEL, apiKey: null };
     let token: string;
     try {
@@ -1923,6 +1975,8 @@ export async function aiVoiceSession(opts: {
           system,
           tools,
           voice: opts.voice ?? "Kore",
+          turnTaking: opts.turnTaking,
+          languageCode: opts.languageCode,
           config,
           target,
           events: opts.events ?? {},
@@ -1958,4 +2012,98 @@ export async function aiVoiceSession(opts: {
       }),
     );
   });
+}
+
+/* ---------------------------------------------- voice credentials (BYO) */
+
+// The organisation's own credential for the live voice model: its Google API
+// key (saved like any other key), or a Vertex AI service account stored here,
+// encrypted, under its own provider name. No platform credential exists.
+
+const VOICE_VERTEX = "google_vertex";
+
+/** Validate a service-account JSON key file; returns what is stored, or why not. */
+export function parseVoiceServiceAccount(
+  json: string,
+  location: string,
+): { ok: true; vertex: VoiceVertex } | { ok: false; message: string } {
+  let raw: Record<string, unknown>;
+  try {
+    raw = JSON.parse(json) as Record<string, unknown>;
+  } catch {
+    return { ok: false, message: "That is not a JSON key file." };
+  }
+  const str = (k: string) => (typeof raw[k] === "string" ? (raw[k] as string).trim() : "");
+  if (str("type") !== "service_account")
+    return { ok: false, message: "That file is not a service-account key." };
+  const clientEmail = str("client_email");
+  const privateKey = str("private_key");
+  const project = str("project_id");
+  if (!clientEmail || !privateKey.includes("PRIVATE KEY") || !project)
+    return { ok: false, message: "The key file is missing its account, key or project." };
+  if (!/^[a-z]+-[a-z]+\d$/.test(location))
+    return { ok: false, message: "Choose a region such as us-central1." };
+  const tokenUri = str("token_uri");
+  return {
+    ok: true,
+    vertex: {
+      project,
+      location,
+      serviceAccount: {
+        client_email: clientEmail,
+        private_key: privateKey,
+        ...(tokenUri ? { token_uri: tokenUri } : {}),
+      },
+    },
+  };
+}
+
+export async function writeVoiceServiceAccount(orgId: string, vertex: VoiceVertex) {
+  const { encryptSecret } = await import("../server/crypto");
+  const encrypted = encryptSecret(JSON.stringify(vertex));
+  await db
+    .insert(aiProviderCredentials)
+    .values({ orgId, provider: VOICE_VERTEX, apiKey: encrypted, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: [aiProviderCredentials.orgId, aiProviderCredentials.provider],
+      set: { apiKey: encrypted, updatedAt: new Date() },
+    });
+}
+
+export async function clearVoiceServiceAccount(orgId: string) {
+  await db
+    .delete(aiProviderCredentials)
+    .where(
+      and(eq(aiProviderCredentials.orgId, orgId), eq(aiProviderCredentials.provider, VOICE_VERTEX)),
+    );
+}
+
+/** The organisation's stored service account, decrypted (server only). */
+export async function readVoiceServiceAccount(orgId: string): Promise<VoiceVertex | null> {
+  const { decryptSecret } = await import("../server/crypto");
+  const [cred] = await db
+    .select({ apiKey: aiProviderCredentials.apiKey })
+    .from(aiProviderCredentials)
+    .where(
+      and(eq(aiProviderCredentials.orgId, orgId), eq(aiProviderCredentials.provider, VOICE_VERTEX)),
+    )
+    .limit(1);
+  if (!cred?.apiKey) return null;
+  try {
+    return JSON.parse(decryptSecret(cred.apiKey)) as VoiceVertex;
+  } catch {
+    return null;
+  }
+}
+
+/** Which voice credentials the organisation has stored — booleans only, for the UI. */
+export async function voiceCredentialStatus(
+  orgId: string,
+): Promise<{ serviceAccount: boolean; apiKey: boolean }> {
+  const rows = await db
+    .select({ provider: aiProviderCredentials.provider })
+    .from(aiProviderCredentials)
+    .where(eq(aiProviderCredentials.orgId, orgId));
+  const has = (p: string) => rows.some((r) => r.provider === p);
+  return { serviceAccount: has(VOICE_VERTEX), apiKey: has("google") };
 }

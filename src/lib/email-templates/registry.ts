@@ -18,6 +18,7 @@ import { template as interviewerBriefTemplate } from "./interviewer-brief";
 import { template as interviewSlotsTemplate } from "./interview-slots";
 import { template as compensationFormTemplate } from "./compensation-form";
 import { template as offerNegotiationTemplate } from "./offer-negotiation";
+import { template as screeningCallBookedTemplate } from "./screening-call-booked";
 
 /**
  * Dynamic template-data bag passed to every template renderer and subject
@@ -73,4 +74,5 @@ export const TEMPLATES: Record<string, TemplateEntry> = {
   compensation_form: compensationFormTemplate,
   offer_negotiation: offerNegotiationTemplate,
   interview_slots: interviewSlotsTemplate,
+  screening_call_booked: screeningCallBookedTemplate,
 };

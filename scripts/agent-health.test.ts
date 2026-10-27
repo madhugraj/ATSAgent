@@ -457,6 +457,129 @@ describe("rules", () => {
   });
 });
 
+describe("scheduling call health", () => {
+  test("few bookings from connected scheduling calls, and AI-call opt-outs", async () => {
+    const { applications, candidates, interviewSlotOffers, requisitions, screeningCalls } =
+      await import("../drizzle/schema");
+    const [req] = await db
+      .insert(requisitions)
+      .values({
+        orgId,
+        code: `REQ-H-${Date.now()}`,
+        title: "x",
+        status: "approved",
+        createdBy: userId,
+      } as never)
+      .returning({ id: requisitions.id });
+    const [cand] = await db
+      .insert(candidates)
+      .values({ orgId, fullName: "Asha", email: `asha-${Date.now()}@h.local` } as never)
+      .returning({ id: candidates.id });
+    const [app] = await db
+      .insert(applications)
+      .values({ orgId, requisitionId: req!.id, candidateId: cand!.id, stage: "l1" } as never)
+      .returning({ id: applications.id });
+    const [offer] = await db
+      .insert(interviewSlotOffers)
+      .values({
+        orgId,
+        applicationId: app!.id,
+        level: 1,
+        interviewerEmail: "p@h.local",
+        slots: [new Date(Date.now() + 3 * 864e5).toISOString()],
+        token: `h-${Date.now()}`,
+        expiresAt: new Date(Date.now() + 864e5),
+      })
+      .returning({ id: interviewSlotOffers.id });
+    const calls = (n: number, endReason: string) =>
+      db.insert(screeningCalls).values(
+        Array.from({ length: n }, () => ({
+          orgId,
+          candidateId: cand!.id,
+          applicationId: app!.id,
+          purpose: "scheduling" as const,
+          slotOfferId: offer!.id,
+          status: "completed" as const,
+          consentAt: new Date(),
+          endReason,
+        })),
+      );
+    const ruleOf = async (rule: string) => (await open()).find((i) => i.rule === rule);
+    await calls(HEALTH.minSchedulingCalls7d, "availability_noted");
+    await evaluate();
+    expect(await ruleOf("scheduling_call.no_booking")).toMatchObject({
+      agentType: "scheduling_call",
+      severity: "warning",
+    });
+    await calls(HEALTH.minSchedulingCalls7d, "booked");
+    await evaluate();
+    expect(await ruleOf("scheduling_call.no_booking")).toBeUndefined();
+
+    for (let i = 0; i < HEALTH.aiCallOptOuts7d; i++)
+      await db.insert(auditLog).values({
+        orgId,
+        actor: "t",
+        action: "candidate.ai_call_opt_out",
+        entityType: "candidate",
+        entityId: cand!.id,
+        detail: {},
+      } as never);
+    await evaluate();
+    expect(await ruleOf("ai_call.opt_outs")).toMatchObject({ severity: "warning" });
+    await db.delete(screeningCalls).where(eq(screeningCalls.applicationId, app!.id));
+    await db.delete(applications).where(eq(applications.id, app!.id));
+    await db.delete(candidates).where(eq(candidates.id, cand!.id));
+    await db.delete(requisitions).where(eq(requisitions.id, req!.id));
+  });
+});
+
+describe("replies cut off at the length limit", () => {
+  test("flagged once they repeat", async () => {
+    const id = await run("screening");
+    const cut = (seq: number) =>
+      db.insert(agentSteps).values({
+        runId: id,
+        orgId,
+        seq,
+        kind: "model",
+        status: "ok",
+        output: { stopReason: "max_tokens" },
+      } as never);
+    await cut(1);
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "harness.cut_off_replies")).toBeUndefined();
+    await cut(2);
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "harness.cut_off_replies")).toMatchObject({
+      agentType: "screening",
+    });
+  });
+});
+
+describe("an agent going round in circles", () => {
+  test("a run that keeps asking people questions is flagged", async () => {
+    const id = await run("interview");
+    const ask = (n: number) =>
+      db.insert(agentTasks).values(
+        Array.from({ length: n }, () => ({
+          orgId,
+          runId: id,
+          kind: "clarification" as const,
+          title: "q",
+        })),
+      );
+    await ask(HEALTH.questionsPerRun - 1);
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "hitl.repeated_questions")).toBeUndefined();
+    await ask(1);
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "hitl.repeated_questions")).toMatchObject({
+      agentType: "interview",
+      severity: "warning",
+    });
+  });
+});
+
 describe("scheduler heartbeat", () => {
   test("a tick records liveness; an old tick reads as stopped", async () => {
     await heartbeatAndMaybeEvaluate({ claimed: 0 });
@@ -551,5 +674,194 @@ describe("distribution rules", () => {
     ).toMatchObject({ agentType: "distribution", severity: "serious" });
     await db.delete(candidates).where(eq(candidates.id, c));
     await db.delete(requisitions).where(eq(requisitions.id, closed));
+  });
+});
+
+describe("phone screening health", () => {
+  const ruleOf = async (rule: string) => (await open()).find((i) => i.rule === rule);
+  async function calls(n: number, values: Record<string, unknown>) {
+    const { candidates, screeningCalls } = await import("../drizzle/schema");
+    const [c] = await db
+      .insert(candidates)
+      .values({ orgId, fullName: "Call Test", email: `call-${Math.random()}@cand.local` } as never)
+      .returning({ id: candidates.id });
+    for (let i = 0; i < n; i++)
+      await db.insert(screeningCalls).values({ orgId, candidateId: c!.id, ...values } as never);
+    return c!.id;
+  }
+  const clear = async (candidateId: string) => {
+    const { candidates } = await import("../drizzle/schema");
+    await db.delete(candidates).where(eq(candidates.id, candidateId));
+  };
+
+  test("calls not placed long after they were due; resolved once placed", async () => {
+    const c = await calls(1, { status: "approved", dueAt: ago(60) });
+    await evaluate();
+    expect(await ruleOf("screening_call.not_placed")).toBeUndefined();
+    const late = await calls(1, {
+      status: "approved",
+      dueAt: ago(HEALTH.callOverdueHours * 60 + 10),
+    });
+    await evaluate();
+    expect(await ruleOf("screening_call.not_placed")).toMatchObject({
+      agentType: "screening_call",
+      severity: "serious",
+    });
+    await clear(late);
+    await evaluate();
+    expect(await ruleOf("screening_call.not_placed")).toBeUndefined();
+    await clear(c);
+  });
+
+  test("a call stuck mid-call is critical", async () => {
+    const c = await calls(1, {
+      status: "in_progress",
+      updatedAt: ago(HEALTH.callStuckMinutes + 5),
+    });
+    await evaluate();
+    expect(await ruleOf("screening_call.stuck")).toMatchObject({ severity: "critical" });
+    await clear(c);
+  });
+
+  test("line or voice failures, not unanswered calls", async () => {
+    const quiet = await calls(HEALTH.callFailures24h, { status: "no_answer", attempt: 1 });
+    await evaluate();
+    expect(await ruleOf("screening_call.failures")).toBeUndefined();
+    const broken = await calls(HEALTH.callFailures24h, {
+      status: "fell_back",
+      attempt: 1,
+      lastError: "503 Service Unavailable",
+    });
+    await evaluate();
+    expect(await ruleOf("screening_call.failures")).toMatchObject({ severity: "serious" });
+    await clear(quiet);
+    await clear(broken);
+  });
+
+  test("low pick-up, then many declines, then calls ending before any question", async () => {
+    const unanswered = await calls(HEALTH.minCalls7d, { status: "no_answer", attempt: 1 });
+    await evaluate();
+    expect(await ruleOf("screening_call.answer_rate")).toMatchObject({ severity: "warning" });
+    await clear(unanswered);
+
+    const declined = await calls(HEALTH.minCalls7d, {
+      status: "consent_declined",
+      attempt: 1,
+      startedAt: ago(30),
+    });
+    await evaluate();
+    expect(await ruleOf("screening_call.answer_rate")).toBeUndefined();
+    expect(await ruleOf("screening_call.declines")).toMatchObject({ severity: "warning" });
+    await clear(declined);
+
+    const short = await calls(HEALTH.shortCalls7d, {
+      status: "completed",
+      attempt: 1,
+      startedAt: ago(30),
+      consentAt: ago(29),
+    });
+    await evaluate();
+    expect(await ruleOf("screening_call.short_calls")).toMatchObject({ severity: "warning" });
+    await clear(short);
+    await evaluate();
+    expect(await ruleOf("screening_call.short_calls")).toBeUndefined();
+  });
+});
+
+describe("interview panels", () => {
+  test("candidates waiting for a round nobody is eligible to interview are flagged", async () => {
+    const {
+      applications,
+      candidates,
+      memberInterviewerProfiles,
+      orgMembers,
+      requisitions,
+      rolePanels,
+    } = await import("../drizzle/schema");
+    const [m] = await db
+      .insert(orgMembers)
+      .values({ orgId, userId, email: `health-${stamp}@test.local`, status: "active" } as never)
+      .returning({ id: orgMembers.id });
+    // The only registered interviewer takes L3 alone.
+    await db
+      .insert(memberInterviewerProfiles)
+      .values({ orgId, memberId: m!.id, active: true, rounds: [3] });
+    const [req] = await db
+      .insert(requisitions)
+      .values({ orgId, code: `H-P-${stamp}`, title: "Panel Test", status: "approved" } as never)
+      .returning({ id: requisitions.id });
+    const [cand] = await db
+      .insert(candidates)
+      .values({ orgId, fullName: "Panel Wait", email: `pw-${stamp}@cand.local` } as never)
+      .returning({ id: candidates.id });
+    await db
+      .insert(applications)
+      .values({ orgId, requisitionId: req!.id, candidateId: cand!.id, stage: "l1" } as never);
+    const rule = async () => (await open()).find((i) => i.rule === "interview.no_eligible_panel");
+    await evaluate();
+    expect(await rule()).toMatchObject({
+      agentType: "interview",
+      severity: "warning",
+      title: `Nobody is eligible to interview for H-P-${stamp} L1`,
+    });
+    // A person settled the panel: no longer flagged.
+    await db
+      .insert(rolePanels)
+      .values({ orgId, requisitionId: req!.id, level: 1, memberIds: [m!.id] });
+    await evaluate();
+    expect(await rule()).toBeUndefined();
+    await db.delete(requisitions).where(eq(requisitions.id, req!.id));
+    await db.delete(candidates).where(eq(candidates.id, cand!.id));
+    await db.delete(orgMembers).where(eq(orgMembers.id, m!.id));
+  });
+});
+
+describe("interviewers who can't make it", () => {
+  test("a booked interview within a day with an interviewer who can't make it is critical", async () => {
+    const { applications, candidates, interviews, requisitions } =
+      await import("../drizzle/schema");
+    const [req] = await db
+      .insert(requisitions)
+      .values({
+        orgId,
+        code: `H-U-${stamp}`,
+        title: "Unavailable Test",
+        status: "approved",
+      } as never)
+      .returning({ id: requisitions.id });
+    const [cand] = await db
+      .insert(candidates)
+      .values({ orgId, fullName: "Soon", email: `soon-${stamp}@cand.local` } as never)
+      .returning({ id: candidates.id });
+    const [app] = await db
+      .insert(applications)
+      .values({ orgId, requisitionId: req!.id, candidateId: cand!.id, stage: "l1" } as never)
+      .returning({ id: applications.id });
+    const [r] = await db
+      .insert(interviews)
+      .values({
+        orgId,
+        applicationId: app!.id,
+        level: 1,
+        interviewer: "Busy",
+        interviewerEmail: "busy@x.test",
+        scheduledAt: new Date(Date.now() + 5 * 3600_000),
+        status: "scheduled",
+        unavailable: [{ email: "busy@x.test", note: null, at: new Date().toISOString() }],
+      } as never)
+      .returning({ id: interviews.id });
+    const rule = async () =>
+      (await open()).find((i) => i.rule === "interview.unavailable_unresolved");
+    await evaluate();
+    expect(await rule()).toMatchObject({ agentType: "interview", severity: "critical" });
+    // A stand-in took their place: resolved.
+    await db
+      .update(interviews)
+      .set({ interviewer: "Stand-in", interviewerEmail: "standin@x.test" })
+      .where(eq(interviews.id, r!.id));
+    await evaluate();
+    expect(await rule()).toBeUndefined();
+    await db.delete(requisitions).where(eq(requisitions.id, req!.id));
+    await db.delete(candidates).where(eq(candidates.id, cand!.id));
   });
 });

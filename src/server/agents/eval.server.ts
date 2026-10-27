@@ -145,7 +145,8 @@ export async function runScenario(s: Scenario): Promise<EvalReport> {
 
     let humanRequests = 0;
     for (let tick = 0; tick < MAX_TICKS; tick++) {
-      await runAgentTick({ max: 1, orgId });
+      // Only this scenario's run: sweeps and events must not start others.
+      await runAgentTick({ max: 1, orgId, onlyRunId: runId });
       const [run] = await db.select().from(agentRuns).where(eq(agentRuns.id, runId));
       if (!run || run.status === "done" || run.status === "failed") break;
       if (run.status !== "awaiting_human") continue;
@@ -179,7 +180,12 @@ export async function runScenario(s: Scenario): Promise<EvalReport> {
     const failures: string[] = [];
     const e = s.expect;
     if (e.status && run?.status !== e.status) {
-      failures.push(`status: expected ${e.status}, got ${run?.status}`);
+      failures.push(
+        `status: expected ${e.status}, got ${run?.status}${run?.lastError ? ` (${run.lastError.slice(0, 300)})` : ""}${steps
+          .filter((x) => x.kind === "tool" && x.status === "error")
+          .map((x) => `; ${x.toolName} failed: ${JSON.stringify(x.output).slice(0, 300)}`)
+          .join("")}`,
+      );
     }
     if (e.calls) {
       let i = 0;

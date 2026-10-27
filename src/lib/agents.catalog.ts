@@ -69,6 +69,21 @@ export const AGENT_CATALOG: AgentInfo[] = [
       "Builds screening kits, sends assessments, grades answers and writes a proceed / hold summary.",
   },
   {
+    type: "screening_call",
+    label: "Screening call agent",
+    phase: 2,
+    description:
+      "Phones a shortlisted candidate when the Screening agent asks and a person approves: says it is an AI, asks consent, asks the role's screening questions — never about pay — and hands the answers back for grading.",
+  },
+  {
+    type: "scheduling_call",
+    label: "Scheduling call agent",
+    phase: 3,
+    description:
+      "Phones a candidate who has not picked one of the e-mailed interview times, when the Interview coordinator asks and a person approves: says it is an AI and books one of those times (or another the interviewers are free for) — never changes the interview, never discusses pay or results.",
+  },
+
+  {
     type: "followup",
     label: "Follow-up agent",
     phase: 2,

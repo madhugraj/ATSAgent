@@ -170,6 +170,8 @@ describe("free slots", () => {
       scheduledAt: new Date(r1.slots[0]!),
       durationMins: 60,
     });
+    // A person moved them on to round 2 (times are offered only for their current round).
+    await db.update(applications).set({ stage: "l2" }).where(eq(applications.id, app));
     await offers.offerSlotsCore(
       orgId,
       { userId, runId: null },
@@ -240,7 +242,8 @@ describe("free slots", () => {
     });
     expect(r.slots.length).toBeGreaterThan(0);
     for (const s of r.slots) expect(Date.parse(s)).toBeGreaterThanOrEqual(nb!.getTime());
-    // Offering L2 before L1 has happened is refused.
+    // In round 2 now, L2 times before L1 has ended are still refused.
+    await db.update(applications).set({ stage: "l2" }).where(eq(applications.id, app));
     await expect(
       offers.offerSlotsCore(
         orgId,
@@ -281,6 +284,21 @@ describe("the candidate chooses the time", () => {
     return { ...r, token: row!.token };
   }
 
+  async function offerSlotsAt(when: Date[]) {
+    return offers.offerSlotsCore(
+      orgId,
+      { userId, runId: null },
+      {
+        applicationId: app,
+        level: 1,
+        interviewerEmail: interviewer,
+        slots: when.map((d) => d.toISOString()),
+        durationMins: 60,
+        mode: "online",
+      },
+    );
+  }
+
   test("an offer emails the candidate a private link; a clashing time is refused", async () => {
     const o = await offer();
     expect(o.slots).toHaveLength(3);
@@ -313,6 +331,72 @@ describe("the candidate chooses the time", () => {
     ).rejects.toThrow(/not free: .*another interview is booked then/);
   });
 
+  test("a newer offer for the round withdraws the older one's unsent e-mail", async () => {
+    const first = await offer();
+    // Its e-mail has not gone out yet (e.g. the process that queued it exited first).
+    await db
+      .update(emailOutbox)
+      .set({ status: "queued" })
+      .where(eq(emailOutbox.idempotencyKey, `interview-slots:${first.offerId}`));
+    const second = await offerSlotsAt([weekdayAt(6), weekdayAt(7, 14)]);
+    const mails = await db.select().from(emailOutbox).where(eq(emailOutbox.orgId, orgId));
+    const of = (id: string) => mails.find((m) => m.idempotencyKey === `interview-slots:${id}`)!;
+    expect(of(first.offerId).status).toBe("suppressed");
+    expect(of(second.offerId).status).not.toBe("suppressed");
+    // Chosen before its e-mail went out: the e-mail is withdrawn too.
+    await db
+      .update(emailOutbox)
+      .set({ status: "queued" })
+      .where(eq(emailOutbox.idempotencyKey, `interview-slots:${second.offerId}`));
+    const [row] = await db
+      .select({ token: interviewSlotOffers.token })
+      .from(interviewSlotOffers)
+      .where(eq(interviewSlotOffers.id, second.offerId));
+    expect(await offers.chooseSlot(row!.token, second.slots[0]!)).toMatchObject({ booked: true });
+    const [after] = await db
+      .select()
+      .from(emailOutbox)
+      .where(eq(emailOutbox.idempotencyKey, `interview-slots:${second.offerId}`));
+    expect(after!.status).toBe("suppressed");
+  });
+
+  test("only the round they are in: no round-2 times while they are in round 1", async () => {
+    expect(offers.roundNotYet("l1", 1)).toBeNull();
+    expect(offers.roundNotYet("shortlisted", 1)).toBeNull();
+    expect(offers.roundNotYet("l2", 2)).toBeNull();
+    expect(offers.roundNotYet("l1", 2)).toMatch(/in round 1; times for round 2/);
+    expect(offers.roundNotYet("shortlisted", 2)).toMatch(/in round 1/);
+    expect(offers.roundNotYet("rejected", 1)).toMatch(/cannot be offered/);
+    await expect(
+      offers.offerSlotsCore(
+        orgId,
+        { userId, runId: null },
+        {
+          applicationId: app,
+          level: 2,
+          interviewerEmail: interviewer,
+          slots: [weekdayAt(6).toISOString(), weekdayAt(7).toISOString()],
+          durationMins: 60,
+          mode: "online",
+        },
+      ),
+    ).rejects.toThrow(/in round 1; times for round 2/);
+  });
+
+  test("none of these work: the unsent e-mail is withdrawn with the offer", async () => {
+    const o = await offer();
+    await db
+      .update(emailOutbox)
+      .set({ status: "queued" })
+      .where(eq(emailOutbox.idempotencyKey, `interview-slots:${o.offerId}`));
+    expect(await offers.declineSlots(o.token, "not this week")).toBe(true);
+    const [m] = await db
+      .select()
+      .from(emailOutbox)
+      .where(eq(emailOutbox.idempotencyKey, `interview-slots:${o.offerId}`));
+    expect(m!.status).toBe("suppressed");
+  });
+
   test("names fall back to the email; a booking without a meeting provider says so", async () => {
     expect(offers.displayName(null, "madhu.r@yavar.ai")).toBe("Madhu");
     expect(offers.displayName("  Priya N ", "x@y.z")).toBe("Priya N");
@@ -332,9 +416,11 @@ describe("the candidate chooses the time", () => {
       orgName: "Slots Org",
       jobTitle: "UI/UX Engineer",
       roundLabel: "L1 interview",
-      interviewerName: "Priya",
+      withText: "the hiring team",
       status: "offered",
     });
+    // Staff are confidential: no interviewer's name or e-mail on the public page.
+    expect(JSON.stringify(p)).not.toMatch(/Priya|Natarajan|panel-/);
     expect(p.slots).toHaveLength(3);
     expect(JSON.stringify(p)).not.toMatch(/asha|Raman|@/i);
     expect(await offers.publicOffer("0".repeat(64))).toBeNull();
@@ -364,7 +450,55 @@ describe("the candidate chooses the time", () => {
     expect((brief.templateData as Record<string, string>)["candidateName"]).toBe("Asha Raman");
     expect((brief.attachments as { filename: string }[])[0]!.filename).toMatch(/\.ics$/);
     expect((await lastDesk(conv.id))!.body).toMatch(/^Asha Raman chose .* It is booked/);
+    // The candidate's invite and its calendar file say who it is with, never a name.
+    const invite = (
+      await db.select().from(emailOutbox).where(eq(emailOutbox.kind, "interview_invite"))
+    ).find((m) => m.orgId === orgId)!;
+    expect(invite.toEmail).toMatch(/^asha-/);
+    expect((invite.templateData as Record<string, string>)["withText"]).toBe("the hiring team");
+    const ics = Buffer.from(
+      (invite.attachments as { contentBase64: string }[])[0]!.contentBase64,
+      "base64",
+    ).toString("utf8");
+    expect(ics).toContain("With: the hiring team");
+    expect(JSON.stringify(invite.templateData) + ics).not.toMatch(/Priya|Natarajan|panel-\d/);
     expect(await offers.chooseSlot(o.token, o.slots[0]!)).toMatchObject({ booked: false });
+  });
+
+  test("on an AI scheduling call: an offered time or a pre-checked alternate, nothing else", async () => {
+    const conv = await thread();
+    const o = await offer();
+    const alternate = weekdayAt(6, 15).toISOString();
+    const call = { callId: "00000000-0000-4000-8000-000000000001", alternates: [alternate] };
+    // A time never offered or pre-checked is refused, even by phone.
+    expect(
+      await offers.chooseSlotByOffer(orgId, o.offerId, weekdayAt(7).toISOString(), call),
+    ).toMatchObject({ booked: false, reason: "Please choose one of the times offered." });
+    // Another organisation cannot book this offer.
+    const other = await offers.chooseSlotByOffer(
+      "00000000-0000-4000-8000-000000000000",
+      o.offerId,
+      alternate,
+      call,
+    );
+    expect(other).toMatchObject({ booked: false });
+    // The alternate books like a link choice, said as a phone choice.
+    expect(await offers.chooseSlotByOffer(orgId, o.offerId, alternate, call)).toMatchObject({
+      booked: true,
+      at: alternate,
+    });
+    const [iv] = await db.select().from(interviews).where(eq(interviews.applicationId, app));
+    expect(iv!.scheduledAt.toISOString()).toBe(alternate);
+    expect((await lastDesk(conv.id))!.body).toMatch(/chose .* on the AI scheduling call/);
+    // One booking per offer: the e-mailed link no longer books.
+    expect(await offers.chooseSlot(o.token, o.slots[0]!)).toMatchObject({ booked: false });
+  });
+
+  test("the link alone never books a phone-only alternate", async () => {
+    const o = await offer();
+    expect(await offers.chooseSlot(o.token, weekdayAt(6, 15).toISOString())).toMatchObject({
+      booked: false,
+    });
   });
 
   test("none of these work: the candidate's words reach the thread; the offer closes", async () => {

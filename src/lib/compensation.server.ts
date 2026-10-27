@@ -560,6 +560,77 @@ export async function recordCompensation(
   return { ok: true, complete: view.complete };
 }
 
+/**
+ * What the AI screening call records here: the candidate's own figures for
+ * current and expected pay, notice period and availability. The agent never
+ * discusses, judges or negotiates them; only TA / HR see them.
+ */
+export const CallDetailsFields = z
+  .object({
+    currentFixed: money.nullable().optional(),
+    currentVariable: money.nullable().optional(),
+    expectedCtc: money.positive().nullable().optional(),
+    noticePeriodDays: z.number().int().min(0).max(365).nullable().optional(),
+    earliestJoining: isoDate.nullable().optional(),
+    currentLocation: z.string().trim().max(120).nullable().optional(),
+    openToRelocate: z.boolean().nullable().optional(),
+    /** Pay said in words, not figures ("a 30% hike", "plus ₹10L in shares"). */
+    note: z.string().trim().max(1000).nullable().optional(),
+  })
+  .strict();
+export type CallDetails = z.infer<typeof CallDetailsFields>;
+
+/**
+ * The Screening call agent records what the candidate said about pay, notice
+ * period and availability (source `screening_call`, entered by no person).
+ * Audited with field names only — never the amounts.
+ */
+export async function recordCallDetails(
+  orgId: string,
+  applicationId: string,
+  input: CallDetails,
+  now = new Date(),
+): Promise<{ recorded: string[] }> {
+  const data = CallDetailsFields.parse(input);
+  const fields = Object.keys(data).filter((k) => data[k as keyof typeof data] != null);
+  if (!fields.length) return { recorded: [] };
+  if (joiningDateProblem(data.earliestJoining, now)) delete data.earliestJoining;
+  const app = await loadApp(orgId, applicationId);
+  const detailId = await insertDetails(orgId, app, data, "screening_call", null, null);
+  const { writeAudit } = await import("../server/audit");
+  await writeAudit({
+    actor: "agent:screening_call",
+    actorUserId: null,
+    orgId,
+    action: "compensation.recorded",
+    entityType: "compensation_details",
+    entityId: detailId,
+    detail: { applicationId: app.id, source: "screening_call", fields },
+  });
+  // Expected CTC and notice now known: the open form is no longer needed, and
+  // the Offer agent may proceed — as when TA records them.
+  const view = await detailsFor(orgId, app.id);
+  if (view.complete) {
+    await db
+      .update(compensationRequests)
+      .set({ status: "cancelled" })
+      .where(
+        and(
+          eq(compensationRequests.orgId, orgId),
+          eq(compensationRequests.applicationId, app.id),
+          eq(compensationRequests.status, "sent"),
+        ),
+      );
+    await tellThread(
+      orgId,
+      app.requisitionId,
+      `${app.name ?? "The candidate"} gave their pay and availability on the AI screening call.`,
+    );
+    await announce(orgId, app.id, null);
+  }
+  return { recorded: fields };
+}
+
 /** Email the form again (counted; the same link). */
 export async function remindCompensation(
   orgId: string,

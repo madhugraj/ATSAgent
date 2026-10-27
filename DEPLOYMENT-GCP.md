@@ -83,6 +83,7 @@ Recent additions to note per release: `0015_ai_usage_events.sql` (AI usage ledge
 | Google for Jobs — tell Google when roles open/close (Indexing API)    | `GOOGLE_INDEXING_CREDENTIALS` (service-account JSON key, raw or base64; the account must be an **owner** of the `PUBLIC_SITE_URL` property in Search Console), optional `GOOGLE_INDEXING_DAILY_LIMIT` (default 180; Google's default quota is 200/day, shared by all organisations). Unset: roles are still listed from their apply page's structured data and found on Google's own crawl |
 | Scheduler/cron routes                                                | `CRON_SECRET` (random 32+; optional `CRON_SECRET_PREVIOUS` for rotation)                                                                                               |
 | Transactional email                                                  | `SMTP_URL` (e.g. `smtps://user:pass@smtp.example.com:465`), `EMAIL_FROM`                                                                                                               |
+| Phone screening (the PBX extension the voice worker dials out from; docs/voice-screening-agent.md) | `SIP_SERVER`, `SIP_USER`, `SIP_PASSWORD` (all three, or none), optional `SIP_PORT` (5060), `SIP_AUTH_USER`, `SIP_DOMAIN`, `SIP_CALLER_NAME`, `SIP_PUBLIC_IP` (only for one-way audio behind NAT), `VOICE_MAX_CONCURRENT` (calls at once, default 2). The AI voice itself is each organisation's own credential (Integrations → AI model), never a deployment key |
 
 **Secrets to generate:** `SESSION_SECRET`, `SECRET_ENCRYPTION_KEY` (AES-256 key for credentials at rest; `openssl rand -base64 32`), `OAUTH_STATE_SECRET`, `LINKEDIN_STATE_SECRET`, `INBOUND_EMAIL_SECRET`, `CRON_SECRET` — stored in Secret Manager. `SECRET_ENCRYPTION_KEY` is mandatory before saving OAuth or AI credentials. Rotating it requires re-encrypting stored values.
 
@@ -155,6 +156,45 @@ spec:
 ```
 
 Plus a `Service` (port 80 → 3000) and an `Ingress` with `ManagedCertificate` for `z-atsiq.yavar.ai` and a Cloud DNS A record pointing at the ingress IP.
+
+### Voice worker (phone screening — optional)
+
+The same image runs the voice worker that places phone screening calls
+(docs/voice-screening-agent.md). It has no Service or Ingress: it only dials
+out (SIP UDP 5060 and RTP to the PBX). Verified on GKE through Cloud NAT with
+no extra networking. A person creates it and its Secret; `scripts/deploy.sh`
+then rolls it with every release.
+
+```yaml
+# kubectl -n atsiq create secret generic atsiq-voice --from-literal=SIP_SERVER=… \
+#   --from-literal=SIP_USER=… --from-literal=SIP_PASSWORD=… [--from-literal=SIP_CALLER_NAME=…]
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: atsiq-voice-worker
+spec:
+  replicas: 1 # calls are claimed atomically; more replicas = more simultaneous calls
+  selector: { matchLabels: { app: atsiq-voice-worker } }
+  template:
+    metadata:
+      labels: { app: atsiq-voice-worker }
+    spec:
+      # A call in progress finishes before the pod stops (policy maximum is 30 minutes).
+      terminationGracePeriodSeconds: 1900
+      containers:
+        - name: voice-worker
+          image: REGION-docker.pkg.dev/PROJECT/REGISTRY/atsiq:TAG
+          command: ["node", "/app/.output/voice-worker/index.mjs"]
+          envFrom:
+            - secretRef: { name: atsiq-env } # DATABASE_URL, SESSION_SECRET, SECRET_ENCRYPTION_KEY, …
+            - secretRef: { name: atsiq-voice } # SIP_* (and VOICE_MAX_CONCURRENT)
+          resources:
+            requests: { cpu: "250m", memory: "512Mi" }
+```
+
+The AI voice uses each organisation's own credential (Integrations → AI model);
+the worker holds none. Without `SIP_*` the worker exits at start with a clear
+log line.
 
 ## 8. First-boot checklist
 
