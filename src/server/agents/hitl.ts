@@ -2,7 +2,7 @@
  * Human-in-the-loop tools every agent has (docs/agentic-plan.md §5): ask a
  * person, request a human decision, hand off. Part of every manifest hash.
  */
-import { z } from "zod/v4";
+import { z } from "zod";
 
 const ROLES = [
   "recruiter",

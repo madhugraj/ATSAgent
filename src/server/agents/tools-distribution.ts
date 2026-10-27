@@ -7,7 +7,7 @@
  * goes to the HR head. Posting on a portal by hand is a person's job — the
  * agent reminds them (remind_member) and never records a posting itself.
  */
-import { z } from "zod/v4";
+import { z } from "zod";
 
 import { JOB_CHANNELS, channelById } from "@/lib/job-channels";
 import { registerTool, type ToolContext } from "./registry";
