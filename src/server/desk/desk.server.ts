@@ -17,7 +17,7 @@ import { localWhen } from "@/lib/local-time";
 import { placeLabel } from "@/lib/work-mode";
 import { sourceLabel as channelSourceLabel } from "@/lib/job-channels";
 import { and, asc, desc, eq, ilike, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
-import { z } from "zod/v4";
+import { z } from "zod";
 
 import { INJECTION_RULES, aiJson, untrusted } from "@/lib/ai-gateway.server";
 import { db } from "../db";

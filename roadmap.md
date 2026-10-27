@@ -9,6 +9,11 @@
 - [x] Platform console → Organisation agreements: which organisation accepted which version, when and by whom, with history
 - [ ] Legal review of the Terms and DPA drafts (commercial terms, named sub-processors and objection process, hosting region and transfers, data export at termination, breach timeframe)
 
+## Dependency security (2026-10-24)
+
+- [x] zod 4 (GHSA-mrhx-c7xc-m3w5, memory exhaustion on oversized constrained collections): all schemas import `zod`; ids are checked as RFC 9562 UUIDs everywhere (the local demo fixture ids were made valid); every agent got a patch version because its generated tool contracts changed wording only
+- [x] DOMPurify pinned to 3.4.17 or later through `overrides` (pulled in by jsPDF; GHSA-cg2g-xh64-v4q7, GHSA-mrv2-3pqr-j5jr)
+
 ## Distribution agent (2026-10-21)
 
 - [x] Distribution agent v1.0.0 (owner HR head): advertises approved roles across the job portals by the route each allows — requests feed listings (HR head approves; pre-approvable per feed for Autonomous), reminds a person to post where no integration exists with the role's ready text — and runs a daily check: CVs arriving by portal, listings quiet for a week, unread careers-inbox mail, portal CVs with no role
