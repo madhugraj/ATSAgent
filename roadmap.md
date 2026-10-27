@@ -1,5 +1,11 @@
 # Roadmap
 
+## Voice screening agent (2026-10-23)
+
+- [x] M0 voice foundation (docs/voice-screening-agent.md): SIP/RTP/G.711 call stack in TypeScript (`src/server/voice/`), live voice sessions through the AI gateway (`aiVoiceSession`, feature `screening_call`, ledger + training capture), spike script; real test calls placed from a workstation and from inside GKE with two-way audio
+- [ ] M1–M4: `screening_calls` data, voice worker, Screening agent 1.8.0 `request_screening_call`, Screening call agent 1.0.0 with evals and health rules, UI, pilot
+- [ ] Decide which voice credential an organisation stores (API key or Vertex service account)
+
 ## Dependency security (2026-10-24)
 
 - [x] zod 4 (GHSA-mrhx-c7xc-m3w5, memory exhaustion on oversized constrained collections): all schemas import `zod`; ids are checked as RFC 9562 UUIDs everywhere (the local demo fixture ids were made valid); every agent got a patch version because its generated tool contracts changed wording only
