@@ -33,6 +33,7 @@ import { assertRole, type AppRole } from "@/lib/auth.middleware";
 import { db } from "../db";
 import { writeAudit } from "../audit";
 import { log } from "../log";
+import { currentTraceUuid, runTraceContext, withRequestContext } from "../request-context";
 import {
   agentPolicies,
   agentRuns,
@@ -770,6 +771,7 @@ export async function startRun(input: {
     }
   }
   const startPolicy = await loadPolicy(input.orgId, input.agentType);
+  const requestTrace = currentTraceUuid();
   const [run] = await db
     .insert(agentRuns)
     .values({
@@ -787,6 +789,8 @@ export async function startRun(input: {
       ...(startPolicy.maxTokensPerLeg ? { maxTokens: startPolicy.maxTokensPerLeg } : {}),
       conversationId,
       transcript: [{ role: "user", content: input.goal } satisfies AgentMessage],
+      // Started from an HTTP request: join its trace, so the request ID finds the run.
+      ...(requestTrace ? { traceId: requestTrace } : {}),
     })
     .returning({ id: agentRuns.id });
   await writeAudit({
@@ -850,6 +854,7 @@ export async function startReplay(input: {
       mode: "replay",
       replayOf: orig.id,
       transcript: [{ role: "user", content: orig.goal } satisfies AgentMessage],
+      ...(currentTraceUuid() ? { traceId: currentTraceUuid() } : {}),
     })
     .returning({ id: agentRuns.id });
   await writeAudit({
@@ -1166,15 +1171,18 @@ export async function runAgentTick(
         agent: run.agentType,
       });
       const scoped = run;
-      const outcome = await agentRunScope
-        .run({ runId: scoped.id, orgId: scoped.orgId, agentType: scoped.agentType }, () =>
-          driveRun(scoped),
-        )
-        .catch(async (e: unknown) => {
-          runLog.error("agent.run.crashed", { error: e instanceof Error ? e : String(e) });
-          await finish(run!, "failed", null, e instanceof Error ? e.message : String(e));
-          return "failed" as const;
-        });
+      // Every log line inside the run (gateway, tools) carries the run's trace,
+      // not that of whichever request or tick happens to drive it.
+      const outcome = await withRequestContext(runTraceContext(scoped.traceId), () =>
+        agentRunScope.run(
+          { runId: scoped.id, orgId: scoped.orgId, agentType: scoped.agentType },
+          () => driveRun(scoped),
+        ),
+      ).catch(async (e: unknown) => {
+        runLog.error("agent.run.crashed", { error: e instanceof Error ? e : String(e) });
+        await finish(run!, "failed", null, e instanceof Error ? e.message : String(e));
+        return "failed" as const;
+      });
       runLog.info("agent.run.turn", { outcome, duration_ms: Date.now() - started });
       counts[outcome]++;
     }

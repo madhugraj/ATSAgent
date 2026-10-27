@@ -45,6 +45,16 @@ ATSIQ by Yavar AI is an enterprise recruiting intelligence platform. It combines
 - Every AI provider request is recorded in the `ai_usage_events` ledger (feature, provider, model, tokens, attempt, latency) and aggregated in the platform super admin's `/platform-ai-usage` console
 - Tenant authorization enforced in server middleware and repeated in every tenant query with an explicit organisation predicate
 
+## Observability
+
+- **Logs** — one JSON object per line (`src/server/log.ts`, OpenTelemetry field names). Ids and short summaries only: never CV, document, mail or prompt text, secrets, or vendor/model names.
+- **Correlation** — `src/server.ts` opens a request context per request (`src/server/request-context.ts`): it continues a valid W3C `traceparent` or starts a trace, every log line on that request carries `trace_id` / `span_id`, and the response returns `traceparent` and `x-request-id`. Agent runs started from a request join its trace (`agent_runs.trace_id` is the same 16 bytes as a uuid), and lines written while a run executes carry the run's trace. Logs Explorer: `jsonPayload.trace_id="<x-request-id>"` finds every line of a request and its runs.
+- **Request logs and metrics** — one `http.request` line per request (method, route template with ids as `:id`, `route_group`, status, `status_class`, `duration_ms`, `server_fn` id). In-process counters and a latency histogram are exposed as OpenMetrics on `GET /metrics` (`src/server/http-metrics.ts`) when `METRICS_TOKEN` is set — bearer-protected, rate-limited, 404 otherwise.
+- **Label rules (cardinality)** — metric labels come from a fixed set only: `route_group` (server_fn, page, api_public, api_auth, api, metrics, static), `method` (GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS, OTHER), `status_class` (1xx–5xx). Raw paths, ids, tokens, org/user ids, server-function ids and model names are never labels; they stay in log lines.
+- **SLOs** — defined once in `src/server/slo.ts`: server-function availability 99 %, server-function latency 95 % within 2.5 s, agent run success 95 % (30-day windows). Each replica persists per-minute request counts to `service_request_minutes`; platform super admins see SLI vs objective, error budget left and 5 min / 1 h / 6 h / 24 h burn rates on **Platform → Service health** (`/platform-health`). Note: the framework answers any thrown server-function error with HTTP 500, so expected errors (validation, permission) count against availability; the log line flags them `fn_error: true`.
+- **Alerts** — multi-window burn-rate alerts (14.4× over 1 h and 5 min → critical; 6× over 6 h and 30 min → serious) are evaluated with the agent health engine on the scheduler tick (`src/server/slo.server.ts`) and go to platform admins by e-mail, the optional signed `PLATFORM_ALERT_WEBHOOK_URL`, an ERROR `slo.burn_alert` log line and `audit_log`. Agent health issues keep their per-organisation e-mail / webhook alerts and Agent observability page.
+- **Ops** — Cloud Monitoring log-based metrics, dashboard and alert policies as code in `infra/monitoring/` (`DEPLOYMENT-GCP.md` §9).
+
 ## Documentation
 
 - `docs/testing-guide.md` — step-by-step local test script for the agents, hiring desk, observability and platform console (everything except voice)

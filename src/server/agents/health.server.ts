@@ -755,6 +755,14 @@ export async function heartbeatAndMaybeEvaluate(
   const { dispatchAgentAlerts } = await import("./alerts.server");
   const a = await dispatchAgentAlerts();
   if (a.alerted) log.info("agent.alerts", a);
+  // Platform SLO burn-rate alerts ride the same cadence (src/server/slo.server.ts).
+  try {
+    const { evaluateSloBurn } = await import("../slo.server");
+    const b = await evaluateSloBurn();
+    if (b.opened || b.escalated || b.resolved) log.info("slo.burn", b);
+  } catch (e) {
+    log.error("slo.burn_failed", { error: e instanceof Error ? e : String(e) });
+  }
 }
 
 /** Scheduler liveness for the observability page (a stopped scheduler can't report itself). */

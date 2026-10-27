@@ -1,7 +1,26 @@
 import "./lib/error-capture";
 
+import { timingSafeEqual } from "node:crypto";
+
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
+import {
+  OPENMETRICS_CONTENT_TYPE,
+  recordRequest,
+  renderOpenMetrics,
+  requestStarted,
+  routeGroup,
+  routeTemplate,
+  serverFnId,
+  statusClass,
+} from "./server/http-metrics";
+import { log } from "./server/log";
+import {
+  contextFromHeaders,
+  formatTraceparent,
+  withRequestContext,
+  type RequestContext,
+} from "./server/request-context";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -28,7 +47,12 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
   const body = await response.clone().text();
   if (!isH3SwallowedErrorBody(body)) return response;
 
-  console.error(consumeLastCapturedError() ?? new Error(`h3 swallowed SSR error: ${body}`));
+  const captured = consumeLastCapturedError();
+  log.error("http.ssr_error", {
+    error: captured instanceof Error ? captured : `h3 swallowed SSR error: ${body}`,
+  });
+  // Plain stderr too, so Error Reporting gets the stack trace.
+  console.error(captured ?? new Error(`h3 swallowed SSR error: ${body}`));
   return new Response(renderErrorPage(), {
     status: 500,
     headers: { "content-type": "text/html; charset=utf-8" },
@@ -109,6 +133,62 @@ function isServerFnPath(path: string): boolean {
   return path === "/_serverFn" || path.startsWith("/_serverFn/");
 }
 
+/* ------------------------------------------------------------- /metrics */
+
+/**
+ * OpenMetrics scrape endpoint. Off (404) unless METRICS_TOKEN is set; the
+ * scraper sends `Authorization: Bearer <METRICS_TOKEN>`. Rate-limited like
+ * the other public paths. Labels are low-cardinality only (http-metrics.ts).
+ */
+function metricsResponse(request: Request): Response {
+  const token = process.env["METRICS_TOKEN"] ?? "";
+  if (token.length < 16) return new Response("Not found", { status: 404 });
+  const given = (request.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
+  const a = Buffer.from(given);
+  const b = Buffer.from(token);
+  if (a.length !== b.length || !timingSafeEqual(a, b))
+    return new Response("Unauthorized", {
+      status: 401,
+      headers: { "www-authenticate": "Bearer" },
+    });
+  return new Response(renderOpenMetrics(), {
+    status: 200,
+    headers: { "content-type": OPENMETRICS_CONTENT_TYPE, "cache-control": "no-store" },
+  });
+}
+
+/* ----------------------------------------------------------- correlation */
+
+/** Return the request's trace on the response so callers can quote it. */
+function withTraceHeaders(response: Response, ctx: RequestContext): Response {
+  try {
+    response.headers.set("traceparent", formatTraceparent(ctx));
+    response.headers.set("x-request-id", ctx.traceId);
+    return response;
+  } catch {
+    // Immutable headers (e.g. a passed-through fetch Response): copy once.
+    const headers = new Headers(response.headers);
+    headers.set("traceparent", formatTraceparent(ctx));
+    headers.set("x-request-id", ctx.traceId);
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  }
+}
+
+let sliFlusherStarted = false;
+function ensureSliFlusher() {
+  if (sliFlusherStarted) return;
+  sliFlusherStarted = true;
+  void import("./server/slo.server")
+    .then((m) => m.startSliFlusher())
+    .catch((e: unknown) =>
+      log.warn("slo.flusher_start_failed", { error: e instanceof Error ? e : String(e) }),
+    );
+}
+
 async function applySecurityHeaders(response: Response, request: Request): Promise<Response> {
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.includes("text/html")) return response;
@@ -177,26 +257,70 @@ function tooManyRequests(): Response {
   );
 }
 
+async function handle(request: Request, url: URL, env: unknown, ctx: unknown): Promise<Response> {
+  try {
+    if (url.pathname === "/metrics") return metricsResponse(request);
+
+    const handler = await getServerEntry();
+    const response = await handler.fetch(request, env, ctx);
+    return await applySecurityHeaders(await normalizeCatastrophicSsrResponse(response), request);
+  } catch (error) {
+    log.error("http.unhandled", { error: error instanceof Error ? error : String(error) });
+    console.error(error);
+    return new Response(renderErrorPage(), {
+      status: 500,
+      headers: { "content-type": "text/html; charset=utf-8" },
+    });
+  }
+}
+
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
+    const started = performance.now();
+    const trace = contextFromHeaders(request.headers);
+    let url: URL;
     try {
-      const url = new URL(request.url);
+      url = new URL(request.url);
+    } catch {
+      return new Response("Bad request", { status: 400 });
+    }
+    const group = routeGroup(url.pathname);
+    ensureSliFlusher();
+    requestStarted();
+
+    return withRequestContext(trace, async () => {
+      let response: Response;
       if (
         request.method !== "OPTIONS" &&
-        (isPublicApiPath(url.pathname) || isServerFnPath(url.pathname))
+        (isPublicApiPath(url.pathname) || isServerFnPath(url.pathname) || group === "metrics")
       ) {
-        if (!allowRequest(`${clientIp(request)}:${url.pathname}`)) return tooManyRequests();
+        response = allowRequest(`${clientIp(request)}:${url.pathname}`)
+          ? await handle(request, url, env, ctx)
+          : tooManyRequests();
+      } else {
+        response = await handle(request, url, env, ctx);
       }
 
-      const handler = await getServerEntry();
-      const response = await handler.fetch(request, env, ctx);
-      return await applySecurityHeaders(await normalizeCatastrophicSsrResponse(response), request);
-    } catch (error) {
-      console.error(error);
-      return new Response(renderErrorPage(), {
-        status: 500,
-        headers: { "content-type": "text/html; charset=utf-8" },
-      });
-    }
+      // Time to response headers; streamed bodies may still be flowing.
+      const durationMs = Math.round(performance.now() - started);
+      recordRequest({ group, method: request.method, status: response.status, durationMs });
+      if (group !== "static") {
+        const fields = {
+          http_method: request.method,
+          http_route: routeTemplate(url.pathname),
+          route_group: group,
+          server_fn: serverFnId(url.pathname),
+          http_status: response.status,
+          status_class: statusClass(response.status),
+          duration_ms: durationMs,
+          // A thrown server-function error is serialised by the framework as a 500.
+          fn_error: response.headers.get("x-tss-serialized") === "true" ? true : undefined,
+        };
+        if (response.status >= 500) log.error("http.request", fields);
+        else if (durationMs > 10_000) log.warn("http.request", fields);
+        else log.info("http.request", fields);
+      }
+      return withTraceHeaders(response, trace);
+    });
   },
 };

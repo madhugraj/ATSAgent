@@ -83,8 +83,11 @@ Recent additions to note per release: `0015_ai_usage_events.sql` (AI usage ledge
 | Google for Jobs — tell Google when roles open/close (Indexing API)    | `GOOGLE_INDEXING_CREDENTIALS` (service-account JSON key, raw or base64; the account must be an **owner** of the `PUBLIC_SITE_URL` property in Search Console), optional `GOOGLE_INDEXING_DAILY_LIMIT` (default 180; Google's default quota is 200/day, shared by all organisations). Unset: roles are still listed from their apply page's structured data and found on Google's own crawl |
 | Scheduler/cron routes                                                | `CRON_SECRET` (random 32+; optional `CRON_SECRET_PREVIOUS` for rotation)                                                                                               |
 | Transactional email                                                  | `SMTP_URL` (e.g. `smtps://user:pass@smtp.example.com:465`), `EMAIL_FROM`                                                                                                               |
+| `/metrics` OpenMetrics scrape (§9)                                   | `METRICS_TOKEN` (random 32+; the scraper sends `Authorization: Bearer …`). Unset: `/metrics` answers 404                                                                              |
+| Platform SLO alert webhook (§9)                                      | `PLATFORM_ALERT_WEBHOOK_URL`, `PLATFORM_ALERT_WEBHOOK_SECRET` (HMAC-SHA256 signing key; `X-ATSAgent-Signature: sha256=<hex>`, as agent alerts). Platform admins are e-mailed when `SMTP_URL` is set |
+| Cloud Logging ↔ trace grouping                                       | `GOOGLE_CLOUD_PROJECT` (project id; adds `logging.googleapis.com/trace` to every log line that has a trace)                                                                            |
 
-**Secrets to generate:** `SESSION_SECRET`, `SECRET_ENCRYPTION_KEY` (AES-256 key for credentials at rest; `openssl rand -base64 32`), `OAUTH_STATE_SECRET`, `LINKEDIN_STATE_SECRET`, `INBOUND_EMAIL_SECRET`, `CRON_SECRET` — stored in Secret Manager. `SECRET_ENCRYPTION_KEY` is mandatory before saving OAuth or AI credentials. Rotating it requires re-encrypting stored values.
+**Secrets to generate:** `SESSION_SECRET`, `SECRET_ENCRYPTION_KEY` (AES-256 key for credentials at rest; `openssl rand -base64 32`), `OAUTH_STATE_SECRET`, `LINKEDIN_STATE_SECRET`, `INBOUND_EMAIL_SECRET`, `CRON_SECRET`, `METRICS_TOKEN`, `PLATFORM_ALERT_WEBHOOK_SECRET` — stored in Secret Manager. `SECRET_ENCRYPTION_KEY` is mandatory before saving OAuth or AI credentials. Rotating it requires re-encrypting stored values.
 
 ### Organisation-owned AI credentials
 
@@ -163,3 +166,14 @@ Plus a `Service` (port 80 → 3000) and an `Ingress` with `ManagedCertificate` f
 3. Create first org/user, upload a CV — confirms `DATABASE_URL` + S3/HMAC path.
 4. Trigger one cron route manually with the bearer token → HTTP 200.
 5. Smoke: `/`, `/candidates`, `/requisitions`, `/privacy` → HTTP 200.
+
+## 9. Monitoring, SLOs and alerting
+
+The app writes one JSON log line per request (`msg: "http.request"`: method, route template with ids replaced by `:id`, `route_group`, status, `status_class`, `duration_ms`, `trace_id`) and returns `x-request-id` / `traceparent` on every response. Searching Logs Explorer for `jsonPayload.trace_id="<x-request-id>"` returns every line of that request, including the agent runs it started.
+
+Service level objectives are defined in `src/server/slo.ts`: server-function availability 99 % (no 5xx), server-function latency 95 % within 2.5 s, agent run success 95 % — each over 30 days. Platform super admins see SLI vs objective, error budget left and burn rates on **Platform → Service health** (`/platform-health`). The app's own multi-window burn-rate evaluator runs with the agent scheduler tick and alerts platform admins by e-mail, the optional signed `PLATFORM_ALERT_WEBHOOK_URL`, an ERROR log line `slo.burn_alert` and `audit_log`.
+
+Cloud Monitoring dashboard and alert policies are kept as code in `infra/monitoring/` (log-based metrics, dashboard JSON, burn-rate / latency / scheduler-stalled / app-burn-alert policies, optional Managed Prometheus `PodMonitoring` for `/metrics`). Apply them with the steps in `infra/monitoring/README.md` after the first deploy, and register the notification channel for on-call. Metric labels are fixed and low-cardinality (`route_group`, `method`, `status_class`); never add route, id, org or user labels.
+
+Each replica writes its per-minute request counts to `service_request_minutes` (migration `0046_service_slo.sql`, kept 35 days), so the SLO panel covers all replicas.
+

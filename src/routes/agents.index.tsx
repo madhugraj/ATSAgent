@@ -419,7 +419,9 @@ function RunSteps({ runId }: { runId: string }) {
   return (
     <div className="mt-3 rounded-md border border-border bg-muted/30 p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <p className="num text-[11px] text-muted-foreground">Trace {q.data.traceId}</p>
+        <p className="num text-[11px] text-muted-foreground">
+          Trace {q.data.traceId.replace(/-/g, "")}
+        </p>
         <Button size="sm" variant="outline" onClick={() => downloadTrail(runId)}>
           Export trail (JSON)
         </Button>

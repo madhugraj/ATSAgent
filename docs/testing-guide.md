@@ -176,10 +176,12 @@ super admin with:
 set -a; source .env.local; set +a; psql "$DATABASE_URL" -c "insert into platform_admins (email) values ('agent-demo@test.local')"
 ```
 
-| ID  | Steps                     | Expected                                                                                                                                                               |
-| --- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| S1  | Open **Platform agents**. | Scheduler status, totals, per-organisation, per-agent cost and latency, per-model table (model names are allowed here), recent failed runs. 24 h / 7 / 30 days switch. |
-| S2  | Open **AI usage**.        | Every AI request, including the hiring desk (`hiring_desk`) and agent steps.                                                                                           |
+| ID  | Steps                                                                                                                         | Expected                                                                                                                                                                                                              |
+| --- | ----------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| S1  | Open **Platform agents**.                                                                                                     | Scheduler status, totals, per-organisation, per-agent cost and latency, per-model table (model names are allowed here), recent failed runs. 24 h / 7 / 30 days switch.                                                |
+| S2  | Open **AI usage**.                                                                                                            | Every AI request, including the hiring desk (`hiring_desk`) and agent steps.                                                                                                                                          |
+| S3  | Use the app for a few minutes, then open **Service health**.                                                                  | Three objectives (server-function availability, latency, agent run success) with SLI, objective, error budget left and burn rates; requests by route group with p95. Counts appear about a minute after the requests. |
+| S4  | In the browser's network tab, copy a request's `x-request-id` response header and search the server log for it (`grep <id>`). | Every log line of that request carries `trace_id` = that id, including the `http.request` line with its route template, status and duration.                                                                          |
 
 Remove the grant afterwards: same command with
 `delete from platform_admins where email = 'agent-demo@test.local'`.
