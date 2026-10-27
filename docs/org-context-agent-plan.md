@@ -1,6 +1,7 @@
 # Organisation context agent — plan
 
-Status: **design only, for review** (2026-10-26). Nothing is built. Builds on the
+Status: **decided, O0 next** (decisions recorded 2026-10-27; see the end).
+Nothing is built. Builds on the
 agent framework (`docs/agentic-plan.md` §4–§6), the hiring desk (§13.2) and the
 voice agents' charter (`src/server/voice/charter.ts`, on
 `feat/voice-screening-stage1` at the time of writing).
@@ -119,6 +120,14 @@ for what the website and documents did not answer.
   policies, sitemap-led), HTML stripped to text, 200 KB per page, one full read
   per organisation per hour (a per-org limiter beside the RPC limiter in
   `src/server.ts`).
+- **Monthly re-read.** Once a profile is approved, the website is read again
+  every month on a schedule. Pages whose hash is unchanged are skipped (no AI
+  call). If any page changed, the extraction runs on the changed pages only and
+  the agent raises a **draft version** with the differences, sent for approval
+  like any other change — never auto-approved. The monthly AI cost goes through
+  the gateway under `org_profile_extract`, attributed to the run, so it shows in
+  the organisation's AI usage. A failed read or a draft left waiting raises a
+  health rule (below).
 - Each page's text is stored as a **source** with its URL, fetch time and
   SHA-256, so a later read can tell what changed.
 - Extraction: one `aiJson` call per page with feature `org_profile_extract`,
@@ -135,9 +144,17 @@ for what the website and documents did not answer.
 
 Policies, employee handbooks, product sheets, brand / tone guides, hiring
 SOPs. PDF and DOCX, up to 10 MB and 200 pages each, text extracted with the
-existing server-side extractor (`src/lib/cv-text.server.ts`). Scanned
-documents without a text layer are refused with a reason (no OCR in the first
-cut).
+existing server-side extractor (`src/lib/cv-text.server.ts`).
+
+**Scanned documents (OCR, in O1).** A PDF page or image with no text layer is
+read through the gateway: `aiJson` with the page attached (the gateway already
+takes PDF and image attachments) and feature `org_document_ocr`, with
+`INJECTION_RULES` first in the system prompt and the result zod-validated. The
+recognised text is stored as the source's text and from then on is treated
+exactly like any other document text: it goes into extraction inside
+`untrusted("org_document", …)`, every item must quote it, and the pay / staff-
+name refusals apply. Pages that cannot be read are listed for the person, not
+guessed.
 
 - Same extraction as website pages, per chunk, `untrusted("org_document", …)`,
   feature `org_profile_extract`, quote-checked.
@@ -154,7 +171,8 @@ cut).
 |---|---|
 | `agent_org_context` | the Organisation context agent's own turns |
 | `org_desk` | the organisation desk's conversation turns (as `hiring_desk`) |
-| `org_profile_extract` | reading a website page or document chunk into profile items |
+| `org_profile_extract` | reading a website page or document chunk into profile items (including the monthly re-read) |
+| `org_document_ocr` | reading the text of a scanned document page |
 | `domain_pack_draft` | drafting a domain pack or an org overlay for review |
 
 All through `aiJson` / `aiAgentStep` (`src/lib/ai-gateway.server.ts`), so usage
@@ -200,8 +218,12 @@ refreshed (`bun run agents:lock`).
 - `request_approval` gains a subject `{type: "org_profile", versionId}` and
   `GateKind` gains `org_profile`. Approving or declining in the inbox performs
   the real step, server-side (`assertRole`), never from client status logic.
-- **Approver:** the HR head; the organisation owner may also decide (the HITL
-  role list has no owner role today — see open decisions).
+- **Approver:** the HR head **or** the organisation owner — either may approve
+  any version. The task is addressed to `hr_head`; the owner already passes
+  `assertRole` for an `hr_head` task (`src/lib/auth.middleware.ts`), so no new
+  HITL role is needed.
+- **The approver sees every candidate-visible item listed** on the card, apart
+  from the diff, so nothing reaches candidates unnoticed.
 - The approval card shows the **diff** against the approved version by
   section, each item with its source and quote, items whose visibility
   changed, and anything flagged (suspected injection, refused items and why).
@@ -210,7 +232,19 @@ refreshed (`bun run agents:lock`).
   before approving; an edit by a person is recorded as theirs and as
   `captureFeedback` (the person judged the AI's extraction).
 - **No auto-approval.** Not even at Autonomous level: `org_profile` is not
-  pre-approvable, like requisition approval.
+  pre-approvable, like requisition approval — this includes the monthly
+  re-read's drafts.
+
+### Before a requisition is raised
+
+- **Soft by default.** With no approved profile, the hiring desk and the
+  Requisition agent still work; the desk shows "No organisation profile —
+  agents are working without your organisation's context" with a link, and
+  `orgContextFor` returns that line so agents say so instead of guessing.
+- **Hard on request.** An organisation setting (Organisation → Profile,
+  "Require an approved profile before roles are raised", owner or HR head,
+  audited) makes the desk and `draft_requisition` refuse until a profile is
+  approved, with the reason shown.
 
 ### Versions and audit
 
@@ -229,10 +263,11 @@ A new element `context`, each with a test in `scripts/agent-health.test.ts`:
 | Rule | Severity | Threshold | Plain-language description |
 |---|---|---|---|
 | `context.profile_missing` | warning → serious | any live hiring agent and no approved profile; serious once a requisition is drafted without one | "Agents are drafting roles without knowing your organisation." |
-| `context.profile_stale` | warning | approved more than 180 days ago, or a source changed since (website hash, document re-uploaded) | "Your organisation profile may be out of date." |
-| `context.review_waiting` | warning | a draft waiting for approval more than 7 days | "A profile change is waiting for the HR head." |
+| `context.profile_stale` | warning | approved more than 180 days ago, or a document re-uploaded since | "Your organisation profile may be out of date." |
+| `context.reread_failed` | warning → serious | the monthly website re-read failed; serious after two months in a row | "We could not re-read your website this month." |
+| `context.review_waiting` | warning | a draft (from a person, the agent or the monthly re-read) waiting for approval more than 7 days | "A profile change is waiting for the HR head or owner." |
 | `context.items_refused` | warning | more than 5 items refused (pay, names) in one read | "The website or a document holds data the profile may not keep — check what was read." |
-| `context.pack_review_due` | warning | an adopted domain pack past its review date | "Your domain pack's regulatory content is due for review." |
+| `context.pack_review_due` | warning | an adopted domain pack still a draft after 14 days, or past its review date | "Your domain pack is waiting for your reviewer." |
 
 ## Domain packs
 
@@ -268,23 +303,34 @@ platform domain pack (e.g. banking 1.2)   — curated, versioned, shared
   medical fitness for certain clinical roles) the conditions under which a
   person — not an agent — may ask.
 
-**Who approves:**
+**Packs at launch:** banking, healthcare provider, technology and generic.
 
-- **Platform packs** are drafted (optionally with `domain_pack_draft`) and
-  approved by a platform admin (`requirePlatformAdmin`) with a named domain
-  reviewer recorded on the version; audited. A pack is advice for hiring, not
-  legal advice, and says so.
-- **Adopting a pack** and every **organisation overlay** is approved by the
-  organisation's HR head through the same `org_profile` gate (the overlay is
-  part of the profile version). An organisation in no listed domain starts
-  with the generic pack and its own overlay.
+**Who approves — each organisation signs off its own pack:**
+
+- **Platform packs** are written and published by platform admins
+  (`requirePlatformAdmin`, optionally drafted with `domain_pack_draft`,
+  audited). Publishing makes a pack *available*; it does not make it binding on
+  anyone. A pack is advice for hiring, not legal advice, and says so.
+- **Adopting a pack** in an organisation starts as a **draft**. The agent asks
+  the organisation admin for a reviewer: the admin either **forwards** the pack
+  review to their internal head — an organisation member they name (e.g. the
+  head of compliance or the nursing superintendent) — or **approves it
+  themselves**. The named reviewer, their decision and the time are recorded
+  on the adoption / overlay version and audited.
+- Until that reviewer approves, the pack stays a draft: no agent reads it, and
+  `orgContextFor` uses the organisation profile alone.
+- Every **organisation overlay** (additions and removals) goes the same way
+  and is part of the profile version, so the HR head or owner also sees it at
+  the `org_profile` gate. An organisation in no listed domain starts with the
+  generic pack and its own overlay.
 
 ## How each agent consumes it
 
 One loader, `orgContextFor({orgId, audience, purpose})`, in plain code:
 
 - reads the **current approved** version only (none → an explicit "no
-  approved organisation profile" line, so agents say so instead of guessing);
+  approved organisation profile" line, so agents say so instead of guessing),
+  and only a domain pack the organisation's reviewer has approved;
 - `audience: "candidate"` returns only candidate-visible items;
   `"internal"` returns both;
 - renders facts as a labelled data block, and renders *rules* (never-say
@@ -307,7 +353,7 @@ suggestion ("JD agent: no product line given for the Pharmacy department").
 | **Intake & matching** | internal; pack competencies | domain experience weighed alongside skills (a bank's "relationship manager" is a bank role); licences as must-haves when the pack says so; explanations cite the profile item |
 | **Screening (kits)** | internal; pack regulatory items | kit generation (`screening_kit`) adds the pack's regulatory questions, marked "regulatory", and drops anything on the lawful-question list; HR approves the kit as today |
 | **Interview, Evaluation, Offer, Onboarding** | internal | interview rounds from hiring norms; background checks and document lists from policies (Onboarding: which documents, licence verification); never pay figures from the profile (offers keep using compensation details) |
-| **Voice agents** | **candidate only** | the call brief (`src/server/voice/call-brief.server.ts`, scheduling brief) gains a short "About the organisation" from candidate-visible items; the charter (`src/server/voice/charter.ts`) gains one `may` rule — "What the organisation does, from its approved profile, in a sentence or two" — and the org's never-say list is added to `mustNot` in the brief; the existing rules stay (no staff names, no pay, no invented facts). Questions beyond the profile still go to the hiring team |
+| **Voice agents** | **candidate only** | the call brief (`src/server/voice/call-brief.server.ts`, scheduling brief) gains a short "About the organisation" from candidate-visible items; the charter (`src/server/voice/charter.ts`) gains one `may` rule — "What the organisation does, from its approved profile, in a sentence or two" — and the org's never-say list is added to `mustNot` in the brief; the existing rules stay (no staff names, no pay, no invented facts). One or two sentences at most, from approved candidate-visible items only. Questions beyond the profile still go to the hiring team |
 
 Every consuming agent whose instructions or tools change bumps its `version`
 and the lock is refreshed; the voice charter change is a charter version
@@ -328,6 +374,9 @@ org_profiles                       -- one row per organisation
   current_version_id uuid null → org_profile_versions
   website_url       text null      -- confirmed own domain
   website_confirmed_by uuid null, website_confirmed_at timestamptz null
+  require_profile   boolean default false   -- hard gate before roles are raised
+  last_reread_at    timestamptz null, last_reread_status text null  -- ok | unchanged | failed
+  next_reread_at    timestamptz null
   updated_at        timestamptz
 
 org_profile_versions               -- immutable once approved
@@ -336,8 +385,7 @@ org_profile_versions               -- immutable once approved
   version           int            -- 1, 2, 3 … per org (unique org_id, version)
   status            text           -- draft | pending | approved | changes_requested | declined | superseded
   sections          jsonb          -- {section: [{id, text, visibility, sourceIds[], quote, editedBy?}]}
-  domain_pack_key   text null, domain_pack_version text null
-  overlay           jsonb          -- additions / removals on the pack
+  org_domain_pack_id uuid null → org_domain_packs  -- the approved adoption in force
   refused           jsonb          -- items refused and why (pay figure, staff name, injection)
   created_by        uuid null, agent_run_id uuid null
   submitted_at, decided_at timestamptz null
@@ -350,6 +398,7 @@ org_context_sources
   kind              text           -- conversation | website_page | document
   url               text null      -- website page
   file_key          text null, file_name text null, mime text null, bytes int null
+  ocr_pages         int default 0  -- pages read by OCR
   sha256            text
   text              text           -- extracted text (for re-reads and quotes)
   fetched_at        timestamptz, created_by uuid null
@@ -357,11 +406,21 @@ org_context_sources
 
 domain_packs                       -- platform-level, no org_id
   id                uuid pk
-  key               text           -- banking, healthcare_provider, …
+  key               text           -- banking, healthcare_provider, technology, generic
   version           text           -- unique (key, version)
-  status            text           -- draft | approved | retired
+  status            text           -- draft | published | retired
   content           jsonb          -- role families, competencies, regulatory items, guardrails
-  reviewed_by       uuid, domain_reviewer text, reviewed_at, review_due timestamptz
+  published_by      uuid, published_at, review_due timestamptz
+
+org_domain_packs                   -- one organisation's adoption of a pack
+  id                uuid pk
+  org_id            uuid → organizations
+  pack_id           uuid → domain_packs
+  overlay           jsonb          -- this org's additions / removals
+  status            text           -- draft | approved | superseded
+  reviewer_id       uuid           -- the named org member (or the admin themself)
+  requested_by      uuid, requested_at timestamptz
+  decided_at        timestamptz null, decision_note text null
 
 agent_runs        + org_profile_version_id uuid null
 hiring_conversations + kind text default 'hiring'   -- 'org_profile' for the organisation desk
@@ -392,32 +451,32 @@ shows a one-line notice with a link while no profile is approved.
 | Step | What | Done when |
 |---|---|---|
 | O0 | Migration; Organisation → Profile page (view, edit by hand, versions, diff); `org_profile` gate and approval card; pay / name validators; audit | an HR head approves a hand-written profile; tests pass for the validators and the gate |
-| O1 | Organisation context agent: manifest, tools, website read (`safeFetchText`), document read, extraction with quote check; organisation desk thread; AI features; evals | real-agent evals pass, including the planted-instruction page and pay / name refusals |
-| O2 | `orgContextFor`; Hiring desk, Requisition and JD agents consume it; run records the version; health rules; manual and journey step | a JD for a non-tech role reads like the organisation's own; health shows a missing profile |
-| O3 | Domain packs (banking, healthcare provider, technology, generic) and overlays; Intake and Screening kit consume them | a nursing role's kit carries the registration question; a bank role's scoring weighs domain experience |
+| O1 | Organisation context agent: manifest, tools, website read (`safeFetchText`), document read with OCR for scanned pages, extraction with quote check; organisation desk thread; AI features; evals | real-agent evals pass, including the planted-instruction page, a scanned policy, and pay / name refusals |
+| O2 | `orgContextFor`; Hiring desk, Requisition and JD agents consume it; soft gate and the hard-gate setting; monthly website re-read raising drafts; run records the version; health rules; manual and journey step | a JD for a non-tech role reads like the organisation's own; health shows a missing profile; a changed site raises a draft |
+| O3 | Domain packs (banking, healthcare provider, technology, generic) and overlays, with the reviewer flow; Intake and Screening kit consume them. Packs ship as **drafts** in each organisation until its named reviewer approves | a nursing role's kit carries the registration question; a bank role's scoring weighs domain experience; an unapproved pack is not read |
 | O4 | Voice briefs and charter change; Interview / Offer / Onboarding norms and policies | evals: the call says what the organisation does and keeps internal items out |
 | O5 | Pilot with one finance and one healthcare organisation, HR reviewing the first versions | — |
 
-## Open decisions for the product owner
+## Decisions (2026-10-27)
 
-1. **Hard or soft gate.** Should a requisition be blocked until the profile
-   is approved, or allowed with a visible "no organisation profile" warning?
-   Recommended: soft by default, with an organisation setting to make it
-   hard.
-2. **Approver.** HR head only, or HR head *or* organisation owner? (The
-   approval roles have no owner role today; adding one touches the HITL role
-   list.) Recommended: HR head, owner as fallback when no HR head exists.
-3. **Candidate visibility default.** Should new items default to `internal`
-   (safer, more clicks) or by section as in the table above? Recommended: by
-   section, with the approver seeing every candidate-visible item listed.
-4. **Domain packs at launch.** Which packs first, and who is the named domain
-   reviewer for banking and healthcare? Recommended: banking, healthcare
-   provider, technology, generic.
-5. **Re-reading the website.** Manual only, or a monthly scheduled re-read that
-   raises a draft when the site changed? Recommended: manual plus a monthly
-   check that only raises the staleness health rule.
-6. **Scanned documents.** Is OCR needed in the first cut?
-   Recommended: no; refuse with a reason.
-7. **Voice agents answering about the organisation.** Is one or two sentences
-   about what the organisation does acceptable on a call, or should calls
-   stay silent on it? Recommended: allow, candidate-visible items only.
+Decided by the product owner; the sections above reflect them.
+
+1. **Gate:** soft by default — a "no organisation profile" warning — with an
+   organisation setting to make it hard.
+2. **Approver:** the HR head **or** the organisation owner; either may approve
+   any version. The gate uses role `hr_head`, which the owner already passes.
+3. **Visibility default:** by section, as in the profile table; the approver
+   sees every candidate-visible item listed.
+4. **Domain packs:** all four at launch — banking, healthcare provider,
+   technology, generic — after O0–O2. Sign-off belongs to each organisation:
+   the admin forwards the pack review to a named member (their internal head)
+   or approves it themselves; the reviewer is recorded on the adoption /
+   overlay version. Packs remain advice for hiring, not legal advice.
+5. **Website:** a monthly scheduled re-read that raises a **draft** version for
+   approval when the site changed; never auto-approved; its AI cost goes through
+   the gateway; health rules for a failed read and a waiting draft.
+6. **OCR:** included in O1 for scanned documents, through the gateway
+   (`org_document_ocr`), fenced with `untrusted()`, with the same quote check
+   and pay / name refusals.
+7. **Voice:** calls may say one or two sentences about what the organisation
+   does, from approved candidate-visible items only.
