@@ -522,71 +522,95 @@ export const inviteMember = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const orgId = await assertAdmin(context.userId);
-    const [org] = await db
-      .select({ status: organizations.status })
-      .from(organizations)
-      .where(eq(organizations.id, orgId))
-      .limit(1);
-    if ((org?.status ?? "active") !== "active")
-      throw new Error(
-        "Your organisation is not approved yet — internal users can be added after approval.",
-      );
-    const email = data.email.toLowerCase();
-    const problem = workEmailProblem(email);
-    if (problem) throw new Error(problem);
-
-    // The owner's verified domain defines who counts as an internal user.
-    const [owner] = await db
-      .select({ email: orgMembers.email })
-      .from(orgMembers)
-      .where(and(eq(orgMembers.orgId, orgId), eq(orgMembers.isOwner, true)))
-      .limit(1);
-    if (owner?.email && registrableDomain(owner.email) !== registrableDomain(email))
-      throw new Error(
-        `Only ${registrableDomain(owner.email)} addresses can be invited into this organisation.`,
-      );
-
-    const [existingUser] = await db
-      .select({ id: orgMembers.id })
-      .from(orgMembers)
-      .where(and(eq(orgMembers.orgId, orgId), ilike(orgMembers.email, email)))
-      .limit(1);
-    if (existingUser) throw new Error("That email is already on the roster.");
-
-    const [row] = await db
-      .insert(orgMembers)
-      .values({
-        orgId,
-        email,
-        fullName: data.fullName.trim() || null,
-        title: data.title.trim() || null,
-        invitedRole: data.role,
-        invitedBy: context.userId,
-        status: "invited",
-      })
-      .returning({ id: orgMembers.id });
-
-    const [orgRow] = await db
-      .select({ name: organizations.name })
-      .from(organizations)
-      .where(eq(organizations.id, orgId))
-      .limit(1);
-    const [inviter] = await db
-      .select({ fullName: orgMembers.fullName, email: orgMembers.email })
-      .from(orgMembers)
-      .where(and(eq(orgMembers.userId, context.userId), eq(orgMembers.orgId, orgId)))
-      .limit(1);
-    await notifyInvitedMember({
-      email,
-      orgName: orgRow?.name ?? "your organisation",
-      role: data.role,
-      title: data.title.trim() || null,
-      inviteeName: data.fullName.trim() || null,
-      inviterName: inviter?.fullName ?? inviter?.email ?? null,
-      memberId: row?.id ?? null,
-    });
-    return { ok: true, notified: true };
+    return inviteMemberCore(orgId, context.userId, data);
   });
+
+/**
+ * Invite a person into the organisation with one approval role (the caller has
+ * checked the inviter is an admin). Company-domain gate as before; audited
+ * `member.invited` — an invite is a role grant.
+ */
+export async function inviteMemberCore(
+  orgId: string,
+  inviterUserId: string,
+  data: { email: string; role: AppRole; title: string; fullName: string },
+): Promise<{ ok: true; notified: true }> {
+  const context = { userId: inviterUserId };
+  const [org] = await db
+    .select({ status: organizations.status })
+    .from(organizations)
+    .where(eq(organizations.id, orgId))
+    .limit(1);
+  if ((org?.status ?? "active") !== "active")
+    throw new Error(
+      "Your organisation is not approved yet — internal users can be added after approval.",
+    );
+  const email = data.email.toLowerCase();
+  const problem = workEmailProblem(email);
+  if (problem) throw new Error(problem);
+
+  // The owner's verified domain defines who counts as an internal user.
+  const [owner] = await db
+    .select({ email: orgMembers.email })
+    .from(orgMembers)
+    .where(and(eq(orgMembers.orgId, orgId), eq(orgMembers.isOwner, true)))
+    .limit(1);
+  if (owner?.email && registrableDomain(owner.email) !== registrableDomain(email))
+    throw new Error(
+      `Only ${registrableDomain(owner.email)} addresses can be invited into this organisation.`,
+    );
+
+  const [existingUser] = await db
+    .select({ id: orgMembers.id })
+    .from(orgMembers)
+    .where(and(eq(orgMembers.orgId, orgId), ilike(orgMembers.email, email)))
+    .limit(1);
+  if (existingUser) throw new Error("That email is already on the roster.");
+
+  const [row] = await db
+    .insert(orgMembers)
+    .values({
+      orgId,
+      email,
+      fullName: data.fullName.trim() || null,
+      title: data.title.trim() || null,
+      invitedRole: data.role,
+      invitedBy: context.userId,
+      status: "invited",
+    })
+    .returning({ id: orgMembers.id });
+
+  const [orgRow] = await db
+    .select({ name: organizations.name })
+    .from(organizations)
+    .where(eq(organizations.id, orgId))
+    .limit(1);
+  const [inviter] = await db
+    .select({ fullName: orgMembers.fullName, email: orgMembers.email })
+    .from(orgMembers)
+    .where(and(eq(orgMembers.userId, context.userId), eq(orgMembers.orgId, orgId)))
+    .limit(1);
+  await notifyInvitedMember({
+    email,
+    orgName: orgRow?.name ?? "your organisation",
+    role: data.role,
+    title: data.title.trim() || null,
+    inviteeName: data.fullName.trim() || null,
+    inviterName: inviter?.fullName ?? inviter?.email ?? null,
+    memberId: row?.id ?? null,
+  });
+  const { writeAudit } = await import("../server/audit");
+  await writeAudit({
+    actor: inviter?.email ?? `user:${inviterUserId}`,
+    actorUserId: inviterUserId,
+    orgId,
+    action: "member.invited",
+    entityType: "org_member",
+    entityId: row?.id ?? null,
+    detail: { email, role: data.role },
+  });
+  return { ok: true, notified: true };
+}
 
 export const setMemberRole = createServerFn({ method: "POST" })
   .middleware([requireIdentity])

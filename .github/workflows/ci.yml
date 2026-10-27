@@ -125,5 +125,19 @@ jobs:
         run: bun test scripts/job-distribution.test.ts
       - name: Distribution agent (portal credit, role-limited CVs, daily check)
         run: bun test scripts/distribution-agent.test.ts
+      - name: Voice foundation (G.711, resampler, RTP, SIP, live-session framing)
+        run: bun test scripts/voice.test.ts
+      - name: Phone screening settings (numbers, policy, voice credential, readiness)
+        run: bun test scripts/phone-screening.test.ts
+      - name: Phone screening call (brief, in-call tools, outcomes, window, dispatcher)
+        run: bun test scripts/screening-call.test.ts
+      - name: Voice agents' charter (dos and don'ts, generated doc in sync)
+        run: bun test scripts/voice-charter.test.ts
+      - name: Scheduling call (tools, brief, timing, booking, call-back, opt-out)
+        run: bun test scripts/scheduling-call.test.ts
+      - name: Interview with (confidential panel wording)
+        run: bun test scripts/interview-with.test.ts
+      - name: Interview panels (profiles, hiring manager, plan, panels, stand-ins)
+        run: bun test scripts/interview-panels.test.ts
       - name: Companion portal form filler (field matching)
         run: bun test scripts/portal-fill.test.ts

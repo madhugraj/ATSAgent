@@ -4,7 +4,7 @@
  * A round is complete when every interviewer on it has submitted a scorecard
  * (legacy scorecards without a round count as complete for their level).
  */
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { db } from "../server/db";
 import { applications, evaluations, interviews, requisitions } from "@db/schema";
@@ -40,6 +40,11 @@ export async function savePlan(
   plan: unknown,
 ): Promise<InterviewPlan> {
   const parsed = InterviewPlanSchema.parse(plan);
+  const inUse = await roundsInUse(orgId, requisitionId);
+  if (parsed.rounds.length < inUse)
+    throw new Error(
+      `Round L${inUse} is already in use for this role (a candidate is in it or an interview is booked) — keep at least ${inUse} round${inUse > 1 ? "s" : ""}.`,
+    );
   const done = await db
     .update(requisitions)
     .set({ interviewPlan: parsed })
@@ -47,6 +52,24 @@ export async function savePlan(
     .returning({ id: requisitions.id });
   if (!done.length) throw new Error("Requisition not found.");
   return parsed;
+}
+
+/**
+ * The highest round a role already uses: a candidate at that stage, or a
+ * booked or held interview at that level. A plan may not drop below it.
+ */
+export async function roundsInUse(orgId: string, requisitionId: string): Promise<number> {
+  const [row] = (await db.execute(sql`
+    select greatest(
+      coalesce((select max(substring(a.stage::text from 2)::int) from applications a
+        where a.org_id = ${orgId} and a.requisition_id = ${requisitionId}
+          and a.stage::text in ('l1', 'l2', 'l3')), 0),
+      coalesce((select max(i.level) from interviews i
+        join applications a on a.id = i.application_id
+        where i.org_id = ${orgId} and a.org_id = ${orgId} and a.requisition_id = ${requisitionId}
+          and i.status not in ('cancelled', 'no_show')), 0)
+    ) as n`)) as unknown as { n: number }[];
+  return Number(row?.n ?? 0);
 }
 
 export const emailsOf = (r: {

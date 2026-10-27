@@ -24,6 +24,7 @@ ATSIQ by Yavar AI is an enterprise recruiting intelligence platform. It combines
 - Candidate email notifications (acknowledgment, stage update, interview invitation, offer) with per-organisation toggles
 - Explainable JD↔CV scoring, social-claim verification and recruiter overrides
 - Contextual screening kits, private audio transcription, grading and interview scorecards
+- AI phone screening (optional, per organisation): the Screening call agent phones shortlisted candidates through the organisation's PBX line and its own AI voice key — says it is an AI, asks consent, asks the kit's questions (never pay), retries and takes callbacks within calling hours, falls back to the written assessment; only the answered questions are graded, and the hiring desk shows the result with *Why this score* and asks a person who moves on (`docs/voice-screening-agent.md`)
 - Google Meet, Microsoft Teams and Zoom meeting integrations
 - Talent pool ownership, referrals, deduplication, internal job postings and reusable organisation knowledge
 - Live compensation research with cited evidence and saved organisation corrections

@@ -32,10 +32,42 @@ We credit reporters in release notes on request.
   server-validated allowlist and is never inferred from browser storage.
 - Secrets: `SECRET_ENCRYPTION_KEY` encrypts stored credentials (AES-256-GCM); OAuth state
   is HMAC-signed with required secrets; no secret values are committed. Every organisation supplies
-  its own AI provider key, and no deployment-level AI key is used as a fallback.
+  its own AI provider key, and no deployment-level AI key is used as a fallback. That includes the
+  AI voice for phone screening: the organisation's Google API key or a Vertex AI service-account key
+  it uploads (validated, stored encrypted, reported to the browser only as "stored"; saving and
+  removing it are audited `ai.voice_credential.save` / `.remove`). The PBX extension the voice
+  worker dials from (`SIP_*`) is deployment configuration; phone numbers are never logged.
+  On a call the assistant says it is an AI; nothing is recorded before the candidate consents, the
+  transcript is kept only after consent (no audio is stored), answers are accepted only for the kit's
+  questions, and what it may write about the candidate is notice period and availability — the
+  schema refuses pay fields (audited `compensation.recorded`, actor `agent:screening_call`).
+  A candidate who asks not to be called by the AI assistant (on a call, or told to the team) is
+  never requested, dialled or retried again — checked when a call is asked for, when it is claimed
+  and just before dialling — and calls already waiting are cancelled (audited
+  `candidate.ai_call_opt_out`; only TA, the HR head or the CBO can clear it, audited
+  `candidate.ai_call_opt_in`).
+  A scheduling call books only the e-mailed times or up to three alternates checked free when it
+  is arranged — by number, never a free-form time — through the same booking core as the
+  candidate's link (one booking per offer); a person approves each call (audited
+  `scheduling_call.requested`).
+  Staff are confidential to candidates: the interview invite e-mail, its calendar file and the
+  time-choice page say only who an interview is with ("the hiring team" / "a panel of N from the
+  hiring team", `src/lib/interview-with.ts`), never a name; and on calls neither voice agent names or describes the hiring manager,
+  recruiters or the interview panel — the call's facts carry only how many interviewers there are,
+  and the only contact given is the organisation's mailbox. Each voice agent's dos and don'ts are
+  one charter (`src/server/voice/charter.ts`, `docs/voice-agents-charter.md`), printed into every
+  call and the source of its must-never list.
 - Rate limiting on all public HTTP routes and server-function RPCs (`src/server.ts`).
 - SSRF gate: server-side fetches of user-supplied URLs go through `src/server/safe-fetch.ts`.
-- Auditing: privileged actions append to `audit_log` (`src/server/audit.ts`).
+- Auditing: privileged actions append to `audit_log` (`src/server/audit.ts`), including member
+  invites (`member.invited`) and interviewer-profile changes (`member.interviewer_profile.set`,
+  owner, CBO or HR head only), a role's hiring manager (`requisition.hiring_manager_set`, an active
+  member only) interview-plan changes (`requisition.interview_plan_updated`) and approved interview panels
+  (`role_panel.approved`, decided by the role's hiring manager or the HR head — agents only propose
+  with `propose_panel`, a proposal tool that always opens a person's decision), stand-ins for one
+  candidate's round (`round_substitute.approved`, same deciders, proposed with `propose_substitute`)
+  and interviewers saying they cannot make a round (`interview.interviewer_unavailable`, only
+  someone on that round, before it starts).
 - AI safety: untrusted CV, JD, profile and mail text is delimited before prompting; structured model
   responses are schema-validated before use. AI decisions retain evidence and permit audited human override.
 - AI usage ledger: every provider request is recorded in `ai_usage_events`

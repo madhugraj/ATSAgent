@@ -42,6 +42,7 @@ const KIND_TOGGLE: Record<
   interview_slots: "interviewEnabled",
   compensation_form: "stageEnabled",
   offer_negotiation: "offerEnabled",
+  screening_call_booked: "stageEnabled",
 };
 
 export async function getOrgEmailSettings(orgId: string): Promise<EmailSettingsEffective> {

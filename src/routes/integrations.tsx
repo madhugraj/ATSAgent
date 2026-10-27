@@ -12,6 +12,7 @@ import {
   KeyRound,
   Loader2,
   Mail,
+  Phone,
   Plug,
   RefreshCw,
   Sparkles,
@@ -33,6 +34,10 @@ import {
   saveAiSettings,
   testAiModel,
 } from "@/lib/ai-settings.functions";
+import {
+  removeVoiceServiceAccount,
+  saveVoiceServiceAccount,
+} from "@/lib/phone-screening.functions";
 import { getEmailSettings, saveEmailSettings } from "@/lib/email-settings.functions";
 import {
   disconnectLinkedIn,
@@ -1778,7 +1783,106 @@ function AiModelCard() {
           </Button>
         ) : null}
       </div>
+
+      {s ? <VoiceCredentialBlock voice={s.voice} /> : null}
     </article>
+  );
+}
+
+/**
+ * The AI voice for phone screening: a Google Cloud (Vertex AI) service-account
+ * key, or else the Google Gemini API key above. Stored encrypted; never shown again.
+ */
+function VoiceCredentialBlock({ voice }: { voice: { serviceAccount: boolean; apiKey: boolean } }) {
+  const qc = useQueryClient();
+  const save = useServerFn(saveVoiceServiceAccount);
+  const remove = useServerFn(removeVoiceServiceAccount);
+  const [json, setJson] = useState("");
+  const [fileName, setFileName] = useState("");
+  const [location, setLocation] = useState("us-central1");
+  const [busy, setBusy] = useState(false);
+
+  async function run(action: "save" | "remove") {
+    setBusy(true);
+    try {
+      if (action === "save") {
+        await save({ data: { json, location: location.trim() } });
+        toast.success("Voice service account stored");
+        setJson("");
+        setFileName("");
+      } else {
+        await remove({ data: undefined });
+        toast.success("Voice service account removed");
+      }
+      qc.invalidateQueries({ queryKey: ["ai_settings"] });
+      qc.invalidateQueries({ queryKey: ["phone_screening"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-5 border-t pt-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Phone className="size-4 text-primary" />
+        <h4 className="text-sm font-semibold">Voice for phone screening</h4>
+        <Badge variant={voice.serviceAccount || voice.apiKey ? "secondary" : "outline"}>
+          {voice.serviceAccount
+            ? "Google Cloud service account stored"
+            : voice.apiKey
+              ? "Using your Google Gemini API key"
+              : "Not set — phone screening unavailable"}
+        </Badge>
+      </div>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Phone screening talks through Google Gemini Live. It uses your Google Cloud (Vertex AI)
+        service account if you store one here, otherwise the Google Gemini API key above. Like your
+        other keys, it is billed to your account only, stored encrypted and never shown again.
+      </p>
+      <div className="mt-3 grid gap-3 sm:grid-cols-3">
+        <div className="space-y-1.5 sm:col-span-2">
+          <Label htmlFor="voice-sa" className="flex items-center gap-1.5">
+            <KeyRound className="size-3.5" /> Service-account key file (JSON)
+          </Label>
+          <Input
+            id="voice-sa"
+            type="file"
+            accept="application/json,.json"
+            onChange={async (e) => {
+              const f = e.target.files?.[0];
+              setFileName(f?.name ?? "");
+              setJson(f ? await f.text() : "");
+            }}
+          />
+          {fileName ? (
+            <p className="text-xs text-muted-foreground">
+              {fileName} ready — press Store to save it.
+            </p>
+          ) : null}
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="voice-region">Region</Label>
+          <Input
+            id="voice-region"
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            placeholder="us-central1"
+          />
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Button size="sm" onClick={() => void run("save")} disabled={busy || !json}>
+          {busy ? <Loader2 className="size-3.5 animate-spin" /> : null} Store service account
+        </Button>
+        {voice.serviceAccount ? (
+          <Button size="sm" variant="ghost" onClick={() => void run("remove")} disabled={busy}>
+            Remove service account
+          </Button>
+        ) : null}
+      </div>
+    </div>
   );
 }
 

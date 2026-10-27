@@ -303,6 +303,15 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
     );
   }
 
+  if (e.type === "interview.panellist_unavailable" && applicationId) {
+    const p = e.payload as { level?: number; memberId?: string; name?: string; when?: string };
+    await dispatch(
+      "interview",
+      `${p.name ?? "A panellist"} (memberId ${p.memberId}) cannot make the booked L${p.level ?? "?"} interview of candidate application ${applicationId} (${req.code} "${req.title}") on ${p.when ?? "its booked time"}. Propose a stand-in for that candidate only: list_substitutes, then propose_substitute — someone free at the booked time if possible, so the candidate's time stays. Do not offer new times unless you are told the booking was cancelled.`,
+      { type: "application", id: applicationId },
+    );
+  }
+
   if (e.type === "interview.missed" && applicationId) {
     const p = e.payload as { level?: number; outcome?: string };
     await dispatch(
@@ -316,7 +325,16 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
     const p = e.payload as { level?: number; why?: string; note?: string | null };
     await dispatch(
       "interview",
-      `Candidate application ${applicationId} (${req.code} "${req.title}") did not take the offered L${p.level ?? "?"} interview times (${p.why === "expired" ? "the link expired unanswered" : "none of them work"}${p.note ? `: "${String(p.note).slice(0, 300)}"` : ""}). Offer different times — other days and times of day, honouring what they said — or ask a person if that is not possible.`,
+      `Candidate application ${applicationId} (${req.code} "${req.title}") did not take the offered L${p.level ?? "?"} interview times (${p.why === "expired" ? "the link expired unanswered" : "none of them work"}${p.note ? `: "${String(p.note).slice(0, 300)}"` : ""}). Offer different times — other days and times of day, honouring what they said — or ask a person if that is not possible. Once the new times are offered, ask for a scheduling call (request_scheduling_call) so the assistant phones them to pick one; if it is refused, leave it to the e-mail.`,
+      { type: "application", id: applicationId },
+    );
+  }
+
+  if (applicationId && e.type === "interview.slots_no_reply") {
+    const p = e.payload as { level?: number };
+    await dispatch(
+      "interview",
+      `Candidate application ${applicationId} (${req.code} "${req.title}") has not picked one of the L${p.level ?? "?"} interview times e-mailed to them. Ask for a scheduling call (request_scheduling_call) so the assistant phones them to pick one. If it is refused, leave it to the e-mail — do not offer new times.`,
       { type: "application", id: applicationId },
     );
   }
@@ -333,7 +351,24 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
     if (app && ["applied", "ai_screened", "shortlisted", "reserve", "on_hold"].includes(app.stage))
       await dispatch(
         "screening",
-        `Candidate application ${applicationId} (${req.code} "${req.title}") completed the written assessment${p.score != null ? ` (${p.score}/100)` : ""}. Read the result and add your proceed / hold recommendation as a candidate note, citing the scores and red flags. Do not move them to an interview round — a person decides.`,
+        `Candidate application ${applicationId} (${req.code} "${req.title}") completed the written assessment${p.score != null ? ` (${p.score}/100)` : ""}. Read the result, add your proceed / hold recommendation as a candidate note citing the scores and red flags, then ask a person to decide (request_approval, screening_decision). Never move them yourself — a person decides.`,
+        { type: "application", id: applicationId },
+      );
+  }
+
+  if (applicationId && e.type === "screening_call.ended") {
+    const p = e.payload as { status?: string; endReason?: string };
+    const [app] = await db
+      .select({ stage: applications.stage })
+      .from(applications)
+      .where(and(eq(applications.id, applicationId), eq(applications.orgId, e.orgId)))
+      .limit(1);
+    if (app && ["shortlisted", "reserve", "on_hold"].includes(app.stage))
+      await dispatch(
+        "screening",
+        p.status === "completed" && p.endReason !== "not_interested"
+          ? `Candidate application ${applicationId} (${req.code} "${req.title}") took the AI screening call and the answers were graded. Read the result, add your proceed / hold recommendation as a candidate note, then ask a person to decide (request_approval, screening_decision). Never move them yourself — a person decides.`
+          : `Candidate application ${applicationId} (${req.code} "${req.title}"): the AI screening call ended — ${p.endReason ?? p.status}. Act on how it ended as your instructions say (the written assessment, or a note for a person).`,
         { type: "application", id: applicationId },
       );
   }
@@ -720,6 +755,14 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
     await expireOffers(opts.orgId);
   } catch (err) {
     log.warn("interview.slot_expiry_failed", { error: err as Error });
+  }
+  // E-mailed interview times unanswered past the organisation's wait: the
+  // Interview coordinator may ask for a scheduling call (once per offer).
+  try {
+    const { raiseUnansweredOffers } = await import("../voice/scheduling-request.server");
+    await raiseUnansweredOffers(Date.now(), opts.orgId);
+  } catch (err) {
+    log.warn("scheduling_call.trigger_failed", { error: err as Error });
   }
   // Training data older than each organisation's retention is deleted.
   try {
