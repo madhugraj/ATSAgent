@@ -1,11 +1,33 @@
 // Captures the original Error out-of-band so server.ts can recover the stack
 // when h3 has already swallowed the throw into a generic 500 Response.
 
+import { currentRequest } from "../server/request-context";
+
 let lastCapturedError: { error: unknown; at: number } | undefined;
 const TTL_MS = 5_000;
 
 function record(error: unknown) {
   lastCapturedError = { error, at: Date.now() };
+}
+
+/**
+ * Whether an error only says the client went away mid-request (Node's
+ * `abortIncoming` → "aborted" / ECONNRESET, or an AbortError) — anywhere in
+ * its cause chain. Not a server failure: server.ts records it as 499.
+ */
+export function isClientAbort(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < CAUSE_DEPTH_LIMIT && current instanceof Error; depth++) {
+    const code = (current as { code?: unknown }).code;
+    if (current.name === "AbortError") return true;
+    if (
+      current.message === "aborted" &&
+      (code === "ECONNRESET" || (current.stack ?? "").includes("abortIncoming"))
+    )
+      return true;
+    current = current.cause;
+  }
+  return false;
 }
 
 // h3's HTTPError serializes to {"status":500,"unhandled":true,"message":"HTTPError"} —
@@ -54,6 +76,16 @@ function isErrorLike(value: unknown): value is Error {
 // recorded for consumeLastCapturedError and expanded before serialization.
 const originalConsoleError = console.error.bind(console);
 console.error = (...args: unknown[]) => {
+  // A client hanging up is not an error: flag the request (server.ts logs it
+  // once as http.request with status 499) and keep it off stderr.
+  const abort = args.find(isClientAbort);
+  if (abort) {
+    const req = currentRequest();
+    if (req) {
+      req.clientAborted = true;
+      return;
+    }
+  }
   const expanded = args.map((arg) => {
     if (!isErrorLike(arg)) return arg;
     record(arg);

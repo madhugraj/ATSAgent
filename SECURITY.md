@@ -68,6 +68,14 @@ We credit reporters in release notes on request.
   candidate's round (`round_substitute.approved`, same deciders, proposed with `propose_substitute`)
   and interviewers saying they cannot make a round (`interview.interviewer_unavailable`, only
   someone on that round, before it starts).
+- Observability data: request logs, metrics and SLO tables hold ids, route templates (ids replaced
+  by `:id`), status, durations and counts only — never request bodies, candidate content, prompts,
+  tokens from URLs or vendor/model names. Metric labels are a fixed low-cardinality set
+  (`route_group`, `method`, `status_class`). `/metrics` is off unless `METRICS_TOKEN` is set, then
+  requires it as a bearer token (constant-time compare) and is rate-limited like other public paths.
+  The Service health page and its server function are platform-admin only; SLO alert webhooks are
+  HMAC-signed and sent through `safeFetch`; SLO alert notifications are audited. Incoming
+  `traceparent` headers are validated and only their ids are reused.
 - AI safety: untrusted CV, JD, profile and mail text is delimited before prompting; structured model
   responses are schema-validated before use. AI decisions retain evidence and permit audited human override.
 - AI usage ledger: every provider request is recorded in `ai_usage_events`

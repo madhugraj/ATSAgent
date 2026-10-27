@@ -33,6 +33,14 @@
 - [x] Platform console → Organisation agreements: which organisation accepted which version, when and by whom, with history
 - [ ] Legal review of the Terms and DPA drafts (commercial terms, named sub-processors and objection process, hosting region and transfers, data export at termination, breach timeframe)
 
+## App-wide observability: correlation, request metrics, SLOs (2026-10-27)
+
+- [x] Request correlation: per-request W3C trace context (`traceparent` accepted and returned, `x-request-id`), carried by every log line in the request; agent runs started from a request join its trace, and lines written while a run executes carry the run's trace; logs use one 32-hex trace form (also on the run trail)
+- [x] One `http.request` log line per request (route template, route group, status class, duration); in-process request counters and latency histogram on a token-protected, rate-limited OpenMetrics `/metrics`; fixed low-cardinality label set, documented
+- [x] SLOs in one file (`src/server/slo.ts`): server-function availability and latency, agent run success; per-minute SLI counts per replica (migration `0053`); Platform → Service health with SLI vs objective, error budget and burn rates; multi-window burn-rate alerts to platform admins (e-mail, signed webhook, log line, audit)
+- [x] Cloud Monitoring as code (`infra/monitoring/`): log-based metrics, dashboard, burn-rate / latency / scheduler-stalled / app-alert policies, optional Managed Prometheus scrape; `scripts/observability.test.ts` (14 tests)
+- [ ] Not built: outbound `traceparent` on calls to integrations and AI providers; Cloud Trace span export for HTTP requests; no voice worker exists in this repository to propagate context into
+
 ## Dependency security (2026-10-24)
 
 - [x] zod 4 (GHSA-mrhx-c7xc-m3w5, memory exhaustion on oversized constrained collections): all schemas import `zod`; ids are checked as RFC 9562 UUIDs everywhere (the local demo fixture ids were made valid); every agent got a patch version because its generated tool contracts changed wording only

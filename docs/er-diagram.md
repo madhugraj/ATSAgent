@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-90 tables across 9 domains.
+92 tables across 9 domains.
 
 ## Identity & access
 
@@ -1343,10 +1343,12 @@ erDiagram
 | `screening_kits` | Screening & interviews | 11 | — |
 | `screening_prep_jobs` | Screening & interviews | 10 | (application_id) |
 | `screening_runs` | Screening & interviews | 23 | — |
+| `service_request_minutes` | — | 7 | — |
 | `sessions` | Identity & access | 8 | (token_hash) |
 | `skill_edges` | Intelligence | 8 | — |
 | `skill_evidence` | Intelligence | 9 | — |
 | `skill_nodes` | Intelligence | 15 | (orgId+slug) |
+| `slo_alerts` | — | 10 | — |
 | `social_profiles` | Candidates & pipeline | 13 | (candidateId+provider) |
 | `source_integrations` | Sourcing & integrations | 17 | (orgId+provider) |
 | `stage_events` | Candidates & pipeline | 9 | — |
