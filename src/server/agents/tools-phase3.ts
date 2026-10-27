@@ -6,7 +6,7 @@
  * Evaluation agent asks for it with request_approval (hiring_decision).
  */
 import { and, asc, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
-import { z } from "zod/v4";
+import { z } from "zod";
 
 import { db } from "../db";
 import {

@@ -5,7 +5,7 @@
  * the run's principal so `assertRole` and org predicates apply exactly as for
  * that person. Agents only see the tools their definition lists.
  */
-import type { z } from "zod/v4";
+import type { z } from "zod";
 
 import type { AiFeature } from "../ai-usage";
 import type { AgentType } from "@db/schema";

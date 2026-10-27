@@ -24,6 +24,11 @@
 - [ ] Interview panels P4 (plan: docs/interview-panel-plan.md): interviewer profiles registered once by the admin; hiring manager as a member; an editable interview plan; the panel proposed per role and round, approved by a person, reused and changeable
 - [ ] Stage 1.2 S3–S4: the interviews board and candidate-page view, a "call me" choice and HR's "call now", a pilot (docs/voice-scheduling-call-plan.md)
 
+## Dependency security (2026-10-24)
+
+- [x] zod 4 (GHSA-mrhx-c7xc-m3w5, memory exhaustion on oversized constrained collections): all schemas import `zod`; ids are checked as RFC 9562 UUIDs everywhere (the local demo fixture ids were made valid); every agent got a patch version because its generated tool contracts changed wording only
+- [x] DOMPurify pinned to 3.4.17 or later through `overrides` (pulled in by jsPDF; GHSA-cg2g-xh64-v4q7, GHSA-mrv2-3pqr-j5jr)
+
 ## Distribution agent (2026-10-21)
 
 - [x] Distribution agent v1.0.0 (owner HR head): advertises approved roles across the job portals by the route each allows — requests feed listings (HR head approves; pre-approvable per feed for Autonomous), reminds a person to post where no integration exists with the role's ready text — and runs a daily check: CVs arriving by portal, listings quiet for a week, unread careers-inbox mail, portal CVs with no role

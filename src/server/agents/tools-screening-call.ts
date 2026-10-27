@@ -10,7 +10,7 @@
  *   against the in-progress call its run belongs to.
  */
 import { and, desc, eq, isNull } from "drizzle-orm";
-import { z } from "zod/v4";
+import { z } from "zod";
 
 import { screeningCalls } from "@db/schema";
 import { db } from "../db";

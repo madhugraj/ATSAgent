@@ -15,7 +15,6 @@
 
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { z as zodV4 } from "zod/v4";
 
 import { db } from "../server/db";
 import { aiProviderCredentials, aiSettings } from "@db/schema";
@@ -1043,11 +1042,11 @@ const AGENT_STEP_TIMEOUT_MS = 120_000;
 const AGENT_MAX_OUTPUT_TOKENS = 8192;
 
 /**
- * JSON Schema for a tool's input, from a zod v4 schema (`import { z } from "zod/v4"`).
+ * JSON Schema for a tool's input, from a zod schema.
  * The `$schema` marker is dropped: providers want the bare object schema.
  */
 export function toolParameters(schema: unknown): Record<string, unknown> {
-  const json = (zodV4.toJSONSchema(schema as never) ?? {}) as Record<string, unknown>;
+  const json = (z.toJSONSchema(schema as never) ?? {}) as Record<string, unknown>;
   delete json["$schema"];
   return json;
 }
@@ -1422,7 +1421,7 @@ export function withToday(system: string, now = new Date()): string {
 function outputSchemaOf(schema: unknown): unknown {
   if (!schema) return null;
   try {
-    return zodV4.toJSONSchema(schema as never);
+    return z.toJSONSchema(schema as never);
   } catch {
     return null;
   }

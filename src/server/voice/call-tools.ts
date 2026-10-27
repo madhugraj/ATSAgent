@@ -5,7 +5,7 @@
  * agent registry (so the agents lock covers them) and the text-mode evals.
  * Pure: no database.
  */
-import { z } from "zod/v4";
+import { z } from "zod";
 
 export const END_REASONS = [
   "completed",

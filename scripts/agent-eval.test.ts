@@ -6,7 +6,7 @@
  * Needs the disposable local database.
  */
 import { beforeAll, describe, expect, mock, test } from "bun:test";
-import { z } from "zod/v4";
+import { z } from "zod";
 
 import type { ScriptStep } from "./evals/scenarios";
 

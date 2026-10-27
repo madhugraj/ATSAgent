@@ -5,7 +5,7 @@
  * text-mode evals. Pure: no database. The assistant books by the number of an
  * option it was given — never a time it makes up.
  */
-import { z } from "zod/v4";
+import { z } from "zod";
 
 import { disclosureMissing } from "./call-tools";
 
