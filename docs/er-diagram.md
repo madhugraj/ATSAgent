@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-89 tables across 9 domains.
+90 tables across 9 domains.
 
 ## Identity & access
 
@@ -71,7 +71,7 @@ erDiagram
 
 ## Organisations & masters
 
-`organizations`, `org_members`, `departments`, `master_items`, `org_linkedin_connections`, `product_catalogue_commercials`, `org_pool_shares`
+`organizations`, `org_members`, `org_agreements`, `departments`, `master_items`, `org_linkedin_connections`, `product_catalogue_commercials`, `org_pool_shares`
 
 ```mermaid
 erDiagram
@@ -116,6 +116,18 @@ erDiagram
     uuid invited_by "nullable"
     timestamptz created_at
     timestamptz joined_at "nullable"
+  }
+  org_agreements {
+    uuid id PK
+    uuid org_id FK
+    text kind
+    text version
+    uuid accepted_by FK
+    timestamptz accepted_at
+    text accepter_name
+    text accepter_title
+    text accepter_email
+    text ip_hash "nullable"
   }
   departments {
     uuid id PK
@@ -175,6 +187,8 @@ erDiagram
 
   org_members }o--|| organizations : "org_id · cascade"
   org_members }o--o| users : "user_id · cascade"
+  org_agreements }o--|| organizations : "org_id · cascade"
+  org_agreements }o--o| users : "accepted_by"
   departments }o--o| organizations : "org_id · cascade"
   master_items }o--o| organizations : "org_id · cascade"
   org_linkedin_connections }o--|| organizations : "org_id · cascade"
@@ -1168,6 +1182,8 @@ erDiagram
 | `onboarding_documents` | `offer_id` | `offers` | no action |
 | `onboarding_documents` | `org_id` | `organizations` | cascade |
 | `ontology_snapshots` | `org_id` | `organizations` | cascade |
+| `org_agreements` | `accepted_by` | `users` | no action |
+| `org_agreements` | `org_id` | `organizations` | cascade |
 | `org_job_distribution` | `org_id` | `organizations` | cascade |
 | `org_linkedin_connections` | `org_id` | `organizations` | cascade |
 | `org_members` | `org_id` | `organizations` | cascade |
@@ -1309,6 +1325,7 @@ erDiagram
 | `offers` | Offers & onboarding | 14 | — |
 | `onboarding_documents` | Offers & onboarding | 23 | — |
 | `ontology_snapshots` | Intelligence | 11 | — |
+| `org_agreements` | Organisations & masters | 10 | — |
 | `org_job_distribution` | — | 7 | — |
 | `org_linkedin_connections` | Organisations & masters | 11 | — |
 | `org_members` | Organisations & masters | 12 | (orgId+email) |

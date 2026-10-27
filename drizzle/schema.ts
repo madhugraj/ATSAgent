@@ -234,6 +234,36 @@ export const orgMembers = pgTable(
   ],
 );
 
+/**
+ * An organisation's acceptance of a versioned legal document (Terms of
+ * Service, Privacy Policy, Data Processing Agreement — src/lib/legal). One row
+ * per document version accepted; a new version needs a new row, so the owner
+ * is asked again. The signatory's name, title and email are copied so the
+ * record survives the user being removed; the IP is kept only as an HMAC.
+ */
+export const orgAgreements = pgTable(
+  "org_agreements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    version: text("version").notNull(),
+    acceptedBy: uuid("accepted_by").references(() => users.id, { onDelete: "set null" }),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }).notNull().defaultNow(),
+    accepterName: text("accepter_name").notNull(),
+    accepterTitle: text("accepter_title").notNull(),
+    accepterEmail: text("accepter_email").notNull(),
+    ipHash: text("ip_hash"),
+  },
+  (t) => [
+    check("org_agreements_kind_check", sql`${t.kind} in ('terms','privacy','dpa')`),
+    uniqueIndex("org_agreements_org_kind_version_key").on(t.orgId, t.kind, t.version),
+    index("org_agreements_org_idx").on(t.orgId, t.acceptedAt),
+  ],
+);
+
 /** Who interviews, on what, how often — registered once by the admin (docs/interview-panel-plan.md). */
 export const memberInterviewerProfiles = pgTable(
   "member_interviewer_profiles",

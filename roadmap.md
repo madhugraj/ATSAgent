@@ -24,6 +24,15 @@
 - [ ] Interview panels P4 (plan: docs/interview-panel-plan.md): interviewer profiles registered once by the admin; hiring manager as a member; an editable interview plan; the panel proposed per role and round, approved by a person, reused and changeable
 - [ ] Stage 1.2 S3–S4: the interviews board and candidate-page view, a "call me" choice and HR's "call now", a pilot (docs/voice-scheduling-call-plan.md)
 
+## Organisation agreements (2026-10-27)
+
+- [x] Versioned Terms of Service, Privacy Policy and Data Processing Agreement in one registry (`src/lib/legal/`), with public `/terms` and `/dpa` pages beside `/privacy`; Terms and DPA are marked as drafts for legal review and describe only what the platform does today (open points are marked "For legal review")
+- [x] Migration 0052 `org_agreements`: one row per organisation, document and version, with the signatory's user, name, title and email, the time, and the request IP as an HMAC only
+- [x] Registration needs an Agreements step (signatory name, title and the acceptance box); `createOrganization` refuses without it or with a stale version, records the acceptance and audits `org.agreement.accepted`
+- [x] Existing organisations and new versions: the owner gets a blocking accept step on next sign-in; other members see "Waiting for your organisation's owner"
+- [x] Platform console → Organisation agreements: which organisation accepted which version, when and by whom, with history
+- [ ] Legal review of the Terms and DPA drafts (commercial terms, named sub-processors and objection process, hosting region and transfers, data export at termination, breach timeframe)
+
 ## Dependency security (2026-10-24)
 
 - [x] zod 4 (GHSA-mrhx-c7xc-m3w5, memory exhaustion on oversized constrained collections): all schemas import `zod`; ids are checked as RFC 9562 UUIDs everywhere (the local demo fixture ids were made valid); every agent got a patch version because its generated tool contracts changed wording only

@@ -139,3 +139,5 @@ jobs:
         run: bun test scripts/interview-with.test.ts
       - name: Interview panels (profiles, hiring manager, plan, panels, stand-ins)
         run: bun test scripts/interview-panels.test.ts
+      - name: Organisation agreements (Terms, Privacy, DPA acceptance)
+        run: bun test scripts/org-agreements.test.ts
