@@ -39,7 +39,7 @@ const desk = await import("../src/server/desk/desk.server");
 const org = await import("../src/lib/org.functions");
 const plans = await import("../src/lib/interview-plan.server");
 const { defaultPlan } = await import("../src/lib/interview-plan");
-const hm = await import("../src/lib/role-hiring-manager.functions");
+const hm = await import("../src/lib/role-hiring-manager.server");
 
 const stamp = Date.now();
 const domain = `panels${stamp}.test`;
