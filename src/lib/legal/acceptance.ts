@@ -10,10 +10,7 @@ import { currentAgreementVersions } from "./agreements";
  */
 export const AgreementAcceptanceInput = z.object({
   accepted: z.literal(true, {
-    errorMap: () => ({
-      message:
-        "Accept the Terms of Service, Privacy Policy and Data Processing Agreement to continue.",
-    }),
+    error: "Accept the Terms of Service, Privacy Policy and Data Processing Agreement to continue.",
   }),
   versions: z.object({
     terms: z.string().trim().min(1).max(32),
