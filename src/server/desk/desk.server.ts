@@ -283,6 +283,7 @@ export async function conversationForRequisition(
     .where(
       and(
         eq(hiringConversations.orgId, orgId),
+        eq(hiringConversations.kind, "hiring"),
         eq(hiringConversations.requisitionId, requisitionId),
         notInArray(hiringConversations.status, ["closed"]),
         isNull(hiringConversations.deletedAt),
@@ -374,6 +375,7 @@ const SYSTEM = [
   '- The reply must never promise an action ("I\'ll benchmark…", "I\'ll check…"): the desk acts only through commands, and the system reports what it did. With a research command the reply can be empty.',
   '- "reply": one short, friendly message. If MISSING lists details, ask for the FIRST missing one only, in one sentence, offering a typical example. Otherwise acknowledge briefly. Never claim that anything was created, approved or sent.',
   "- Questions about the role, its status, the candidates or how to do something: answer ONLY from FACTS and APP RULES below. Never describe screens, menus, statuses or abilities that are not listed there; if the facts do not answer the question, say you do not know and where to look.",
+  "- ORGANISATION CONTEXT is the employer's approved profile: use it to word questions for this organisation's domain (its products, tech stacks and regulators), suggest the role families that fit, and ask domain-specific details. Never state a pay figure from it — pay is asked only through the app's own flow.",
 ].join("\n");
 
 /** How the app really works — the only how-to the desk may describe. */
@@ -413,6 +415,14 @@ export async function runTurn(
         : "none"
     }`,
     `FACTS (live from the system):\n${await deskFacts(conv)}`,
+    `ORGANISATION CONTEXT:\n${untrusted(
+      "organisation_profile",
+      (
+        await (
+          await import("@/lib/org-context.server")
+        ).orgContextFor({ orgId, audience: "internal", purpose: "desk" })
+      ).blocks,
+    )}`,
     `APP RULES:\n${APP_RULES}`,
     "CONVERSATION (oldest first):",
     untrusted(
@@ -514,6 +524,7 @@ const AGENT_NAME: Record<string, string> = {
   intake: "Intake & matching agent",
   screening: "Screening agent",
   sourcing: "Sourcing agent",
+  org_context: "Organisation context agent",
 };
 
 /** Start an agent for the thread, or tell the person why it cannot start. */
@@ -1619,6 +1630,7 @@ const AGENT_TITLE: Record<string, string> = {
   followup: "Follow-up agent",
   sourcing: "Sourcing agent",
   distribution: "Distribution agent",
+  org_context: "Organisation context agent",
   copilot: "Copilot",
 };
 
@@ -2463,6 +2475,8 @@ export async function resumeThreadsForAgent(
       and(
         eq(hiringConversations.orgId, orgId),
         eq(hiringConversations.status, "active"),
+        // Hiring threads only — org-desk threads (kind = 'org_profile') never carry a requisition.
+        eq(hiringConversations.kind, "hiring"),
         sql`${hiringConversations.requisitionId} is not null`,
         isNull(hiringConversations.deletedAt),
       ),
@@ -2629,10 +2643,26 @@ const STATUS_WORDS: Record<string, string> = {
   closed: "closed",
 };
 
+/** One line on the approved organisation profile (or its absence), for FACTS. */
+async function organisationFact(orgId: string): Promise<string> {
+  const { orgContextFor } = await import("@/lib/org-context.server");
+  const org = await orgContextFor({ orgId, audience: "internal", purpose: "desk" });
+  const first = org.blocks.split("\n").find((l) => l.startsWith("• "));
+  return `Organisation: ${
+    org.versionId
+      ? first
+        ? first.replace(/^• /, "").slice(0, 200)
+        : "approved profile on file"
+      : "no approved profile yet — agents are working without the organisation's context"
+  }`;
+}
+
 /** What is actually true for this thread right now, for the desk's answers. */
 export async function deskFacts(conv: Conversation): Promise<string> {
   if (!conv.requisitionId)
-    return `No requisition yet — the role is still being described.\n${await jdTemplateFacts(conv.orgId, null)}`;
+    return `No requisition yet — the role is still being described.\n${await organisationFact(
+      conv.orgId,
+    )}\n${await jdTemplateFacts(conv.orgId, null)}`;
   const [req] = await db
     .select({
       code: requisitions.code,
@@ -2664,6 +2694,7 @@ export async function deskFacts(conv: Conversation): Promise<string> {
   const progress = await deskProgress(conv);
   return [
     `${req.code} "${req.title}" (${req.location ?? "—"}, ${plural(req.openings ?? 0, "opening")}) is ${STATUS_WORDS[req.status] ?? req.status}.`,
+    await organisationFact(conv.orgId),
     last?.to && ["closed", "rejected", "on_hold"].includes(last.to)
       ? `It became ${last.to.replace("_", " ")}${last.at ? ` on ${last.at.slice(0, 10)}` : ""}${last.comment ? ` — reason: "${last.comment}"` : ""}.`
       : "",
@@ -4074,6 +4105,8 @@ export async function announceNewApplicants(orgId?: string): Promise<number> {
       and(
         orgId ? eq(hiringConversations.orgId, orgId) : undefined,
         eq(hiringConversations.status, "active"),
+        // Hiring threads only — org-desk threads (kind = 'org_profile') never carry a requisition.
+        eq(hiringConversations.kind, "hiring"),
         sql`${hiringConversations.requisitionId} is not null`,
         sql`${hiringConversations.updatedAt} >= now() - interval '60 days'`,
         isNull(hiringConversations.deletedAt),
@@ -4315,6 +4348,7 @@ export async function deletedThreads(orgId: string, now = new Date()) {
     .where(
       and(
         eq(hiringConversations.orgId, orgId),
+        eq(hiringConversations.kind, "hiring"),
         sql`${hiringConversations.deletedAt} > ${new Date(now.getTime() - RESTORE_DAYS * 864e5).toISOString()}::timestamptz`,
       ),
     )

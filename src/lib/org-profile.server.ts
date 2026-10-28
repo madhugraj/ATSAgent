@@ -30,7 +30,7 @@ export type ProfileActor = { orgId: string; userId: string };
 type VersionRow = typeof orgProfileVersions.$inferSelect;
 
 /** Who may write and submit drafts (the owner always passes). */
-const EDITORS = ["hr_head", "president_cbo"] as const;
+export const EDITORS = ["hr_head", "president_cbo"] as const;
 
 const OPEN = ["draft", "pending", "changes_requested"] as const;
 const EDITABLE = new Set(["draft", "changes_requested"]);

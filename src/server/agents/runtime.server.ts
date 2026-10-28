@@ -73,6 +73,14 @@ const TURNS_PER_TICK = 8;
 const CONCURRENCY = 2;
 const PREVIEW_CHARS = 600;
 
+/**
+ * Agents that read the organisation's approved profile: the runtime injects
+ * the context block into their system prompt and stamps the run with the
+ * version it read (docs/org-context-agent-plan.md, O2). The Organisation
+ * context agent itself is not a consumer — it writes the profile.
+ */
+const CONSUMING_AGENT_TYPES = new Set<AgentType>(["requisition", "jd", "intake", "screening"]);
+
 /** The harness limits every run executes under (shown in Agent observability). */
 export const HARNESS_LIMITS = {
   leaseMinutes: LEASE_MINUTES,
@@ -1513,7 +1521,26 @@ async function driveRun(run: AgentRun): Promise<"done" | "awaiting" | "yielded" 
       parameters: toolParameters(HITL_TOOLS[name].input),
     })),
   ];
-  const system = `${INJECTION_RULES}\n\n${RUNTIME_RULES}\n\n${def.system}`;
+  let system = `${INJECTION_RULES}\n\n${RUNTIME_RULES}\n\n${def.system}`;
+
+  // Consumers of the organisation profile read it here, once per run, and the
+  // run records exactly which approved version it saw (docs/org-context-agent-plan.md, O2).
+  if (CONSUMING_AGENT_TYPES.has(def.type)) {
+    const { orgContextFor } = await import("@/lib/org-context.server");
+    const ctxBlock = await orgContextFor({
+      orgId: run.orgId,
+      audience: "internal",
+      purpose: "agent",
+    });
+    system = `${system}\n\n${untrusted("organisation_profile", ctxBlock.blocks)}`;
+    if (ctxBlock.versionId && !run.orgProfileVersionId) {
+      await db
+        .update(agentRuns)
+        .set({ orgProfileVersionId: ctxBlock.versionId })
+        .where(eq(agentRuns.id, run.id));
+      run.orgProfileVersionId = ctxBlock.versionId;
+    }
+  }
 
   // A deploy may have changed the agent since this run started: record the
   // definition the remaining steps execute under.

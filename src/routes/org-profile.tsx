@@ -1,9 +1,29 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { BookOpenText, Eye, Lock, Plus, Trash2 } from "lucide-react";
+import {
+  BookOpenText,
+  Eye,
+  FileText,
+  Globe,
+  Lock,
+  Plus,
+  RefreshCw,
+  Sparkles,
+  Trash2,
+  TriangleAlert,
+} from "lucide-react";
 
+import {
+  acceptOrgSource,
+  deleteOrgDocument,
+  getOrgContextAdmin,
+  readOrgWebsiteNow,
+  setOrgWebsite,
+  startOrgContextBuild,
+  uploadOrgDocument,
+} from "@/lib/org-context.functions";
 import {
   decideOrgProfileVersion,
   discardOrgProfileDraft,
@@ -51,15 +71,21 @@ const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : "")
 function OrgProfilePage() {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["org_profile"], queryFn: () => getOrgProfile() });
+  const qa = useQuery({
+    queryKey: ["org_context_admin"],
+    queryFn: () => getOrgContextAdmin(),
+  });
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["org_profile"] });
     qc.invalidateQueries({ queryKey: ["org_profile_gate"] });
+    qc.invalidateQueries({ queryKey: ["org_context_admin"] });
   };
   if (q.isLoading) return <p className="text-sm text-muted-foreground">Loading profile…</p>;
   if (q.error || !q.data)
     return <p className="text-sm text-destructive">Could not load the organisation profile.</p>;
   const p = q.data;
   const open = p.open;
+  const removedIds = new Set((qa.data?.sources ?? []).filter((s) => s.deleted).map((s) => s.id));
 
   return (
     <>
@@ -83,27 +109,54 @@ function OrgProfilePage() {
             No approved profile yet — agents are working without your organisation&apos;s context.
           </span>
         )}
-        {open ? (
-          <Badge variant="outline" className="ml-auto">
-            Version {open.version}: {STATUS_LABEL[open.status] ?? open.status}
-          </Badge>
-        ) : p.canEdit ? (
-          <Button
-            size="sm"
-            className="ml-auto"
-            onClick={async () => {
-              try {
-                await startOrgProfileDraft();
-                refresh();
-              } catch (e) {
-                toast.error(e instanceof Error ? e.message : "Could not start a draft");
-              }
-            }}
-          >
-            {p.approved ? "Change the profile" : "Write the profile"}
-          </Button>
-        ) : null}
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {open ? (
+            <Badge variant="outline">
+              Version {open.version}: {STATUS_LABEL[open.status] ?? open.status}
+            </Badge>
+          ) : p.canEdit ? (
+            <Button
+              size="sm"
+              onClick={async () => {
+                try {
+                  await startOrgProfileDraft();
+                  refresh();
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : "Could not start a draft");
+                }
+              }}
+            >
+              {p.approved ? "Change the profile" : "Write the profile"}
+            </Button>
+          ) : null}
+          {p.canEdit ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1"
+              onClick={async () => {
+                try {
+                  await startOrgContextBuild();
+                  toast.success(
+                    "The Organisation context agent is building the profile from your records, website and documents.",
+                  );
+                  refresh();
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : "Could not start the agent");
+                }
+              }}
+            >
+              <Sparkles className="size-3.5" />
+              {open || p.approved ? "Build with the agent" : "Build it with the agent"}
+            </Button>
+          ) : null}
+          <Link to="/org-desk" className="text-xs underline text-muted-foreground">
+            Organisation desk
+          </Link>
+        </div>
       </section>
+
+      {p.canEdit ? <SourcesCard onChanged={refresh} /> : null}
 
       {open && (open.status === "draft" || open.status === "changes_requested") && p.canEdit ? (
         <DraftEditor
@@ -117,10 +170,11 @@ function OrgProfilePage() {
           version={open}
           approved={p.approved}
           canDecide={p.canDecide && open.status === "pending"}
+          removedSourceIds={removedIds}
           onChanged={refresh}
         />
       ) : p.approved ? (
-        <ReadOnlyProfile sections={p.approved.sections} />
+        <ReadOnlyProfile sections={p.approved.sections} removedSourceIds={removedIds} />
       ) : (
         <p className="mt-4 text-sm text-muted-foreground">
           {p.canEdit
@@ -211,7 +265,258 @@ function VisibilityBadge({ item, def }: { item: OrgProfileItem; def: SectionDef 
   );
 }
 
-function ReadOnlyProfile({ sections }: { sections: OrgProfileSections }) {
+type ContextAdmin = Awaited<ReturnType<typeof getOrgContextAdmin>>;
+
+/** Base64 for a file up to a few MB, without blowing the call stack. */
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000)
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
+/** The agent's sources: the organisation's website and its uploaded documents. */
+function SourcesCard({ onChanged }: { onChanged: () => void }) {
+  const qc = useQueryClient();
+  const qa = useQuery({ queryKey: ["org_context_admin"], queryFn: () => getOrgContextAdmin() });
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [url, setUrl] = useState("");
+  const [busy, setBusy] = useState<"" | "save" | "read" | "upload">("");
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["org_context_admin"] });
+    onChanged();
+  };
+  const run = async (kind: typeof busy, fn: () => Promise<void>) => {
+    setBusy(kind);
+    try {
+      await fn();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Something went wrong");
+    } finally {
+      setBusy("");
+    }
+  };
+  const data = qa.data;
+  const flagged = (data?.sources ?? []).filter((s) => s.injectionFlagged && !s.deleted);
+  const documents = (data?.sources ?? []).filter((s) => s.kind === "document" && !s.deleted);
+  const pages = (data?.sources ?? []).filter((s) => s.kind === "website_page" && !s.deleted);
+
+  return (
+    <section className="panel mt-4 space-y-3 p-4 text-sm">
+      <h2 className="flex items-center gap-2 font-semibold">
+        <Globe className="size-4 text-muted-foreground" /> Sources the agent reads
+      </h2>
+
+      {flagged.length ? (
+        <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-3">
+          <p className="flex items-center gap-1.5 font-medium">
+            <TriangleAlert className="size-4 text-amber-600" /> {flagged.length} source(s) look like
+            instructions to an AI and nothing was kept from them.
+          </p>
+          {flagged.map((f) => (
+            <div key={f.id} className="mt-1 flex items-center justify-between gap-2">
+              <span className="text-xs text-muted-foreground">{f.url ?? f.fileName}</span>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy !== ""}
+                onClick={() =>
+                  run("save", async () => {
+                    await acceptOrgSource({ data: { sourceId: f.id } });
+                    toast.success("Accepted — the source was read into the draft.");
+                    refresh();
+                  })
+                }
+              >
+                I have read it — accept it
+              </Button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="space-y-2">
+          <Label htmlFor="org-website" className="text-sm font-medium">
+            Your website
+          </Label>
+          {data?.website ? (
+            <p className="text-xs text-muted-foreground">
+              {data.website.url}
+              {data.website.confirmedAt ? " — confirmed by an owner" : ""}
+              <br />
+              Last read:{" "}
+              {data.website.lastRereadAt
+                ? `${when(data.website.lastRereadAt)} (${data.website.lastRereadStatus})`
+                : "never"}
+              {data.website.nextRereadAt
+                ? ` · next monthly re-read ${when(data.website.nextRereadAt)}`
+                : ""}
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              The agent reads only this host — it should match your registered e-mail domain. A
+              different address needs an owner&apos;s confirmation.
+            </p>
+          )}
+          <div className="flex gap-2">
+            <input
+              id="org-website"
+              className="h-8 w-full rounded-md border bg-background px-2 text-xs"
+              placeholder="https://www.your-company.com"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy !== "" || !url.trim()}
+              onClick={() =>
+                run("save", async () => {
+                  const res = await setOrgWebsite({ data: { url: url.trim() } });
+                  if (res.ok) {
+                    setUrl("");
+                    toast.success("Website saved.");
+                    refresh();
+                    return;
+                  }
+                  const ok = await setOrgWebsite({ data: { url: url.trim(), confirm: true } });
+                  if (ok.ok) {
+                    setUrl("");
+                    toast.success("Website saved with an owner's confirmation.");
+                    refresh();
+                  } else {
+                    toast.error(
+                      "Only an owner can confirm a website outside the registered e-mail domain.",
+                    );
+                  }
+                })
+              }
+            >
+              Save
+            </Button>
+          </div>
+          {data?.website ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1"
+              disabled={busy !== ""}
+              onClick={() =>
+                run("read", async () => {
+                  const r = await readOrgWebsiteNow({ data: {} });
+                  toast.success(
+                    `Read ${r.pagesFetched} page(s): ${r.pagesChanged} changed, ${r.pagesUnchanged} unchanged${
+                      r.flagged.length ? `, ${r.flagged.length} held back for review` : ""
+                    }. ${r.itemsKept} item(s) proposed into the draft.`,
+                  );
+                  refresh();
+                })
+              }
+            >
+              <RefreshCw className="size-3.5" /> Read it now
+            </Button>
+          ) : null}
+        </div>
+
+        <div className="space-y-2">
+          <Label className="text-sm font-medium">Documents (PDF or DOCX, up to 10 MB)</Label>
+          <p className="text-xs text-muted-foreground">
+            Handbooks, policies, brochures — anything that states what the organisation does.
+            Scanned pages are read through the AI model.
+          </p>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".pdf,.docx"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (!file) return;
+              void run("upload", async () => {
+                const bytes = new Uint8Array(await file.arrayBuffer());
+                const r = await uploadOrgDocument({
+                  data: { fileName: file.name, dataBase64: bytesToBase64(bytes) },
+                });
+                toast.success(
+                  `${file.name}: ${r.pages} page(s)${r.ocr ? " (read through the AI model)" : ""}, ${r.itemsKept} item(s) proposed into the draft.`,
+                );
+                refresh();
+              });
+            }}
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1"
+            disabled={busy !== ""}
+            onClick={() => fileRef.current?.click()}
+          >
+            <FileText className="size-3.5" /> Upload a document
+          </Button>
+          {documents.length ? (
+            <ul className="mt-1 space-y-1">
+              {documents.map((d) => (
+                <li key={d.id} className="flex items-center gap-2 text-xs">
+                  <FileText className="size-3 shrink-0 text-muted-foreground" />
+                  <span className="truncate">{d.fileName}</span>
+                  <span className="text-muted-foreground">
+                    {d.ocr ? "· scanned pages read" : ""}{" "}
+                    {d.bytes ? `· ${Math.round(d.bytes / 1024)} kB` : ""}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    aria-label={`Remove ${d.fileName}`}
+                    className="ml-auto"
+                    disabled={busy !== ""}
+                    onClick={() =>
+                      run("save", async () => {
+                        await deleteOrgDocument({ data: { sourceId: d.id } });
+                        toast.success(
+                          "Document removed — lines from it are marked until the next approval.",
+                        );
+                        refresh();
+                      })
+                    }
+                  >
+                    <Trash2 className="size-3" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      </div>
+
+      {pages.length ? (
+        <p className="text-xs text-muted-foreground">
+          Website pages read:{" "}
+          {pages
+            .map((p) => p.url)
+            .slice(0, 5)
+            .join(", ")}
+          {pages.length > 5 ? ` and ${pages.length - 5} more` : ""}
+        </p>
+      ) : null}
+      {data && !data.agentEnabled ? (
+        <p className="text-xs text-muted-foreground">
+          The Organisation context agent is switched off — switch it on in Governance → Agent
+          settings to let it build the profile, or keep writing it by hand.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+function ReadOnlyProfile({
+  sections,
+  removedSourceIds,
+}: {
+  sections: OrgProfileSections;
+  removedSourceIds?: Set<string>;
+}) {
   return (
     <div className="mt-4 space-y-3">
       {PROFILE_SECTIONS.map((def) => {
@@ -225,6 +530,11 @@ function ReadOnlyProfile({ sections }: { sections: OrgProfileSections }) {
                 <li key={i.id} className="flex items-start gap-2">
                   <VisibilityBadge item={i} def={def} />
                   <span className="whitespace-pre-wrap">{i.text}</span>
+                  {i.source.ref && removedSourceIds?.has(i.source.ref) ? (
+                    <Badge variant="outline" className="shrink-0 text-muted-foreground">
+                      source removed
+                    </Badge>
+                  ) : null}
                 </li>
               ))}
             </ul>
@@ -554,11 +864,13 @@ function PendingReview({
   version,
   approved,
   canDecide,
+  removedSourceIds,
   onChanged,
 }: {
   version: OrgProfileVersionView;
   approved: OrgProfileVersionView | null;
   canDecide: boolean;
+  removedSourceIds: Set<string>;
   onChanged: () => void;
 }) {
   const [note, setNote] = useState("");
@@ -607,7 +919,7 @@ function PendingReview({
         ) : null}
       </section>
       <DiffPanel approved={approved?.sections ?? null} sections={version.sections} />
-      <ReadOnlyProfile sections={version.sections} />
+      <ReadOnlyProfile sections={version.sections} removedSourceIds={removedSourceIds} />
       {canDecide ? (
         <section className="panel mt-4 space-y-2 p-4">
           <Textarea

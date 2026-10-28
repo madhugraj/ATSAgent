@@ -17,12 +17,14 @@ const { registerPhase3Tools } = await import("../src/server/agents/tools-phase3"
 const { registerPhase4Tools } = await import("../src/server/agents/tools-phase4");
 const { registerSourcingTools } = await import("../src/server/agents/tools-sourcing");
 const { registerDistributionTools } = await import("../src/server/agents/tools-distribution");
+const { registerOrgTools } = await import("../src/server/agents/tools-org");
 const {
   registerPhase1Agents,
   registerPhase2Agents,
   registerPhase3Agents,
   registerPhase4Agents,
   registerPhase6Agents,
+  registerOrgAgents,
 } = await import("../src/server/agents/definitions");
 const { listAgents } = await import("../src/server/agents/registry");
 const { manifestHash } = await import("../src/server/agents/manifest.server");
@@ -33,11 +35,13 @@ registerPhase3Tools();
 registerPhase4Tools();
 registerSourcingTools();
 registerDistributionTools();
+registerOrgTools();
 registerPhase1Agents();
 registerPhase2Agents();
 registerPhase3Agents();
 registerPhase4Agents();
 registerPhase6Agents();
+registerOrgAgents();
 
 const lock = Object.fromEntries(
   listAgents()

@@ -1,0 +1,313 @@
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
+import { Globe, Send, Sparkles } from "lucide-react";
+
+import {
+  buildFromDesk,
+  getOrgDeskThread,
+  readWebsiteFromDesk,
+  sendOrgDeskMessage,
+  type OrgDeskMessageView,
+} from "@/lib/org-desk.functions";
+import { decideAgentTask } from "@/lib/agents.functions";
+import { PageHeader } from "@/components/ats";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+
+export const Route = createFileRoute("/org-desk")({
+  head: () => ({
+    meta: [
+      { title: "Organisation desk — Talent Acquisition" },
+      {
+        name: "description",
+        content:
+          "Tell the Organisation context agent about your organisation — what it does, its products and tech stacks, how it hires. The profile it builds is the context every hiring agent works from.",
+      },
+    ],
+  }),
+  component: OrgDeskPage,
+});
+
+const when = (iso: string) =>
+  new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+function OrgDeskPage() {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["org_desk"], queryFn: () => getOrgDeskThread() });
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const scroller = useRef<HTMLDivElement>(null);
+  const thread = q.data;
+
+  useEffect(() => {
+    scroller.current?.scrollTo({ top: scroller.current.scrollHeight });
+  }, [thread?.messages.length]);
+
+  const refresh = () => qc.invalidateQueries({ queryKey: ["org_desk"] });
+
+  async function send() {
+    const text = draft.trim();
+    if (!text || !thread) return;
+    setBusy(true);
+    setDraft("");
+    try {
+      await sendOrgDeskMessage({ data: { id: thread.id, message: text } });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not send");
+    } finally {
+      setBusy(false);
+      refresh();
+    }
+  }
+
+  async function decide(
+    taskId: string,
+    decision: "approve" | "send_back" | "decline",
+    note?: string,
+  ) {
+    try {
+      if (decision === "approve")
+        await decideAgentTask({
+          data: { taskId, decision: { status: "approved", comment: note } },
+        });
+      else
+        await decideAgentTask({
+          data: {
+            taskId,
+            decision: { status: "rejected", reason: note, changes: decision === "send_back" },
+          },
+        });
+      toast.success(
+        decision === "approve"
+          ? "Approved — the version is now the organisation profile."
+          : decision === "send_back"
+            ? "Sent back for changes."
+            : "Declined.",
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not record the decision");
+    } finally {
+      refresh();
+    }
+  }
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="Administration"
+        title="Organisation desk"
+        description="Describe your organisation to the Organisation context agent. What you settle here becomes the approved profile every hiring agent works from — the JD agent's “About us”, the requisition drafts, and candidate matching."
+      />
+      <p className="mt-1 text-sm text-muted-foreground">
+        The profile itself, its versions and its sources live on{" "}
+        <Link to="/org-profile" className="underline">
+          the Profile page
+        </Link>
+        . Only the HR head, the CBO or the owner use this desk.
+      </p>
+
+      {q.isLoading ? (
+        <p className="mt-4 text-sm text-muted-foreground">Opening the desk…</p>
+      ) : q.error || !thread ? (
+        <p className="mt-4 text-sm text-destructive">Could not open the organisation desk.</p>
+      ) : (
+        <>
+          <div
+            ref={scroller}
+            className="panel mt-4 max-h-[58vh] space-y-3 overflow-y-auto p-4"
+            aria-live="polite"
+          >
+            {thread.messages.map((m) => (
+              <Message
+                key={m.id}
+                m={m}
+                tasks={thread.tasks}
+                deciders={thread.deciders}
+                onDecide={decide}
+              />
+            ))}
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  await readWebsiteFromDesk({ data: { id: thread.id } });
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : "Could not start the read");
+                } finally {
+                  setBusy(false);
+                  refresh();
+                }
+              }}
+            >
+              <Globe className="size-3.5" /> Read the website
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  await buildFromDesk({ data: { id: thread.id } });
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : "Could not start the build");
+                } finally {
+                  setBusy(false);
+                  refresh();
+                }
+              }}
+            >
+              <Sparkles className="size-3.5" /> Build the draft
+            </Button>
+          </div>
+
+          <div className="mt-2 flex gap-2">
+            <Textarea
+              rows={2}
+              className="flex-1"
+              placeholder="Describe the organisation… (Enter to send)"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void send();
+                }
+              }}
+            />
+            <Button disabled={busy || !draft.trim()} onClick={() => void send()} aria-label="Send">
+              <Send className="size-4" />
+            </Button>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+function Message({
+  m,
+  tasks,
+  deciders,
+  onDecide,
+}: {
+  m: OrgDeskMessageView;
+  tasks: Record<string, string>;
+  deciders: Record<string, { canDecide: boolean; waitingFor: string | null }>;
+  onDecide: (taskId: string, decision: "approve" | "send_back" | "decline", note?: string) => void;
+}) {
+  const [note, setNote] = useState("");
+  const mine = m.role === "user";
+  if (mine)
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[80%] whitespace-pre-wrap rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">
+          {m.body}
+        </div>
+      </div>
+    );
+  return (
+    <div className="max-w-[85%] space-y-1">
+      <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
+        <span>{m.agentType ? `${m.agentType.replace(/_/g, " ")} agent` : "Desk"}</span>
+        <span>{when(m.at)}</span>
+      </div>
+      <div className="whitespace-pre-wrap rounded-lg border bg-background px-3 py-2 text-sm">
+        {m.body}
+      </div>
+      {m.card?.type === "approval" && typeof m.card["taskId"] === "string" ? (
+        <GateCard
+          taskId={m.card["taskId"]}
+          title={typeof m.card["title"] === "string" ? m.card["title"] : "Approval request"}
+          body={typeof m.card["body"] === "string" ? m.card["body"] : ""}
+          status={tasks[m.card["taskId"]] ?? "open"}
+          canDecide={deciders[m.card["taskId"]]?.canDecide ?? false}
+          waitingFor={deciders[m.card["taskId"]]?.waitingFor ?? null}
+          note={note}
+          setNote={setNote}
+          onDecide={onDecide}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function GateCard({
+  taskId,
+  title,
+  body,
+  status,
+  canDecide,
+  waitingFor,
+  note,
+  setNote,
+  onDecide,
+}: {
+  taskId: string;
+  title: string;
+  body: string;
+  status: string;
+  canDecide: boolean;
+  waitingFor: string | null;
+  note: string;
+  setNote: (v: string) => void;
+  onDecide: (taskId: string, decision: "approve" | "send_back" | "decline", note?: string) => void;
+}) {
+  return (
+    <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm">
+      <p className="font-medium">{title}</p>
+      <p className="mt-1 whitespace-pre-wrap text-xs">{body}</p>
+      {status !== "open" ? (
+        <Badge variant="outline" className="mt-2">
+          {status === "approved" ? "Approved" : status === "rejected" ? "Decided" : status}
+        </Badge>
+      ) : canDecide ? (
+        <div className="mt-2 space-y-2">
+          <Textarea
+            rows={2}
+            maxLength={2000}
+            value={note}
+            placeholder="What should change, or why you decline (required for both); optional when approving"
+            onChange={(e) => setNote(e.target.value)}
+          />
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" onClick={() => onDecide(taskId, "approve", note.trim() || undefined)}>
+              Approve
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={note.trim().length < 3}
+              onClick={() => onDecide(taskId, "send_back", note.trim())}
+            >
+              Send back for changes
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={note.trim().length < 3}
+              onClick={() => onDecide(taskId, "decline", note.trim())}
+            >
+              Decline
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Waiting for {waitingFor ?? "the HR head or an owner"}.
+        </p>
+      )}
+    </div>
+  );
+}

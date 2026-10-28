@@ -151,6 +151,17 @@ export async function scoreCandidate(opts: {
 }): Promise<MatchResult> {
   const { jd, candidate, weights } = opts;
 
+  // The employer's approved profile (O2): what the organisation actually does,
+  // so domain experience is judged against the employer's real world, not a
+  // generic one. Fenced as data; it never replaces the stated requirements.
+  let organisationContext: string | null = null;
+  if (opts.orgId) {
+    const { orgContextFor } = await import("./org-context.server");
+    organisationContext = (
+      await orgContextFor({ orgId: opts.orgId, audience: "internal", purpose: "scoring" })
+    ).blocks;
+  }
+
   /* 1 — AI extraction + semantic assessment (skills, education, history, impact). */
   const ai = await aiJson<{
     skills_score: number;
@@ -176,6 +187,9 @@ export async function scoreCandidate(opts: {
       "and never credit a must-have skill that is only listed but never demonstrated — flag that instead. " +
       "skills_score weights must-have coverage far above good-to-have. " +
       "education_score reflects fit against the stated qualification requirement (return 70 if no requirement is stated). " +
+      (organisationContext
+        ? "organisation_context is approved fact about the employer — weigh domain experience against it (a project or stack that looks unusual elsewhere may be standard there) and cite the matching line in the rationale when it changes your judgement. It never replaces the stated requirements.\n"
+        : "") +
       "ALSO extract, never invent:\n" +
       "• employment_history: every role as {company, title, start, end, level_hint}. Use YYYY-MM (or YYYY) for " +
       "start/end; use null for end when the role is current. Omit a role entirely only if neither company nor title " +
@@ -198,6 +212,7 @@ export async function scoreCandidate(opts: {
       JSON.stringify({
         job_description: jd,
         candidate: { ...candidate, cachedSocial: undefined },
+        ...(organisationContext ? { organisation_context: organisationContext } : {}),
       }),
     ),
     orgId: opts.orgId,

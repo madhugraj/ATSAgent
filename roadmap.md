@@ -46,17 +46,20 @@
 - [x] zod 4 (GHSA-mrhx-c7xc-m3w5, memory exhaustion on oversized constrained collections): all schemas import `zod`; ids are checked as RFC 9562 UUIDs everywhere (the local demo fixture ids were made valid); every agent got a patch version because its generated tool contracts changed wording only
 - [x] DOMPurify pinned to 3.4.17 or later through `overrides` (pulled in by jsPDF; GHSA-cg2g-xh64-v4q7, GHSA-mrv2-3pqr-j5jr)
 
-## Organisation profile — O0 (2026-10-27)
+## Organisation profile — O0 (2026-10-27), Organisation context agent O1+O2 (2026-10-28)
 
-Plan: `docs/org-context-agent-plan.md` (decided 2026-10-27).
+Plan: `docs/org-context-agent-plan.md` (decided 2026-10-27; O0 built 2026-10-27, O1+O2 built 2026-10-28).
 
 - [x] Organisation → Profile (`/org-profile`): the profile in eleven sections, each line marked Candidates or Internal (Structure, Tone of voice and Never say are always internal); written by the HR head, CBO or owner; versions, a diff against the approved version and every candidate-visible line shown before approval (migration 0054)
 - [x] Approved, sent back or declined by the HR head or an owner; approved versions never change; the next draft starts from the approved one; every step audited (`org_profile.*`)
 - [x] Pay figures (amounts, LPA, lakh/crore/k or % next to a pay word) and staff names, e-mails and phone numbers (members and HRMS employees) refused with the reason; nothing is saved
 - [x] The `org_profile` gate: an agent's approval request for a profile version is decided on its card (desk or Waiting for you: approve, send back, decline) by the HR head or owner, server-side; a decision on the Profile page closes the waiting request
 - [x] Soft gate: the hiring desk and the requisition page warn while no profile is approved; an organisation setting (HR head / owner, audited) refuses new requisitions until one is
-- [ ] O1: the Organisation context agent (organisation desk, own website through `safeFetchText`, documents with OCR); the `request_approval` subject `org_profile` lands with it, since that schema is part of every agent's manifest hash
-- [ ] O2: agents read the approved profile (`orgContextFor`), monthly website re-read, health rules; O3 domain packs; O4 voice agents
+- [x] O1 — the Organisation context agent 1.0.0 (2026-10-28, migration 0055): organisation desk `/org-desk` (a hiring-desk-style thread with the agent, one section at a time; Read the website / Build the draft buttons); the organisation's own website read through `safeFetchText` (https, own domain unless an owner confirms, robots.txt, ≤20 pages, one full read per hour, HTML stripped, each page a source with SHA-256; unchanged pages skip the AI call); PDF/DOCX documents ≤10 MB / 200 pages with OCR through the gateway (`org_document_ocr`) for scans; extraction quotes the source exactly — a quote not in the source is dropped in code; a page that trips the injection tripwire contributes nothing until a person accepts it; every item passes the same pay / staff-name refusals as a person's typing; "Build with the agent" on the Profile page
+- [x] O1 — the `request_approval` subject `org_profile` landed with the agent: every agent's manifest hash changed, so all fifteen existing agents got version bumps and the lock was refreshed
+- [x] O2 — agents read the approved profile (`orgContextFor`, 2026-10-28): candidate / internal audiences, code-rendered never-say and tone rules, word caps per purpose; the runtime injects it into the Requisition, JD, Intake and Screening agents and stamps each run with the version it read (`agent_runs.org_profile_version_id`); candidate scoring weighs domain experience against it; screening kits may verify domain and regulators; the JD (button, import path and agent alike) writes "About us" only from candidate-visible lines and `saveJobDescriptionCore` refuses a JD that repeats an internal-only line or makes an absolute guarantee; the hiring desk words its questions for the organisation's domain; the organisation desk thread kind never mixes with hiring threads
+- [x] O2 — monthly website re-read (the sweep starts one run per due organisation; changed pages become draft items, never auto-approved) and five health rules (`context.profile_missing`, `context.profile_stale`, `context.reread_failed`, `context.review_waiting`, `context.items_refused`)
+- [ ] O3 domain packs; O4 voice agents read the profile; O5 pilot
 
 ## Distribution agent (2026-10-21)
 
@@ -342,12 +345,12 @@ Study in `docs/hrms-integrations-study.md`: vendor API landscape (Keka, greytHR,
 
 ## Release validation and documentation
 
-- [ ] Restore the database to immediately before 2026-09-22 22:13 UTC and reconcile all business-record counts (blocked: provider point-in-time recovery required)
-- [ ] Run authenticated and public end-to-end workflow tests (blocked until database recovery)
+- [x] Production data reset (2026-10-28): all hiring data wiped in both organisations, with a backup taken first — supersedes the planned restore to immediately before 2026-09-22 22:13 UTC
+- [ ] Run authenticated and public end-to-end workflow tests (run against the clean database)
 - [x] Refresh repository product, deployment, security and verification documents
 - [x] Refresh the in-app user manual and copilot knowledge source
 - [x] Update the technical architecture document to the current implementation
 - [x] Update and visually inspect the investor product document
 - [ ] Run current security checks and resolve release blockers (basic scan passed; dependency scan parser blocked by URL-pinned xlsx package)
-- [ ] Publish and verify the production release (blocked until database recovery and revalidation)
+- [ ] Publish and verify the production release (after revalidation on the clean database)
 - [x] Pre-onboarding: per-employer salary breakup captured verbatim; multi-page, scanned, merged and zipped uploads read as individual documents

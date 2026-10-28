@@ -100,6 +100,7 @@ export const listDeskConversations = createServerFn({ method: "GET" })
       .where(
         and(
           eq(hiringConversations.orgId, context.orgId),
+          eq(hiringConversations.kind, "hiring"),
           isNull(hiringConversations.deletedAt),
           all ? undefined : eq(hiringConversations.createdBy, context.userId),
         ),

@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-94 tables across 9 domains.
+95 tables across 9 domains.
 
 ## Identity & access
 
@@ -71,7 +71,7 @@ erDiagram
 
 ## Organisations & masters
 
-`organizations`, `org_members`, `org_agreements`, `departments`, `master_items`, `org_linkedin_connections`, `product_catalogue_commercials`, `org_pool_shares`, `org_profile_versions`, `org_profiles`
+`organizations`, `org_members`, `org_agreements`, `departments`, `master_items`, `org_linkedin_connections`, `product_catalogue_commercials`, `org_pool_shares`, `org_profile_versions`, `org_profiles`, `org_context_sources`
 
 ```mermaid
 erDiagram
@@ -206,8 +206,34 @@ erDiagram
     uuid org_id PK,FK
     uuid current_version_id FK
     boolean require_profile
+    text website_url "nullable"
+    uuid website_confirmed_by FK
+    timestamptz website_confirmed_at "nullable"
+    timestamptz last_reread_at "nullable"
+    text last_reread_status "nullable"
+    integer reread_failures
+    timestamptz next_reread_at "nullable"
     uuid updated_by FK
     timestamptz updated_at
+  }
+  org_context_sources {
+    uuid id PK
+    uuid org_id FK
+    text kind
+    text url "nullable"
+    text file_key "nullable"
+    text file_name "nullable"
+    text mime "nullable"
+    integer bytes "nullable"
+    integer ocr_pages
+    text sha256
+    text text
+    boolean injection_flagged
+    timestamptz fetched_at "nullable"
+    uuid created_by FK
+    timestamptz created_at
+    timestamptz deleted_at "nullable"
+    uuid deleted_by FK
   }
 
   org_members }o--|| organizations : "org_id · cascade"
@@ -227,7 +253,11 @@ erDiagram
   org_profile_versions }o--o| users : "decided_by"
   org_profiles }o--|| organizations : "org_id · cascade"
   org_profiles }o--o| org_profile_versions : "current_version_id"
+  org_profiles }o--o| users : "website_confirmed_by"
   org_profiles }o--o| users : "updated_by"
+  org_context_sources }o--|| organizations : "org_id · cascade"
+  org_context_sources }o--o| users : "created_by"
+  org_context_sources }o--o| users : "deleted_by"
 ```
 
 ## Requisitions & job content
@@ -1218,6 +1248,9 @@ erDiagram
 | `ontology_snapshots` | `org_id` | `organizations` | cascade |
 | `org_agreements` | `accepted_by` | `users` | no action |
 | `org_agreements` | `org_id` | `organizations` | cascade |
+| `org_context_sources` | `created_by` | `users` | no action |
+| `org_context_sources` | `deleted_by` | `users` | no action |
+| `org_context_sources` | `org_id` | `organizations` | cascade |
 | `org_job_distribution` | `org_id` | `organizations` | cascade |
 | `org_linkedin_connections` | `org_id` | `organizations` | cascade |
 | `org_members` | `org_id` | `organizations` | cascade |
@@ -1233,6 +1266,7 @@ erDiagram
 | `org_profiles` | `current_version_id` | `org_profile_versions` | no action |
 | `org_profiles` | `org_id` | `organizations` | cascade |
 | `org_profiles` | `updated_by` | `users` | no action |
+| `org_profiles` | `website_confirmed_by` | `users` | no action |
 | `phone_screening_settings` | `org_id` | `organizations` | cascade |
 | `phone_screening_settings` | `updated_by` | `users` | no action |
 | `requisition_board_postings` | `org_id` | `organizations` | cascade |
@@ -1318,7 +1352,7 @@ erDiagram
 | `agent_issues` | — | 16 | — |
 | `agent_metrics_daily` | — | 17 | — |
 | `agent_policies` | — | 12 | (orgId+agentType) |
-| `agent_runs` | — | 33 | — |
+| `agent_runs` | — | 34 | — |
 | `agent_runtime_heartbeat` | — | 4 | — |
 | `agent_steps` | — | 17 | (runId+seq) |
 | `agent_tasks` | — | 16 | — |
@@ -1348,7 +1382,7 @@ erDiagram
 | `email_outbox` | Communications & AI settings | 16 | (idempotency_key) |
 | `email_settings` | Communications & AI settings | 11 | (org_id) |
 | `evaluations` | Candidates & pipeline | 15 | — |
-| `hiring_conversations` | — | 13 | — |
+| `hiring_conversations` | — | 14 | — |
 | `hiring_messages` | — | 8 | — |
 | `hr_incentive_schemes` | Offers & onboarding | 9 | — |
 | `hrms_employees` | — | 15 | (integrationId+externalId) |
@@ -1369,12 +1403,13 @@ erDiagram
 | `onboarding_documents` | Offers & onboarding | 23 | — |
 | `ontology_snapshots` | Intelligence | 11 | — |
 | `org_agreements` | Organisations & masters | 10 | — |
+| `org_context_sources` | Organisations & masters | 17 | — |
 | `org_job_distribution` | — | 7 | — |
 | `org_linkedin_connections` | Organisations & masters | 11 | — |
 | `org_members` | Organisations & masters | 12 | (orgId+email) |
 | `org_pool_shares` | Organisations & masters | 10 | (ownerOrg+partnerOrg) |
 | `org_profile_versions` | Organisations & masters | 16 | (orgId+version) |
-| `org_profiles` | Organisations & masters | 5 | — |
+| `org_profiles` | Organisations & masters | 12 | — |
 | `organizations` | Organisations & masters | 26 | (slug), (capture_token), (capture_token_hash) |
 | `phone_screening_settings` | Screening & interviews | 15 | — |
 | `platform_admins` | Identity & access | 6 | (email) |

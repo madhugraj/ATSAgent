@@ -5,7 +5,7 @@ import { z } from "zod";
 import { db } from "../server/db";
 import { applications, matchScores, socialProfiles, sourceIntegrations } from "@db/schema";
 import { requireIdentity, requireOrg } from "./auth.middleware";
-import { aiJson } from "./ai-gateway.server";
+import { aiJson, untrusted } from "./ai-gateway.server";
 import {
   buildTemplateSystemPrompt,
   resolveTemplate,
@@ -46,12 +46,16 @@ const BASE_JD_SYSTEM =
   "measures and education given in the data — keep their substance, make them concrete; where the data asks " +
   "you to draft them from typical market practice, do so for this exact role and seniority. Never invent " +
   "company facts (products, revenue, team names) or a salary. " +
+  "The data may carry organisation_context: the employer's approved profile. Write the “About us” section " +
+  "only from its candidate-visible lines — never from your own knowledge and never from an internal-only " +
+  "line — and keep its never-say rules. When it says there is no approved profile, write no company " +
+  "claims at all beyond the role itself. " +
   "Return ONLY JSON with keys: purpose (2-3 sentences: why the role exists and its impact), " +
   "responsibilities (markdown bullet list — 8 to 12 specific bullets for senior roles, 6 to 8 otherwise), " +
   "must_have (string array), good_to_have (string array), qualifications, " +
   "success_factors (what good looks like at 6 and 12 months), reporting_to, " +
-  "full_text (the full JD as markdown with sections: About the role, What you will do, What you will bring, " +
-  "Nice to have, What success looks like, Reporting line). No fluff, no buzzwords, no emojis.";
+  "full_text (the full JD as markdown with sections: About us, About the role, What you will do, " +
+  "What you will bring, Nice to have, What success looks like, Reporting line). No fluff, no buzzwords, no emojis.";
 
 const stripAll = <T>(value: T): T => {
   if (typeof value === "string") return stripUnreplacedPlaceholders(value) as T;
@@ -79,11 +83,21 @@ export async function generateJdCore(
   data: z.infer<typeof JdInput>,
 ): Promise<GeneratedJd> {
   const template = await resolveTemplate(orgId, "jd", data.templateId);
+  // The employer's approved profile feeds the “About us” section (O2); it is
+  // third-party-derived text, so it enters the prompt fenced as data.
+  const { orgContextFor, NO_PROFILE_LINE } = await import("./org-context.server");
+  const org = await orgContextFor({ orgId, audience: "candidate", purpose: "jd" });
   const result = await aiJson<GeneratedJd>({
     orgId,
     feature: "jd_generate",
     system: buildTemplateSystemPrompt({ base: BASE_JD_SYSTEM, template }),
-    prompt: JSON.stringify(data),
+    prompt: JSON.stringify({
+      ...data,
+      organisation_context: untrusted(
+        "organisation_profile",
+        org.versionId ? org.blocks : `${NO_PROFILE_LINE} (write no company claims)`,
+      ),
+    }),
   });
   if (!result.ok) throw new Error(result.message);
   return stripAll(result.data);

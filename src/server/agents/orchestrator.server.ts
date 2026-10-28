@@ -749,6 +749,52 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
       started++;
     }
   }
+  // The Organisation context agent's monthly website re-read: pages whose hash
+  // is unchanged cost no AI call; a changed site raises a draft for approval.
+  if (getAgent("org_context")) {
+    for (const orgId of await enabledOrgs("org_context", opts.orgId)) {
+      const { orgProfiles } = await import("@db/schema");
+      const [p] = await db
+        .select({
+          websiteUrl: orgProfiles.websiteUrl,
+          currentVersionId: orgProfiles.currentVersionId,
+          nextRereadAt: orgProfiles.nextRereadAt,
+        })
+        .from(orgProfiles)
+        .where(eq(orgProfiles.orgId, orgId))
+        .limit(1);
+      if (!p?.websiteUrl || !p.currentVersionId) continue;
+      if (p.nextRereadAt && p.nextRereadAt.getTime() > Date.now()) continue;
+      const [recent] = await db
+        .select({ id: agentRuns.id })
+        .from(agentRuns)
+        .where(
+          and(
+            eq(agentRuns.orgId, orgId),
+            eq(agentRuns.agentType, "org_context"),
+            eq(agentRuns.mode, "live"),
+            sql`(${agentRuns.status} in ('queued','running','awaiting_human') or ${agentRuns.createdAt} >= now() - interval '7 days')`,
+          ),
+        )
+        .limit(1);
+      if (recent) continue;
+      const principal = await ownerOf(orgId);
+      if (!principal) continue;
+      await startRun({
+        orgId,
+        agentType: "org_context",
+        principalUserId: principal,
+        goal: "Monthly website re-read: re-read the organisation's website, propose what changed as profile items with their exact quotes, and submit the version for approval. If nothing changed, say so and finish without submitting.",
+        subjectType: "org_profile",
+        subjectId: p.currentVersionId,
+      });
+      await db
+        .update(orgProfiles)
+        .set({ nextRereadAt: new Date(Date.now() + 30 * 864e5), updatedAt: new Date() })
+        .where(eq(orgProfiles.orgId, orgId));
+      started++;
+    }
+  }
   // Interview times nobody chose in time close, and the team hears about it.
   try {
     const { expireOffers } = await import("@/lib/slot-offers.server");

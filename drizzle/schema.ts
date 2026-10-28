@@ -2073,7 +2073,8 @@ export type AgentType =
   | "sourcing"
   | "distribution"
   | "screening_call"
-  | "scheduling_call";
+  | "scheduling_call"
+  | "org_context";
 export type AgentAutonomy = "suggest" | "act_and_notify" | "autonomous";
 export type AgentRunStatus =
   "queued" | "running" | "awaiting_human" | "done" | "failed" | "cancelled";
@@ -2218,6 +2219,15 @@ export const agentRuns = pgTable(
     conversationId: uuid("conversation_id").references((): AnyPgColumn => hiringConversations.id, {
       onDelete: "set null",
     }),
+    /**
+     * The approved organisation-profile version this run read, stamped when the
+     * runtime injected the org context block (migration 0055). Consumers only —
+     * the Organisation context agent's own runs stay null.
+     */
+    orgProfileVersionId: uuid("org_profile_version_id").references(
+      (): AnyPgColumn => orgProfileVersions.id,
+      { onDelete: "set null" },
+    ),
   },
   (t) => [
     index("agent_runs_queue_idx").on(t.status, t.updatedAt),
@@ -2401,8 +2411,15 @@ export const agentTelemetrySettings = pgTable("agent_telemetry_settings", {
 
 export type HiringConversationStatus = "gathering" | "confirming" | "active" | "closed";
 export type HiringMessageRole = "user" | "desk" | "agent";
+/**
+ * What the thread is for: `hiring` is a hiring-desk thread (the default, and
+ * every row that existed before migration 0055); `org_profile` is an
+ * organisation-desk thread with the Organisation context agent. Any new query
+ * that lists threads must filter on `kind` — the two kinds never mix.
+ */
+export type HiringConversationKind = "hiring" | "org_profile";
 
-/** One chat thread per hiring need (docs/agentic-plan.md §13.2). */
+/** One chat thread per hiring need (docs/agentic-plan.md §13.2); org-desk threads share the table (0055). */
 export const hiringConversations = pgTable(
   "hiring_conversations",
   {
@@ -2414,6 +2431,8 @@ export const hiringConversations = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     title: text("title").notNull().default("New hiring need"),
+    /** hiring (default) | org_profile — the org desk thread kind never mixes with hiring threads. */
+    kind: text("kind").$type<HiringConversationKind>().notNull().default("hiring"),
     status: text("status").$type<HiringConversationStatus>().notNull().default("gathering"),
     /** The hiring details gathered so far (role, location, experience, …). */
     slots: jsonb("slots")
@@ -2434,7 +2453,10 @@ export const hiringConversations = pgTable(
     deletedBy: uuid("deleted_by").references(() => users.id, { onDelete: "set null" }),
     deleteReason: text("delete_reason"),
   },
-  (t) => [index("hiring_conversations_org_idx").on(t.orgId, t.updatedAt)],
+  (t) => [
+    index("hiring_conversations_org_idx").on(t.orgId, t.updatedAt),
+    index("hiring_conversations_org_kind_idx").on(t.orgId, t.kind, t.updatedAt),
+  ],
 );
 
 /** Messages of a hiring-desk thread; `card` carries structured results. */
@@ -3168,6 +3190,71 @@ export const orgProfiles = pgTable("org_profiles", {
   }),
   /** No requisition is raised until a version is approved. */
   requireProfile: boolean("require_profile").notNull().default(false),
+  /**
+   * The organisation's own website (migration 0055): https, and matching the
+   * registered e-mail domain unless an owner confirmed it (audited). Only this
+   * host is ever fetched.
+   */
+  websiteUrl: text("website_url"),
+  websiteConfirmedBy: uuid("website_confirmed_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  websiteConfirmedAt: timestamp("website_confirmed_at", { withTimezone: true }),
+  /** Outcome of the last website read (ok | unchanged | failed) and when it ran. */
+  lastRereadAt: timestamp("last_reread_at", { withTimezone: true }),
+  lastRereadStatus: text("last_reread_status"),
+  rereadFailures: integer("reread_failures").notNull().default(0),
+  /** Dispatch guard for the monthly re-read sweep. */
+  nextRereadAt: timestamp("next_reread_at", { withTimezone: true }),
   updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/* ------------------------------------------------ org context sources (0055) */
+
+export type OrgContextSourceKind = "website_page" | "document";
+
+/**
+ * One row per website page or uploaded document the Organisation context
+ * agent read (docs/org-context-agent-plan.md §3). `text` holds the extracted
+ * (or OCR-recognised) text every profile item must quote; items are dropped
+ * in code when their quote is not in it. A page that trips the injection
+ * tripwire contributes nothing until a person accepts it.
+ */
+export const orgContextSources = pgTable(
+  "org_context_sources",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** website_page | document */
+    kind: text("kind").$type<OrgContextSourceKind>().notNull(),
+    /** Website pages: the final URL after redirects (same host as the saved website). */
+    url: text("url"),
+    fileKey: text("file_key"),
+    fileName: text("file_name"),
+    mime: text("mime"),
+    bytes: integer("bytes"),
+    /** How many pages were recognised through the gateway (0 = plain text extraction). */
+    ocrPages: integer("ocr_pages").notNull().default(0),
+    /** SHA-256 of the fetched page bytes or uploaded file; unchanged hash → no re-extraction. */
+    sha256: text("sha256").notNull(),
+    text: text("text").notNull().default(""),
+    injectionFlagged: boolean("injection_flagged").notNull().default(false),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Soft delete: items sourced from this row render "(source removed)" until the next approval. */
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    deletedBy: uuid("deleted_by").references(() => users.id, { onDelete: "set null" }),
+  },
+  (t) => [
+    check("org_context_sources_kind_check", sql`${t.kind} in ('website_page', 'document')`),
+    // A re-read upserts the page instead of adding a duplicate row.
+    uniqueIndex("org_context_sources_page_key")
+      .on(t.orgId, t.url)
+      .where(sql`${t.kind} = 'website_page' and ${t.deletedAt} is null`),
+    index("org_context_sources_org_idx").on(t.orgId, t.kind, t.createdAt),
+  ],
+);
