@@ -156,6 +156,8 @@ function OrgProfilePage() {
         </div>
       </section>
 
+      {p.canEdit ? <SourcesCard onChanged={refresh} /> : null}
+
       {p.canEdit ? (
         <div className="mt-4 flex gap-1 border-b" role="tablist">
           {(
@@ -185,8 +187,6 @@ function OrgProfilePage() {
         <OrgDeskChat onProfileChanged={refresh} />
       ) : (
         <>
-          {p.canEdit ? <SourcesCard onChanged={refresh} /> : null}
-
           {open && (open.status === "draft" || open.status === "changes_requested") && p.canEdit ? (
             <DraftEditor
               key={`${open.id}:${open.updatedAt}`}
@@ -207,7 +207,7 @@ function OrgProfilePage() {
           ) : (
             <p className="mt-4 text-sm text-muted-foreground">
               {p.canEdit
-                ? "Start with About: what the organisation does, in two or three sentences — or use the agent's chat above."
+                ? "Start with About: what the organisation does, in two or three sentences — or switch to the agent's chat above."
                 : "The HR head, the CBO or an owner writes the profile."}
             </p>
           )}

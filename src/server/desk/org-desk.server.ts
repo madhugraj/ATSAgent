@@ -43,6 +43,8 @@ const TurnOutput = z.object({
   reply: z.string().max(600).default(""),
   /** The person asked for the website to be read (a button does the same). */
   readWebsite: z.boolean().default(false),
+  /** The person gave the organisation's website address — the system saves it. */
+  saveWebsite: z.string().max(400).optional(),
 });
 export type OrgTurn = z.infer<typeof TurnOutput>;
 
@@ -62,6 +64,7 @@ const SYSTEM = [
   '- "slots": which sections are settled ("done": true) from the conversation so far, and any "notes" still to capture for a section. Mark a section done only when the person gave you something real for it. Never invent facts to fill a section.',
   '- "reply": one short, friendly message. Ask about the FIRST section in MISSING (below) that is not done, in one sentence — show the section title and what belongs in it, and build on what the person already said. When everything is done, say you will build the draft and what you will read (the website, the documents).',
   '- "readWebsite": true when the person asks you to read the website (or answers yes to that offer).',
+  '- "saveWebsite": when the person gives the organisation\'s website address (a domain like "www.acme.com", with or without https://), return it here exactly as a full address — the system saves it and tells them. Never invent or guess a website.',
   "The organisation profile never holds pay figures or pay bands, and never staff names, e-mails or phone numbers — if the person gives any, say you keep the philosophy in words and roles by title, not the figures or names.",
 ].join("\n");
 
@@ -157,11 +160,44 @@ export async function handleOrgUserMessage(
     .where(eq(hiringConversations.id, conv.id));
   conv = { ...conv, slots: slots as never };
 
+  if (turn.saveWebsite) await saveWebsiteFromChat(conv, userId, turn.saveWebsite);
   if (turn.readWebsite) await startWebsiteRead(conv, userId);
   if (turn.reply.trim()) await postMessage(conv, { role: "desk", body: turn.reply.trim() });
   if (missingSections(slots).length === 0) {
     await startBuild(conv, userId);
   }
+}
+
+/** "www.acme.com" said in the chat: normalise, save (owner rules apply), confirm. */
+async function saveWebsiteFromChat(
+  conv: Conversation,
+  userId: string,
+  said: string,
+): Promise<void> {
+  const trimmed = said.trim();
+  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  const { setWebsiteCore } = await import("@/lib/org-context.server");
+  let res;
+  try {
+    res = await setWebsiteCore({ orgId: conv.orgId, userId }, { url: withScheme });
+  } catch (e) {
+    await postMessage(conv, {
+      role: "desk",
+      body: e instanceof Error ? e.message : "That address could not be saved.",
+    });
+    return;
+  }
+  if (res.ok) {
+    await postMessage(conv, {
+      role: "desk",
+      body: `Saved ${res.url} as your website (under Sources above). Press “Read the website” and I'll read it into your profile.`,
+    });
+    return;
+  }
+  await postMessage(conv, {
+    role: "desk",
+    body: `${withScheme} is outside your registered e-mail domain, so only an owner can confirm it — an owner can press Save under Sources above, or confirm it there.`,
+  });
 }
 
 /** "Read the website now" — starts the agent on a read inside this thread. */
@@ -175,7 +211,7 @@ export async function startWebsiteRead(conv: Conversation, userId: string): Prom
   if (!p?.websiteUrl) {
     await postMessage(conv, {
       role: "desk",
-      body: "No website is saved yet — add it on the Organisation profile page and I'll read it from there.",
+      body: "No website is saved yet — paste the address here in the chat (like https://www.acme.com), or type it under Sources above, and I'll read it.",
     });
     return;
   }
@@ -241,7 +277,7 @@ export async function ensureOrgThread(orgId: string, userId: string): Promise<Co
     .returning();
   await postMessage(conv!, {
     role: "desk",
-    body: "Tell me about your organisation — what it does, what it makes, its tech stacks and projects, who it serves. I'll ask section by section; the profile this builds is what every hiring agent here works from. The website and documents you add on the Profile page are read too.",
+    body: "Tell me about your organisation — what it does, what it makes, its tech stacks and projects, who it serves. I'll ask section by section; the profile this builds is what every hiring agent here works from. You can also paste your website address here (I'll save and read it), upload documents under Sources above, or press Build the draft to have me read everything on file and propose the profile for approval.",
   });
   return conv!;
 }

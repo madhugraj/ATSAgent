@@ -122,6 +122,7 @@ export function OrgDeskChat({ onProfileChanged }: { onProfileChanged?: () => voi
           size="sm"
           variant="outline"
           className="gap-1"
+          title="The agent fetches your saved website (own domain only) and proposes what it states as draft items, quoting each page"
           disabled={busy}
           onClick={async () => {
             setBusy(true);
@@ -141,6 +142,7 @@ export function OrgDeskChat({ onProfileChanged }: { onProfileChanged?: () => voi
           size="sm"
           variant="outline"
           className="gap-1"
+          title="The agent reads your records, the website and every uploaded document, proposes what it finds as draft items with exact quotes, then submits the draft for the HR head's approval"
           disabled={busy}
           onClick={async () => {
             setBusy(true);
