@@ -148,7 +148,11 @@ export function registerOrgTools(): void {
       section: z.enum(SECTION_KEYS),
       items: z.array(ProposedItem).min(1).max(30),
     }),
-    risk: "write",
+    // Risk "read" on purpose: items land only in a draft that is inert until
+    // the version itself is submitted and approved — the human gate is the
+    // version approval at the end of the run, not each proposal. Approving
+    // every section separately made the build a permission nag.
+    risk: "read",
     describe: (i) => `Propose ${i.items.length} profile item(s) under “${i.section}”`,
     run: async (ctx, input) => {
       const { proposeItemsCore } = await import("@/lib/org-context.server");
@@ -159,9 +163,13 @@ export function registerOrgTools(): void {
   registerTool({
     name: "submit_profile_version",
     description:
-      "Submit the organisation profile draft for approval. Refuses when there is no open draft or nothing under About. Afterwards ask for the decision with request_approval (subject type org_profile, this version's id) — never approve it yourself.",
+      "Submit the organisation profile draft for approval — submitting IS the ask; afterwards request the decision with request_approval (subject type org_profile, this version's id) and the approval card is the person's decision. Refuses when there is no open draft or nothing under About.",
     input: z.object({ note: z.string().max(1000).optional() }),
-    risk: "write",
+    // Risk "read" like proposing: submitting moves the inert draft to
+    // "waiting for approval" — the approval card that follows is the human
+    // gate. Under suggest autonomy this otherwise asks "may I submit?" and
+    // then asks again on the version itself: two approvals for one decision.
+    risk: "read",
     describe: () => "Submit the organisation profile for approval",
     precheck: async (ctx) => {
       const { profileState } = await import("@/lib/org-profile.server");
@@ -170,6 +178,8 @@ export function registerOrgTools(): void {
         return "There is no open draft to submit. Propose items first (propose_profile_items), then submit.";
       if (state.open.status === "pending")
         return "This version is already waiting for approval; do not submit it again.";
+      if (!(state.open.sections["about"] ?? []).length)
+        return "The draft has nothing under About yet — propose at least one About item before submitting.";
       return null;
     },
     run: async (ctx) => {

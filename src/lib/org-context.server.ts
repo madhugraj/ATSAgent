@@ -282,6 +282,25 @@ export function __clearReadWindowForTest(orgId: string): void {
   readWindow.delete(orgId);
 }
 
+/**
+ * What a page declares about itself outside its visible text — title and the
+ * meta / Open-Graph description — one line each. Client-rendered sites serve
+ * a script-only shell whose visible text is empty; this is often all they
+ * state, so it is kept as the page's text rather than reading nothing.
+ */
+export function metaText(html: string): string {
+  const lines: string[] = [];
+  const title = html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1]?.trim();
+  if (title) lines.push(title);
+  for (const m of html.matchAll(
+    /<meta[^>]+(?:name|property)=["'](description|og:description|og:site_name)["'][^>]*>/gi,
+  )) {
+    const content = m[0].match(/content=["']([^"']*)["']/i)?.[1]?.trim();
+    if (content) lines.push(content);
+  }
+  return [...new Set(lines)].join("\n");
+}
+
 /** Drop script/style/head/comment blocks and tags, decode entities, keep line breaks. */
 export function htmlToText(html: string): string {
   return html
@@ -307,12 +326,12 @@ export function htmlToText(html: string): string {
     .trim();
 }
 
-/** Same-host links on a page, resolved, deduplicated, fragment-free. */
+/** Same-host links on a page, resolved, deduplicated, fragment-free. Anchors only — a stylesheet or icon link is not a page to read. */
 export function pageLinks(html: string, baseUrl: string): string[] {
   const base = new URL(baseUrl);
   const host = bareHost(base.hostname);
   const out = new Set<string>();
-  for (const m of html.matchAll(/href\s*=\s*["']([^"']+)["']/gi)) {
+  for (const m of html.matchAll(/<a\b[^>]*?\bhref\s*=\s*["']([^"']+)["']/gi)) {
     const href = m[1];
     if (!href || /\s/.test(href)) continue;
     try {
@@ -515,6 +534,8 @@ export async function readWebsiteCore(
     let finalUrl: string;
     try {
       const res = await safeFetchText(url, { maxBytes: MAX_PAGE_BYTES, hops: 2 });
+      if (res.contentType && !/text\/html|application\/xhtml/i.test(res.contentType))
+        throw new Error("not an HTML page (a stylesheet, script or asset)");
       text = res.text;
       finalUrl = res.finalUrl;
       if (bareHost(new URL(finalUrl).hostname) !== bareHost(new URL(url).hostname))
@@ -524,7 +545,12 @@ export async function readWebsiteCore(
       skipped.push({ url, why: e instanceof Error ? e.message : "could not be fetched" });
       continue;
     }
-    const pageText = htmlToText(text);
+    // Visible text first; a client-rendered shell has none, so what the page
+    // declares about itself (title, meta description) stands in.
+    const pageText = [htmlToText(text), metaText(text)]
+      .map((t) => t.trim())
+      .filter(Boolean)
+      .join("\n");
     if (!pageText) {
       skipped.push({ url, why: "no readable text" });
       continue;
