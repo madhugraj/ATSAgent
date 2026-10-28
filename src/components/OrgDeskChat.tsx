@@ -8,12 +8,13 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Globe, Send, Sparkles } from "lucide-react";
+import { Globe, RefreshCw, Send, Sparkles } from "lucide-react";
 
 import {
   buildFromDesk,
   getOrgDeskThread,
   readWebsiteFromDesk,
+  retryOrgDeskRun,
   sendOrgDeskMessage,
   type OrgDeskMessageView,
 } from "@/lib/org-desk.functions";
@@ -25,17 +26,27 @@ import { Textarea } from "@/components/ui/textarea";
 const when = (iso: string) =>
   new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
+const ACTIVE = new Set(["queued", "running", "awaiting_human"]);
+
 export function OrgDeskChat({ onProfileChanged }: { onProfileChanged?: () => void }) {
   const qc = useQueryClient();
-  const q = useQuery({ queryKey: ["org_desk"], queryFn: () => getOrgDeskThread() });
+  const q = useQuery({
+    queryKey: ["org_desk"],
+    queryFn: () => getOrgDeskThread(),
+    // While the agent is working (or waiting on a decision), keep the thread
+    // and its activity strip live; poll gently otherwise.
+    refetchInterval: (query) =>
+      query.state.data && ACTIVE.has(query.state.data.activity?.status ?? "") ? 4000 : 15_000,
+  });
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   const thread = q.data;
+  const activity = thread?.activity ?? null;
 
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight });
-  }, [thread?.messages.length]);
+  }, [thread?.messages.length, activity?.status]);
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["org_desk"] });
@@ -117,6 +128,26 @@ export function OrgDeskChat({ onProfileChanged }: { onProfileChanged?: () => voi
         ))}
       </div>
 
+      {activity ? (
+        <ActivityStrip
+          activity={activity}
+          busy={busy}
+          threadId={thread.id}
+          onRetry={async () => {
+            setBusy(true);
+            try {
+              await retryOrgDeskRun({ data: { id: thread.id, runId: activity.runId } });
+              toast.success("Trying the agent again.");
+            } catch (e) {
+              toast.error(e instanceof Error ? e.message : "Could not try again");
+            } finally {
+              setBusy(false);
+              refresh();
+            }
+          }}
+        />
+      ) : null}
+
       <div className="mt-3 flex flex-wrap gap-2">
         <Button
           size="sm"
@@ -179,6 +210,58 @@ export function OrgDeskChat({ onProfileChanged }: { onProfileChanged?: () => voi
         </Button>
       </div>
     </>
+  );
+}
+
+function ActivityStrip({
+  activity,
+  busy,
+  threadId,
+  onRetry,
+}: {
+  activity: NonNullable<NonNullable<Awaited<ReturnType<typeof getOrgDeskThread>>>["activity"]>;
+  busy: boolean;
+  threadId: string;
+  onRetry: () => void;
+}) {
+  const ago = Math.round((Date.now() - new Date(activity.updatedAt).getTime()) / 60000);
+  const since = activity.lastStep
+    ? Math.round((Date.now() - new Date(activity.lastStep.at).getTime()) / 60000)
+    : null;
+  if (activity.status === "running" || activity.status === "queued")
+    return (
+      <p className="flex items-center gap-2 px-1 text-xs text-muted-foreground">
+        <RefreshCw className="size-3 animate-spin" />
+        {activity.status === "queued" ? "Starting…" : "Working"}
+        {activity.lastStep ? ` — ${activity.lastStep.text}` : ""}
+        {since !== null && since >= 1 ? ` (last step ${since} min ago)` : ""}. Its results and its
+        approval request will appear in the thread.
+      </p>
+    );
+  if (activity.status === "awaiting_human")
+    return (
+      <p className="px-1 text-xs text-amber-600">
+        Waiting for you — the agent's request is in the thread above.
+      </p>
+    );
+  if (activity.status === "failed")
+    return (
+      <div className="flex flex-wrap items-center gap-2 px-1 text-xs text-destructive">
+        <span>
+          The agent stopped: {activity.error ?? "something went wrong"}
+          {ago >= 1 ? ` (${ago} min ago)` : ""}
+        </span>
+        <Button size="sm" variant="outline" disabled={busy} onClick={onRetry}>
+          Try again
+        </Button>
+      </div>
+    );
+  return (
+    <p className="px-1 text-xs text-muted-foreground">
+      Last run {activity.status}
+      {activity.result ? `: ${activity.result.slice(0, 160)}` : ""}
+      {ago >= 1 ? ` · ${ago} min ago` : ""}
+    </p>
   );
 }
 

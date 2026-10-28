@@ -5,7 +5,7 @@
  * never appears in the hiring desk and hiring threads never appear here.
  */
 import { createServerFn } from "@tanstack/react-start";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../server/db";
@@ -63,6 +63,18 @@ export type OrgDeskMessageView = {
   at: string;
 };
 
+export type OrgDeskActivityView = {
+  runId: string;
+  /** queued | running | awaiting_human | done | failed | cancelled */
+  status: string;
+  goal: string;
+  result: string | null;
+  error: string | null;
+  updatedAt: string;
+  /** The latest step, in plain words (never its content). */
+  lastStep: { text: string; at: string } | null;
+};
+
 export type OrgDeskThreadView = {
   id: string;
   title: string;
@@ -72,6 +84,20 @@ export type OrgDeskThreadView = {
   tasks: Record<string, string>;
   /** Whether the viewer may decide each request, and who it waits for otherwise. */
   deciders: Record<string, { canDecide: boolean; waitingFor: string | null }>;
+  /** What the agent is doing right now (its latest run in this thread). */
+  activity: OrgDeskActivityView | null;
+};
+
+/** Tool names in words people can read (ids and flags stay out). */
+const STEP_WORDS: Record<string, string> = {
+  read_org_profile: "reading the profile as it stands",
+  read_org_records: "reading your organisation's records",
+  read_org_website: "reading your website",
+  read_org_document: "reading an uploaded document",
+  propose_profile_items: "proposing profile items into the draft",
+  submit_profile_version: "submitting the draft for approval",
+  ask_human: "asking you a question",
+  request_approval: "asking for approval",
 };
 
 export const getOrgDeskThread = createServerFn({ method: "GET" })
@@ -98,6 +124,63 @@ export const getOrgDeskThread = createServerFn({ method: "GET" })
       const { taskDeciders } = await import("../server/desk/desk.server");
       return taskDeciders(context.orgId, context.userId, context.isOwner, taskIds);
     })();
+    // The agent's latest run in this thread, with its newest step in plain words.
+    const { agentRuns, agentSteps } = await import("@db/schema");
+    const [run] = await db
+      .select({
+        id: agentRuns.id,
+        status: agentRuns.status,
+        goal: agentRuns.goal,
+        result: agentRuns.result,
+        lastError: agentRuns.lastError,
+        updatedAt: agentRuns.updatedAt,
+      })
+      .from(agentRuns)
+      .where(
+        and(
+          eq(agentRuns.orgId, context.orgId),
+          eq(agentRuns.conversationId, conv.id),
+          eq(agentRuns.agentType, "org_context"),
+          eq(agentRuns.mode, "live"),
+        ),
+      )
+      .orderBy(desc(agentRuns.updatedAt))
+      .limit(1);
+    let activity: OrgDeskActivityView | null = null;
+    if (run) {
+      const [step] = await db
+        .select({
+          kind: agentSteps.kind,
+          toolName: agentSteps.toolName,
+          status: agentSteps.status,
+          createdAt: agentSteps.createdAt,
+        })
+        .from(agentSteps)
+        .where(eq(agentSteps.runId, run.id))
+        .orderBy(desc(agentSteps.seq))
+        .limit(1);
+      activity = {
+        runId: run.id,
+        status: run.status,
+        goal: run.goal,
+        result: run.result,
+        error: run.lastError,
+        updatedAt: run.updatedAt.toISOString(),
+        lastStep: step
+          ? {
+              text:
+                step.kind === "tool" && step.toolName
+                  ? (STEP_WORDS[step.toolName] ?? "working")
+                  : step.kind === "model"
+                    ? "thinking"
+                    : step.kind === "decision"
+                      ? "a person decided"
+                      : "working",
+              at: step.createdAt.toISOString(),
+            }
+          : null,
+      };
+    }
     return {
       id: conv.id,
       title: conv.title,
@@ -112,6 +195,7 @@ export const getOrgDeskThread = createServerFn({ method: "GET" })
       })),
       tasks: await taskStatusesFor(context.orgId, taskIds),
       deciders,
+      activity,
     };
   });
 
@@ -171,4 +255,20 @@ export const buildFromDesk = createServerFn({ method: "POST" })
     const { startBuild } = await import("../server/desk/org-desk.server");
     await startBuild(conv, context.userId);
     return { ok: true as const };
+  });
+
+/** Run the thread's stopped agent run again (same goal, same person). */
+export const retryOrgDeskRun = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) =>
+    z.object({ id: z.string().uuid(), runId: z.string().uuid() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await actorCtx(context);
+    await registered();
+    const { loadConversation } = await import("../server/desk/desk.server");
+    const conv = await loadConversation(context.orgId, data.id);
+    if (conv.kind !== "org_profile") throw new Error("Conversation not found.");
+    const { retryRun } = await import("../server/desk/desk.server");
+    return { runId: await retryRun(conv, context.userId, data.runId) };
   });

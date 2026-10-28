@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   BookOpenText,
@@ -26,12 +26,8 @@ import {
 } from "@/lib/org-context.functions";
 import {
   decideOrgProfileVersion,
-  discardOrgProfileDraft,
   getOrgProfile,
-  saveOrgProfileDraft,
   setOrgProfileRequired,
-  startOrgProfileDraft,
-  submitOrgProfileDraft,
   type OrgProfileVersionView,
 } from "@/lib/org-profile.functions";
 import {
@@ -76,8 +72,6 @@ function OrgProfilePage() {
     queryKey: ["org_context_admin"],
     queryFn: () => getOrgContextAdmin(),
   });
-  /** "hand" writes the sections by hand; "chat" is the agent's conversation. */
-  const [tab, setTab] = useState<"hand" | "chat">("hand");
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["org_profile"] });
     qc.invalidateQueries({ queryKey: ["org_profile_gate"] });
@@ -95,7 +89,7 @@ function OrgProfilePage() {
       <PageHeader
         eyebrow="Administration"
         title="Organisation profile"
-        description="What your organisation does and how it hires. Once the HR head or an owner approves it, this is the context every hiring agent works from. Pay figures and staff names are never kept here."
+        description="What your organisation does and how it hires — built with the Organisation context agent from your answers, your website and your documents, then approved by the HR head or an owner. This approved profile is the context every hiring agent works from. Pay figures and staff names are never kept here."
       />
 
       <RequireCard required={p.requireProfile} canChange={p.canDecide} onChanged={refresh} />
@@ -117,41 +111,6 @@ function OrgProfilePage() {
             <Badge variant="outline">
               Version {open.version}: {STATUS_LABEL[open.status] ?? open.status}
             </Badge>
-          ) : p.canEdit ? (
-            <Button
-              size="sm"
-              onClick={async () => {
-                try {
-                  await startOrgProfileDraft();
-                  refresh();
-                } catch (e) {
-                  toast.error(e instanceof Error ? e.message : "Could not start a draft");
-                }
-              }}
-            >
-              {p.approved ? "Change the profile" : "Write the profile"}
-            </Button>
-          ) : null}
-          {p.canEdit ? (
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-1"
-              onClick={async () => {
-                try {
-                  await startOrgContextBuild();
-                  toast.success(
-                    "The Organisation context agent is building the profile from your records, website and documents.",
-                  );
-                  refresh();
-                } catch (e) {
-                  toast.error(e instanceof Error ? e.message : "Could not start the agent");
-                }
-              }}
-            >
-              <Sparkles className="size-3.5" />
-              {open || p.approved ? "Build with the agent" : "Build it with the agent"}
-            </Button>
           ) : null}
         </div>
       </section>
@@ -159,60 +118,30 @@ function OrgProfilePage() {
       {p.canEdit ? <SourcesCard onChanged={refresh} /> : null}
 
       {p.canEdit ? (
-        <div className="mt-4 flex gap-1 border-b" role="tablist">
-          {(
-            [
-              ["hand", "Write by hand"],
-              ["chat", "Chat with the agent"],
-            ] as const
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              role="tab"
-              aria-selected={tab === key}
-              className={`px-3 py-1.5 text-sm ${
-                tab === key
-                  ? "border-b-2 border-primary font-medium"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-              onClick={() => setTab(key)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      {tab === "chat" && p.canEdit ? (
         <OrgDeskChat onProfileChanged={refresh} />
+      ) : open ? (
+        <PendingReview
+          version={open}
+          approved={p.approved}
+          canDecide={p.canDecide && open.status === "pending"}
+          removedSourceIds={removedIds}
+          onChanged={refresh}
+        />
       ) : (
-        <>
-          {open && (open.status === "draft" || open.status === "changes_requested") && p.canEdit ? (
-            <DraftEditor
-              key={`${open.id}:${open.updatedAt}`}
-              draft={open}
-              approved={p.approved}
-              onChanged={refresh}
-            />
-          ) : open ? (
-            <PendingReview
-              version={open}
-              approved={p.approved}
-              canDecide={p.canDecide && open.status === "pending"}
-              removedSourceIds={removedIds}
-              onChanged={refresh}
-            />
-          ) : p.approved ? (
-            <ReadOnlyProfile sections={p.approved.sections} removedSourceIds={removedIds} />
-          ) : (
-            <p className="mt-4 text-sm text-muted-foreground">
-              {p.canEdit
-                ? "Start with About: what the organisation does, in two or three sentences — or switch to the agent's chat above."
-                : "The HR head, the CBO or an owner writes the profile."}
-            </p>
-          )}
-        </>
+        <p className="mt-4 text-sm text-muted-foreground">
+          The HR head, the CBO or an owner writes the profile with the Organisation context agent.
+        </p>
       )}
+
+      {p.canEdit && open && open.status !== "pending" ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          A draft (version {open.version}) is being built in the chat above; it appears here for
+          approval once submitted.
+        </p>
+      ) : null}
+      {p.approved ? (
+        <ReadOnlyProfile sections={p.approved.sections} removedSourceIds={removedIds} />
+      ) : null}
 
       {p.history.length ? (
         <section className="panel mt-4 p-4">
@@ -648,246 +577,6 @@ function DiffPanel({
         )}
       </div>
     </section>
-  );
-}
-
-function DraftEditor({
-  draft,
-  approved,
-  onChanged,
-}: {
-  draft: OrgProfileVersionView;
-  approved: OrgProfileVersionView | null;
-  onChanged: () => void;
-}) {
-  const [sections, setSections] = useState<OrgProfileSections>(draft.sections);
-  const [refused, setRefused] = useState<Refusal[]>([]);
-  const [problems, setProblems] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [dirty, setDirty] = useState(false);
-  useEffect(() => setSections(draft.sections), [draft.sections]);
-  const refusedById = useMemo(() => new Map(refused.map((r) => [r.itemId, r.reason])), [refused]);
-
-  const update = (key: string, items: OrgProfileItem[]) => {
-    setSections((s) => ({ ...s, [key]: items }));
-    setDirty(true);
-  };
-
-  async function save(): Promise<boolean> {
-    const res = await saveOrgProfileDraft({
-      data: {
-        versionId: draft.id,
-        sections: Object.fromEntries(
-          Object.entries(sections).map(([k, items]) => [
-            k,
-            items.map(({ id, text, visibility }) => ({ id, text, visibility })),
-          ]),
-        ),
-      },
-    });
-    if (!res.ok) {
-      setRefused(res.refused);
-      setProblems(res.problems);
-      toast.error(
-        res.refused.length
-          ? `${res.refused.length} item(s) cannot be kept — see the reasons below. Nothing was saved.`
-          : "Nothing was saved — see the problems below.",
-      );
-      return false;
-    }
-    setRefused([]);
-    setProblems([]);
-    setDirty(false);
-    if (res.injectionFlagged)
-      toast.warning("Some text reads like instructions to an AI; the approver will be warned.");
-    return true;
-  }
-
-  async function run(fn: () => Promise<void>) {
-    setBusy(true);
-    try {
-      await fn();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Something went wrong");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <>
-      {draft.status === "changes_requested" && draft.decisionNote ? (
-        <section className="panel mt-4 border-primary/40 p-3 text-sm">
-          <strong>Sent back{draft.decidedBy ? ` by ${draft.decidedBy}` : ""}:</strong> “
-          {draft.decisionNote}”
-        </section>
-      ) : null}
-      {problems.length ? (
-        <section className="panel mt-4 border-destructive/40 p-3 text-sm text-destructive">
-          {problems.map((m) => (
-            <p key={m}>{m}</p>
-          ))}
-        </section>
-      ) : null}
-
-      <div className="mt-4 space-y-3">
-        {PROFILE_SECTIONS.map((def) => {
-          const items = sections[def.key] ?? [];
-          return (
-            <section key={def.key} className="panel space-y-2 p-4">
-              <div>
-                <h2 className="flex items-center gap-2 text-sm font-semibold">
-                  <BookOpenText className="size-4 text-muted-foreground" /> {def.title}
-                  {def.internalOnly ? (
-                    <Badge variant="secondary" className="gap-1">
-                      <Lock className="size-3" /> Never shown to candidates
-                    </Badge>
-                  ) : null}
-                </h2>
-                <p className="text-xs text-muted-foreground">{def.hint}</p>
-              </div>
-              {items.map((item, n) => (
-                <div key={item.id} className="space-y-1">
-                  <div className="flex items-start gap-2">
-                    <Textarea
-                      rows={2}
-                      maxLength={MAX_ITEM_CHARS}
-                      value={item.text}
-                      aria-label={`${def.title} item ${n + 1}`}
-                      className={refusedById.has(item.id) ? "border-destructive" : ""}
-                      onChange={(e) =>
-                        update(
-                          def.key,
-                          items.map((i) => (i.id === item.id ? { ...i, text: e.target.value } : i)),
-                        )
-                      }
-                    />
-                    <div className="flex shrink-0 flex-col gap-1">
-                      {def.internalOnly ? (
-                        <Badge variant="secondary" className="gap-1">
-                          <Lock className="size-3" /> Internal
-                        </Badge>
-                      ) : (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          title="Who may hear or read this line"
-                          onClick={() =>
-                            update(
-                              def.key,
-                              items.map((i) =>
-                                i.id === item.id
-                                  ? {
-                                      ...i,
-                                      visibility:
-                                        i.visibility === "candidate" ? "internal" : "candidate",
-                                    }
-                                  : i,
-                              ),
-                            )
-                          }
-                        >
-                          {item.visibility === "candidate" ? (
-                            <>
-                              <Eye className="size-3" /> Candidates
-                            </>
-                          ) : (
-                            <>
-                              <Lock className="size-3" /> Internal
-                            </>
-                          )}
-                        </Button>
-                      )}
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        aria-label="Remove this line"
-                        onClick={() =>
-                          update(
-                            def.key,
-                            items.filter((i) => i.id !== item.id),
-                          )
-                        }
-                      >
-                        <Trash2 className="size-3" />
-                      </Button>
-                    </div>
-                  </div>
-                  {refusedById.has(item.id) ? (
-                    <p className="text-xs text-destructive">{refusedById.get(item.id)}</p>
-                  ) : null}
-                </div>
-              ))}
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  update(def.key, [
-                    ...items,
-                    {
-                      id: crypto.randomUUID(),
-                      text: "",
-                      visibility: def.defaultVisibility,
-                      source: { kind: "person" },
-                    },
-                  ])
-                }
-              >
-                <Plus className="size-3" /> Add a line
-              </Button>
-            </section>
-          );
-        })}
-      </div>
-
-      <DiffPanel approved={approved?.sections ?? null} sections={sections} />
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        <Button
-          disabled={busy || !dirty}
-          onClick={() =>
-            run(async () => {
-              if (await save()) {
-                toast.success("Draft saved");
-                onChanged();
-              }
-            })
-          }
-        >
-          Save draft
-        </Button>
-        <Button
-          variant="outline"
-          disabled={busy}
-          onClick={() =>
-            run(async () => {
-              if (dirty && !(await save())) return;
-              await submitOrgProfileDraft({ data: { versionId: draft.id } });
-              toast.success("Sent to the HR head or an owner for approval");
-              onChanged();
-            })
-          }
-        >
-          Submit for approval
-        </Button>
-        <Button
-          variant="ghost"
-          disabled={busy}
-          onClick={() =>
-            run(async () => {
-              await discardOrgProfileDraft({ data: { versionId: draft.id } });
-              toast.success("Draft discarded");
-              onChanged();
-            })
-          }
-        >
-          Discard draft
-        </Button>
-      </div>
-    </>
   );
 }
 
