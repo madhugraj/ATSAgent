@@ -9,7 +9,7 @@ import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../server/db";
-import { agentTasks, hiringMessages } from "@db/schema";
+import { agentTasks, hiringConversations, hiringMessages } from "@db/schema";
 import { requireOrg } from "./auth.middleware";
 import { EDITORS } from "./org-profile.server";
 
@@ -271,4 +271,44 @@ export const retryOrgDeskRun = createServerFn({ method: "POST" })
     if (conv.kind !== "org_profile") throw new Error("Conversation not found.");
     const { retryRun } = await import("../server/desk/desk.server");
     return { runId: await retryRun(conv, context.userId, data.runId) };
+  });
+
+/**
+ * Clear the chat: stop the agent's open runs (their waiting questions go
+ * with them), hide the thread, and start a fresh one with the greeting.
+ * The old thread stays restorable for 30 days, as hiring threads do.
+ */
+export const clearOrgDeskChat = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await actorCtx(context);
+    await registered();
+    const { loadConversation } = await import("../server/desk/desk.server");
+    const conv = await loadConversation(context.orgId, data.id);
+    if (conv.kind !== "org_profile") throw new Error("Conversation not found.");
+    const { agentRuns } = await import("@db/schema");
+    const open = await db
+      .select({ id: agentRuns.id })
+      .from(agentRuns)
+      .where(
+        and(
+          eq(agentRuns.orgId, context.orgId),
+          eq(agentRuns.conversationId, conv.id),
+          eq(agentRuns.agentType, "org_context"),
+          inArray(agentRuns.status, ["queued", "running", "awaiting_human"]),
+        ),
+      );
+    const { cancelRun } = await import("../server/agents/runtime.server");
+    for (const r of open)
+      await cancelRun({ orgId: context.orgId, runId: r.id, userId: context.userId });
+    await db
+      .update(hiringConversations)
+      .set({ deletedAt: new Date(), deletedBy: context.userId, updatedAt: new Date() })
+      .where(
+        and(eq(hiringConversations.id, conv.id), eq(hiringConversations.orgId, context.orgId)),
+      );
+    const { ensureOrgThread } = await import("../server/desk/org-desk.server");
+    const fresh = await ensureOrgThread(context.orgId, context.userId);
+    return { id: fresh.id };
   });

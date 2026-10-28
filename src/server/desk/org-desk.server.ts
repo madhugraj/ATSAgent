@@ -9,7 +9,7 @@
  * kinds never mix. Only the HR head, the CBO or the owner use this desk (the
  * same people who edit the profile).
  */
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../db";
@@ -263,7 +263,15 @@ export async function ensureOrgThread(orgId: string, userId: string): Promise<Co
   const existing = await db
     .select()
     .from(hiringConversations)
-    .where(and(eq(hiringConversations.orgId, orgId), eq(hiringConversations.kind, "org_profile")))
+    .where(
+      and(
+        eq(hiringConversations.orgId, orgId),
+        eq(hiringConversations.kind, "org_profile"),
+        // A cleared thread stays restorable but is never reused: clearing
+        // must hand back a fresh conversation.
+        isNull(hiringConversations.deletedAt),
+      ),
+    )
     .limit(1);
   if (existing[0]) return existing[0];
   const [conv] = await db

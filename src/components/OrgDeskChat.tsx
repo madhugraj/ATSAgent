@@ -12,6 +12,7 @@ import { Globe, RefreshCw, Send, Sparkles } from "lucide-react";
 
 import {
   buildFromDesk,
+  clearOrgDeskChat,
   getOrgDeskThread,
   readWebsiteFromDesk,
   retryOrgDeskRun,
@@ -99,6 +100,33 @@ export function OrgDeskChat({ onProfileChanged }: { onProfileChanged?: () => voi
     }
   }
 
+  async function answer(taskId: string, text: string) {
+    try {
+      await decideAgentTask({ data: { taskId, decision: { status: "answered", answer: text } } });
+      toast.success("Sent — the agent continues with your answer.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not send the answer");
+    } finally {
+      refresh();
+    }
+  }
+
+  async function clearChat() {
+    if (!thread) return;
+    if (!window.confirm("Clear this chat? The agent's open work stops and a fresh thread starts."))
+      return;
+    setBusy(true);
+    try {
+      await clearOrgDeskChat({ data: { id: thread.id } });
+      toast.success("Chat cleared.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not clear the chat");
+    } finally {
+      setBusy(false);
+      refresh();
+    }
+  }
+
   if (q.isLoading) return <p className="text-sm text-muted-foreground">Opening the chat…</p>;
   if (q.error || !thread)
     return <p className="text-sm text-destructive">Could not open the chat.</p>;
@@ -109,7 +137,7 @@ export function OrgDeskChat({ onProfileChanged }: { onProfileChanged?: () => voi
         Describe your organisation — what it does, its products and tech stacks, its projects, how
         it hires. What you settle here becomes the approved profile every hiring agent works from:
         the JD agent's “About us”, the requisition drafts, and candidate matching. The agent's
-        approval request appears in this thread, and a person always approves.
+        requests and questions appear as cards in this thread, and a person always decides.
       </p>
 
       <div
@@ -124,6 +152,7 @@ export function OrgDeskChat({ onProfileChanged }: { onProfileChanged?: () => voi
             tasks={thread.tasks}
             deciders={thread.deciders}
             onDecide={decide}
+            onAnswer={answer}
           />
         ))}
       </div>
@@ -188,6 +217,16 @@ export function OrgDeskChat({ onProfileChanged }: { onProfileChanged?: () => voi
           }}
         >
           <Sparkles className="size-3.5" /> Build the draft
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="ml-auto text-muted-foreground"
+          title="Stop the agent's open work and start a fresh thread"
+          disabled={busy}
+          onClick={() => void clearChat()}
+        >
+          Clear chat
         </Button>
       </div>
 
@@ -270,13 +309,16 @@ function Message({
   tasks,
   deciders,
   onDecide,
+  onAnswer,
 }: {
   m: OrgDeskMessageView;
   tasks: Record<string, string>;
   deciders: Record<string, { canDecide: boolean; waitingFor: string | null }>;
   onDecide: (taskId: string, decision: "approve" | "send_back" | "decline", note?: string) => void;
+  onAnswer: (taskId: string, answer: string) => void;
 }) {
   const [note, setNote] = useState("");
+  const [answer, setAnswer] = useState("");
   const mine = m.role === "user";
   if (mine)
     return (
@@ -286,6 +328,9 @@ function Message({
         </div>
       </div>
     );
+  const card = m.card;
+  const taskId = card && typeof card["taskId"] === "string" ? card["taskId"] : null;
+  const kind = card && typeof card["kind"] === "string" ? card["kind"] : null;
   return (
     <div className="max-w-[85%] space-y-1">
       <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
@@ -295,19 +340,90 @@ function Message({
       <div className="whitespace-pre-wrap rounded-lg border bg-background px-3 py-2 text-sm">
         {m.body}
       </div>
-      {m.card?.type === "approval" && typeof m.card["taskId"] === "string" ? (
-        <GateCard
-          taskId={m.card["taskId"]}
-          title={typeof m.card["title"] === "string" ? m.card["title"] : "Approval request"}
-          body={typeof m.card["body"] === "string" ? m.card["body"] : ""}
-          status={tasks[m.card["taskId"]] ?? "open"}
-          canDecide={deciders[m.card["taskId"]]?.canDecide ?? false}
-          waitingFor={deciders[m.card["taskId"]]?.waitingFor ?? null}
-          note={note}
-          setNote={setNote}
-          onDecide={onDecide}
-        />
+      {card?.type === "task" && taskId ? (
+        kind === "clarification" ? (
+          <QuestionCard
+            taskId={taskId}
+            title={typeof card["title"] === "string" ? card["title"] : "The agent has a question"}
+            body={typeof card["body"] === "string" ? card["body"] : ""}
+            status={tasks[taskId] ?? "open"}
+            canAnswer={deciders[taskId]?.canDecide ?? false}
+            waitingFor={deciders[taskId]?.waitingFor ?? null}
+            answer={answer}
+            setAnswer={setAnswer}
+            onAnswer={onAnswer}
+          />
+        ) : (
+          <GateCard
+            taskId={taskId}
+            title={typeof card["title"] === "string" ? card["title"] : "Approval request"}
+            body={typeof card["body"] === "string" ? card["body"] : ""}
+            status={tasks[taskId] ?? "open"}
+            canDecide={deciders[taskId]?.canDecide ?? false}
+            waitingFor={deciders[taskId]?.waitingFor ?? null}
+            note={note}
+            setNote={setNote}
+            onDecide={onDecide}
+          />
+        )
       ) : null}
+    </div>
+  );
+}
+
+/** The agent paused to ask something: read it, answer it, the run carries on. */
+function QuestionCard({
+  taskId,
+  title,
+  body,
+  status,
+  canAnswer,
+  waitingFor,
+  answer,
+  setAnswer,
+  onAnswer,
+}: {
+  taskId: string;
+  title: string;
+  body: string;
+  status: string;
+  canAnswer: boolean;
+  waitingFor: string | null;
+  answer: string;
+  setAnswer: (v: string) => void;
+  onAnswer: (taskId: string, answer: string) => void;
+}) {
+  return (
+    <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+      <p className="font-medium">{title}</p>
+      <p className="mt-1 whitespace-pre-wrap text-xs">{body}</p>
+      {status !== "open" ? (
+        <Badge variant="outline" className="mt-2">
+          Answered
+        </Badge>
+      ) : canAnswer ? (
+        <div className="mt-2 flex gap-2">
+          <Textarea
+            rows={2}
+            className="flex-1"
+            maxLength={2000}
+            value={answer}
+            placeholder="Type your answer… (the agent continues with it)"
+            onChange={(e) => setAnswer(e.target.value)}
+          />
+          <Button
+            size="sm"
+            disabled={answer.trim().length < 1}
+            onClick={() => onAnswer(taskId, answer.trim())}
+          >
+            Reply
+          </Button>
+        </div>
+      ) : (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Waiting for {waitingFor ?? "the HR head or an owner"}.
+        </p>
+      )}
     </div>
   );
 }
