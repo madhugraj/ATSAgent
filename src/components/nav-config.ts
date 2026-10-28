@@ -233,12 +233,6 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: BookOpenText,
         show: (c) => c.governance,
       },
-      {
-        to: "/org-desk",
-        label: "Organisation desk",
-        icon: MessagesSquare,
-        show: (c) => c.governance,
-      },
       { to: "/integrations", label: "Integrations", icon: Plug, show: (c) => c.governance },
       { to: "/masters", label: "Master data", icon: Database, show: (c) => c.governance },
       {

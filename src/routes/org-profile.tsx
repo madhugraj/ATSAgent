@@ -46,6 +46,7 @@ import {
   type SectionDef,
 } from "@/lib/org-profile";
 import { PageHeader } from "@/components/ats";
+import { OrgDeskChat } from "@/components/OrgDeskChat";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -75,6 +76,8 @@ function OrgProfilePage() {
     queryKey: ["org_context_admin"],
     queryFn: () => getOrgContextAdmin(),
   });
+  /** "hand" writes the sections by hand; "chat" is the agent's conversation. */
+  const [tab, setTab] = useState<"hand" | "chat">("hand");
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["org_profile"] });
     qc.invalidateQueries({ queryKey: ["org_profile_gate"] });
@@ -150,37 +153,65 @@ function OrgProfilePage() {
               {open || p.approved ? "Build with the agent" : "Build it with the agent"}
             </Button>
           ) : null}
-          <Link to="/org-desk" className="text-xs underline text-muted-foreground">
-            Organisation desk
-          </Link>
         </div>
       </section>
 
-      {p.canEdit ? <SourcesCard onChanged={refresh} /> : null}
+      {p.canEdit ? (
+        <div className="mt-4 flex gap-1 border-b" role="tablist">
+          {(
+            [
+              ["hand", "Write by hand"],
+              ["chat", "Chat with the agent"],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              role="tab"
+              aria-selected={tab === key}
+              className={`px-3 py-1.5 text-sm ${
+                tab === key
+                  ? "border-b-2 border-primary font-medium"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+              onClick={() => setTab(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
-      {open && (open.status === "draft" || open.status === "changes_requested") && p.canEdit ? (
-        <DraftEditor
-          key={`${open.id}:${open.updatedAt}`}
-          draft={open}
-          approved={p.approved}
-          onChanged={refresh}
-        />
-      ) : open ? (
-        <PendingReview
-          version={open}
-          approved={p.approved}
-          canDecide={p.canDecide && open.status === "pending"}
-          removedSourceIds={removedIds}
-          onChanged={refresh}
-        />
-      ) : p.approved ? (
-        <ReadOnlyProfile sections={p.approved.sections} removedSourceIds={removedIds} />
+      {tab === "chat" && p.canEdit ? (
+        <OrgDeskChat onProfileChanged={refresh} />
       ) : (
-        <p className="mt-4 text-sm text-muted-foreground">
-          {p.canEdit
-            ? "Start with About: what the organisation does, in two or three sentences."
-            : "The HR head, the CBO or an owner writes the profile."}
-        </p>
+        <>
+          {p.canEdit ? <SourcesCard onChanged={refresh} /> : null}
+
+          {open && (open.status === "draft" || open.status === "changes_requested") && p.canEdit ? (
+            <DraftEditor
+              key={`${open.id}:${open.updatedAt}`}
+              draft={open}
+              approved={p.approved}
+              onChanged={refresh}
+            />
+          ) : open ? (
+            <PendingReview
+              version={open}
+              approved={p.approved}
+              canDecide={p.canDecide && open.status === "pending"}
+              removedSourceIds={removedIds}
+              onChanged={refresh}
+            />
+          ) : p.approved ? (
+            <ReadOnlyProfile sections={p.approved.sections} removedSourceIds={removedIds} />
+          ) : (
+            <p className="mt-4 text-sm text-muted-foreground">
+              {p.canEdit
+                ? "Start with About: what the organisation does, in two or three sentences — or use the agent's chat above."
+                : "The HR head, the CBO or an owner writes the profile."}
+            </p>
+          )}
+        </>
       )}
 
       {p.history.length ? (

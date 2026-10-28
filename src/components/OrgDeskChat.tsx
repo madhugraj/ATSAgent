@@ -1,4 +1,10 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+/**
+ * The chat with the Organisation context agent, embedded in the Organisation
+ * profile page (tab "Chat with the agent"). One thread per organisation; the
+ * server layer lives in src/server/desk/org-desk.server.ts and
+ * src/lib/org-desk.functions.ts. Only the HR head, the CBO and the owner see
+ * this tab.
+ */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -12,29 +18,14 @@ import {
   type OrgDeskMessageView,
 } from "@/lib/org-desk.functions";
 import { decideAgentTask } from "@/lib/agents.functions";
-import { PageHeader } from "@/components/ats";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
-export const Route = createFileRoute("/org-desk")({
-  head: () => ({
-    meta: [
-      { title: "Organisation desk — Talent Acquisition" },
-      {
-        name: "description",
-        content:
-          "Tell the Organisation context agent about your organisation — what it does, its products and tech stacks, how it hires. The profile it builds is the context every hiring agent works from.",
-      },
-    ],
-  }),
-  component: OrgDeskPage,
-});
-
 const when = (iso: string) =>
   new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-function OrgDeskPage() {
+export function OrgDeskChat({ onProfileChanged }: { onProfileChanged?: () => void }) {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["org_desk"], queryFn: () => getOrgDeskThread() });
   const [draft, setDraft] = useState("");
@@ -46,7 +37,10 @@ function OrgDeskPage() {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight });
   }, [thread?.messages.length]);
 
-  const refresh = () => qc.invalidateQueries({ queryKey: ["org_desk"] });
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["org_desk"] });
+    onProfileChanged?.();
+  };
 
   async function send() {
     const text = draft.trim();
@@ -94,104 +88,94 @@ function OrgDeskPage() {
     }
   }
 
+  if (q.isLoading) return <p className="text-sm text-muted-foreground">Opening the chat…</p>;
+  if (q.error || !thread)
+    return <p className="text-sm text-destructive">Could not open the chat.</p>;
+
   return (
     <>
-      <PageHeader
-        eyebrow="Administration"
-        title="Organisation desk"
-        description="Describe your organisation to the Organisation context agent. What you settle here becomes the approved profile every hiring agent works from — the JD agent's “About us”, the requisition drafts, and candidate matching."
-      />
-      <p className="mt-1 text-sm text-muted-foreground">
-        The profile itself, its versions and its sources live on{" "}
-        <Link to="/org-profile" className="underline">
-          the Profile page
-        </Link>
-        . Only the HR head, the CBO or the owner use this desk.
+      <p className="mt-4 text-sm text-muted-foreground">
+        Describe your organisation — what it does, its products and tech stacks, its projects, how
+        it hires. What you settle here becomes the approved profile every hiring agent works from:
+        the JD agent's “About us”, the requisition drafts, and candidate matching. The agent's
+        approval request appears in this thread, and a person always approves.
       </p>
 
-      {q.isLoading ? (
-        <p className="mt-4 text-sm text-muted-foreground">Opening the desk…</p>
-      ) : q.error || !thread ? (
-        <p className="mt-4 text-sm text-destructive">Could not open the organisation desk.</p>
-      ) : (
-        <>
-          <div
-            ref={scroller}
-            className="panel mt-4 max-h-[58vh] space-y-3 overflow-y-auto p-4"
-            aria-live="polite"
-          >
-            {thread.messages.map((m) => (
-              <Message
-                key={m.id}
-                m={m}
-                tasks={thread.tasks}
-                deciders={thread.deciders}
-                onDecide={decide}
-              />
-            ))}
-          </div>
+      <div
+        ref={scroller}
+        className="panel mt-3 max-h-[52vh] space-y-3 overflow-y-auto p-4"
+        aria-live="polite"
+      >
+        {thread.messages.map((m) => (
+          <Message
+            key={m.id}
+            m={m}
+            tasks={thread.tasks}
+            deciders={thread.deciders}
+            onDecide={decide}
+          />
+        ))}
+      </div>
 
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-1"
-              disabled={busy}
-              onClick={async () => {
-                setBusy(true);
-                try {
-                  await readWebsiteFromDesk({ data: { id: thread.id } });
-                } catch (e) {
-                  toast.error(e instanceof Error ? e.message : "Could not start the read");
-                } finally {
-                  setBusy(false);
-                  refresh();
-                }
-              }}
-            >
-              <Globe className="size-3.5" /> Read the website
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-1"
-              disabled={busy}
-              onClick={async () => {
-                setBusy(true);
-                try {
-                  await buildFromDesk({ data: { id: thread.id } });
-                } catch (e) {
-                  toast.error(e instanceof Error ? e.message : "Could not start the build");
-                } finally {
-                  setBusy(false);
-                  refresh();
-                }
-              }}
-            >
-              <Sparkles className="size-3.5" /> Build the draft
-            </Button>
-          </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-1"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              await readWebsiteFromDesk({ data: { id: thread.id } });
+            } catch (e) {
+              toast.error(e instanceof Error ? e.message : "Could not start the read");
+            } finally {
+              setBusy(false);
+              refresh();
+            }
+          }}
+        >
+          <Globe className="size-3.5" /> Read the website
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-1"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              await buildFromDesk({ data: { id: thread.id } });
+            } catch (e) {
+              toast.error(e instanceof Error ? e.message : "Could not start the build");
+            } finally {
+              setBusy(false);
+              refresh();
+            }
+          }}
+        >
+          <Sparkles className="size-3.5" /> Build the draft
+        </Button>
+      </div>
 
-          <div className="mt-2 flex gap-2">
-            <Textarea
-              rows={2}
-              className="flex-1"
-              placeholder="Describe the organisation… (Enter to send)"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  void send();
-                }
-              }}
-            />
-            <Button disabled={busy || !draft.trim()} onClick={() => void send()} aria-label="Send">
-              <Send className="size-4" />
-            </Button>
-          </div>
-        </>
-      )}
+      <div className="mt-2 flex gap-2">
+        <Textarea
+          rows={2}
+          className="flex-1"
+          placeholder="Describe the organisation… (Enter to send)"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              void send();
+            }
+          }}
+        />
+        <Button disabled={busy || !draft.trim()} onClick={() => void send()} aria-label="Send">
+          <Send className="size-4" />
+        </Button>
+      </div>
     </>
   );
 }

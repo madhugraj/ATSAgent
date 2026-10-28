@@ -25,7 +25,6 @@ import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as MastersRouteImport } from './routes/masters'
 import { Route as MatchingRouteImport } from './routes/matching'
 import { Route as OffersRouteImport } from './routes/offers'
-import { Route as OrgDeskRouteImport } from './routes/org-desk'
 import { Route as OrgProfileRouteImport } from './routes/org-profile'
 import { Route as OrganisationRouteImport } from './routes/organisation'
 import { Route as PlatformRouteImport } from './routes/platform'
@@ -159,11 +158,6 @@ const MatchingRoute = MatchingRouteImport.update({
 const OffersRoute = OffersRouteImport.update({
   id: '/offers',
   path: '/offers',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const OrgDeskRoute = OrgDeskRouteImport.update({
-  id: '/org-desk',
-  path: '/org-desk',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OrgProfileRoute = OrgProfileRouteImport.update({
@@ -461,7 +455,6 @@ export interface FileRoutesByFullPath {
   '/masters': typeof MastersRoute
   '/matching': typeof MatchingRoute
   '/offers': typeof OffersRoute
-  '/org-desk': typeof OrgDeskRoute
   '/org-profile': typeof OrgProfileRoute
   '/organisation': typeof OrganisationRoute
   '/platform': typeof PlatformRoute
@@ -534,7 +527,6 @@ export interface FileRoutesByTo {
   '/masters': typeof MastersRoute
   '/matching': typeof MatchingRoute
   '/offers': typeof OffersRoute
-  '/org-desk': typeof OrgDeskRoute
   '/org-profile': typeof OrgProfileRoute
   '/organisation': typeof OrganisationRoute
   '/platform': typeof PlatformRoute
@@ -608,7 +600,6 @@ export interface FileRoutesById {
   '/masters': typeof MastersRoute
   '/matching': typeof MatchingRoute
   '/offers': typeof OffersRoute
-  '/org-desk': typeof OrgDeskRoute
   '/org-profile': typeof OrgProfileRoute
   '/organisation': typeof OrganisationRoute
   '/platform': typeof PlatformRoute
@@ -683,7 +674,6 @@ export interface FileRouteTypes {
     | '/masters'
     | '/matching'
     | '/offers'
-    | '/org-desk'
     | '/org-profile'
     | '/organisation'
     | '/platform'
@@ -756,7 +746,6 @@ export interface FileRouteTypes {
     | '/masters'
     | '/matching'
     | '/offers'
-    | '/org-desk'
     | '/org-profile'
     | '/organisation'
     | '/platform'
@@ -829,7 +818,6 @@ export interface FileRouteTypes {
     | '/masters'
     | '/matching'
     | '/offers'
-    | '/org-desk'
     | '/org-profile'
     | '/organisation'
     | '/platform'
@@ -903,7 +891,6 @@ export interface RootRouteChildren {
   MastersRoute: typeof MastersRoute
   MatchingRoute: typeof MatchingRoute
   OffersRoute: typeof OffersRoute
-  OrgDeskRoute: typeof OrgDeskRoute
   OrgProfileRoute: typeof OrgProfileRoute
   OrganisationRoute: typeof OrganisationRoute
   PlatformRoute: typeof PlatformRoute
@@ -1072,13 +1059,6 @@ declare module '@tanstack/react-router' {
       path: '/offers'
       fullPath: '/offers'
       preLoaderRoute: typeof OffersRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/org-desk': {
-      id: '/org-desk'
-      path: '/org-desk'
-      fullPath: '/org-desk'
-      preLoaderRoute: typeof OrgDeskRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/org-profile': {
@@ -1479,7 +1459,6 @@ const rootRouteChildren: RootRouteChildren = {
   MastersRoute: MastersRoute,
   MatchingRoute: MatchingRoute,
   OffersRoute: OffersRoute,
-  OrgDeskRoute: OrgDeskRoute,
   OrgProfileRoute: OrgProfileRoute,
   OrganisationRoute: OrganisationRoute,
   PlatformRoute: PlatformRoute,
