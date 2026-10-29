@@ -35,6 +35,7 @@ import {
   PROFILE_SECTIONS,
   SECTION_BY_KEY,
   checkSections,
+  nearDuplicate,
   norm,
   type OrgProfileItem,
   type OrgProfileSections,
@@ -940,11 +941,9 @@ You extract facts for an organisation's profile from ONE source. Rules:
     const merged: OrgProfileSections = JSON.parse(JSON.stringify(draft.sections ?? {}));
     for (const [key, items] of Object.entries(sections)) {
       const existing = merged[key] ?? [];
-      const seen = new Set(existing.map((i) => norm(i.text)));
       for (const item of items) {
-        const key2 = norm(item.text);
-        if (seen.has(key2)) continue;
-        seen.add(key2);
+        // A rewording of a line the draft already holds is not a new fact.
+        if (holdsItem(existing, item)) continue;
         existing.push(item as OrgProfileItem);
         contributed++;
       }
@@ -953,6 +952,26 @@ You extract facts for an organisation's profile from ONE source. Rules:
     await saveDraftCore(actor, { versionId: draft.id, sections: merged });
   }
   return { contributed, refused, injectionFlagged: false };
+}
+
+/**
+ * A draft already holds this fact: the same words in other words, or the same
+ * source quoted near-identically (the extraction re-quotes a source every
+ * read, so one fact quoted again must not become a second item).
+ */
+function holdsItem(existing: OrgProfileItem[], item: Partial<OrgProfileItem>): boolean {
+  return existing.some(
+    (i) =>
+      nearDuplicate(i.text, item.text ?? "") ||
+      (Boolean(
+        i.source?.quote &&
+        item.source?.quote &&
+        i.source.ref &&
+        item.source.ref &&
+        i.source.ref === item.source.ref,
+      ) &&
+        nearDuplicate(i.source.quote!, item.source!.quote!)),
+  );
 }
 
 /** The draft being worked on — opening one from the approved version when needed. */
@@ -1037,12 +1056,10 @@ export async function proposeItemsCore(
   const draft = await ensureOpenDraft(actor);
   const merged: OrgProfileSections = JSON.parse(JSON.stringify(draft.sections ?? {}));
   const existing = merged[input.section] ?? [];
-  const seen = new Set(existing.map((i) => norm(i.text)));
   let added = 0;
   for (const item of kept) {
-    const k = norm(item.text);
-    if (seen.has(k)) continue;
-    seen.add(k);
+    // A rewording of a line the draft already holds is not a new fact.
+    if (holdsItem(existing, item)) continue;
     existing.push(item as OrgProfileItem);
     added++;
   }

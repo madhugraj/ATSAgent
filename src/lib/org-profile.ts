@@ -325,6 +325,27 @@ function jaccard(a: string[], b: string[]): number {
   return inter / (sa.size + sb.size - inter || 1);
 }
 
+/**
+ * Whether two lines say the same fact in other words: ≥ 75 % stemmed-word
+ * containment (the shorter line's words almost all appear in the longer —
+ * a paraphrase-expansion, not a new fact). Used to keep near-duplicate
+ * rewordings out of a profile draft.
+ */
+export function nearDuplicate(a: string, b: string): boolean {
+  const stem = (s: string) =>
+    norm(s)
+      .split(" ")
+      .filter(Boolean)
+      .map((w) => (w.length > 4 && w.endsWith("s") ? w.slice(0, -1) : w));
+  const wa = stem(a);
+  const wb = stem(b);
+  if (!wa.length || !wb.length) return false;
+  const sb = new Set(wb);
+  let inter = 0;
+  for (const w of new Set(wa)) if (sb.has(w)) inter++;
+  return inter / Math.min(new Set(wa).size, sb.size) >= 0.75;
+}
+
 /** Phrases an internal item could leak as: the whole line, each sentence, and a leading clause. */
 function internalPhrases(text: string): string[] {
   const phrases = new Set<string>();

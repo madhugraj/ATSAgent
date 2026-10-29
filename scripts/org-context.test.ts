@@ -158,6 +158,21 @@ describe("pure helpers", () => {
     expect(two).toHaveLength(2);
   });
 
+  test("nearDuplicate flags a paraphrase-expansion but not a genuinely different line", () => {
+    expect(
+      pure.nearDuplicate(
+        "Yavar provides agentic AI for enterprise workflows.",
+        "Yavar provides agentic AI solutions designed for enterprise workflows.",
+      ),
+    ).toBe(true);
+    expect(
+      pure.nearDuplicate(
+        "Yavar provides agentic AI for enterprise workflows.",
+        "Yavar builds inspection instruments for power plants.",
+      ),
+    ).toBe(false);
+  });
+
   test("internalLineReason catches the internal line, a reworded copy and the absolute claim, but not public lines", () => {
     const sections: pure.OrgProfileSections = {
       about: [
