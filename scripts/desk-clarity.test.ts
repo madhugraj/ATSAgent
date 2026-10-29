@@ -349,3 +349,14 @@ describe("thread order", () => {
     expect(desk.scoreChanges(before.slice(1), after.slice(1))).toBeNull();
   });
 });
+
+describe("next-step honesty", () => {
+  test("market research is offered only for what research can fill", () => {
+    expect(desk.nextStepText("mustHaveSkills")).toContain("as per market");
+    expect(desk.nextStepText("experience")).toContain("as per market");
+    expect(desk.nextStepText("hiringManager")).not.toContain("market");
+    expect(desk.nextStepText("hiringManager")).toContain("registered member");
+    expect(desk.nextStepText("roleTitle")).not.toContain("market");
+    expect(desk.nextStepText("workMode")).not.toContain("market");
+  });
+});

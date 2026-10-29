@@ -2993,6 +2993,19 @@ function thinking(
   };
 }
 
+/**
+ * What happens next, per missing detail — honest about what research can
+ * and cannot fill. Market research applies to skills and experience only;
+ * a hiring manager comes from the registered team, never from the market.
+ */
+export function nextStepText(missing: RequiredSlot): string {
+  if (missing === "hiringManager")
+    return "Asking for the hiring manager — they approve the role's interview panels and must be a registered member of your team; the question suggests the people on it.";
+  if (missing === "mustHaveSkills" || missing === "experience")
+    return `Asking for the ${REQUIRED_LABEL[missing]}. You can also say "as per market" and I'll research it.`;
+  return `Asking for the ${REQUIRED_LABEL[missing]}.`;
+}
+
 /** Continue gathering: ask the next missing detail, the JD question once, then similar roles. */
 async function advanceGathering(
   conv: Conversation,
@@ -3005,11 +3018,7 @@ async function advanceGathering(
     await postMessage(conv, {
       role: "desk",
       body: reply.trim() || FALLBACK_QUESTION[missing[0]!],
-      card: thinking(
-        understood,
-        slots,
-        `Asking for the ${REQUIRED_LABEL[missing[0]!]}. You can also say "as per market" and I'll research it.`,
-      ),
+      card: thinking(understood, slots, nextStepText(missing[0]!)),
     });
     return;
   }
