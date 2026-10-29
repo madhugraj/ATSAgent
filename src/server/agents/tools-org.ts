@@ -68,7 +68,7 @@ export function registerOrgTools(): void {
   registerTool({
     name: "read_org_website",
     description:
-      "Read the organisation's own website (the host saved on the Profile page) into profile sources and propose what it states as draft items. At most 20 pages, robots.txt honoured, at most one full read per hour; pass specific same-host pages when the person asked for them. A page that looks like instructions to an AI is held back for a person, and nothing is kept from it until they accept it.",
+      "Read the organisation's own website (the host saved on the Profile page) into profile sources and propose what it states as draft items. At most 20 pages, robots.txt honoured; pages already read and unchanged cost nothing. Pass specific same-host pages when the person asked for them. A page that looks like instructions to an AI is held back for a person, and nothing is kept from it until they accept it.",
     input: z.object({
       pages: z.array(z.string().max(2000)).max(20).optional(),
     }),
@@ -79,7 +79,6 @@ export function registerOrgTools(): void {
       const { orgProfiles } = await import("@db/schema");
       const { eq } = await import("drizzle-orm");
       const { db } = await import("../db");
-      const { websiteReadBlocked } = await import("@/lib/org-context.server");
       const [p] = await db
         .select({ websiteUrl: orgProfiles.websiteUrl })
         .from(orgProfiles)
@@ -99,9 +98,6 @@ export function registerOrgTools(): void {
         const off = input.pages.find((p2) => host(p2) !== own);
         if (off) return `Only the organisation's own website (${own}) may be read — not ${off}.`;
       }
-      const blocked = await websiteReadBlocked(ctx.orgId);
-      if (blocked)
-        return `The website was read within the last hour; read again after ${blocked.toLocaleTimeString()}. Work with what read_org_profile and the documents already hold.`;
       return null;
     },
     run: async (ctx, input) => {

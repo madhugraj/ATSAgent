@@ -232,55 +232,12 @@ export async function orgContextFor(input: {
 
 const MAX_PAGES_PER_READ = 20;
 const MAX_PAGE_BYTES = 200_000;
-const READ_WINDOW_MS = 60 * 60 * 1000;
 const DOC_MAX_BYTES = 10_000_000;
 const DOC_MAX_PAGES = 200;
 const CHUNK_CHARS = 12_000;
 
 /** The host without a leading www., for same-site comparisons. */
 const bareHost = (host: string) => host.toLowerCase().replace(/^www\./, "");
-
-/** In-memory sliding window — one full read per organisation per hour. */
-const readWindow = new Map<string, number[]>();
-
-async function readRecent(orgId: string): Promise<Date | null> {
-  const [row] = await db
-    .select({ last: sql<Date | null>`max(${orgContextSources.fetchedAt})` })
-    .from(orgContextSources)
-    .where(
-      and(
-        eq(orgContextSources.orgId, orgId),
-        eq(orgContextSources.kind, "website_page"),
-        isNull(orgContextSources.deletedAt),
-      ),
-    );
-  return row?.last ? new Date(row.last) : null;
-}
-
-/**
- * May this organisation's website be read now? In-memory for this replica plus
- * a durable check over the source rows, so several replicas and the monthly
- * sweep cannot double-read. One full read per organisation per hour.
- */
-export async function websiteReadBlocked(orgId: string): Promise<Date | null> {
-  const now = Date.now();
-  const recent = (readWindow.get(orgId) ?? []).filter((t) => now - t < READ_WINDOW_MS);
-  readWindow.set(orgId, recent);
-  const durable = await readRecent(orgId);
-  const last = durable ? Math.max(...recent, durable.getTime()) : Math.max(...recent, 0);
-  if (!last) return null;
-  const retryAt = new Date(last + READ_WINDOW_MS);
-  return retryAt.getTime() > now ? retryAt : null;
-}
-
-function markRead(orgId: string) {
-  readWindow.set(orgId, [...(readWindow.get(orgId) ?? []), Date.now()]);
-}
-
-/** Test hook: forget this organisation's in-process read timestamps. */
-export function __clearReadWindowForTest(orgId: string): void {
-  readWindow.delete(orgId);
-}
 
 /**
  * What a page declares about itself outside its visible text — title and the
@@ -483,12 +440,6 @@ export async function readWebsiteCore(
     .limit(1);
   if (!profile?.websiteUrl)
     throw new Error("Save the organisation's website on the Profile page first.");
-  const blocked = await websiteReadBlocked(actor.orgId);
-  if (blocked)
-    throw new Error(
-      `The website was read within the last hour; read again after ${blocked.toLocaleTimeString()}.`,
-    );
-  markRead(actor.orgId);
   await audit(actor, "read_started", { host: new URL(profile.websiteUrl).hostname });
 
   const origin = new URL(profile.websiteUrl).origin;

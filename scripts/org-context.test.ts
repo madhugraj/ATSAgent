@@ -272,7 +272,7 @@ describe("website sources", () => {
     ).rejects.toThrow(/HR head|CBO|owner/);
   });
 
-  test("one full read per hour: the second is refused until the window clears", async () => {
+  test("repeated reads are allowed — no hourly lock (unchanged pages cost nothing)", async () => {
     await db.delete(orgContextSources).where(eq(orgContextSources.orgId, orgId));
     await db
       .update(orgProfiles)
@@ -280,9 +280,6 @@ describe("website sources", () => {
       .where(eq(orgProfiles.orgId, orgId));
     const res = await ctx.readWebsiteCore(as(hr), {});
     expect(res.status).toBe("failed"); // the fake host never answers
-    await expect(ctx.readWebsiteCore(as(hr), {})).rejects.toThrow(/last hour|read again/);
-    await db.delete(orgContextSources).where(eq(orgContextSources.orgId, orgId));
-    ctx.__clearReadWindowForTest(orgId);
     const again = await ctx.readWebsiteCore(as(hr), {});
     expect(again.status).toBe("failed");
   });
