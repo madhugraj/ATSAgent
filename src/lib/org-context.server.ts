@@ -260,6 +260,58 @@ export function metaText(html: string): string {
 }
 
 /** Drop script/style/head/comment blocks and tags, decode entities, keep line breaks. */
+/**
+ * Below this many characters a page counts as "no readable text" — typically
+ * a client-rendered site whose body is a script shell.
+ */
+const RENDER_BELOW_CHARS = 200;
+/** Script-shell pages rendered per read — one shared browser keeps this inside the run lease. */
+const RENDER_PAGES_PER_READ = 10;
+
+/**
+ * Render pages in one real browser and return each one's visible text plus
+ * the rendered DOM's HTML (client-built anchors are links to follow). Used
+ * when the static fetch yields (almost) nothing — one browser for the whole
+ * read, since a per-page launch is far too slow inside one tool call.
+ * Optional at runtime: without a browser installed (Chrome, or
+ * `playwright install chromium`) it returns no pages and the static read
+ * stands.
+ */
+export async function renderPages(
+  urls: string[],
+): Promise<{ url: string; text: string; html: string }[]> {
+  if (!urls.length) return [];
+  type Chromium = (typeof import("playwright"))["chromium"];
+  let browser: Awaited<ReturnType<Chromium["launch"]>> | null = null;
+  const out: { url: string; text: string; html: string }[] = [];
+  try {
+    const { chromium } = await import("playwright");
+    browser = await chromium
+      .launch({ channel: "chrome", headless: true })
+      .catch(() => chromium.launch({ headless: true }));
+    const page = await browser!.newPage();
+    for (const url of urls) {
+      try {
+        await page.goto(url, { waitUntil: "load", timeout: 20_000 });
+        // Client-rendered bodies build after load; settle briefly.
+        await page.waitForLoadState("networkidle", { timeout: 8_000 }).catch(() => {});
+        const { text, html } = await page.evaluate(() => ({
+          text: (document.body?.innerText ?? "").trim(),
+          html: document.documentElement.outerHTML,
+        }));
+        if (text) out.push({ url, text, html });
+      } catch {
+        // One slow or broken page does not stop the read.
+      }
+    }
+  } catch {
+    // No browser available — the static read stands.
+  } finally {
+    await browser?.close().catch(() => {});
+  }
+  return out;
+}
+
 export function htmlToText(html: string): string {
   return html
     .replace(/<!--[\s\S]*?-->/g, " ")
@@ -473,6 +525,83 @@ export async function readWebsiteCore(
   };
   let fetchFailures = 0;
 
+  /** Store one page's text as a source and extract it into the draft. */
+  const storeAndExtract = async (
+    url: string,
+    pageHtml: string,
+    pageText: string,
+  ): Promise<void> => {
+    result.pagesFetched++;
+    const hash = sha256(pageText);
+    const [existing] = await db
+      .select({
+        id: orgContextSources.id,
+        sha256: orgContextSources.sha256,
+        injectionFlagged: orgContextSources.injectionFlagged,
+      })
+      .from(orgContextSources)
+      .where(
+        and(
+          eq(orgContextSources.orgId, actor.orgId),
+          eq(orgContextSources.kind, "website_page"),
+          eq(orgContextSources.url, url),
+          isNull(orgContextSources.deletedAt),
+        ),
+      )
+      .limit(1);
+    const now = new Date();
+    let sourceId: string;
+    if (existing && existing.sha256 === hash && !existing.injectionFlagged) {
+      await db
+        .update(orgContextSources)
+        .set({ fetchedAt: now })
+        .where(eq(orgContextSources.id, existing.id));
+      result.pagesUnchanged++;
+      return; // Nothing changed — no AI call.
+    }
+    if (existing) {
+      await db
+        .update(orgContextSources)
+        .set({ sha256: hash, text: pageText, fetchedAt: now, injectionFlagged: false })
+        .where(eq(orgContextSources.id, existing.id));
+      sourceId = existing.id;
+    } else {
+      const [row] = await db
+        .insert(orgContextSources)
+        .values({
+          orgId: actor.orgId,
+          kind: "website_page",
+          url,
+          sha256: hash,
+          text: pageText,
+          fetchedAt: now,
+          createdBy: actor.userId,
+        })
+        .onConflictDoUpdate({
+          target: [orgContextSources.orgId, orgContextSources.url],
+          targetWhere: sql`${orgContextSources.kind} = 'website_page' and ${orgContextSources.deletedAt} is null`,
+          set: { sha256: hash, text: pageText, fetchedAt: now, injectionFlagged: false },
+        })
+        .returning({ id: orgContextSources.id });
+      sourceId = row!.id;
+    }
+    const extracted = await extractToDraft(actor, {
+      sourceId,
+      kind: "website_page",
+      label: `Website page ${url}`,
+      text: pageText,
+      conversationId: input.conversationId,
+    });
+    if (extracted.injectionFlagged) result.flagged.push({ url });
+    result.pagesChanged++;
+    result.itemsKept += extracted.contributed;
+    for (const r of extracted.refused)
+      result.itemsRefused.push({ section: r.section, reason: r.reason });
+  };
+
+  // Script-shell pages, rendered together in one browser after the walk.
+  const toRender: { url: string; html: string }[] = [];
+
   while (queue.length && seen.size < MAX_PAGES_PER_READ) {
     const url = queue.shift()!;
     if (seen.has(url)) continue;
@@ -503,81 +632,55 @@ export async function readWebsiteCore(
       .map((t) => t.trim())
       .filter(Boolean)
       .join("\n");
-    if (!pageText) {
-      skipped.push({ url, why: "no readable text" });
-      continue;
-    }
-    result.pagesFetched++;
-    const hash = sha256(pageText);
-    const [existing] = await db
-      .select({
-        id: orgContextSources.id,
-        sha256: orgContextSources.sha256,
-        injectionFlagged: orgContextSources.injectionFlagged,
-      })
-      .from(orgContextSources)
-      .where(
-        and(
-          eq(orgContextSources.orgId, actor.orgId),
-          eq(orgContextSources.kind, "website_page"),
-          eq(orgContextSources.url, finalUrl),
-          isNull(orgContextSources.deletedAt),
-        ),
-      )
-      .limit(1);
-    const now = new Date();
-    let sourceId: string;
-    if (existing && existing.sha256 === hash && !existing.injectionFlagged) {
-      await db
-        .update(orgContextSources)
-        .set({ fetchedAt: now })
-        .where(eq(orgContextSources.id, existing.id));
-      result.pagesUnchanged++;
-      continue; // Nothing changed — no AI call.
-    }
-    if (existing) {
-      await db
-        .update(orgContextSources)
-        .set({ sha256: hash, text: pageText, fetchedAt: now, injectionFlagged: false })
-        .where(eq(orgContextSources.id, existing.id));
-      sourceId = existing.id;
+    if (pageText.length >= RENDER_BELOW_CHARS) {
+      await storeAndExtract(finalUrl, text, pageText);
+      // Follow same-host links to fill the page budget.
+      if (seen.size < MAX_PAGES_PER_READ)
+        for (const link of pageLinks(text, finalUrl)) {
+          if (!seen.has(link) && !queue.includes(link)) queue.push(link);
+        }
+    } else if (toRender.length < RENDER_PAGES_PER_READ) {
+      toRender.push({ url: finalUrl, html: text });
     } else {
-      const [row] = await db
-        .insert(orgContextSources)
-        .values({
-          orgId: actor.orgId,
-          kind: "website_page",
-          url: finalUrl,
-          sha256: hash,
-          text: pageText,
-          fetchedAt: now,
-          createdBy: actor.userId,
-        })
-        .onConflictDoUpdate({
-          target: [orgContextSources.orgId, orgContextSources.url],
-          targetWhere: sql`${orgContextSources.kind} = 'website_page' and ${orgContextSources.deletedAt} is null`,
-          set: { sha256: hash, text: pageText, fetchedAt: now, injectionFlagged: false },
-        })
-        .returning({ id: orgContextSources.id });
-      sourceId = row!.id;
+      skipped.push({ url: finalUrl, why: "no readable text without a browser" });
     }
-    const extracted = await extractToDraft(actor, {
-      sourceId,
-      kind: "website_page",
-      label: `Website page ${finalUrl}`,
-      text: pageText,
-      conversationId: input.conversationId,
-    });
-    if (extracted.injectionFlagged) result.flagged.push({ url: finalUrl });
-    result.pagesChanged++;
-    result.itemsKept += extracted.contributed;
-    for (const r of extracted.refused)
-      result.itemsRefused.push({ section: r.section, reason: r.reason });
-    // Follow same-host links from the home page to fill the page budget.
-    if (seen.size < MAX_PAGES_PER_READ)
-      for (const link of pageLinks(text, finalUrl)) {
-        if (!seen.has(link) && !queue.includes(link)) queue.push(link);
+  }
+
+  // Client-rendered shells: one browser for all of them, so a site built in
+  // JavaScript is read the way a person reads it. Optional — without a
+  // browser installed the static read (meta lines) stands.
+  if (toRender.length) {
+    const rendered = await renderPages(toRender.map((p) => p.url));
+    for (const page of rendered) {
+      const pageText = [page.text, metaText(page.html)]
+        .map((t) => t.trim())
+        .filter(Boolean)
+        .join("\n");
+      if (!pageText) {
+        skipped.push({ url: page.url, why: "no readable text even rendered" });
+        continue;
       }
+      await storeAndExtract(page.url, page.html, pageText);
+      if (seen.size < MAX_PAGES_PER_READ)
+        for (const link of pageLinks(page.html, page.url)) {
+          if (!seen.has(link) && !queue.includes(link)) queue.push(link);
+        }
+    }
+    // Rendered pages can reveal more same-host pages than the budget held:
+    // they are queued, and a later read picks them up (unchanged pages cost
+    // nothing, so the follow-up read is cheap).
+    while (queue.length && seen.size < MAX_PAGES_PER_READ) {
+      const url = queue.shift()!;
+      if (seen.has(url)) continue;
+      seen.add(url);
+      const res = await safeFetchText(url, { maxBytes: MAX_PAGE_BYTES, hops: 2 }).catch(() => null);
+      if (!res) continue;
+      const text2 = [htmlToText(res.text), metaText(res.text)]
+        .map((t) => t.trim())
+        .filter(Boolean)
+        .join("\n");
+      if (text2) await storeAndExtract(url, res.text, text2);
+    }
   }
 
   const status: WebsiteReadResult["status"] =
