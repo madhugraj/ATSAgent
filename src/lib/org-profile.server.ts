@@ -8,7 +8,7 @@
  * Pay figures and staff names / contacts are refused before anything is
  * saved (src/lib/org-profile.ts), with the reason shown to the person.
  */
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 
 import { db } from "../server/db";
 import { writeAudit } from "../server/audit";
@@ -471,12 +471,12 @@ export const PROFILE_REQUIRED_MESSAGE =
   "Your organisation requires an approved organisation profile before a role is raised. Ask the HR head or an owner to approve it in Organisation → Profile.";
 
 /**
- * Delete the whole profile — every version (draft, pending, approved), the
- * approved pointer and the require-profile switch — and start from nothing.
- * HR head or owner only, with a reason; audited. The agent's open runs are
- * stopped first so no approval card points at a deleted version. Sources
- * (website pages, documents) are kept: re-reading them is cheap and the
- * rebuild quotes them again.
+ * Delete the whole profile and start from nothing: every version (draft,
+ * pending, approved), the approved pointer, the require-profile switch, the
+ * saved website and its read pages, and the uploaded documents (files
+ * removed from storage; source rows hidden so the audit stays whole). The
+ * agent's open runs stop and its chat starts fresh. HR head or owner only,
+ * with a reason; audited.
  */
 export async function resetProfileCore(
   actor: ProfileActor,
@@ -518,16 +518,44 @@ export async function resetProfileCore(
     .delete(orgProfileVersions)
     .where(eq(orgProfileVersions.orgId, actor.orgId))
     .returning({ id: orgProfileVersions.id });
+  // Delete means a clean slate: the saved website, its read pages and the
+  // uploaded documents go too (files removed from storage; source rows kept,
+  // hidden, so the audit story stays in one place).
+  const { orgContextSources } = await import("@db/schema");
+  const { deleteObject } = await import("../server/storage");
+  const sources = await db
+    .select({ id: orgContextSources.id, fileKey: orgContextSources.fileKey })
+    .from(orgContextSources)
+    .where(and(eq(orgContextSources.orgId, actor.orgId), isNull(orgContextSources.deletedAt)));
+  const now = new Date();
+  for (const s of sources) {
+    if (s.fileKey) await deleteObject(s.fileKey);
+    await db
+      .update(orgContextSources)
+      .set({ deletedAt: now, deletedBy: actor.userId })
+      .where(eq(orgContextSources.id, s.id));
+  }
   await db
     .update(orgProfiles)
     .set({
       currentVersionId: null,
       requireProfile: false,
+      websiteUrl: null,
+      websiteConfirmedBy: null,
+      websiteConfirmedAt: null,
+      lastRereadAt: null,
+      lastRereadStatus: null,
+      rereadFailures: 0,
+      nextRereadAt: null,
       updatedBy: actor.userId,
-      updatedAt: new Date(),
+      updatedAt: now,
     })
     .where(eq(orgProfiles.orgId, actor.orgId));
-  await audit(actor, "reset", null, { reason, versions: rows.length });
+  await audit(actor, "reset", null, {
+    reason,
+    versions: rows.length,
+    sources: sources.length,
+  });
   return { versions: rows.length };
 }
 

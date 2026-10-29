@@ -126,7 +126,7 @@ function OrgProfilePage() {
                 if (!reason || reason.trim().length < 3) return;
                 if (
                   !window.confirm(
-                    "Delete the organisation profile — every draft, the pending and the approved version, and the agent's chat? The agent starts from nothing; sources (website, documents) are kept.",
+                    "Delete the organisation profile — every draft and version, the saved website, its read pages, uploaded documents, and the agent's chat? You start from nothing.",
                   )
                 )
                   return;

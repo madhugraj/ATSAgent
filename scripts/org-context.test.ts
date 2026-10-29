@@ -15,7 +15,7 @@
  * Run: DATABASE_URL=postgres://…/atsagent_test SESSION_SECRET=… bun test scripts/org-context.test.ts
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 
 process.env["SECRET_ENCRYPTION_KEY"] ??= Buffer.alloc(32, 7).toString("base64");
 
@@ -606,6 +606,18 @@ describe("deleting the profile", () => {
     expect(after.approved).toBeNull();
     expect(after.open).toBeNull();
     expect(after.requireProfile).toBe(false);
+    // A clean slate: the saved website and its read pages are gone too.
+    const [p] = await db
+      .select({ websiteUrl: orgProfiles.websiteUrl, lastRereadAt: orgProfiles.lastRereadAt })
+      .from(orgProfiles)
+      .where(eq(orgProfiles.orgId, orgId));
+    expect(p?.websiteUrl ?? null).toBeNull();
+    expect(p?.lastRereadAt ?? null).toBeNull();
+    const liveSources = await db
+      .select({ id: orgContextSources.id })
+      .from(orgContextSources)
+      .where(and(eq(orgContextSources.orgId, orgId), isNull(orgContextSources.deletedAt)));
+    expect(liveSources).toHaveLength(0);
     expect((await audits("org_profile.reset")) > 0).toBe(true);
 
     // The chat starts fresh: a new thread, only the greeting in it.
