@@ -62,6 +62,13 @@ export const AGENT_CATALOG: AgentInfo[] = [
       "Advertises approved roles across job portals by the route each allows (Google for Jobs, job feeds, posting by hand), chases portals that send no CVs, credits every CV to its portal and erases CVs a portal limited to their role once it is over (with your approval).",
   },
   {
+    type: "org_context",
+    label: "Organisation context agent",
+    phase: 2,
+    description:
+      "Builds and keeps the organisation's profile from its records, its own website and its documents — the approved facts every other agent works from. Every version waits for the HR head's approval.",
+  },
+  {
     type: "screening",
     label: "Screening agent",
     phase: 2,

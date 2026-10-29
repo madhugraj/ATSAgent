@@ -91,10 +91,26 @@ export const HEALTH = {
   shortCalls7d: 3,
   /** Re-evaluate at most this often (minutes). */
   evaluateEveryMinutes: 5,
+  /** An approved organisation profile older than this is stale (days). */
+  profileStaleDays: 180,
+  /** A submitted profile version waiting longer than this for a decision (days). */
+  reviewWaitingDays: 7,
+  /** Website re-read failures before the warning becomes serious. */
+  rereadSeriousFailures: 2,
+  /** Profile items refused from sources in 7 days before it is flagged. */
+  refusedItems7d: 5,
 } as const;
 
 export type HealthElement =
-  "harness" | "hitl" | "tools" | "skills" | "budget" | "orchestrator" | "definition" | "audit";
+  | "harness"
+  | "hitl"
+  | "tools"
+  | "skills"
+  | "budget"
+  | "orchestrator"
+  | "definition"
+  | "audit"
+  | "context";
 
 type Finding = {
   agentType: string;
@@ -929,6 +945,119 @@ export const RULES: Rule[] = [
           agentType: "screening_call",
           title: `${n} screening calls ended before any question was answered`,
           detail: { calls: n },
+        },
+      ];
+    },
+  },
+  {
+    id: "context.profile_missing",
+    element: "context",
+    severity: "warning",
+    description: `Live hiring agents are working with no approved organisation profile — the JD, the requisitions and the candidate matching all go without the organisation's own context. Approve one on Organisation → Profile (serious once a role was raised without one).`,
+    evaluate: async (orgId) => {
+      const live = await rows<{ n: number }>(sql`
+        select count(*)::int n from agent_policies
+        where org_id = ${orgId} and enabled
+          and agent_type in ('requisition','jd','intake','screening','publishing','sourcing','distribution')`);
+      if (!live[0]?.n) return [];
+      const [p] = await rows<{ current: string | null }>(sql`
+        select current_version_id current from org_profiles where org_id = ${orgId}`);
+      if (p?.current) return [];
+      const raised = await rows<{ n: number }>(sql`
+        select count(*)::int n from requisitions
+        where org_id = ${orgId} and created_at >= now() - interval '30 days'`);
+      const serious = (raised[0]?.n ?? 0) > 0;
+      return [
+        {
+          agentType: "org_context",
+          title: serious
+            ? "Roles are being raised with no approved organisation profile"
+            : "No approved organisation profile — agents work without the organisation's context",
+          detail: { rolesRaised30d: raised[0]?.n ?? 0 },
+          ...(serious ? { severity: "serious" as const } : {}),
+        },
+      ];
+    },
+  },
+  {
+    id: "context.profile_stale",
+    element: "context",
+    severity: "warning",
+    description: `The approved organisation profile has not been touched for ${HEALTH.profileStaleDays} days, or documents were added after it was approved — the profile may no longer say what the organisation is. Read the website again or start a new draft.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ id: string; version: number; days: number }>(sql`
+        select v.id, v.version, extract(day from now() - v.decided_at)::int days
+        from org_profiles p join org_profile_versions v on v.id = p.current_version_id
+        where p.org_id = ${orgId} and v.decided_at < now() - make_interval(days => ${HEALTH.profileStaleDays})`);
+      if (!r.length) return [];
+      const docs = await rows<{ n: number }>(sql`
+        select count(*)::int n from org_context_sources
+        where org_id = ${orgId} and kind = 'document' and deleted_at is null
+          and created_at > (select decided_at from org_profiles p join org_profile_versions v on v.id = p.current_version_id where p.org_id = ${orgId})`);
+      return r.map((x) => ({
+        agentType: "org_context",
+        title: `The approved organisation profile (version ${x.version}) is ${x.days} days old${docs[0]?.n ? ` and ${docs[0].n} document(s) arrived after it` : ""}`,
+        detail: { version: x.version, days: x.days, documentsAfter: docs[0]?.n ?? 0 },
+      }));
+    },
+  },
+  {
+    id: "context.reread_failed",
+    element: "context",
+    severity: "warning",
+    description: `The monthly re-read of the organisation's website failed${HEALTH.rereadSeriousFailures > 1 ? ` — it becomes serious after ${HEALTH.rereadSeriousFailures} failures in a row` : ""}. Check the website address on Organisation → Profile and use “Read it now”.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ status: string; failures: number }>(sql`
+        select last_reread_status status, reread_failures failures
+        from org_profiles where org_id = ${orgId} and last_reread_status = 'failed'`);
+      if (!r.length) return [];
+      const serious = r[0]!.failures >= HEALTH.rereadSeriousFailures;
+      return [
+        {
+          agentType: "org_context",
+          title: `The organisation website could not be read${r[0]!.failures > 1 ? ` (${r[0]!.failures} failures in a row)` : ""}`,
+          detail: { failures: r[0]!.failures },
+          ...(serious ? { severity: "serious" as const } : {}),
+        },
+      ];
+    },
+  },
+  {
+    id: "context.review_waiting",
+    element: "context",
+    severity: "warning",
+    description: `A submitted organisation profile has waited more than ${HEALTH.reviewWaitingDays} days for the HR head's decision — the improvements it holds are not reaching any agent. Decide it on Organisation → Profile.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ version: number; days: number }>(sql`
+        select version, extract(day from now() - submitted_at)::int days
+        from org_profile_versions
+        where org_id = ${orgId} and status = 'pending'
+          and submitted_at < now() - make_interval(days => ${HEALTH.reviewWaitingDays})`);
+      return r.map((x) => ({
+        agentType: "org_context",
+        title: `Profile version ${x.version} has waited ${x.days} days for approval`,
+        detail: { version: x.version, days: x.days },
+      }));
+    },
+  },
+  {
+    id: "context.items_refused",
+    element: "context",
+    severity: "warning",
+    description: `More than ${HEALTH.refusedItems7d} items from the website or documents were refused in 7 days (pay figures or staff names) — a source may be the wrong kind of document for the profile.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number }>(sql`
+        select coalesce(sum(jsonb_array_length(coalesce(detail->'refused', '[]'::jsonb))), 0)::int n
+        from audit_log
+        where org_id = ${orgId} and action = 'org_profile.items_refused'
+          and created_at >= now() - interval '7 days'`);
+      const n = r[0]?.n ?? 0;
+      if (n <= HEALTH.refusedItems7d) return [];
+      return [
+        {
+          agentType: "org_context",
+          title: `${n} profile items were refused in 7 days (pay figures or staff names)`,
+          detail: { refused: n },
         },
       ];
     },

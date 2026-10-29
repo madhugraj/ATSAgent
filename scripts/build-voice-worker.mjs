@@ -14,7 +14,9 @@ const out = await Bun.build({
   minify: false,
   // Virtual modules of the web build, reached only through TanStack Start's HTTP
   // handler (server-function modules the worker shares); never loaded here.
-  external: ["#tanstack-*", "tanstack-start-*"],
+  // playwright runs from node_modules at runtime (the website reader's
+  // renderer); bundling it pulls in chromium-bidi paths that cannot resolve.
+  external: ["#tanstack-*", "tanstack-start-*", "playwright", "playwright-core", "chromium-bidi"],
 });
 if (!out.success) {
   for (const m of out.logs) console.error(m);

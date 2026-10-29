@@ -8,7 +8,7 @@
  * Pay figures and staff names / contacts are refused before anything is
  * saved (src/lib/org-profile.ts), with the reason shown to the person.
  */
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 
 import { db } from "../server/db";
 import { writeAudit } from "../server/audit";
@@ -30,7 +30,7 @@ export type ProfileActor = { orgId: string; userId: string };
 type VersionRow = typeof orgProfileVersions.$inferSelect;
 
 /** Who may write and submit drafts (the owner always passes). */
-const EDITORS = ["hr_head", "president_cbo"] as const;
+export const EDITORS = ["hr_head", "president_cbo"] as const;
 
 const OPEN = ["draft", "pending", "changes_requested"] as const;
 const EDITABLE = new Set(["draft", "changes_requested"]);
@@ -469,6 +469,95 @@ export async function profileGate(
 
 export const PROFILE_REQUIRED_MESSAGE =
   "Your organisation requires an approved organisation profile before a role is raised. Ask the HR head or an owner to approve it in Organisation → Profile.";
+
+/**
+ * Delete the whole profile and start from nothing: every version (draft,
+ * pending, approved), the approved pointer, the require-profile switch, the
+ * saved website and its read pages, and the uploaded documents (files
+ * removed from storage; source rows hidden so the audit stays whole). The
+ * agent's open runs stop and its chat starts fresh. HR head or owner only,
+ * with a reason; audited.
+ */
+export async function resetProfileCore(
+  actor: ProfileActor,
+  input: { reason: string },
+): Promise<{ versions: number }> {
+  await assertRole(
+    actor.userId,
+    actor.orgId,
+    "hr_head",
+    "Only the HR head or an owner can delete the organisation profile.",
+  );
+  const reason = input.reason.trim();
+  if (reason.length < 3)
+    throw new Error(
+      "Say why you are deleting the profile — the reason is kept in the audit trail.",
+    );
+  const { cancelRun } = await import("../server/agents/runtime.server");
+  const open = await db
+    .select({ id: agentRuns.id })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.orgId, actor.orgId),
+        eq(agentRuns.agentType, "org_context"),
+        inArray(agentRuns.status, ["queued", "running", "awaiting_human"]),
+      ),
+    );
+  for (const r of open) await cancelRun({ orgId: actor.orgId, runId: r.id, userId: actor.userId });
+  // The conversation starts fresh too: the old thread (with the agent's
+  // proposals about a now-deleted profile) is hidden, restorable for 30 days.
+  const { hiringConversations } = await import("@db/schema");
+  await db
+    .update(hiringConversations)
+    .set({ deletedAt: new Date(), deletedBy: actor.userId, updatedAt: new Date() })
+    .where(
+      and(eq(hiringConversations.orgId, actor.orgId), eq(hiringConversations.kind, "org_profile")),
+    );
+  const rows = await db
+    .delete(orgProfileVersions)
+    .where(eq(orgProfileVersions.orgId, actor.orgId))
+    .returning({ id: orgProfileVersions.id });
+  // Delete means a clean slate: the saved website, its read pages and the
+  // uploaded documents go too (files removed from storage; source rows kept,
+  // hidden, so the audit story stays in one place).
+  const { orgContextSources } = await import("@db/schema");
+  const { deleteObject } = await import("../server/storage");
+  const sources = await db
+    .select({ id: orgContextSources.id, fileKey: orgContextSources.fileKey })
+    .from(orgContextSources)
+    .where(and(eq(orgContextSources.orgId, actor.orgId), isNull(orgContextSources.deletedAt)));
+  const now = new Date();
+  for (const s of sources) {
+    if (s.fileKey) await deleteObject(s.fileKey);
+    await db
+      .update(orgContextSources)
+      .set({ deletedAt: now, deletedBy: actor.userId })
+      .where(eq(orgContextSources.id, s.id));
+  }
+  await db
+    .update(orgProfiles)
+    .set({
+      currentVersionId: null,
+      requireProfile: false,
+      websiteUrl: null,
+      websiteConfirmedBy: null,
+      websiteConfirmedAt: null,
+      lastRereadAt: null,
+      lastRereadStatus: null,
+      rereadFailures: 0,
+      nextRereadAt: null,
+      updatedBy: actor.userId,
+      updatedAt: now,
+    })
+    .where(eq(orgProfiles.orgId, actor.orgId));
+  await audit(actor, "reset", null, {
+    reason,
+    versions: rows.length,
+    sources: sources.length,
+  });
+  return { versions: rows.length };
+}
 
 /** Refuse to raise a requisition while the organisation insists on an approved profile it lacks. */
 export async function assertProfileAllowsRequisition(orgId: string): Promise<void> {

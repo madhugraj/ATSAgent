@@ -62,7 +62,6 @@ beforeAll(async () => {
 
   // Clean slate (cascades handle children)
   await db.execute(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (await import("drizzle-orm"))
       .sql`truncate table ${organizations}, ${users}, ${candidates}, ${captureEvents} restart identity cascade`,
   );

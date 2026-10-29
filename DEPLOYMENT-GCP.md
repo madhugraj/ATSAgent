@@ -40,6 +40,8 @@ gcloud builds submit \
 
 Container: port **3000**, `HOST=0.0.0.0`. No `/health` endpoint exists — use `GET /` (HTTP 200) as readiness/liveness probe. One DB migration **Job per release** (below) must complete before rolling the Deployment.
 
+**Optional — browser for website reads** (Organisation context agent): the reader renders client-built websites when Chrome or a Playwright Chromium is present in the image (`playwright` is already a dependency; add `bunx playwright install chromium --with-deps` to the image build, or bake Chrome). Without a browser the feature still works — client-rendered sites just yield only their meta lines, and static sites read fully.
+
 **Migrations** (run once per release, before deploy). The schema source of truth is `drizzle/pg-migrations/` applied by `scripts/migrate-pg.mjs` (idempotent — safe to re-run; records applied files in `pg_migrations`). **Do NOT use `bunx drizzle-kit migrate`** — the runner is the only supported migration path:
 
 ```bash

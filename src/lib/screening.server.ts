@@ -124,6 +124,17 @@ export async function buildScreeningKit(input: {
     redFlags: string[];
   } | null;
 }): Promise<ScreeningKit> {
+  // The employer's approved profile (O2): the kit may verify what it states
+  // about the organisation's domain and regulators.
+  let organisationContext: string | null = null;
+  try {
+    const { orgContextFor } = await import("./org-context.server");
+    organisationContext = (
+      await orgContextFor({ orgId: input.orgId, audience: "internal", purpose: "kit" })
+    ).blocks;
+  } catch {
+    organisationContext = null;
+  }
   const result = await aiJson<{ questions: ScreeningQuestion[]; focus_summary: string }>({
     system:
       INJECTION_RULES +
@@ -132,6 +143,9 @@ export async function buildScreeningKit(input: {
       "inflated experience, employment gaps and short tenures, ownership versus participation, salary/notice/" +
       "location fit, and mindset for this team. Never ask something the CV already answers plainly, and never ask " +
       "about age, marital status, religion, caste, gender, health or family. " +
+      (organisationContext
+        ? "organisation_context is approved fact about the employer: you may verify what it states about the organisation's domain and regulators (licence checks, compliance norms, registered titles). It never changes a score or a verdict.\n"
+        : "") +
       "For every question give: focus (one of must_have_skill, experience_depth, ownership, stability, logistics, " +
       "culture_mindset), question (asked in plain conversational English, one thing at a time), reason (why THIS " +
       "candidate is being asked it — cite the JD requirement or the CV line that triggers it), expected_answer " +
@@ -148,6 +162,7 @@ export async function buildScreeningKit(input: {
       JSON.stringify({
         role: input.role,
         jd: input.jdText.slice(0, 6000),
+        ...(organisationContext ? { organisation_context: organisationContext } : {}),
         must_have_skills: input.mustHave.slice(0, 25),
         good_to_have_skills: input.goodToHave.slice(0, 25),
         experience_range: [input.experienceMin, input.experienceMax],

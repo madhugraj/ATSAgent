@@ -1,17 +1,34 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { BookOpenText, Eye, Lock, Plus, Trash2 } from "lucide-react";
+import {
+  BookOpenText,
+  Eye,
+  FileText,
+  Globe,
+  Lock,
+  Plus,
+  RefreshCw,
+  Sparkles,
+  Trash2,
+  TriangleAlert,
+} from "lucide-react";
 
 import {
+  acceptOrgSource,
+  deleteOrgDocument,
+  getOrgContextAdmin,
+  readOrgWebsiteNow,
+  resetOrgProfile,
+  setOrgWebsite,
+  startOrgContextBuild,
+  uploadOrgDocument,
+} from "@/lib/org-context.functions";
+import {
   decideOrgProfileVersion,
-  discardOrgProfileDraft,
   getOrgProfile,
-  saveOrgProfileDraft,
   setOrgProfileRequired,
-  startOrgProfileDraft,
-  submitOrgProfileDraft,
   type OrgProfileVersionView,
 } from "@/lib/org-profile.functions";
 import {
@@ -26,6 +43,7 @@ import {
   type SectionDef,
 } from "@/lib/org-profile";
 import { PageHeader } from "@/components/ats";
+import { OrgDeskChat } from "@/components/OrgDeskChat";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -51,22 +69,28 @@ const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : "")
 function OrgProfilePage() {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["org_profile"], queryFn: () => getOrgProfile() });
+  const qa = useQuery({
+    queryKey: ["org_context_admin"],
+    queryFn: () => getOrgContextAdmin(),
+  });
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["org_profile"] });
     qc.invalidateQueries({ queryKey: ["org_profile_gate"] });
+    qc.invalidateQueries({ queryKey: ["org_context_admin"] });
   };
   if (q.isLoading) return <p className="text-sm text-muted-foreground">Loading profile…</p>;
   if (q.error || !q.data)
     return <p className="text-sm text-destructive">Could not load the organisation profile.</p>;
   const p = q.data;
   const open = p.open;
+  const removedIds = new Set((qa.data?.sources ?? []).filter((s) => s.deleted).map((s) => s.id));
 
   return (
     <>
       <PageHeader
         eyebrow="Administration"
         title="Organisation profile"
-        description="What your organisation does and how it hires. Once the HR head or an owner approves it, this is the context every hiring agent works from. Pay figures and staff names are never kept here."
+        description="What your organisation does and how it hires — built with the Organisation context agent from your answers, your website and your documents, then approved by the HR head or an owner. This approved profile is the context every hiring agent works from. Pay figures and staff names are never kept here."
       />
 
       <RequireCard required={p.requireProfile} canChange={p.canDecide} onChanged={refresh} />
@@ -83,51 +107,73 @@ function OrgProfilePage() {
             No approved profile yet — agents are working without your organisation&apos;s context.
           </span>
         )}
-        {open ? (
-          <Badge variant="outline" className="ml-auto">
-            Version {open.version}: {STATUS_LABEL[open.status] ?? open.status}
-          </Badge>
-        ) : p.canEdit ? (
-          <Button
-            size="sm"
-            className="ml-auto"
-            onClick={async () => {
-              try {
-                await startOrgProfileDraft();
-                refresh();
-              } catch (e) {
-                toast.error(e instanceof Error ? e.message : "Could not start a draft");
-              }
-            }}
-          >
-            {p.approved ? "Change the profile" : "Write the profile"}
-          </Button>
-        ) : null}
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {open ? (
+            <Badge variant="outline">
+              Version {open.version}: {STATUS_LABEL[open.status] ?? open.status}
+            </Badge>
+          ) : null}
+          {p.canDecide && (p.approved || open) ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-destructive"
+              title="Delete every version and start from nothing (the reason is kept in the audit trail)"
+              onClick={async () => {
+                const reason = window.prompt(
+                  "Why are you deleting the profile? (kept in the audit trail)",
+                );
+                if (!reason || reason.trim().length < 3) return;
+                if (
+                  !window.confirm(
+                    "Delete the organisation profile — every draft and version, the saved website, its read pages, uploaded documents, and the agent's chat? You start from nothing.",
+                  )
+                )
+                  return;
+                try {
+                  await resetOrgProfile({ data: { reason: reason.trim() } });
+                  toast.success(
+                    "Profile deleted — build it again from the chat or with Build with the agent.",
+                  );
+                  refresh();
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : "Could not delete the profile");
+                }
+              }}
+            >
+              Delete profile
+            </Button>
+          ) : null}
+        </div>
       </section>
 
-      {open && (open.status === "draft" || open.status === "changes_requested") && p.canEdit ? (
-        <DraftEditor
-          key={`${open.id}:${open.updatedAt}`}
-          draft={open}
-          approved={p.approved}
-          onChanged={refresh}
-        />
+      {p.canEdit ? <SourcesCard onChanged={refresh} /> : null}
+
+      {p.canEdit ? (
+        <OrgDeskChat onProfileChanged={refresh} />
       ) : open ? (
         <PendingReview
           version={open}
           approved={p.approved}
           canDecide={p.canDecide && open.status === "pending"}
+          removedSourceIds={removedIds}
           onChanged={refresh}
         />
-      ) : p.approved ? (
-        <ReadOnlyProfile sections={p.approved.sections} />
       ) : (
         <p className="mt-4 text-sm text-muted-foreground">
-          {p.canEdit
-            ? "Start with About: what the organisation does, in two or three sentences."
-            : "The HR head, the CBO or an owner writes the profile."}
+          The HR head, the CBO or an owner writes the profile with the Organisation context agent.
         </p>
       )}
+
+      {p.canEdit && open && open.status !== "pending" ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          A draft (version {open.version}) is being built in the chat above; it appears here for
+          approval once submitted.
+        </p>
+      ) : null}
+      {p.approved ? (
+        <ReadOnlyProfile sections={p.approved.sections} removedSourceIds={removedIds} />
+      ) : null}
 
       {p.history.length ? (
         <section className="panel mt-4 p-4">
@@ -211,7 +257,288 @@ function VisibilityBadge({ item, def }: { item: OrgProfileItem; def: SectionDef 
   );
 }
 
-function ReadOnlyProfile({ sections }: { sections: OrgProfileSections }) {
+type ContextAdmin = Awaited<ReturnType<typeof getOrgContextAdmin>>;
+
+/** Base64 for a file up to a few MB, without blowing the call stack. */
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000)
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
+/** The agent's sources: the organisation's website and its uploaded documents. */
+function SourcesCard({ onChanged }: { onChanged: () => void }) {
+  const qc = useQueryClient();
+  const qa = useQuery({ queryKey: ["org_context_admin"], queryFn: () => getOrgContextAdmin() });
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [url, setUrl] = useState("");
+  const [busy, setBusy] = useState<"" | "save" | "read" | "upload">("");
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["org_context_admin"] });
+    onChanged();
+  };
+  const run = async (kind: typeof busy, fn: () => Promise<void>) => {
+    setBusy(kind);
+    try {
+      await fn();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Something went wrong");
+    } finally {
+      setBusy("");
+    }
+  };
+  const data = qa.data;
+  // The input carries the saved website; Save arms only on a change.
+  useEffect(() => {
+    if (data?.website && !url) setUrl(data.website.url);
+  }, [data?.website, url]);
+  const saved = data?.website?.url ?? null;
+  const dirty = url.trim() !== "" && url.trim() !== (saved ?? "");
+  const flagged = (data?.sources ?? []).filter((s) => s.injectionFlagged && !s.deleted);
+  const documents = (data?.sources ?? []).filter((s) => s.kind === "document" && !s.deleted);
+  const pages = (data?.sources ?? []).filter((s) => s.kind === "website_page" && !s.deleted);
+  const pathOf = (u: string) => {
+    try {
+      return new URL(u).pathname === "/" ? new URL(u).hostname : new URL(u).pathname;
+    } catch {
+      return u;
+    }
+  };
+
+  const save = () =>
+    run("save", async () => {
+      const first = await setOrgWebsite({ data: { url: url.trim() } });
+      const res = first.ok
+        ? first
+        : await setOrgWebsite({ data: { url: url.trim(), confirm: true } });
+      if (res.ok) {
+        toast.success(
+          saved && saved !== url.trim()
+            ? "Website updated."
+            : res === first
+              ? "Website saved."
+              : "Website saved with an owner's confirmation.",
+        );
+        refresh();
+      } else {
+        toast.error("Only an owner can confirm a website outside the registered e-mail domain.");
+      }
+    });
+
+  return (
+    <section className="panel mt-4 space-y-4 p-4 text-sm">
+      <h2 className="flex items-center gap-2 font-semibold">
+        <Globe className="size-4 text-muted-foreground" /> Sources the agent reads
+      </h2>
+
+      {flagged.length ? (
+        <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-3">
+          <p className="flex items-center gap-1.5 font-medium">
+            <TriangleAlert className="size-4 text-amber-600" /> {flagged.length} source(s) look like
+            instructions to an AI and nothing was kept from them.
+          </p>
+          {flagged.map((f) => (
+            <div key={f.id} className="mt-1 flex items-center justify-between gap-2">
+              <span className="break-all text-xs text-muted-foreground">{f.url ?? f.fileName}</span>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy !== ""}
+                onClick={() =>
+                  run("save", async () => {
+                    await acceptOrgSource({ data: { sourceId: f.id } });
+                    toast.success("Accepted — the source was read into the draft.");
+                    refresh();
+                  })
+                }
+              >
+                I have read it — accept it
+              </Button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="grid gap-6 md:min-w-0 md:grid-cols-2">
+        <div className="min-w-0 space-y-2">
+          <Label htmlFor="org-website" className="text-sm font-medium">
+            Your website
+          </Label>
+          <div className="flex gap-2">
+            <input
+              id="org-website"
+              className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+              placeholder="https://www.your-company.com"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+            />
+            <Button size="sm" variant="outline" disabled={busy !== "" || !dirty} onClick={save}>
+              Save
+            </Button>
+          </div>
+          <p className="break-words text-xs text-muted-foreground">
+            The agent reads only this host — it should match your registered e-mail domain; a
+            different address needs an owner&apos;s confirmation.
+          </p>
+
+          {saved ? (
+            <div className="space-y-2 rounded-md border bg-muted/30 p-3">
+              <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                <span
+                  className={`inline-block size-2 rounded-full ${
+                    data?.website?.lastRereadStatus === "failed" ? "bg-red-500" : "bg-emerald-500"
+                  }`}
+                />
+                <span className="font-medium">{saved.replace(/^https?:\/\//, "")}</span>
+                {data?.website?.confirmedAt ? (
+                  <Badge variant="outline">owner-confirmed</Badge>
+                ) : null}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {pages.length
+                  ? `${pages.length} page${pages.length === 1 ? "" : "s"} read`
+                  : "Not read yet"}
+                {data?.website?.lastRereadAt ? ` · last ${when(data.website.lastRereadAt)}` : ""}
+                {data?.website?.nextRereadAt
+                  ? ` · re-reads monthly (next ${when(data.website.nextRereadAt)})`
+                  : ""}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1"
+                  disabled={busy !== ""}
+                  onClick={() =>
+                    run("read", async () => {
+                      const r = await readOrgWebsiteNow({ data: {} });
+                      toast.success(
+                        `Read ${r.pagesFetched} page(s): ${r.pagesChanged} changed, ${r.pagesUnchanged} unchanged${
+                          r.flagged.length ? `, ${r.flagged.length} held back for review` : ""
+                        }. ${r.itemsKept} item(s) proposed into the draft.`,
+                      );
+                      refresh();
+                    })
+                  }
+                >
+                  <RefreshCw className="size-3.5" /> Read it now
+                </Button>
+              </div>
+              {pages.length ? (
+                <details className="text-xs">
+                  <summary className="cursor-pointer text-muted-foreground">
+                    Pages read ({pages.length})
+                  </summary>
+                  <ul className="mt-1 space-y-0.5">
+                    {pages.map((p) => (
+                      <li key={p.id} className="truncate">
+                        <a
+                          href={p.url ?? "#"}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-muted-foreground underline decoration-dotted hover:text-foreground"
+                        >
+                          {pathOf(p.url ?? "")}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="min-w-0 space-y-2">
+          <Label className="text-sm font-medium">Documents</Label>
+          <p className="break-words text-xs text-muted-foreground">
+            PDF or DOCX up to 10 MB — handbooks, policies, brochures; anything that states what the
+            organisation does. Scanned pages are read through the AI model.
+          </p>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".pdf,.docx"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (!file) return;
+              void run("upload", async () => {
+                const bytes = new Uint8Array(await file.arrayBuffer());
+                const r = await uploadOrgDocument({
+                  data: { fileName: file.name, dataBase64: bytesToBase64(bytes) },
+                });
+                toast.success(
+                  `${file.name}: ${r.pages} page(s)${r.ocr ? " (read through the AI model)" : ""}, ${r.itemsKept} item(s) proposed into the draft.`,
+                );
+                refresh();
+              });
+            }}
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1"
+            disabled={busy !== ""}
+            onClick={() => fileRef.current?.click()}
+          >
+            <FileText className="size-3.5" /> Upload a document
+          </Button>
+          {documents.length ? (
+            <ul className="space-y-1">
+              {documents.map((d) => (
+                <li key={d.id} className="flex items-center gap-2 text-xs">
+                  <FileText className="size-3 shrink-0 text-muted-foreground" />
+                  <span className="truncate" title={d.fileName ?? ""}>
+                    {d.fileName}
+                  </span>
+                  <span className="shrink-0 text-muted-foreground">
+                    {d.ocr ? "· scanned" : ""} {d.bytes ? `· ${Math.round(d.bytes / 1024)} kB` : ""}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    aria-label={`Remove ${d.fileName}`}
+                    className="ml-auto"
+                    disabled={busy !== ""}
+                    onClick={() =>
+                      run("save", async () => {
+                        await deleteOrgDocument({ data: { sourceId: d.id } });
+                        toast.success(
+                          "Document removed — lines from it are marked until the next approval.",
+                        );
+                        refresh();
+                      })
+                    }
+                  >
+                    <Trash2 className="size-3" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      </div>
+
+      {data && !data.agentEnabled ? (
+        <p className="text-xs text-muted-foreground">
+          The Organisation context agent is switched off — switch it on in Governance → Agent
+          settings so it can build the profile from these sources.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+function ReadOnlyProfile({
+  sections,
+  removedSourceIds,
+}: {
+  sections: OrgProfileSections;
+  removedSourceIds?: Set<string>;
+}) {
   return (
     <div className="mt-4 space-y-3">
       {PROFILE_SECTIONS.map((def) => {
@@ -225,6 +552,11 @@ function ReadOnlyProfile({ sections }: { sections: OrgProfileSections }) {
                 <li key={i.id} className="flex items-start gap-2">
                   <VisibilityBadge item={i} def={def} />
                   <span className="whitespace-pre-wrap">{i.text}</span>
+                  {i.source.ref && removedSourceIds?.has(i.source.ref) ? (
+                    <Badge variant="outline" className="shrink-0 text-muted-foreground">
+                      source removed
+                    </Badge>
+                  ) : null}
                 </li>
               ))}
             </ul>
@@ -310,255 +642,17 @@ function DiffPanel({
   );
 }
 
-function DraftEditor({
-  draft,
-  approved,
-  onChanged,
-}: {
-  draft: OrgProfileVersionView;
-  approved: OrgProfileVersionView | null;
-  onChanged: () => void;
-}) {
-  const [sections, setSections] = useState<OrgProfileSections>(draft.sections);
-  const [refused, setRefused] = useState<Refusal[]>([]);
-  const [problems, setProblems] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [dirty, setDirty] = useState(false);
-  useEffect(() => setSections(draft.sections), [draft.sections]);
-  const refusedById = useMemo(() => new Map(refused.map((r) => [r.itemId, r.reason])), [refused]);
-
-  const update = (key: string, items: OrgProfileItem[]) => {
-    setSections((s) => ({ ...s, [key]: items }));
-    setDirty(true);
-  };
-
-  async function save(): Promise<boolean> {
-    const res = await saveOrgProfileDraft({
-      data: {
-        versionId: draft.id,
-        sections: Object.fromEntries(
-          Object.entries(sections).map(([k, items]) => [
-            k,
-            items.map(({ id, text, visibility }) => ({ id, text, visibility })),
-          ]),
-        ),
-      },
-    });
-    if (!res.ok) {
-      setRefused(res.refused);
-      setProblems(res.problems);
-      toast.error(
-        res.refused.length
-          ? `${res.refused.length} item(s) cannot be kept — see the reasons below. Nothing was saved.`
-          : "Nothing was saved — see the problems below.",
-      );
-      return false;
-    }
-    setRefused([]);
-    setProblems([]);
-    setDirty(false);
-    if (res.injectionFlagged)
-      toast.warning("Some text reads like instructions to an AI; the approver will be warned.");
-    return true;
-  }
-
-  async function run(fn: () => Promise<void>) {
-    setBusy(true);
-    try {
-      await fn();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Something went wrong");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <>
-      {draft.status === "changes_requested" && draft.decisionNote ? (
-        <section className="panel mt-4 border-primary/40 p-3 text-sm">
-          <strong>Sent back{draft.decidedBy ? ` by ${draft.decidedBy}` : ""}:</strong> “
-          {draft.decisionNote}”
-        </section>
-      ) : null}
-      {problems.length ? (
-        <section className="panel mt-4 border-destructive/40 p-3 text-sm text-destructive">
-          {problems.map((m) => (
-            <p key={m}>{m}</p>
-          ))}
-        </section>
-      ) : null}
-
-      <div className="mt-4 space-y-3">
-        {PROFILE_SECTIONS.map((def) => {
-          const items = sections[def.key] ?? [];
-          return (
-            <section key={def.key} className="panel space-y-2 p-4">
-              <div>
-                <h2 className="flex items-center gap-2 text-sm font-semibold">
-                  <BookOpenText className="size-4 text-muted-foreground" /> {def.title}
-                  {def.internalOnly ? (
-                    <Badge variant="secondary" className="gap-1">
-                      <Lock className="size-3" /> Never shown to candidates
-                    </Badge>
-                  ) : null}
-                </h2>
-                <p className="text-xs text-muted-foreground">{def.hint}</p>
-              </div>
-              {items.map((item, n) => (
-                <div key={item.id} className="space-y-1">
-                  <div className="flex items-start gap-2">
-                    <Textarea
-                      rows={2}
-                      maxLength={MAX_ITEM_CHARS}
-                      value={item.text}
-                      aria-label={`${def.title} item ${n + 1}`}
-                      className={refusedById.has(item.id) ? "border-destructive" : ""}
-                      onChange={(e) =>
-                        update(
-                          def.key,
-                          items.map((i) => (i.id === item.id ? { ...i, text: e.target.value } : i)),
-                        )
-                      }
-                    />
-                    <div className="flex shrink-0 flex-col gap-1">
-                      {def.internalOnly ? (
-                        <Badge variant="secondary" className="gap-1">
-                          <Lock className="size-3" /> Internal
-                        </Badge>
-                      ) : (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          title="Who may hear or read this line"
-                          onClick={() =>
-                            update(
-                              def.key,
-                              items.map((i) =>
-                                i.id === item.id
-                                  ? {
-                                      ...i,
-                                      visibility:
-                                        i.visibility === "candidate" ? "internal" : "candidate",
-                                    }
-                                  : i,
-                              ),
-                            )
-                          }
-                        >
-                          {item.visibility === "candidate" ? (
-                            <>
-                              <Eye className="size-3" /> Candidates
-                            </>
-                          ) : (
-                            <>
-                              <Lock className="size-3" /> Internal
-                            </>
-                          )}
-                        </Button>
-                      )}
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        aria-label="Remove this line"
-                        onClick={() =>
-                          update(
-                            def.key,
-                            items.filter((i) => i.id !== item.id),
-                          )
-                        }
-                      >
-                        <Trash2 className="size-3" />
-                      </Button>
-                    </div>
-                  </div>
-                  {refusedById.has(item.id) ? (
-                    <p className="text-xs text-destructive">{refusedById.get(item.id)}</p>
-                  ) : null}
-                </div>
-              ))}
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  update(def.key, [
-                    ...items,
-                    {
-                      id: crypto.randomUUID(),
-                      text: "",
-                      visibility: def.defaultVisibility,
-                      source: { kind: "person" },
-                    },
-                  ])
-                }
-              >
-                <Plus className="size-3" /> Add a line
-              </Button>
-            </section>
-          );
-        })}
-      </div>
-
-      <DiffPanel approved={approved?.sections ?? null} sections={sections} />
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        <Button
-          disabled={busy || !dirty}
-          onClick={() =>
-            run(async () => {
-              if (await save()) {
-                toast.success("Draft saved");
-                onChanged();
-              }
-            })
-          }
-        >
-          Save draft
-        </Button>
-        <Button
-          variant="outline"
-          disabled={busy}
-          onClick={() =>
-            run(async () => {
-              if (dirty && !(await save())) return;
-              await submitOrgProfileDraft({ data: { versionId: draft.id } });
-              toast.success("Sent to the HR head or an owner for approval");
-              onChanged();
-            })
-          }
-        >
-          Submit for approval
-        </Button>
-        <Button
-          variant="ghost"
-          disabled={busy}
-          onClick={() =>
-            run(async () => {
-              await discardOrgProfileDraft({ data: { versionId: draft.id } });
-              toast.success("Draft discarded");
-              onChanged();
-            })
-          }
-        >
-          Discard draft
-        </Button>
-      </div>
-    </>
-  );
-}
-
 function PendingReview({
   version,
   approved,
   canDecide,
+  removedSourceIds,
   onChanged,
 }: {
   version: OrgProfileVersionView;
   approved: OrgProfileVersionView | null;
   canDecide: boolean;
+  removedSourceIds: Set<string>;
   onChanged: () => void;
 }) {
   const [note, setNote] = useState("");
@@ -607,7 +701,7 @@ function PendingReview({
         ) : null}
       </section>
       <DiffPanel approved={approved?.sections ?? null} sections={version.sections} />
-      <ReadOnlyProfile sections={version.sections} />
+      <ReadOnlyProfile sections={version.sections} removedSourceIds={removedSourceIds} />
       {canDecide ? (
         <section className="panel mt-4 space-y-2 p-4">
           <Textarea

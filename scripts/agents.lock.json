@@ -1,62 +1,66 @@
 {
   "copilot": {
-    "version": "1.2.4",
-    "hash": "e4ab4363e656d6942e73ab7fa0dfda0328c4f8bc9c30210df3dd1271fa88f6f8"
+    "version": "1.2.5",
+    "hash": "26fc876df0c1757fc325098f7a3fef5e60b63377eb0ca5b59a2eafc32aa367f3"
   },
   "distribution": {
-    "version": "1.1.2",
-    "hash": "153611288aad9e84d4a8be250263514ca27c6527076db7367da6b4570d413f0d"
+    "version": "1.1.3",
+    "hash": "c70d3d9fa1a4757cff17427d9b2f4966580e73c969d5ae552c52fa029314a290"
   },
   "evaluation": {
-    "version": "1.2.3",
-    "hash": "5501b395464488ab6bed6b84161d4ffa01d167cfb4ac1b32a2578a5c83eacb28"
+    "version": "1.2.4",
+    "hash": "8dfb69f233494b568fb4102819419ba4c9a01ceca0e4b8a0c3e3b37fec69ff07"
   },
   "followup": {
-    "version": "1.4.3",
-    "hash": "8174eb478ff1da17464bfffa63b4eaf04ec5a6a041711fa49a71444d7acf8207"
+    "version": "1.4.4",
+    "hash": "6ae2844058dad5536d89165bcb0c560f66f8c5918e42b01145d45100d571f715"
   },
   "intake": {
-    "version": "1.4.3",
-    "hash": "063c55b645f0a2d65264475d975416cfed7551fa16234c992f4453b066d5762e"
+    "version": "1.5.0",
+    "hash": "354f16f1610eaecf6240ef4e596a57fb88872f936767ab6d8b6d80b428c7432e"
   },
   "interview": {
-    "version": "2.1.1",
-    "hash": "fd20a9fc5373bc6dfa51e3d4fcb4525fc143fa8c675bf0e04c02910b602a8821"
+    "version": "2.1.2",
+    "hash": "866b78cbedcb43478cd759330c8fa0777b1911f34fbc1fddca48fd70623a9b11"
   },
   "jd": {
-    "version": "1.3.3",
-    "hash": "b506576b9d4e22cf08da1e3954eae677d572f75c71286f78dfd302c67a1ce559"
+    "version": "1.4.0",
+    "hash": "e9cbe409177ca0f8bf7018f8fea8dc1e4fa90077e3e5e822851c306704e68593"
   },
   "offer": {
-    "version": "1.5.4",
-    "hash": "a53b9f33a5a7d9ba26b543514cb0ba17898b2e628ca0aafef181a5f3037678b8"
+    "version": "1.5.5",
+    "hash": "c58e20bab283a70d732db479ac40e5aca8fcc5318df7598576e739ad3e96ac8a"
   },
   "onboarding": {
-    "version": "1.3.2",
-    "hash": "06ad38cc6074d1ce41d23b75e6de9b6b152a0a8924f539eb1896688a27c0a93a"
+    "version": "1.3.3",
+    "hash": "1526ae9402415f70382f6ad580692fb28c3bade9d372f97045a650f95623f524"
+  },
+  "org_context": {
+    "version": "1.0.5",
+    "hash": "ec13eeb7cd2badb5b7630e9ce3f63232f15fb2e6e9afb4b6738cf3d51b782eb3"
   },
   "publishing": {
-    "version": "1.4.3",
-    "hash": "ac73048738422a4ce2a8593d50cc07f1c7e49205e8e857aef0170be5d8def61d"
+    "version": "1.4.4",
+    "hash": "8cfceff5e69ef697711f98e88a1f334433740269902aa5a43447b7b7a3b89786"
   },
   "requisition": {
-    "version": "1.4.3",
-    "hash": "d4911dccf738c5d1749bb8076260d1f029403f4531708df412096f4d34478b37"
+    "version": "1.5.0",
+    "hash": "e4df0aec9e7729fdd5f3f167c932dc940e08cd100b734a602e355e1dea280587"
   },
   "scheduling_call": {
-    "version": "1.7.1",
-    "hash": "a2547123108b148c610ce861150dae3a715165f53016337365ac468ef624e6cc"
+    "version": "1.7.2",
+    "hash": "05d9a22d867e289530fa04c9ec43f5d34789a0fe9be5562e7f92227ad939a74c"
   },
   "screening": {
-    "version": "1.10.3",
-    "hash": "c0d61a4c03d49f26bad56b76d76c85e9d6c6e8a78a495a49bdb1bc11a068394c"
+    "version": "1.11.0",
+    "hash": "15cfc3682026b5429282abf1aaa21071c77dcdccd6af59d3814212307224a89d"
   },
   "screening_call": {
-    "version": "1.1.10",
-    "hash": "69891cbd97b4f4645324642e8981e8830356b8a9bb2f22e09b549f134e1b348d"
+    "version": "1.1.11",
+    "hash": "eff4a520d34957545c74f02675926b89a9465389d9f7e3dcd545db1f296de6f2"
   },
   "sourcing": {
-    "version": "1.0.3",
-    "hash": "361beb0a4af511ce1b471a7a94493584303077e92992a49da7acef866d8a0321"
+    "version": "1.0.4",
+    "hash": "e4c946ba6d531ed32755cf22cb185c268ed75c941430e8ed1b9726f2eaaa872e"
   }
 }

@@ -47,6 +47,7 @@ import {
   startDeskSourcing,
   startDeskDistribution,
   chooseDeskRole,
+  chooseHiringManagerOption,
   closeDeskRole,
   deleteDeskConversation,
   getDeskConversation,
@@ -629,6 +630,8 @@ function Card({
 }) {
   if (card.type === "similar_roles")
     return <SimilarRolesCard card={card} conv={conv} onChanged={onChanged} />;
+  if (card.type === "hiring_manager_options")
+    return <HiringManagerOptionsCard card={card} conv={conv} onChanged={onChanged} />;
   if (card.type === "ranked_candidates")
     return <RankedCard card={card} conv={conv} onChanged={onChanged} />;
   if (card.type === "task") return <TaskCard card={card} conv={conv} onChanged={onChanged} />;
@@ -1886,6 +1889,87 @@ function Thinking({
         </Button>
       ) : null}
     </details>
+  );
+}
+
+/** The team as tappable options — the hiring manager is picked, never typed. */
+function HiringManagerOptionsCard({
+  card,
+  conv,
+  onChanged,
+}: {
+  card: DeskCardView;
+  conv: DeskConversationView;
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const why = (card["why"] ?? {}) as Why;
+  const options =
+    (card["options"] as unknown as { memberId: string; name: string; email: string }[]) ?? [];
+  const open = conv.status === "gathering";
+  async function pick(memberId: string) {
+    setBusy(true);
+    try {
+      await chooseHiringManagerOption({ data: { id: conv.id, memberId } });
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not set the hiring manager");
+    } finally {
+      setBusy(false);
+    }
+  }
+  const understood = why.understood ?? [];
+  return (
+    <div className="space-y-2 rounded-lg border border-border p-3">
+      <details
+        className="group rounded-md border border-dashed border-border bg-muted/30 px-3 py-2 text-xs"
+        open
+      >
+        <summary className="cursor-pointer select-none font-medium text-muted-foreground">
+          How I read that
+        </summary>
+        <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+          <dt className="text-muted-foreground">Understood</dt>
+          <dd>
+            {understood.length
+              ? understood.map((u) => `${u.label}: ${u.value}`).join(" · ")
+              : "Asking who manages this hire"}
+          </dd>
+          <dt className="text-muted-foreground">Still missing</dt>
+          <dd>{(why.missing ?? []).join(", ") || "Nothing — all required details are in"}</dd>
+          {why.next ? (
+            <>
+              <dt className="text-muted-foreground">Next</dt>
+              <dd>{why.next}</dd>
+            </>
+          ) : null}
+        </dl>
+      </details>
+      {options.length ? (
+        <div className="space-y-1">
+          <p className="text-xs text-muted-foreground">
+            Pick the hiring manager from your team — they approve this role&apos;s interview panels:
+          </p>
+          {options.map((o) => (
+            <Button
+              key={o.memberId}
+              size="sm"
+              variant="outline"
+              className="w-full justify-start"
+              disabled={busy || !open}
+              onClick={() => void pick(o.memberId)}
+            >
+              <span className="truncate">{o.name}</span>
+              <span className="ml-auto truncate text-xs text-muted-foreground">{o.email}</span>
+            </Button>
+          ))}
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          No active team members found — the admin adds people on the Team page.
+        </p>
+      )}
+    </div>
   );
 }
 

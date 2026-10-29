@@ -11,6 +11,7 @@ import { db } from "../server/db";
 import { jobDescriptions, requisitions } from "@db/schema";
 import { emitAgentEvent } from "../server/agents/events";
 import { assertRole, type AppRole } from "./auth.middleware";
+import type { OrgProfileSections } from "./org-profile";
 
 export type LifecycleActor = {
   orgId: string;
@@ -512,6 +513,16 @@ export async function saveJobDescriptionCore(
     .where(and(eq(requisitions.id, input.requisitionId), eq(requisitions.orgId, actor.orgId)))
     .limit(1);
   if (!requisition) throw new Error("Requisition not found");
+
+  // A JD that repeats an internal-only organisation-profile line (or makes an
+  // absolute claim the never-say list forbids) is refused before it exists —
+  // one gate for the button, the import path and the JD agent alike (O2).
+  const { profileState } = await import("./org-profile.server");
+  const { internalLineReason } = await import("./org-profile");
+  const state = await profileState(actor.orgId);
+  const sections = state.open?.sections ?? state.approved?.sections ?? ({} as OrgProfileSections);
+  const internal = internalLineReason(`${input.jd.purpose ?? ""}\n${input.jd.full_text}`, sections);
+  if (internal) throw new Error(internal.reason);
 
   const [latest] = await db
     .select({ version: jobDescriptions.version })

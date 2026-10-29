@@ -152,7 +152,8 @@ const PHONE = /(\+?\(?\d[\d\s().-]{8,}\d)/;
 
 export type Person = { name: string | null; email?: string | null };
 
-const norm = (s: string) =>
+/** Lowercase, accent-folded, punctuation-free, single-spaced — the one normaliser for matching. */
+export const norm = (s: string) =>
   s
     .toLowerCase()
     .normalize("NFKD")
@@ -307,3 +308,106 @@ export const STATUS_LABEL: Record<string, string> = {
   declined: "Declined",
   superseded: "Replaced by a later version",
 };
+
+/* ------------------------------------------------- internal lines in a JD */
+
+export type InternalLineHit = { section: string; itemId: string; reason: string };
+
+/** The never-say claims that are matchable as sentences (topics are not; those stay prompt rules). */
+const ABSOLUTE_CLAIM =
+  /\b(guarantee[sd]?|assured|100%)\b[^.!?]{0,40}\b(job|offer|placement|selection|hiring|joining)\b/i;
+
+function jaccard(a: string[], b: string[]): number {
+  const sa = new Set(a);
+  const sb = new Set(b);
+  let inter = 0;
+  for (const w of sa) if (sb.has(w)) inter++;
+  return inter / (sa.size + sb.size - inter || 1);
+}
+
+/**
+ * Whether two lines say the same fact in other words: ≥ 75 % stemmed-word
+ * containment (the shorter line's words almost all appear in the longer —
+ * a paraphrase-expansion, not a new fact). Used to keep near-duplicate
+ * rewordings out of a profile draft.
+ */
+export function nearDuplicate(a: string, b: string): boolean {
+  const stem = (s: string) =>
+    norm(s)
+      .split(" ")
+      .filter(Boolean)
+      .map((w) => (w.length > 4 && w.endsWith("s") ? w.slice(0, -1) : w));
+  const wa = stem(a);
+  const wb = stem(b);
+  if (!wa.length || !wb.length) return false;
+  const sb = new Set(wb);
+  let inter = 0;
+  for (const w of new Set(wa)) if (sb.has(w)) inter++;
+  return inter / Math.min(new Set(wa).size, sb.size) >= 0.75;
+}
+
+/** Phrases an internal item could leak as: the whole line, each sentence, and a leading clause. */
+function internalPhrases(text: string): string[] {
+  const phrases = new Set<string>();
+  const whole = norm(text);
+  if (whole.split(" ").length >= 5) phrases.add(whole);
+  for (const sentence of text.split(/[.;!?\n]/)) {
+    const s = norm(sentence);
+    const words = s.split(" ").filter(Boolean);
+    if (words.length >= 5 && words.length <= 80) phrases.add(s);
+  }
+  const lead = whole.split(" ").slice(0, 12).join(" ");
+  if (whole.split(" ").length > 12) phrases.add(lead);
+  return [...phrases];
+}
+
+/**
+ * Why this JD text may not be saved because it repeats an internal-only
+ * profile line (or makes an absolute claim the never-say list exists for),
+ * or null. Pure and deterministic: normalised substring or ≥0.8 word overlap.
+ */
+export function internalLineReason(
+  fullText: string,
+  sections: OrgProfileSections,
+  opts?: { minWords?: number },
+): InternalLineHit | null {
+  if (ABSOLUTE_CLAIM.test(fullText))
+    return {
+      section: "never_say",
+      itemId: "absolute_claim",
+      reason:
+        "It makes an absolute guarantee about a job or offer. The profile's never-say list exists so candidates never read a claim like that.",
+    };
+  const minWords = opts?.minWords ?? 5;
+  const hayNorm = norm(fullText);
+  const hayWords = hayNorm.split(" ");
+  for (const def of PROFILE_SECTIONS) {
+    for (const item of sections[def.key] ?? []) {
+      if (item.visibility !== "internal" && !def.internalOnly) continue;
+      const t = item.text.trim();
+      if (norm(t).split(" ").length < 2 && t.length < 12) continue;
+      for (const phrase of internalPhrases(t)) {
+        const words = phrase.split(" ").filter(Boolean);
+        if (words.length < Math.max(2, minWords) && phrase.length < 12) continue;
+        if (hayNorm.includes(phrase))
+          return {
+            section: def.key,
+            itemId: item.id,
+            reason: `It repeats an internal-only profile line — candidates must never read it (${def.title.toLowerCase()}).`,
+          };
+        // Same window count, ≥0.8 overlap: a lightly reworded copy.
+        if (words.length >= 5 && hayWords.length >= words.length) {
+          for (let i = 0; i + words.length <= hayWords.length; i++) {
+            if (jaccard(words, hayWords.slice(i, i + words.length)) >= 0.8)
+              return {
+                section: def.key,
+                itemId: item.id,
+                reason: `It repeats an internal-only profile line in other words — candidates must never read it (${def.title.toLowerCase()}).`,
+              };
+          }
+        }
+      }
+    }
+  }
+  return null;
+}

@@ -1,6 +1,6 @@
 # Organisation context agent — plan
 
-Status: **O0 built** (2026-10-27; migration `0054_org_profile.sql`); O1 next.
+Status: **O0–O2 built** (O0 2026-10-27, migration `0054_org_profile.sql`; O1+O2 2026-10-28, migration `0055_org_context.sql`). O3 (domain packs), O4 (voice agents) and O5 (pilot) remain.
 Decisions recorded 2026-10-27 (see the end).
 Nothing is built. Builds on the
 agent framework (`docs/agentic-plan.md` §4–§6), the hiring desk (§13.2) and the

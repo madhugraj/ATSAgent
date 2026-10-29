@@ -4,7 +4,7 @@
  * holds, escalates, re-sees without duplicating, and resolves when it clears;
  * the scheduler heartbeat reports a stopped scheduler.
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { and, eq, ne } from "drizzle-orm";
 
 const { db } = await import("../src/server/db");
@@ -863,5 +863,161 @@ describe("interviewers who can't make it", () => {
     expect(await rule()).toBeUndefined();
     await db.delete(requisitions).where(eq(requisitions.id, req!.id));
     await db.delete(candidates).where(eq(candidates.id, cand!.id));
+  });
+});
+
+describe("organisation context rules", () => {
+  const days = (n: number) => new Date(Date.now() - n * 864e5);
+
+  async function approvedProfile(values: Record<string, unknown> = {}) {
+    const { orgProfileVersions, orgProfiles } = await import("../drizzle/schema");
+    const [v] = await db
+      .insert(orgProfileVersions)
+      .values({
+        orgId,
+        version: 1,
+        status: "approved",
+        sections: {
+          about: [
+            {
+              id: "a1",
+              text: "We build hiring software.",
+              visibility: "candidate",
+              source: { kind: "person" },
+            },
+          ],
+        },
+        decidedAt: days(10),
+        ...values,
+      } as never)
+      .returning({ id: orgProfileVersions.id });
+    await db
+      .insert(orgProfiles)
+      .values({ orgId, currentVersionId: v!.id })
+      .onConflictDoUpdate({
+        target: orgProfiles.orgId,
+        set: { currentVersionId: v!.id },
+      });
+    return v!.id;
+  }
+
+  afterEach(async () => {
+    const { orgProfiles, orgProfileVersions, orgContextSources, agentPolicies, requisitions } =
+      await import("../drizzle/schema");
+    await db.delete(orgProfiles).where(eq(orgProfiles.orgId, orgId));
+    await db.delete(orgProfileVersions).where(eq(orgProfileVersions.orgId, orgId));
+    await db.delete(orgContextSources).where(eq(orgContextSources.orgId, orgId));
+    await db.delete(agentPolicies).where(eq(agentPolicies.orgId, orgId));
+    await db.delete(requisitions).where(eq(requisitions.orgId, orgId));
+  });
+
+  test("no approved profile: warning while agents are on, serious once a role was raised", async () => {
+    const { agentPolicies, requisitions } = await import("../drizzle/schema");
+    // Other blocks' fixtures must not read as "roles raised without a profile".
+    await db.delete(requisitions).where(eq(requisitions.orgId, orgId));
+    await evaluate();
+    expect((await open()).filter((i) => i.rule === "context.profile_missing")).toHaveLength(0);
+    await db.insert(agentPolicies).values({ orgId, agentType: "jd", enabled: true });
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "context.profile_missing")).toMatchObject({
+      agentType: "org_context",
+      element: "context",
+      severity: "warning",
+    });
+    await db.insert(requisitions).values({
+      orgId,
+      code: `REQ-CTX-${Math.random().toString(36).slice(2, 7)}`,
+      title: "Engineer",
+      status: "draft",
+    } as never);
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "context.profile_missing")).toMatchObject({
+      severity: "serious",
+    });
+  });
+
+  test("an approved profile older than 180 days is stale; documents after it are named", async () => {
+    const { orgContextSources } = await import("../drizzle/schema");
+    await approvedProfile({ decidedAt: days(HEALTH.profileStaleDays + 5) });
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "context.profile_stale")).toMatchObject({
+      agentType: "org_context",
+      severity: "warning",
+    });
+    await db.insert(orgContextSources).values({
+      orgId,
+      kind: "document",
+      fileName: "handbook.pdf",
+      sha256: "x".repeat(64),
+      text: "handbook",
+      createdAt: days(2),
+    });
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "context.profile_stale")).toMatchObject({
+      title: expect.stringContaining("document"),
+    });
+  });
+
+  test("a failed website re-read escalates after two failures in a row", async () => {
+    const { orgProfiles } = await import("../drizzle/schema");
+    await approvedProfile();
+    await db
+      .insert(orgProfiles)
+      .values({ orgId, lastRereadStatus: "failed", rereadFailures: 1 })
+      .onConflictDoUpdate({
+        target: orgProfiles.orgId,
+        set: { lastRereadStatus: "failed", rereadFailures: 1 },
+      });
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "context.reread_failed")).toMatchObject({
+      severity: "warning",
+    });
+    await db
+      .update(orgProfiles)
+      .set({ rereadFailures: HEALTH.rereadSeriousFailures })
+      .where(eq(orgProfiles.orgId, orgId));
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "context.reread_failed")).toMatchObject({
+      severity: "serious",
+    });
+  });
+
+  test("a submitted version waiting past 7 days is flagged", async () => {
+    const { orgProfileVersions } = await import("../drizzle/schema");
+    await db.insert(orgProfileVersions).values({
+      orgId,
+      version: 2,
+      status: "pending",
+      sections: {
+        about: [
+          { id: "a2", text: "About us", visibility: "candidate", source: { kind: "person" } },
+        ],
+      },
+      submittedAt: days(HEALTH.reviewWaitingDays + 2),
+    } as never);
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "context.review_waiting")).toMatchObject({
+      agentType: "org_context",
+      title: expect.stringContaining("waited"),
+    });
+  });
+
+  test("more than five refused items in 7 days is flagged", async () => {
+    const refused = Array.from({ length: HEALTH.refusedItems7d + 1 }, (_, i) => ({
+      section: "about",
+      reason: `r${i}`,
+    }));
+    await db.insert(auditLog).values({
+      orgId,
+      actor: "user:x",
+      action: "org_profile.items_refused",
+      entityType: "org_context_source",
+      detail: { refused },
+    });
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "context.items_refused")).toMatchObject({
+      agentType: "org_context",
+      title: expect.stringContaining("refused"),
+    });
   });
 });

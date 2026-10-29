@@ -8,7 +8,13 @@ import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../server/db";
-import { hiringConversations, hiringMessages, requisitions, userRoles } from "@db/schema";
+import {
+  hiringConversations,
+  hiringMessages,
+  orgMembers,
+  requisitions,
+  userRoles,
+} from "@db/schema";
 import { requireOrg } from "./auth.middleware";
 
 const LEADERSHIP = ["hr_head", "president_cbo"] as const;
@@ -100,6 +106,7 @@ export const listDeskConversations = createServerFn({ method: "GET" })
       .where(
         and(
           eq(hiringConversations.orgId, context.orgId),
+          eq(hiringConversations.kind, "hiring"),
           isNull(hiringConversations.deletedAt),
           all ? undefined : eq(hiringConversations.createdBy, context.userId),
         ),
@@ -332,6 +339,64 @@ export const chooseDeskRole = createServerFn({ method: "POST" })
         reuseJdFrom: data.choice.reuseJdFrom ?? null,
       });
     }
+    return { ok: true as const };
+  });
+
+/**
+ * A team member tapped as the hiring manager on the desk's options card:
+ * the member is verified against the organisation, recorded as the system
+ * would resolve a typed name (no guessing), and gathering continues.
+ */
+export const chooseHiringManagerOption = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) =>
+    z.object({ id: z.string().uuid(), memberId: z.string().uuid() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    if (conv.status !== "gathering")
+      throw new Error("The hiring manager is already settled for this role.");
+    const [member] = await db
+      .select({ name: orgMembers.fullName, email: orgMembers.email })
+      .from(orgMembers)
+      .where(
+        and(
+          eq(orgMembers.id, data.memberId),
+          eq(orgMembers.orgId, context.orgId),
+          eq(orgMembers.status, "active"),
+        ),
+      )
+      .limit(1);
+    if (!member) throw new Error("That person is not on your team.");
+    const name = member.name || member.email;
+    await echoClick(conv, `Hiring manager: ${name}`);
+    const { hiringConversations } = await import("@db/schema");
+    await db
+      .update(hiringConversations)
+      .set({
+        slots: {
+          ...(conv.slots as Record<string, unknown>),
+          hiringManager: name,
+          hiringManagerMemberId: data.memberId,
+        } as never,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(eq(hiringConversations.id, conv.id), eq(hiringConversations.orgId, context.orgId)),
+      );
+    const desk = await import("../server/desk/desk.server");
+    await desk.advanceGathering(
+      {
+        ...conv,
+        slots: {
+          ...(conv.slots as object),
+          hiringManager: name,
+          hiringManagerMemberId: data.memberId,
+        } as never,
+      },
+      "",
+      [{ label: "Hiring manager", value: name }],
+    );
     return { ok: true as const };
   });
 

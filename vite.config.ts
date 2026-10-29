@@ -39,6 +39,16 @@ export default defineConfig(({ command }) => ({
   },
   // PORT lets tooling pick a free port; 8080 stays the default.
   server: { host: "::", port: Number(process.env["PORT"]) || 8080 },
+  ssr: {
+    // playwright runs from node_modules at runtime (dynamic import in
+    // src/lib/org-context.server.ts); bundling it breaks on chromium-bidi.
+    external: ["playwright", "playwright-core", "chromium-bidi"],
+  },
+  build: {
+    rolldownOptions: {
+      external: [/^playwright([-]core)?($|\/)/, /^chromium-bidi($|\/)/],
+    },
+  },
   plugins: [
     {
       name: "atsiq-stub-browser-3d-on-server",
