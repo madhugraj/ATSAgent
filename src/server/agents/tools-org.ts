@@ -183,7 +183,13 @@ export function registerOrgTools(): void {
       const before = await profileState(ctx.orgId);
       if (!before.open) throw new Error("There is no open draft to submit.");
       await submitDraftCore(await actor(ctx), { versionId: before.open.id });
-      return { versionId: before.open.id, version: before.open.version };
+      return {
+        versionId: before.open.id,
+        version: before.open.version,
+        // Say the next call outright — a model that stops here leaves the
+        // version pending with no approval card anywhere.
+        next: 'REQUIRED next call: request_approval with assignee_role "hr_head" and subject { type: "org_profile", versionId: "<the versionId above>" }.',
+      };
     },
   });
 }

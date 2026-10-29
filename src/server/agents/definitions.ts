@@ -1012,7 +1012,9 @@ export function registerOrgAgents(): void {
     // 1.0.3 (the hourly website lock made the build stall): the limiter is
     // gone — unchanged pages already cost nothing — and a thin source is a
     // note in the summary, never a reason to stop and ask.
-    version: "1.0.3",
+    // 1.0.4 (a run submitted and ended without the approval card): the submit
+    // result states the required next call, so the request always follows.
+    version: "1.0.4",
     owner: "hr_head",
     responsibility:
       "Builds and maintains the organisation's profile from the admin's answers, its own website and its documents, and gets every version approved by the HR head — so every other agent works from what the organisation actually is.",
