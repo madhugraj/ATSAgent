@@ -45,12 +45,14 @@ So this is primarily a desk-flow feature — not a runtime change.
 4. **The originating thread becomes a control panel**: one card per need — title,
    live status (gathering / role created `REQ-…` / awaiting you / active) — linking to
    each child. Approvals already aggregate in "Needs you today" and the bell.
-5. **Split screen (up to 3 tracks)**: a desk layout mode (`?split=<id1>,<id2>,<id3>`)
-   rendering each track as a column — compact thread, its own composer, its own cards
-   (including approval cards), a needs-attention dot per column header, a focus toggle
-   to expand one column, single-pane fallback below ~1200 px. Frontend only: each pane
-   is an independent react-query over the existing per-thread server functions; the
-   agents run in parallel whether or not the screen is split.
+5. **Split screen only at the moment of the split.** There is no standing
+   split-screen layout mode. When the HR states 2–3 requirements at once (the
+   `split_needs` moment), the single thread visibly **animates apart** into 2–3 panes
+   — one per hiring agent — and each pane then runs its track live: compact thread,
+   its own composer, its own cards (including approval cards), a needs-attention dot
+   per column header, a focus toggle to expand one column, single-pane fallback below
+   ~1200 px. The panes are independent react-queries over the existing per-thread
+   server functions; the agents run in parallel whether or not the screen is split.
 6. **Parallelism is a choice**: an org setting on Agent settings — "Handle multiple
    hiring needs in parallel" (default on). Off restores today's priority-asking
    behaviour for teams that prefer focus.
@@ -71,11 +73,13 @@ So this is primarily a desk-flow feature — not a runtime change.
 - Compute the question set common to all children (work mode, hiring manager); ask
   once in the originating thread; apply answers to every child that lacks them.
 
-### Phase 3 — Control panel + split screen
+### Phase 3 — Control panel, split animation + panes
 
 - Parent router card with per-need live status.
-- Split-screen mode per Decision 5 (pure `desk.tsx`: a pane component reusing the
-  existing thread rendering, a layout mode, a focus toggle).
+- The split **animation**: the moment the desk detects 2–3 needs, the one thread
+  visually divides into the panes (the fan-out made visible), then each pane runs its
+  track live. Pure `desk.tsx`: a pane component reusing the existing thread rendering
+  plus the entrance animation; panes exist only for this fan-out moment.
 
 ### Phase 4 — Runtime hardening for real parallelism
 
