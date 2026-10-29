@@ -63,6 +63,7 @@ ATSIQ by Yavar AI is an enterprise recruiting intelligence platform. It combines
 - `docs/testing-guide.md` — step-by-step local test script for the agents, hiring desk, observability and platform console (everything except voice)
 - `docs/agentic-plan.md` — the plan for turning ATSIQ into a multi-agent, human-in-the-loop hiring system (requisition → offer release)
 - `docs/org-context-agent-plan.md` — the organisation profile and the Organisation context agent that keeps it (O0 built)
+- `docs/parallel-hiring-desk-plan.md` — the plan for handling multiple hiring needs in parallel (fan-out threads, shared questions, split-screen supervision)
 - `docs/er-diagram.md` — entity-relationship diagram for all tables, generated from `drizzle/schema.ts` (`node scripts/gen-er-diagram.mjs`)
 - `DEPLOYMENT-GCP.md` and `infra/DEPLOYMENT-HANDOFF.md` — deployment runbooks
 - `SECURITY.md` — security policy and secure-development baseline
