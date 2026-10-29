@@ -355,6 +355,13 @@ const TurnOutput = z.object({
   slots: DeskSlots.default({}),
   command: Command.default({ type: "none" }),
   reply: z.string().max(600).default(""),
+  /**
+   * One short line on what the LATEST message adds or asks — even when no
+   * slot could be filled yet (three roles named and one asked about, a
+   * question about the process). The "How I read that" card shows it; an
+   * empty line means the message truly added nothing.
+   */
+  understood: z.string().max(300).default(""),
 });
 export type DeskTurn = z.infer<typeof TurnOutput>;
 
@@ -373,6 +380,7 @@ const SYSTEM = [
   '- Templates: whenever the person names or asks about a template ("use the Yavar template", "which template did you use?"), return {"type":"feedback","text":"<their words>","template":"<the name as they said it>"} — even when no request is open. The system checks the templates (by name and by content) and answers. Never state from memory or from earlier messages which templates exist; FACTS lists them.',
   '- When OPEN REQUESTS lists a request and the person comments on it, objects to it or asks for a change ("give more weight to experience", "budget is too high", "use Pune instead") — or answers an agent\'s question — → {"type":"feedback","text":"<what they want, faithfully, in their words>"}. The system sends it to the agent, which revises and asks again. This includes a job description waiting for approval: "use the X template", "make it shorter", "add a section on Y" are feedback (changes to the JD), not an approval decision; when they name a template add "template":"<the name as they said it>".',
   '- The reply must never promise an action ("I\'ll benchmark…", "I\'ll check…"): the desk acts only through commands, and the system reports what it did. With a research command the reply can be empty.',
+  '- "understood": one short line stating what the LATEST message adds or asks, in the person\'s terms ("Three roles named — Head of AI, Intern, Data Scientist; asking which to start with"). Fill it even when no slot could be set yet; leave it empty only when the message truly added nothing.',
   '- "reply": one short, friendly message. If MISSING lists details, ask for the FIRST missing one only, in one sentence, offering a typical example. Otherwise acknowledge briefly. Never claim that anything was created, approved or sent.',
   "- Questions about the role, its status, the candidates or how to do something: answer ONLY from FACTS and APP RULES below. Never describe screens, menus, statuses or abilities that are not listed there; if the facts do not answer the question, say you do not know and where to look.",
   "- ORGANISATION CONTEXT is the employer's approved profile: use it to word questions for this organisation's domain (its products, tech stacks and regulators), suggest the role families that fit, and ask domain-specific details. Never state a pay figure from it — pay is asked only through the app's own flow.",
@@ -1104,12 +1112,20 @@ async function handleUserMessageInner(
     .where(eq(hiringConversations.id, conv.id));
   conv = { ...conv, slots: slots as never };
   if (hiringManagerNote) await postMessage(conv, { role: "desk", body: hiringManagerNote });
-  const understood = changedSlots(before, slots);
+  const changed = changedSlots(before, slots);
+  // The card says what the message added even when no slot could be filled
+  // yet (three roles named and one asked about, a process question) — the
+  // model's own one-line reading covers those; "Nothing new" then means it.
+  const understood = changed.length
+    ? changed
+    : turn.understood.trim()
+      ? [{ label: "Read", value: turn.understood.trim() }]
+      : [];
   // The person edited the proposed details themselves: the open proposal is superseded,
   // so a later "ok" cannot overwrite their edits with it.
   if (
     turn.command.type !== "accept" &&
-    understood.some((u) => /skills|Experience|Budget/.test(u.label))
+    changed.some((u) => /skills|Experience|Budget/.test(u.label))
   )
     await supersedeProposal(conv);
 
