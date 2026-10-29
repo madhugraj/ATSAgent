@@ -470,6 +470,58 @@ export async function profileGate(
 export const PROFILE_REQUIRED_MESSAGE =
   "Your organisation requires an approved organisation profile before a role is raised. Ask the HR head or an owner to approve it in Organisation → Profile.";
 
+/**
+ * Delete the whole profile — every version (draft, pending, approved), the
+ * approved pointer and the require-profile switch — and start from nothing.
+ * HR head or owner only, with a reason; audited. The agent's open runs are
+ * stopped first so no approval card points at a deleted version. Sources
+ * (website pages, documents) are kept: re-reading them is cheap and the
+ * rebuild quotes them again.
+ */
+export async function resetProfileCore(
+  actor: ProfileActor,
+  input: { reason: string },
+): Promise<{ versions: number }> {
+  await assertRole(
+    actor.userId,
+    actor.orgId,
+    "hr_head",
+    "Only the HR head or an owner can delete the organisation profile.",
+  );
+  const reason = input.reason.trim();
+  if (reason.length < 3)
+    throw new Error(
+      "Say why you are deleting the profile — the reason is kept in the audit trail.",
+    );
+  const { cancelRun } = await import("../server/agents/runtime.server");
+  const open = await db
+    .select({ id: agentRuns.id })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.orgId, actor.orgId),
+        eq(agentRuns.agentType, "org_context"),
+        inArray(agentRuns.status, ["queued", "running", "awaiting_human"]),
+      ),
+    );
+  for (const r of open) await cancelRun({ orgId: actor.orgId, runId: r.id, userId: actor.userId });
+  const rows = await db
+    .delete(orgProfileVersions)
+    .where(eq(orgProfileVersions.orgId, actor.orgId))
+    .returning({ id: orgProfileVersions.id });
+  await db
+    .update(orgProfiles)
+    .set({
+      currentVersionId: null,
+      requireProfile: false,
+      updatedBy: actor.userId,
+      updatedAt: new Date(),
+    })
+    .where(eq(orgProfiles.orgId, actor.orgId));
+  await audit(actor, "reset", null, { reason, versions: rows.length });
+  return { versions: rows.length };
+}
+
 /** Refuse to raise a requisition while the organisation insists on an approved profile it lacks. */
 export async function assertProfileAllowsRequisition(orgId: string): Promise<void> {
   const gate = await profileGate(orgId);

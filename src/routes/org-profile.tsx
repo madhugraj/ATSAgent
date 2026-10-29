@@ -20,6 +20,7 @@ import {
   deleteOrgDocument,
   getOrgContextAdmin,
   readOrgWebsiteNow,
+  resetOrgProfile,
   setOrgWebsite,
   startOrgContextBuild,
   uploadOrgDocument,
@@ -111,6 +112,37 @@ function OrgProfilePage() {
             <Badge variant="outline">
               Version {open.version}: {STATUS_LABEL[open.status] ?? open.status}
             </Badge>
+          ) : null}
+          {p.canDecide && (p.approved || open) ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-destructive"
+              title="Delete every version and start from nothing (the reason is kept in the audit trail)"
+              onClick={async () => {
+                const reason = window.prompt(
+                  "Why are you deleting the profile? (kept in the audit trail)",
+                );
+                if (!reason || reason.trim().length < 3) return;
+                if (
+                  !window.confirm(
+                    "Delete the organisation profile — every draft, the pending and the approved version? The agent starts from nothing; sources (website, documents) are kept.",
+                  )
+                )
+                  return;
+                try {
+                  await resetOrgProfile({ data: { reason: reason.trim() } });
+                  toast.success(
+                    "Profile deleted — build it again from the chat or with Build with the agent.",
+                  );
+                  refresh();
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : "Could not delete the profile");
+                }
+              }}
+            >
+              Delete profile
+            </Button>
           ) : null}
         </div>
       </section>

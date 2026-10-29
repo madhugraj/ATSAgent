@@ -556,3 +556,50 @@ describe("monthly re-read sweep", () => {
     expect(after).toHaveLength(0);
   });
 });
+
+describe("deleting the profile", () => {
+  test("HR head or owner only, reason required, every version gone", async () => {
+    // Seed an approved version so there is something real to delete.
+    const [v] = await db
+      .insert(orgProfileVersions)
+      .values({
+        orgId,
+        version: 90,
+        status: "approved",
+        sections: {
+          about: [
+            {
+              id: "del",
+              text: "Soon to be deleted.",
+              visibility: "candidate",
+              source: { kind: "person" },
+            },
+          ],
+        },
+        decidedAt: new Date(),
+      } as never)
+      .returning({ id: orgProfileVersions.id });
+    await db
+      .insert(orgProfiles)
+      .values({ orgId, currentVersionId: v!.id, requireProfile: true })
+      .onConflictDoUpdate({
+        target: orgProfiles.orgId,
+        set: { currentVersionId: v!.id, requireProfile: true },
+      });
+
+    await expect(
+      core.resetProfileCore(as(recruiter), { reason: "recruiters cannot delete" }),
+    ).rejects.toThrow(/HR head/);
+    await expect(core.resetProfileCore(as(hr), { reason: "no" })).rejects.toThrow(/why/);
+
+    const res = await core.resetProfileCore(as(hr), { reason: "Starting over with new material." });
+    expect(res.versions).toBeGreaterThanOrEqual(1);
+    const after = await core.profileState(orgId);
+    expect(after.approved).toBeNull();
+    expect(after.open).toBeNull();
+    expect(after.requireProfile).toBe(false);
+    expect((await audits("org_profile.reset")) > 0).toBe(true);
+    await db.delete(orgProfiles).where(eq(orgProfiles.orgId, orgId));
+    await db.delete(orgProfileVersions).where(eq(orgProfileVersions.orgId, orgId));
+  });
+});

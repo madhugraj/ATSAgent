@@ -161,6 +161,26 @@ export const startOrgContextBuild = createServerFn({ method: "POST" })
     return { runId };
   });
 
+/**
+ * Delete the whole profile and start from nothing (HR head / CBO / owner;
+ * audited). The agent's open runs stop, and the require-profile switch is
+ * switched off with it.
+ */
+export const resetOrgProfile = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) => z.object({ reason: z.string().trim().min(3).max(500) }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { assertRole } = await import("./auth.middleware");
+    await assertRole(
+      context.userId,
+      context.orgId,
+      "hr_head",
+      "Only the HR head or an owner can delete the organisation profile.",
+    );
+    const { resetProfileCore } = await import("./org-profile.server");
+    return resetProfileCore({ orgId: context.orgId, userId: context.userId }, data);
+  });
+
 /** Recent refusal count for the Profile page's quiet warning. */
 export const getOrgContextRefusals = createServerFn({ method: "GET" })
   .middleware([requireOrg])
