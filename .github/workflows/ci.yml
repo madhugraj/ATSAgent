@@ -148,5 +148,5 @@ jobs:
         run: bun test scripts/portal-fill.test.ts
       - name: Organisation profile (versions, approval gate, pay and name refusals)
         run: bun test scripts/org-profile.test.ts
-      - name: Organisation context agent (O1+O2: sources, orgContextFor, consumers, sweep)
+      - name: "Organisation context agent (O1+O2 — sources, consumers, sweep)"
         run: bun test scripts/org-context.test.ts
