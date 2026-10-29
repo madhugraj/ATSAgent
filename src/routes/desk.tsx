@@ -68,7 +68,7 @@ import {
 } from "@/lib/hiring-desk.functions";
 
 export const Route = createFileRoute("/desk")({
-  validateSearch: z.object({ c: z.string().optional() }),
+  validateSearch: z.object({ c: z.string().optional(), split: z.string().optional() }),
   head: () => ({
     meta: [
       { title: "Hiring desk — ATSIQ" },
@@ -89,8 +89,12 @@ const EXAMPLES = [
 ];
 
 function DeskPage() {
-  const { c } = Route.useSearch();
+  const { c, split } = Route.useSearch();
   const navigate = useNavigate({ from: "/desk" });
+  const splitIds = (split ?? "")
+    .split(",")
+    .filter((s) => /^[-0-9a-f]{36}$/.test(s))
+    .slice(0, 3);
   const list = useQuery({
     queryKey: ["desk_list"],
     queryFn: () => listDeskConversations(),
@@ -113,40 +117,44 @@ function DeskPage() {
       <div className="mt-4">
         <OrgProfileNotice />
       </div>
-      <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
-        <aside className="panel h-fit max-h-[70vh] overflow-y-auto p-2">
-          {list.isLoading ? (
-            <p className="p-3 text-sm text-muted-foreground">Loading…</p>
-          ) : !list.data?.length ? (
-            <p className="p-3 text-sm text-muted-foreground">No conversations yet.</p>
+      {splitIds.length >= 2 ? (
+        <SplitDesk ids={splitIds} />
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
+          <aside className="panel h-fit max-h-[70vh] overflow-y-auto p-2">
+            {list.isLoading ? (
+              <p className="p-3 text-sm text-muted-foreground">Loading…</p>
+            ) : !list.data?.length ? (
+              <p className="p-3 text-sm text-muted-foreground">No conversations yet.</p>
+            ) : (
+              <ul className="space-y-1">
+                {list.data.map((t) => (
+                  <li key={t.id}>
+                    <button
+                      type="button"
+                      onClick={() => select(t.id)}
+                      className={`w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted ${c === t.id ? "bg-muted" : ""}`}
+                    >
+                      <p className="truncate font-medium">{t.title}</p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {t.requisitionCode ?? STATUS_LABEL[t.status] ?? t.status} ·{" "}
+                        {new Date(t.updatedAt).toLocaleDateString()}
+                        {t.mine ? "" : " · team"}
+                      </p>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <RecentlyDeleted onRestored={(id) => select(id)} />
+          </aside>
+          {c ? (
+            <Thread id={c} onDeleted={() => select(undefined)} />
           ) : (
-            <ul className="space-y-1">
-              {list.data.map((t) => (
-                <li key={t.id}>
-                  <button
-                    type="button"
-                    onClick={() => select(t.id)}
-                    className={`w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted ${c === t.id ? "bg-muted" : ""}`}
-                  >
-                    <p className="truncate font-medium">{t.title}</p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {t.requisitionCode ?? STATUS_LABEL[t.status] ?? t.status} ·{" "}
-                      {new Date(t.updatedAt).toLocaleDateString()}
-                      {t.mine ? "" : " · team"}
-                    </p>
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <NewThread onStarted={(id) => select(id)} />
           )}
-          <RecentlyDeleted onRestored={(id) => select(id)} />
-        </aside>
-        {c ? (
-          <Thread id={c} onDeleted={() => select(undefined)} />
-        ) : (
-          <NewThread onStarted={(id) => select(id)} />
-        )}
-      </div>
+        </div>
+      )}
     </>
   );
 }
@@ -233,6 +241,78 @@ function Composer({
         {busy ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
         Send
       </Button>
+    </div>
+  );
+}
+
+/**
+ * Side-by-side supervision for 2–3 parallel hiring needs: one column per
+ * thread, each an independent live view (messages, cards, composer). The
+ * entrance is the fan-out made visible — the columns rise in sequence.
+ */
+function SplitDesk({ ids }: { ids: string[] }) {
+  const navigate = useNavigate({ from: "/desk" });
+  const [entered, setEntered] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setEntered(true), 30);
+    return () => clearTimeout(t);
+  }, []);
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">
+          {ids.length} hiring needs running in parallel — each column is its own thread, with its
+          own questions, agents and approvals.
+        </p>
+        <Button size="sm" variant="ghost" onClick={() => navigate({ search: { c: ids[0] } })}>
+          Exit side by side
+        </Button>
+      </div>
+      <div className="grid gap-3 lg:grid-cols-3">
+        {ids.map((id, i) => (
+          <div
+            key={id}
+            className={`transition-all duration-500 ${
+              entered ? "translate-y-0 opacity-100" : "translate-y-6 opacity-0"
+            }`}
+            style={{ transitionDelay: `${i * 180}ms` }}
+          >
+            <Thread id={id} compact onDeleted={() => navigate({ search: {} })} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** The desk fanned a multi-need message out: open the tracks side by side. */
+function NeedsFanoutCard({ card, onChanged }: { card: DeskCardView; onChanged: () => void }) {
+  const navigate = useNavigate({ from: "/desk" });
+  const items = (card["items"] as unknown as { id: string; title: string }[]) ?? [];
+  return (
+    <div className="space-y-2 rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm">
+      <p className="font-medium">Running {items.length} hiring needs in parallel</p>
+      <ul className="space-y-1">
+        {items.map((i, n) => (
+          <li key={i.id} className="text-xs">
+            {n + 1}. {i.title}
+          </li>
+        ))}
+      </ul>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => navigate({ search: { split: items.map((i) => i.id).join(",") } })}
+      >
+        Run side by side
+      </Button>
+      <button
+        type="button"
+        className="block text-xs text-muted-foreground underline"
+        onClick={onChanged}
+      >
+        Refresh
+      </button>
     </div>
   );
 }
@@ -391,7 +471,16 @@ function DeleteThreadButton({
   );
 }
 
-function Thread({ id, onDeleted }: { id: string; onDeleted: () => void }) {
+function Thread({
+  id,
+  onDeleted,
+  compact,
+}: {
+  id: string;
+  onDeleted: () => void;
+  /** Split-screen column: no journey panel, taller conversation. */
+  compact?: boolean;
+}) {
   const qc = useQueryClient();
   const q = useQuery({
     queryKey: ["desk", id],
@@ -413,6 +502,22 @@ function Thread({ id, onDeleted }: { id: string; onDeleted: () => void }) {
     qc.invalidateQueries({ queryKey: ["desk", id] });
     qc.invalidateQueries({ queryKey: ["desk_list"] });
   };
+
+  // The fan-out made visible: when the desk splits a multi-need message into
+  // parallel tracks, open them side by side (once per fan-out card).
+  const navigate = useNavigate({ from: "/desk" });
+  const fanout = [...(q.data?.messages ?? [])]
+    .reverse()
+    .find((m) => (m.card as { type?: string } | null)?.type === "needs_fanout");
+  const fanoutItems = (fanout?.card as { items?: { id: string }[] } | null)?.items ?? [];
+  const [splitShown, setSplitShown] = useState("");
+  useEffect(() => {
+    if (!compact && fanoutItems.length >= 2 && splitShown !== fanout?.id) {
+      setSplitShown(fanout?.id ?? "");
+      void navigate({ search: { split: fanoutItems.map((i) => i.id).join(",") } });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [compact, fanout?.id, fanoutItems.length]);
 
   async function send() {
     const message = text.trim();
@@ -450,13 +555,19 @@ function Thread({ id, onDeleted }: { id: string; onDeleted: () => void }) {
   const visible = d.messages.filter((m, i) => i >= hidden || isOpenTask(m));
   const folded = d.messages.length - visible.length;
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+    <div className={compact ? "" : "grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]"}>
       {/* The journey: first on small screens, a sticky column on wide ones. */}
-      <div className="xl:order-2">
-        <JourneyPanel conv={d} onChanged={refresh} />
-      </div>
+      {!compact ? (
+        <div className="xl:order-2">
+          <JourneyPanel conv={d} onChanged={refresh} />
+        </div>
+      ) : null}
       {/* The conversation: fixed height, scrolls inside, composer always visible. */}
-      <section className="panel flex h-[calc(100vh-13rem)] min-h-[460px] flex-col xl:order-1">
+      <section
+        className={`panel flex ${
+          compact ? "h-[calc(100vh-7.5rem)]" : "h-[calc(100vh-13rem)]"
+        } min-h-[460px] flex-col xl:order-1`}
+      >
         <header className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
           <h2 className="font-semibold">{d.title}</h2>
           <Badge variant="outline">{STATUS_LABEL[d.status] ?? d.status}</Badge>
@@ -630,6 +741,7 @@ function Card({
 }) {
   if (card.type === "similar_roles")
     return <SimilarRolesCard card={card} conv={conv} onChanged={onChanged} />;
+  if (card.type === "needs_fanout") return <NeedsFanoutCard card={card} onChanged={onChanged} />;
   if (card.type === "hiring_manager_options")
     return <HiringManagerOptionsCard card={card} conv={conv} onChanged={onChanged} />;
   if (card.type === "ranked_candidates")

@@ -432,3 +432,64 @@ describe("hiring manager options card", () => {
     await db.delete(orgMembers).where(eq(orgMembers.id, member!.id));
   });
 });
+
+describe("parallel hiring needs", () => {
+  test("a 3-need message fans out into three threads, each with only its own details", async () => {
+    const c = await thread();
+    const conv = (
+      await db.select().from(hiringConversations).where(eq(hiringConversations.id, c.id))
+    )[0]!;
+    await db
+      .update(hiringConversations)
+      .set({
+        slots: { roleTitle: "Head of AI", location: "Chennai" } as never,
+        title: "Head of AI",
+      })
+      .where(eq(hiringConversations.id, c.id));
+    const fresh = (
+      await db.select().from(hiringConversations).where(eq(hiringConversations.id, c.id))
+    )[0]!;
+
+    await desk.splitNeeds(fresh, userId, [
+      { title: "Head of AI", slots: { roleTitle: "Head of AI", location: "Chennai" } },
+      { title: "Intern - AI", slots: { roleTitle: "Intern - AI" } },
+      { title: "Data Scientist", slots: { roleTitle: "Data Scientist", experienceMin: 3 } },
+    ]);
+
+    // The parent carries the fan-out card; each child got its opening question.
+    const parentMsgs = await db
+      .select()
+      .from(hiringMessages)
+      .where(eq(hiringMessages.conversationId, c.id));
+    const fanout = parentMsgs.find(
+      (m) => (m.card as { type?: string } | null)?.type === "needs_fanout",
+    );
+    expect(fanout).toBeTruthy();
+    const items = ((fanout!.card as { items?: { id: string }[] }).items ?? []).map((i) => i.id);
+    expect(items).toHaveLength(3);
+
+    // The children hold only their own details — never the first thread's role.
+    const byId = async (id: string) =>
+      (await db.select().from(hiringConversations).where(eq(hiringConversations.id, id)))[0]!;
+    const intern = await byId(items[1]!);
+    expect(intern.title).toBe("Intern - AI");
+    expect((intern.slots as { roleTitle?: string }).roleTitle).toBe("Intern - AI");
+    expect((intern.slots as { location?: string }).location).toBeUndefined();
+    const ds = await byId(items[2]!);
+    expect(ds.title).toBe("Data Scientist");
+    expect((ds.slots as { experienceMin?: number }).experienceMin).toBe(3);
+
+    for (const id of items) {
+      const m = await db
+        .select({ body: hiringMessages.body })
+        .from(hiringMessages)
+        .where(eq(hiringMessages.conversationId, id));
+      expect(m.length).toBeGreaterThanOrEqual(1);
+    }
+
+    await db.delete(hiringMessages).where(eq(hiringMessages.conversationId, items[1]!));
+    await db.delete(hiringMessages).where(eq(hiringMessages.conversationId, items[2]!));
+    await db.delete(hiringConversations).where(eq(hiringConversations.id, items[1]!));
+    await db.delete(hiringConversations).where(eq(hiringConversations.id, items[2]!));
+  });
+});
