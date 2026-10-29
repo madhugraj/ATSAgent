@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   BookOpenText,
@@ -289,12 +289,45 @@ function SourcesCard({ onChanged }: { onChanged: () => void }) {
     }
   };
   const data = qa.data;
+  // The input carries the saved website; Save arms only on a change.
+  useEffect(() => {
+    if (data?.website && !url) setUrl(data.website.url);
+  }, [data?.website, url]);
+  const saved = data?.website?.url ?? null;
+  const dirty = url.trim() !== "" && url.trim() !== (saved ?? "");
   const flagged = (data?.sources ?? []).filter((s) => s.injectionFlagged && !s.deleted);
   const documents = (data?.sources ?? []).filter((s) => s.kind === "document" && !s.deleted);
   const pages = (data?.sources ?? []).filter((s) => s.kind === "website_page" && !s.deleted);
+  const pathOf = (u: string) => {
+    try {
+      return new URL(u).pathname === "/" ? new URL(u).hostname : new URL(u).pathname;
+    } catch {
+      return u;
+    }
+  };
+
+  const save = () =>
+    run("save", async () => {
+      const first = await setOrgWebsite({ data: { url: url.trim() } });
+      const res = first.ok
+        ? first
+        : await setOrgWebsite({ data: { url: url.trim(), confirm: true } });
+      if (res.ok) {
+        toast.success(
+          saved && saved !== url.trim()
+            ? "Website updated."
+            : res === first
+              ? "Website saved."
+              : "Website saved with an owner's confirmation.",
+        );
+        refresh();
+      } else {
+        toast.error("Only an owner can confirm a website outside the registered e-mail domain.");
+      }
+    });
 
   return (
-    <section className="panel mt-4 space-y-3 p-4 text-sm">
+    <section className="panel mt-4 space-y-4 p-4 text-sm">
       <h2 className="flex items-center gap-2 font-semibold">
         <Globe className="size-4 text-muted-foreground" /> Sources the agent reads
       </h2>
@@ -307,7 +340,7 @@ function SourcesCard({ onChanged }: { onChanged: () => void }) {
           </p>
           {flagged.map((f) => (
             <div key={f.id} className="mt-1 flex items-center justify-between gap-2">
-              <span className="text-xs text-muted-foreground">{f.url ?? f.fileName}</span>
+              <span className="break-all text-xs text-muted-foreground">{f.url ?? f.fileName}</span>
               <Button
                 size="sm"
                 variant="outline"
@@ -327,95 +360,101 @@ function SourcesCard({ onChanged }: { onChanged: () => void }) {
         </div>
       ) : null}
 
-      <div className="grid gap-3 md:grid-cols-2">
-        <div className="space-y-2">
+      <div className="grid gap-6 md:min-w-0 md:grid-cols-2">
+        <div className="min-w-0 space-y-2">
           <Label htmlFor="org-website" className="text-sm font-medium">
             Your website
           </Label>
-          {data?.website ? (
-            <p className="text-xs text-muted-foreground">
-              {data.website.url}
-              {data.website.confirmedAt ? " — confirmed by an owner" : ""}
-              <br />
-              Last read:{" "}
-              {data.website.lastRereadAt
-                ? `${when(data.website.lastRereadAt)} (${data.website.lastRereadStatus})`
-                : "never"}
-              {data.website.nextRereadAt
-                ? ` · next monthly re-read ${when(data.website.nextRereadAt)}`
-                : ""}
-            </p>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              The agent reads only this host — it should match your registered e-mail domain. A
-              different address needs an owner&apos;s confirmation.
-            </p>
-          )}
           <div className="flex gap-2">
             <input
               id="org-website"
-              className="h-8 w-full rounded-md border bg-background px-2 text-xs"
+              className="h-9 w-full rounded-md border bg-background px-3 text-sm"
               placeholder="https://www.your-company.com"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
             />
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={busy !== "" || !url.trim()}
-              onClick={() =>
-                run("save", async () => {
-                  const res = await setOrgWebsite({ data: { url: url.trim() } });
-                  if (res.ok) {
-                    setUrl("");
-                    toast.success("Website saved.");
-                    refresh();
-                    return;
-                  }
-                  const ok = await setOrgWebsite({ data: { url: url.trim(), confirm: true } });
-                  if (ok.ok) {
-                    setUrl("");
-                    toast.success("Website saved with an owner's confirmation.");
-                    refresh();
-                  } else {
-                    toast.error(
-                      "Only an owner can confirm a website outside the registered e-mail domain.",
-                    );
-                  }
-                })
-              }
-            >
+            <Button size="sm" variant="outline" disabled={busy !== "" || !dirty} onClick={save}>
               Save
             </Button>
           </div>
-          {data?.website ? (
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-1"
-              disabled={busy !== ""}
-              onClick={() =>
-                run("read", async () => {
-                  const r = await readOrgWebsiteNow({ data: {} });
-                  toast.success(
-                    `Read ${r.pagesFetched} page(s): ${r.pagesChanged} changed, ${r.pagesUnchanged} unchanged${
-                      r.flagged.length ? `, ${r.flagged.length} held back for review` : ""
-                    }. ${r.itemsKept} item(s) proposed into the draft.`,
-                  );
-                  refresh();
-                })
-              }
-            >
-              <RefreshCw className="size-3.5" /> Read it now
-            </Button>
+          <p className="break-words text-xs text-muted-foreground">
+            The agent reads only this host — it should match your registered e-mail domain; a
+            different address needs an owner&apos;s confirmation.
+          </p>
+
+          {saved ? (
+            <div className="space-y-2 rounded-md border bg-muted/30 p-3">
+              <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                <span
+                  className={`inline-block size-2 rounded-full ${
+                    data?.website?.lastRereadStatus === "failed" ? "bg-red-500" : "bg-emerald-500"
+                  }`}
+                />
+                <span className="font-medium">{saved.replace(/^https?:\/\//, "")}</span>
+                {data?.website?.confirmedAt ? (
+                  <Badge variant="outline">owner-confirmed</Badge>
+                ) : null}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {pages.length
+                  ? `${pages.length} page${pages.length === 1 ? "" : "s"} read`
+                  : "Not read yet"}
+                {data?.website?.lastRereadAt ? ` · last ${when(data.website.lastRereadAt)}` : ""}
+                {data?.website?.nextRereadAt
+                  ? ` · re-reads monthly (next ${when(data.website.nextRereadAt)})`
+                  : ""}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1"
+                  disabled={busy !== ""}
+                  onClick={() =>
+                    run("read", async () => {
+                      const r = await readOrgWebsiteNow({ data: {} });
+                      toast.success(
+                        `Read ${r.pagesFetched} page(s): ${r.pagesChanged} changed, ${r.pagesUnchanged} unchanged${
+                          r.flagged.length ? `, ${r.flagged.length} held back for review` : ""
+                        }. ${r.itemsKept} item(s) proposed into the draft.`,
+                      );
+                      refresh();
+                    })
+                  }
+                >
+                  <RefreshCw className="size-3.5" /> Read it now
+                </Button>
+              </div>
+              {pages.length ? (
+                <details className="text-xs">
+                  <summary className="cursor-pointer text-muted-foreground">
+                    Pages read ({pages.length})
+                  </summary>
+                  <ul className="mt-1 space-y-0.5">
+                    {pages.map((p) => (
+                      <li key={p.id} className="truncate">
+                        <a
+                          href={p.url ?? "#"}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-muted-foreground underline decoration-dotted hover:text-foreground"
+                        >
+                          {pathOf(p.url ?? "")}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
+            </div>
           ) : null}
         </div>
 
-        <div className="space-y-2">
-          <Label className="text-sm font-medium">Documents (PDF or DOCX, up to 10 MB)</Label>
-          <p className="text-xs text-muted-foreground">
-            Handbooks, policies, brochures — anything that states what the organisation does.
-            Scanned pages are read through the AI model.
+        <div className="min-w-0 space-y-2">
+          <Label className="text-sm font-medium">Documents</Label>
+          <p className="break-words text-xs text-muted-foreground">
+            PDF or DOCX up to 10 MB — handbooks, policies, brochures; anything that states what the
+            organisation does. Scanned pages are read through the AI model.
           </p>
           <input
             ref={fileRef}
@@ -448,14 +487,15 @@ function SourcesCard({ onChanged }: { onChanged: () => void }) {
             <FileText className="size-3.5" /> Upload a document
           </Button>
           {documents.length ? (
-            <ul className="mt-1 space-y-1">
+            <ul className="space-y-1">
               {documents.map((d) => (
                 <li key={d.id} className="flex items-center gap-2 text-xs">
                   <FileText className="size-3 shrink-0 text-muted-foreground" />
-                  <span className="truncate">{d.fileName}</span>
-                  <span className="text-muted-foreground">
-                    {d.ocr ? "· scanned pages read" : ""}{" "}
-                    {d.bytes ? `· ${Math.round(d.bytes / 1024)} kB` : ""}
+                  <span className="truncate" title={d.fileName ?? ""}>
+                    {d.fileName}
+                  </span>
+                  <span className="shrink-0 text-muted-foreground">
+                    {d.ocr ? "· scanned" : ""} {d.bytes ? `· ${Math.round(d.bytes / 1024)} kB` : ""}
                   </span>
                   <Button
                     size="sm"
@@ -482,20 +522,10 @@ function SourcesCard({ onChanged }: { onChanged: () => void }) {
         </div>
       </div>
 
-      {pages.length ? (
-        <p className="text-xs text-muted-foreground">
-          Website pages read:{" "}
-          {pages
-            .map((p) => p.url)
-            .slice(0, 5)
-            .join(", ")}
-          {pages.length > 5 ? ` and ${pages.length - 5} more` : ""}
-        </p>
-      ) : null}
       {data && !data.agentEnabled ? (
         <p className="text-xs text-muted-foreground">
           The Organisation context agent is switched off — switch it on in Governance → Agent
-          settings to let it build the profile, or keep writing it by hand.
+          settings so it can build the profile from these sources.
         </p>
       ) : null}
     </section>
