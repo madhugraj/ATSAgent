@@ -505,6 +505,15 @@ export async function resetProfileCore(
       ),
     );
   for (const r of open) await cancelRun({ orgId: actor.orgId, runId: r.id, userId: actor.userId });
+  // The conversation starts fresh too: the old thread (with the agent's
+  // proposals about a now-deleted profile) is hidden, restorable for 30 days.
+  const { hiringConversations } = await import("@db/schema");
+  await db
+    .update(hiringConversations)
+    .set({ deletedAt: new Date(), deletedBy: actor.userId, updatedAt: new Date() })
+    .where(
+      and(eq(hiringConversations.orgId, actor.orgId), eq(hiringConversations.kind, "org_profile")),
+    );
   const rows = await db
     .delete(orgProfileVersions)
     .where(eq(orgProfileVersions.orgId, actor.orgId))

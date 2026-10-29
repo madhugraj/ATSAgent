@@ -592,6 +592,14 @@ describe("deleting the profile", () => {
     ).rejects.toThrow(/HR head/);
     await expect(core.resetProfileCore(as(hr), { reason: "no" })).rejects.toThrow(/why/);
 
+    // An old chat thread with a message: the reset must clear it too.
+    const oldThread = (
+      await db
+        .insert(hiringConversations)
+        .values({ orgId, createdBy: hr, kind: "org_profile" })
+        .returning({ id: hiringConversations.id })
+    )[0]!.id;
+
     const res = await core.resetProfileCore(as(hr), { reason: "Starting over with new material." });
     expect(res.versions).toBeGreaterThanOrEqual(1);
     const after = await core.profileState(orgId);
@@ -599,6 +607,19 @@ describe("deleting the profile", () => {
     expect(after.open).toBeNull();
     expect(after.requireProfile).toBe(false);
     expect((await audits("org_profile.reset")) > 0).toBe(true);
+
+    // The chat starts fresh: a new thread, only the greeting in it.
+    const { ensureAgentsRegistered } = await import("../src/server/agents");
+    ensureAgentsRegistered();
+    const { ensureOrgThread } = await import("../src/server/desk/org-desk.server");
+    const fresh = await ensureOrgThread(orgId, hr);
+    expect(fresh.id).not.toBe(oldThread);
+    const [hidden] = await db
+      .select({ deletedAt: hiringConversations.deletedAt })
+      .from(hiringConversations)
+      .where(eq(hiringConversations.id, oldThread));
+    expect(hidden?.deletedAt).not.toBeNull(); // hidden with the rest of the reset
+    await db.delete(hiringConversations).where(eq(hiringConversations.id, fresh.id));
     await db.delete(orgProfiles).where(eq(orgProfiles.orgId, orgId));
     await db.delete(orgProfileVersions).where(eq(orgProfileVersions.orgId, orgId));
   });
