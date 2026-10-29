@@ -3000,14 +3000,14 @@ function thinking(
  */
 export function nextStepText(missing: RequiredSlot): string {
   if (missing === "hiringManager")
-    return "Asking for the hiring manager — they approve the role's interview panels and must be a registered member of your team; the question suggests the people on it.";
+    return "Presenting your team — pick who manages this hire; they approve the role's interview panels and must be a registered member.";
   if (missing === "mustHaveSkills" || missing === "experience")
     return `Asking for the ${REQUIRED_LABEL[missing]}. You can also say "as per market" and I'll research it.`;
   return `Asking for the ${REQUIRED_LABEL[missing]}.`;
 }
 
 /** Continue gathering: ask the next missing detail, the JD question once, then similar roles. */
-async function advanceGathering(
+export async function advanceGathering(
   conv: Conversation,
   reply: string,
   understood: { label: string; value: string }[],
@@ -3015,6 +3015,27 @@ async function advanceGathering(
   const slots = conv.slots as DeskSlots;
   const missing = missingSlots(slots);
   if (missing.length) {
+    // The hiring manager must be a registered member: present the team as
+    // tappable options instead of a free-text question with examples.
+    if (missing[0] === "hiringManager") {
+      const options = await hiringManagerOptions(conv.orgId);
+      await postMessage(conv, {
+        role: "desk",
+        body:
+          reply.trim() ||
+          `Who manages this hire? They approve the role's interview panels. Pick from your team${options.length ? " below" : " (the admin adds people on the Team page)"}:`,
+        card: {
+          type: "hiring_manager_options",
+          options,
+          why: {
+            understood,
+            missing: missingSlots(slots).map((m) => REQUIRED_LABEL[m]),
+            next: nextStepText("hiringManager"),
+          },
+        },
+      });
+      return;
+    }
     await postMessage(conv, {
       role: "desk",
       body: reply.trim() || FALLBACK_QUESTION[missing[0]!],

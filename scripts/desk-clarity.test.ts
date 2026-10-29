@@ -360,3 +360,75 @@ describe("next-step honesty", () => {
     expect(desk.nextStepText("workMode")).not.toContain("market");
   });
 });
+
+describe("hiring manager options card", () => {
+  test("when only the hiring manager is missing, the desk presents the team as options", async () => {
+    const { orgMembers } = await import("../drizzle/schema");
+    const [member] = await db
+      .insert(orgMembers)
+      .values({
+        orgId,
+        userId,
+        fullName: "Priya Raman",
+        email: `priya-${stamp}@team.local`,
+        status: "active",
+      } as never)
+      .returning({ id: orgMembers.id });
+    const c = await thread();
+    const slots = {
+      roleTitle: "Head of AI",
+      location: "Chennai",
+      workMode: "hybrid",
+      experienceMin: 6,
+      openings: 1,
+      mustHaveSkills: ["AI strategy"],
+      jdDetailsAsked: true,
+    };
+    await db
+      .update(hiringConversations)
+      .set({ slots: slots as never })
+      .where(eq(hiringConversations.id, c.id));
+
+    const fresh = (
+      await db.select().from(hiringConversations).where(eq(hiringConversations.id, c.id))
+    )[0]!;
+    await desk.advanceGathering(fresh, "", []);
+    const msgs = await db
+      .select()
+      .from(hiringMessages)
+      .where(eq(hiringMessages.conversationId, c.id))
+      .orderBy(hiringMessages.createdAt);
+    const card = msgs.at(-1)?.card as { type?: string; options?: unknown[]; why?: unknown } | null;
+    expect(card?.type).toBe("hiring_manager_options");
+    expect((card?.options as { name: string }[]).map((o) => o.name)).toContain("Priya Raman");
+    expect((card?.why as { next?: string })?.next).not.toContain("market");
+
+    // Picking a member records them as the system would resolve a typed name.
+    await db
+      .update(hiringConversations)
+      .set({
+        slots: {
+          ...slots,
+          hiringManager: "Priya Raman",
+          hiringManagerMemberId: member!.id,
+        } as never,
+      })
+      .where(eq(hiringConversations.id, c.id));
+    const conv = (
+      await db.select().from(hiringConversations).where(eq(hiringConversations.id, c.id))
+    )[0]!;
+    await desk.advanceGathering(conv, "", [{ label: "Hiring manager", value: "Priya Raman" }]);
+    const after = await db
+      .select()
+      .from(hiringMessages)
+      .where(eq(hiringMessages.conversationId, c.id))
+      .orderBy(hiringMessages.createdAt);
+    const nextCard = after.at(-1)?.card as { type?: string; why?: { missing?: string[] } } | null;
+    expect(nextCard?.type).toBe("similar_roles");
+    expect(nextCard?.why?.missing ?? []).not.toContain("hiring manager");
+
+    await db.delete(hiringMessages).where(eq(hiringMessages.conversationId, c.id));
+    await db.delete(hiringConversations).where(eq(hiringConversations.id, c.id));
+    await db.delete(orgMembers).where(eq(orgMembers.id, member!.id));
+  });
+});
