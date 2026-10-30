@@ -21,51 +21,66 @@ import { PROFILE_SECTIONS } from "@/lib/org-profile";
 
 type Conversation = typeof hiringConversations.$inferSelect;
 
-/** How far the conversation has got, per profile section. */
-const OrgSlots = z.object(
-  Object.fromEntries(
-    PROFILE_SECTIONS.map((s) => [
-      s.key,
-      z
-        .object({
-          done: z.boolean(),
-          /** What the admin still wants captured for this section. */
-          notes: z.string().max(2000).optional(),
-        })
-        .optional(),
-    ]),
-  ),
-);
-export type OrgSlots = z.infer<typeof OrgSlots>;
+const SECTION_KEYS = PROFILE_SECTIONS.map((s) => s.key) as [string, ...string[]];
+const SECTION_TITLES = new Map(PROFILE_SECTIONS.map((s) => [s.key, s.title]));
+
+/**
+ * A fact the admin stated in the latest message, as a profile item. The chat
+ * used to track only which sections were "done" — what the admin actually
+ * said never reached the profile (the build read the website and documents,
+ * not the chat). Now each stated fact joins the draft at once, through the
+ * same checks as the Profile page (pay figures and staff names refused).
+ */
+const StatedFact = z.object({
+  section: z.enum(SECTION_KEYS),
+  text: z.string().min(3).max(600),
+  visibility: z.enum(["candidate", "internal"]).default("candidate"),
+});
 
 const TurnOutput = z.object({
-  slots: OrgSlots,
+  facts: z.array(StatedFact).max(12).default([]),
   reply: z.string().max(600).default(""),
   /** The person asked for the website to be read (a button does the same). */
   readWebsite: z.boolean().default(false),
+  /** The person asked for the draft to be built from everything on file. */
+  build: z.boolean().default(false),
   /** The person gave the organisation's website address — the system saves it. */
   saveWebsite: z.string().max(400).optional(),
 });
 export type OrgTurn = z.infer<typeof TurnOutput>;
 
-const SECTION_ORDER = PROFILE_SECTIONS.map((s) => s.key);
-const SECTION_TITLES = new Map(PROFILE_SECTIONS.map((s) => [s.key, s.title]));
+/** How many items each section holds now — the open draft, else the approved version. */
+export async function sectionCoverage(orgId: string): Promise<Record<string, number>> {
+  const { profileState } = await import("@/lib/org-profile.server");
+  const state = await profileState(orgId);
+  const v = state.open ?? state.approved;
+  return Object.fromEntries(
+    PROFILE_SECTIONS.map((s) => [s.key, (v?.sections?.[s.key] ?? []).length]),
+  );
+}
 
-export function missingSections(s: OrgSlots): string[] {
-  return SECTION_ORDER.filter((k) => !s[k]?.done);
+/** Sections to ask about next: empty ones first, then thin ones, in profile order. */
+export function sectionsToAsk(coverage: Record<string, number>): string[] {
+  const keys = PROFILE_SECTIONS.map((s) => s.key);
+  return [
+    ...keys.filter((k) => (coverage[k] ?? 0) === 0),
+    ...keys.filter((k) => (coverage[k] ?? 0) > 0 && (coverage[k] ?? 0) < 3),
+  ];
 }
 
 const SYSTEM = [
   INJECTION_RULES,
   "",
   "You are the organisation desk of an applicant tracking system. An HR head (or the CBO or owner) describes their organisation so its profile can be written — what it does, its products and projects, its tech stacks, its customers, domain and regulators, locations, structure, culture, hiring norms, policies, tone of voice, and what must never be said to candidates.",
-  "This profile is the context every other agent works from: the JD agent writes “About us” from it, the requisition agent drafts from it, and candidate matching weighs it. Facts must be exact and quotable.",
+  "This profile is the context every other agent works from: the JD agent writes “About us” from it, the requisition agent drafts from it, and candidate matching weighs it. Facts must be exact.",
   "Each turn, return JSON with:",
-  '- "slots": which sections are settled ("done": true) from the conversation so far, and any "notes" still to capture for a section. Mark a section done only when the person gave you something real for it. Never invent facts to fill a section.',
-  '- "reply": one short, friendly message. Ask about the FIRST section in MISSING (below) that is not done, in one sentence — show the section title and what belongs in it, and build on what the person already said. When everything is done, say you will build the draft and what you will read (the website, the documents).',
+  '- "facts": every concrete fact the LATEST admin message states about the organisation, one per item: {"section": one of the section keys, "text": the fact in plain words, faithful to what they said, "visibility": "candidate" when it may be said to candidates, "internal" for internal structure, policies, never-say rules and anything they call internal}. Only what they said — never invent, never restate what COVERAGE says is already there. Empty when the message states no fact (a question, "ok", a request).',
+  '- "reply": one short, friendly message. If facts were captured, do NOT list them (the system confirms them) — go straight to the next question. Ask about the FIRST section in ASK NEXT, in one sentence: name the section and give one example of what belongs there, building on what they said. When ASK NEXT is empty, say the profile looks well covered and they can press Build the draft (or say "build it").',
   '- "readWebsite": true when the person asks you to read the website (or answers yes to that offer).',
+  '- "build": true when the person asks you to build / write / draft the profile now ("build it", "go ahead and draft it").',
   '- "saveWebsite": when the person gives the organisation\'s website address (a domain like "www.acme.com", with or without https://), return it here exactly as a full address — the system saves it and tells them. Never invent or guess a website.',
-  "The organisation profile never holds pay figures or pay bands, and never staff names, e-mails or phone numbers — if the person gives any, say you keep the philosophy in words and roles by title, not the figures or names.",
+  "The organisation profile never holds pay figures or pay bands, and never staff names, e-mails or phone numbers — if the person gives any, leave them out of facts and say you keep the philosophy in words and roles by title, not the figures or names.",
+  `Section keys: ${PROFILE_SECTIONS.map((s) => `${s.key} (${s.title})`).join(", ")}.`,
 ].join("\n");
 
 async function orgDeskFacts(orgId: string) {
@@ -79,13 +94,13 @@ async function orgDeskFacts(orgId: string) {
   ]);
   return [
     `ORGANISATION RECORD: ${JSON.stringify(records.organisation)}`,
-    `WEBSITE SAVED: ${records.website ?? "no"}`,
+    `WEBSITE SAVED: ${records.website ?? "no"} (${records.websitePages.length} pages read)`,
     `DOCUMENTS UPLOADED: ${records.documents.map((d) => d.fileName).join(", ") || "none"}`,
     `PROFILE: ${
-      profileState.approved
-        ? `approved version ${profileState.approved.version}`
-        : profileState.open
-          ? `draft version ${profileState.open.version} (${profileState.open.status})`
+      profileState.open
+        ? `draft version ${profileState.open.version} (${profileState.open.status})`
+        : profileState.approved
+          ? `approved version ${profileState.approved.version}`
           : "none yet"
     }`,
   ].join("\n");
@@ -93,18 +108,17 @@ async function orgDeskFacts(orgId: string) {
 
 export async function runOrgTurn(
   orgId: string,
-  conv: Conversation,
   history: { role: string; body: string }[],
 ): Promise<{ ok: true; turn: OrgTurn } | { ok: false; message: string }> {
-  const slots = (conv.slots ?? {}) as OrgSlots;
-  const missing = missingSections(slots);
+  const coverage = await sectionCoverage(orgId);
+  const ask = sectionsToAsk(coverage);
   const prompt = [
-    `KNOWN (sections done so far): ${JSON.stringify(slots)}`,
-    `MISSING (ask about these, in this order): ${
-      missing.length ? missing.map((k) => SECTION_TITLES.get(k) ?? k).join(" → ") : "none"
+    `COVERAGE (items per section now): ${PROFILE_SECTIONS.map((s) => `${s.title}: ${coverage[s.key] ?? 0}`).join(" · ")}`,
+    `ASK NEXT (empty first, then thin): ${
+      ask.length ? ask.map((k) => SECTION_TITLES.get(k) ?? k).join(" → ") : "none"
     }`,
     `WHAT THE SYSTEM ALREADY KNOWS:\n${await orgDeskFacts(orgId)}`,
-    "CONVERSATION (oldest first):",
+    "CONVERSATION (oldest first; the last Admin line is the LATEST message):",
     untrusted(
       "admin_message",
       history
@@ -124,7 +138,39 @@ export async function runOrgTurn(
   return { ok: true, turn: res.data };
 }
 
-/** One user turn: echo it, think, persist what settled, reply, act on the website ask. */
+/** Facts the admin stated: into the draft now, with what was kept and refused said plainly. */
+async function addStatedFacts(
+  conv: Conversation,
+  userId: string,
+  facts: OrgTurn["facts"],
+): Promise<string> {
+  if (!facts.length) return "";
+  const { proposeItemsCore } = await import("@/lib/org-context.server");
+  const bySection = new Map<string, OrgTurn["facts"]>();
+  for (const f of facts) bySection.set(f.section, [...(bySection.get(f.section) ?? []), f]);
+  const added: string[] = [];
+  const refused: string[] = [];
+  for (const [section, items] of bySection) {
+    try {
+      const res = await proposeItemsCore(
+        { orgId: conv.orgId, userId },
+        { section, items: items.map((i) => ({ text: i.text, visibility: i.visibility })) },
+      );
+      if (res.kept) added.push(`${SECTION_TITLES.get(section) ?? section} (${res.kept})`);
+      for (const r of res.refused) refused.push(r.reason);
+    } catch (e) {
+      refused.push(e instanceof Error ? e.message : "could not be added");
+    }
+  }
+  return [
+    added.length ? `Added to the draft: ${added.join(", ")}.` : "",
+    refused.length ? `Not kept: ${[...new Set(refused)].join("; ")}.` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+/** One user turn: echo it, think, add what they stated to the draft, reply, act on asks. */
 export async function handleOrgUserMessage(
   conv: Conversation,
   userId: string,
@@ -136,7 +182,7 @@ export async function handleOrgUserMessage(
     .from(hiringMessages)
     .where(eq(hiringMessages.conversationId, conv.id))
     .orderBy(asc(hiringMessages.createdAt));
-  const res = await runOrgTurn(conv.orgId, conv, history);
+  const res = await runOrgTurn(conv.orgId, history);
   if (!res.ok) {
     log.warn("org_desk.turn_failed", { org_id: conv.orgId, error: res.message });
     await postMessage(conv, {
@@ -148,24 +194,17 @@ export async function handleOrgUserMessage(
     return;
   }
   const { turn } = res;
-  const before = (conv.slots ?? {}) as OrgSlots;
-  const slots: OrgSlots = { ...before };
-  for (const [k, v] of Object.entries(turn.slots)) {
-    if (!v) continue;
-    slots[k as keyof OrgSlots] = v;
-  }
+  const captured = await addStatedFacts(conv, userId, turn.facts);
   await db
     .update(hiringConversations)
-    .set({ slots: slots as never, updatedAt: new Date() })
+    .set({ updatedAt: new Date() })
     .where(eq(hiringConversations.id, conv.id));
-  conv = { ...conv, slots: slots as never };
 
   if (turn.saveWebsite) await saveWebsiteFromChat(conv, userId, turn.saveWebsite);
-  if (turn.readWebsite) await startWebsiteRead(conv, userId);
-  if (turn.reply.trim()) await postMessage(conv, { role: "desk", body: turn.reply.trim() });
-  if (missingSections(slots).length === 0) {
-    await startBuild(conv, userId);
-  }
+  const reply = [captured, turn.reply.trim()].filter(Boolean).join(" ");
+  if (reply) await postMessage(conv, { role: "desk", body: reply });
+  if (turn.build) await startBuild(conv, userId);
+  else if (turn.readWebsite) await startWebsiteRead(conv, userId);
 }
 
 /** "www.acme.com" said in the chat: normalise, save (owner rules apply), confirm. */
@@ -218,7 +257,7 @@ export async function startWebsiteRead(conv: Conversation, userId: string): Prom
   await startOrgAgentRun(
     conv,
     userId,
-    "Re-read the organisation's website and propose what it states as profile items, quoting each page exactly. Submit the version when the draft holds what you found.",
+    "Re-read the organisation's website, then read_org_sources and propose what the pages state that the profile lacks, quoting each page exactly. Submit the version when the draft holds what you found.",
   );
 }
 
@@ -227,7 +266,7 @@ export async function startBuild(conv: Conversation, userId: string): Promise<vo
   await startOrgAgentRun(
     conv,
     userId,
-    "Build the organisation's profile: read the organisation's records, its website and every uploaded document, propose what you find as profile items with their exact quotes, then submit the version for approval.",
+    "Build the organisation's profile: read the organisation's records, its website, every uploaded document and what the admin said in the chat (read_org_sources), write what you find as profile items with their exact quotes across every section the sources speak to, then submit the version for approval.",
   );
 }
 

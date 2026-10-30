@@ -1831,6 +1831,105 @@ export function scenarios(): ScriptedScenario[] {
         say("A person must review the held-back page; the version is with the HR head."),
       ],
     },
+    (() => {
+      // The first version is rejected as too thin; the agent rewrites from
+      // the sources' text and asks again — never re-reads guessed pages.
+      let decisions = 0;
+      const culture =
+        "Engineers own a customer workflow end to end and ship to production every week.";
+      return {
+        name: "org_context: reworks a draft rejected as too thin from the sources' text",
+        agentType: "org_context",
+        autonomy: "act_and_notify",
+        setup: async ({ orgId }: { orgId: string }) => {
+          const { db } = await import("../../src/server/db");
+          const { orgContextSources, orgProfiles } = await import("../../drizzle/schema");
+          const { createHash } = await import("node:crypto");
+          await db
+            .insert(orgProfiles)
+            .values({ orgId, websiteUrl: "https://www.acme-instruments.test/" })
+            .onConflictDoNothing();
+          await db.insert(orgContextSources).values({
+            orgId,
+            kind: "website_page",
+            url: "https://www.acme-instruments.test/about",
+            sha256: createHash("sha256").update("about").digest("hex"),
+            text: `Acme builds inspection instruments for steel plants.\n${culture}`,
+            fetchedAt: new Date(),
+          });
+          return {};
+        },
+        goal: () =>
+          "Build the organisation's profile: read the organisation's records, its website, every uploaded document and what the admin said in the chat (read_org_sources), write what you find as profile items with their exact quotes, then submit the version for approval.",
+        decide: () =>
+          decisions++ === 0
+            ? { status: "rejected", reason: "Not enough — go deeper on how we work." }
+            : { status: "approved" },
+        expect: {
+          status: "done",
+          calls: [
+            "read_org_profile",
+            "read_org_records",
+            "read_org_sources",
+            "propose_profile_items",
+            "submit_profile_version",
+            "request_approval",
+          ],
+          gateRole: "hr_head",
+        },
+        script: [
+          () => call("p", "read_org_profile", {}),
+          () => call("r", "read_org_records", {}),
+          () => call("src", "read_org_sources", {}),
+          (m) => {
+            const page = (lastTool(m)["websitePages"] as { sourceId: string }[])[0]!;
+            return call("a", "propose_profile_items", {
+              section: "about",
+              items: [
+                {
+                  text: "Acme builds inspection instruments for steel plants.",
+                  visibility: "candidate",
+                  sourceId: page.sourceId,
+                  quote: "Acme builds inspection instruments for steel plants.",
+                },
+              ],
+            });
+          },
+          () => call("s", "submit_profile_version", {}),
+          (m) => {
+            const submitted = toolResult(m, "submit_profile_version") as { versionId: string };
+            return call("g", "request_approval", {
+              title: "Approve the organisation profile",
+              summary: "About Acme, from its website. Culture and hiring norms are thin.",
+              assignee_role: "hr_head",
+              subject: { type: "org_profile", versionId: submitted.versionId },
+            });
+          },
+          // Rejected: "go deeper on how we work" — back to the text, not to guessing pages.
+          () => call("src2", "read_org_sources", {}),
+          (m) => {
+            const page = (lastTool(m)["websitePages"] as { sourceId: string }[])[0]!;
+            return call("c", "propose_profile_items", {
+              section: "culture",
+              items: [
+                { text: culture, visibility: "candidate", sourceId: page.sourceId, quote: culture },
+              ],
+            });
+          },
+          () => call("s2", "submit_profile_version", {}),
+          (m) => {
+            const submitted = toolResult(m, "submit_profile_version") as { versionId: string };
+            return call("g2", "request_approval", {
+              title: "Approve the organisation profile",
+              summary: "Added how Acme works, from its About page.",
+              assignee_role: "hr_head",
+              subject: { type: "org_profile", versionId: submitted.versionId },
+            });
+          },
+          say("Reworked the profile with how Acme works; the version is with the HR head."),
+        ],
+      } satisfies ScriptedScenario;
+    })(),
     {
       name: "org_context: refuses pay figures and staff names",
       agentType: "org_context",

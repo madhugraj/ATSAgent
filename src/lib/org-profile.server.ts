@@ -139,7 +139,18 @@ export async function profileState(orgId: string): Promise<ProfileState> {
 }
 
 /** The version being worked on, or a new draft copied from the approved one. */
-export async function startDraftCore(actor: ProfileActor): Promise<VersionRow> {
+export async function startDraftCore(
+  actor: ProfileActor,
+  opts: {
+    /**
+     * Rework after a decline: start from the declined draft (when it is the
+     * newest version) instead of the approved one. A "not enough — go
+     * deeper" decline used to throw away everything the agent had built,
+     * and its next proposals landed in a near-empty draft.
+     */
+    continueDeclined?: boolean;
+  } = {},
+): Promise<VersionRow> {
   await assertRole(
     actor.userId,
     actor.orgId,
@@ -152,13 +163,23 @@ export async function startDraftCore(actor: ProfileActor): Promise<VersionRow> {
     .select({ max: sql<number>`coalesce(max(${orgProfileVersions.version}), 0)::int` })
     .from(orgProfileVersions)
     .where(eq(orgProfileVersions.orgId, actor.orgId))) as [{ max: number }];
+  let base = state.approved?.sections ?? {};
+  if (opts.continueDeclined) {
+    const [newest] = await db
+      .select({ status: orgProfileVersions.status, sections: orgProfileVersions.sections })
+      .from(orgProfileVersions)
+      .where(eq(orgProfileVersions.orgId, actor.orgId))
+      .orderBy(desc(orgProfileVersions.version))
+      .limit(1);
+    if (newest?.status === "declined" && newest.sections) base = newest.sections;
+  }
   const [row] = await db
     .insert(orgProfileVersions)
     .values({
       orgId: actor.orgId,
       version: max + 1,
       status: "draft",
-      sections: state.approved?.sections ?? {},
+      sections: base,
       createdBy: actor.userId,
       updatedBy: actor.userId,
     })
