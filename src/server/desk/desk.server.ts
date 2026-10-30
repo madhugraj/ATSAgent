@@ -3105,11 +3105,17 @@ export async function advanceGathering(
     .set({ status: "confirming" })
     .where(eq(hiringConversations.id, conv.id));
   const similar = await findSimilarRoles(conv.orgId, slots);
+  // "Research it" for the JD details is done when the JD is written (jdBrief
+  // hands it to the JD agent) — say so, or the ask looks silently dropped.
+  const jdNote =
+    slots.researchRole && (!slots.responsibilities || !slots.successMeasures)
+      ? " The responsibilities and success measures will be drafted from market practice when the job description is written."
+      : "";
   await postMessage(conv, {
     role: "desk",
     body: similar.length
-      ? `Got it: ${describeNeed(slots)}. I found ${plural(similar.length, "similar role")}. Continue with one of them, reuse an approved JD for a new role, or create a new role.`
-      : `Got it: ${describeNeed(slots)}. There is no similar role yet — shall I create a new one?`,
+      ? `Got it: ${describeNeed(slots)}.${jdNote} I found ${plural(similar.length, "similar role")}. Continue with one of them, reuse an approved JD for a new role, or create a new role.`
+      : `Got it: ${describeNeed(slots)}.${jdNote} There is no similar role yet — shall I create a new one?`,
     card: {
       type: "similar_roles",
       slots,
@@ -4443,6 +4449,40 @@ export async function deleteThread(
     code: what.kind === "draft" ? what.code : null,
     restoreUntil: new Date(now.getTime() + RESTORE_DAYS * 864e5).toISOString(),
   };
+}
+
+/**
+ * Delete a thread — and with scope "split", the other tracks of its fan-out.
+ * Each sibling passes the same rules as a single delete (deletionAllowed:
+ * the starter or HR leadership; a draft only by leadership); one that may
+ * not go is kept and named with the reason, never silently skipped.
+ */
+export async function deleteThreads(
+  conv: Conversation,
+  userId: string,
+  reason: string,
+  scope: "track" | "split",
+  now = new Date(),
+): Promise<
+  Awaited<ReturnType<typeof deleteThread>> & {
+    alsoDeleted: number;
+    kept: { title: string; why: string }[];
+  }
+> {
+  // Read the group before this thread leaves it (siblings skip deleted ones).
+  const siblings = scope === "split" ? await deskSiblings(conv.orgId, conv.id) : [];
+  const res = await deleteThread(conv, userId, reason, now);
+  const kept: { title: string; why: string }[] = [];
+  let alsoDeleted = 0;
+  for (const sib of siblings) {
+    try {
+      await deleteThread(await loadConversation(conv.orgId, sib.id), userId, reason, now);
+      alsoDeleted++;
+    } catch (e) {
+      kept.push({ title: sib.title, why: e instanceof Error ? e.message : "Not deleted." });
+    }
+  }
+  return { ...res, alsoDeleted, kept };
 }
 
 /** Chats deleted in the last 30 days (owners restore them). */

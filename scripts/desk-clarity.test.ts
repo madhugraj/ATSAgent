@@ -434,6 +434,69 @@ describe("hiring manager options card", () => {
 });
 
 describe("parallel hiring needs", () => {
+  test("deleting a split: one track keeps the rest; the whole split takes every track", async () => {
+    // Deleting needs a member of the organisation; the starter may delete a
+    // chat that has no requisition yet.
+    const { orgMembers } = await import("../drizzle/schema");
+    const [member] = await db
+      .insert(orgMembers)
+      .values({ orgId, userId, email: `split-${stamp}@team.local`, status: "active" } as never)
+      .returning({ id: orgMembers.id });
+    const make = async () => {
+      const [conv] = await db
+        .insert(hiringConversations)
+        .values({ orgId, createdBy: userId, title: "Head of AI" })
+        .returning();
+      await desk.splitNeeds(conv!, userId, [
+        { title: "Head of AI", slots: { roleTitle: "Head of AI" } },
+        { title: "Intern - AI", slots: { roleTitle: "Intern - AI" } },
+        { title: "Data Scientist", slots: { roleTitle: "Data Scientist" } },
+      ]);
+      return (
+        await db.select().from(hiringConversations).where(eq(hiringConversations.id, conv!.id))
+      )[0]!;
+    };
+    const alive = async (groupId: string) =>
+      (
+        await db
+          .select({ id: hiringConversations.id, deletedAt: hiringConversations.deletedAt })
+          .from(hiringConversations)
+          .where(eq(hiringConversations.splitGroupId, groupId))
+      ).filter((r) => !r.deletedAt).length;
+
+    // One track: the other two stay, and they no longer list the deleted one.
+    const a = await make();
+    const one = await desk.deleteThreads(a, userId, "", "track");
+    expect(one.alsoDeleted).toBe(0);
+    expect(await alive(a.splitGroupId!)).toBe(2);
+    const left = (
+      await db
+        .select({ id: hiringConversations.id })
+        .from(hiringConversations)
+        .where(eq(hiringConversations.splitGroupId, a.splitGroupId!))
+    ).find((r) => r.id !== a.id)!;
+    expect((await desk.deskSiblings(orgId, left.id)).map((s) => s.id)).not.toContain(a.id);
+
+    // The whole split: nothing of it is left behind.
+    const b = await make();
+    const all = await desk.deleteThreads(b, userId, "", "split");
+    expect(all.alsoDeleted).toBe(2);
+    expect(all.kept).toEqual([]);
+    expect(await alive(b.splitGroupId!)).toBe(0);
+
+    for (const g of [a.splitGroupId!, b.splitGroupId!]) {
+      const rows = await db
+        .select({ id: hiringConversations.id })
+        .from(hiringConversations)
+        .where(eq(hiringConversations.splitGroupId, g));
+      for (const r of rows) {
+        await db.delete(hiringMessages).where(eq(hiringMessages.conversationId, r.id));
+        await db.delete(hiringConversations).where(eq(hiringConversations.id, r.id));
+      }
+    }
+    await db.delete(orgMembers).where(eq(orgMembers.id, member!.id));
+  });
+
   test("a 3-need message fans out into three threads, each with only its own details", async () => {
     const c = await thread();
     const conv = (

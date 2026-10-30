@@ -80,6 +80,8 @@ export type DeskConversationSummary = {
   requisitionCode: string | null;
   updatedAt: string;
   mine: boolean;
+  /** Shared by the threads of one fan-out (parallel needs): the list groups them. */
+  splitGroupId: string | null;
 };
 
 export const listDeskConversations = createServerFn({ method: "GET" })
@@ -93,6 +95,7 @@ export const listDeskConversations = createServerFn({ method: "GET" })
         status: hiringConversations.status,
         createdBy: hiringConversations.createdBy,
         updatedAt: hiringConversations.updatedAt,
+        splitGroupId: hiringConversations.splitGroupId,
         code: requisitions.code,
       })
       .from(hiringConversations)
@@ -120,6 +123,7 @@ export const listDeskConversations = createServerFn({ method: "GET" })
       requisitionCode: r.code ?? null,
       updatedAt: r.updatedAt.toISOString(),
       mine: r.createdBy === context.userId,
+      splitGroupId: r.splitGroupId ?? null,
     }));
   });
 
@@ -171,128 +175,155 @@ export type DeskConversationView = {
 export const getDeskConversation = createServerFn({ method: "GET" })
   .middleware([requireOrg])
   .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
-  .handler(async ({ data, context }): Promise<DeskConversationView> => {
-    let conv = await accessible(context, data.id);
-    // Self-heal: the role ended (closed / rejected elsewhere, perhaps before this
-    // thread followed it) but the thread did not — sync it now.
-    if (conv.requisitionId && conv.status !== "closed") {
-      const [r] = await db
-        .select({ status: requisitions.status })
+  .handler(({ data, context }) => deskConversationView(context, data.id));
+
+/**
+ * Side-by-side view: every pane in ONE poll. Polling each pane separately
+ * multiplied the calls by the panes and ran into the per-function rate
+ * limit — throttled panes silently stopped updating, so a reply (research,
+ * an approval) showed in one pane and not in another. A thread deleted
+ * elsewhere comes back as `missing`, so its pane drops out.
+ */
+export const getDeskThreads = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) =>
+    z.object({ ids: z.array(z.string().uuid()).min(1).max(3) }).parse(d),
+  )
+  .handler(async ({ data, context }) =>
+    Promise.all(
+      data.ids.map(async (id) => {
+        try {
+          return { id, view: await deskConversationView(context, id) };
+        } catch (e) {
+          if (e instanceof Error && /not found/i.test(e.message))
+            return { id, view: null, missing: true as const };
+          throw e;
+        }
+      }),
+    ),
+  );
+
+async function deskConversationView(
+  context: { orgId: string; userId: string; isOwner: boolean },
+  id: string,
+): Promise<DeskConversationView> {
+  let conv = await accessible(context, id);
+  // Self-heal: the role ended (closed / rejected elsewhere, perhaps before this
+  // thread followed it) but the thread did not — sync it now.
+  if (conv.requisitionId && conv.status !== "closed") {
+    const [r] = await db
+      .select({ status: requisitions.status })
+      .from(requisitions)
+      .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, context.orgId)))
+      .limit(1);
+    if (r && (r.status === "closed" || r.status === "rejected")) {
+      const { onRequisitionEnded } = await import("../server/desk/desk.server");
+      await onRequisitionEnded(context.orgId, conv.requisitionId, r.status, null);
+      conv = await accessible(context, id);
+    }
+  }
+  const msgs = await db
+    .select()
+    .from(hiringMessages)
+    .where(and(eq(hiringMessages.conversationId, conv.id), eq(hiringMessages.orgId, context.orgId)))
+    .orderBy(asc(hiringMessages.createdAt))
+    .limit(500);
+  const [req] = conv.requisitionId
+    ? await db
+        .select({ id: requisitions.id, code: requisitions.code, status: requisitions.status })
         .from(requisitions)
         .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, context.orgId)))
-        .limit(1);
-      if (r && (r.status === "closed" || r.status === "rejected")) {
-        const { onRequisitionEnded } = await import("../server/desk/desk.server");
-        await onRequisitionEnded(context.orgId, conv.requisitionId, r.status, null);
-        conv = await accessible(context, data.id);
-      }
-    }
-    const msgs = await db
-      .select()
-      .from(hiringMessages)
-      .where(
-        and(eq(hiringMessages.conversationId, conv.id), eq(hiringMessages.orgId, context.orgId)),
-      )
-      .orderBy(asc(hiringMessages.createdAt))
-      .limit(500);
-    const [req] = conv.requisitionId
-      ? await db
-          .select({ id: requisitions.id, code: requisitions.code, status: requisitions.status })
-          .from(requisitions)
-          .where(
-            and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, context.orgId)),
-          )
-          .limit(1)
+        .limit(1)
+    : [];
+  const taskIds = msgs
+    .map((m) => (m.card as { type?: string; taskId?: string } | null)?.taskId)
+    .filter((x): x is string => typeof x === "string");
+  const {
+    taskStatuses,
+    taskDetails,
+    deskProgress,
+    deskActivity,
+    startStage,
+    candidateReasoning,
+    tidyForPeople,
+    deskTimeZone,
+  } = await import("../server/desk/desk.server");
+  const timeZone = await deskTimeZone(context.orgId);
+  const rankedIds = msgs.flatMap((m) => {
+    const c = m.card as { type?: string; items?: { applicationId?: string }[] } | null;
+    return c?.type === "ranked_candidates"
+      ? (c.items ?? [])
+          .map((i) => i.applicationId)
+          .filter((x): x is string => typeof x === "string")
       : [];
-    const taskIds = msgs
-      .map((m) => (m.card as { type?: string; taskId?: string } | null)?.taskId)
-      .filter((x): x is string => typeof x === "string");
-    const {
-      taskStatuses,
-      taskDetails,
-      deskProgress,
-      deskActivity,
-      startStage,
-      candidateReasoning,
-      tidyForPeople,
-      deskTimeZone,
-    } = await import("../server/desk/desk.server");
-    const timeZone = await deskTimeZone(context.orgId);
-    const rankedIds = msgs.flatMap((m) => {
-      const c = m.card as { type?: string; items?: { applicationId?: string }[] } | null;
-      return c?.type === "ranked_candidates"
-        ? (c.items ?? [])
-            .map((i) => i.applicationId)
-            .filter((x): x is string => typeof x === "string")
-        : [];
-    });
-    const statuses = await taskStatuses(context.orgId, taskIds);
-    const selfNeedsYou = Object.values(statuses as Record<string, string>).filter(
-      (s) => s === "open",
-    ).length;
-    return {
-      id: conv.id,
-      title: conv.title,
-      status: conv.status,
-      slots: conv.slots as import("../server/desk/desk.server").DeskSlots,
-      requisition: req ?? null,
-      messages: msgs.map((m) => ({
-        id: m.id,
-        role: m.role,
-        agentType: m.agentType,
-        body: m.role === "user" ? m.body : tidyForPeople(m.body, timeZone),
-        card: (m.card as DeskMessageView["card"]) ?? null,
-        at: m.createdAt.toISOString(),
-      })),
-      tasks: statuses,
-      taskSubjects: await (async () => {
-        if (!taskIds.length) return {};
-        const { agentTasks } = await import("@db/schema");
-        const rows = await db
-          .select({ id: agentTasks.id, action: agentTasks.proposedAction })
-          .from(agentTasks)
-          .where(and(eq(agentTasks.orgId, context.orgId), inArray(agentTasks.id, taskIds)));
-        return Object.fromEntries(
-          rows.flatMap((t) => {
-            const type = (t.action as { args?: { subject?: { type?: string } } } | null)?.args
-              ?.subject?.type;
-            return type ? [[t.id, type]] : [];
-          }),
-        );
-      })(),
-      taskDetails: await taskDetails(context.orgId, taskIds),
-      deciders: await (
-        await import("../server/desk/desk.server")
-      ).taskDeciders(context.orgId, context.userId, context.isOwner, taskIds),
-      reasoning: await candidateReasoning(context.orgId, [...new Set(rankedIds)]),
-      stages: await liveStages(context.orgId, [...new Set(rankedIds)]),
-      progress: await deskProgress(conv),
-      activity: await deskActivity(conv),
-      canStart: Boolean(await startStage(conv, context.userId, { dryRun: true })),
-      canEditAgents: await canEditAgents(context.userId, context.orgId),
-      canDelete: await (async () => {
-        const { deletionAllowed } = await import("../server/desk/desk.server");
-        const d = await deletionAllowed(conv, context.userId);
-        return d
-          ? d.kind === "chat"
-            ? { kind: "chat" as const }
-            : { kind: "draft" as const, code: d.code }
-          : null;
-      })(),
-      tracks: await (async () => {
-        const { deskSiblings } = await import("../server/desk/desk.server");
-        const sibs = await deskSiblings(context.orgId, conv.id);
-        const self = {
-          id: conv.id,
-          title: conv.title,
-          status: conv.status,
-          needsYou: selfNeedsYou,
-          self: true,
-        };
-        return [self, ...sibs.map((s) => ({ ...s, self: false }))];
-      })(),
-    };
   });
+  const statuses = await taskStatuses(context.orgId, taskIds);
+  const selfNeedsYou = Object.values(statuses as Record<string, string>).filter(
+    (s) => s === "open",
+  ).length;
+  return {
+    id: conv.id,
+    title: conv.title,
+    status: conv.status,
+    slots: conv.slots as import("../server/desk/desk.server").DeskSlots,
+    requisition: req ?? null,
+    messages: msgs.map((m) => ({
+      id: m.id,
+      role: m.role,
+      agentType: m.agentType,
+      body: m.role === "user" ? m.body : tidyForPeople(m.body, timeZone),
+      card: (m.card as DeskMessageView["card"]) ?? null,
+      at: m.createdAt.toISOString(),
+    })),
+    tasks: statuses,
+    taskSubjects: await (async () => {
+      if (!taskIds.length) return {};
+      const { agentTasks } = await import("@db/schema");
+      const rows = await db
+        .select({ id: agentTasks.id, action: agentTasks.proposedAction })
+        .from(agentTasks)
+        .where(and(eq(agentTasks.orgId, context.orgId), inArray(agentTasks.id, taskIds)));
+      return Object.fromEntries(
+        rows.flatMap((t) => {
+          const type = (t.action as { args?: { subject?: { type?: string } } } | null)?.args
+            ?.subject?.type;
+          return type ? [[t.id, type]] : [];
+        }),
+      );
+    })(),
+    taskDetails: await taskDetails(context.orgId, taskIds),
+    deciders: await (
+      await import("../server/desk/desk.server")
+    ).taskDeciders(context.orgId, context.userId, context.isOwner, taskIds),
+    reasoning: await candidateReasoning(context.orgId, [...new Set(rankedIds)]),
+    stages: await liveStages(context.orgId, [...new Set(rankedIds)]),
+    progress: await deskProgress(conv),
+    activity: await deskActivity(conv),
+    canStart: Boolean(await startStage(conv, context.userId, { dryRun: true })),
+    canEditAgents: await canEditAgents(context.userId, context.orgId),
+    canDelete: await (async () => {
+      const { deletionAllowed } = await import("../server/desk/desk.server");
+      const d = await deletionAllowed(conv, context.userId);
+      return d
+        ? d.kind === "chat"
+          ? { kind: "chat" as const }
+          : { kind: "draft" as const, code: d.code }
+        : null;
+    })(),
+    tracks: await (async () => {
+      const { deskSiblings } = await import("../server/desk/desk.server");
+      const sibs = await deskSiblings(context.orgId, conv.id);
+      const self = {
+        id: conv.id,
+        title: conv.title,
+        status: conv.status,
+        needsYou: selfNeedsYou,
+        self: true,
+      };
+      return [self, ...sibs.map((s) => ({ ...s, self: false }))];
+    })(),
+  };
+}
 
 const Text = z.string().trim().min(1).max(2000);
 
@@ -691,12 +722,23 @@ async function liveStages(orgId: string, ids: string[]): Promise<Record<string, 
 export const deleteDeskConversation = createServerFn({ method: "POST" })
   .middleware([requireOrg])
   .inputValidator((d: unknown) =>
-    z.object({ id: z.string().uuid(), reason: z.string().max(500).default("") }).parse(d),
+    z
+      .object({
+        id: z.string().uuid(),
+        reason: z.string().max(500).default(""),
+        /**
+         * "split": also delete the other tracks of this fan-out. Deleting one
+         * track used to leave its siblings behind — orphaned half-splits
+         * that kept piling up in the list under identical titles.
+         */
+        scope: z.enum(["track", "split"]).default("track"),
+      })
+      .parse(d),
   )
   .handler(async ({ data, context }) => {
     const conv = await accessible(context, data.id);
-    const { deleteThread } = await import("../server/desk/desk.server");
-    return deleteThread(conv, context.userId, data.reason);
+    const { deleteThreads } = await import("../server/desk/desk.server");
+    return deleteThreads(conv, context.userId, data.reason, data.scope);
   });
 
 /** Chats deleted in the last 30 days — owners only (they restore them). */

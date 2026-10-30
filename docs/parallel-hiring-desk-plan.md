@@ -80,6 +80,16 @@ So this is primarily a desk-flow feature — not a runtime change.
   visually divides into the panes (the fan-out made visible), then each pane runs its
   track live. Pure `desk.tsx`: a pane component reusing the existing thread rendering
   plus the entrance animation; panes exist only for this fan-out moment.
+- As shipped: the panes are fed by **one** batched poll (`getDeskThreads`) —
+  one poll per pane ran into the per-function rate limit (60/min/IP) and a
+  throttled pane silently froze, so a reply showed in one pane and not another.
+  The split opens automatically only right after the fan-out (once per tab
+  session); later it is entered from the fan-out card or the conversation list,
+  which groups the tracks of a split. Each pane has Focus (open alone) and the
+  view has Exit. Deleting a track asks "only this one" or "all tracks of the
+  split"; a track already in approval is kept and named. While the desk works
+  on the person's last message (research takes up to a minute), every pane
+  says so.
 
 ### Phase 4 — Runtime hardening for real parallelism
 

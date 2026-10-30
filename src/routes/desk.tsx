@@ -11,13 +11,16 @@ import {
   CheckCircle2,
   Circle,
   CircleDot,
+  Columns2,
   Loader2,
+  Maximize2,
   MessageSquarePlus,
   RotateCcw,
   Send,
   Sparkles,
   Trash2,
   UserRound,
+  X,
 } from "lucide-react";
 
 import { EmptyState, PageHeader } from "@/components/ats";
@@ -51,6 +54,7 @@ import {
   closeDeskRole,
   deleteDeskConversation,
   getDeskConversation,
+  getDeskThreads,
   listDeletedDeskConversations,
   restoreDeskConversation,
   listDeskConversations,
@@ -63,6 +67,7 @@ import {
   sendDeskMessage,
   startDeskConversation,
   type DeskCardView,
+  type DeskConversationSummary,
   type DeskConversationView,
   type DeskMessageView,
 } from "@/lib/hiring-desk.functions";
@@ -127,24 +132,12 @@ function DeskPage() {
             ) : !list.data?.length ? (
               <p className="p-3 text-sm text-muted-foreground">No conversations yet.</p>
             ) : (
-              <ul className="space-y-1">
-                {list.data.map((t) => (
-                  <li key={t.id}>
-                    <button
-                      type="button"
-                      onClick={() => select(t.id)}
-                      className={`w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted ${c === t.id ? "bg-muted" : ""}`}
-                    >
-                      <p className="truncate font-medium">{t.title}</p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        {t.requisitionCode ?? STATUS_LABEL[t.status] ?? t.status} ·{" "}
-                        {new Date(t.updatedAt).toLocaleDateString()}
-                        {t.mine ? "" : " · team"}
-                      </p>
-                    </button>
-                  </li>
-                ))}
-              </ul>
+              <ThreadList
+                rows={list.data}
+                current={c}
+                onSelect={(id) => select(id)}
+                onSideBySide={(ids) => void navigate({ search: { split: ids.join(",") } })}
+              />
             )}
             <RecentlyDeleted onRestored={(id) => select(id)} />
           </aside>
@@ -159,8 +152,103 @@ function DeskPage() {
   );
 }
 
-/** Fan-out cards whose side-by-side view this tab already opened (Exit must stick). */
-const autoSplitShown = new Set<string>();
+/**
+ * The conversation list. The threads of one fan-out sit together under one
+ * heading with a "Side by side" action — listed loose, a few splits made a
+ * wall of near-identical titles with no way to tell which belonged together.
+ */
+function ThreadList({
+  rows,
+  current,
+  onSelect,
+  onSideBySide,
+}: {
+  rows: DeskConversationSummary[];
+  current: string | undefined;
+  onSelect: (id: string) => void;
+  onSideBySide: (ids: string[]) => void;
+}) {
+  // Groups keep the position of their most recently updated thread.
+  const blocks: { group: string | null; items: DeskConversationSummary[] }[] = [];
+  const byGroup = new Map<string, DeskConversationSummary[]>();
+  for (const r of rows) {
+    if (!r.splitGroupId) {
+      blocks.push({ group: null, items: [r] });
+      continue;
+    }
+    const g = byGroup.get(r.splitGroupId);
+    if (g) g.push(r);
+    else {
+      const items = [r];
+      byGroup.set(r.splitGroupId, items);
+      blocks.push({ group: r.splitGroupId, items });
+    }
+  }
+  const row = (t: DeskConversationSummary, inGroup: boolean) => (
+    <li key={t.id}>
+      <button
+        type="button"
+        onClick={() => onSelect(t.id)}
+        className={`w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted ${
+          current === t.id ? "bg-muted" : ""
+        } ${inGroup ? "pl-5" : ""}`}
+      >
+        <p className="truncate font-medium">{t.title}</p>
+        <p className="truncate text-xs text-muted-foreground">
+          {t.requisitionCode ?? STATUS_LABEL[t.status] ?? t.status} ·{" "}
+          {new Date(t.updatedAt).toLocaleDateString()}
+          {t.mine ? "" : " · team"}
+        </p>
+      </button>
+    </li>
+  );
+  return (
+    <ul className="space-y-1">
+      {blocks.map((b) =>
+        b.group && b.items.length >= 2 ? (
+          <li key={b.group} className="rounded-md border border-border/70 py-1">
+            <div className="flex items-center gap-1 px-3 py-1">
+              <span className="flex-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                {b.items.length} needs in parallel
+              </span>
+              <button
+                type="button"
+                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-primary hover:bg-primary/10"
+                onClick={() => onSideBySide(b.items.slice(0, 3).map((i) => i.id))}
+              >
+                <Columns2 className="size-3" /> Side by side
+              </button>
+            </div>
+            <ul className="space-y-0.5">{b.items.map((t) => row(t, true))}</ul>
+          </li>
+        ) : (
+          b.items.map((t) => row(t, false))
+        ),
+      )}
+    </ul>
+  );
+}
+
+/**
+ * Fan-outs whose side-by-side view this tab already opened, so Exit sticks —
+ * kept for the tab's session (a reload must not snap the person back in).
+ */
+const AUTO_SPLIT_KEY = "desk.autoSplitShown";
+function autoSplitSeen(id: string): boolean {
+  try {
+    return (JSON.parse(sessionStorage.getItem(AUTO_SPLIT_KEY) ?? "[]") as string[]).includes(id);
+  } catch {
+    return false;
+  }
+}
+function markAutoSplitSeen(id: string) {
+  try {
+    const seen = JSON.parse(sessionStorage.getItem(AUTO_SPLIT_KEY) ?? "[]") as string[];
+    sessionStorage.setItem(AUTO_SPLIT_KEY, JSON.stringify([...seen, id].slice(-50)));
+  } catch {
+    // Storage unavailable: the view simply may open again.
+  }
+}
 
 const STATUS_LABEL: Record<string, string> = {
   gathering: "Gathering details",
@@ -252,15 +340,24 @@ function Composer({
  * Side-by-side supervision for 2–3 parallel hiring needs: one column per
  * thread, each an independent live view (messages, cards, composer). The
  * entrance is the fan-out made visible — the columns rise in sequence.
+ *
+ * All columns are fed by ONE poll (getDeskThreads) that seeds each pane's
+ * cache: one poll per pane hit the server-function rate limit, and a throttled
+ * pane silently froze — a reply showed in one column and not in another.
  */
 function SplitDesk({ ids }: { ids: string[] }) {
   const navigate = useNavigate({ from: "/desk" });
-  const first = useQuery({
-    queryKey: ["desk", ids[0]],
-    queryFn: () => getDeskConversation({ data: { id: ids[0] } }),
-    refetchInterval: 15_000,
+  const qc = useQueryClient();
+  const key = ids.join(",");
+  const all = useQuery({
+    queryKey: ["desk_split", key],
+    queryFn: async () => {
+      const rows = await getDeskThreads({ data: { ids } });
+      for (const r of rows) if (r.view) qc.setQueryData(["desk", r.id], r.view);
+      return rows;
+    },
+    refetchInterval: 4_000,
   });
-  const tracks = first.data?.tracks ?? [];
   const [entered, setEntered] = useState(false);
   useEffect(() => {
     const t = setTimeout(() => setEntered(true), 30);
@@ -268,25 +365,40 @@ function SplitDesk({ ids }: { ids: string[] }) {
   }, []);
   // Deleting one track drops that one from the view; the others stay side by
   // side. Fewer than two left — back to the normal single-thread desk.
-  const drop = (id: string) => {
-    const rest = ids.filter((x) => x !== id);
+  const drop = (gone: string[]) => {
+    const rest = ids.filter((x) => !gone.includes(x));
     if (rest.length >= 2) void navigate({ search: { split: rest.join(",") } });
     else void navigate({ search: rest.length ? { c: rest[0] } : {} });
   };
+  // A thread deleted elsewhere (another tab, another person) leaves the view.
+  const missing = (all.data ?? []).filter((r) => r.missing).map((r) => r.id);
+  useEffect(() => {
+    if (missing.length) drop(missing);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [missing.join(",")]);
+  const views = new Map((all.data ?? []).map((r) => [r.id, r.view]));
+  const waiting = [...views.values()].filter((v) => v && v.tracks.find((t) => t.self)?.needsYou);
   return (
     <div>
-      <div className="mb-2 flex items-center justify-between">
-        <p className="text-xs text-muted-foreground">
-          {ids.length} hiring needs running in parallel — each column is its own thread, with its
-          own questions, agents and approvals.
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <p className="flex-1 text-xs text-muted-foreground">
+          {ids.length} hiring needs side by side — each column is its own thread, with its own
+          questions, agents and approvals.
+          {waiting.length ? (
+            <span className="ml-1 font-medium text-amber-700">
+              {waiting.length} waiting for you.
+            </span>
+          ) : null}
+          {all.isError ? <span className="ml-1 text-destructive">Reconnecting…</span> : null}
         </p>
-        {tracks.length >= 2 ? (
-          <TracksChip
-            tracks={tracks}
-            onOpenTrack={(id) => void navigate({ search: { c: id } })}
-            onSideBySide={() => {}}
-          />
-        ) : null}
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-1"
+          onClick={() => void navigate({ search: { c: ids[0] } })}
+        >
+          <X className="size-3.5" /> Exit side by side
+        </Button>
       </div>
       <div
         className="grid gap-3"
@@ -295,12 +407,18 @@ function SplitDesk({ ids }: { ids: string[] }) {
         {ids.map((id, i) => (
           <div
             key={id}
-            className={`transition-all duration-500 ${
+            className={`min-w-0 transition-all duration-500 ${
               entered ? "translate-y-0 opacity-100" : "translate-y-6 opacity-0"
             }`}
             style={{ transitionDelay: `${i * 180}ms` }}
           >
-            <Thread id={id} compact onDeleted={() => drop(id)} onMissing={() => drop(id)} />
+            <Thread
+              id={id}
+              compact
+              onDeleted={(also) => drop([id, ...(also ?? [])])}
+              onFocus={() => void navigate({ search: { c: id } })}
+              onChangedAll={() => void qc.invalidateQueries({ queryKey: ["desk_split", key] })}
+            />
           </div>
         ))}
       </div>
@@ -308,29 +426,52 @@ function SplitDesk({ ids }: { ids: string[] }) {
   );
 }
 
-/** The desk fanned a multi-need message out: open the tracks side by side. */
+/**
+ * The desk fanned a multi-need message out. The card lists the tracks as
+ * they are NOW (a deleted one says so) and opens the live ones side by side.
+ */
 function NeedsFanoutCard({
   card,
-  onChanged,
+  conv,
   inSplit,
 }: {
   card: DeskCardView;
-  onChanged: () => void;
+  conv: DeskConversationView;
   /** Rendered inside one of the side-by-side panes: the split is already on. */
   inSplit?: boolean | undefined;
 }) {
   const navigate = useNavigate({ from: "/desk" });
   const items = (card["items"] as unknown as { id: string; title: string }[]) ?? [];
+  const live = new Map(conv.tracks.map((t) => [t.id, t]));
+  const liveIds = items.map((i) => i.id).filter((id) => live.has(id) || id === conv.id);
   return (
     <div className="space-y-2 rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm">
       <p className="font-medium">Running {items.length} hiring needs in parallel</p>
       <ul className="space-y-1">
-        {items.map((i, n) => (
-          <li key={i.id} className="text-xs">
-            {n + 1}. {i.title}
-          </li>
-        ))}
+        {items.map((i, n) => {
+          const t = live.get(i.id);
+          return (
+            <li key={i.id} className="flex items-center gap-2 text-xs">
+              <span className={t ? "" : "text-muted-foreground line-through"}>
+                {n + 1}. {t?.title ?? i.title}
+              </span>
+              <span className="text-muted-foreground">
+                {t ? (STATUS_LABEL[t.status] ?? t.status) : "deleted"}
+              </span>
+            </li>
+          );
+        })}
       </ul>
+      {!inSplit && liveIds.length >= 2 ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-1"
+          onClick={() => void navigate({ search: { split: liveIds.join(",") } })}
+        >
+          <Columns2 className="size-3.5" /> Open side by side
+        </Button>
+      ) : null}
     </div>
   );
 }
@@ -495,28 +636,39 @@ function DeleteThreadButton({
   onDeleted,
 }: {
   conv: DeskConversationView;
-  onDeleted: () => void;
+  onDeleted: (also?: string[]) => void;
 }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const others = conv.tracks.filter((t) => !t.self);
+  const [scope, setScope] = useState<"track" | "split">("track");
   const what = conv.canDelete;
   if (!what) return null;
   const draft = what.kind === "draft";
   async function confirm() {
     setBusy(true);
     try {
-      await deleteDeskConversation({ data: { id: conv.id, reason: reason.trim() } });
+      const res = await deleteDeskConversation({
+        data: { id: conv.id, reason: reason.trim(), scope: others.length ? scope : "track" },
+      });
       toast.success(
-        draft
-          ? `Chat and draft ${what && "code" in what ? what.code : ""} deleted`
-          : "Chat deleted",
+        res.alsoDeleted
+          ? `${res.alsoDeleted + 1} tracks deleted`
+          : draft
+            ? `Chat and draft ${what && "code" in what ? what.code : ""} deleted`
+            : "Chat deleted",
       );
+      // A track that could not go (in approval, or someone else's) stays — say why.
+      for (const k of res.kept) toast.warning(`${k.title} was kept: ${k.why}`);
       setOpen(false);
       void qc.invalidateQueries({ queryKey: ["desk_list"] });
       void qc.invalidateQueries({ queryKey: ["desk_deleted"] });
-      onDeleted();
+      const keptTitles = new Set(res.kept.map((k) => k.title));
+      onDeleted(
+        scope === "split" ? others.filter((t) => !keptTitles.has(t.title)).map((t) => t.id) : [],
+      );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not delete");
     } finally {
@@ -550,6 +702,37 @@ function DeleteThreadButton({
               removed for good. The deletion is recorded in the audit log.
             </DialogDescription>
           </DialogHeader>
+          {others.length ? (
+            <fieldset className="space-y-1 rounded-md border border-border p-2 text-sm">
+              <legend className="px-1 text-xs font-medium">
+                This chat is one of {others.length + 1} needs started together
+              </legend>
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="delete-scope"
+                  checked={scope === "track"}
+                  onChange={() => setScope("track")}
+                />
+                Only {conv.title}
+              </label>
+              <label className="flex items-start gap-2">
+                <input
+                  type="radio"
+                  name="delete-scope"
+                  className="mt-1"
+                  checked={scope === "split"}
+                  onChange={() => setScope("split")}
+                />
+                <span>
+                  All {others.length + 1}: also {others.map((t) => t.title).join(", ")}
+                  <span className="block text-xs text-muted-foreground">
+                    A track already in approval or later is kept — you will be told which.
+                  </span>
+                </span>
+              </label>
+            </fieldset>
+          ) : null}
           <div className="space-y-1">
             <label className="text-xs font-medium" htmlFor="delete-reason">
               {draft ? "Why? (required)" : "Why? (optional)"}
@@ -583,21 +766,28 @@ function DeleteThreadButton({
 function Thread({
   id,
   onDeleted,
-  onMissing,
   compact,
+  onFocus,
+  onChangedAll,
 }: {
   id: string;
-  onDeleted: () => void;
-  /** The thread was deleted from somewhere else — drop this pane/column. */
-  onMissing?: () => void;
+  /** This thread was deleted (with `also`: the other tracks deleted with it). */
+  onDeleted: (also?: string[]) => void;
   /** Split-screen column: no journey panel, taller conversation. */
   compact?: boolean;
+  /** Split-screen column: open this thread on its own. */
+  onFocus?: () => void;
+  /** Split-screen column: refresh every pane (the split's one poll). */
+  onChangedAll?: () => void;
 }) {
   const qc = useQueryClient();
   const q = useQuery({
     queryKey: ["desk", id],
     queryFn: () => getDeskConversation({ data: { id } }),
-    refetchInterval: 4_000,
+    // In a split the columns are fed by the split's one poll (SplitDesk);
+    // a pane polling on its own multiplied the calls into the rate limit.
+    refetchInterval: compact ? false : 4_000,
+    staleTime: compact ? 60_000 : 0,
   });
   const [text, setText] = useState("");
   const [pending, setPending] = useState<string | null>(null);
@@ -611,7 +801,8 @@ function Thread({
   }, [count, pending]);
 
   const refresh = () => {
-    qc.invalidateQueries({ queryKey: ["desk", id] });
+    if (onChangedAll) onChangedAll();
+    else qc.invalidateQueries({ queryKey: ["desk", id] });
     qc.invalidateQueries({ queryKey: ["desk_list"] });
   };
 
@@ -631,21 +822,21 @@ function Thread({
   }, [q.data?.tracks]);
 
   // The fan-out made visible: when the desk splits a multi-need message into
-  // parallel tracks, open them side by side (once per fan-out card).
+  // parallel tracks, open them side by side — once per fan-out, and only the
+  // tracks still alive (a deleted track must not come back as a column).
   const navigate = useNavigate({ from: "/desk" });
   const fanout = [...(q.data?.messages ?? [])]
     .reverse()
     .find((m) => (m.card as { type?: string } | null)?.type === "needs_fanout");
-  const fanoutItems = (fanout?.card as { items?: { id: string }[] } | null)?.items ?? [];
+  const liveTracks = (q.data?.tracks ?? []).map((t) => t.id);
   useEffect(() => {
-    // Once per fan-out card per session: exiting side by side must not snap
-    // the user straight back in when the thread remounts.
-    if (!compact && fanoutItems.length >= 2 && !autoSplitShown.has(fanout?.id ?? "")) {
-      autoSplitShown.add(fanout?.id ?? "");
-      void navigate({ search: { split: fanoutItems.map((i) => i.id).join(",") } });
-    }
+    if (compact || !fanout || liveTracks.length < 2 || autoSplitSeen(fanout.id)) return;
+    // Only right after the fan-out: an old split reopened later is just a thread.
+    if (Date.now() - new Date(fanout.at).getTime() > 10 * 60_000) return;
+    markAutoSplitSeen(fanout.id);
+    void navigate({ search: { split: liveTracks.slice(0, 3).join(",") } });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [compact, fanout?.id, fanoutItems.length]);
+  }, [compact, fanout?.id, liveTracks.length]);
 
   async function send() {
     const message = text.trim();
@@ -663,13 +854,15 @@ function Thread({
     }
   }
 
-  // Deleted from somewhere else (another view, another pane): drop the
-  // pane/column instead of sitting on an error.
+  // Deleted from somewhere else (another view, another tab): leave the
+  // thread instead of sitting on an error. (In a split, SplitDesk does this.)
+  const missing = q.error instanceof Error && /not found/i.test(q.error.message);
   useEffect(() => {
-    if (q.error instanceof Error && /not found/i.test(q.error.message)) onMissing?.();
-  }, [q.error, onMissing]);
+    if (missing && !compact) onDeleted();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [missing, compact]);
 
-  if (q.isLoading)
+  if (q.isLoading || (compact && !q.data && !q.error))
     return <section className="panel p-6 text-sm text-muted-foreground">Loading…</section>;
   if (!q.data)
     return (
@@ -688,6 +881,13 @@ function Thread({
   const hidden = showAll ? 0 : Math.max(0, d.messages.length - RECENT_MESSAGES);
   const visible = d.messages.filter((m, i) => i >= hidden || isOpenTask(m));
   const folded = d.messages.length - visible.length;
+  // The person's message (or a button they pressed — "Research … from the
+  // market") is the last word and the desk has not answered yet: it is still
+  // working. Shown to every viewer and every pane, not only the one that
+  // clicked — research takes up to a minute and looked like nothing happened.
+  const last = d.messages.at(-1);
+  const deskWorking =
+    !pending && last?.role === "user" && Date.now() - new Date(last.at).getTime() < 3 * 60_000;
   return (
     <div className={compact ? "" : "grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]"}>
       {/* The journey: first on small screens, a sticky column on wide ones. */}
@@ -705,7 +905,7 @@ function Thread({
         <header className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
           <h2 className="font-semibold">{d.title}</h2>
           <Badge variant="outline">{STATUS_LABEL[d.status] ?? d.status}</Badge>
-          {(d.tracks?.length ?? 0) >= 2 ? (
+          {!compact && (d.tracks?.length ?? 0) >= 2 ? (
             <TracksChip
               tracks={d.tracks}
               onOpenTrack={(id) => void navigate({ search: { c: id } })}
@@ -721,6 +921,17 @@ function Thread({
             />
           ) : null}
           <DeleteThreadButton conv={d} onDeleted={onDeleted} />
+          {onFocus ? (
+            <button
+              type="button"
+              aria-label="Open this thread on its own"
+              title="Open this thread on its own"
+              className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={onFocus}
+            >
+              <Maximize2 className="size-4" />
+            </button>
+          ) : null}
           {d.requisition ? (
             <Link
               to="/requisitions/$id"
@@ -768,6 +979,11 @@ function Thread({
                 <Loader2 className="size-3 animate-spin" /> The desk is thinking…
               </p>
             </>
+          ) : deskWorking ? (
+            <p className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="size-3 animate-spin" /> The desk is working on it — research can
+              take up to a minute…
+            </p>
           ) : null}
         </div>
         <footer className="border-t border-border p-3">
@@ -908,7 +1124,7 @@ function Card({
   if (card.type === "similar_roles")
     return <SimilarRolesCard card={card} conv={conv} onChanged={onChanged} />;
   if (card.type === "needs_fanout")
-    return <NeedsFanoutCard card={card} onChanged={onChanged} inSplit={compact} />;
+    return <NeedsFanoutCard card={card} conv={conv} inSplit={compact} />;
   if (card.type === "hiring_manager_options")
     return <HiringManagerOptionsCard card={card} conv={conv} onChanged={onChanged} />;
   if (card.type === "ranked_candidates")
