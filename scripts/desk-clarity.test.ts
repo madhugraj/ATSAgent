@@ -479,6 +479,12 @@ describe("parallel hiring needs", () => {
     expect(ds.title).toBe("Data Scientist");
     expect((ds.slots as { experienceMin?: number }).experienceMin).toBe(3);
 
+    // deskSiblings never lists the thread itself: the parent sees its two
+    // children, each child sees only the parent.
+    const parentSibs = await desk.deskSiblings(orgId, c.id);
+    expect(parentSibs.map((s) => s.title)).toEqual(["Intern - AI", "Data Scientist"]);
+    const childSibs = await desk.deskSiblings(orgId, items[1]!);
+    expect(childSibs.map((s) => s.title)).toEqual(["Head of AI", "Data Scientist"]);
     for (const id of items) {
       const m = await db
         .select({ body: hiringMessages.body })

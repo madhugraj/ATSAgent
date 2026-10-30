@@ -4621,7 +4621,7 @@ export async function deskSiblings(
         where r.conversation_id = hc.id and t.status = 'open') as needs_you
     from hiring_conversations hc
     where hc.org_id = ${orgId} and hc.split_group_id = ${groupId}
-      and hc.deleted_at is null
+      and hc.id <> ${conversationId} and hc.deleted_at is null
     order by hc.created_at`)) as unknown as {
     id: string;
     title: string;
