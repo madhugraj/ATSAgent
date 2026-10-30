@@ -164,6 +164,8 @@ export type DeskConversationView = {
   canEditAgents: boolean;
   /** What the dustbin would delete for this viewer now ("chat" / "draft" + code), or null. */
   canDelete: { kind: "chat" } | { kind: "draft"; code: string } | null;
+  /** The other threads of the same fan-out (parallel hiring needs), with what needs the person. */
+  tracks: { id: string; title: string; status: string; needsYou: number; self: boolean }[];
 };
 
 export const getDeskConversation = createServerFn({ method: "GET" })
@@ -224,6 +226,10 @@ export const getDeskConversation = createServerFn({ method: "GET" })
             .filter((x): x is string => typeof x === "string")
         : [];
     });
+    const statuses = await taskStatuses(context.orgId, taskIds);
+    const selfNeedsYou = Object.values(statuses as Record<string, string>).filter(
+      (s) => s === "open",
+    ).length;
     return {
       id: conv.id,
       title: conv.title,
@@ -238,7 +244,7 @@ export const getDeskConversation = createServerFn({ method: "GET" })
         card: (m.card as DeskMessageView["card"]) ?? null,
         at: m.createdAt.toISOString(),
       })),
-      tasks: await taskStatuses(context.orgId, taskIds),
+      tasks: statuses,
       taskSubjects: await (async () => {
         if (!taskIds.length) return {};
         const { agentTasks } = await import("@db/schema");
@@ -272,6 +278,18 @@ export const getDeskConversation = createServerFn({ method: "GET" })
             ? { kind: "chat" as const }
             : { kind: "draft" as const, code: d.code }
           : null;
+      })(),
+      tracks: await (async () => {
+        const { deskSiblings } = await import("../server/desk/desk.server");
+        const sibs = await deskSiblings(context.orgId, conv.id);
+        const self = {
+          id: conv.id,
+          title: conv.title,
+          status: conv.status,
+          needsYou: selfNeedsYou,
+          self: true,
+        };
+        return [self, ...sibs.map((s) => ({ ...s, self: false }))];
       })(),
     };
   });

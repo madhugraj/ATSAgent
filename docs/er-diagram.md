@@ -1382,7 +1382,7 @@ erDiagram
 | `email_outbox` | Communications & AI settings | 16 | (idempotency_key) |
 | `email_settings` | Communications & AI settings | 11 | (org_id) |
 | `evaluations` | Candidates & pipeline | 15 | — |
-| `hiring_conversations` | — | 14 | — |
+| `hiring_conversations` | — | 15 | — |
 | `hiring_messages` | — | 8 | — |
 | `hr_incentive_schemes` | Offers & onboarding | 9 | — |
 | `hrms_employees` | — | 15 | (integrationId+externalId) |

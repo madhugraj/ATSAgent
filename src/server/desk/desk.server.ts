@@ -4523,6 +4523,13 @@ export async function splitNeeds(
   const items: { id: string; title: string }[] = [];
   const firstName = (conv.slots as DeskSlots).roleTitle || first?.title || "the first role";
   items.push({ id: conv.id, title: firstName });
+  // All threads of one fan-out share this id — the tracks chip in any of
+  // them shows the others' statuses and what needs the person.
+  const groupId = crypto.randomUUID();
+  await db
+    .update(hiringConversations)
+    .set({ splitGroupId: groupId })
+    .where(eq(hiringConversations.id, conv.id));
 
   for (const need of rest) {
     const [child] = await db
@@ -4531,6 +4538,7 @@ export async function splitNeeds(
         orgId: conv.orgId,
         createdBy: userId,
         title: need.title,
+        splitGroupId: groupId,
         // The child starts from ITS OWN details only — never the first
         // thread's role or the details said for it.
         slots: mergeSlots({} as DeskSlots, need.slots) as never,
@@ -4555,4 +4563,77 @@ export async function splitNeeds(
     body: `${plural(needs.length, "track")} running in parallel — one thread each, and I'll ask what is missing in each separately. This thread is ${firstName}; the card below opens all of them side by side.`,
     card: { type: "needs_fanout", items } as never,
   });
+}
+
+/* ------------------------------------------------- tracks chip (siblings) */
+
+export type DeskTrackView = {
+  id: string;
+  title: string;
+  status: string;
+  /** Open agent requests waiting for the person in this thread. */
+  needsYou: number;
+  /** This is the thread being viewed. */
+  self: boolean;
+};
+
+/**
+ * The other threads of the same fan-out, with what needs the person in each.
+ * Threads created before `split_group_id` existed are linked lazily from
+ * their fan-out card's track list, so older splits get the chip too.
+ */
+export async function deskSiblings(
+  orgId: string,
+  conversationId: string,
+): Promise<DeskTrackView[]> {
+  const [conv] = await db
+    .select({ splitGroupId: hiringConversations.splitGroupId })
+    .from(hiringConversations)
+    .where(and(eq(hiringConversations.id, conversationId), eq(hiringConversations.orgId, orgId)))
+    .limit(1);
+  if (!conv) return [];
+  let groupId = conv.splitGroupId;
+  if (!groupId) {
+    // Write-behind: derive the group from this thread's fan-out card.
+    const msgs = await db
+      .select({ card: hiringMessages.card })
+      .from(hiringMessages)
+      .where(eq(hiringMessages.conversationId, conversationId));
+    const fanout = msgs.find((m) => (m.card as { type?: string } | null)?.type === "needs_fanout");
+    const items =
+      (fanout?.card as { items?: { id: string }[] } | null)?.items ?? ([] as { id: string }[]);
+    if (items.length < 2) return [];
+    groupId = crypto.randomUUID();
+    await db
+      .update(hiringConversations)
+      .set({ splitGroupId: groupId })
+      .where(
+        and(
+          eq(hiringConversations.orgId, orgId),
+          inArray(hiringConversations.id, [conversationId, ...items.map((i) => i.id)]),
+        ),
+      );
+  }
+  const rows = (await db.execute(sql`
+    select hc.id, hc.title, hc.status, hc.created_by,
+      (select count(*)::int from agent_tasks t
+         join agent_runs r on r.id = t.run_id
+        where r.conversation_id = hc.id and t.status = 'open') as needs_you
+    from hiring_conversations hc
+    where hc.org_id = ${orgId} and hc.split_group_id = ${groupId}
+      and hc.deleted_at is null
+    order by hc.created_at`)) as unknown as {
+    id: string;
+    title: string;
+    status: string;
+    created_by: string;
+    needs_you: number;
+  }[];
+  return rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    status: r.status,
+    needsYou: r.needs_you,
+    self: false,
+  }));
 }

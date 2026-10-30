@@ -2452,10 +2452,17 @@ export const hiringConversations = pgTable(
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     deletedBy: uuid("deleted_by").references(() => users.id, { onDelete: "set null" }),
     deleteReason: text("delete_reason"),
+    /**
+     * Links the threads of one fan-out (parallel hiring needs, migration
+     * 0056): all threads of a split share this id, so any of them can show
+     * the tracks chip — the others' statuses and what needs the person.
+     */
+    splitGroupId: uuid("split_group_id"),
   },
   (t) => [
     index("hiring_conversations_org_idx").on(t.orgId, t.updatedAt),
     index("hiring_conversations_org_kind_idx").on(t.orgId, t.kind, t.updatedAt),
+    index("hiring_conversations_split_group_idx").on(t.splitGroupId),
   ],
 );
 

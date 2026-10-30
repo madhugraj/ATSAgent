@@ -255,6 +255,12 @@ function Composer({
  */
 function SplitDesk({ ids }: { ids: string[] }) {
   const navigate = useNavigate({ from: "/desk" });
+  const first = useQuery({
+    queryKey: ["desk", ids[0]],
+    queryFn: () => getDeskConversation({ data: { id: ids[0] } }),
+    refetchInterval: 15_000,
+  });
+  const tracks = first.data?.tracks ?? [];
   const [entered, setEntered] = useState(false);
   useEffect(() => {
     const t = setTimeout(() => setEntered(true), 30);
@@ -274,9 +280,13 @@ function SplitDesk({ ids }: { ids: string[] }) {
           {ids.length} hiring needs running in parallel — each column is its own thread, with its
           own questions, agents and approvals.
         </p>
-        <Button size="sm" variant="ghost" onClick={() => navigate({ search: { c: ids[0] } })}>
-          Exit side by side
-        </Button>
+        {tracks.length >= 2 ? (
+          <TracksChip
+            tracks={tracks}
+            onOpenTrack={(id) => void navigate({ search: { c: id } })}
+            onSideBySide={() => {}}
+          />
+        ) : null}
       </div>
       <div
         className="grid gap-3"
@@ -321,24 +331,97 @@ function NeedsFanoutCard({
           </li>
         ))}
       </ul>
-      {inSplit ? null : (
-        <>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => navigate({ search: { split: items.map((i) => i.id).join(",") } })}
-          >
-            Run side by side
-          </Button>
-          <button
-            type="button"
-            className="block text-xs text-muted-foreground underline"
-            onClick={onChanged}
-          >
-            Refresh
-          </button>
-        </>
-      )}
+    </div>
+  );
+}
+
+/**
+ * The one control for a fan-out: the tracks chip. In the header of any
+ * thread of a split, it shows how many tracks are running and what needs
+ * the person; the dropdown lists every track (open it, or all side by side).
+ * In side-by-side view it carries the Focus action instead of Exit.
+ */
+function TracksChip({
+  tracks,
+  compact,
+  onOpenTrack,
+  onSideBySide,
+}: {
+  tracks: { id: string; title: string; status: string; needsYou: number; self: boolean }[];
+  compact?: boolean | undefined;
+  onOpenTrack: (id: string) => void;
+  onSideBySide: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const waiting = tracks.filter((t) => !t.self && t.needsYou > 0);
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${
+          waiting.length
+            ? "border-amber-500/60 bg-amber-500/10 text-amber-700"
+            : "border-border text-muted-foreground"
+        }`}
+      >
+        {tracks.length} tracks
+        {waiting.length ? (
+          <>
+            <span className="inline-block size-1.5 rounded-full bg-amber-500" />
+            {waiting.length} need{waiting.length === 1 ? "s" : ""} you
+          </>
+        ) : null}
+      </button>
+      {open ? (
+        <div className="absolute right-0 z-20 mt-1 w-72 space-y-1 rounded-md border border-border bg-background p-2 shadow-lg">
+          {tracks.map((t) => (
+            <div
+              key={t.id}
+              className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-xs ${
+                t.self ? "bg-muted/60" : ""
+              }`}
+            >
+              <span className="min-w-0 flex-1 truncate font-medium">{t.title}</span>
+              <span className="shrink-0 text-muted-foreground">
+                {STATUS_LABEL[t.status] ?? t.status}
+              </span>
+              {t.needsYou > 0 ? (
+                <span className="shrink-0 font-medium text-amber-600">
+                  {t.needsYou} need{t.needsYou === 1 ? "s" : ""} you
+                </span>
+              ) : null}
+              {t.self ? (
+                <span className="shrink-0 text-muted-foreground">this thread</span>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setOpen(false);
+                    onOpenTrack(t.id);
+                  }}
+                >
+                  Open
+                </Button>
+              )}
+            </div>
+          ))}
+          <div className="border-t border-border pt-1">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="w-full text-xs"
+              onClick={() => {
+                setOpen(false);
+                onSideBySide();
+              }}
+            >
+              {compact ? "Show all side by side" : "Run side by side"}
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -529,6 +612,21 @@ function Thread({
     qc.invalidateQueries({ queryKey: ["desk_list"] });
   };
 
+  // While focused on one track, the others still move: when a sibling's
+  // open requests rise, say so — nobody should have to remember to look.
+  const prevNeeds = useRef<Record<string, number>>({});
+  useEffect(() => {
+    const tracks = q.data?.tracks ?? [];
+    if (!tracks.length) return;
+    const prev = prevNeeds.current;
+    for (const t of tracks) {
+      if (t.self) continue;
+      const before = prev[t.id];
+      if (before !== undefined && t.needsYou > before) toast(`${t.title} is waiting for you`);
+    }
+    prevNeeds.current = Object.fromEntries(tracks.map((t) => [t.id, t.needsYou]));
+  }, [q.data?.tracks]);
+
   // The fan-out made visible: when the desk splits a multi-need message into
   // parallel tracks, open them side by side (once per fan-out card).
   const navigate = useNavigate({ from: "/desk" });
@@ -598,6 +696,15 @@ function Thread({
         <header className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
           <h2 className="font-semibold">{d.title}</h2>
           <Badge variant="outline">{STATUS_LABEL[d.status] ?? d.status}</Badge>
+          {(d.tracks?.length ?? 0) >= 2 ? (
+            <TracksChip
+              tracks={d.tracks}
+              onOpenTrack={(id) => void navigate({ search: { c: id } })}
+              onSideBySide={() =>
+                void navigate({ search: { split: d.tracks.map((t) => t.id).join(",") } })
+              }
+            />
+          ) : null}
           {openTasks > 0 ? (
             <span
               className="inline-block size-2 rounded-full bg-amber-500"
