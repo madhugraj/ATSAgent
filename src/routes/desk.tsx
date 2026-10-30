@@ -2333,6 +2333,19 @@ type Why = {
   jdResearch?: boolean;
 };
 
+/**
+ * Market research fills a known role's skills and experience: offer it only
+ * once the role is named and while either is still open — from the thread's
+ * live details, not the card's snapshot. Before the role is known ("which
+ * of the two roles first?") it can only answer "which role should I research?".
+ */
+function researchable(conv: DeskConversationView): boolean {
+  const s = conv.slots as { roleTitle?: string; mustHaveSkills?: string[]; experienceMin?: number };
+  return (
+    Boolean(s.roleTitle) && (!(s.mustHaveSkills ?? []).length || s.experienceMin === undefined)
+  );
+}
+
 /** "How I read that": what the desk understood, what is missing, what it does next. */
 function Thinking({
   why,
@@ -2346,9 +2359,7 @@ function Thinking({
   const [busy, setBusy] = useState(false);
   const understood = why.understood ?? [];
   const missing = why.missing ?? [];
-  const canResearch =
-    conv?.status === "gathering" &&
-    missing.some((m) => m === "must-have skills" || m === "experience");
+  const canResearch = conv?.status === "gathering" && researchable(conv);
   async function research() {
     if (!conv) return;
     setBusy(true);
@@ -2443,7 +2454,7 @@ function HiringManagerOptionsCard({
   // manager is the question on the card — research stays available for as
   // long as those details are missing, not only on the turn that asked.
   const missing = why.missing ?? [];
-  const canResearch = open && missing.some((m) => m === "must-have skills" || m === "experience");
+  const canResearch = open && researchable(conv);
   async function research() {
     setBusy(true);
     try {
