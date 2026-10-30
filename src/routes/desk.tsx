@@ -300,7 +300,7 @@ function SplitDesk({ ids }: { ids: string[] }) {
             }`}
             style={{ transitionDelay: `${i * 180}ms` }}
           >
-            <Thread id={id} compact onDeleted={() => drop(id)} />
+            <Thread id={id} compact onDeleted={() => drop(id)} onMissing={() => drop(id)} />
           </div>
         ))}
       </div>
@@ -583,10 +583,13 @@ function DeleteThreadButton({
 function Thread({
   id,
   onDeleted,
+  onMissing,
   compact,
 }: {
   id: string;
   onDeleted: () => void;
+  /** The thread was deleted from somewhere else — drop this pane/column. */
+  onMissing?: () => void;
   /** Split-screen column: no journey panel, taller conversation. */
   compact?: boolean;
 }) {
@@ -659,6 +662,12 @@ function Thread({
       setPending(null);
     }
   }
+
+  // Deleted from somewhere else (another view, another pane): drop the
+  // pane/column instead of sitting on an error.
+  useEffect(() => {
+    if (q.error instanceof Error && /not found/i.test(q.error.message)) onMissing?.();
+  }, [q.error, onMissing]);
 
   if (q.isLoading)
     return <section className="panel p-6 text-sm text-muted-foreground">Loading…</section>;
