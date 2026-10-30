@@ -2093,7 +2093,13 @@ function CloseRoleCard({
 
 /* ------------------------------------------------- thinking & proposals */
 
-type Why = { understood?: { label: string; value: string }[]; missing?: string[]; next?: string };
+type Why = {
+  understood?: { label: string; value: string }[];
+  missing?: string[];
+  next?: string;
+  /** The optional JD details can be drafted from market practice — one press. */
+  jdResearch?: boolean;
+};
 
 /** "How I read that": what the desk understood, what is missing, what it does next. */
 function Thinking({
@@ -2128,6 +2134,18 @@ function Thinking({
       setBusy(false);
     }
   }
+  async function draftFromMarket() {
+    if (!conv) return;
+    setBusy(true);
+    try {
+      await sendDeskMessage({ data: { id: conv.id, message: "research it" } });
+      onChanged?.();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not draft");
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <details
       className="group rounded-md border border-dashed border-border bg-muted/30 px-3 py-2 text-xs"
@@ -2156,6 +2174,18 @@ function Thinking({
         <Button size="sm" variant="outline" className="mt-2" disabled={busy} onClick={research}>
           {busy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
           Research it from the market
+        </Button>
+      ) : null}
+      {why.jdResearch && conv ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="mt-2 gap-1"
+          disabled={busy}
+          onClick={() => void draftFromMarket()}
+        >
+          {busy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+          Draft responsibilities from market practice
         </Button>
       ) : null}
     </details>

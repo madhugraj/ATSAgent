@@ -3087,11 +3087,16 @@ export async function advanceGathering(
     await postMessage(conv, {
       role: "desk",
       body: `To write a strong job description for ${slots.roleTitle}: what are the 3–5 key responsibilities, who does this role report to, and what does success look like after 12 months? Any education requirement? Answer in your own words — or say "research it" and I'll draft these from typical market practice for this role.`,
-      card: thinking(
-        understood,
-        slots,
-        "All required details are in. One optional question for a deeper job description.",
-      ),
+      card: {
+        ...thinking(
+          understood,
+          slots,
+          "All required details are in. One optional question for a deeper job description.",
+        ),
+        // The optional JD details can be drafted from market practice: the
+        // person presses the button instead of typing "research it".
+        jdResearch: true,
+      },
     });
     return;
   }
