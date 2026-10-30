@@ -159,6 +159,9 @@ function DeskPage() {
   );
 }
 
+/** Fan-out cards whose side-by-side view this tab already opened (Exit must stick). */
+const autoSplitShown = new Set<string>();
+
 const STATUS_LABEL: Record<string, string> = {
   gathering: "Gathering details",
   confirming: "Choose the role",
@@ -275,7 +278,10 @@ function SplitDesk({ ids }: { ids: string[] }) {
           Exit side by side
         </Button>
       </div>
-      <div className="grid gap-3 lg:grid-cols-3">
+      <div
+        className="grid gap-3"
+        style={{ gridTemplateColumns: `repeat(${ids.length}, minmax(0, 1fr))` }}
+      >
         {ids.map((id, i) => (
           <div
             key={id}
@@ -293,7 +299,16 @@ function SplitDesk({ ids }: { ids: string[] }) {
 }
 
 /** The desk fanned a multi-need message out: open the tracks side by side. */
-function NeedsFanoutCard({ card, onChanged }: { card: DeskCardView; onChanged: () => void }) {
+function NeedsFanoutCard({
+  card,
+  onChanged,
+  inSplit,
+}: {
+  card: DeskCardView;
+  onChanged: () => void;
+  /** Rendered inside one of the side-by-side panes: the split is already on. */
+  inSplit?: boolean | undefined;
+}) {
   const navigate = useNavigate({ from: "/desk" });
   const items = (card["items"] as unknown as { id: string; title: string }[]) ?? [];
   return (
@@ -306,20 +321,24 @@ function NeedsFanoutCard({ card, onChanged }: { card: DeskCardView; onChanged: (
           </li>
         ))}
       </ul>
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={() => navigate({ search: { split: items.map((i) => i.id).join(",") } })}
-      >
-        Run side by side
-      </Button>
-      <button
-        type="button"
-        className="block text-xs text-muted-foreground underline"
-        onClick={onChanged}
-      >
-        Refresh
-      </button>
+      {inSplit ? null : (
+        <>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => navigate({ search: { split: items.map((i) => i.id).join(",") } })}
+          >
+            Run side by side
+          </Button>
+          <button
+            type="button"
+            className="block text-xs text-muted-foreground underline"
+            onClick={onChanged}
+          >
+            Refresh
+          </button>
+        </>
+      )}
     </div>
   );
 }
@@ -517,10 +536,11 @@ function Thread({
     .reverse()
     .find((m) => (m.card as { type?: string } | null)?.type === "needs_fanout");
   const fanoutItems = (fanout?.card as { items?: { id: string }[] } | null)?.items ?? [];
-  const [splitShown, setSplitShown] = useState("");
   useEffect(() => {
-    if (!compact && fanoutItems.length >= 2 && splitShown !== fanout?.id) {
-      setSplitShown(fanout?.id ?? "");
+    // Once per fan-out card per session: exiting side by side must not snap
+    // the user straight back in when the thread remounts.
+    if (!compact && fanoutItems.length >= 2 && !autoSplitShown.has(fanout?.id ?? "")) {
+      autoSplitShown.add(fanout?.id ?? "");
       void navigate({ search: { split: fanoutItems.map((i) => i.id).join(",") } });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -622,6 +642,7 @@ function Thread({
               conv={d}
               onChanged={refresh}
               superseded={superseded.get(m.id) ?? null}
+              compact={compact}
             />
           ))}
           {pending ? (
@@ -713,12 +734,15 @@ function Message({
   conv,
   onChanged,
   superseded,
+  compact,
 }: {
   m: DeskMessageView;
   conv: DeskConversationView;
   onChanged: () => void;
   /** Why this message's card no longer applies (it is folded), or null. */
   superseded?: string | null;
+  /** Rendered inside a side-by-side pane: cards drop actions that manage the view. */
+  compact?: boolean | undefined;
 }) {
   const [reopen, setReopen] = useState(false);
   if (superseded && !reopen)
@@ -741,7 +765,7 @@ function Message({
       {m.body ? <Bubble role={m.role} body={m.body} {...(who ? { who } : {})} /> : null}
       {m.card ? (
         <div className="ml-9 space-y-2">
-          <Card card={m.card} conv={conv} onChanged={onChanged} />
+          <Card card={m.card} conv={conv} onChanged={onChanged} compact={compact} />
           {m.card.type !== "reasoning" && m.card["why"] ? (
             <Thinking why={m.card["why"] as Why} />
           ) : null}
@@ -757,14 +781,18 @@ function Card({
   card,
   conv,
   onChanged,
+  compact,
 }: {
   card: DeskCardView;
   conv: DeskConversationView;
   onChanged: () => void;
+  /** Inside a side-by-side pane: no view-managing actions on cards. */
+  compact?: boolean | undefined;
 }) {
   if (card.type === "similar_roles")
     return <SimilarRolesCard card={card} conv={conv} onChanged={onChanged} />;
-  if (card.type === "needs_fanout") return <NeedsFanoutCard card={card} onChanged={onChanged} />;
+  if (card.type === "needs_fanout")
+    return <NeedsFanoutCard card={card} onChanged={onChanged} inSplit={compact} />;
   if (card.type === "hiring_manager_options")
     return <HiringManagerOptionsCard card={card} conv={conv} onChanged={onChanged} />;
   if (card.type === "ranked_candidates")
