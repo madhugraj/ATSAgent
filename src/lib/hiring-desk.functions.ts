@@ -333,7 +333,12 @@ export const chooseDeskRole = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ id: z.string().uuid(), choice: Choice }).parse(d))
   .handler(async ({ data, context }) => {
     const conv = await accessible(context, data.id);
-    if (conv.status !== "confirming") throw new Error("The role has already been settled.");
+    // A thread still in gathering with all required details present is
+    // simply one turn behind: accept the choice instead of failing silently
+    // behind a toast (the similar-roles card can be visible while the status
+    // flip has not landed).
+    if (conv.status !== "gathering" && conv.status !== "confirming")
+      throw new Error("The role has already been settled.");
     await registered();
     const desk = await import("../server/desk/desk.server");
     const { assertRequisitionInOrg } = await import("../server/guards");

@@ -4629,14 +4629,16 @@ export async function deskSiblings(
   if (!groupId) {
     // Write-behind: derive the group from this thread's fan-out card.
     const msgs = await db
-      .select({ card: hiringMessages.card })
+      .select({ id: hiringMessages.id, card: hiringMessages.card })
       .from(hiringMessages)
       .where(eq(hiringMessages.conversationId, conversationId));
     const fanout = msgs.find((m) => (m.card as { type?: string } | null)?.type === "needs_fanout");
     const items =
       (fanout?.card as { items?: { id: string }[] } | null)?.items ?? ([] as { id: string }[]);
     if (items.length < 2) return [];
-    groupId = crypto.randomUUID();
+    // The fan-out card's message id IS the group id: deterministic, so every
+    // thread of the split derives and stamps the same value whenever it runs.
+    groupId = fanout!.id;
     await db
       .update(hiringConversations)
       .set({ splitGroupId: groupId })
