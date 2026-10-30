@@ -3118,14 +3118,34 @@ export async function advanceGathering(
   });
 }
 
+// The research model answers in its own shape: numbers may arrive as strings,
+// reasoning can run long, lists can overshoot. Accept the reasonable forms and
+// normalise here — a strict parse turned usable research into "incomplete".
+const researchNumLpa = z.preprocess(
+  (v) => (typeof v === "string" ? (v.trim() === "" ? null : Number(v)) : v),
+  z.number().min(0).max(1000).nullable().default(null),
+);
+const researchSkillList = z.preprocess(
+  (v) =>
+    Array.isArray(v)
+      ? v
+          .map((s) => String(s).trim().slice(0, 60))
+          .filter(Boolean)
+          .slice(0, 10)
+      : [],
+  z.array(z.string().min(1).max(60)).max(10).default([]),
+);
 const Proposal = z.object({
-  mustHaveSkills: z.array(z.string().min(1).max(60)).max(10).default([]),
-  goodToHaveSkills: z.array(z.string().min(1).max(60)).max(10).default([]),
-  experienceMin: z.number().min(0).max(40).nullable().default(null),
-  experienceMax: z.number().min(0).max(50).nullable().default(null),
-  budgetLpaMin: z.number().min(0).max(1000).nullable().default(null),
-  budgetLpaMax: z.number().min(0).max(1000).nullable().default(null),
-  reasoning: z.string().max(1200).default(""),
+  mustHaveSkills: researchSkillList.default([]),
+  goodToHaveSkills: researchSkillList.default([]),
+  experienceMin: researchNumLpa,
+  experienceMax: researchNumLpa,
+  budgetLpaMin: researchNumLpa,
+  budgetLpaMax: researchNumLpa,
+  reasoning: z.preprocess(
+    (v) => (typeof v === "string" ? v.slice(0, 1200) : ""),
+    z.string().max(1200).default(""),
+  ),
   sources: z
     .array(z.object({ title: z.string().max(200), url: z.string().max(500) }))
     .max(8)
@@ -3179,6 +3199,11 @@ export async function researchRole(
   }
   const parsed = Proposal.safeParse(res.data);
   if (!parsed.success) {
+    // Diagnoseable: which fields the model got wrong stays server-side.
+    log.warn("desk.research_parse_failed", {
+      org_id: conv.orgId,
+      issues: parsed.error.issues.slice(0, 5).map((i) => `${i.path.join(".")}: ${i.message}`),
+    });
     await postMessage(conv, {
       role: "desk",
       body: "The research came back incomplete. Tell me the details yourself, or ask again.",
@@ -4554,6 +4579,9 @@ export async function splitNeeds(
           ? FALLBACK_QUESTION[missing[0]!]
           : "All the required details are in — I'll look for similar roles next."
       }`,
+      // Same card as any gathering turn: Research it from the market works
+      // from the first message in a fanned-out thread too.
+      ...(missing.length ? { card: thinking([], childSlots, nextStepText(missing[0]!)) } : {}),
     });
     items.push({ id: child!.id, title: need.title });
   }
