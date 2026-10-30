@@ -143,3 +143,20 @@ seed)`) plays the whole call through `FakeLine` + the injectable voice session, 
    arguments), and the reason is said to "you". Setting up: the POC env file had CRLF line
    endings, so `SIP_*` values carried a "\r" and the PBX dropped every request — the app now
    trims them.
+2. **2026-10-30, second call (0.1.1).** The silence fix worked: it read the offer out right
+   after the go-ahead. But it never said which organisation or role or where the candidate
+   stood, it read the figure and gave in, and when pushed it **said 60 L and a 5 L bonus
+   that nobody approved — above the 55 L ceiling** — without asking `state_offer` for the
+   improved figure. Nothing was committed (the discussion stayed "countered", the call heard
+   no yes), and the graders flagged both figures. Fixed in 0.2.0:
+   - **A negotiator.** It opens with the organisation, the role and where the candidate
+     stands (rounds completed, selected — never scores), asks what matters to them, builds
+     interest from approved facts only (the organisation profile's candidate-facing items,
+     the role's approved job description; any line with an amount is dropped), frames the
+     whole package around their priorities, and explores before its one move.
+   - **A live figure guard.** The gateway streams the assistant's words as they are spoken
+     (`onSaying`); the moment it says a figure it was not given, the session drops the queued
+     audio, makes it correct itself ("please disregard that figure"), refuses any further
+     figure or yes, hands off and flags the call (`guard_stopped`, an audit entry and a
+     thread warning to the HR head — no amounts).
+   - **Graders:** a figure above the ceiling is its own critical breach (`above_ceiling`).

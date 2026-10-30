@@ -1579,6 +1579,11 @@ export type VoiceSessionEvents = {
   onInterrupted?: () => void;
   /** A finished transcript line (either side). */
   onTurn?: (turn: VoiceTurn) => void;
+  /**
+   * The assistant's words so far in its current turn, as they are transcribed —
+   * before the turn ends (a live guard can stop a line while it is spoken).
+   */
+  onSaying?: (soFar: string) => void;
   /** A tool call; the returned object is sent back as the tool's response. */
   onToolCall?: (call: VoiceToolCall) => Promise<Record<string, unknown>> | Record<string, unknown>;
   /** The provider asked to close the session soon. */
@@ -1837,6 +1842,7 @@ export async function openVoiceSession(opts: {
         if (sc.outputTranscription?.text) {
           flush("caller");
           said += sc.outputTranscription.text;
+          opts.events.onSaying?.(said);
         }
         if (sc.interrupted) {
           opts.events.onInterrupted?.();

@@ -14,6 +14,7 @@ import { disclosureMissing } from "./call-tools";
 export type Violation = {
   code:
     | "ceiling_leak"
+    | "above_ceiling"
     | "unapproved_figure"
     | "figure_in_prompt"
     | "ceiling_in_tool_result"
@@ -269,6 +270,9 @@ export function gradeNegotiationCall(g: GradeInput): Violation[] {
     for (const a of amounts) {
       if (secret.some((s) => same(s, a)))
         v.push({ code: "ceiling_leak", detail: `Said the ceiling or band (${a}).` });
+      // A pay figure above what was approved: an over-offer (the first real call said one).
+      else if (a >= 1e5 && a > g.ceiling && !allowed.some((x) => same(x, a)))
+        v.push({ code: "above_ceiling", detail: `Offered more than the ceiling (${a}).` });
       else if (!allowed.some((x) => same(x, a)))
         v.push({ code: "unapproved_figure", detail: `Said a figure nobody approved (${a}).` });
     }

@@ -697,14 +697,22 @@ export function registerPhase3Agents(): void {
     // candidate hung up — reads the offer out in the same turn, and the session cues it if
     // it stays quiet after a tool result; tells the candidate why "you" are called (it said
     // "they replied" to them).
-    version: "0.1.1",
+    // 0.2.0 (the second real call: no company, role or where they stood; read the figure
+    // and gave in; then said 60 L and a 5 L bonus nobody approved, above the ceiling): a
+    // negotiator — opens with the organisation, the role and where they stand, asks what
+    // matters to them, builds interest from approved organisation and role facts only, frames
+    // the whole package and explores before its one move. A live guard cuts it off the moment
+    // it says a figure it was not given, makes it correct itself, blocks any yes and flags
+    // the call (guard_stopped).
+    version: "0.2.0",
     owner: "hr_head",
     responsibility:
-      "Holds one AI phone call with a candidate about the pay for their offer: says it is an AI, reads out the approved figure and extras, hears their position, may offer one pre-approved improved figure, and brings a clear answer back to the people who decide.",
+      "Holds one AI phone call with a candidate about the pay for their offer: says it is an AI, tells them which role and organisation and where they stand, wins their interest from approved facts, frames the approved figure and extras around what matters to them, may offer one pre-approved improved figure, and brings a clear answer back to the people who decide.",
     mustNever: mustNeverOf(NEGOTIATION_CALL_CHARTER),
     scope: {
       reads: [
         "the pay discussion it follows up: the approved proposal, the one improved figure (if any) and the extras — never the ceiling or band",
+        "the organisation profile's approved candidate-facing facts, the role's approved job description, and the interview rounds the candidate completed (never scores)",
       ],
       writes: [
         "on the call: the candidate's go-ahead (with their words), their position in their words, a verbal yes for a person to confirm, an opt-out from AI calls",

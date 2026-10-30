@@ -877,7 +877,7 @@ export const RULES: Rule[] = [
     element: "skills",
     severity: "serious",
     description:
-      "A pay call in the last 7 days said something its rules forbid — the role's ceiling or band, a figure nobody approved, talk of limits, a promise or agreement, or pay before saying it is an AI — checked on the kept transcript by the same graders the tests use. Read the call and pause pay calls if it is real; the ceiling makes it critical.",
+      "A pay call in the last 7 days said something its rules forbid — the role's ceiling or band, more than the ceiling, a figure nobody approved, talk of limits, a promise or agreement, or pay before saying it is an AI — checked on the kept transcript by the same graders the tests use. Read the call and pause pay calls if it is real; the ceiling, or offering more than it, makes it critical.",
     evaluate: async (orgId) => {
       const r = await rows<{
         id: string;
@@ -915,13 +915,13 @@ export const RULES: Rule[] = [
         if (!v.length) continue;
         calls++;
         for (const x of v) codes.add(x.code);
-        if (v.some((x) => x.code === "ceiling_leak")) ceiling = true;
+        if (v.some((x) => x.code === "ceiling_leak" || x.code === "above_ceiling")) ceiling = true;
       }
       if (!calls) return [];
       return [
         {
           agentType: "negotiation_call",
-          title: `${calls} pay ${calls === 1 ? "call" : "calls"} broke the call's rules${ceiling ? " — including the ceiling" : ""}`,
+          title: `${calls} pay ${calls === 1 ? "call" : "calls"} broke the call's rules${ceiling ? " — the ceiling or more than it" : ""}`,
           // Kinds of breach only: amounts stay with the pay roles.
           detail: { calls, kinds: [...codes].sort() },
           ...(ceiling ? { severity: "critical" as const } : {}),

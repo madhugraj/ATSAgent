@@ -48,6 +48,7 @@ import {
   type NegotiationCallOutcomeKind,
   type NegotiationCallState,
 } from "./negotiation-call-tools";
+import { amountsIn } from "./negotiation-graders";
 import { negotiationSystemPrompt } from "./negotiation-prompt";
 import { dialNumber } from "./phone";
 import { Resampler } from "./resample";
@@ -68,6 +69,25 @@ export const NEGOTIATION_REPLY_CUE_MS = 1_200;
  * go-ahead until the candidate hung up.
  */
 export const NEGOTIATION_TOOL_SILENCE_CUE_MS = 2_500;
+
+/**
+ * The live figure guard (pure; unit-tested): a figure in what the assistant is
+ * saying that it may not say right now — anything but the proposal, the extras,
+ * and the improved figure once it was given. Returns the first such amount.
+ */
+export function unapprovedFigure(
+  soFar: string,
+  f: { proposalCtc: number; stepCtc: number | null; leverAmounts: number[] },
+  improvedGiven: boolean,
+): number | null {
+  const ok = [f.proposalCtc, ...f.leverAmounts, ...(improvedGiven && f.stepCtc ? [f.stepCtc] : [])];
+  for (const a of amountsIn(soFar)) if (!ok.some((x) => Math.abs(x - a) < 500)) return a;
+  return null;
+}
+
+/** What the assistant is told when the guard stops it (no figure in it). */
+export const GUARD_CORRECTION =
+  '(STOP. You said a pay figure you were not given — it is not approved. Say now, in one sentence: "I\'m sorry, I misspoke — please disregard that figure; the hiring team will confirm the details with you." Then thank them, request_human_call with why "other", say goodbye and end the call. Say no other figure.)';
 
 /** Tools after which the assistant must say something (not end the call). */
 const SPEAK_AFTER = new Set([
@@ -179,6 +199,9 @@ async function place(
   // Real clock: when a tool result that needs a spoken follow-up came back with no audio since.
   let awaitingSpeechSince: number | null = null;
   let cue: (() => void) | null = null;
+  // The live guard (fires once): cut the line, correct, hand off, flag.
+  let guard: ((amount: number) => void) | null = null;
+  const leverAmounts = brief.figures.levers.joiningBonus ? [brief.figures.levers.joiningBonus] : [];
 
   const events: VoiceSessionEvents = {
     onAudio: (pcm) => {
@@ -188,6 +211,15 @@ async function place(
       line.play(down.process(pcm));
     },
     onInterrupted: () => line.clear(),
+    onSaying: (soFar) => {
+      if (state.halted) return;
+      const bad = unapprovedFigure(
+        soFar,
+        { ...brief.figures, leverAmounts },
+        state.stated.improved,
+      );
+      if (bad !== null) guard?.(bad);
+    },
     onTurn: (t) => {
       if (t.who === "ai") {
         awaitingSpeechSince = null;
@@ -259,6 +291,17 @@ async function place(
       lastError: opened.message,
     });
   const session: VoiceSession = opened.session;
+  guard = (amount) => {
+    state.halted = true;
+    // Drop what is queued to play: the rest of the line never reaches the candidate.
+    line.clear();
+    // Never the figure itself (the session does not even know the ceiling).
+    log.error("negotiation_call.guard_tripped", {
+      call_id: call.id,
+      scale: amount >= 1e5 ? "lakh+" : "small",
+    });
+    session.sendText(GUARD_CORRECTION);
+  };
   cue = () => {
     log.warn("negotiation_call.cue_after_tool", { call_id: call.id });
     session.sendText(
@@ -334,7 +377,9 @@ async function place(
   const result = negotiationOutcome(state);
   const endedAt = now();
   return settle(orgId, call, brief, state, result, endedAt, {
-    endReason: state.endReason ?? (result === "no_answer" ? why : result),
+    endReason: state.halted
+      ? "guard_stopped"
+      : (state.endReason ?? (result === "no_answer" ? why : result)),
     extra: {
       startedAt: new Date(answeredAt),
       endedAt: new Date(endedAt),
@@ -445,7 +490,14 @@ async function settle(
       entityType: "offer_negotiation",
       entityId: brief.negotiationId,
       // No amounts (the pay discussion's convention).
-      detail: { callId: call.id, result, endReason, verbalYes: !!heard?.agreed },
+      detail: {
+        callId: call.id,
+        result,
+        endReason,
+        verbalYes: !!heard?.agreed,
+        // The live guard stopped it after a figure it was not given.
+        guardStopped: !!state?.halted,
+      },
     }).catch((e) => log.warn("negotiation_call.audit_failed", { call_id: call.id, error: e }));
   }
   if (call.agentRunId)
@@ -453,7 +505,12 @@ async function settle(
       log.warn("negotiation_call.run_close_failed", { call_id: call.id, error: e as Error }),
     );
   if (status !== "no_answer")
-    await postToThread(orgId, call, brief, result === "gave_up" ? endReason : result).catch((e) =>
+    await postToThread(
+      orgId,
+      call,
+      brief,
+      state?.halted ? "guard_stopped" : result === "gave_up" ? endReason : result,
+    ).catch((e) =>
       log.warn("negotiation_call.thread_post_failed", { call_id: call.id, error: e as Error }),
     );
   return { status, endReason, screeningRunId: null };
@@ -479,6 +536,7 @@ async function postToThread(
     opt_out: `${name} asked not to be called by the AI assistant. No AI call will dial them again.`,
     wrong_person: `The pay call for ${name} reached someone else.`,
     already_settled: `The pay discussion with ${name} was settled before the call, so no call was needed.`,
+    guard_stopped: `On the pay call with ${name}, the assistant said a figure it was not given. The call stopped it, it corrected itself and handed over — the HR head should call ${name} before anything else is said about pay, and review the call.`,
   };
   await desk.postMessage(
     { id: convId, orgId },

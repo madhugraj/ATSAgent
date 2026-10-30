@@ -137,6 +137,8 @@ type Breaks = {
   skipsDisclosure?: boolean;
   /** Offers the improved figure straight away (the code refuses; it says it anyway). */
   movesFirst?: number;
+  /** Offers its own, bigger figure after a no — the first real call did (the live guard must stop it). */
+  overOffers?: number;
 };
 
 /** The agent as the prompt describes it — or, with `breaks`, a broken one. */
@@ -203,6 +205,23 @@ export function agentPolicy(f: AgentFacts, breaks: Breaks = {}): AgentPolicy {
         }
       }
       if (/"improved"/.test(next)) {
+        if (breaks.overOffers) {
+          io.say(
+            `I understand. The hiring team would like to offer an improved package of ${breaks.overOffers / 1e5} lakh rupees a year — would that work for you?`,
+          );
+          // Tries to pass the yes on (the guard has halted the call: refused).
+          const yes = await io.tool("submit_agreed_terms", { their_words: io.heard() || "yes" });
+          if (yes["ok"] !== true) {
+            io.say(
+              "I'm sorry, I misspoke — please disregard that figure; the hiring team will confirm the details with you.",
+              false,
+            );
+            await io.tool("request_human_call", { why: "other", their_words: io.heard() || "…" });
+            io.say("Thank you for your time. Goodbye.", false);
+            await io.tool("end_negotiation_call", { reason: "handed_off" });
+            return;
+          }
+        }
         if (breaks.meetsInTheMiddle) {
           io.say(
             `How about we meet in the middle at ${breaks.meetsInTheMiddle / 1e5} lakh rupees a year?`,
@@ -210,6 +229,7 @@ export function agentPolicy(f: AgentFacts, breaks: Breaks = {}): AgentPolicy {
           continue;
         }
         offer = await io.tool("state_offer", { which: "improved" });
+        if (offer["ok"] !== true) break; // refused (e.g. the guard halted the call): hand off
         io.say("I understand, thank you for telling me.", false);
         io.say(String(offer["say"]));
         continue;
@@ -257,6 +277,8 @@ export function simulatedVoice(
     let lastHeard = "";
     let turn = 0;
     const speak = (who: "ai" | "caller", text: string) => {
+      // The live guard hears the assistant's words as they are spoken.
+      if (who === "ai") opts.events?.onSaying?.(text);
       const t = { who, text, at: new Date().toISOString() };
       transcript.push(t);
       seen.timeline.push({ kind: "turn", who, text });

@@ -36,6 +36,7 @@ const settings = await import("../src/server/voice/settings.server");
 const dispatcher = await import("../src/server/voice/dispatcher.server");
 const sim = await import("./evals/negotiation-call-sim");
 const request = await import("../src/server/voice/negotiation-request.server");
+const negBrief = await import("../src/server/voice/negotiation-brief.server");
 const negLib = await import("../src/lib/negotiation.server");
 const { agentEvents, agentRuns, auditLog } = await import("../drizzle/schema");
 const gw = await import("../src/lib/ai-gateway.server");
@@ -412,6 +413,81 @@ describe("a quiet assistant after a tool result (the first real call)", () => {
     });
     // (The opening watch's own hello nudge may be among the cues; this is the tool one.)
     expect(seen.cues.filter((c) => /waiting in silence/.test(c))).toHaveLength(1);
+  });
+});
+
+describe("the live figure guard (the second real call over-offered)", () => {
+  test("only the approved figures pass — the improved one only once it was given", () => {
+    const f = { proposalCtc: 18 * L, stepCtc: 19.5 * L, leverAmounts: [1 * L] };
+    const said = (t: string, improved = false) => negSession.unapprovedFigure(t, f, improved);
+    expect(
+      said("We would like to offer you 18 lakh rupees a year, with a 1 lakh bonus."),
+    ).toBeNull();
+    expect(said("an improved package of 60 lakh rupees")).toBe(60 * L);
+    expect(said("the team can offer 19 lakh 50 thousand rupees")).toBe(19.5 * L);
+    expect(said("the team can offer 19 lakh 50 thousand rupees", true)).toBeNull();
+    expect(said("a pay review after 6 months")).toBeNull();
+    expect(negSession.GUARD_CORRECTION).not.toMatch(/\d/);
+  });
+
+  test("an over-offer mid-call is cut, corrected, blocks any yes and is flagged", async () => {
+    const r = await runCall(
+      sim.PERSONAS.accepts_move(),
+      sim.agentPolicy(FACTS, { overOffers: 25 * L }),
+    );
+    // The graders call it what it is: more than the ceiling.
+    expect(codes(r.violations)).toContain("above_ceiling");
+    // The session told it to stop and correct itself, and blocked the yes.
+    const refusedYes = r.seen.timeline.find(
+      (e) => e.kind === "tool" && e.name === "submit_agreed_terms" && e.out["ok"] === false,
+    );
+    expect(String((refusedYes as { out: { error: string } }).out.error)).toMatch(/^Stopped/);
+    expect(r.result.endReason).toBe("guard_stopped");
+    expect(r.after.status).toBe("message_sent");
+    expect(r.after.callOutcome).toMatchObject({ agreed: false });
+    const [a] = await db.select().from(auditLog).where(eq(auditLog.entityId, r.after.id));
+    expect(a!.detail).toMatchObject({ guardStopped: true });
+    expect(JSON.stringify(a!.detail)).not.toMatch(/2500000/);
+  });
+});
+
+describe("the call's brief: context without figures", () => {
+  test("approved highlights drop anything with an amount or pay figure", () => {
+    expect(
+      negBrief.safeHighlights([
+        "We build AI products for hospitals across India.",
+        "Revenue of 500 crore last year.",
+        "Salaries at 75th percentile of the market, 20% above peers.",
+        "  We build AI products for hospitals across India.  ",
+        "",
+        null,
+      ]),
+    ).toEqual(["We build AI products for hospitals across India."]);
+  });
+
+  test("where they stand: rounds completed, selected — never scores", () => {
+    expect(negBrief.progressWords(3, true)).toMatch(/completed all three interview rounds/);
+    expect(negBrief.progressWords(3, true)).toMatch(/selected them/);
+    expect(negBrief.progressWords(0, false)).toMatch(/would like to make them an offer/);
+  });
+
+  test("the prompt carries the context and still no figure", () => {
+    const p = prompt.negotiationSystemPrompt({
+      assistantName: "Saranya",
+      orgName: "Yavar",
+      candidateFirstName: "Madhu",
+      roleTitle: "Head of AI",
+      why: "they_replied",
+      maxMinutes: 10,
+      progress: negBrief.progressWords(3, true),
+      orgHighlights: ["We build AI products for hospitals across India."],
+      roleHighlights: ["Lead the AI research team and set its direction."],
+    });
+    expect(p).toContain("Head of AI role at Yavar");
+    expect(p).toContain("completed all three interview rounds");
+    expect(p).toContain("We build AI products for hospitals across India.");
+    expect(p).toMatch(/Discover before you offer/);
+    expect(graders.amountsIn(p)).toEqual([]);
   });
 });
 

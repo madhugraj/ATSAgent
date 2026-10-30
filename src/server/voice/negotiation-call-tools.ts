@@ -164,6 +164,11 @@ export type NegotiationCallState = {
   agreement: { which: Which; ctc: number; words: string } | null;
   handOff: { why: (typeof HAND_OFF_WHY)[number]; words: string } | null;
   endReason: NegotiationEndReason | null;
+  /**
+   * The live guard stopped the assistant (it said a figure it was not given): no
+   * more figures and no yes is passed on — a person takes it from here.
+   */
+  halted?: boolean;
 };
 
 export const freshNegotiationState = (): NegotiationCallState => ({
@@ -209,6 +214,12 @@ export function applyNegotiationTool(
         "Ask whether they have a few minutes to talk about the pay, and record their answer first.",
     };
   const heard = heardAfterAsk?.trim();
+  if (state.halted && (name === "state_offer" || name === "submit_agreed_terms"))
+    return {
+      ok: false,
+      error:
+        "Stopped: you said a figure you were not given. Correct yourself, say the hiring team will come back to them, request_human_call and end the call.",
+    };
   switch (name as NegotiationToolName) {
     case "record_permission": {
       const { granted, their_words } = parsed.data as { granted: boolean; their_words: string };

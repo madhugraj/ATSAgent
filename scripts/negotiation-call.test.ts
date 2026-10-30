@@ -245,7 +245,7 @@ describe("the negotiation charter (two-way)", () => {
     const r = rules(ch);
     expect(r).not.toContain("Discuss pay, the role's budget or band, or any offer.");
     expect(r).toMatch(/ceiling, budget or band/);
-    expect(r).toMatch(/any figure other than the approved ones/);
+    expect(r).toMatch(/any figure a tool did not give it/);
     expect(r).toMatch(/Agree, accept or confirm the offer/);
     expect(r).toMatch(/Name or describe any member of staff/);
     expect(charter.charterBlock(ch)).toContain(ch.purpose);
