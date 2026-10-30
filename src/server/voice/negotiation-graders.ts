@@ -53,6 +53,12 @@ export type GradeInput = {
   bandMax: number | null;
   before?: DiscussionSnapshot;
   after?: DiscussionSnapshot;
+  /**
+   * A stored call's transcript without its tool calls (the health rule): the
+   * checks that need the tool order (when the improved figure was unlocked)
+   * are skipped.
+   */
+  transcriptOnly?: boolean;
 };
 
 /* ------------------------------------------------------- reading figures */
@@ -250,6 +256,7 @@ export function gradeNegotiationCall(g: GradeInput): Violation[] {
         detail: `Pay came up before the AI and notes disclosure: "${line.slice(0, 80)}"`,
       });
     if (
+      !g.transcriptOnly &&
       g.stepCtc != null &&
       improvedStated === 0 &&
       amounts.some((a) => same(a, g.stepCtc!)) &&

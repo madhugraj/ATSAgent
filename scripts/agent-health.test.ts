@@ -1021,3 +1021,147 @@ describe("organisation context rules", () => {
     });
   });
 });
+
+describe("AI pay calls (negotiation_call)", () => {
+  test("a broken call, an unconfirmed yes and too few yeses are flagged; amounts never in the issue", async () => {
+    const { applications, candidates, requisitions, offerNegotiations, screeningCalls } =
+      await import("../drizzle/schema");
+    const L = 100_000;
+    const [q] = await db
+      .insert(requisitions)
+      .values({
+        orgId,
+        code: `REQ-NC-${stamp}`,
+        title: "SRE",
+        status: "approved",
+        ctcBandMax: String(21 * L),
+      } as never)
+      .returning({ id: requisitions.id });
+    const [c] = await db
+      .insert(candidates)
+      .values({ orgId, fullName: "Meera", email: `meera-nc-${stamp}@x.local` })
+      .returning({ id: candidates.id });
+    const [a] = await db
+      .insert(applications)
+      .values({ orgId, requisitionId: q!.id, candidateId: c!.id, stage: "l3" })
+      .returning({ id: applications.id });
+    const [n] = await db
+      .insert(offerNegotiations)
+      .values({
+        orgId,
+        applicationId: a!.id,
+        candidateId: c!.id,
+        status: "message_sent",
+        ceiling: String(20 * L),
+        ceilingApprovedBy: "hr_head",
+        proposedCtc: String(18 * L),
+        callStepCtc: String(19.5 * L),
+        levers: { joiningBonus: L },
+      })
+      .returning({ id: offerNegotiations.id });
+    const ruleOf = async (rule: string) => (await open()).find((i) => i.rule === rule);
+    const turn = (who: "ai" | "caller", text: string) => ({
+      who,
+      text,
+      at: new Date().toISOString(),
+    });
+    const good = [
+      turn("caller", "Hello?"),
+      turn("ai", "Hello, this is Saranya, an AI recruiting assistant — am I speaking with Meera?"),
+      turn("caller", "Yes."),
+      turn(
+        "ai",
+        "Thank you. I make notes of this call for the hiring team. Do you have a few minutes?",
+      ),
+      turn("caller", "Sure."),
+      turn(
+        "ai",
+        "The hiring team would like to offer you 18 lakh rupees a year. Along with that, the offer includes a one-time joining bonus of 1 lakh rupees. Would that work for you?",
+      ),
+      turn("caller", "I was hoping for 22."),
+      turn(
+        "ai",
+        "Having heard you, the hiring team can offer 19 lakh 50 thousand rupees a year. Would that work for you?",
+      ),
+      turn("caller", "Yes, that works."),
+    ];
+    const call = (o: { transcript?: unknown[]; endReason?: string } = {}) =>
+      db
+        .insert(screeningCalls)
+        .values({
+          orgId,
+          candidateId: c!.id,
+          applicationId: a!.id,
+          purpose: "negotiation",
+          negotiationId: n!.id,
+          status: "completed",
+          consentAt: new Date(),
+          endReason: o.endReason ?? "handed_off",
+          transcript: (o.transcript ?? good) as never,
+        })
+        .returning({ id: screeningCalls.id });
+
+    // A call that kept its rules is not flagged.
+    await call({ endReason: "verbal_agreement" });
+    await evaluate();
+    expect(await ruleOf("negotiation_call.leak_suspected")).toBeUndefined();
+
+    // One that spoke the ceiling is critical; the issue names kinds, never amounts.
+    await call({
+      transcript: [
+        ...good.slice(0, 6),
+        turn("ai", "Between us, the ceiling for this role is 20 lakh rupees a year."),
+      ],
+    });
+    await evaluate();
+    const leak = await ruleOf("negotiation_call.leak_suspected");
+    expect(leak).toMatchObject({ agentType: "negotiation_call", severity: "critical" });
+    expect(JSON.stringify(leak)).not.toMatch(/2000000|20 lakh/);
+    expect((leak!.detail as { kinds: string[] }).kinds).toContain("ceiling_leak");
+
+    // A yes heard on a call and left unconfirmed past the window.
+    const heard = (hoursAgo: number) => ({
+      callId: crypto.randomUUID(),
+      agreed: true,
+      which: "improved" as const,
+      agreedCtc: 19.5 * L,
+      theirWords: "Yes, that works.",
+      at: new Date(Date.now() - hoursAgo * 3600_000).toISOString(),
+    });
+    await db
+      .update(offerNegotiations)
+      .set({ callOutcome: heard(1) })
+      .where(eq(offerNegotiations.id, n!.id));
+    await evaluate();
+    expect(await ruleOf("negotiation_call.unconfirmed_yes")).toBeUndefined();
+    await db
+      .update(offerNegotiations)
+      .set({ callOutcome: heard(HEALTH.verbalConfirmHours + 1) })
+      .where(eq(offerNegotiations.id, n!.id));
+    await evaluate();
+    expect(await ruleOf("negotiation_call.unconfirmed_yes")).toMatchObject({
+      agentType: "negotiation_call",
+      severity: "warning",
+    });
+    // Confirmed by a person: cleared.
+    await db
+      .update(offerNegotiations)
+      .set({ status: "agreed" })
+      .where(eq(offerNegotiations.id, n!.id));
+    await evaluate();
+    expect(await ruleOf("negotiation_call.unconfirmed_yes")).toBeUndefined();
+
+    // Enough connected calls with too few yeses (1 yes so far, + 4 hand-offs = 1 of 6).
+    for (let i = 0; i < HEALTH.minNegotiationCalls14d - 1; i++) await call();
+    await evaluate();
+    expect(await ruleOf("negotiation_call.few_agreements")).toMatchObject({
+      agentType: "negotiation_call",
+    });
+    for (let i = 0; i < 2; i++) await call({ endReason: "verbal_agreement" });
+    await evaluate();
+    expect(await ruleOf("negotiation_call.few_agreements")).toBeUndefined();
+
+    await db.delete(screeningCalls).where(eq(screeningCalls.negotiationId, n!.id));
+    await db.delete(requisitions).where(eq(requisitions.id, q!.id));
+  });
+});

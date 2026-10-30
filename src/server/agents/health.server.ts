@@ -68,6 +68,12 @@ export const HEALTH = {
   minSchedulingCalls7d: 5,
   /** …fewer than this share ending in a booking is flagged. */
   schedulingBookedShare: 0.3,
+  /** Pay calls: a yes heard on a call and not confirmed by a person for this many hours. */
+  verbalConfirmHours: 24,
+  /** …with at least this many connected pay calls in 14 days… */
+  minNegotiationCalls14d: 5,
+  /** …fewer than this share ending in a yes is flagged. */
+  negotiationYesShare: 0.2,
   /** Candidates asking not to be called by the AI assistant, in 7 days. */
   aiCallOptOuts7d: 2,
   /** A booked interview this close with an interviewer who said they can't make it (hours). */
@@ -862,6 +868,111 @@ export const RULES: Rule[] = [
           agentType: "scheduling_call",
           title: `${x.booked} of ${x.connected} scheduling calls booked a time`,
           detail: { connected: x.connected, booked: x.booked },
+        },
+      ];
+    },
+  },
+  {
+    id: "negotiation_call.leak_suspected",
+    element: "skills",
+    severity: "serious",
+    description:
+      "A pay call in the last 7 days said something its rules forbid — the role's ceiling or band, a figure nobody approved, talk of limits, a promise or agreement, or pay before saying it is an AI — checked on the kept transcript by the same graders the tests use. Read the call and pause pay calls if it is real; the ceiling makes it critical.",
+    evaluate: async (orgId) => {
+      const r = await rows<{
+        id: string;
+        transcript: { who: "ai" | "caller"; text: string }[];
+        proposed_ctc: string;
+        call_step_ctc: string | null;
+        ceiling: string;
+        band_max: string | null;
+        levers: { joiningBonus?: number | null } | null;
+      }>(sql`
+        select c.id, c.transcript, n.proposed_ctc, n.call_step_ctc, n.ceiling, q.ctc_band_max band_max, n.levers
+        from screening_calls c
+        join offer_negotiations n on n.id = c.negotiation_id and n.org_id = c.org_id
+        join applications a on a.id = n.application_id and a.org_id = n.org_id
+        join requisitions q on q.id = a.requisition_id and q.org_id = a.org_id
+        where c.org_id = ${orgId} and c.purpose = 'negotiation'
+          and jsonb_array_length(c.transcript) > 0
+          and c.updated_at >= now() - interval '7 days'`);
+      if (!r.length) return [];
+      const { gradeNegotiationCall } = await import("../voice/negotiation-graders");
+      const codes = new Set<string>();
+      let calls = 0;
+      let ceiling = false;
+      for (const c of r) {
+        const v = gradeNegotiationCall({
+          system: "",
+          timeline: c.transcript.map((t) => ({ kind: "turn", who: t.who, text: t.text })),
+          proposalCtc: Number(c.proposed_ctc),
+          stepCtc: c.call_step_ctc == null ? null : Number(c.call_step_ctc),
+          leverAmounts: c.levers?.joiningBonus ? [Number(c.levers.joiningBonus)] : [],
+          ceiling: Number(c.ceiling),
+          bandMax: c.band_max == null ? null : Number(c.band_max),
+          transcriptOnly: true,
+        });
+        if (!v.length) continue;
+        calls++;
+        for (const x of v) codes.add(x.code);
+        if (v.some((x) => x.code === "ceiling_leak")) ceiling = true;
+      }
+      if (!calls) return [];
+      return [
+        {
+          agentType: "negotiation_call",
+          title: `${calls} pay ${calls === 1 ? "call" : "calls"} broke the call's rules${ceiling ? " — including the ceiling" : ""}`,
+          // Kinds of breach only: amounts stay with the pay roles.
+          detail: { calls, kinds: [...codes].sort() },
+          ...(ceiling ? { severity: "critical" as const } : {}),
+        },
+      ];
+    },
+  },
+  {
+    id: "negotiation_call.unconfirmed_yes",
+    element: "hitl",
+    severity: "warning",
+    description: `A candidate said yes on an AI pay call more than ${HEALTH.verbalConfirmHours} hours ago and nobody has confirmed it — nothing is agreed, and no offer is drafted, until TA or the HR head confirms it on the candidate's page.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number }>(sql`
+        select count(*)::int n from offer_negotiations
+        where org_id = ${orgId}
+          and status in ('open','message_sent','countered','call_requested','expired')
+          and (call_outcome ->> 'agreed')::boolean
+          and (call_outcome ->> 'at')::timestamptz < now() - make_interval(hours => ${HEALTH.verbalConfirmHours})`);
+      const n = r[0]?.n ?? 0;
+      if (!n) return [];
+      return [
+        {
+          agentType: "negotiation_call",
+          title: `${n} ${n === 1 ? "yes" : "yeses"} from pay calls waiting to be confirmed`,
+          detail: { candidates: n },
+        },
+      ];
+    },
+  },
+  {
+    id: "negotiation_call.few_agreements",
+    element: "skills",
+    severity: "warning",
+    description: `Of ${HEALTH.minNegotiationCalls14d} or more pay calls in 14 days where the candidate agreed to talk, fewer than ${Math.round(HEALTH.negotiationYesShare * 100)}% ended in a yes — the approved figures may be too far from expectations, or the calls may not land well; read a few.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ connected: number; yes: number }>(sql`
+        select count(*)::int connected,
+          count(*) filter (where end_reason = 'verbal_agreement')::int yes
+        from screening_calls
+        where org_id = ${orgId} and purpose = 'negotiation' and consent_at is not null
+          and status not in ('dialling', 'in_progress')
+          and updated_at >= now() - interval '14 days'`);
+      const x = r[0];
+      if (!x || x.connected < HEALTH.minNegotiationCalls14d) return [];
+      if (x.yes / x.connected >= HEALTH.negotiationYesShare) return [];
+      return [
+        {
+          agentType: "negotiation_call",
+          title: `${x.yes} of ${x.connected} pay calls ended in a yes`,
+          detail: { connected: x.connected, yes: x.yes },
         },
       ];
     },

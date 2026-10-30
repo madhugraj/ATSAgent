@@ -1,6 +1,6 @@
 # Stage 2 — Negotiation call agent (voice)
 
-Status: **design approved; N0–N3 built** (2026-10-30); N4–N5 to come. Builds on the voice
+Status: **design approved; N0–N4 built** (2026-10-30); N5 (a real call, capacity) to come. Builds on the voice
 foundation of stage 1 (`docs/voice-screening-agent.md`, `docs/voice-scheduling-call-plan.md`)
 and on the text pay discussion (Offer agent 1.5.0, migration 0039,
 `src/lib/negotiation.server.ts`).
@@ -119,7 +119,15 @@ seed)`) plays the whole call through `FakeLine` + the injectable voice session, 
   `negotiation.needs_call` event (a counter, a call request or a closed link) wakes the
   Offer agent; a closed link (`expired`) may be called about; a pop-up asks TA / the HR
   head to confirm what a call heard.
-- **N4** health rules (`negotiation_call.leak_suspected`, `.no_agreement`,
-  `.unconfirmed_verbal`) + tests; README, SECURITY, roadmap.
+- **N4 (built)** health rules in `src/server/agents/health.server.ts`, tested in
+  `scripts/agent-health.test.ts`:
+  - `negotiation_call.leak_suspected` (serious; critical for the ceiling) — the same
+    graders over the kept transcripts of the past week's calls (transcript-only mode:
+    the checks that need the tool order are skipped). The issue lists kinds of breach,
+    never amounts.
+  - `negotiation_call.unconfirmed_yes` (warning) — a yes heard on a call that no person
+    has confirmed after 24 hours.
+  - `negotiation_call.few_agreements` (warning) — five or more connected calls in 14
+    days with under 20% ending in a yes.
 - **N5** a real call with an operator playing the candidate; then capacity
   (`VOICE_MAX_CONCURRENT` 1→2→4, PBX trunk cap, RTP pacing on the worker's CPU).
