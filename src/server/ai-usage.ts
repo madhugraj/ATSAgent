@@ -47,6 +47,7 @@ export const AI_FEATURES = [
   "agent_distribution",
   "agent_screening_call",
   "agent_scheduling_call",
+  "agent_negotiation_call",
   "agent_followup",
   "agent_org_context",
   // Organisation context agent (docs/org-context-agent-plan.md): the org desk

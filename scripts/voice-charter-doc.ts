@@ -9,6 +9,7 @@
 import { writeFileSync } from "node:fs";
 
 import {
+  NEGOTIATION_CALL_CHARTER,
   SCHEDULING_CALL_CHARTER,
   SCREENING_CALL_CHARTER,
   type Rule,
@@ -55,7 +56,7 @@ export function charterDoc(): string {
     "contact given is the organisation's mailbox.",
     "",
   ];
-  for (const ch of [SCREENING_CALL_CHARTER, SCHEDULING_CALL_CHARTER]) {
+  for (const ch of [SCREENING_CALL_CHARTER, SCHEDULING_CALL_CHARTER, NEGOTIATION_CALL_CHARTER]) {
     out.push(`## ${NAME[ch.agent]} (\`${ch.agent}\`)`, "", `**Purpose:** ${ch.purpose}`, "");
     out.push(...rows("Must say", ch.mustSay));
     out.push(...rows("May talk about only", ch.may));

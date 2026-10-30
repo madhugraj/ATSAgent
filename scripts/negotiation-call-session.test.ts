@@ -35,6 +35,9 @@ const prompt = await import("../src/server/voice/negotiation-prompt");
 const settings = await import("../src/server/voice/settings.server");
 const dispatcher = await import("../src/server/voice/dispatcher.server");
 const sim = await import("./evals/negotiation-call-sim");
+const request = await import("../src/server/voice/negotiation-request.server");
+const negLib = await import("../src/lib/negotiation.server");
+const { agentEvents, agentRuns, auditLog } = await import("../drizzle/schema");
 const gw = await import("../src/lib/ai-gateway.server");
 type VoiceOpts = Parameters<typeof gw.aiVoiceSession>[0];
 
@@ -78,6 +81,7 @@ beforeAll(async () => {
       } as never)
       .returning({ id: requisitions.id })
   )[0]!.id;
+  await gw.writeProviderKey(orgId, "google", "test-api-key-not-real");
   await settings.setPhoneScreeningPolicyCore(
     orgId,
     { userId, memberEmail: hr },
@@ -263,6 +267,9 @@ describe("a whole negotiation call (reference agent vs personas)", () => {
       theirWords: "Yes, that works for me.",
     });
     expect(r.row.consentWords).toBe("Sure, go ahead.");
+    // The call is a run of the Negotiation call agent (its ledger and trace).
+    const [run] = await db.select().from(agentRuns).where(eq(agentRuns.id, r.row.agentRunId!));
+    expect(run).toMatchObject({ agentType: "negotiation_call", status: "done" });
     expect(r.row.transcript.length).toBeGreaterThan(0);
   });
 
@@ -458,5 +465,121 @@ describe("negative control: broken agents fail the graders", () => {
       bandMax: FIG.bandMax,
     });
     expect(codes(v)).toEqual(["ceiling_in_tool_result", "figure_in_prompt"]);
+  });
+});
+
+/* ------------------------------------------- asking for a call (N3) */
+
+describe("asking for a negotiation call", () => {
+  test("the one improved figure: above the proposal, at or under the ceiling", () => {
+    const n = { proposedCtc: 18 * L, ceiling: 20 * L };
+    expect(request.stepProblem(null, n)).toBeNull();
+    expect(request.stepProblem(19.5 * L, n)).toBeNull();
+    expect(request.stepProblem(20 * L, n)).toBeNull();
+    expect(request.stepProblem(18 * L, n)).toMatch(/above the proposal/);
+    expect(request.stepProblem(21 * L, n)).toMatch(/ceiling/);
+  });
+
+  test("arranged with the figure; audited without amounts; one at a time", async () => {
+    const { negotiation } = await arranged({ status: "countered" });
+    await db.delete(screeningCalls).where(eq(screeningCalls.negotiationId, negotiation.id));
+    await expect(
+      request.requestNegotiationCall({
+        orgId,
+        negotiationId: negotiation.id,
+        step: 21 * L,
+        requestedBy: userId,
+        requestedRunId: null,
+        actor: hr,
+      }),
+    ).rejects.toThrow(/ceiling/);
+    const r = await request.requestNegotiationCall({
+      orgId,
+      negotiationId: negotiation.id,
+      step: 19 * L,
+      requestedBy: userId,
+      requestedRunId: null,
+      actor: hr,
+    });
+    const [n] = await db
+      .select()
+      .from(offerNegotiations)
+      .where(eq(offerNegotiations.id, negotiation.id));
+    expect(Number(n!.callStepCtc)).toBe(19 * L);
+    expect(n!.status).toBe("countered");
+    const [c] = await db.select().from(screeningCalls).where(eq(screeningCalls.id, r.callId));
+    expect(c).toMatchObject({ purpose: "negotiation", status: "approved" });
+    const [a] = await db.select().from(auditLog).where(eq(auditLog.entityId, negotiation.id));
+    expect(a!.action).toBe("negotiation.voice_call_requested");
+    // No amount in the audit: only the fields it is meant to carry, and no rupee figure.
+    expect(Object.keys(a!.detail as object).sort()).toEqual([
+      "applicationId",
+      "byPerson",
+      "callId",
+      "dueAt",
+      "improvedFigure",
+    ]);
+    expect(JSON.stringify(a!.detail)).not.toMatch(/\b(1900000|2000000|1800000)\b/);
+    const again = await request.checkNegotiationCall(orgId, negotiation.id, { byPerson: true });
+    expect(again).toMatchObject({ ok: false, reason: expect.stringMatching(/already arranged/) });
+  });
+
+  test("an agent never asks twice once the assistant spoke with them; a person may", async () => {
+    const { negotiation, call } = await arranged();
+    await db
+      .update(screeningCalls)
+      .set({ status: "completed", consentAt: new Date() })
+      .where(eq(screeningCalls.id, call.id));
+    expect(await request.checkNegotiationCall(orgId, negotiation.id)).toMatchObject({
+      ok: false,
+    });
+    expect(
+      await request.checkNegotiationCall(orgId, negotiation.id, { byPerson: true }),
+    ).toMatchObject({ ok: true });
+  });
+
+  test("settled or opted out: no call", async () => {
+    const settled = await arranged({ status: "agreed" });
+    expect(await request.checkNegotiationCall(orgId, settled.negotiation.id)).toMatchObject({
+      ok: false,
+    });
+    const out = await arranged();
+    await db
+      .update(candidates)
+      .set({ aiCallOptOutAt: new Date() })
+      .where(eq(candidates.id, out.candidateId));
+    expect(
+      await request.checkNegotiationCall(orgId, out.negotiation.id, { byPerson: true }),
+    ).toMatchObject({ ok: false, reason: expect.stringMatching(/not to be called/) });
+  });
+
+  test("a closed link raises negotiation.needs_call for the Offer agent", async () => {
+    const { negotiation } = await arranged();
+    await db.delete(screeningCalls).where(eq(screeningCalls.negotiationId, negotiation.id));
+    await db
+      .update(offerNegotiations)
+      .set({ closesAt: new Date(Date.now() - 60_000) })
+      .where(eq(offerNegotiations.id, negotiation.id));
+    await negLib.runNegotiationSweep(orgId);
+    const ev = await db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.subjectId, negotiation.applicationId));
+    expect(ev.map((e) => e.type)).toContain("negotiation.needs_call");
+    expect(await request.checkNegotiationCall(orgId, negotiation.id)).toMatchObject({
+      ok: true,
+    });
+  });
+
+  test("one click: a person confirms what the call heard, and only then is it agreed", async () => {
+    const r = await runCall(sim.PERSONAS.accepts_move());
+    expect(r.after.status).toBe("message_sent");
+    const heard = r.after.callOutcome!;
+    const out = await negLib.recordNegotiationOutcome(
+      { orgId, userId, memberEmail: hr },
+      r.after.id,
+      { agreed: true, agreedCtc: heard.agreedCtc!, note: "Confirmed from the AI pay call" },
+    );
+    expect(out.status).toBe("agreed");
   });
 });

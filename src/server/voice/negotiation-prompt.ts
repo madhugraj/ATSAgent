@@ -12,7 +12,7 @@ export type NegotiationFacts = {
   candidateFirstName: string;
   roleTitle: string;
   /** Why we are calling, from the pay discussion's state (never an amount). */
-  why: "follow_up" | "they_asked" | "they_replied";
+  why: "follow_up" | "they_asked" | "they_replied" | "no_reply";
   maxMinutes: number;
 };
 
@@ -21,6 +21,7 @@ const WHY: Record<NegotiationFacts["why"], string> = {
   they_asked: "because they asked for a call about the pay for the role",
   they_replied:
     "because they replied to our pay message with a different figure, and the hiring team wanted to talk it through",
+  no_reply: "to follow up the message we sent about the pay for the role they have been offered",
 };
 
 export function negotiationSystemPrompt(f: NegotiationFacts): string {

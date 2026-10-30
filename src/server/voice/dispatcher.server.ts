@@ -30,10 +30,10 @@ export async function dueCalls(now: Date, limit = 50) {
       -- Never a candidate who asked not to be called by the AI assistant.
       and cand.ai_call_opt_out_at is null
       and c.due_at is not null and c.due_at <= ${now.toISOString()}::timestamptz
-      -- A pay discussion call only while the discussion is still open.
+      -- A pay discussion call only while the discussion is unsettled (CALLABLE_NEGOTIATION).
       and (c.purpose <> 'negotiation' or exists (
         select 1 from offer_negotiations n where n.id = c.negotiation_id and n.org_id = c.org_id
-          and n.status in ('open', 'message_sent', 'countered', 'call_requested')))
+          and n.status in ('open', 'message_sent', 'countered', 'call_requested', 'expired')))
       -- Scheduling and pay calls are tried at most twice (…_MAX_ATTEMPTS).
       and (c.status = 'callback'
         or c.attempt < case when c.purpose in ('scheduling', 'negotiation') then 2

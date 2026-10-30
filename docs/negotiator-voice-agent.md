@@ -1,6 +1,6 @@
 # Stage 2 — Negotiation call agent (voice)
 
-Status: **design approved; N0–N2 built** (2026-10-30); N3–N5 to come. Builds on the voice
+Status: **design approved; N0–N3 built** (2026-10-30); N4–N5 to come. Builds on the voice
 foundation of stage 1 (`docs/voice-screening-agent.md`, `docs/voice-scheduling-call-plan.md`)
 and on the text pay discussion (Offer agent 1.5.0, migration 0039,
 `src/lib/negotiation.server.ts`).
@@ -112,11 +112,13 @@ seed)`) plays the whole call through `FakeLine` + the injectable voice session, 
   open, two attempts), `negotiation-graders.ts`, and the harness
   (`scripts/evals/negotiation-call-sim.ts`, `scripts/negotiation-call-session.test.ts`):
   a reference agent against nine personas, and five broken agents the graders must
-  catch. Until N3 registers the agent, a call opens no agent run (its AI usage is
-  ledgered under the feature, not a run).
-- **N3** manifest `negotiation_call` 0.1.0 (owner `hr_head`, high risk), Offer agent
+  catch.
+- **N3 (built)** manifest `negotiation_call` 0.1.0 (owner `hr_head`, high risk), Offer agent
   `request_negotiation_call` (1.6.0), the "Call to negotiate" button with the improved
-  figure, the pre-filled confirm, evals, `bun run agents:lock`.
+  figure, the pre-filled confirm, evals, `bun run agents:lock`. Also: a
+  `negotiation.needs_call` event (a counter, a call request or a closed link) wakes the
+  Offer agent; a closed link (`expired`) may be called about; a pop-up asks TA / the HR
+  head to confirm what a call heard.
 - **N4** health rules (`negotiation_call.leak_suspected`, `.no_agreement`,
   `.unconfirmed_verbal`) + tests; README, SECURITY, roadmap.
 - **N5** a real call with an operator playing the candidate; then capacity

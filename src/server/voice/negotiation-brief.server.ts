@@ -15,7 +15,7 @@ import {
   screeningCalls,
   type NegotiationStatus,
 } from "@db/schema";
-import { OPEN_NEGOTIATION } from "@/lib/negotiation.server";
+import { CALLABLE_NEGOTIATION } from "@/lib/negotiation.server";
 import { db } from "../db";
 import type { NegotiationFigures } from "./negotiation-call-tools";
 import type { NegotiationFacts } from "./negotiation-prompt";
@@ -28,13 +28,14 @@ export const NEGOTIATION_MAX_MINUTES = 8;
 export function whyOf(status: NegotiationStatus): NegotiationFacts["why"] {
   if (status === "call_requested") return "they_asked";
   if (status === "countered") return "they_replied";
+  if (status === "expired") return "no_reply";
   return "follow_up";
 }
 
 export type NegotiationBrief = {
   negotiationId: string;
   status: NegotiationStatus;
-  /** The discussion is still open (otherwise the call is not placed). */
+  /** The discussion can still be called about (otherwise the call is not placed). */
   open: boolean;
   candidateName: string;
   facts: NegotiationFacts;
@@ -77,7 +78,7 @@ export async function loadNegotiationBrief(
   return {
     negotiationId: row.negotiationId,
     status: row.status,
-    open: OPEN_NEGOTIATION.includes(row.status),
+    open: CALLABLE_NEGOTIATION.includes(row.status),
     candidateName: row.fullName,
     facts: {
       assistantName: policy.assistantName,
