@@ -138,6 +138,8 @@ jobs:
         run: bun test scripts/voice-charter.test.ts
       - name: Scheduling call (tools, brief, timing, booking, call-back, opt-out)
         run: bun test scripts/scheduling-call.test.ts
+      - name: "Negotiation call (no amounts in tools, one move, a yes is passed on)"
+        run: bun test scripts/negotiation-call.test.ts
       - name: Interview with (confidential panel wording)
         run: bun test scripts/interview-with.test.ts
       - name: Interview panels (profiles, hiring manager, plan, panels, stand-ins)

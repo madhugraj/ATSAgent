@@ -2779,6 +2779,19 @@ export type NegotiationStatus =
   | "expired"
   | "cancelled";
 
+/** What an AI negotiation call heard (migration 0057). A person confirms it. */
+export type NegotiationCallOutcome = {
+  callId: string;
+  /** A clear yes to the figure just read back. */
+  agreed: boolean;
+  /** Which approved figure: the proposal or the one improved figure. */
+  which: "proposal" | "improved" | null;
+  agreedCtc: number | null;
+  /** What the candidate said, as heard. */
+  theirWords: string;
+  at: string;
+};
+
 /** What can make an offer work besides base pay. */
 export type NegotiationLevers = {
   joiningBonus?: number | null;
@@ -2809,6 +2822,10 @@ export const offerNegotiations = pgTable(
     proposedCtc: numeric("proposed_ctc", { precision: 14, scale: 2 }).notNull(),
     levers: jsonb("levers").$type<NegotiationLevers>().notNull().default({}),
     talkTrack: text("talk_track").notNull().default(""),
+    /** The one improved figure an AI negotiation call may offer (≤ ceiling); null = hold (0057). */
+    callStepCtc: numeric("call_step_ctc", { precision: 14, scale: 2 }),
+    /** What an AI negotiation call heard; pre-fills the confirm form, never sets the status. */
+    callOutcome: jsonb("call_outcome").$type<NegotiationCallOutcome | null>(),
     message: text("message"),
     token: text("token").unique(),
     dueAt: timestamp("due_at", { withTimezone: true }),
@@ -2834,7 +2851,13 @@ export const offerNegotiations = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     decidedAt: timestamp("decided_at", { withTimezone: true }),
   },
-  (t) => [index("offer_negotiations_app_idx").on(t.applicationId, t.createdAt)],
+  (t) => [
+    index("offer_negotiations_app_idx").on(t.applicationId, t.createdAt),
+    check(
+      "offer_negotiations_call_step_check",
+      sql`${t.callStepCtc} is null or (${t.callStepCtc} > ${t.proposedCtc} and ${t.callStepCtc} <= ${t.ceiling})`,
+    ),
+  ],
 );
 
 /* ------------------------------------------------------- phone screening */
@@ -2944,7 +2967,7 @@ export type ScreeningCallDetails = {
 };
 
 /** What the candidate said for one kit question, as the call agent recorded it. */
-export type VoiceCallPurpose = "screening" | "scheduling";
+export type VoiceCallPurpose = "screening" | "scheduling" | "negotiation";
 
 export type ScreeningCallAnswer = {
   question_id: string;
@@ -3027,6 +3050,10 @@ export const screeningCalls = pgTable(
       .$type<string[]>()
       .notNull()
       .default(sql`'[]'::jsonb`),
+    /** Negotiation: the pay discussion this call follows up (0057). */
+    negotiationId: uuid("negotiation_id").references(() => offerNegotiations.id, {
+      onDelete: "set null",
+    }),
     lastError: text("last_error"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -3040,7 +3067,10 @@ export const screeningCalls = pgTable(
     index("screening_calls_application_idx").on(t.applicationId, t.createdAt),
     index("screening_calls_candidate_idx").on(t.candidateId),
     index("screening_calls_slot_offer_idx").on(t.slotOfferId),
-    check("screening_calls_purpose_check", sql`${t.purpose} in ('screening', 'scheduling')`),
+    check(
+      "screening_calls_purpose_check",
+      sql`${t.purpose} in ('screening', 'scheduling', 'negotiation')`,
+    ),
     check(
       "screening_calls_alternates_check",
       sql`jsonb_typeof(${t.alternates}) = 'array' and jsonb_array_length(${t.alternates}) <= 3`,
@@ -3048,6 +3078,11 @@ export const screeningCalls = pgTable(
     check(
       "screening_calls_scheduling_offer_check",
       sql`${t.purpose} <> 'scheduling' or ${t.slotOfferId} is not null`,
+    ),
+    index("screening_calls_negotiation_idx").on(t.negotiationId),
+    check(
+      "screening_calls_negotiation_check",
+      sql`${t.purpose} <> 'negotiation' or ${t.negotiationId} is not null`,
     ),
   ],
 );

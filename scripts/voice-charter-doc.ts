@@ -18,6 +18,7 @@ import {
 const NAME: Record<VoiceCharter["agent"], string> = {
   screening_call: "Screening call agent",
   scheduling_call: "Scheduling call agent",
+  negotiation_call: "Negotiation call agent",
 };
 
 const rows = (title: string, rs: Rule[]) => [

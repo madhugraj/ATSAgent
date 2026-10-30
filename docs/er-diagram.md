@@ -751,6 +751,7 @@ erDiagram
     text purpose
     uuid slot_offer_id FK
     jsonb alternates
+    uuid negotiation_id FK
     text last_error "nullable"
     timestamptz created_at
     timestamptz updated_at
@@ -785,6 +786,7 @@ erDiagram
   screening_calls }o--o| users : "requested_by"
   screening_calls }o--o| screening_runs : "screening_run_id"
   screening_calls }o--o| interview_slot_offers : "slot_offer_id"
+  screening_calls }o--o| offer_negotiations : "negotiation_id"
 ```
 
 ## Offers & onboarding
@@ -1289,6 +1291,7 @@ erDiagram
 | `screening_calls` | `application_id` | `applications` | no action |
 | `screening_calls` | `candidate_id` | `candidates` | cascade |
 | `screening_calls` | `kit_id` | `screening_kits` | no action |
+| `screening_calls` | `negotiation_id` | `offer_negotiations` | no action |
 | `screening_calls` | `org_id` | `organizations` | cascade |
 | `screening_calls` | `requested_by` | `users` | no action |
 | `screening_calls` | `requested_run_id` | `agent_runs` | no action |
@@ -1398,7 +1401,7 @@ erDiagram
 | `match_scores` | Candidates & pipeline | 26 | — |
 | `member_interviewer_profiles` | — | 9 | (member_id) |
 | `notification_states` | — | 7 | — |
-| `offer_negotiations` | — | 21 | — |
+| `offer_negotiations` | — | 23 | — |
 | `offers` | Offers & onboarding | 14 | — |
 | `onboarding_documents` | Offers & onboarding | 23 | — |
 | `ontology_snapshots` | Intelligence | 11 | — |
@@ -1419,7 +1422,7 @@ erDiagram
 | `role_panels` | — | 8 | (requisitionId+level) |
 | `round_substitutes` | — | 9 | — |
 | `salary_benchmarks` | Intelligence | 15 | — |
-| `screening_calls` | Screening & interviews | 33 | — |
+| `screening_calls` | Screening & interviews | 34 | — |
 | `screening_kits` | Screening & interviews | 11 | — |
 | `screening_prep_jobs` | Screening & interviews | 10 | (application_id) |
 | `screening_runs` | Screening & interviews | 23 | — |
