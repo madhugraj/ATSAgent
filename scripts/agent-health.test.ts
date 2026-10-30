@@ -607,6 +607,34 @@ describe("an agent re-reading instead of working", () => {
   });
 });
 
+describe("a hiring manager who never answers the expert interview", () => {
+  test("flagged once the questions are older than the limit", async () => {
+    const id = await run("expert_interview");
+    const [t] = await db
+      .insert(agentTasks)
+      .values({
+        orgId,
+        runId: id,
+        kind: "clarification",
+        title: "Questions",
+        body: "1. What matters?",
+        assigneeRole: "hiring_manager",
+      } as never)
+      .returning({ id: agentTasks.id });
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "expert_interview.unanswered")).toBeUndefined();
+    await db
+      .update(agentTasks)
+      .set({ createdAt: ago(60 * (HEALTH.expertUnansweredHours + 1)) })
+      .where(eq(agentTasks.id, t!.id));
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "expert_interview.unanswered")).toMatchObject({
+      agentType: "expert_interview",
+      severity: "warning",
+    });
+  });
+});
+
 describe("scheduler heartbeat", () => {
   test("a tick records liveness; an old tick reads as stopped", async () => {
     await heartbeatAndMaybeEvaluate({ claimed: 0 });

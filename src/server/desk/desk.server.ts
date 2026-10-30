@@ -541,6 +541,7 @@ async function agentOn(orgId: string, type: AgentType): Promise<boolean> {
 }
 
 const AGENT_NAME: Record<string, string> = {
+  expert_interview: "Role expert interview agent",
   publishing: "Publishing agent",
   requisition: "Requisition agent",
   jd: "JD agent",
@@ -1415,7 +1416,9 @@ export async function onTaskOpened(
     agentType: run.agentType,
     body:
       task.kind === "clarification"
-        ? "I have a question before I continue."
+        ? run.agentType === "expert_interview"
+          ? "A few questions for the hiring manager about what this role really needs."
+          : "I have a question before I continue."
         : task.kind === "gate"
           ? step
             ? `${step.replace(" · ", " — waiting for the ")}.`
@@ -1428,7 +1431,10 @@ export async function onTaskOpened(
                 : (task.proposedAction as { args?: { subject?: { type?: string } } } | null)?.args
                       ?.subject?.type === "panel_substitute"
                   ? "A panellist can't make an interview — approve the stand-in, or decline and say who instead."
-                  : "This needs a decision."
+                  : (task.proposedAction as { args?: { subject?: { type?: string } } } | null)?.args
+                        ?.subject?.type === "expert_brief"
+                    ? "The role's expert brief, written from the hiring manager's answers — the hiring manager approves it or says what to change."
+                    : "This needs a decision."
           : revision
             ? `Revised as you asked ("${revision.reason}")${
                 revision.changes.length
@@ -2510,6 +2516,49 @@ export async function startStage(
     INTAKE_GOAL(req.code, req.title),
     conv.requisitionId,
     "I've asked the Intake & matching agent to search the talent pool and rank the best matches.",
+  );
+}
+
+/**
+ * Ask the role's hiring manager what the role really needs (the Role expert
+ * interview agent): its questions go to that hiring manager's inbox, and the
+ * brief it writes comes back to them for approval.
+ */
+export async function startExpertInterview(
+  conv: Conversation,
+  userId: string,
+): Promise<string | null> {
+  if (!conv.requisitionId) {
+    await postMessage(conv, {
+      role: "desk",
+      body: "There is no role yet to interview the hiring manager about — create the requisition first.",
+    });
+    return null;
+  }
+  const [req] = await db
+    .select({
+      code: requisitions.code,
+      title: requisitions.title,
+      hm: requisitions.hiringManagerMemberId,
+    })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, conv.orgId)))
+    .limit(1);
+  if (!req) return null;
+  if (!req.hm) {
+    await postMessage(conv, {
+      role: "desk",
+      body: "Set the role's hiring manager first (in the interview plan card) — they are the one the questions go to.",
+    });
+    return null;
+  }
+  return startForThread(
+    conv,
+    "expert_interview",
+    userId,
+    `Interview the hiring manager of ${req.code} "${req.title}" about what the role really needs, and propose its expert brief for their approval.`,
+    conv.requisitionId,
+    "I've asked the Role expert interview agent to put a few questions to the hiring manager. Their answers become the role's expert brief, which they approve.",
   );
 }
 

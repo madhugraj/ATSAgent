@@ -61,6 +61,14 @@ Plan: `docs/org-context-agent-plan.md` (decided 2026-10-27; O0 built 2026-10-27,
 - [x] O2 — monthly website re-read (the sweep starts one run per due organisation; changed pages become draft items, never auto-approved) and five health rules (`context.profile_missing`, `context.profile_stale`, `context.reread_failed`, `context.review_waiting`, `context.items_refused`)
 - [ ] O3 domain packs; O4 voice agents read the profile; O5 pilot
 
+## Role expert interview agent (2026-10-30)
+
+- [x] Role expert interview agent 1.0.0 (owner HR head, migration 0057): from the desk's interview-plan card ("Ask the hiring manager what this role needs"), it puts at most two rounds of role-specific questions to the role's own hiring manager (a question for the hiring manager on a run about one role now goes to that role's hiring manager, not to every hiring manager), then proposes the role's expert brief — must-haves and why, nice-to-haves, deal-breakers, first months, success after six months, 3–6 screening questions with strong / weak answers, each round's focus and rubric — written only from their answers.
+- [x] The `expert_brief` gate: the role's hiring manager (else the HR head) approves, sends back or declines; approving stores the brief on the role and applies each round's focus and rubric to the interview plan; a stale card is refused; audited (`requisition.expert_brief_approved`).
+- [x] Screening kits ask the approved brief's questions (with its strong / weak answers), weigh its must-haves and probe its deal-breakers.
+- [x] Health rule `expert_interview.unanswered` (questions open over 72 h); rehearsal "interviews the hiring manager and proposes the brief".
+- [ ] Start it from the requisition page, and a hiring manager's own chat with the agent (today: questions arrive as a card in their inbox).
+
 ## Distribution agent (2026-10-21)
 
 - [x] Hand posting with the companion (2026-10-22): the Distribution agent 1.1.0 plans roles for portals a person posts on ("waiting to be posted"); ATSIQ Capture 1.16.0 on Internshala and Apna lists them, fills the portal's form in the person's own signed-in browser (never submits), records the posting from the portal's own listing page, and sends applicants into the role credited to the portal (`/api/public/distribution`, capture `channel`); the daily check chases postings still waiting after 2 days

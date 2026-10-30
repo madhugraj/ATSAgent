@@ -11,6 +11,10 @@
     "version": "1.2.4",
     "hash": "8dfb69f233494b568fb4102819419ba4c9a01ceca0e4b8a0c3e3b37fec69ff07"
   },
+  "expert_interview": {
+    "version": "1.0.0",
+    "hash": "719d56ca8baa148071de7c0bd726c9c4eced9e6f2aba01cddc712721388aec3d"
+  },
   "followup": {
     "version": "1.4.4",
     "hash": "6ae2844058dad5536d89165bcb0c560f66f8c5918e42b01145d45100d571f715"

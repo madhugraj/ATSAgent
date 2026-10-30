@@ -37,7 +37,7 @@ type PanelGateInfo<S = PanelApprovalSubject> = {
 };
 
 /** The role's hiring manager decides when they can sign in; else the HR head. */
-async function deciderOf(
+export async function deciderOf(
   orgId: string,
   hmMemberId: string | null,
 ): Promise<{ assigneeUserId: string | undefined; decider: string }> {

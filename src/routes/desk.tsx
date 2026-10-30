@@ -49,6 +49,7 @@ import {
   rescoreDeskCandidates,
   startDeskSourcing,
   startDeskDistribution,
+  startDeskExpertInterview,
   chooseDeskRole,
   chooseHiringManagerOption,
   closeDeskRole,
@@ -1141,7 +1142,13 @@ function Card({
     return <Thinking why={card as unknown as Why} conv={conv} onChanged={onChanged} />;
   if (card.type === "jd") return <JdCard card={card} />;
   if (card.type === "interview_plan")
-    return <InterviewPlanThreadCard requisitionId={String(card["requisitionId"])} />;
+    return (
+      <InterviewPlanThreadCard
+        requisitionId={String(card["requisitionId"])}
+        conv={conv}
+        onChanged={onChanged}
+      />
+    );
   if (card.type === "next_steps")
     return <NextStepsCard card={card} conv={conv} onChanged={onChanged} />;
   if (card.type === "rescore") return <RescoreCard card={card} conv={conv} onChanged={onChanged} />;
@@ -2708,7 +2715,61 @@ function BudgetPaused({
 
 /** A job description shown in the thread: the saved text of one version. */
 /** The role's hiring manager and interview plan, editable in the thread. */
-function InterviewPlanThreadCard({ requisitionId }: { requisitionId: string }) {
+/**
+ * The Role expert interview agent, from the thread: ask the role's hiring
+ * manager what it really needs. Once their brief is approved, say so —
+ * screening kits and the interview rounds work from it.
+ */
+function ExpertInterviewAction({
+  conv,
+  onChanged,
+}: {
+  conv: DeskConversationView;
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const at = conv.requisition?.expertBriefAt ?? null;
+  async function start() {
+    setBusy(true);
+    try {
+      await startDeskExpertInterview({ data: { id: conv.id } });
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not start the interview");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="space-y-1 rounded-md border border-dashed border-border p-2">
+      <p className="text-xs text-muted-foreground">
+        {at
+          ? `Expert brief approved by the hiring manager on ${new Date(at).toLocaleDateString()} — screening and interviews work from it.`
+          : "Ask the hiring manager what this role really needs: must-haves and why, deal-breakers, and the questions that tell strong from weak. They approve the brief before screening uses it."}
+      </p>
+      <Button
+        size="sm"
+        variant="outline"
+        className="gap-1"
+        disabled={busy}
+        onClick={() => void start()}
+      >
+        {busy ? <Loader2 className="size-4 animate-spin" /> : <UserRound className="size-4" />}
+        {at ? "Interview the hiring manager again" : "Ask the hiring manager what this role needs"}
+      </Button>
+    </div>
+  );
+}
+
+function InterviewPlanThreadCard({
+  requisitionId,
+  conv,
+  onChanged,
+}: {
+  requisitionId: string;
+  conv: DeskConversationView;
+  onChanged: () => void;
+}) {
   return (
     <div className="space-y-3 rounded-lg border border-border p-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
@@ -2725,6 +2786,7 @@ function InterviewPlanThreadCard({ requisitionId }: { requisitionId: string }) {
         <p className="text-xs text-muted-foreground">Hiring manager</p>
         <HiringManagerPicker requisitionId={requisitionId} />
       </div>
+      <ExpertInterviewAction conv={conv} onChanged={onChanged} />
       <InterviewPlanCard requisitionId={requisitionId} />
     </div>
   );

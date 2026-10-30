@@ -1931,6 +1931,107 @@ export function scenarios(): ScriptedScenario[] {
       } satisfies ScriptedScenario;
     })(),
     {
+      name: "expert_interview: interviews the hiring manager and proposes the brief for their approval",
+      agentType: "expert_interview",
+      autonomy: "act_and_notify",
+      setup: async ({ orgId, userId }) => {
+        const { db } = await import("../../src/server/db");
+        const { orgMembers, requisitions } = await import("../../drizzle/schema");
+        const { eq, and } = await import("drizzle-orm");
+        const [existing] = await db
+          .select({ id: orgMembers.id })
+          .from(orgMembers)
+          .where(and(eq(orgMembers.orgId, orgId), eq(orgMembers.userId, userId)))
+          .limit(1);
+        const hm =
+          existing ??
+          (
+            await db
+              .insert(orgMembers)
+              .values({
+                orgId,
+                userId,
+                email: `hm-${orgId.slice(0, 8)}@eval.test`,
+                fullName: "Eval Hiring Manager",
+                status: "active",
+              } as never)
+              .returning({ id: orgMembers.id })
+          )[0]!;
+        const [req] = await db
+          .insert(requisitions)
+          .values({
+            orgId,
+            code: `REQ-EXP-${Date.now()}`,
+            title: "Platform SRE",
+            status: "approved",
+            mustHaveSkills: ["Kubernetes", "Terraform"],
+            hiringManagerMemberId: hm.id,
+            createdBy: userId,
+          } as never)
+          .returning({ id: requisitions.id });
+        return { requisitionId: req!.id };
+      },
+      goal: (s) =>
+        `Interview the hiring manager of "Platform SRE" about what the role really needs, and propose its expert brief for their approval.\n\nRequisition id: ${s["requisitionId"]}`,
+      decide: (t) =>
+        t.kind === "clarification"
+          ? {
+              status: "answered",
+              answer:
+                "Kubernetes matters most — we run 40 clusters and they will be on call for them. Terraform is nice, not essential. Never hire someone who has not carried a pager. First months: own the cluster upgrade programme. Success after six months: upgrades with no customer-visible incident. I ask: tell me about the worst outage you handled — a great answer names the root cause and what they changed after; a weak one blames others.",
+            }
+          : { status: "approved" },
+      expect: {
+        status: "done",
+        calls: ["read_role_for_expert", "ask_human", "propose_expert_brief"],
+        maxSteps: 12,
+      },
+      script: [
+        (m) => {
+          const goal = m.map((x) => x.content ?? "").join("\n");
+          const id = /Requisition id: ([0-9a-f-]{36})/.exec(goal)![1]!;
+          return call("r", "read_role_for_expert", { requisitionId: id });
+        },
+        () =>
+          call("q", "ask_human", {
+            assignee_role: "hiring_manager",
+            question:
+              "1. Which of Kubernetes and Terraform truly matter for this team, and why?\n2. What rules a candidate out?\n3. What will they work on first?\n4. What does success look like after six months?\n5. A question you would ask, and what a great answer sounds like?",
+          }),
+        (m) => {
+          const goal = m.map((x) => x.content ?? "").join("\n");
+          const id = /Requisition id: ([0-9a-f-]{36})/.exec(goal)![1]!;
+          return call("b", "propose_expert_brief", {
+            requisitionId: id,
+            brief: {
+              mustHaves: [
+                { skill: "Kubernetes", why: "They will be on call for the team's 40 clusters." },
+              ],
+              niceToHaves: ["Terraform"],
+              dealBreakers: ["Has never carried a pager"],
+              firstMonthsWork: "Own the cluster upgrade programme.",
+              successAfterSixMonths: "Upgrades with no customer-visible incident.",
+              screeningQuestions: [
+                {
+                  question: "Tell me about the worst outage you handled.",
+                  strongAnswer: "Names the root cause and what they changed afterwards.",
+                  weakAnswer: "Blames others; no change followed.",
+                },
+              ],
+              rounds: [
+                {
+                  level: 1,
+                  focus: "On-call depth",
+                  competencies: ["Kubernetes", "Incident handling"],
+                },
+              ],
+            },
+          });
+        },
+        say("The hiring manager approved the role's expert brief."),
+      ],
+    },
+    {
       name: "org_context: refuses pay figures and staff names",
       agentType: "org_context",
       autonomy: "act_and_notify",

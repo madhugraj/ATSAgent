@@ -49,6 +49,7 @@ export const AI_FEATURES = [
   "agent_scheduling_call",
   "agent_followup",
   "agent_org_context",
+  "agent_expert_interview",
   // Organisation context agent (docs/org-context-agent-plan.md): the org desk
   // conversation turns, website-page extraction and document OCR.
   "org_desk",

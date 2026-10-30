@@ -182,6 +182,11 @@ import {
   type PanelApprovalSubject,
   type PanelSubstituteSubject,
 } from "./panel-gate.server";
+import {
+  expertBriefGateFor,
+  performExpertBriefGate,
+  type ExpertBriefSubject,
+} from "./expert-gate.server";
 
 /* --------------------------------------------- gates tied to real records */
 
@@ -213,6 +218,7 @@ type DocumentValidationSubject = {
 /** An organisation profile version waiting for the HR head or owner (docs/org-context-agent-plan.md). */
 type OrgProfileSubject = { type: "org_profile"; versionId: string; expects?: string };
 type GateSubject =
+  | ExpertBriefSubject
   | OrgProfileSubject
   | PanelApprovalSubject
   | PanelSubstituteSubject
@@ -364,6 +370,7 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
     };
   }
   if (subject.type === "panel_approval") return panelGateFor(orgId, subject);
+  if (subject.type === "expert_brief") return expertBriefGateFor(orgId, subject);
   if (subject.type === "panel_substitute") return substituteGateFor(orgId, subject);
   if (subject.type === "offer" || subject.type === "offer_release") {
     const offerId = "offerId" in subject ? subject.offerId : subject.id;
@@ -666,6 +673,8 @@ async function performGate(
     return;
   }
   if (subject.type === "panel_approval") return performPanelGate(orgId, userId, subject, decision);
+  if (subject.type === "expert_brief")
+    return performExpertBriefGate(orgId, userId, subject, decision);
   if (subject.type === "panel_substitute")
     return performSubstituteGate(orgId, userId, org.memberEmail, subject, decision);
   if (subject.type === "offer" || subject.type === "offer_release") {
@@ -1866,6 +1875,25 @@ async function openDecision(
   let args: unknown = call.args;
   let assigneeUserId: string | undefined;
   let detail = "";
+  // A question for "the hiring manager" on a run about one role goes to THAT
+  // role's hiring manager (a named member who can sign in), not to whoever
+  // holds the hiring-manager role anywhere in the organisation.
+  if (
+    d.kind === "clarification" &&
+    assigneeRole === "hiring_manager" &&
+    run.subjectType === "requisition" &&
+    run.subjectId
+  ) {
+    const [req] = await db
+      .select({ hm: requisitions.hiringManagerMemberId })
+      .from(requisitions)
+      .where(and(eq(requisitions.id, run.subjectId), eq(requisitions.orgId, run.orgId)))
+      .limit(1);
+    if (req?.hm) {
+      const { deciderOf } = await import("./panel-gate.server");
+      assigneeUserId = (await deciderOf(run.orgId, req.hm)).assigneeUserId;
+    }
+  }
   if (d.subject) {
     const gate = await gateFor(run.orgId, d.subject);
     if ("error" in gate) return toolError(gate.error, true);

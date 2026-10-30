@@ -303,6 +303,7 @@ erDiagram
     boolean ijp_enabled
     timestamptz ijp_posted_at "nullable"
     text ijp_notes "nullable"
+    jsonb expert_brief "nullable"
     numeric ctc_band_min "nullable"
     numeric ctc_band_max "nullable"
     text career_level "nullable"
@@ -1415,7 +1416,7 @@ erDiagram
 | `platform_admins` | Identity & access | 6 | (email) |
 | `product_catalogue_commercials` | Organisations & masters | 8 | — |
 | `requisition_board_postings` | — | 16 | (requisitionId+provider) |
-| `requisitions` | Requisitions & job content | 42 | (orgId+code) |
+| `requisitions` | Requisitions & job content | 43 | (orgId+code) |
 | `role_panels` | — | 8 | (requisitionId+level) |
 | `round_substitutes` | — | 9 | — |
 | `salary_benchmarks` | Intelligence | 15 | — |

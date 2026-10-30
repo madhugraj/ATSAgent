@@ -78,6 +78,8 @@ export const HEALTH = {
   questionsPerRun: 3,
   /** One run calling the same read tool this many times in 24 h is re-reading instead of working. */
   repeatedReadsPerRun: 4,
+  /** A hiring manager's expert-interview questions open longer than this (hours). */
+  expertUnansweredHours: 72,
   /** Phone screening: a call still not placed this many hours after it was due. */
   callOverdueHours: 3,
   /** …a call still dialling / in progress this many minutes later (the worker stopped). */
@@ -948,6 +950,29 @@ export const RULES: Rule[] = [
         title: `${x.runs} run${x.runs === 1 ? "" : "s"} re-read the same source ${x.most} times or more`,
         detail: { runs: x.runs, mostReads: x.most, tool: x.tool },
       }));
+    },
+  },
+  {
+    id: "expert_interview.unanswered",
+    element: "hitl",
+    severity: "warning",
+    description: `A hiring manager has left the Role expert interview agent's questions unanswered for over ${HEALTH.expertUnansweredHours} hours — the role's screening and interviews go ahead without what the hiring manager says it really needs. Remind them, or set a hiring manager who can answer.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number }>(sql`
+        select count(*)::int n from agent_tasks t
+        join agent_runs r on r.id = t.run_id
+        where t.org_id = ${orgId} and r.agent_type = 'expert_interview'
+          and t.kind = 'clarification' and t.status = 'open'
+          and t.created_at < now() - make_interval(hours => ${HEALTH.expertUnansweredHours})`);
+      const n = r[0]?.n ?? 0;
+      if (!n) return [];
+      return [
+        {
+          agentType: "expert_interview",
+          title: `${n} hiring manager interview${n === 1 ? "" : "s"} unanswered for over ${Math.round(HEALTH.expertUnansweredHours / 24)} days`,
+          detail: { open: n },
+        },
+      ];
     },
   },
   {

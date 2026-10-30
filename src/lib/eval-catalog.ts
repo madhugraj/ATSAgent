@@ -394,6 +394,16 @@ export const EVAL_CATALOG: Record<string, EvalExplainer> = {
       "It asks the HR head again, and only a person's approval makes it the profile.",
     ],
   },
+  "expert_interview: interviews the hiring manager and proposes the brief for their approval": {
+    title: "Asks the hiring manager what the role really needs and writes it down",
+    situation:
+      "An approved platform reliability role with a hiring manager who can sign in, and no expert brief yet.",
+    checks: [
+      "It reads what the role already states, then puts one set of specific questions to the hiring manager.",
+      "The brief it writes holds only what the hiring manager said: the must-have and why, the deal-breaker, the first months, success after six months and a screening question with strong and weak answers.",
+      "The hiring manager approves the brief before anything uses it.",
+    ],
+  },
   "org_context: refuses pay figures and staff names": {
     title: "Keeps pay figures and staff names out of the profile",
     situation:

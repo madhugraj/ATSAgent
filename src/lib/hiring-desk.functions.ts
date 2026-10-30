@@ -144,7 +144,13 @@ export type DeskConversationView = {
   title: string;
   status: string;
   slots: import("../server/desk/desk.server").DeskSlots;
-  requisition: { id: string; code: string; status: string } | null;
+  requisition: {
+    id: string;
+    code: string;
+    status: string;
+    /** When the role's expert brief was approved (null: none yet). */
+    expertBriefAt: string | null;
+  } | null;
   messages: DeskMessageView[];
   /** Current status of every agent request shown in the thread. */
   tasks: Record<string, string>;
@@ -230,7 +236,12 @@ async function deskConversationView(
     .limit(500);
   const [req] = conv.requisitionId
     ? await db
-        .select({ id: requisitions.id, code: requisitions.code, status: requisitions.status })
+        .select({
+          id: requisitions.id,
+          code: requisitions.code,
+          status: requisitions.status,
+          brief: requisitions.expertBrief,
+        })
         .from(requisitions)
         .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, context.orgId)))
         .limit(1)
@@ -266,7 +277,14 @@ async function deskConversationView(
     title: conv.title,
     status: conv.status,
     slots: conv.slots as import("../server/desk/desk.server").DeskSlots,
-    requisition: req ?? null,
+    requisition: req
+      ? {
+          id: req.id,
+          code: req.code,
+          status: req.status,
+          expertBriefAt: req.brief?.approvedAt ?? null,
+        }
+      : null,
     messages: msgs.map((m) => ({
       id: m.id,
       role: m.role,
@@ -557,6 +575,19 @@ export const acceptDeskProposal = createServerFn({ method: "POST" })
     const { applyProposal } = await import("../server/desk/desk.server");
     await applyProposal(conv);
     return { ok: true as const };
+  });
+
+/** Ask the role's hiring manager what the role really needs (Role expert interview agent). */
+export const startDeskExpertInterview = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    await needsAiKey(context.orgId);
+    await registered();
+    await echoClick(conv, "Ask the hiring manager what this role needs");
+    const { startExpertInterview } = await import("../server/desk/desk.server");
+    return { runId: await startExpertInterview(conv, context.userId) };
   });
 
 /** Ask the desk to research details from the market instead of typing them. */

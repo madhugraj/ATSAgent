@@ -426,6 +426,13 @@ export const requisitions = pgTable(
     /** Interview rounds, rubric and verdict policy for this role (null = the default from its must-haves). */
     interviewPlan:
       jsonb("interview_plan").$type<import("../src/lib/interview-plan").InterviewPlan>(),
+    /**
+     * What the role's hiring manager said the role really needs, captured by
+     * the Role expert interview agent and approved by them (migration 0057):
+     * must-haves with why, deal-breakers, must-ask screening questions and
+     * each round's focus. Null until approved.
+     */
+    expertBrief: jsonb("expert_brief").$type<import("../src/lib/expert-brief").ExpertBrief>(),
     ctcBandMin: numeric("ctc_band_min", { precision: 14, scale: 2 }),
     ctcBandMax: numeric("ctc_band_max", { precision: 14, scale: 2 }),
     /** Ladder key the budget CTC was benchmarked against (see career-ladder.ts). */
@@ -2074,7 +2081,8 @@ export type AgentType =
   | "distribution"
   | "screening_call"
   | "scheduling_call"
-  | "org_context";
+  | "org_context"
+  | "expert_interview";
 export type AgentAutonomy = "suggest" | "act_and_notify" | "autonomous";
 export type AgentRunStatus =
   "queued" | "running" | "awaiting_human" | "done" | "failed" | "cancelled";

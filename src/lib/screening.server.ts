@@ -123,6 +123,8 @@ export async function buildScreeningKit(input: {
     strengths: string[];
     redFlags: string[];
   } | null;
+  /** What the role's hiring manager said it needs (approved expert brief), when there is one. */
+  expertBrief?: import("./expert-brief").ExpertBrief | null;
 }): Promise<ScreeningKit> {
   // The employer's approved profile (O2): the kit may verify what it states
   // about the organisation's domain and regulators.
@@ -155,6 +157,13 @@ export async function buildScreeningKit(input: {
       "If written_assessment is present, the candidate has already been assessed in writing on mindset and ways of " +
       "working: do not ask again what it established; probe its weakest areas and any red flags, and resolve the CV " +
       "inferences it did not settle. Say in reason when a question follows from the written assessment. " +
+      (input.expertBrief
+        ? "expert_brief is what the role's hiring manager approved as what the role really needs: ask each of its " +
+          "screening_questions (adapted to this candidate, unless the CV already answers it plainly), using its " +
+          "strongAnswer and weakAnswer as expected_answer and weak_answer, focus must_have_skill, weight 5; weigh its " +
+          "mustHaves (with their why) above the JD's list, and probe any deal-breaker the CV leaves open. Say in " +
+          "reason that the hiring manager asked for it. "
+        : "") +
       "Return ONLY JSON: {questions:[{focus, question, reason, expected_answer, weak_answer, weight}], " +
       "focus_summary: one or two sentences on what this call must establish}.",
     prompt: untrusted(
@@ -163,6 +172,15 @@ export async function buildScreeningKit(input: {
         role: input.role,
         jd: input.jdText.slice(0, 6000),
         ...(organisationContext ? { organisation_context: organisationContext } : {}),
+        ...(input.expertBrief
+          ? {
+              expert_brief: {
+                mustHaves: input.expertBrief.mustHaves,
+                dealBreakers: input.expertBrief.dealBreakers,
+                screening_questions: input.expertBrief.screeningQuestions,
+              },
+            }
+          : {}),
         must_have_skills: input.mustHave.slice(0, 25),
         good_to_have_skills: input.goodToHave.slice(0, 25),
         experience_range: [input.experienceMin, input.experienceMax],
