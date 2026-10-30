@@ -238,7 +238,7 @@ export function agentPolicy(f: AgentFacts, breaks: Breaks = {}): AgentPolicy {
 export function simulatedVoice(
   agent: AgentPolicy,
   candidate: Persona,
-  seen: { opts?: VoiceOpts; timeline: TimelineEntry[] },
+  seen: { opts?: VoiceOpts; timeline: TimelineEntry[]; cues?: string[] },
   onHangUp: () => void,
 ) {
   return (async (opts: VoiceOpts) => {
@@ -300,6 +300,7 @@ export function simulatedVoice(
         sendAudio() {},
         sendText(text: string) {
           if (text.includes("picked up")) void play();
+          else seen.cues?.push(text);
         },
         close: async () => {
           const x = summary();

@@ -384,6 +384,37 @@ function freshState() {
   } as Parameters<typeof negSession.callOutcomeOf>[1];
 }
 
+describe("a quiet assistant after a tool result (the first real call)", () => {
+  test("it is cued once to go on, instead of leaving the candidate in silence", async () => {
+    const { call } = await arranged();
+    const line = new FakeLine();
+    const seen: { opts?: VoiceOpts; timeline: graders.TimelineEntry[]; cues: string[] } = {
+      timeline: [],
+      cues: [],
+    };
+    // Gets the go-ahead, then says nothing for a while (as the real call did), then goes on.
+    const quiet: sim.AgentPolicy = async (io) => {
+      io.say(
+        "Hello, this is Saranya, an AI recruiting assistant from Neg Org — am I speaking with Meera?",
+      );
+      io.say(
+        "Thank you. I make notes of this call for the hiring team, and they confirm anything we discuss. Do you have a few minutes now?",
+      );
+      await io.tool("record_permission", { granted: true, their_words: io.heard() });
+      await new Promise((r) => setTimeout(r, negSession.NEGOTIATION_TOOL_SILENCE_CUE_MS + 800));
+      io.say("Sorry for the pause. Goodbye.", false);
+      await io.tool("end_negotiation_call", { reason: "not_now" });
+    };
+    await session.runScreeningCall(orgId, call.id, {
+      line: () => line,
+      voice: sim.simulatedVoice(quiet, sim.PERSONAS.accepter(), seen, () => line.hangsUp()),
+      limits: { silenceMs: 60_000, firstWordsMs: 60_000, callerFirstMs: 0 },
+    });
+    // (The opening watch's own hello nudge may be among the cues; this is the tool one.)
+    expect(seen.cues.filter((c) => /waiting in silence/.test(c))).toHaveLength(1);
+  });
+});
+
 /* ------------------------------------------------- the negative control */
 
 describe("negative control: broken agents fail the graders", () => {

@@ -2780,7 +2780,7 @@ export type NegotiationStatus =
   | "expired"
   | "cancelled";
 
-/** What an AI negotiation call heard (migration 0057). A person confirms it. */
+/** What an AI negotiation call heard (migration 0058). A person confirms it. */
 export type NegotiationCallOutcome = {
   callId: string;
   /** A clear yes to the figure just read back. */
@@ -2823,7 +2823,7 @@ export const offerNegotiations = pgTable(
     proposedCtc: numeric("proposed_ctc", { precision: 14, scale: 2 }).notNull(),
     levers: jsonb("levers").$type<NegotiationLevers>().notNull().default({}),
     talkTrack: text("talk_track").notNull().default(""),
-    /** The one improved figure an AI negotiation call may offer (≤ ceiling); null = hold (0057). */
+    /** The one improved figure an AI negotiation call may offer (≤ ceiling); null = hold (0058). */
     callStepCtc: numeric("call_step_ctc", { precision: 14, scale: 2 }),
     /** What an AI negotiation call heard; pre-fills the confirm form, never sets the status. */
     callOutcome: jsonb("call_outcome").$type<NegotiationCallOutcome | null>(),
@@ -3051,7 +3051,7 @@ export const screeningCalls = pgTable(
       .$type<string[]>()
       .notNull()
       .default(sql`'[]'::jsonb`),
-    /** Negotiation: the pay discussion this call follows up (0057). */
+    /** Negotiation: the pay discussion this call follows up (0058). */
     negotiationId: uuid("negotiation_id").references(() => offerNegotiations.id, {
       onDelete: "set null",
     }),

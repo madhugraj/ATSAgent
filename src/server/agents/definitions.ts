@@ -693,7 +693,11 @@ export function registerPhase3Agents(): void {
     // may move once to a pre-approved improved figure after a no, and passes a clear yes
     // to TA / the HR head to confirm. Never holds or says the ceiling or band; no tool
     // takes an amount; never agrees anything.
-    version: "0.1.0",
+    // 0.1.1 (the first real call, 2026-10-30): it went silent after the go-ahead until the
+    // candidate hung up — reads the offer out in the same turn, and the session cues it if
+    // it stays quiet after a tool result; tells the candidate why "you" are called (it said
+    // "they replied" to them).
+    version: "0.1.1",
     owner: "hr_head",
     responsibility:
       "Holds one AI phone call with a candidate about the pay for their offer: says it is an AI, reads out the approved figure and extras, hears their position, may offer one pre-approved improved figure, and brings a clear answer back to the people who decide.",

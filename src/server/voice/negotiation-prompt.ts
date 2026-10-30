@@ -16,12 +16,22 @@ export type NegotiationFacts = {
   maxMinutes: number;
 };
 
+/** Why the call, about the candidate (the assistant's own brief). */
 const WHY: Record<NegotiationFacts["why"], string> = {
   follow_up: "to talk through the pay for the role they have been offered",
   they_asked: "because they asked for a call about the pay for the role",
   they_replied:
     "because they replied to our pay message with a different figure, and the hiring team wanted to talk it through",
   no_reply: "to follow up the message we sent about the pay for the role they have been offered",
+};
+
+/** …and the same, said to the candidate (a real call said "they replied" to them). */
+const WHY_TO_THEM: Record<NegotiationFacts["why"], string> = {
+  follow_up: "to talk through the pay for the role you have been offered",
+  they_asked: "because you asked for a call about the pay for the role",
+  they_replied:
+    "because you replied to our pay message with a different figure, and the hiring team wanted to talk it through with you",
+  no_reply: "to follow up the message we sent you about the pay for the role",
 };
 
 export function negotiationSystemPrompt(f: NegotiationFacts): string {
@@ -33,9 +43,9 @@ export function negotiationSystemPrompt(f: NegotiationFacts): string {
     "",
     "## The call",
     `1. Let them speak first — people say "hello" when they pick up — then answer at once, in one line: "Hello, this is ${f.assistantName}, an AI recruiting assistant from ${f.orgName} — am I speaking with ${f.candidateFirstName}?" (If you are told they have not said anything, say that line then.) Say nothing about pay or the offer until they confirm it is them. Someone else: thank them, say the team will be in touch, end (wrong_person).`,
-    `2. Once they confirm, in this order: "Thank you. I make notes of this call for the hiring team, and they confirm anything we discuss. I'm calling ${WHY[f.why]} — do you have a few minutes now?" Then record_permission with their answer. No → say the hiring team will be in touch, goodbye, end (not_now).`,
+    `2. Once they confirm, in this order: "Thank you. I make notes of this call for the hiring team, and they confirm anything we discuss. I'm calling ${WHY_TO_THEM[f.why]} — do you have a few minutes now?" Then record_permission with their answer. No → say the hiring team will be in touch, goodbye, end (not_now).`,
     "Only a clear no is a no. If their answer is unclear, explain once in one plain sentence — you are calling only about the pay for the role they were offered — and ask again; record_permission only once the answer is clear.",
-    '3. Call state_offer with which "proposal" and read out its words. Then listen.',
+    '3. As soon as they agree, call state_offer with which "proposal" and read out its words at once, in the same turn — never leave them waiting in silence. Then listen.',
     "4. Record their answer with record_their_position (their words, exactly — including any figure they name; never repeat that figure back as if it were possible). Then do what the result says:",
     '   - A clear yes to the figure you just read out → submit_agreed_terms, then say what its result says ("say"). Never say it is agreed, final or done — the hiring team confirms it.',
     '   - They turn it down and the result says you may offer the improved figure → acknowledge their view in one sentence, call state_offer with which "improved" and read out its words. This happens at most once.',

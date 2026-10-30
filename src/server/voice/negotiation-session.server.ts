@@ -62,6 +62,22 @@ export const NEGOTIATION_MAX_ATTEMPTS = 2;
 /** Cue the assistant this long after the candidate's hello if it has not begun. */
 export const NEGOTIATION_REPLY_CUE_MS = 1_200;
 
+/**
+ * After a tool result the assistant should speak on (the offer's words, the next
+ * step), cue it if no audio starts within this. A real call went silent after the
+ * go-ahead until the candidate hung up.
+ */
+export const NEGOTIATION_TOOL_SILENCE_CUE_MS = 2_500;
+
+/** Tools after which the assistant must say something (not end the call). */
+const SPEAK_AFTER = new Set([
+  "record_permission",
+  "state_offer",
+  "record_their_position",
+  "submit_agreed_terms",
+  "request_human_call",
+]);
+
 /** Turn-taking: people pause before answering about pay — a little more room than scheduling. */
 export const NEGOTIATION_TURN_TAKING = {
   silenceMs: 800,
@@ -160,16 +176,21 @@ async function place(
   let heardAfterAsk: string | null = null;
   let agentEnded!: () => void;
   const agentEnd = new Promise<void>((r) => (agentEnded = r));
+  // Real clock: when a tool result that needs a spoken follow-up came back with no audio since.
+  let awaitingSpeechSince: number | null = null;
+  let cue: (() => void) | null = null;
 
   const events: VoiceSessionEvents = {
     onAudio: (pcm) => {
       aiSpoke = true;
+      awaitingSpeechSince = null;
       lastActivity = now();
       line.play(down.process(pcm));
     },
     onInterrupted: () => line.clear(),
     onTurn: (t) => {
       if (t.who === "ai") {
+        awaitingSpeechSince = null;
         aiSaid += ` ${t.text}`;
         if (t.text.includes("?") && !disclosureMissing(aiSaid)) heardAfterAsk = "";
       } else if (heardAfterAsk !== null) heardAfterAsk += ` ${t.text}`;
@@ -188,6 +209,19 @@ async function place(
         aiSaid,
         heardAfterAsk ?? "",
       );
+      // Which tool ran and whether it went through — never its arguments (amounts).
+      log.info("negotiation_call.tool", {
+        call_id: call.id,
+        tool: c.name,
+        ok: out.ok,
+        ...(out.ok ? {} : { error: out.error }),
+      });
+      if (
+        out.ok &&
+        SPEAK_AFTER.has(c.name) &&
+        !(c.name === "record_permission" && !state.permission)
+      )
+        awaitingSpeechSince = Date.now();
       if (!out.ok) return out;
       if (c.name === "record_permission") {
         await setCall(call.id, orgId, {
@@ -225,6 +259,12 @@ async function place(
       lastError: opened.message,
     });
   const session: VoiceSession = opened.session;
+  cue = () => {
+    log.warn("negotiation_call.cue_after_tool", { call_id: call.id });
+    session.sendText(
+      "(The candidate is waiting in silence. Continue now, out loud: say what the last tool result gave you to say, or your next step.)",
+    );
+  };
   await setCall(call.id, orgId, { phoneLast4: number.last4 });
 
   try {
@@ -269,6 +309,14 @@ async function place(
       if (t - answeredAt > brief.facts.maxMinutes * 60_000) resolve("time_limit");
       else if (!candidateSpoke && t - answeredAt > limits.firstWordsMs) resolve("no_response");
       else if (t - lastActivity > limits.silenceMs) resolve("silence");
+      // Once per tool result: a quiet assistant after a result it should speak on.
+      if (
+        awaitingSpeechSince !== null &&
+        Date.now() - awaitingSpeechSince > NEGOTIATION_TOOL_SILENCE_CUE_MS
+      ) {
+        awaitingSpeechSince = null;
+        cue?.();
+      }
     }, 250);
   });
   const why = await Promise.race([

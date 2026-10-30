@@ -50,7 +50,7 @@ or an outcome; never discusses other candidates or what others are paid.
 | Gate verbs                                         | Tool names avoid approve / accept / agree (the registry refuses them): `submit_agreed_terms`, `request_human_call`.                                                                                                                          |
 | Amounts in the thread / audit                      | As today: thread posts, nudges and audit entries carry no amounts.                                                                                                                                                                           |
 
-## Data (migration 0057)
+## Data (migration 0058)
 
 - `screening_calls.purpose` gains `'negotiation'`; new `negotiation_id → offer_negotiations`
   with `purpose <> 'negotiation' or negotiation_id is not null`. The dispatcher, worker,
@@ -101,7 +101,7 @@ seed)`) plays the whole call through `FakeLine` + the injectable voice session, 
 
 ## Build steps
 
-- **N0** migration 0057, schema, ER diagram; charter fork with a two-way test
+- **N0** migration 0058, schema, ER diagram; charter fork with a two-way test
   (screening and scheduling still ban pay talk; negotiation may state only approved
   figures).
 - **N1** pure tool layer + refusal tests.
@@ -131,3 +131,15 @@ seed)`) plays the whole call through `FakeLine` + the injectable voice session, 
     days with under 20% ending in a yes.
 - **N5** a real call with an operator playing the candidate; then capacity
   (`VOICE_MAX_CONCURRENT` 1→2→4, PBX trunk cap, RTP pacing on the worker's CPU).
+
+## Real calls
+
+1. **2026-10-30, Head of AI (local worker, scratch database).** Disclosure, the notes line
+   and the go-ahead worked; the discussion stayed untouched. Then the assistant went silent
+   after the go-ahead until the candidate hung up, and it said "because they replied" to the
+   candidate. Fixed in 0.1.1: it reads the offer out in the same turn, the session cues it
+   once if it stays quiet 2.5 s after a tool result it should speak on (logged as
+   `negotiation_call.cue_after_tool`; every tool is logged by name and result, never its
+   arguments), and the reason is said to "you". Setting up: the POC env file had CRLF line
+   endings, so `SIP_*` values carried a "\r" and the PBX dropped every request — the app now
+   trims them.

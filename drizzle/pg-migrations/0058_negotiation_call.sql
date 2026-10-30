@@ -1,4 +1,4 @@
--- 0057_negotiation_call.sql — the AI negotiation call, step N0
+-- 0058_negotiation_call.sql — the AI negotiation call, step N0
 -- (docs/negotiator-voice-agent.md).
 --
 -- * screening_calls: a third purpose, 'negotiation', always tied to the pay
