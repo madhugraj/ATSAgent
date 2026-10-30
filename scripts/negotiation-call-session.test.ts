@@ -43,6 +43,14 @@ const gw = await import("../src/lib/ai-gateway.server");
 type VoiceOpts = Parameters<typeof gw.aiVoiceSession>[0];
 
 const L = 100_000;
+const BRIEF = {
+  fixedCtc: 15 * 100_000,
+  variableCtc: 3 * 100_000,
+  esop: "ESOPs vesting over four years",
+  review: "A review at six months, then every April.",
+  benefits: "Family health cover and a learning budget.",
+  whyYou: ["The panel valued how you built and scaled an AI team."],
+};
 const FIG = { proposal: 18 * L, step: 19.5 * L, ceiling: 20 * L, bandMax: 21 * L, bonus: 1 * L };
 const stamp = Date.now();
 const hr = `neg-${stamp}@test.local`;
@@ -149,6 +157,8 @@ async function arranged(o: { step?: number | null; status?: string; attempt?: nu
       proposedCtc: String(FIG.proposal),
       callStepCtc: o.step === null ? null : String(o.step ?? FIG.step),
       levers: { joiningBonus: FIG.bonus, reviewMonths: 6 },
+      // What the call may explain (the negotiator's material), approved with the call.
+      callBrief: BRIEF,
     })
     .returning();
   const [call] = await db
@@ -203,7 +213,7 @@ async function runCall(
     timeline: seen.timeline,
     proposalCtc: FIG.proposal,
     stepCtc: step,
-    leverAmounts: [FIG.bonus],
+    leverAmounts: [FIG.bonus, BRIEF.fixedCtc, BRIEF.variableCtc],
     ceiling: FIG.ceiling,
     bandMax: FIG.bandMax,
     before: snap(negotiation),
@@ -253,6 +263,7 @@ describe("a whole negotiation call (reference agent vs personas)", () => {
     expect(r.seen.opts).toMatchObject({ feature: "negotiation_call", languageCode: "en-IN" });
     expect(r.seen.opts!.tools!.map((t) => t.name).sort()).toEqual([
       "end_negotiation_call",
+      "explain_offer",
       "record_permission",
       "record_their_position",
       "request_human_call",
@@ -292,6 +303,41 @@ describe("a whole negotiation call (reference agent vs personas)", () => {
     expect(r.result.endReason).toBe("handed_off");
     expect(r.after.callOutcome).toMatchObject({ agreed: false, agreedCtc: null });
     expect(r.after.status).toBe("message_sent");
+  });
+
+  test("they ask for the breakdown: answered from the approved words, then a yes", async () => {
+    const r = await runCall(sim.PERSONAS.breakdown());
+    expect(r.violations).toEqual([]);
+    const split = r.seen.timeline.find(
+      (e) =>
+        e.kind === "tool" &&
+        e.name === "explain_offer" &&
+        (e.args as { topic?: string })?.topic === "split",
+    );
+    expect(String((split as { out: { say: string } }).out.say)).toContain(
+      "15 lakh rupees is fixed pay",
+    );
+    expect(r.result.endReason).toBe("verbal_agreement");
+    expect(r.after.callOutcome).toMatchObject({ agreed: true, which: "proposal" });
+  });
+
+  test("why the team wants them is said before the offer", async () => {
+    const r = await runCall(sim.PERSONAS.accepter());
+    const ai = r.seen.timeline
+      .filter((e) => e.kind === "turn" && e.who === "ai")
+      .map((e) => (e as { text: string }).text);
+    const why = ai.findIndex((t) => t.includes("scaled an AI team"));
+    const offer = ai.findIndex((t) => t.includes("18 lakh rupees a year"));
+    expect(why).toBeGreaterThan(-1);
+    expect(why).toBeLessThan(offer);
+  });
+
+  test("a firm no even if it improved: the improvement is kept, handed off", async () => {
+    const r = await runCall(sim.PERSONAS.firm_no());
+    expect(r.violations).toEqual([]);
+    expect(okCalls(r.seen.timeline, "state_offer", "improved")).toBe(0);
+    expect(JSON.stringify(r.seen.timeline)).not.toContain("19 lakh 50 thousand");
+    expect(r.result.endReason).toBe("handed_off");
   });
 
   test("hold (no improved figure approved): no move, handed off", async () => {
@@ -418,7 +464,12 @@ describe("a quiet assistant after a tool result (the first real call)", () => {
 
 describe("the live figure guard (the second real call over-offered)", () => {
   test("only the approved figures pass — the improved one only once it was given", () => {
-    const f = { proposalCtc: 18 * L, stepCtc: 19.5 * L, leverAmounts: [1 * L] };
+    const f = {
+      proposalCtc: 18 * L,
+      stepCtc: 19.5 * L,
+      levers: { joiningBonus: 1 * L },
+      brief: { fixedCtc: 15 * L, variableCtc: 3 * L },
+    };
     const said = (t: string, improved = false) => negSession.unapprovedFigure(t, f, improved);
     expect(
       said("We would like to offer you 18 lakh rupees a year, with a 1 lakh bonus."),
@@ -427,6 +478,8 @@ describe("the live figure guard (the second real call over-offered)", () => {
     expect(said("the team can offer 19 lakh 50 thousand rupees")).toBe(19.5 * L);
     expect(said("the team can offer 19 lakh 50 thousand rupees", true)).toBeNull();
     expect(said("a pay review after 6 months")).toBeNull();
+    // The approved split may be said.
+    expect(said("15 lakh rupees is fixed pay and 3 lakh rupees is variable pay")).toBeNull();
     expect(negSession.GUARD_CORRECTION).not.toMatch(/\d/);
   });
 
@@ -503,7 +556,8 @@ describe("the call's brief: context without figures", () => {
     expect(p).toContain("Head of AI role at Yavar");
     expect(p).toContain("completed all three interview rounds");
     expect(p).toContain("We build AI products for hospitals across India.");
-    expect(p).toMatch(/Discover before you offer/);
+    expect(p).toMatch(/Understand them before you offer/);
+    expect(p).toMatch(/trade, never give/);
     expect(graders.amountsIn(p)).toEqual([]);
   });
 });
@@ -641,6 +695,7 @@ describe("asking for a negotiation call", () => {
       "byPerson",
       "callId",
       "dueAt",
+      "explains",
       "improvedFigure",
     ]);
     expect(JSON.stringify(a!.detail)).not.toMatch(/\b(1900000|2000000|1800000)\b/);

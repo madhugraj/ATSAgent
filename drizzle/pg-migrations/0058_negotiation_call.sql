@@ -7,6 +7,9 @@
 --   offer (above the proposal, at or under the ceiling); null = hold.
 -- * offer_negotiations.call_outcome: what the call heard. It pre-fills the
 --   confirm form; only a person's confirmation marks the discussion agreed.
+-- * offer_negotiations.call_brief: what the person arranging the call approved
+--   for it to explain — the fixed / variable split, ESOPs, how the review works,
+--   benefits, and why the team wants this candidate.
 --
 -- Idempotent: re-running is a no-op.
 
@@ -29,3 +32,4 @@ do $$ begin
     check (call_step_ctc is null or (call_step_ctc > proposed_ctc and call_step_ctc <= ceiling));
 exception when duplicate_object then null; end $$;
 alter table offer_negotiations add column if not exists call_outcome jsonb;
+alter table offer_negotiations add column if not exists call_brief jsonb;

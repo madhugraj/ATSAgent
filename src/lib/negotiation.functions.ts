@@ -7,6 +7,17 @@ import { z } from "zod";
 
 import { assertRole, requireOrg } from "./auth.middleware";
 
+/** What an AI pay call may explain (validated again in the request core). */
+const CallBriefInput = z.object({
+  fixedCtc: z.number().positive().max(500_000_000).nullable().optional(),
+  variableCtc: z.number().positive().max(500_000_000).nullable().optional(),
+  esop: z.string().trim().max(300).nullable().optional(),
+  esopValue: z.number().positive().max(500_000_000).nullable().optional(),
+  review: z.string().trim().max(300).nullable().optional(),
+  benefits: z.string().trim().max(300).nullable().optional(),
+  whyYou: z.array(z.string().trim().min(3).max(200)).max(3).optional(),
+});
+
 const Token = z.object({ token: z.string().regex(/^[a-f0-9]{64}$/) });
 
 export const getNegotiationPage = createServerFn({ method: "GET" })
@@ -57,6 +68,7 @@ export const getNegotiation = createServerFn({ method: "GET" })
       // The AI pay call (docs/negotiator-voice-agent.md): its one improved figure,
       // what it heard (pre-fills the confirm), its latest call and whether one may be arranged.
       callStepCtc: n.callStepCtc == null ? null : Number(n.callStepCtc),
+      callBrief: n.callBrief ?? null,
       callOutcome: n.callOutcome ?? null,
       ...(await aiCallState(context.orgId, n.id)),
     };
@@ -101,6 +113,7 @@ export const arrangeNegotiationCall = createServerFn({ method: "POST" })
       .object({
         negotiationId: z.string().uuid(),
         improvedCtc: z.number().positive().max(500_000_000).nullable(),
+        brief: CallBriefInput.nullable().optional(),
       })
       .parse(d),
   )
@@ -117,6 +130,7 @@ export const arrangeNegotiationCall = createServerFn({ method: "POST" })
       orgId: context.orgId,
       negotiationId: data.negotiationId,
       step: data.improvedCtc,
+      brief: data.brief ?? null,
       requestedBy: context.userId,
       requestedRunId: null,
       actor: context.memberEmail,

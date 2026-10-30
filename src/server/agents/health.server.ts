@@ -887,8 +887,13 @@ export const RULES: Rule[] = [
         ceiling: string;
         band_max: string | null;
         levers: { joiningBonus?: number | null } | null;
+        call_brief: {
+          fixedCtc?: number | null;
+          variableCtc?: number | null;
+          esopValue?: number | null;
+        } | null;
       }>(sql`
-        select c.id, c.transcript, n.proposed_ctc, n.call_step_ctc, n.ceiling, q.ctc_band_max band_max, n.levers
+        select c.id, c.transcript, n.proposed_ctc, n.call_step_ctc, n.ceiling, q.ctc_band_max band_max, n.levers, n.call_brief
         from screening_calls c
         join offer_negotiations n on n.id = c.negotiation_id and n.org_id = c.org_id
         join applications a on a.id = n.application_id and a.org_id = n.org_id
@@ -907,7 +912,14 @@ export const RULES: Rule[] = [
           timeline: c.transcript.map((t) => ({ kind: "turn", who: t.who, text: t.text })),
           proposalCtc: Number(c.proposed_ctc),
           stepCtc: c.call_step_ctc == null ? null : Number(c.call_step_ctc),
-          leverAmounts: c.levers?.joiningBonus ? [Number(c.levers.joiningBonus)] : [],
+          leverAmounts: [
+            c.levers?.joiningBonus,
+            c.call_brief?.fixedCtc,
+            c.call_brief?.variableCtc,
+            c.call_brief?.esopValue,
+          ]
+            .filter((x): x is number => typeof x === "number" && x > 0)
+            .map(Number),
           ceiling: Number(c.ceiling),
           bandMax: c.band_max == null ? null : Number(c.band_max),
           transcriptOnly: true,

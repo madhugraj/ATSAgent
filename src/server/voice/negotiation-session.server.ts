@@ -44,6 +44,8 @@ import {
   applyNegotiationTool,
   freshNegotiationState,
   NEGOTIATION_TOOLS,
+  allowedAmounts,
+  type NegotiationFigures,
   negotiationOutcome,
   type NegotiationCallOutcomeKind,
   type NegotiationCallState,
@@ -77,10 +79,10 @@ export const NEGOTIATION_TOOL_SILENCE_CUE_MS = 2_500;
  */
 export function unapprovedFigure(
   soFar: string,
-  f: { proposalCtc: number; stepCtc: number | null; leverAmounts: number[] },
+  f: NegotiationFigures,
   improvedGiven: boolean,
 ): number | null {
-  const ok = [f.proposalCtc, ...f.leverAmounts, ...(improvedGiven && f.stepCtc ? [f.stepCtc] : [])];
+  const ok = allowedAmounts(f, improvedGiven);
   for (const a of amountsIn(soFar)) if (!ok.some((x) => Math.abs(x - a) < 500)) return a;
   return null;
 }
@@ -201,7 +203,6 @@ async function place(
   let cue: (() => void) | null = null;
   // The live guard (fires once): cut the line, correct, hand off, flag.
   let guard: ((amount: number) => void) | null = null;
-  const leverAmounts = brief.figures.levers.joiningBonus ? [brief.figures.levers.joiningBonus] : [];
 
   const events: VoiceSessionEvents = {
     onAudio: (pcm) => {
@@ -215,7 +216,7 @@ async function place(
       if (state.halted) return;
       const bad = unapprovedFigure(
         soFar,
-        { ...brief.figures, leverAmounts },
+        brief.figures,
         state.stated.improved || !!state.improvedRevealed,
       );
       if (bad !== null) return guard?.(bad);

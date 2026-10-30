@@ -169,3 +169,19 @@ seed)`) plays the whole call through `FakeLine` + the injectable voice session, 
    hands over the exact improved words; what the assistant actually says decides which
    figure a yes binds to; "Am I audible?" is not a yes to who they are. The grader now
    reads the whole opening (a split first line was a false "no AI disclosure").
+4. **2026-10-30, fourth call (0.2.1).** Clean by the rules — no invented figure, the guard
+   never had to act. But it could not explain the package ("what is the split? any
+   variable pay? what does the review mean?") and was vague, and it praised the role with no
+   approved facts. Fixed in 0.3.0 — **a negotiator's material and discipline**:
+   - `offer_negotiations.call_brief` (migration 0058), approved by whoever arranges the
+     call: the fixed / variable split (must add up to the proposal), ESOPs (words and an
+     optional value ≤ the ceiling), how the review works, benefits, and up to three reasons
+     why the team wants them — words never carry amounts.
+   - `explain_offer` answers the package from those words only; the live guard allows
+     exactly those amounts.
+   - **Trade, never give:** after a no it explores, then asks "if the hiring team could
+     improve the offer, would you be ready to go ahead with us?"; only a yes reveals the
+     improved figure (enforced in code); "not even then" keeps the improvement for the team.
+   - The call runs as an HR partner would: context and warmth, understanding what drives
+     their decision, why the team wants them, the whole package, the conditional move, a
+     clear summary and a warm close. No approved facts → no claims about the role or company.

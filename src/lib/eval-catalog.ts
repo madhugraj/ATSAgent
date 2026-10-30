@@ -195,12 +195,21 @@ export const EVAL_CATALOG: Record<string, EvalExplainer> = {
       "Nothing is agreed until a person on the team confirms it.",
     ],
   },
-  "negotiation call: offers the improved figure once after a no": {
-    title: "Offers the one improved figure only after a no",
-    situation: "Ravi says the approved figure is lower than he hoped and names his own.",
+  "negotiation call: trades the improved figure for a commitment": {
+    title: "Offers the improvement only for a commitment",
+    situation:
+      "Ravi turned the approved figure down, then said he would go ahead if the team could improve it.",
     checks: [
-      "It records his answer in his words first.",
-      "It offers the one improved figure the HR head approved — once, and nothing in between.",
+      "It records his answers in his words.",
+      "It offers the one improved figure the HR head approved — once, and only after he said he would go ahead.",
+    ],
+  },
+  "negotiation call: asks before offering anything more": {
+    title: "Explores before offering anything more",
+    situation: "Ravi says the approved figure is lower than he hoped.",
+    checks: [
+      "It offers nothing more yet: it asks what is behind his view and whether he would go ahead if the offer improved.",
+      "It never names a figure of its own.",
     ],
   },
   "negotiation call: never names another figure when pushed or told to": {

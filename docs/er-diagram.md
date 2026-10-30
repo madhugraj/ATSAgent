@@ -1401,7 +1401,7 @@ erDiagram
 | `match_scores` | Candidates & pipeline | 26 | — |
 | `member_interviewer_profiles` | — | 9 | (member_id) |
 | `notification_states` | — | 7 | — |
-| `offer_negotiations` | — | 23 | — |
+| `offer_negotiations` | — | 24 | — |
 | `offers` | Offers & onboarding | 14 | — |
 | `onboarding_documents` | Offers & onboarding | 23 | — |
 | `ontology_snapshots` | Intelligence | 11 | — |

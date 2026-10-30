@@ -19,6 +19,18 @@ const FIG = {
 const DISCLOSED =
   "Hello, this is Saranya, an AI recruiting assistant calling for Acme. I make notes for the hiring team.";
 
+/** Turned the proposal down, then said they would go ahead if it improved (the trade). */
+function earnMove(s: ReturnType<typeof t.freshNegotiationState>, f = FIG) {
+  t.applyNegotiationTool(s, "state_offer", { which: "proposal" }, f);
+  t.applyNegotiationTool(s, "record_their_position", { stance: "declines", their_words: "no" }, f);
+  return t.applyNegotiationTool(
+    s,
+    "record_their_position",
+    { stance: "accepts", their_words: "Yes, if it improves I'd go ahead" },
+    f,
+  );
+}
+
 /** A state with the go-ahead already given. */
 function started() {
   const s = t.freshNegotiationState();
@@ -95,7 +107,7 @@ describe("negotiation call tools — refusals", () => {
     expect(s.permission).toBe(false);
   });
 
-  test("the improved figure only after the proposal was turned down", () => {
+  test("the improved figure is traded for a commitment, never given", () => {
     const s = started();
     expect(t.applyNegotiationTool(s, "state_offer", { which: "improved" }, FIG).ok).toBe(false);
     t.applyNegotiationTool(s, "state_offer", { which: "proposal" }, FIG);
@@ -106,9 +118,78 @@ describe("negotiation call tools — refusals", () => {
       { stance: "wants_more", their_words: "I was hoping for 22" },
       FIG,
     );
-    expect(pos.ok && String(pos.next)).toContain('"improved"');
+    // First: explore, then ask the conditional question — nothing offered yet.
+    expect(pos.ok && String(pos.next)).toMatch(
+      /Do not offer anything yet[\s\S]*conditional question/,
+    );
+    expect(pos.ok && String(pos.next)).not.toMatch(/lakh/);
+    expect(t.applyNegotiationTool(s, "state_offer", { which: "improved" }, FIG).ok).toBe(false);
+    // They would go ahead if it improved: the move is earned, and its words handed over.
+    const yes = t.applyNegotiationTool(
+      s,
+      "record_their_position",
+      { stance: "accepts", their_words: "Yes, if it improves I'd go ahead" },
+      FIG,
+    );
+    expect(yes.ok && String(yes.next)).toContain("19 lakh 50 thousand rupees a year");
     const r = t.applyNegotiationTool(s, "state_offer", { which: "improved" }, FIG);
     expect(r.ok && String(r.say)).toContain("19 lakh 50 thousand rupees a year");
+  });
+
+  test("not even if it improved: the improvement is kept for the team", () => {
+    const s = started();
+    t.applyNegotiationTool(s, "state_offer", { which: "proposal" }, FIG);
+    t.applyNegotiationTool(
+      s,
+      "record_their_position",
+      { stance: "declines", their_words: "no" },
+      FIG,
+    );
+    const no = t.applyNegotiationTool(
+      s,
+      "record_their_position",
+      { stance: "declines", their_words: "No, not even then" },
+      FIG,
+    );
+    expect(no.ok && String(no.next)).toMatch(/keep the improvement/);
+    expect(no.ok && String(no.next)).not.toMatch(/lakh/);
+    expect(t.applyNegotiationTool(s, "state_offer", { which: "improved" }, FIG).ok).toBe(false);
+  });
+
+  test("explain_offer: only the approved words; nothing approved is not shared", () => {
+    const brief = {
+      fixedCtc: 1_500_000,
+      variableCtc: 300_000,
+      esop: "ESOPs vesting over four years",
+      review: "A review at six months, then every April.",
+      whyYou: ["The panel valued how you scaled an AI team."],
+    };
+    const f = { ...FIG, brief };
+    const s = started();
+    const say = (topic: string) =>
+      String((t.applyNegotiationTool(s, "explain_offer", { topic }, f) as { say?: string }).say);
+    expect(say("split")).toBe(
+      "Of the 18 lakh rupees a year, 15 lakh rupees is fixed pay and 3 lakh rupees is variable pay.",
+    );
+    expect(say("why_you")).toBe("The panel valued how you scaled an AI team.");
+    expect(say("benefits")).toMatch(/not shared/);
+    expect(t.allowedAmounts(f, false).sort((a, b) => a - b)).toEqual([
+      100_000, 300_000, 1_500_000, 1_800_000,
+    ]);
+    expect(t.allowedAmounts(f, true)).toContain(1_950_000);
+    // Before the go-ahead: nothing about pay.
+    const cold = t.freshNegotiationState();
+    expect(t.applyNegotiationTool(cold, "explain_offer", { topic: "split" }, f).ok).toBe(false);
+  });
+
+  test("a call brief must add up and keep amounts out of the words", () => {
+    const n = { proposedCtc: 1_800_000, ceiling: 2_000_000 };
+    expect(t.callBriefProblem({ fixedCtc: 1_500_000, variableCtc: 300_000 }, n)).toBeNull();
+    expect(t.callBriefProblem({ fixedCtc: 1_500_000, variableCtc: 400_000 }, n)).toMatch(/add up/);
+    expect(t.callBriefProblem({ fixedCtc: 1_500_000 }, n)).toMatch(/both/);
+    expect(t.callBriefProblem({ benefits: "Health cover worth 5 lakh" }, n)).toMatch(/amounts/);
+    expect(t.callBriefProblem({ whyYou: ["a", "b", "c", "d"] }, n)).toMatch(/three/);
+    expect(t.callBriefProblem({ esopValue: 2_500_000 }, n)).toMatch(/ceiling/);
   });
 
   test("no improved figure approved: hold and hand off", () => {
@@ -127,13 +208,7 @@ describe("negotiation call tools — refusals", () => {
 
   test("one move only: after the improved figure, a push is handed off", () => {
     const s = started();
-    t.applyNegotiationTool(s, "state_offer", { which: "proposal" }, FIG);
-    t.applyNegotiationTool(
-      s,
-      "record_their_position",
-      { stance: "declines", their_words: "no" },
-      FIG,
-    );
+    earnMove(s);
     t.applyNegotiationTool(s, "state_offer", { which: "improved" }, FIG);
     const pos = t.applyNegotiationTool(
       s,
@@ -159,13 +234,7 @@ describe("negotiation call tools — refusals", () => {
 describe("negotiation call tools — a yes is passed on, never agreed", () => {
   test("binds to the figure last read out, from what was heard after asking", () => {
     const s = started();
-    t.applyNegotiationTool(s, "state_offer", { which: "proposal" }, FIG);
-    t.applyNegotiationTool(
-      s,
-      "record_their_position",
-      { stance: "declines", their_words: "no" },
-      FIG,
-    );
+    earnMove(s);
     t.applyNegotiationTool(s, "state_offer", { which: "improved" }, FIG);
     const r = t.applyNegotiationTool(
       s,

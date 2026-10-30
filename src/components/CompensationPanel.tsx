@@ -593,8 +593,36 @@ function ArrangeCallDialog({
   const arrange = useServerFn(arrangeNegotiationCall);
   const [step, setStep] = useState("");
   const [busy, setBusy] = useState(false);
+  // What the call may explain, and why the team wants them (the negotiator's material).
+  const [d, setD] = useState({
+    fixed: "",
+    variable: "",
+    esop: "",
+    esopValue: "",
+    review: "",
+    benefits: "",
+    whyYou: "",
+  });
+  const setF = (k: keyof typeof d) => (e: { target: { value: string } }) =>
+    setD((p) => ({ ...p, [k]: e.target.value }));
   const stepRupees = lakhsToRupees(step);
-  const problem =
+  const fixed = lakhsToRupees(d.fixed);
+  const variable = lakhsToRupees(d.variable);
+  const esopValue = lakhsToRupees(d.esopValue);
+  const whyYou = d.whyYou
+    .split("\n")
+    .map((x) => x.trim())
+    .filter(Boolean);
+  const detailProblem = [fixed, variable, esopValue].some((x) => x != null && Number.isNaN(x))
+    ? "Amounts are lakhs per annum, e.g. 42."
+    : (fixed == null) !== (variable == null)
+      ? "Give both the fixed and the variable part, or neither."
+      : fixed != null && variable != null && Math.abs(fixed + variable - proposedCtc) > 1
+        ? `Fixed and variable must add up to the proposal (${lpa(proposedCtc)}).`
+        : whyYou.length > 3
+          ? "At most three reasons."
+          : null;
+  const stepProblem =
     stepRupees == null
       ? null
       : Number.isNaN(stepRupees)
@@ -604,10 +632,20 @@ function ArrangeCallDialog({
           : stepRupees > ceiling
             ? `At or under the approved ceiling (${lpa(ceiling)}).`
             : null;
+  const problem = stepProblem ?? detailProblem;
   async function submit() {
     setBusy(true);
     try {
-      const r = await arrange({ data: { negotiationId, improvedCtc: stepRupees ?? null } });
+      const brief = {
+        fixedCtc: fixed ?? null,
+        variableCtc: variable ?? null,
+        esop: d.esop.trim() || null,
+        esopValue: esopValue ?? null,
+        review: d.review.trim() || null,
+        benefits: d.benefits.trim() || null,
+        whyYou,
+      };
+      const r = await arrange({ data: { negotiationId, improvedCtc: stepRupees ?? null, brief } });
       toast.success(
         `Pay call arranged — first try ${new Date(r.dueAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}.`,
       );
@@ -620,7 +658,7 @@ function ArrangeCallDialog({
   }
   return (
     <Dialog open onOpenChange={(o) => (!o ? onClose() : undefined)}>
-      <DialogContent>
+      <DialogContent className="max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Call to negotiate</DialogTitle>
           <DialogDescription>
@@ -638,8 +676,77 @@ function ArrangeCallDialog({
             value={step}
             onChange={(e) => setStep(e.target.value)}
           />
-          {problem ? <p className="text-xs text-destructive">{problem}</p> : null}
+          {stepProblem ? <p className="text-xs text-destructive">{stepProblem}</p> : null}
         </div>
+        <p className="text-xs text-muted-foreground">
+          What the assistant may explain if they ask — and why the team wants them. It says only
+          what you write here; empty means "the hiring team will share it".
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label htmlFor="neg-fixed">Fixed (₹ L)</Label>
+            <Input id="neg-fixed" inputMode="decimal" value={d.fixed} onChange={setF("fixed")} />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="neg-variable">Variable (₹ L)</Label>
+            <Input
+              id="neg-variable"
+              inputMode="decimal"
+              value={d.variable}
+              onChange={setF("variable")}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="neg-esop">ESOPs (in words)</Label>
+            <Input
+              id="neg-esop"
+              maxLength={300}
+              placeholder="e.g. ESOPs vesting over four years"
+              value={d.esop}
+              onChange={setF("esop")}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="neg-esop-value">ESOP value (₹ L, optional)</Label>
+            <Input
+              id="neg-esop-value"
+              inputMode="decimal"
+              value={d.esopValue}
+              onChange={setF("esopValue")}
+            />
+          </div>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="neg-review">How the pay review works</Label>
+          <Input
+            id="neg-review"
+            maxLength={300}
+            placeholder="e.g. A review at six months, then every April with the company"
+            value={d.review}
+            onChange={setF("review")}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="neg-benefits">Benefits</Label>
+          <Input
+            id="neg-benefits"
+            maxLength={300}
+            placeholder="e.g. Family health cover, a learning budget, hybrid work"
+            value={d.benefits}
+            onChange={setF("benefits")}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="neg-why">Why the team wants them (up to three lines)</Label>
+          <Textarea
+            id="neg-why"
+            rows={3}
+            placeholder={"e.g. The panel valued how you built and scaled an AI team"}
+            value={d.whyYou}
+            onChange={setF("whyYou")}
+          />
+        </div>
+        {detailProblem ? <p className="text-xs text-destructive">{detailProblem}</p> : null}
         <DialogFooter>
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Cancel

@@ -13,11 +13,18 @@
  */
 import { and, eq, inArray, sql } from "drizzle-orm";
 
-import { applications, candidates, offerNegotiations, screeningCalls } from "@db/schema";
+import {
+  applications,
+  candidates,
+  offerNegotiations,
+  screeningCalls,
+  type NegotiationCallBrief,
+} from "@db/schema";
 import { CALLABLE_NEGOTIATION } from "@/lib/negotiation.server";
 import { writeAudit } from "../audit";
 import { db } from "../db";
 import { dialNumber } from "./phone";
+import { callBriefProblem } from "./negotiation-call-tools";
 import { nextWindowStart } from "./schedule";
 import { phoneScreeningPolicyOf, phoneScreeningReadiness } from "./settings.server";
 
@@ -52,7 +59,7 @@ export type NegotiationCallCheck =
 export async function checkNegotiationCall(
   orgId: string,
   negotiationId: string,
-  opts: { byPerson?: boolean; step?: number | null } = {},
+  opts: { byPerson?: boolean; step?: number | null; brief?: NegotiationCallBrief | null } = {},
 ): Promise<NegotiationCallCheck> {
   const ready = await phoneScreeningReadiness(orgId);
   if (!ready.enabled)
@@ -95,6 +102,13 @@ export async function checkNegotiationCall(
     ceiling: Number(row.n.ceiling),
   });
   if (step) return { ok: false, reason: step };
+  const briefProblem = opts.brief
+    ? callBriefProblem(opts.brief, {
+        proposedCtc: Number(row.n.proposedCtc),
+        ceiling: Number(row.n.ceiling),
+      })
+    : null;
+  if (briefProblem) return { ok: false, reason: briefProblem };
 
   const [live] = await db
     .select({ id: screeningCalls.id })
@@ -138,6 +152,8 @@ export async function requestNegotiationCall(input: {
   orgId: string;
   negotiationId: string;
   step: number | null;
+  /** What the call may explain (split, ESOPs, review, benefits, why the team wants them). */
+  brief?: NegotiationCallBrief | null;
   requestedBy: string;
   requestedRunId: string | null;
   actor: string;
@@ -148,6 +164,7 @@ export async function requestNegotiationCall(input: {
   const check = await checkNegotiationCall(input.orgId, input.negotiationId, {
     byPerson: Boolean(input.byPerson),
     step: input.step,
+    brief: input.brief ?? null,
   });
   if (!check.ok) throw new Error(check.reason);
   const n = check.negotiation;
@@ -160,6 +177,7 @@ export async function requestNegotiationCall(input: {
       .update(offerNegotiations)
       .set({
         callStepCtc: input.step == null ? null : String(input.step),
+        callBrief: input.brief ?? null,
         updatedAt: new Date(now),
       })
       .where(and(eq(offerNegotiations.id, n.id), eq(offerNegotiations.orgId, input.orgId)));
@@ -192,6 +210,10 @@ export async function requestNegotiationCall(input: {
       applicationId: n.applicationId,
       // Whether the call may move once — never the figure.
       improvedFigure: input.step != null,
+      // Which parts the call may explain — never their amounts.
+      explains: Object.keys(input.brief ?? {}).filter(
+        (k) => (input.brief as Record<string, unknown>)[k] != null,
+      ),
       byPerson: Boolean(input.byPerson),
       dueAt: dueAt.toISOString(),
     },

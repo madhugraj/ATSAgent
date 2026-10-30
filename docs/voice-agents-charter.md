@@ -138,6 +138,8 @@ contact given is the organisation's mailbox.
 |---|---|
 | The organisation and the role — only the approved facts it is given — to show why the role is worth their while. | instruction + evals |
 | What matters to the candidate in their next move, so the offer is framed around it. | instruction + evals |
+| Why the team wants them — only the points the person who arranged the call approved. | instruction + evals |
+| The package's parts — fixed and variable split, joining bonus, review, ESOPs, benefits — only as the system words them. | code |
 | The approved figure, and at most one improved figure — only as the system words them. | code |
 | The approved extras (joining bonus, early pay review, other), as the system words them. | code |
 | The candidate's own position, in their words. | instruction + evals |
@@ -150,7 +152,7 @@ contact given is the organisation's mailbox.
 | Name or describe any member of staff — the hiring manager, recruiters or the interview panel (names, titles, e-mails, phone numbers) — or say who decides; refer only to "the hiring team". | instruction + evals |
 | State, hint at or confirm the role's ceiling, budget or band, or how much room there is. | code |
 | Say, calculate or agree any figure a tool did not give it — no splitting the difference, no rounding; the call cuts it off, corrects it and hands to a person. | code |
-| Offer the improved figure before the first one was turned down, or move more than once. | code |
+| Give the improved figure away: it comes only after the first was turned down and they said they would go ahead if it improved — and only once. | code |
 | Agree, accept or confirm the offer — a verbal yes goes to the hiring team to confirm. | code |
 | Claim anything about the organisation, the role, its growth, benefits or future beyond the facts it is given. | instruction + evals |
 | Repeat or weigh the figures the candidate names, or judge their other offers. | instruction + evals |

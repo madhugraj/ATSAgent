@@ -11,7 +11,7 @@
  */
 import { z } from "zod";
 
-import type { NegotiationLevers } from "@db/schema";
+import type { NegotiationCallBrief, NegotiationLevers } from "@db/schema";
 import { disclosureMissing } from "./call-tools";
 import { UNCLEAR } from "./scheduling-call-tools";
 
@@ -35,6 +35,18 @@ export const HAND_OFF_WHY = ["wants_more", "wants_person", "needs_time", "other"
 
 export type Which = "proposal" | "improved";
 
+/** What the call may explain about the package — only as the person who arranged it approved. */
+export const EXPLAIN_TOPICS = [
+  "package",
+  "split",
+  "joining_bonus",
+  "review",
+  "esop",
+  "benefits",
+  "why_you",
+] as const;
+export type ExplainTopic = (typeof EXPLAIN_TOPICS)[number];
+
 export const NEGOTIATION_TOOL_INPUTS = {
   record_permission: z.object({
     granted: z.boolean(),
@@ -49,6 +61,10 @@ export const NEGOTIATION_TOOL_INPUTS = {
     stance: z.enum(STANCES),
     /** Exactly what they said — any figure they name stays in their words. */
     their_words: z.string().trim().min(1).max(400),
+  }),
+  explain_offer: z.object({
+    /** What they asked about. */
+    topic: z.enum(EXPLAIN_TOPICS),
   }),
   submit_agreed_terms: z.object({
     /** Their clear yes to the figure you just read out, as they said it. */
@@ -70,6 +86,8 @@ export const NEGOTIATION_TOOL_DESCRIPTIONS: Record<NegotiationToolName, string> 
     'Get the exact words for a figure, then say them out loud word for word. which "proposal" first; "improved" only after they turned the proposal down, and only if the result of record_their_position said you may. You never say any other figure.',
   record_their_position:
     "Record the candidate's answer to the figure you read out: stance accepts, declines, wants_more (they want more) or unsure; their_words exactly as they said it, including any figure they named. The result says what you may do next.",
+  explain_offer:
+    "Get the approved words about part of the offer, then say them: package (the whole offer), split (fixed and variable), joining_bonus, review (how the pay review works), esop, benefits, or why_you (why the team wants them). Use it whenever they ask about the package, and to build the offer's value. Never describe the package any other way; if the result says a detail is not shared, say the hiring team will share it.",
   submit_agreed_terms:
     "They clearly said yes to the figure you just read out: pass it to the hiring team, who confirm it with them. It does not agree anything itself. their_words is their yes, as said.",
   request_human_call:
@@ -98,7 +116,98 @@ export type NegotiationFigures = {
   /** The one improved figure (above the proposal, ≤ ceiling); null = hold. */
   stepCtc: number | null;
   levers: NegotiationLevers;
+  /** What the person arranging the call approved it to explain. */
+  brief?: NegotiationCallBrief | null;
 };
+
+/** Every amount the call may say right now (pure): the guard allows only these. */
+export function allowedAmounts(f: NegotiationFigures, improvedGiven: boolean): number[] {
+  const b = f.brief ?? {};
+  return [
+    f.proposalCtc,
+    ...(improvedGiven && f.stepCtc != null ? [f.stepCtc] : []),
+    ...[f.levers.joiningBonus, b.fixedCtc, b.variableCtc, b.esopValue].filter(
+      (x): x is number => typeof x === "number" && x > 0,
+    ),
+  ];
+}
+
+/**
+ * Why a call brief cannot be approved, or null (pure; unit-tested): the split
+ * adds up to the proposal, amounts are positive and within it, the words
+ * carry no amounts, at most three short "why you" points.
+ */
+export function callBriefProblem(
+  b: NegotiationCallBrief,
+  n: { proposedCtc: number; ceiling: number },
+): string | null {
+  const { fixedCtc: fx, variableCtc: vr, esopValue } = b;
+  for (const x of [fx, vr, esopValue])
+    if (x != null && !(x > 0)) return "Amounts must be positive.";
+  if ((fx != null) !== (vr != null))
+    return "Give both the fixed and the variable part, or neither.";
+  if (fx != null && vr != null && Math.abs(fx + vr - n.proposedCtc) > 1)
+    return "Fixed and variable must add up to the proposal.";
+  if (esopValue != null && esopValue > n.ceiling)
+    return "The ESOP value cannot be above the approved ceiling.";
+  for (const t of [b.esop, b.review, b.benefits, ...(b.whyYou ?? [])])
+    if (t && /\d[\d,.]*\s*(lakh|lac|crore|cr|lpa|k\b|%|rupees|₹|rs\b)|₹\s*\d/i.test(t))
+      return "Keep amounts out of the words — use the amount fields.";
+  if ((b.whyYou ?? []).length > 3) return "At most three reasons why the team wants them.";
+  if ((b.whyYou ?? []).some((w) => w.length > 200)) return "Keep each reason under 200 characters.";
+  for (const t of [b.esop, b.review, b.benefits])
+    if (t && t.length > 300) return "Keep each description under 300 characters.";
+  return null;
+}
+
+const NOT_SHARED =
+  "That detail is not shared for this call: say the hiring team will share it with them.";
+
+/** The approved words for one part of the offer (pure; unit-tested). */
+export function explainOffer(
+  topic: ExplainTopic,
+  f: NegotiationFigures,
+  improved: boolean,
+): string {
+  const b = f.brief ?? {};
+  const split =
+    b.fixedCtc != null && b.variableCtc != null
+      ? `Of the ${spokenRupees(f.proposalCtc)} a year, ${spokenRupees(b.fixedCtc)} is fixed pay and ${spokenRupees(b.variableCtc)} is variable pay.${improved ? " That split is for the first figure; the hiring team will confirm the split for the improved one." : ""}`
+      : null;
+  const bonus = f.levers.joiningBonus
+    ? `There is a one-time joining bonus of ${spokenRupees(f.levers.joiningBonus)}.`
+    : null;
+  const review =
+    b.review?.trim() ||
+    (f.levers.reviewMonths
+      ? `Your pay is reviewed after ${f.levers.reviewMonths} months, as part of the hiring team's review process.`
+      : null);
+  const esop = b.esop?.trim()
+    ? `${b.esop.trim().replace(/\.$/, "")}${b.esopValue ? `, valued at ${spokenRupees(b.esopValue)}` : ""}.`
+    : null;
+  const benefits = b.benefits?.trim() || null;
+  const whyYou = b.whyYou?.length ? b.whyYou.join(" ") : null;
+  const by: Record<ExplainTopic, string | null> = {
+    package:
+      [
+        split ??
+          `The annual cost to company is ${spokenRupees(improved && f.stepCtc ? f.stepCtc : f.proposalCtc)}.`,
+        bonus,
+        review,
+        esop,
+        benefits,
+      ]
+        .filter(Boolean)
+        .join(" ") || null,
+    split,
+    joining_bonus: bonus,
+    review,
+    esop,
+    benefits,
+    why_you: whyYou,
+  };
+  return by[topic] ?? NOT_SHARED;
+}
 
 /** A yearly rupee amount as it is spoken in India: "18 lakh 50 thousand rupees a year" (pure). */
 export function spokenRupees(n: number): string {
@@ -174,6 +283,13 @@ export type NegotiationCallState = {
    * need never invent one; once it says them the call counts them as offered.
    */
   improvedRevealed?: boolean;
+  /**
+   * The conditional question was asked ("if the team could improve it, would you
+   * go ahead?") — a concession is traded for a commitment, never given away.
+   */
+  conditionalAsked?: boolean;
+  /** …and their answer: true = they would go ahead (the move is earned), false = not even then. */
+  conditionalYes?: boolean | null;
 };
 
 export const freshNegotiationState = (): NegotiationCallState => ({
@@ -211,7 +327,8 @@ export function applyNegotiationTool(
     name === "state_offer" ||
     name === "record_their_position" ||
     name === "submit_agreed_terms" ||
-    name === "request_human_call";
+    name === "request_human_call" ||
+    name === "explain_offer";
   if (needsPermission && state.permission !== true)
     return {
       ok: false,
@@ -267,6 +384,18 @@ export function applyNegotiationTool(
             error:
               'Not yet: read out the proposal first (which "proposal") and record their answer with record_their_position.',
           };
+        if (!state.conditionalAsked || state.conditionalYes == null)
+          return {
+            ok: false,
+            error:
+              "Not yet: never give the improvement away. Ask first whether, if the hiring team could improve the offer, they would be ready to go ahead with us — and record their answer with record_their_position.",
+          };
+        if (state.conditionalYes === false)
+          return {
+            ok: false,
+            error:
+              "They said they would not go ahead even with more: keep the improvement for the hiring team. Summarise what would make it work for them and use request_human_call.",
+          };
       }
       state.stated[which] = true;
       state.lastStated = which;
@@ -279,23 +408,37 @@ export function applyNegotiationTool(
       const turnedDown = stance === "declines" || stance === "wants_more";
       if (turnedDown && state.lastStated === "proposal") state.proposalDeclined = true;
       let next: string;
-      if (stance === "accepts")
+      const canMove =
+        figures.stepCtc != null && state.stated.proposal && !state.stated.improved && !state.halted;
+      if (canMove && state.conditionalAsked && state.conditionalYes == null) {
+        // Their answer to the conditional question.
+        if (stance === "declines") {
+          state.conditionalYes = false;
+          next =
+            "They would not go ahead even if it improved: keep the improvement. Ask what would make it work for them, sum it up in words (no figures), say the hiring team will come back to them, and use request_human_call with wants_more.";
+        } else {
+          state.conditionalYes = true;
+          // Hand it the exact words: real calls invented their own "improved" figure.
+          state.improvedRevealed = true;
+          next = `They would go ahead if it improved. Tell them the hiring team has heard them, then call state_offer with which "improved" — or say exactly these words and nothing else about pay: "${offerSentence("improved", figures)}" No other figure exists; any other number ends the call.`;
+        }
+      } else if (stance === "accepts")
         next = "If they clearly said yes to the figure you just read out, use submit_agreed_terms.";
       else if (stance === "unsure")
         next =
-          "Ask once, gently, what would help them decide. If they want time, use request_human_call with needs_time.";
-      else if (
-        state.lastStated === "proposal" &&
-        figures.stepCtc != null &&
-        !state.stated.improved
-      ) {
-        // Hand it the exact words: real calls invented their own "improved" figure.
-        state.improvedRevealed = true;
-        next = `You may offer the improved figure, once. First explore what is behind their view (in words, never their numbers). If they still want more, call state_offer with which "improved" — or say exactly these words and nothing else about pay: "${offerSentence("improved", figures)}" No other figure exists; any other number ends the call.`;
+          "Ask what would help them decide — use explain_offer for the parts of the package they are unsure about. If they want time, use request_human_call with needs_time.";
+      else if (canMove && state.lastStated === "proposal" && !state.conditionalAsked) {
+        state.conditionalAsked = true;
+        next =
+          'Do not offer anything yet. Explore first: acknowledge their view in words (never their numbers), ask what is behind it (their current package, another offer, what matters most), and use explain_offer to show the whole package and why the team wants them. If they still want more, ask the conditional question in your own words — "If the hiring team could improve the offer, would you be ready to go ahead with us?" — and record_their_position with their answer.';
       } else
         next =
-          "You have no other figure. Thank them, say the hiring team will come back to them, and use request_human_call with wants_more.";
+          "You have no other figure. Thank them warmly, sum up in words what would make it work for them, say the hiring team will come back to them, and use request_human_call with wants_more.";
       return { ok: true, next };
+    }
+    case "explain_offer": {
+      const { topic } = parsed.data as { topic: ExplainTopic };
+      return { ok: true, say: explainOffer(topic, figures, state.stated.improved) };
     }
     case "submit_agreed_terms": {
       if (state.agreement) return { ok: false, error: "Their answer is already passed on." };

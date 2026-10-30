@@ -708,7 +708,14 @@ export function registerPhase3Agents(): void {
     // own improved figure from the candidate's numbers): the result after a no hands it the
     // exact improved words; what it actually says decides which figure a yes binds to;
     // "Am I audible?" is not a yes to who they are.
-    version: "0.2.1",
+    // 0.3.0 (the fourth real call: it could not explain the package — "what is the split?
+    // variable pay?" — and was vague; it also praised the role with no approved facts): a
+    // negotiator's material and discipline — explain_offer answers the package (split,
+    // bonus, review, ESOPs, benefits, why the team wants them) only from what the person
+    // arranging the call approved; the improved figure is traded for a commitment ("if the
+    // team could improve it, would you go ahead?"), never given; with no approved facts it
+    // says nothing about the role or organisation.
+    version: "0.3.0",
     owner: "hr_head",
     responsibility:
       "Holds one AI phone call with a candidate about the pay for their offer: says it is an AI, tells them which role and organisation and where they stand, wins their interest from approved facts, frames the approved figure and extras around what matters to them, may offer one pre-approved improved figure, and brings a clear answer back to the people who decide.",
@@ -727,7 +734,8 @@ export function registerPhase3Agents(): void {
     riskTier: "high",
     evals: [
       "negotiation call: passes a clear yes on to be confirmed",
-      "negotiation call: offers the improved figure once after a no",
+      "negotiation call: trades the improved figure for a commitment",
+      "negotiation call: asks before offering anything more",
       "negotiation call: never names another figure when pushed or told to",
       "negotiation call: stops calling when asked not to be called",
     ],
@@ -810,7 +818,9 @@ export function registerPhase4Agents(): void {
     // call or did not answer the pay message, asks for an AI pay call
     // (request_negotiation_call) with at most one improved figure ≤ the ceiling; the HR
     // head always approves it.
-    version: "1.6.0",
+    // 1.6.1: request_negotiation_call carries what the call may explain (the split,
+    // ESOPs, the review, benefits, why the team wants them) for the HR head to approve.
+    version: "1.6.1",
     owner: "hr_head",
     responsibility:
       "Turns a hiring decision into a draft offer inside the approved band — built on the candidate's stated expectation and notice period — with its letter and an approval brief, and walks it through HR head and CBO approval.",
@@ -871,7 +881,7 @@ export function registerPhase4Agents(): void {
       "1c. If compensation.expectedCtc is above the band maximum: ask_human with assignee_role hr_head — state the expectation, the band, the gap in money and %, current pay and competing offers — and offer three choices: (a) offer at the band maximum, (b) seek a CBO exception above the band, (c) stop. Follow the answer: (a) draft at the band maximum; (b) ask_human with assignee_role president_cbo for the figure, then draft at the figure they give; (c) finish without drafting.",
       "1d. If the approved figure (the HR head's ceiling, or the CBO's) is still below the candidate's expectation, do not hand off and do not draft: if the ceiling is above the band maximum and the CBO has not answered, ask_human with assignee_role president_cbo first. Then propose_negotiation: ceiling = the approved figure; proposedCtc = the ceiling (or a little under it, keeping room to agree); levers that cost less than base pay — a joiningBonus that covers variable pay they give up by leaving, reviewMonths 6 for an early review, and other (fixed / variable split, ESOPs if the organisation has them); a talkTrack for TA's call (their current pay, ask and gap; open with appreciation; the proposal and levers; what TA may agree up to the ceiling; when to stop and hand to the HR head); and a message to the candidate: warm and personal, thank them, say plainly what the organisation can offer and why (internal parity, the role's band), list the levers, invite them to accept, suggest another figure or ask for a call; no pressure, no deadlines beyond the link's date, no internal reasoning about other candidates. Then send_negotiation_message with the negotiationId and that message, and finish: a person approves it, and you are started again when a figure is agreed.",
       "1e. When negotiation.status is agreed: draft_offer (or revise_offer) at negotiation.outcome.agreedCtc, joining date = outcome.joiningDate or the candidate's earliest joining date, and state the joining bonus and review in your approval brief. Never draft above the agreed figure. If it is open or message_sent, finish — a person is handling it.",
-      "1f. When negotiation.status is countered, call_requested or expired (the candidate replied with another figure, asked for a call, or did not answer): request_negotiation_call with the negotiationId and improvedCtc — one figure above the proposal and at or under the ceiling that the assistant may offer once if they turn the proposal down (between the proposal and the ceiling, keeping room for TA; null to hold at the proposal). The HR head approves it. If it is refused (calls off, no mobile, already called), finish — a person is handling it. Never ask for a second call.",
+      "1f. When negotiation.status is countered, call_requested or expired (the candidate replied with another figure, asked for a call, or did not answer): request_negotiation_call with the negotiationId, a brief (the proposal's fixed / variable split if you know it — the two must add up to the proposal — and up to three short reasons, in words, why the team wants them, from the hiring decision and interview notes; never scores) and improvedCtc — one figure above the proposal and at or under the ceiling that the assistant may offer once if they turn the proposal down (between the proposal and the ceiling, keeping room for TA; null to hold at the proposal). The HR head approves it. If it is refused (calls off, no mobile, already called), finish — a person is handling it. Never ask for a second call.",
       "2. Propose a CTC inside the requisition's band: anchor on the candidate's expected CTC, the internal parity median and the band midpoint; use research_compensation if the band is missing. Never exceed the band unless the CBO answered 1c(b).",
       "3. draft_offer with a joining date, always: the candidate's earliest joining date if given, otherwise notice period from today, rounded to the next Monday. An offer without a joining date cannot go for approval. When revising a sent-back offer, set the joining date the same way.",
       "4. generate_offer_letter, then submit_offer_for_approval.",

@@ -87,6 +87,7 @@ export async function loadNegotiationBrief(
       proposedCtc: offerNegotiations.proposedCtc,
       callStepCtc: offerNegotiations.callStepCtc,
       levers: offerNegotiations.levers,
+      callBrief: offerNegotiations.callBrief,
       fullName: candidates.fullName,
       roleTitle: requisitions.title,
       applicationId: applications.id,
@@ -136,6 +137,7 @@ export async function loadNegotiationBrief(
       proposalCtc: Number(row.proposedCtc),
       stepCtc: row.callStepCtc == null ? null : Number(row.callStepCtc),
       levers: row.levers ?? {},
+      brief: row.callBrief ?? null,
     },
   };
 }

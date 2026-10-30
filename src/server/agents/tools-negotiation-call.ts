@@ -134,10 +134,23 @@ export function registerNegotiationCallTools(): void {
   registerTool({
     name: "request_negotiation_call",
     description:
-      "Ask for an AI pay call to the candidate of an unsettled pay discussion (they countered, asked for a call, or did not answer the message): the assistant phones them inside the calling window, reads out the proposal and its levers, and may offer improvedCtc ONCE if they turn it down — one figure above the proposal and at or under the approved ceiling, or null to hold at the proposal. It never agrees anything: a yes goes to TA / the HR head to confirm. The HR head always approves the call first and may change the figure. Refused when calls are off, the candidate has no Indian mobile or opted out, a call is already arranged, or the assistant already spoke with them about pay.",
+      "Ask for an AI pay call to the candidate of an unsettled pay discussion (they countered, asked for a call, or did not answer the message): the assistant phones them inside the calling window, wins their interest, reads out the proposal and its levers, explains the package from `brief` (the fixed / variable split adding up to the proposal, ESOPs, how the review works, benefits, and up to three reasons why the team wants them — from the hiring decision and interview notes, in words, no amounts in the words), and may offer improvedCtc ONCE if they turn it down and say they would go ahead if it improved — one figure above the proposal and at or under the approved ceiling, or null to hold at the proposal. It never agrees anything: a yes goes to TA / the HR head to confirm. The HR head always approves the call first and may change the figure. Refused when calls are off, the candidate has no Indian mobile or opted out, a call is already arranged, or the assistant already spoke with them about pay.",
     input: z.object({
       negotiationId: z.string().uuid(),
       improvedCtc: z.number().positive().nullable(),
+      /** What the call may explain; the HR head approves it with the call. */
+      brief: z
+        .object({
+          fixedCtc: z.number().positive().nullable().optional(),
+          variableCtc: z.number().positive().nullable().optional(),
+          esop: z.string().max(300).nullable().optional(),
+          esopValue: z.number().positive().nullable().optional(),
+          review: z.string().max(300).nullable().optional(),
+          benefits: z.string().max(300).nullable().optional(),
+          whyYou: z.array(z.string().min(3).max(200)).max(3).optional(),
+        })
+        .nullable()
+        .optional(),
     }),
     risk: "external",
     // No template: a pay call is never pre-approved, so the HR head always approves it.
@@ -150,7 +163,10 @@ export function registerNegotiationCallTools(): void {
         : `Phone the candidate about pay (may move once, to ${rupees(i.improvedCtc)})`,
     precheck: async (ctx, i) => {
       const { checkNegotiationCall } = await import("../voice/negotiation-request.server");
-      const c = await checkNegotiationCall(ctx.orgId, i.negotiationId, { step: i.improvedCtc });
+      const c = await checkNegotiationCall(ctx.orgId, i.negotiationId, {
+        step: i.improvedCtc,
+        brief: i.brief ?? null,
+      });
       return c.ok ? null : c.reason;
     },
     // Stated by the system on the approval card: exactly what the call may say.
@@ -166,6 +182,22 @@ export function registerNegotiationCallTools(): void {
         i.improvedCtc == null
           ? "• It holds there: if they want more, their words come back to the team."
           : `• If they turn it down, it may offer ${rupees(i.improvedCtc)} once — nothing else.`,
+        ...(i.brief?.fixedCtc && i.brief.variableCtc
+          ? [
+              `• It may explain the split: ${rupees(i.brief.fixedCtc)} fixed + ${rupees(i.brief.variableCtc)} variable.`,
+            ]
+          : []),
+        ...(i.brief?.esop
+          ? [
+              `• ESOPs: ${i.brief.esop}${i.brief.esopValue ? ` (${rupees(i.brief.esopValue)})` : ""}.`,
+            ]
+          : []),
+        ...(i.brief?.review ? [`• The review: ${i.brief.review}`] : []),
+        ...(i.brief?.benefits ? [`• Benefits: ${i.brief.benefits}`] : []),
+        ...(i.brief?.whyYou?.length
+          ? [`• Why the team wants them: ${i.brief.whyYou.join(" ")}`]
+          : []),
+        "• It offers the improvement only after they say they would go ahead if it improved.",
         `• It never says the ceiling (${rupees(Number(n.ceiling))}) or the band, and never agrees anything: a yes comes back to TA / the HR head to confirm in one click.`,
       ].join("\n");
     },
@@ -175,6 +207,7 @@ export function registerNegotiationCallTools(): void {
         orgId: ctx.orgId,
         negotiationId: i.negotiationId,
         step: i.improvedCtc,
+        brief: i.brief ?? null,
         requestedBy: ctx.principalUserId,
         requestedRunId: ctx.runId,
         actor: ctx.actor,

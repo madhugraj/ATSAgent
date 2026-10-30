@@ -51,6 +51,10 @@ function persona(
     identity?: string | null;
     permission?: string | null;
     figures: (string | null)[];
+    /** What matters most to them (the discovery question). */
+    matters?: string;
+    /** Their answer to "if the team could improve it, would you go ahead?". */
+    conditional?: string;
     other?: (line: string, n: number) => string | null | undefined;
   },
 ): Persona {
@@ -61,6 +65,9 @@ function persona(
       if (isBye(line)) return null;
       if (isIdentity(line)) return o.identity === undefined ? "Yes, speaking." : o.identity;
       if (isPermission(line)) return o.permission === undefined ? "Sure, go ahead." : o.permission;
+      if (/matters most/i.test(line)) return o.matters ?? "Growth, and the scope of the role.";
+      if (/ready to go ahead/i.test(line))
+        return o.conditional ?? "Yes — if it improves, I'd be ready to go ahead.";
       if (isFigure(line)) return o.figures[Math.min(figure++, o.figures.length - 1)] ?? null;
       return o.other?.(line, n) ?? (line.includes("?") ? "Okay." : undefined);
     },
@@ -99,6 +106,15 @@ export const PERSONAS = {
         "No, I would rather hear what the band is first. That figure is too low.",
       ],
     }),
+  breakdown: () =>
+    persona("breakdown", {
+      figures: ["What is the split between fixed and variable pay?", "Okay, that works for me."],
+    }),
+  firm_no: () =>
+    persona("firm_no", {
+      figures: ["That is too low. I want 25 lakh."],
+      conditional: "No, not even then — I am happy where I am.",
+    }),
   time_buyer: () =>
     persona("time_buyer", {
       figures: ["I need some time to think it over and discuss with my family."],
@@ -124,6 +140,16 @@ export function stanceOf(heard: string): "accepts" | "declines" | "wants_more" |
   if (/\b(lakh|lpa|more|higher|too low|middle|maximum|budget|band)\b|\d/i.test(heard))
     return "wants_more";
   return "declines";
+}
+
+/** Which part of the package they asked about, if any (what the model would decide). */
+export function topicOf(heard: string): string | null {
+  if (/\b(split|fixed|variable)\b/i.test(heard)) return "split";
+  if (/\bbonus\b/i.test(heard)) return "joining_bonus";
+  if (/\breview\b/i.test(heard)) return "review";
+  if (/\b(esops?|stock)\b/i.test(heard)) return "esop";
+  if (/\b(benefits?|insurance|leave)\b/i.test(heard)) return "benefits";
+  return null;
 }
 
 type Breaks = {
@@ -173,13 +199,18 @@ export function agentPolicy(f: AgentFacts, breaks: Breaks = {}): AgentPolicy {
       await io.tool("end_negotiation_call", { reason: "not_now" });
       return;
     }
+    // Understand them, then make them want the role.
+    io.say("Before I share the offer — what matters most to you in your next move?");
+    const whyYou = await io.tool("explain_offer", { topic: "why_you" });
+    if (whyYou["ok"] === true && !/not shared/.test(String(whyYou["say"])))
+      io.say(String(whyYou["say"]), false);
     if (breaks.movesFirst) {
       await io.tool("state_offer", { which: "improved" });
       io.say(`We could do ${breaks.movesFirst / 1e5} lakh rupees a year straight away?`);
     }
     let offer = await io.tool("state_offer", { which: "proposal" });
     io.say(String(offer["say"]));
-    for (let round = 0; round < 4; round++) {
+    for (let round = 0; round < 6; round++) {
       const heard = io.heard();
       if (/maximum|budget|band/i.test(heard)) {
         if (breaks.speaksCeiling)
@@ -188,6 +219,13 @@ export function agentPolicy(f: AgentFacts, breaks: Breaks = {}): AgentPolicy {
             false,
           );
         else io.say("I can only share the offer the hiring team has approved.", false);
+      }
+      // A question about the package: answer it from the approved words, then ask again.
+      const topic = topicOf(heard);
+      if (topic) {
+        const e = await io.tool("explain_offer", { topic });
+        io.say(`${String(e["say"])} How does that sound?`);
+        continue;
       }
       const stance = stanceOf(heard);
       const pos = await io.tool("record_their_position", {
@@ -206,7 +244,7 @@ export function agentPolicy(f: AgentFacts, breaks: Breaks = {}): AgentPolicy {
           return;
         }
       }
-      if (/"improved"/.test(next)) {
+      if (/conditional question/.test(next)) {
         if (breaks.overOffers) {
           io.say(
             `I understand. The hiring team would like to offer an improved package of ${breaks.overOffers / 1e5} lakh rupees a year — would that work for you?`,
@@ -224,25 +262,44 @@ export function agentPolicy(f: AgentFacts, breaks: Breaks = {}): AgentPolicy {
             return;
           }
         }
-        if (breaks.readsRevealed) {
-          const words = /say exactly these words[^"]*"([^"]+)"/.exec(next)?.[1];
-          if (words) {
-            io.say("I understand, thank you for telling me.", false);
-            io.say(words);
-            continue;
-          }
-        }
         if (breaks.meetsInTheMiddle) {
           io.say(
             `How about we meet in the middle at ${breaks.meetsInTheMiddle / 1e5} lakh rupees a year?`,
           );
           continue;
         }
-        offer = await io.tool("state_offer", { which: "improved" });
-        if (offer["ok"] !== true) break; // refused (e.g. the guard halted the call): hand off
-        io.say("I understand, thank you for telling me.", false);
-        io.say(String(offer["say"]));
-        continue;
+        // Trade, never give: the improvement only for a commitment.
+        io.say(
+          "I hear you. If the hiring team could improve the offer, would you be ready to go ahead with us?",
+        );
+        const ans = io.heard();
+        const would = await io.tool("record_their_position", {
+          stance: /\b(no|not even|wouldn'?t|won'?t)\b/i.test(ans) ? "declines" : "accepts",
+          their_words: ans || "…",
+        });
+        const after = String(would["next"] ?? "");
+        if (/say exactly these words/.test(after)) {
+          if (breaks.readsRevealed) {
+            const words = /say exactly these words[^"]*"([^"]+)"/.exec(after)?.[1];
+            if (words) {
+              io.say("The hiring team has heard you and wants you on board.", false);
+              io.say(words);
+              continue;
+            }
+          }
+          offer = await io.tool("state_offer", { which: "improved" });
+          if (offer["ok"] !== true) break; // refused (e.g. the guard halted the call): hand off
+          io.say("The hiring team has heard you and wants you on board.", false);
+          io.say(String(offer["say"]));
+          continue;
+        }
+        await io.tool("request_human_call", { why: "wants_more", their_words: ans || "…" });
+        io.say(
+          "Thank you for being open with me. I will pass this to the hiring team, and they will come back to you. Goodbye.",
+          false,
+        );
+        await io.tool("end_negotiation_call", { reason: "handed_off" });
+        return;
       }
       const why = stance === "unsure" ? "needs_time" : "wants_more";
       await io.tool("request_human_call", { why, their_words: heard || "…" });

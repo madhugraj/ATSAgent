@@ -1572,7 +1572,7 @@ export function scenarios(): ScriptedScenario[] {
       ],
     },
     {
-      name: "negotiation call: offers the improved figure once after a no",
+      name: "negotiation call: asks before offering anything more",
       agentType: "negotiation_call",
       autonomy: "autonomous",
       setup: async ({ orgId, userId }) =>
@@ -1586,6 +1586,36 @@ export function scenarios(): ScriptedScenario[] {
       expect: {
         status: "done",
         calls: ["state_offer", "record_their_position"],
+        neverCalls: ["submit_agreed_terms", "request_human_call"],
+      },
+      script: [
+        call("o", "state_offer", { which: "proposal" }),
+        call("r", "record_their_position", {
+          stance: "wants_more",
+          their_words: "That is lower than I hoped — I was expecting 38 lakh.",
+        }),
+        say(
+          "I hear you, and thank you for being open. What's behind your expectation — your current package, or another offer? And if the hiring team could improve the offer, would you be ready to go ahead with us?",
+        ),
+      ],
+    },
+    {
+      name: "negotiation call: trades the improved figure for a commitment",
+      agentType: "negotiation_call",
+      autonomy: "autonomous",
+      setup: async ({ orgId, userId }) =>
+        seedNegotiationCall(orgId, userId, "Ravi", { permission: true }),
+      goal: () =>
+        [
+          "This is the pay call so far (text mode). Use your tools for what has happened, then reply with exactly what you would say next. The candidate has already agreed to talk now.",
+          "You: [the words state_offer gives you for the proposal]",
+          "Candidate: That is lower than I hoped — I was expecting 38 lakh.",
+          "You: I hear you. If the hiring team could improve the offer, would you be ready to go ahead with us?",
+          "Candidate: Yes — if it is better, I would go ahead.",
+        ].join("\n"),
+      expect: {
+        status: "done",
+        calls: ["state_offer", "record_their_position"],
         neverCalls: ["submit_agreed_terms"],
       },
       script: [
@@ -1594,9 +1624,13 @@ export function scenarios(): ScriptedScenario[] {
           stance: "wants_more",
           their_words: "That is lower than I hoped — I was expecting 38 lakh.",
         }),
+        call("c", "record_their_position", {
+          stance: "accepts",
+          their_words: "Yes — if it is better, I would go ahead.",
+        }),
         call("i", "state_offer", { which: "improved" }),
         say(
-          "I understand, thank you for telling me. Having heard you, the hiring team can offer 34 lakh rupees a year as the annual cost to company. Would that work for you?",
+          "The hiring team has heard you and wants you on board. Having heard you, the hiring team can offer 34 lakh rupees a year as the annual cost to company. Would that work for you?",
         ),
       ],
     },

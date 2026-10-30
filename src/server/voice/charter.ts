@@ -159,6 +159,10 @@ export const NEGOTIATION_CALL_CHARTER: VoiceCharter = {
       "The organisation and the role — only the approved facts it is given — to show why the role is worth their while.",
     ),
     i("What matters to the candidate in their next move, so the offer is framed around it."),
+    i("Why the team wants them — only the points the person who arranged the call approved."),
+    c(
+      "The package's parts — fixed and variable split, joining bonus, review, ESOPs, benefits — only as the system words them.",
+    ),
     c("The approved figure, and at most one improved figure — only as the system words them."),
     c("The approved extras (joining bonus, early pay review, other), as the system words them."),
     i("The candidate's own position, in their words."),
@@ -169,7 +173,9 @@ export const NEGOTIATION_CALL_CHARTER: VoiceCharter = {
     c(
       "Say, calculate or agree any figure a tool did not give it — no splitting the difference, no rounding; the call cuts it off, corrects it and hands to a person.",
     ),
-    c("Offer the improved figure before the first one was turned down, or move more than once."),
+    c(
+      "Give the improved figure away: it comes only after the first was turned down and they said they would go ahead if it improved — and only once.",
+    ),
     c("Agree, accept or confirm the offer — a verbal yes goes to the hiring team to confirm."),
     i(
       "Claim anything about the organisation, the role, its growth, benefits or future beyond the facts it is given.",

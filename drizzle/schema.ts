@@ -2780,6 +2780,25 @@ export type NegotiationStatus =
   | "expired"
   | "cancelled";
 
+/**
+ * What an AI pay call may explain, approved by the person who arranges it
+ * (migration 0058). Amounts are the proposal's split (fixed + variable = the
+ * proposal) and an optional ESOP value; the words carry no amounts.
+ */
+export type NegotiationCallBrief = {
+  fixedCtc?: number | null | undefined;
+  variableCtc?: number | null | undefined;
+  /** ESOPs in words ("ESOPs vesting over four years"), and their value if shared. */
+  esop?: string | null | undefined;
+  esopValue?: number | null | undefined;
+  /** How the pay review works, in words. */
+  review?: string | null | undefined;
+  /** Benefits in words (insurance, leave, learning budget…). */
+  benefits?: string | null | undefined;
+  /** Why the team wants this candidate: up to three short points from the person. */
+  whyYou?: string[] | undefined;
+};
+
 /** What an AI negotiation call heard (migration 0058). A person confirms it. */
 export type NegotiationCallOutcome = {
   callId: string;
@@ -2827,6 +2846,8 @@ export const offerNegotiations = pgTable(
     callStepCtc: numeric("call_step_ctc", { precision: 14, scale: 2 }),
     /** What an AI negotiation call heard; pre-fills the confirm form, never sets the status. */
     callOutcome: jsonb("call_outcome").$type<NegotiationCallOutcome | null>(),
+    /** What the person arranging an AI pay call approved it to explain (0058). */
+    callBrief: jsonb("call_brief").$type<NegotiationCallBrief | null>(),
     message: text("message"),
     token: text("token").unique(),
     dueAt: timestamp("due_at", { withTimezone: true }),
