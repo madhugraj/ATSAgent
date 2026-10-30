@@ -390,7 +390,7 @@ export async function decideVersionCore(
     v.id,
     { version: v.version, note },
   );
-  await closeGateTasks(actor.orgId, v.id, actor.userId, status);
+  await closeGateTasks(actor.orgId, v.id, actor.userId, status, note);
 }
 
 /**
@@ -404,6 +404,8 @@ async function closeGateTasks(
   versionId: string,
   decidedBy: string,
   outcome: string,
+  /** The decider's words — a decline or send-back is the agent's rework brief. */
+  note: string | null = null,
 ) {
   const open = await db
     .select({ id: agentTasks.id, runId: agentTasks.runId })
@@ -425,10 +427,16 @@ async function closeGateTasks(
       .set({
         status: approved ? "approved" : "rejected",
         response: (approved
-          ? { status: "approved", comment: `Decided outside the inbox (now ${outcome}).` }
+          ? {
+              status: "approved",
+              comment: `Decided outside the inbox (now ${outcome})${note ? `: ${note}` : "."}`,
+            }
           : {
               status: "rejected",
-              reason: `Decided outside the inbox (now ${outcome}).`,
+              // The note is the brief ("not enough — go deeper on culture"):
+              // without it the agent could only guess what to rework. The
+              // prefix is how the inbox recognises a card closed this way.
+              reason: `Decided outside the inbox (now ${outcome})${note ? `: ${note}` : "."}`,
               ...(outcome === "changes_requested" ? { changes: true } : {}),
             }) as never,
         decidedBy,
@@ -446,6 +454,12 @@ async function closeGateTasks(
         .update(agentRuns)
         .set({ status: "queued", updatedAt: at })
         .where(and(eq(agentRuns.id, t.runId), eq(agentRuns.status, "awaiting_human")));
+  }
+  // The agent carries on now (a send-back is reworked at once), not at the
+  // scheduler's next tick — the person is watching it on the Profile page.
+  if (open.length) {
+    const { kickAgents } = await import("../server/agents/orchestrator.server");
+    kickAgents(orgId);
   }
 }
 

@@ -200,14 +200,22 @@ export async function handleOrgUserMessage(
     .set({ updatedAt: new Date() })
     .where(eq(hiringConversations.id, conv.id));
 
-  if (turn.saveWebsite) await saveWebsiteFromChat(conv, userId, turn.saveWebsite);
-  const reply = [captured, turn.reply.trim()].filter(Boolean).join(" ");
+  // A website in the message starts the build: the next question would only
+  // talk over it — the agent's own work answers most of them.
+  const reply = [captured, turn.saveWebsite ? "" : turn.reply.trim()].filter(Boolean).join(" ");
   if (reply) await postMessage(conv, { role: "desk", body: reply });
-  if (turn.build) await startBuild(conv, userId);
+  // A website given in the message is saved and read (that starts the build).
+  if (turn.saveWebsite) await saveWebsiteFromChat(conv, userId, turn.saveWebsite);
+  else if (turn.build) await startBuild(conv, userId);
   else if (turn.readWebsite) await startWebsiteRead(conv, userId);
 }
 
-/** "www.acme.com" said in the chat: normalise, save (owner rules apply), confirm. */
+/**
+ * "www.acme.com" said in the chat: normalise and save, then start reading it
+ * — one message, no trip to a separate form. A host outside the registered
+ * e-mail domain needs an owner: the thread shows a one-click confirmation
+ * (the owner's own click, never the model's).
+ */
 async function saveWebsiteFromChat(
   conv: Conversation,
   userId: string,
@@ -229,14 +237,41 @@ async function saveWebsiteFromChat(
   if (res.ok) {
     await postMessage(conv, {
       role: "desk",
-      body: `Saved ${res.url} as your website (under Sources above). Press “Read the website” and I'll read it into your profile.`,
+      body: `Saved ${hostOf(res.url ?? withScheme)} as your website — reading it now and writing what it says into the draft on the right.`,
     });
+    await startBuild(conv, userId, { quiet: true });
     return;
   }
   await postMessage(conv, {
     role: "desk",
-    body: `${withScheme} is outside your registered e-mail domain, so only an owner can confirm it — an owner can press Save under Sources above, or confirm it there.`,
+    body: `${hostOf(withScheme)} is not your registered e-mail domain, so an owner confirms it is yours before I read it.`,
+    card: { type: "website_confirm", url: withScheme } as never,
   });
+}
+
+const hostOf = (u: string) => {
+  try {
+    return new URL(u).hostname.replace(/^www\./, "");
+  } catch {
+    return u;
+  }
+};
+
+/** An owner pressed "Yes, it's ours" on the confirmation card: save and read it. */
+export async function confirmWebsiteFromChat(
+  conv: Conversation,
+  userId: string,
+  url: string,
+): Promise<void> {
+  const { setWebsiteCore } = await import("@/lib/org-context.server");
+  const res = await setWebsiteCore({ orgId: conv.orgId, userId }, { url, confirm: true });
+  if (!res.ok)
+    throw new Error("Only an owner can confirm a website outside the registered e-mail domain.");
+  await postMessage(conv, {
+    role: "desk",
+    body: `Confirmed ${hostOf(url)} — reading it now and writing what it says into the draft on the right.`,
+  });
+  await startBuild(conv, userId, { quiet: true });
 }
 
 /** "Read the website now" — starts the agent on a read inside this thread. */
@@ -250,7 +285,7 @@ export async function startWebsiteRead(conv: Conversation, userId: string): Prom
   if (!p?.websiteUrl) {
     await postMessage(conv, {
       role: "desk",
-      body: "No website is saved yet — paste the address here in the chat (like https://www.acme.com), or type it under Sources above, and I'll read it.",
+      body: "No website is saved yet — paste the address here (like www.acme.com) and I'll read it.",
     });
     return;
   }
@@ -262,20 +297,50 @@ export async function startWebsiteRead(conv: Conversation, userId: string): Prom
 }
 
 /** The full build: records → website → documents → draft → approval. */
-export async function startBuild(conv: Conversation, userId: string): Promise<void> {
+export async function startBuild(
+  conv: Conversation,
+  userId: string,
+  opts: { quiet?: boolean } = {},
+): Promise<void> {
   await startOrgAgentRun(
     conv,
     userId,
     "Build the organisation's profile: read the organisation's records, its website, every uploaded document and what the admin said in the chat (read_org_sources), write what you find as profile items with their exact quotes across every section the sources speak to, then submit the version for approval.",
+    opts,
   );
 }
 
-async function startOrgAgentRun(conv: Conversation, userId: string, goal: string): Promise<void> {
+async function startOrgAgentRun(
+  conv: Conversation,
+  userId: string,
+  goal: string,
+  opts: { quiet?: boolean } = {},
+): Promise<void> {
   const { loadPolicy } = await import("../agents/policy");
   if (!(await loadPolicy(conv.orgId, "org_context")).enabled) {
     await postMessage(conv, {
       role: "desk",
       body: "The Organisation context agent is switched off — switch it on in Governance → Agent settings and try again.",
+    });
+    return;
+  }
+  const { agentRuns } = await import("@db/schema");
+  const { inArray } = await import("drizzle-orm");
+  const [active] = await db
+    .select({ id: agentRuns.id })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.orgId, conv.orgId),
+        eq(agentRuns.agentType, "org_context"),
+        inArray(agentRuns.status, ["queued", "running", "awaiting_human"]),
+      ),
+    )
+    .limit(1);
+  if (active) {
+    await postMessage(conv, {
+      role: "desk",
+      body: "I'm already working on the profile — what you add now is part of it.",
     });
     return;
   }
@@ -288,11 +353,14 @@ async function startOrgAgentRun(conv: Conversation, userId: string, goal: string
     subjectType: "org_profile",
     conversationId: conv.id,
   });
-  await postMessage(conv, {
-    role: "desk",
-    body: "The Organisation context agent is on it — its results and its request for approval will appear in this thread.",
-    agentType: "org_context",
-  });
+  // The status bar shows the agent at work; a chat line is only for a start
+  // nobody announced already.
+  if (!opts.quiet)
+    await postMessage(conv, {
+      role: "desk",
+      body: "On it — watch the draft fill in on the right. I'll ask you here if I need anything, and the HR head approves the finished draft.",
+      agentType: "org_context",
+    });
   const { kickAgents } = await import("../agents/orchestrator.server");
   kickAgents(conv.orgId);
 }
@@ -324,7 +392,7 @@ export async function ensureOrgThread(orgId: string, userId: string): Promise<Co
     .returning();
   await postMessage(conv!, {
     role: "desk",
-    body: "Tell me about your organisation — what it does, what it makes, its tech stacks and projects, who it serves. I'll ask section by section; the profile this builds is what every hiring agent here works from. You can also paste your website address here (I'll save and read it), upload documents under Sources above, or press Build the draft to have me read everything on file and propose the profile for approval.",
+    body: "Hi — I write your organisation's profile, the context every hiring agent here works from. Paste your website address and I'll read it, attach a brochure or handbook with the clip, or just tell me about the organisation. You'll see the profile fill in on the right; the HR head approves it.",
   });
   return conv!;
 }
