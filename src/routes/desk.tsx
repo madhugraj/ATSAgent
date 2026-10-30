@@ -257,6 +257,13 @@ function SplitDesk({ ids }: { ids: string[] }) {
     const t = setTimeout(() => setEntered(true), 30);
     return () => clearTimeout(t);
   }, []);
+  // Deleting one track drops that one from the view; the others stay side by
+  // side. Fewer than two left — back to the normal single-thread desk.
+  const drop = (id: string) => {
+    const rest = ids.filter((x) => x !== id);
+    if (rest.length >= 2) void navigate({ search: { split: rest.join(",") } });
+    else void navigate({ search: rest.length ? { c: rest[0] } : {} });
+  };
   return (
     <div>
       <div className="mb-2 flex items-center justify-between">
@@ -277,7 +284,7 @@ function SplitDesk({ ids }: { ids: string[] }) {
             }`}
             style={{ transitionDelay: `${i * 180}ms` }}
           >
-            <Thread id={id} compact onDeleted={() => navigate({ search: {} })} />
+            <Thread id={id} compact onDeleted={() => drop(id)} />
           </div>
         ))}
       </div>
@@ -571,6 +578,12 @@ function Thread({
         <header className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
           <h2 className="font-semibold">{d.title}</h2>
           <Badge variant="outline">{STATUS_LABEL[d.status] ?? d.status}</Badge>
+          {openTasks > 0 ? (
+            <span
+              className="inline-block size-2 rounded-full bg-amber-500"
+              title={`${openTasks} request${openTasks === 1 ? "" : "s"} waiting for you`}
+            />
+          ) : null}
           <DeleteThreadButton conv={d} onDeleted={onDeleted} />
           {d.requisition ? (
             <Link
@@ -582,6 +595,16 @@ function Thread({
             </Link>
           ) : null}
         </header>
+        {compact ? (
+          <details className="border-b border-border px-4 py-2 text-xs">
+            <summary className="cursor-pointer select-none font-medium text-muted-foreground">
+              Hiring journey
+            </summary>
+            <div className="mt-2">
+              <JourneyPanel conv={d} onChanged={refresh} />
+            </div>
+          </details>
+        ) : null}
         <div ref={list} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
           {folded > 0 ? (
             <button
