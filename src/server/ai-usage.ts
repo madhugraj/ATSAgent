@@ -64,6 +64,8 @@ export const AI_FEATURES = [
   "screening_call",
   // Live voice: the call to pick an interview time (docs/voice-scheduling-call-plan.md).
   "scheduling_call",
+  // Live voice: the pay discussion call (docs/negotiator-voice-agent.md).
+  "negotiation_call",
 ] as const;
 
 export type AiFeature = (typeof AI_FEATURES)[number];

@@ -2074,6 +2074,7 @@ export type AgentType =
   | "distribution"
   | "screening_call"
   | "scheduling_call"
+  | "negotiation_call"
   | "org_context";
 export type AgentAutonomy = "suggest" | "act_and_notify" | "autonomous";
 export type AgentRunStatus =

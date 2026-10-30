@@ -1,6 +1,6 @@
 # Stage 2 — Negotiation call agent (voice)
 
-Status: **design approved; N0–N1 in progress** (2026-10-30). Builds on the voice
+Status: **design approved; N0–N2 built** (2026-10-30); N3–N5 to come. Builds on the voice
 foundation of stage 1 (`docs/voice-screening-agent.md`, `docs/voice-scheduling-call-plan.md`)
 and on the text pay discussion (Offer agent 1.5.0, migration 0039,
 `src/lib/negotiation.server.ts`).
@@ -105,9 +105,15 @@ seed)`) plays the whole call through `FakeLine` + the injectable voice session, 
   (screening and scheduling still ban pay talk; negotiation may state only approved
   figures).
 - **N1** pure tool layer + refusal tests.
-- **N2** brief + session (`negotiation-session.server.ts`, feature `negotiation_call`)
-  - dispatcher purpose branch → whole-call CI harness with graders and the negative
-    control.
+- **N2 (built)** `negotiation-brief.server.ts` (no ceiling or band loaded),
+  `negotiation-prompt.ts` (no figure in it), `negotiation-session.server.ts`
+  (feature `negotiation_call`; writes only `call_outcome`, an amount-free audit entry
+  and thread post), the dispatcher's purpose branch (only while the discussion is
+  open, two attempts), `negotiation-graders.ts`, and the harness
+  (`scripts/evals/negotiation-call-sim.ts`, `scripts/negotiation-call-session.test.ts`):
+  a reference agent against nine personas, and five broken agents the graders must
+  catch. Until N3 registers the agent, a call opens no agent run (its AI usage is
+  ledgered under the feature, not a run).
 - **N3** manifest `negotiation_call` 0.1.0 (owner `hr_head`, high risk), Offer agent
   `request_negotiation_call` (1.6.0), the "Call to negotiate" button with the improved
   figure, the pre-filled confirm, evals, `bun run agents:lock`.
