@@ -2177,6 +2177,27 @@ function HiringManagerOptionsCard({
   const options =
     (card["options"] as unknown as { memberId: string; name: string; email: string }[]) ?? [];
   const open = conv.status === "gathering";
+  // Skills / experience can still be researched even while the hiring
+  // manager is the question on the card — research stays available for as
+  // long as those details are missing, not only on the turn that asked.
+  const missing = why.missing ?? [];
+  const canResearch = open && missing.some((m) => m === "must-have skills" || m === "experience");
+  async function research() {
+    setBusy(true);
+    try {
+      await researchDeskRole({
+        data: {
+          id: conv.id,
+          fields: missing.includes("experience") ? ["skills", "experience"] : ["skills"],
+        },
+      });
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not research this");
+    } finally {
+      setBusy(false);
+    }
+  }
   async function pick(memberId: string) {
     setBusy(true);
     try {
@@ -2239,6 +2260,18 @@ function HiringManagerOptionsCard({
           No active team members found — the admin adds people on the Team page.
         </p>
       )}
+      {canResearch ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-1"
+          disabled={busy}
+          onClick={() => void research()}
+        >
+          {busy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+          Research it from the market
+        </Button>
+      ) : null}
     </div>
   );
 }
