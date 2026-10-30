@@ -169,6 +169,11 @@ export type NegotiationCallState = {
    * more figures and no yes is passed on — a person takes it from here.
    */
   halted?: boolean;
+  /**
+   * The improved figure's words were handed to the assistant (after a no), so it
+   * need never invent one; once it says them the call counts them as offered.
+   */
+  improvedRevealed?: boolean;
 };
 
 export const freshNegotiationState = (): NegotiationCallState => ({
@@ -279,9 +284,15 @@ export function applyNegotiationTool(
       else if (stance === "unsure")
         next =
           "Ask once, gently, what would help them decide. If they want time, use request_human_call with needs_time.";
-      else if (state.lastStated === "proposal" && figures.stepCtc != null && !state.stated.improved)
-        next = 'You may offer the improved figure, once: state_offer with which "improved".';
-      else
+      else if (
+        state.lastStated === "proposal" &&
+        figures.stepCtc != null &&
+        !state.stated.improved
+      ) {
+        // Hand it the exact words: real calls invented their own "improved" figure.
+        state.improvedRevealed = true;
+        next = `You may offer the improved figure, once. First explore what is behind their view (in words, never their numbers). If they still want more, call state_offer with which "improved" — or say exactly these words and nothing else about pay: "${offerSentence("improved", figures)}" No other figure exists; any other number ends the call.`;
+      } else
         next =
           "You have no other figure. Thank them, say the hiring team will come back to them, and use request_human_call with wants_more.";
       return { ok: true, next };

@@ -451,6 +451,23 @@ describe("the live figure guard (the second real call over-offered)", () => {
   });
 });
 
+describe("the improved words handed over (the third real call made its own up)", () => {
+  test("read straight from the result: no guard, and the yes binds to the improved figure", async () => {
+    const r = await runCall(
+      sim.PERSONAS.accepts_move(),
+      sim.agentPolicy(FACTS, { readsRevealed: true }),
+    );
+    expect(r.violations).toEqual([]);
+    expect(okCalls(r.seen.timeline, "state_offer", "improved")).toBe(0);
+    expect(r.result.endReason).toBe("verbal_agreement");
+    expect(r.after.callOutcome).toMatchObject({
+      agreed: true,
+      which: "improved",
+      agreedCtc: FIG.step,
+    });
+  });
+});
+
 describe("the call's brief: context without figures", () => {
   test("approved highlights drop anything with an amount or pay figure", () => {
     expect(

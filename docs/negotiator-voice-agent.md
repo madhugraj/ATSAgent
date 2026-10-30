@@ -160,3 +160,12 @@ seed)`) plays the whole call through `FakeLine` + the injectable voice session, 
      figure or yes, hands off and flags the call (`guard_stopped`, an audit entry and a
      thread warning to the HR head — no amounts).
    - **Graders:** a figure above the ceiling is its own critical breach (`above_ceiling`).
+3. **2026-10-30, third call (0.2.0).** It opened with the role and organisation, asked what
+   matters (growth, in the candidate's words) and read the offer as a package. Pushed with
+   the candidate's current numbers, it again made up "60 lakh" — **the live guard cut it
+   there**, it corrected itself ("please disregard that figure"), handed off and the call
+   was flagged (`guard_stopped`); nothing was committed. The guard works, but a figure is
+   heard before it can act, so 0.2.1 removes the need to invent: the result after a no
+   hands over the exact improved words; what the assistant actually says decides which
+   figure a yes binds to; "Am I audible?" is not a yes to who they are. The grader now
+   reads the whole opening (a split first line was a false "no AI disclosure").

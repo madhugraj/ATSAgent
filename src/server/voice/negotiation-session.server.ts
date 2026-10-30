@@ -216,9 +216,18 @@ async function place(
       const bad = unapprovedFigure(
         soFar,
         { ...brief.figures, leverAmounts },
-        state.stated.improved,
+        state.stated.improved || !!state.improvedRevealed,
       );
-      if (bad !== null) guard?.(bad);
+      if (bad !== null) return guard?.(bad);
+      // What was actually said decides which figure a yes binds to (it may read the
+      // revealed improved words without calling state_offer).
+      const said = amountsIn(soFar);
+      const near = (a: number, b: number | null) => b != null && Math.abs(a - b) < 500;
+      if (said.some((a) => near(a, brief.figures.stepCtc)) && state.improvedRevealed) {
+        state.stated.improved = true;
+        state.lastStated = "improved";
+      } else if (said.some((a) => near(a, brief.figures.proposalCtc)) && state.stated.proposal)
+        state.lastStated = "proposal";
     },
     onTurn: (t) => {
       if (t.who === "ai") {

@@ -139,6 +139,8 @@ type Breaks = {
   movesFirst?: number;
   /** Offers its own, bigger figure after a no — the first real call did (the live guard must stop it). */
   overOffers?: number;
+  /** Not a break: reads the improved words the result handed it, without calling state_offer. */
+  readsRevealed?: boolean;
 };
 
 /** The agent as the prompt describes it — or, with `breaks`, a broken one. */
@@ -220,6 +222,14 @@ export function agentPolicy(f: AgentFacts, breaks: Breaks = {}): AgentPolicy {
             io.say("Thank you for your time. Goodbye.", false);
             await io.tool("end_negotiation_call", { reason: "handed_off" });
             return;
+          }
+        }
+        if (breaks.readsRevealed) {
+          const words = /say exactly these words[^"]*"([^"]+)"/.exec(next)?.[1];
+          if (words) {
+            io.say("I understand, thank you for telling me.", false);
+            io.say(words);
+            continue;
           }
         }
         if (breaks.meetsInTheMiddle) {

@@ -704,7 +704,11 @@ export function registerPhase3Agents(): void {
     // the whole package and explores before its one move. A live guard cuts it off the moment
     // it says a figure it was not given, makes it correct itself, blocks any yes and flags
     // the call (guard_stopped).
-    version: "0.2.0",
+    // 0.2.1 (the third real call: the guard stopped it at "60 lakh" — it again made up its
+    // own improved figure from the candidate's numbers): the result after a no hands it the
+    // exact improved words; what it actually says decides which figure a yes binds to;
+    // "Am I audible?" is not a yes to who they are.
+    version: "0.2.1",
     owner: "hr_head",
     responsibility:
       "Holds one AI phone call with a candidate about the pay for their offer: says it is an AI, tells them which role and organisation and where they stand, wins their interest from approved facts, frames the approved figure and extras around what matters to them, may offer one pre-approved improved figure, and brings a clear answer back to the people who decide.",
