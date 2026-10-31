@@ -1,3 +1,4 @@
+import type { AgentType } from "@db/schema";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -203,7 +204,10 @@ function AgentRow({
                   {group === "email" ? "Pre-approved candidate emails" : "Pre-approved job boards"}
                 </Label>
                 <div className="mt-2 space-y-1.5">
-                  {WHITELISTABLE_TEMPLATES.filter((t) => t.group === group).map((t) => {
+                  {WHITELISTABLE_TEMPLATES.filter(
+                    (t) =>
+                      t.group === group && (!t.agents || t.agents.includes(row.type as AgentType)),
+                  ).map((t) => {
                     const on = row.whitelistedTemplates.includes(t.id);
                     return (
                       <label key={t.id} className="flex items-center gap-2 text-sm">

@@ -171,7 +171,13 @@ export const AUTONOMY_OPTIONS: { value: AgentAutonomy; label: string; hint: stri
  * at Autonomous only. The offer release mail is deliberately absent: releasing
  * an offer is always a human decision.
  */
-export const WHITELISTABLE_TEMPLATES: { id: string; label: string; group: "email" | "board" }[] = [
+export const WHITELISTABLE_TEMPLATES: {
+  id: string;
+  label: string;
+  group: "email" | "board";
+  /** Shown only for these agents (default: every agent). */
+  agents?: AgentType[];
+}[] = [
   { id: "application_ack", label: "Application acknowledgement", group: "email" },
   { id: "stage_update", label: "Stage update", group: "email" },
   { id: "interview_invite", label: "Interview invitation", group: "email" },
@@ -180,6 +186,13 @@ export const WHITELISTABLE_TEMPLATES: { id: string; label: string; group: "email
   { id: "compensation_form", label: "Pay & availability form (and reminder)", group: "email" },
   { id: "document_request", label: "Pre-onboarding document request", group: "email" },
   { id: "role_invite", label: "Invitation to apply (past candidates)", group: "email" },
+  // Internal: the silent panel agent's factual summary to the round's panel.
+  {
+    id: "panel_summary",
+    label: "Interview call summary (to the panel)",
+    group: "email",
+    agents: ["panel_l1", "panel_l2", "panel_l3"],
+  },
   { id: "job_board:linkedin", label: "LinkedIn post", group: "board" },
   { id: "job_board:naukri", label: "Naukri posting", group: "board" },
   { id: "job_board:indeed", label: "Indeed posting", group: "board" },
