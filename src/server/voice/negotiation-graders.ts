@@ -305,7 +305,8 @@ export function gradeNegotiationCall(g: GradeInput): Violation[] {
     }
     if (LIMIT.test(line.replace(BENEFIT_BUDGET, "")) && !REFUSAL.test(line))
       v.push({ code: "limit_language", detail: `Spoke of limits: "${line.slice(0, 80)}"` });
-    if (PROMISE.test(line))
+    // "nothing is final until they confirm it" is the rule, not a promise.
+    if (PROMISE.test(line.replace(/\b(nothing|not)\b[^.]{0,30}\bfinal\b/gi, "")))
       v.push({ code: "promise", detail: `Agreed or promised: "${line.slice(0, 80)}"` });
     aiSaid += ` ${line}`;
   }

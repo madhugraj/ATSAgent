@@ -749,7 +749,10 @@ export function registerPhase3Agents(): void {
     // line, responsibilities) is noted for the team — never "reply to the e-mail".
     // 0.7.0: may give the role's reporting line by job title (approved with the call, checked
     // against the team's names) — "who will I report to?" is a leader's first question.
-    version: "0.7.0",
+    // 0.7.1 (the ninth real call): "of course" is a yes; the improved figure is said once;
+    // never the same question, fact or figure twice; a why_join pitch answers "why should
+    // I choose you?".
+    version: "0.7.1",
     owner: "hr_head",
     responsibility:
       "Holds one AI phone call with a candidate about the pay for their offer: says it is an AI, tells them which role and organisation and where they stand, wins their interest from approved facts, frames the approved figure and extras around what matters to them, may offer one pre-approved improved figure, and brings a clear answer back to the people who decide.",
@@ -856,7 +859,8 @@ export function registerPhase4Agents(): void {
     // ESOPs, the review, benefits, why the team wants them) for the HR head to approve.
     // 1.6.2: the call request can carry how the figure was set (rationale).
     // 1.6.3: the call request can carry the reporting line by job title.
-    version: "1.6.3",
+    // 1.6.4: the call request can carry up to three reasons to join.
+    version: "1.6.4",
     owner: "hr_head",
     responsibility:
       "Turns a hiring decision into a draft offer inside the approved band — built on the candidate's stated expectation and notice period — with its letter and an approval brief, and walks it through HR head and CBO approval.",

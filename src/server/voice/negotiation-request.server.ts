@@ -110,11 +110,18 @@ export async function checkNegotiationCall(
     : null;
   if (briefProblem) return { ok: false, reason: briefProblem };
   // Titles, never names: the reporting line and "why you" are checked against the team.
-  if (opts.brief && (opts.brief.reportsTo || opts.brief.whyYou?.length)) {
+  if (
+    opts.brief &&
+    (opts.brief.reportsTo || opts.brief.whyYou?.length || opts.brief.whyJoin?.length)
+  ) {
     const { staffNameKeys, orgNamesOf } = await import("@/lib/org-profile.server");
     const { staffReason } = await import("@/lib/org-profile");
     const [names, orgNames] = await Promise.all([staffNameKeys(orgId), orgNamesOf(orgId)]);
-    for (const t of [opts.brief.reportsTo, ...(opts.brief.whyYou ?? [])])
+    for (const t of [
+      opts.brief.reportsTo,
+      ...(opts.brief.whyYou ?? []),
+      ...(opts.brief.whyJoin ?? []),
+    ])
       if (t && staffReason(t, names, orgNames))
         return {
           ok: false,

@@ -625,6 +625,7 @@ function ArrangeCallDialog({
     rationale: "",
     reportsTo: "",
     whyYou: "",
+    whyJoin: "",
   });
   const setF = (k: keyof typeof d) => (e: { target: { value: string } }) =>
     setD((p) => ({ ...p, [k]: e.target.value }));
@@ -668,6 +669,10 @@ function ArrangeCallDialog({
         benefits: d.benefits.trim() || null,
         rationale: d.rationale.trim() || null,
         reportsTo: d.reportsTo.trim() || null,
+        whyJoin: d.whyJoin
+          .split("\n")
+          .map((x) => x.trim())
+          .filter(Boolean),
         whyYou,
       };
       const r = await arrange({ data: { negotiationId, improvedCtc: stepRupees ?? null, brief } });
@@ -791,6 +796,20 @@ function ArrangeCallDialog({
             placeholder={"e.g. The panel valued how you built and scaled an AI team"}
             value={d.whyYou}
             onChange={setF("whyYou")}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="neg-why-join">
+            Why join us — for &quot;why should I choose you?&quot; (up to three lines)
+          </Label>
+          <Textarea
+            id="neg-why-join"
+            rows={3}
+            placeholder={
+              "e.g. You would build the AI team from the ground up, reporting to the CTO"
+            }
+            value={d.whyJoin}
+            onChange={setF("whyJoin")}
           />
         </div>
         {detailProblem ? <p className="text-xs text-destructive">{detailProblem}</p> : null}

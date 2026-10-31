@@ -51,6 +51,7 @@ export const EXPLAIN_TOPICS = [
   "why_you",
   "rationale",
   "reporting",
+  "why_join",
 ] as const;
 export type ExplainTopic = (typeof EXPLAIN_TOPICS)[number];
 
@@ -104,7 +105,7 @@ export const NEGOTIATION_TOOL_DESCRIPTIONS: Record<NegotiationToolName, string> 
   record_their_position:
     "Record the candidate's answer to the figure you read out: stance accepts (a clear yes), declines, wants_more (they want a HIGHER total), restructure (they are fine with the total but want a different split of fixed and variable, or other terms such as the joining date — this is NOT more money), or unsure; their_words exactly as they said it, including any figure they named. The result says what you may do next.",
   explain_offer:
-    "Get the approved words about part of the offer, then say them: package (the whole offer), split (fixed and variable), joining_bonus, review (how the pay review works), esop, benefits, why_you (why the team wants them), rationale (how the figure was set — when they ask why this figure or about market research), or reporting (who the role reports to, by job title). Use it whenever they ask about the package, and to build the offer's value. Never describe the package any other way; if the result says a detail is not shared, say the hiring team will share it.",
+    "Get the approved words about part of the offer, then say them: package (the whole offer), split (fixed and variable), joining_bonus, review (how the pay review works), esop, benefits, why_you (why the team wants them), rationale (how the figure was set — when they ask why this figure or about market research), reporting (who the role reports to, by job title), or why_join (what makes this organisation and role worth choosing — when they ask why they should choose you). Use it whenever they ask about the package, and to build the offer's value. Never describe the package any other way; if the result says a detail is not shared, say the hiring team will share it.",
   submit_agreed_terms:
     "They clearly said yes to the figure you just read out: pass it to the hiring team, who confirm it with them. It does not agree anything itself. their_words is their yes, as said.",
   request_human_call:
@@ -174,7 +175,17 @@ export function callBriefProblem(
     if (r.length < 2 || r.length > 80) return "Give the reporting line as a job title.";
     if (/@|\d{3,}/.test(r)) return "The reporting line is a job title — no e-mails or numbers.";
   }
-  for (const t of [b.esop, b.review, b.benefits, b.rationale, ...(b.whyYou ?? [])])
+  if ((b.whyJoin ?? []).length > 3) return "At most three reasons to join.";
+  if ((b.whyJoin ?? []).some((w) => w.length > 200))
+    return "Keep each reason to join under 200 characters.";
+  for (const t of [
+    b.esop,
+    b.review,
+    b.benefits,
+    b.rationale,
+    ...(b.whyYou ?? []),
+    ...(b.whyJoin ?? []),
+  ])
     if (t && /\d[\d,.]*\s*(lakh|lac|crore|cr|lpa|k\b|%|rupees|₹|rs\b)|₹\s*\d/i.test(t))
       return "Keep amounts out of the words — use the amount fields.";
   if ((b.whyYou ?? []).length > 3) return "At most three reasons why the team wants them.";
@@ -230,6 +241,7 @@ export function explainOffer(
     benefits,
     why_you: whyYou,
     rationale: b.rationale?.trim() || null,
+    why_join: b.whyJoin?.length ? b.whyJoin.join(" ") : null,
     reporting: b.reportsTo?.trim()
       ? `The role reports to ${/^(the|a|an)\s/i.test(b.reportsTo.trim()) ? "" : "the "}${b.reportsTo.trim().replace(/\.$/, "")}.`
       : null,
@@ -299,7 +311,7 @@ export function offerSentence(which: Which, f: NegotiationFigures): string {
 
 /** A clear yes: yes-like words and no "no / but / not" (pure; unit-tested). */
 const AFFIRM =
-  /\b(yes|yeah|yep|yup|ok|okay|sure|agreed?|fine|deal|done|accept\w*|go ahead|works for me|sounds good|haan|han|theek|thik|ji)\b/i;
+  /\b(yes|yeah|yep|yup|ok|okay|sure|agreed?|fine|deal|done|accept\w*|go ahead|works for me|sounds good|of course|absolutely|definitely|certainly|haan|han|theek|thik|ji)\b/i;
 const NEGATE =
   /\b(no|not|don'?t|can'?t|won'?t|but|however|nahi|nahin|unless|if|provided|providing|only|depends|condition)\b/i;
 const NOT_A_NO = /\bno (problem|issues?|worries)\b|\bnot a problem\b/gi;
@@ -514,7 +526,10 @@ export function applyNegotiationTool(
           state.conditionalYes = true;
           // Hand it the exact words: real calls invented their own "improved" figure.
           state.improvedRevealed = true;
-          next = `They would go ahead if it improved. Tell them the hiring team has heard them, then call state_offer with which "improved" — or say exactly these words and nothing else about pay: "${offerSentence("improved", figures)}" No other figure exists; any other number ends the call.`;
+          // Said once: a real call read it from here and again from state_offer.
+          state.stated.improved = true;
+          state.lastStated = "improved";
+          next = `They would go ahead if it improved. Tell them the hiring team has heard them, then say exactly these words, once, and nothing else about pay (do not also call state_offer): "${offerSentence("improved", figures)}" No other figure exists; any other number ends the call.`;
         }
       } else if (stance === "accepts")
         next = "If they clearly said yes to the figure you just read out, use submit_agreed_terms.";

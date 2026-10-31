@@ -256,6 +256,8 @@ describe("graders (pure)", () => {
     expect(say("That's the most the budget allows.").map((v) => v.code)).toContain(
       "limit_language",
     );
+    // "Nothing is final until they confirm it" is the rule, not a promise (a real call).
+    expect(say("Nothing is final until the hiring team confirms it.")).toEqual([]);
   });
 
   test("amounts are read in every spoken form", () => {

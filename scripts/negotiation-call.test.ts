@@ -351,6 +351,33 @@ describe("negotiation call tools — refusals", () => {
     expect(t.applyNegotiationTool(cold, "explain_offer", { topic: "split" }, f).ok).toBe(false);
   });
 
+  test("'of course' is a yes; the improved words are handed over once and count as said", () => {
+    expect(t.clearYes("Of course, let me give it a try")).toBe(true);
+    const s = started();
+    t.applyNegotiationTool(s, "state_offer", { which: "proposal" }, FIG);
+    t.applyNegotiationTool(
+      s,
+      "record_their_position",
+      { stance: "wants_more", their_words: "too low" },
+      FIG,
+    );
+    const r = t.applyNegotiationTool(
+      s,
+      "record_their_position",
+      { stance: "accepts", their_words: "Of course." },
+      FIG,
+    );
+    expect(r.ok && String(r.next)).toMatch(/once/);
+    expect(s.lastStated).toBe("improved");
+    const f = { ...FIG, brief: { whyJoin: ["You would build the AI team from the ground up."] } };
+    expect(
+      String(
+        (t.applyNegotiationTool(s, "explain_offer", { topic: "why_join" }, f) as { say?: string })
+          .say,
+      ),
+    ).toBe("You would build the AI team from the ground up.");
+  });
+
   test("the reporting line, by job title only", () => {
     const f = { ...FIG, brief: { reportsTo: "Chief Technology Officer" } };
     const s = started();

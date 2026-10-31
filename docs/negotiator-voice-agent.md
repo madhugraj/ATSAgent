@@ -255,3 +255,13 @@ safe, de-escalates and hands off).
    it twice said "reply to the e-mail". 0.6.4: such questions are noted for the team ("I have
    noted it, and the hiring team will walk you through it"). Open decision: whether an
    offer call may name the reporting line by title.
+
+9. **2026-10-31, ninth call (0.7.0, with a test JD and the reporting line).** Rules held
+   (no figure invented, nothing committed, notes and a goodbye; one grader false alarm on
+   "nothing is final"). As a negotiation it frustrated: the conditional question three times
+   ("of course, let me give it a try" did not count as a yes), the improved figure read twice,
+   and "why should I choose Yavar?" answered with facts already given. 0.7.1: "of course" /
+   "absolutely" / "definitely" count as yes; the improved figure's words are handed over to
+   be said once (and count as said); never the same question, fact or figure twice; a
+   `why_join` pitch (up to three reasons to join, approved with the call) answers "why should
+   I choose you?".

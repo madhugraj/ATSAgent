@@ -18,6 +18,7 @@ const CallBriefInput = z.object({
   rationale: z.string().trim().max(300).nullable().optional(),
   reportsTo: z.string().trim().max(80).nullable().optional(),
   whyYou: z.array(z.string().trim().min(3).max(200)).max(3).optional(),
+  whyJoin: z.array(z.string().trim().min(3).max(200)).max(3).optional(),
 });
 
 const Token = z.object({ token: z.string().regex(/^[a-f0-9]{64}$/) });
