@@ -28,12 +28,12 @@
     "hash": "e9cbe409177ca0f8bf7018f8fea8dc1e4fa90077e3e5e822851c306704e68593"
   },
   "negotiation_call": {
-    "version": "0.6.4",
-    "hash": "41c03c3748a46842876cc84724c074884dd3d0aeda567feb57ca355a1213e35c"
+    "version": "0.7.0",
+    "hash": "8214e6e1ac81d2ae1c258ccc1ed81af3b9e1d1b8dc98529ecf6f240d03126747"
   },
   "offer": {
-    "version": "1.6.2",
-    "hash": "01a534d8f1dd006ae736a7e281a23053c2114c35650bd1e9a732882827063c3e"
+    "version": "1.6.3",
+    "hash": "d788769ad572d20572d8fefd72caf8449bf4c676cd19a3c4731702dfa4df465f"
   },
   "onboarding": {
     "version": "1.3.3",

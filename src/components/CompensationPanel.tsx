@@ -623,6 +623,7 @@ function ArrangeCallDialog({
     review: "",
     benefits: "",
     rationale: "",
+    reportsTo: "",
     whyYou: "",
   });
   const setF = (k: keyof typeof d) => (e: { target: { value: string } }) =>
@@ -666,6 +667,7 @@ function ArrangeCallDialog({
         review: d.review.trim() || null,
         benefits: d.benefits.trim() || null,
         rationale: d.rationale.trim() || null,
+        reportsTo: d.reportsTo.trim() || null,
         whyYou,
       };
       const r = await arrange({ data: { negotiationId, improvedCtc: stepRupees ?? null, brief } });
@@ -757,6 +759,16 @@ function ArrangeCallDialog({
             placeholder="e.g. Family health cover, a learning budget, hybrid work"
             value={d.benefits}
             onChange={setF("benefits")}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="neg-reports">Reports to (job title, never a name)</Label>
+          <Input
+            id="neg-reports"
+            maxLength={80}
+            placeholder="e.g. the Chief Technology Officer"
+            value={d.reportsTo}
+            onChange={setF("reportsTo")}
           />
         </div>
         <div className="space-y-1">

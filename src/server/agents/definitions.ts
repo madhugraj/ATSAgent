@@ -747,7 +747,9 @@ export function registerPhase3Agents(): void {
     // a split raised before the offer is noted, then the offer is read, then the yes.
     // 0.6.4 (the eighth real call, the cleanest yet): a question it cannot answer (reporting
     // line, responsibilities) is noted for the team — never "reply to the e-mail".
-    version: "0.6.4",
+    // 0.7.0: may give the role's reporting line by job title (approved with the call, checked
+    // against the team's names) — "who will I report to?" is a leader's first question.
+    version: "0.7.0",
     owner: "hr_head",
     responsibility:
       "Holds one AI phone call with a candidate about the pay for their offer: says it is an AI, tells them which role and organisation and where they stand, wins their interest from approved facts, frames the approved figure and extras around what matters to them, may offer one pre-approved improved figure, and brings a clear answer back to the people who decide.",
@@ -853,7 +855,8 @@ export function registerPhase4Agents(): void {
     // 1.6.1: request_negotiation_call carries what the call may explain (the split,
     // ESOPs, the review, benefits, why the team wants them) for the HR head to approve.
     // 1.6.2: the call request can carry how the figure was set (rationale).
-    version: "1.6.2",
+    // 1.6.3: the call request can carry the reporting line by job title.
+    version: "1.6.3",
     owner: "hr_head",
     responsibility:
       "Turns a hiring decision into a draft offer inside the approved band — built on the candidate's stated expectation and notice period — with its letter and an approval brief, and walks it through HR head and CBO approval.",

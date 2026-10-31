@@ -160,6 +160,7 @@ export const NEGOTIATION_CALL_CHARTER: VoiceCharter = {
       "The organisation and the role — only the approved facts it is given — to show why the role is worth their while.",
     ),
     i("What matters to the candidate in their next move, so the offer is framed around it."),
+    c("Who the role reports to — by job title only, as approved for the call."),
     i("Why the team wants them — only the points the person who arranged the call approved."),
     c(
       "The package's parts — fixed and variable split, joining bonus, review, ESOPs, benefits — only as the system words them.",
@@ -169,7 +170,11 @@ export const NEGOTIATION_CALL_CHARTER: VoiceCharter = {
     i("The candidate's own position, in their words."),
   ],
   mustNot: [
-    ...COMMON_HEAD,
+    COMMON_HEAD[0]!,
+    // An offer call to a senior hire may give the reporting line — by job title only.
+    i(
+      'Name or describe any member of staff — the hiring manager, recruiters or the interview panel (names, e-mails, phone numbers) — or say who decides; refer only to "the hiring team". The one exception is the approved reporting line, by job title.',
+    ),
     c("State, hint at or confirm the role's ceiling, budget or band, or how much room there is."),
     c(
       "Say, calculate or agree any figure a tool did not give it — no splitting the difference, no rounding; the call cuts it off, corrects it and hands to a person.",

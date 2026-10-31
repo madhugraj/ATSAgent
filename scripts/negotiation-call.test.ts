@@ -351,6 +351,20 @@ describe("negotiation call tools — refusals", () => {
     expect(t.applyNegotiationTool(cold, "explain_offer", { topic: "split" }, f).ok).toBe(false);
   });
 
+  test("the reporting line, by job title only", () => {
+    const f = { ...FIG, brief: { reportsTo: "Chief Technology Officer" } };
+    const s = started();
+    expect(
+      String(
+        (t.applyNegotiationTool(s, "explain_offer", { topic: "reporting" }, f) as { say?: string })
+          .say,
+      ),
+    ).toBe("The role reports to the Chief Technology Officer.");
+    const n = { proposedCtc: 1_800_000, ceiling: 2_000_000 };
+    expect(t.callBriefProblem({ reportsTo: "cto@acme.com" }, n)).toMatch(/job title/);
+    expect(t.callBriefProblem({ reportsTo: "the CTO" }, n)).toBeNull();
+  });
+
   test("a call brief must add up and keep amounts out of the words", () => {
     const n = { proposedCtc: 1_800_000, ceiling: 2_000_000 };
     expect(t.callBriefProblem({ fixedCtc: 1_500_000, variableCtc: 300_000 }, n)).toBeNull();

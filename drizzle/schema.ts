@@ -2795,6 +2795,8 @@ export type NegotiationCallBrief = {
   review?: string | null | undefined;
   /** Benefits in words (insurance, leave, learning budget…). */
   benefits?: string | null | undefined;
+  /** Who the role reports to, by job title only ("the Chief Technology Officer") — never a name. */
+  reportsTo?: string | null | undefined;
   /** How the figure was set, in words (level, internal parity, market benchmark). */
   rationale?: string | null | undefined;
   /** Why the team wants this candidate: up to three short points from the person. */

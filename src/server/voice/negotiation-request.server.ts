@@ -109,6 +109,18 @@ export async function checkNegotiationCall(
       })
     : null;
   if (briefProblem) return { ok: false, reason: briefProblem };
+  // Titles, never names: the reporting line and "why you" are checked against the team.
+  if (opts.brief && (opts.brief.reportsTo || opts.brief.whyYou?.length)) {
+    const { staffNameKeys, orgNamesOf } = await import("@/lib/org-profile.server");
+    const { staffReason } = await import("@/lib/org-profile");
+    const [names, orgNames] = await Promise.all([staffNameKeys(orgId), orgNamesOf(orgId)]);
+    for (const t of [opts.brief.reportsTo, ...(opts.brief.whyYou ?? [])])
+      if (t && staffReason(t, names, orgNames))
+        return {
+          ok: false,
+          reason: "Keep people's names out of the call — use job titles only.",
+        };
+  }
 
   const [live] = await db
     .select({ id: screeningCalls.id })

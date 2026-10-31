@@ -771,6 +771,22 @@ describe("asking for a negotiation call", () => {
     ).toMatchObject({ ok: true });
   });
 
+  test("the reporting line is a title — a team member's name is refused", async () => {
+    const { negotiation } = await arranged();
+    await db.delete(screeningCalls).where(eq(screeningCalls.negotiationId, negotiation.id));
+    const named = await request.checkNegotiationCall(orgId, negotiation.id, {
+      byPerson: true,
+      brief: { reportsTo: "Asha Rao, our CTO" },
+    });
+    expect(named).toMatchObject({ ok: false, reason: expect.stringMatching(/names/) });
+    expect(
+      await request.checkNegotiationCall(orgId, negotiation.id, {
+        byPerson: true,
+        brief: { reportsTo: "the Chief Technology Officer" },
+      }),
+    ).toMatchObject({ ok: true });
+  });
+
   test("settled or opted out: no call", async () => {
     const settled = await arranged({ status: "agreed" });
     expect(await request.checkNegotiationCall(orgId, settled.negotiation.id)).toMatchObject({

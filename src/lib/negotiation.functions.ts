@@ -16,6 +16,7 @@ const CallBriefInput = z.object({
   review: z.string().trim().max(300).nullable().optional(),
   benefits: z.string().trim().max(300).nullable().optional(),
   rationale: z.string().trim().max(300).nullable().optional(),
+  reportsTo: z.string().trim().max(80).nullable().optional(),
   whyYou: z.array(z.string().trim().min(3).max(200)).max(3).optional(),
 });
 

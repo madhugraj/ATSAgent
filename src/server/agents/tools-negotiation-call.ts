@@ -148,6 +148,7 @@ export function registerNegotiationCallTools(): void {
           review: z.string().max(300).nullable().optional(),
           benefits: z.string().max(300).nullable().optional(),
           rationale: z.string().max(300).nullable().optional(),
+          reportsTo: z.string().max(80).nullable().optional(),
           whyYou: z.array(z.string().min(3).max(200)).max(3).optional(),
         })
         .nullable()
@@ -196,6 +197,7 @@ export function registerNegotiationCallTools(): void {
         ...(i.brief?.review ? [`• The review: ${i.brief.review}`] : []),
         ...(i.brief?.benefits ? [`• Benefits: ${i.brief.benefits}`] : []),
         ...(i.brief?.rationale ? [`• How the figure was set: ${i.brief.rationale}`] : []),
+        ...(i.brief?.reportsTo ? [`• Reports to (title): ${i.brief.reportsTo}`] : []),
         ...(i.brief?.whyYou?.length
           ? [`• Why the team wants them: ${i.brief.whyYou.join(" ")}`]
           : []),
