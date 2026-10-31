@@ -1,8 +1,15 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { ArrowDownRight, ArrowUpRight, PauseCircle, Radio } from "lucide-react";
+import {
+  ArrowDownRight,
+  ArrowUp,
+  ArrowUpRight,
+  ChevronRight,
+  PauseCircle,
+  Radio,
+} from "lucide-react";
 
 import { PageHeader } from "@/components/ats";
 import { Badge } from "@/components/ui/badge";
@@ -101,24 +108,136 @@ function AgentSettingsPage() {
             />
           </section>
 
-          <div className="mt-4 space-y-3">
-            {AGENT_CATALOG.map((info) => {
-              const row = data.agents.find((a) => a.type === info.type);
-              return row ? (
-                <AgentRow
-                  key={info.type}
-                  info={info}
-                  row={row}
-                  canEdit={data.canEdit}
-                  onSave={save}
-                />
-              ) : null;
-            })}
-          </div>
+          <AgentList agents={data.agents} canEdit={data.canEdit} onSave={save} />
 
           <TelemetrySection />
         </>
       )}
+    </>
+  );
+}
+
+const anchorOf = (type: string) => `agent-${type}`;
+
+/**
+ * Every agent's settings, behind an index (jump to an agent), a filter and
+ * collapsible cards — the page was one long scroll. A card's Enabled switch
+ * stays in its header, so agents can be switched on and off without opening it.
+ */
+function AgentList({
+  agents,
+  canEdit,
+  onSave,
+}: {
+  agents: Row[];
+  canEdit: boolean;
+  onSave: (input: AgentPolicyInput) => Promise<void>;
+}) {
+  const [filter, setFilter] = useState("");
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const items = AGENT_CATALOG.flatMap((info) => {
+    const row = agents.find((a) => a.type === info.type);
+    return row ? [{ info, row }] : [];
+  });
+  const words = filter.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = items.filter(({ info, row }) =>
+    words.every((w) =>
+      [info.label, row.type, info.description].join(" ").toLowerCase().includes(w),
+    ),
+  );
+  const toggle = (type: string) =>
+    setOpen((o) => {
+      const n = new Set(o);
+      if (n.has(type)) n.delete(type);
+      else n.add(type);
+      return n;
+    });
+  const reveal = (type: string) => setOpen((o) => (o.has(type) ? o : new Set(o).add(type)));
+  useEffect(() => {
+    const fromHash = () => {
+      const h = window.location.hash.replace(/^#agent-/, "");
+      if (h && h !== "index" && agents.some((a) => a.type === h)) reveal(h);
+    };
+    fromHash();
+    window.addEventListener("hashchange", fromHash);
+    return () => window.removeEventListener("hashchange", fromHash);
+  }, [agents]);
+  return (
+    <>
+      <nav id="agent-index" aria-label="Agent index" className="panel mt-4 scroll-mt-20 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold">
+            Index{" "}
+            <span className="num font-normal text-muted-foreground">
+              {shown.length === items.length
+                ? `· ${items.length} agents · ${items.filter((x) => x.row.enabled).length} on`
+                : `· ${shown.length} of ${items.length}`}
+            </span>
+          </h2>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8"
+              onClick={() => setOpen(new Set(shown.map((x) => x.row.type)))}
+            >
+              Expand all
+            </Button>
+            <Button size="sm" variant="ghost" className="h-8" onClick={() => setOpen(new Set())}>
+              Collapse all
+            </Button>
+          </div>
+          <Input
+            aria-label="Filter agents"
+            placeholder="Filter by name or what it does"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="h-8 w-full sm:w-72"
+          />
+        </div>
+        {shown.length ? (
+          <ul className="mt-3 grid gap-x-6 gap-y-1.5 sm:grid-cols-2 xl:grid-cols-3">
+            {shown.map(({ info, row }) => (
+              <li key={row.type} className="flex items-baseline gap-2 text-sm">
+                <a
+                  href={`#${anchorOf(row.type)}`}
+                  onClick={() => reveal(row.type)}
+                  className="text-primary underline-offset-2 hover:underline"
+                >
+                  {info.label}
+                </a>
+                <span className="shrink-0 text-[11px] text-muted-foreground">
+                  {!row.live
+                    ? "not live"
+                    : row.enabled
+                      ? `on · ${(LEVEL_LABEL[row.autonomy] ?? row.autonomy).toLowerCase()}`
+                      : "off"}
+                </span>
+                {row.recommendation && row.enabled ? (
+                  <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px]">
+                    recommendation
+                  </Badge>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-3 text-sm text-muted-foreground">No agent matches “{filter}”.</p>
+        )}
+      </nav>
+      <div className="mt-4 space-y-2">
+        {shown.map(({ info, row }) => (
+          <AgentRow
+            key={row.type}
+            info={info}
+            row={row}
+            canEdit={canEdit}
+            onSave={onSave}
+            open={open.has(row.type)}
+            onToggle={() => toggle(row.type)}
+          />
+        ))}
+      </div>
     </>
   );
 }
@@ -128,11 +247,15 @@ function AgentRow({
   row,
   canEdit,
   onSave,
+  open,
+  onToggle,
 }: {
   info: (typeof AGENT_CATALOG)[number];
   row: Row;
   canEdit: boolean;
   onSave: (input: AgentPolicyInput) => Promise<void>;
+  open: boolean;
+  onToggle: () => void;
 }) {
   const [budget, setBudget] = useState(row.monthlyTokenBudget?.toString() ?? "");
   const [legSteps, setLegSteps] = useState(row.maxStepsPerLeg?.toString() ?? "");
@@ -146,9 +269,30 @@ function AgentRow({
   };
 
   return (
-    <section className="panel p-5">
+    <section id={anchorOf(row.type)} className={`panel scroll-mt-20 ${open ? "p-5" : "px-5 py-3"}`}>
       <div className="flex flex-wrap items-center gap-2">
-        <h3 className="font-semibold">{info.label}</h3>
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          aria-controls={`${anchorOf(row.type)}-body`}
+          className="flex items-center gap-2 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <ChevronRight
+            className={`size-4 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
+          />
+          <h3 className="font-semibold">{info.label}</h3>
+        </button>
+        {row.enabled && row.live ? (
+          <Badge variant="secondary" className="font-normal">
+            {LEVEL_LABEL[row.autonomy] ?? row.autonomy}
+          </Badge>
+        ) : null}
+        {row.recommendation && row.enabled ? (
+          <Badge variant="outline" className="font-normal">
+            Recommendation
+          </Badge>
+        ) : null}
         {row.live ? (
           <Badge>Live</Badge>
         ) : (
@@ -164,147 +308,161 @@ function AgentRow({
             disabled={!canEdit || !row.live}
             onCheckedChange={(enabled) => onSave({ ...base, enabled })}
           />
-        </div>
-      </div>
-      <p className="mt-1 text-sm text-muted-foreground">{info.description}</p>
-
-      {row.recommendation && row.enabled ? (
-        <Recommendation row={row} canEdit={canEdit} onSave={onSave} base={base} />
-      ) : null}
-
-      <div className="mt-4 grid gap-4 md:grid-cols-3">
-        <div>
-          <Label className="text-xs">Autonomy</Label>
-          <Select
-            value={row.autonomy}
-            disabled={!canEdit}
-            onValueChange={(v) => onSave({ ...base, autonomy: v as Row["autonomy"] })}
+          <a
+            href="#agent-index"
+            className="inline-flex items-center gap-0.5 text-[11px] text-primary underline-offset-2 hover:underline"
           >
-            <SelectTrigger className="mt-1">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {AUTONOMY_OPTIONS.map((o) => (
-                <SelectItem key={o.value} value={o.value}>
-                  {o.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {hint ? <p className="mt-1 text-xs text-muted-foreground">{hint}</p> : null}
-        </div>
-
-        <div>
-          {(["email", "board"] as const)
-            .filter((g) => g === "email" || row.type === "publishing")
-            .map((group) => (
-              <div key={group} className={group === "board" ? "mt-3" : ""}>
-                <Label className="text-xs">
-                  {group === "email" ? "Pre-approved candidate emails" : "Pre-approved job boards"}
-                </Label>
-                <div className="mt-2 space-y-1.5">
-                  {WHITELISTABLE_TEMPLATES.filter((t) => t.group === group).map((t) => {
-                    const on = row.whitelistedTemplates.includes(t.id);
-                    return (
-                      <label key={t.id} className="flex items-center gap-2 text-sm">
-                        <Checkbox
-                          checked={on}
-                          disabled={!canEdit}
-                          onCheckedChange={(v) =>
-                            onSave({
-                              ...base,
-                              whitelistedTemplates: v
-                                ? [...row.whitelistedTemplates, t.id]
-                                : row.whitelistedTemplates.filter((x) => x !== t.id),
-                            })
-                          }
-                        />
-                        {t.label}
-                      </label>
-                    );
-                  })}
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {group === "email"
-                    ? "Used at Act and notify. At Autonomous every candidate email template sends on its own."
-                    : "Used at Autonomous only. Otherwise every post goes to the HR head for approval, and is published as that HR head."}
-                </p>
-              </div>
-            ))}
-        </div>
-
-        <div>
-          <Label className="text-xs" htmlFor={`budget-${row.type}`}>
-            Monthly token budget
-          </Label>
-          <div className="mt-1 flex gap-2">
-            <Input
-              id={`budget-${row.type}`}
-              inputMode="numeric"
-              placeholder="No limit"
-              value={budget}
-              disabled={!canEdit}
-              onChange={(e) => setBudget(e.target.value.replace(/[^0-9]/g, ""))}
-            />
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!canEdit}
-              onClick={() =>
-                onSave({ ...base, monthlyTokenBudget: budget ? Number(budget) : null })
-              }
-            >
-              Save
-            </Button>
-          </div>
-          <p className="mt-1 text-xs text-muted-foreground">Leave empty for no limit.</p>
-        </div>
-
-        <div>
-          <Label className="text-xs" htmlFor={`legsteps-${row.type}`}>
-            Run limits (per stretch of work)
-          </Label>
-          <div className="mt-1 grid grid-cols-[1fr_1fr_auto] gap-2">
-            <Input
-              id={`legsteps-${row.type}`}
-              inputMode="numeric"
-              aria-label="AI turns per stretch"
-              placeholder={`${row.defaultStepsPerLeg} AI turns`}
-              value={legSteps}
-              disabled={!canEdit}
-              onChange={(e) => setLegSteps(e.target.value.replace(/[^0-9]/g, ""))}
-            />
-            <Input
-              inputMode="numeric"
-              aria-label="Tokens per stretch"
-              placeholder="200000 tokens"
-              value={legTokens}
-              disabled={!canEdit}
-              onChange={(e) => setLegTokens(e.target.value.replace(/[^0-9]/g, ""))}
-            />
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!canEdit}
-              onClick={() =>
-                onSave({
-                  ...base,
-                  maxStepsPerLeg: legSteps ? Number(legSteps) : null,
-                  maxTokensPerLeg: legTokens ? Number(legTokens) : null,
-                })
-              }
-            >
-              Save
-            </Button>
-          </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            A stretch is the work between two decisions by a person; each decision gives a fresh
-            allowance, and a run stops for good at four stretches&apos; worth (a loop guard). Turns
-            4–60, tokens 20,000–1,000,000; leave empty for the agent&apos;s default. The monthly
-            token budget is still the cost limit.
-          </p>
+            <ArrowUp className="size-3" /> Index
+          </a>
         </div>
       </div>
+      {!open ? (
+        <p className="mt-1 truncate pl-6 text-xs text-muted-foreground">{info.description}</p>
+      ) : (
+        <div id={`${anchorOf(row.type)}-body`}>
+          <p className="mt-1 text-sm text-muted-foreground">{info.description}</p>
+
+          {row.recommendation && row.enabled ? (
+            <Recommendation row={row} canEdit={canEdit} onSave={onSave} base={base} />
+          ) : null}
+
+          <div className="mt-4 grid gap-4 md:grid-cols-3">
+            <div>
+              <Label className="text-xs">Autonomy</Label>
+              <Select
+                value={row.autonomy}
+                disabled={!canEdit}
+                onValueChange={(v) => onSave({ ...base, autonomy: v as Row["autonomy"] })}
+              >
+                <SelectTrigger className="mt-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {AUTONOMY_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {hint ? <p className="mt-1 text-xs text-muted-foreground">{hint}</p> : null}
+            </div>
+
+            <div>
+              {(["email", "board"] as const)
+                .filter((g) => g === "email" || row.type === "publishing")
+                .map((group) => (
+                  <div key={group} className={group === "board" ? "mt-3" : ""}>
+                    <Label className="text-xs">
+                      {group === "email"
+                        ? "Pre-approved candidate emails"
+                        : "Pre-approved job boards"}
+                    </Label>
+                    <div className="mt-2 space-y-1.5">
+                      {WHITELISTABLE_TEMPLATES.filter((t) => t.group === group).map((t) => {
+                        const on = row.whitelistedTemplates.includes(t.id);
+                        return (
+                          <label key={t.id} className="flex items-center gap-2 text-sm">
+                            <Checkbox
+                              checked={on}
+                              disabled={!canEdit}
+                              onCheckedChange={(v) =>
+                                onSave({
+                                  ...base,
+                                  whitelistedTemplates: v
+                                    ? [...row.whitelistedTemplates, t.id]
+                                    : row.whitelistedTemplates.filter((x) => x !== t.id),
+                                })
+                              }
+                            />
+                            {t.label}
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {group === "email"
+                        ? "Used at Act and notify. At Autonomous every candidate email template sends on its own."
+                        : "Used at Autonomous only. Otherwise every post goes to the HR head for approval, and is published as that HR head."}
+                    </p>
+                  </div>
+                ))}
+            </div>
+
+            <div>
+              <Label className="text-xs" htmlFor={`budget-${row.type}`}>
+                Monthly token budget
+              </Label>
+              <div className="mt-1 flex gap-2">
+                <Input
+                  id={`budget-${row.type}`}
+                  inputMode="numeric"
+                  placeholder="No limit"
+                  value={budget}
+                  disabled={!canEdit}
+                  onChange={(e) => setBudget(e.target.value.replace(/[^0-9]/g, ""))}
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!canEdit}
+                  onClick={() =>
+                    onSave({ ...base, monthlyTokenBudget: budget ? Number(budget) : null })
+                  }
+                >
+                  Save
+                </Button>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">Leave empty for no limit.</p>
+            </div>
+
+            <div>
+              <Label className="text-xs" htmlFor={`legsteps-${row.type}`}>
+                Run limits (per stretch of work)
+              </Label>
+              <div className="mt-1 grid grid-cols-[1fr_1fr_auto] gap-2">
+                <Input
+                  id={`legsteps-${row.type}`}
+                  inputMode="numeric"
+                  aria-label="AI turns per stretch"
+                  placeholder={`${row.defaultStepsPerLeg} AI turns`}
+                  value={legSteps}
+                  disabled={!canEdit}
+                  onChange={(e) => setLegSteps(e.target.value.replace(/[^0-9]/g, ""))}
+                />
+                <Input
+                  inputMode="numeric"
+                  aria-label="Tokens per stretch"
+                  placeholder="200000 tokens"
+                  value={legTokens}
+                  disabled={!canEdit}
+                  onChange={(e) => setLegTokens(e.target.value.replace(/[^0-9]/g, ""))}
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!canEdit}
+                  onClick={() =>
+                    onSave({
+                      ...base,
+                      maxStepsPerLeg: legSteps ? Number(legSteps) : null,
+                      maxTokensPerLeg: legTokens ? Number(legTokens) : null,
+                    })
+                  }
+                >
+                  Save
+                </Button>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                A stretch is the work between two decisions by a person; each decision gives a fresh
+                allowance, and a run stops for good at four stretches&apos; worth (a loop guard).
+                Turns 4–60, tokens 20,000–1,000,000; leave empty for the agent&apos;s default. The
+                monthly token budget is still the cost limit.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
