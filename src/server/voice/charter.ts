@@ -192,7 +192,12 @@ export const NEGOTIATION_CALL_CHARTER: VoiceCharter = {
     ...COMMON_TAIL.slice(1),
   ],
   handOff: [
-    ...COMMON_HAND_OFF,
+    // Not "reply to the e-mail" on an offer call (a real call: it sounded dismissive to a
+    // candidate asking who they would report to).
+    i(
+      'A question it has no approved answer for (reporting line, responsibilities, team): "That is a good question — I have noted it, and the hiring team will walk you through it." It goes into the call notes.',
+    ),
+    COMMON_HAND_OFF[1]!,
     c(
       "They want more than it may offer, want a person, or want time to think: their words and what would make it work for them go to the hiring team, who come back to them.",
     ),

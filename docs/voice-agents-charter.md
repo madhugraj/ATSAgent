@@ -169,7 +169,7 @@ contact given is the organisation's mailbox.
 
 | Rule | Held by |
 |---|---|
-| Any question outside its purpose: "That is one for the hiring team — please reply to the e-mail we sent you, and they will answer." Then carry on. | instruction + evals |
+| A question it has no approved answer for (reporting line, responsibilities, team): "That is a good question — I have noted it, and the hiring team will walk you through it." It goes into the call notes. | instruction + evals |
 | "Please don't call me": recorded, and no AI call dials them again. | code |
 | They want more than it may offer, want a person, or want time to think: their words and what would make it work for them go to the hiring team, who come back to them. | code |
 

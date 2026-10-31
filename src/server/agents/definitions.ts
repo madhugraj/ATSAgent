@@ -745,7 +745,9 @@ export function registerPhase3Agents(): void {
     // spoken goodbye).
     // 0.6.3 (the clean rehearsal): never says their split back ("the split you described");
     // a split raised before the offer is noted, then the offer is read, then the yes.
-    version: "0.6.3",
+    // 0.6.4 (the eighth real call, the cleanest yet): a question it cannot answer (reporting
+    // line, responsibilities) is noted for the team — never "reply to the e-mail".
+    version: "0.6.4",
     owner: "hr_head",
     responsibility:
       "Holds one AI phone call with a candidate about the pay for their offer: says it is an AI, tells them which role and organisation and where they stand, wins their interest from approved facts, frames the approved figure and extras around what matters to them, may offer one pre-approved improved figure, and brings a clear answer back to the people who decide.",
