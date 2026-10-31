@@ -110,6 +110,16 @@ today, amplified by parallel load):
 - Lease renewal inside the turn loop — today a slow run can be reclaimed mid-flight
   by the next tick (ghost worker: duplicate AI spend, duplicate side effects).
 
+As shipped (2026-10-31): `AGENT_CONCURRENCY` (default 6, 1–20) sets how many runs
+one tick drives at once; the lease is renewed every turn, and a run cancelled or
+reclaimed meanwhile stops at its next turn; inline kicks no longer serialise an
+organisation's runs — a kick while another is still driving a long run claims
+and drives what is queued now (claims stay disjoint), so a second pane's run
+starts at once. Measured: two Requisition agent runs started 3 s apart — before,
+the second took its first step after 145 s (once the first paused for approval);
+after, at 9 s, both researching pay at the same time. Still open: the dedupe
+index, the `advanceRequisitionCore` status guard.
+
 ### Phase 5 — Org choice
 
 "Handle multiple hiring needs in parallel" on Agent settings (HR head / CBO /

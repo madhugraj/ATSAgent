@@ -70,7 +70,13 @@ const LEASE_MINUTES = 10;
 const MAX_ATTEMPTS = 3;
 /** Model turns per run per tick, so one long run cannot starve the queue. */
 const TURNS_PER_TICK = 8;
-const CONCURRENCY = 2;
+/**
+ * Runs one tick drives at the same time. Runs wait on the model and the
+ * network, not the CPU, so they interleave in one process; independent
+ * hiring needs (the desk's side-by-side tracks) each need their own worker.
+ * AGENT_CONCURRENCY raises or lowers it (1–20).
+ */
+const CONCURRENCY = Math.min(Math.max(Number(process.env["AGENT_CONCURRENCY"]) || 6, 1), 20);
 const PREVIEW_CHARS = 600;
 
 /**
@@ -1319,6 +1325,12 @@ export async function runAgentTick(
      * starting another run would take the scripted model's replies).
      */
     onlyRunId?: string;
+    /**
+     * Claim and drive queued runs only — no events, no sweeps. A second
+     * inline kick while the first is still driving a long run uses this, so
+     * a run started meanwhile gets its own worker instead of waiting.
+     */
+    runsOnly?: boolean;
   } = {},
 ): Promise<TickCounts> {
   const max = Math.min(Math.max(opts.max ?? 10, 1), 50);
@@ -1334,7 +1346,7 @@ export async function runAgentTick(
   const now = new Date();
 
   // 0. Turn lifecycle events into agent runs and close gates decided elsewhere.
-  if (!opts.onlyRunId)
+  if (!opts.onlyRunId && !opts.runsOnly)
     try {
       const { processAgentEvents } = await import("./orchestrator.server");
       counts.events = (await processAgentEvents(opts.orgId ? { orgId: opts.orgId } : {})).processed;
@@ -1481,6 +1493,16 @@ export async function runAgentTick(
 
 /* -------------------------------------------------------------- internals */
 
+/** Extend this worker's lease on a running run; false when the run is no longer ours. */
+async function renewLease(run: AgentRun): Promise<boolean> {
+  const held = await db
+    .update(agentRuns)
+    .set({ leaseUntil: new Date(Date.now() + LEASE_MINUTES * 60_000) })
+    .where(and(eq(agentRuns.id, run.id), eq(agentRuns.status, "running")))
+    .returning({ id: agentRuns.id });
+  return held.length > 0;
+}
+
 async function driveRun(run: AgentRun): Promise<"done" | "awaiting" | "yielded" | "failed"> {
   const def = getAgent(run.agentType);
   if (!def) {
@@ -1580,6 +1602,10 @@ async function driveRun(run: AgentRun): Promise<"done" | "awaiting" | "yielded" 
     run.lastError = null;
   }
   for (let turn = 0; turn < TURNS_PER_TICK; turn++) {
+    // Keep the claim while working: a slow run must not be reclaimed by the
+    // next tick mid-turn (a second worker on the same run). A run no longer
+    // ours — cancelled, or reclaimed after a stall — stops here.
+    if (turn > 0 && !(await renewLease(run))) return "yielded";
     if (await overBudget(run, policy.monthlyTokenBudget)) {
       await save(run, transcript, null, stepCount, tokensUsed);
       await pauseForBudget(run);
