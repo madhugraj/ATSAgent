@@ -25,11 +25,12 @@ ATSIQ by Yavar AI is an enterprise recruiting intelligence platform. It combines
 - Candidate email notifications (acknowledgment, stage update, interview invitation, offer) with per-organisation toggles
 - Explainable JD↔CV scoring, social-claim verification and recruiter overrides
 - Contextual screening kits, private audio transcription, grading and interview scorecards
-- AI phone screening (optional, per organisation): the Screening call agent phones shortlisted candidates through the organisation's PBX line and its own AI voice key — says it is an AI, asks consent, asks the kit's questions (never pay), retries and takes callbacks within calling hours, falls back to the written assessment; only the answered questions are graded, and the hiring desk shows the result with *Why this score* and asks a person who moves on (`docs/voice-screening-agent.md`)
+- AI phone screening (optional, per organisation): the Screening call agent phones shortlisted candidates through the organisation's PBX line and its own AI voice key — says it is an AI, asks consent, asks the kit's questions (never pay), retries and takes callbacks within calling hours, falls back to the written assessment; only the answered questions are graded, and the hiring desk shows the result with _Why this score_ and asks a person who moves on (`docs/voice-screening-agent.md`)
 - Google Meet, Microsoft Teams and Zoom meeting integrations
 - Talent pool ownership, referrals, deduplication, internal job postings and reusable organisation knowledge
 - Live compensation research with cited evidence and saved organisation corrections
 - Pay discussions before the letter: a call brief and a person-approved message when the candidate expects more than the approved ceiling
+- AI pay calls: the assistant phones the candidate with the approved figure (and at most one pre-approved improved figure), never the ceiling; a yes comes back for TA / the HR head to confirm in one click
 - Pay & availability collected at screening through a private candidate form (HR-only), so offers are built on the candidate's stated expectation and notice period
 - CHRO dashboard, reports, Talent Brain ontology and Return on Individual capability-to-goal planning
 - Role expert interview: the Role expert interview agent asks a role's hiring manager what the role really needs (at most two rounds of questions, in their inbox) and writes the role's expert brief — must-haves and why, deal-breakers, what good looks like, must-ask screening questions and each interview round's rubric. The hiring manager approves it; then screening kits ask its questions and the interview rounds rate its areas

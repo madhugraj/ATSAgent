@@ -210,6 +210,11 @@ export async function runScreeningCall(
     const { runSchedulingCall } = await import("./scheduling-session.server");
     return runSchedulingCall(orgId, call, deps);
   }
+  // A pay discussion call is the Negotiation call agent's (same line, same worker).
+  if (call.purpose === "negotiation") {
+    const { runNegotiationCall } = await import("./negotiation-session.server");
+    return runNegotiationCall(orgId, call, deps);
+  }
   // Each attempt is one run of the Screening call agent (its ledger, trace and outcome).
   const runId = await openCallRun(orgId, call).catch((e) => {
     log.warn("screening_call.run_open_failed", { call_id: callId, error: e as Error });
@@ -247,7 +252,7 @@ export async function runScreeningCall(
 export async function openCallRun(
   orgId: string,
   call: typeof screeningCalls.$inferSelect,
-  agentType: "screening_call" | "scheduling_call" = "screening_call",
+  agentType: "screening_call" | "scheduling_call" | "negotiation_call" = "screening_call",
   goal = `Phone screening call, attempt ${call.attempt}.`,
 ): Promise<string | null> {
   let principal = call.requestedBy;

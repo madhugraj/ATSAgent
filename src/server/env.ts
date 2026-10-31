@@ -75,15 +75,17 @@ const schema = z.object({
   // Phone screening (docs/voice-screening-agent.md): the PBX extension the voice
   // worker dials out from. Unset = phone screening is unavailable. The voice
   // model itself uses each organisation's own credential, never one here.
-  SIP_SERVER: z.string().optional(),
+  // Trimmed: an env file saved with CRLF line endings left a "\r" in each value,
+  // and the PBX silently dropped every request built from them.
+  SIP_SERVER: z.string().trim().optional(),
   SIP_PORT: z.coerce.number().int().min(1).max(65_535).default(5060),
-  SIP_USER: z.string().optional(),
-  SIP_PASSWORD: z.string().optional(),
-  SIP_AUTH_USER: z.string().optional(),
-  SIP_DOMAIN: z.string().optional(),
-  SIP_CALLER_NAME: z.string().max(40).optional(),
+  SIP_USER: z.string().trim().optional(),
+  SIP_PASSWORD: z.string().trim().optional(),
+  SIP_AUTH_USER: z.string().trim().optional(),
+  SIP_DOMAIN: z.string().trim().optional(),
+  SIP_CALLER_NAME: z.string().trim().max(40).optional(),
   // Only when calls have one-way audio behind NAT.
-  SIP_PUBLIC_IP: z.string().optional(),
+  SIP_PUBLIC_IP: z.string().trim().optional(),
   // Calls the voice worker holds at once (the PBX's channel limit).
   VOICE_MAX_CONCURRENT: z.coerce.number().int().min(1).max(20).default(2),
 });

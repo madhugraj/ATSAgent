@@ -28,6 +28,7 @@ const Policy = z
     nextStepsText: z.string().trim().max(300).nullable(),
     schedulingEnabled: z.boolean(),
     schedulingWaitHours: z.number().int().min(2).max(96),
+    negotiationEnabled: z.boolean(),
   })
   .refine((p) => p.windowEndMinute - p.windowStartMinute >= 60, {
     message: "The calling window must be at least an hour long.",
