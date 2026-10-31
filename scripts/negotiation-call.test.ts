@@ -184,6 +184,22 @@ describe("negotiation call tools — refusals", () => {
     expect(t.applyNegotiationTool(s, "state_offer", { which: "improved" }, FIG).ok).toBe(false);
   });
 
+  test("restructure (same total, different split) never unlocks the improvement", () => {
+    const s = started();
+    t.applyNegotiationTool(s, "state_offer", { which: "proposal" }, FIG);
+    const r = t.applyNegotiationTool(
+      s,
+      "record_their_position",
+      { stance: "restructure", their_words: "46 fixed and 4 variable instead" },
+      FIG,
+    );
+    expect(r.ok && String(r.next)).toMatch(/not asking for more money/);
+    expect(r.ok && String(r.next)).not.toMatch(/lakh/);
+    expect(s.structureAsk).toBe("46 fixed and 4 variable instead");
+    expect(s.conditionalAsked).toBeFalsy();
+    expect(t.applyNegotiationTool(s, "state_offer", { which: "improved" }, FIG).ok).toBe(false);
+  });
+
   test("update the records: a call about the offer cannot end without notes", () => {
     const s = started();
     t.applyNegotiationTool(s, "state_offer", { which: "proposal" }, FIG);

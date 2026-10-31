@@ -406,7 +406,10 @@ export function callOutcomeOf(
   s: NegotiationCallState,
   at: Date,
 ): NegotiationCallOutcome | null {
-  const notes = s.notes ? { notes: s.notes } : {};
+  const notes = {
+    ...(s.notes ? { notes: s.notes } : {}),
+    ...(s.structureAsk ? { structureAsk: s.structureAsk } : {}),
+  };
   if (s.agreement)
     return {
       callId,

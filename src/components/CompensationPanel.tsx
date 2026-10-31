@@ -484,6 +484,12 @@ export function NegotiationSection({ applicationId }: { applicationId: string })
                 : "No yes yet"}
               {` — "${heard.theirWords}"`}
             </dd>
+            {heard.structureAsk ? (
+              <>
+                <dt className="text-muted-foreground">Preferred structure</dt>
+                <dd>{`"${heard.structureAsk}" — same total, a different split or terms`}</dd>
+              </>
+            ) : null}
             {heard.notes ? (
               <>
                 <dt className="text-muted-foreground">How they feel</dt>

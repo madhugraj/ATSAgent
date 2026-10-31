@@ -2812,6 +2812,8 @@ export type NegotiationCallOutcome = {
   /** What the candidate said, as heard. */
   theirWords: string;
   at: string;
+  /** A different split or terms they asked for at the same total, in their words. */
+  structureAsk?: string | null | undefined;
   /** The assistant's notes for the team: how they felt, what matters to them, their concerns. */
   notes?: NegotiationCallNotes | null | undefined;
 };

@@ -28,7 +28,11 @@ export const NEGOTIATION_END_REASONS = [
 ] as const;
 export type NegotiationEndReason = (typeof NEGOTIATION_END_REASONS)[number];
 
-export const STANCES = ["accepts", "declines", "wants_more", "unsure"] as const;
+/**
+ * accepts · declines · wants_more (a higher total) · restructure (the same total,
+ * a different split or terms — never more money) · unsure.
+ */
+export const STANCES = ["accepts", "declines", "wants_more", "restructure", "unsure"] as const;
 export type Stance = (typeof STANCES)[number];
 
 export const HAND_OFF_WHY = ["wants_more", "wants_person", "needs_time", "other"] as const;
@@ -96,7 +100,7 @@ export const NEGOTIATION_TOOL_DESCRIPTIONS: Record<NegotiationToolName, string> 
   state_offer:
     'Get the exact words for a figure, then say them out loud word for word. which "proposal" first; "improved" only after they turned the proposal down, and only if the result of record_their_position said you may. You never say any other figure.',
   record_their_position:
-    "Record the candidate's answer to the figure you read out: stance accepts, declines, wants_more (they want more) or unsure; their_words exactly as they said it, including any figure they named. The result says what you may do next.",
+    "Record the candidate's answer to the figure you read out: stance accepts (a clear yes), declines, wants_more (they want a HIGHER total), restructure (they are fine with the total but want a different split of fixed and variable, or other terms such as the joining date — this is NOT more money), or unsure; their_words exactly as they said it, including any figure they named. The result says what you may do next.",
   explain_offer:
     "Get the approved words about part of the offer, then say them: package (the whole offer), split (fixed and variable), joining_bonus, review (how the pay review works), esop, benefits, why_you (why the team wants them), or rationale (how the figure was set — when they ask why this figure or about market research). Use it whenever they ask about the package, and to build the offer's value. Never describe the package any other way; if the result says a detail is not shared, say the hiring team will share it.",
   submit_agreed_terms:
@@ -329,6 +333,8 @@ export type NegotiationCallState = {
   conditionalYes?: boolean | null;
   /** The conditional question was asked again once after an answer that was not a yes. */
   conditionalReasked?: boolean;
+  /** A different split or terms they asked for at the same total, in their words (for the team). */
+  structureAsk?: string | null;
   /** The notes for the team (required before a call about the offer ends). */
   notes?: NegotiationCallNotes | null;
 };
@@ -451,6 +457,15 @@ export function applyNegotiationTool(
       const turnedDown = stance === "declines" || stance === "wants_more";
       if (turnedDown && state.lastStated === "proposal") state.proposalDeclined = true;
       let next: string;
+      // A different split or terms at the same total is not a request for more money:
+      // the improvement stays put (a real call revealed it for "46 + 4 instead of 42 + 8").
+      if (stance === "restructure") {
+        state.structureAsk = words;
+        return {
+          ok: true,
+          next: "They are not asking for more money — do not offer or mention any improvement. Tell them warmly you have noted how they would like it structured and the hiring team will look at it with them. Then ask plainly whether, on that basis, they are happy to go ahead at this offer. A clear yes → submit_agreed_terms (the team sees their preferred structure with it).",
+        };
+      }
       const canMove =
         figures.stepCtc != null && state.stated.proposal && !state.stated.improved && !state.halted;
       if (canMove && state.conditionalAsked && state.conditionalYes == null) {
@@ -513,6 +528,7 @@ export function applyNegotiationTool(
       return {
         ok: true,
         say: "Thank you. I will pass your answer to the hiring team, who will confirm it with you.",
+        next: "Say those words, then record_call_notes for the hiring team, sum up warmly, say goodbye and end_negotiation_call (verbal_agreement).",
       };
     }
     case "request_human_call": {
@@ -521,7 +537,10 @@ export function applyNegotiationTool(
         their_words: string;
       };
       state.handOff = { why, words: their_words };
-      return { ok: true };
+      return {
+        ok: true,
+        next: "Now record_call_notes for the hiring team, then sum up warmly, say goodbye and end_negotiation_call (handed_off).",
+      };
     }
     case "record_call_notes": {
       state.notes = parsed.data as NegotiationCallNotes;

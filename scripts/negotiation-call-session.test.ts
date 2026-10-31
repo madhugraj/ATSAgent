@@ -358,6 +358,20 @@ describe("a whole negotiation call (reference agent vs personas)", () => {
     expect(why).toBeLessThan(offer);
   });
 
+  test("a different split at the same total is not more money: closed at the proposal", async () => {
+    const r = await runCall(sim.PERSONAS.restructurer());
+    expect(r.violations).toEqual([]);
+    expect(okCalls(r.seen.timeline, "state_offer", "improved")).toBe(0);
+    expect(JSON.stringify(r.seen.timeline)).not.toContain("19 lakh 50 thousand");
+    expect(r.result.endReason).toBe("verbal_agreement");
+    expect(r.after.callOutcome).toMatchObject({
+      agreed: true,
+      which: "proposal",
+      agreedCtc: FIG.proposal,
+    });
+    expect(r.after.callOutcome?.structureAsk).toContain("46 fixed and 4 variable");
+  });
+
   test("'I'll think about it' twice: the improvement is kept, handed off", async () => {
     const r = await runCall(sim.PERSONAS.thinker());
     expect(r.violations).toEqual([]);

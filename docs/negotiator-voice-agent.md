@@ -216,3 +216,17 @@ with clear visibility** (a clear "yes, I'd go ahead" first) **→ re-negotiate a
 on value, with no new figures **→ update the records** (`record_call_notes`: how they feel,
 what matters, what holds them back, where it landed — required before a call about the
 offer ends; shown on the candidate's pay discussion) **and close warmly.**
+
+7. **2026-10-31, seventh call (0.5.0).** The flow landed: introduction, congratulations by
+   round, curiosity (approved Yavar facts tied to "learn and lead"), the whole package with
+   "How do you feel about it?" — graders clean. Then the costliest mistake a negotiator can
+   make: the candidate said it looked good and asked for **a different split at the same
+   total** (46 + 4 instead of 42 + 8); it was taken as "wants more", the conditional
+   question was asked and **54 L was revealed** — "I was okay for 50, now you have told me
+   there is a revised offer." No notes were recorded before the call ended, and the
+   appreciation was paraphrased beyond the approved words. Fixed in 0.6.0: `restructure` is
+   its own answer — it never unlocks the improvement, is recorded for the team
+   (`call_outcome.structureAsk`, shown on the pay discussion) and closes at the current
+   figure; a positive answer is closed plainly ("Shall I let the hiring team know you are
+   happy to go ahead?"); the step results after a yes or a hand-off say to record the notes
+   before goodbye; what the team valued is said in its approved words.

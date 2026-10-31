@@ -728,7 +728,13 @@ export function registerPhase3Agents(): void {
     // they feel and acknowledge it; the revised offer only with a clear commitment; then
     // persuade on value; update the records (record_call_notes, required before a call about
     // the offer ends) and close.
-    version: "0.5.0",
+    // 0.6.0 (the seventh real call): a different split at the same total ("46 + 4 instead
+    // of 42 + 8") was taken as "wants more" and the improved figure was revealed — the
+    // candidate had said the offer looked good. restructure is its own answer: it never
+    // unlocks the improvement, is recorded for the team and closes at the current figure;
+    // a positive answer is closed with a plain question; notes come before goodbye; what the
+    // team valued is said in its approved words, nothing added.
+    version: "0.6.0",
     owner: "hr_head",
     responsibility:
       "Holds one AI phone call with a candidate about the pay for their offer: says it is an AI, tells them which role and organisation and where they stand, wins their interest from approved facts, frames the approved figure and extras around what matters to them, may offer one pre-approved improved figure, and brings a clear answer back to the people who decide.",

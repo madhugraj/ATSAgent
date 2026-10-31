@@ -110,6 +110,16 @@ export const PERSONAS = {
     persona("breakdown", {
       figures: ["What is the split between fixed and variable pay?", "Okay, that works for me."],
     }),
+  restructurer: () =>
+    persona("restructurer", {
+      figures: ["It looks good, but I'd like 46 fixed and 4 variable instead. Can we do that?"],
+      other: (line) =>
+        /happy to go ahead/i.test(line)
+          ? "Yes, I'm happy to go ahead."
+          : line.includes("?")
+            ? "Okay."
+            : undefined,
+    }),
   thinker: () =>
     persona("thinker", {
       figures: ["That is too low. I want 25 lakh."],
@@ -139,7 +149,16 @@ export const PERSONAS = {
 export type AgentFacts = { assistantName: string; orgName: string; firstName: string };
 
 /** What the reference agent makes of an answer to a figure (what the model would decide). */
-export function stanceOf(heard: string): "accepts" | "declines" | "wants_more" | "unsure" {
+export function stanceOf(
+  heard: string,
+): "accepts" | "declines" | "wants_more" | "restructure" | "unsure" {
+  // The same total, arranged differently — not more money (the seventh real call).
+  if (
+    /\b(instead|rather|restructure|different split)\b/i.test(heard) &&
+    /\b(fixed|variable|split|joining)\b/i.test(heard) &&
+    !/\b(more|higher|too low|increase)\b/i.test(heard)
+  )
+    return "restructure";
   if (clearYes(heard)) return "accepts";
   if (/\b(think|time|family|later|not sure)\b/i.test(heard)) return "unsure";
   if (/\b(lakh|lpa|more|higher|too low|middle|maximum|budget|band)\b|\d/i.test(heard))
@@ -235,6 +254,13 @@ export function agentPolicy(f: AgentFacts, breaks: Breaks = {}): AgentPolicy {
             false,
           );
         else io.say("I can only share the offer the hiring team has approved.", false);
+      }
+      if (stanceOf(heard) === "restructure") {
+        await io.tool("record_their_position", { stance: "restructure", their_words: heard });
+        io.say(
+          "Thank you — I've noted how you'd like it structured, and the hiring team will look at it with you. On that basis, are you happy to go ahead with this offer?",
+        );
+        continue;
       }
       // A question about the package: answer it from the approved words, then ask again.
       const topic = topicOf(heard);
