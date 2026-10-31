@@ -789,6 +789,58 @@ export function scenarios(): ScriptedScenario[] {
         say(`L${level} round with Sana assessed; the panel has its factual summary.`),
       ],
     })),
+    ...([1, 2, 3] as const).map((level): ScriptedScenario => ({
+      name: `panel_l${level}: asks the HR head to review a disagreement with the panel`,
+      agentType: `panel_l${level}`,
+      autonomy: "act_and_notify",
+      setup: async ({ orgId, userId }) => {
+        const requisitionId = await seedRequisition(orgId, userId, "approved");
+        const app = await seedApplication(orgId, requisitionId, "Sana", `l${level}`, 84);
+        const round = await seedTranscribedRound(orgId, app, level);
+        const { db } = await import("../../src/server/db");
+        const { evaluations, panelAssessments } = await import("../../drizzle/schema");
+        await db.insert(evaluations).values({
+          orgId,
+          applicationId: app,
+          interviewId: round,
+          level,
+          rating: 5,
+          recommendation: "select",
+          evaluator: "Priya",
+          evaluatorEmail: "priya@eval.local",
+        } as never);
+        await db.insert(panelAssessments).values({
+          orgId,
+          interviewId: round,
+          applicationId: app,
+          level,
+          rating: 2,
+          verdict: "reject",
+          assessedAt: new Date(),
+          summarySentAt: new Date(),
+          outcome: "disagree",
+          panelRating: "5",
+          panelVerdict: "select",
+          held: true,
+          reconciledAt: new Date(),
+        } as never);
+        return { requisitionId, app, round };
+      },
+      goal: (d) =>
+        `The panel has finished scoring round=${d["round"]} of app=${d["app"]} and your view disagrees. Ask the HR head to review it.\n\nRequisition id: ${d["requisitionId"]}`,
+      decide: () => ({ status: "approved" }),
+      expect: {
+        status: "done",
+        calls: ["get_round_for_panel", "request_panel_review"],
+        neverCalls: ["assess_round", "send_panel_summary", "request_approval"],
+        maxSteps: 5,
+      },
+      script: [
+        (m) => call("r", "get_round_for_panel", { interviewId: fromGoal(m, "round") }),
+        (m) => call("v", "request_panel_review", { interviewId: fromGoal(m, "round") }),
+        say(`Asked the HR head to review the L${level} round with Sana.`),
+      ],
+    })),
     {
       name: "evaluation: debriefs and asks the hiring manager to decide",
       agentType: "evaluation",

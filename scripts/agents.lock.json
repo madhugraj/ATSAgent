@@ -40,16 +40,16 @@
     "hash": "ec13eeb7cd2badb5b7630e9ce3f63232f15fb2e6e9afb4b6738cf3d51b782eb3"
   },
   "panel_l1": {
-    "version": "1.0.0",
-    "hash": "b18deb700fd4fd53529446179dc8a1b8b6cb4b4884151af240bc44fb111c9304"
+    "version": "1.1.0",
+    "hash": "ca46cf76486b3b41dc36dc341e8bfcf1f8865d442e772312175dc6adc3844865"
   },
   "panel_l2": {
-    "version": "1.0.0",
-    "hash": "7bce66ff67a3d76c6ab1013f225cc49f1861b0ca30cb5bf54755e5daf61b48a7"
+    "version": "1.1.0",
+    "hash": "a2c01acd21070b7c7b3bfa484559fdae23be9137b99f14a866c8781049294116"
   },
   "panel_l3": {
-    "version": "1.0.0",
-    "hash": "18b4ebed529420b87de143357819066176546ddc6c46738400ed63ebbc26a894"
+    "version": "1.1.0",
+    "hash": "b72ba6fc65692be16d1a5de93889f1f702ed0c67baa70a12b26f9d66b7c9ee0e"
   },
   "publishing": {
     "version": "1.4.4",

@@ -287,6 +287,7 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
       verdict?: string;
       finalRound?: boolean;
       policy?: string;
+      heldForPanelReview?: boolean;
     };
     // Under the "immediate" policy the round's verdict already moved the
     // candidate: nobody is asked for a hiring decision.
@@ -298,9 +299,11 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
       `Interview round L${p.level ?? "?"} is complete (round verdict: ${p.verdict ?? "?"}) for ${req.code} "${req.title}". Debrief candidate application ${p.applicationId}${
         due
           ? " and ask the hiring manager for the hiring decision."
-          : p.policy === "immediate"
-            ? ". The role's verdict policy is immediate, so the round's verdict has already moved the candidate: write the debrief only — do not request a hiring decision."
-            : ". This is not the final round and the verdict is select: write the debrief only — do not request a hiring decision."
+          : p.heldForPanelReview
+            ? ". The move is on hold: the round's panel agent disagrees with the panel and the HR head reviews it. Write the debrief only — do not request a hiring decision."
+            : p.policy === "immediate"
+              ? ". The role's verdict policy is immediate, so the round's verdict has already moved the candidate: write the debrief only — do not request a hiring decision."
+              : ". This is not the final round and the verdict is select: write the debrief only — do not request a hiring decision."
       }`,
       p.applicationId ? { type: "application", id: p.applicationId } : undefined,
     );
@@ -313,6 +316,17 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
       await dispatch(
         `panel_l${p.level}`,
         `The call of the L${p.level} interview round ${p.interviewId} (candidate application ${applicationId}, ${req.code} "${req.title}") has its transcript. Assess it and send the panel the factual summary.`,
+        { type: "application", id: applicationId },
+      );
+  }
+
+  // The panel has scored and the round's panel agent's view differs: it asks the HR head.
+  if (e.type === "panel.review_due" && applicationId) {
+    const p = e.payload as { level?: number; interviewId?: string; outcome?: string };
+    if (p.interviewId && (p.level === 1 || p.level === 2 || p.level === 3))
+      await dispatch(
+        `panel_l${p.level}`,
+        `The panel has finished scoring the L${p.level} interview round ${p.interviewId} (candidate application ${applicationId}, ${req.code} "${req.title}"), and your view of the call ${p.outcome === "disagree" ? "disagrees with" : "partly agrees with"} theirs. Ask the HR head to review it with request_panel_review.`,
         { type: "application", id: applicationId },
       );
   }

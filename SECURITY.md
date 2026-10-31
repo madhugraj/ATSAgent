@@ -62,6 +62,10 @@ We credit reporters in release notes on request.
   score. Each agent's tools refuse rounds of another level. Quotes are kept only if they are in the
   transcript, and any summary sentence carrying a score, verdict or recommendation is dropped
   before the panel's e-mail is sent.
+  The agent's view is compared with the panel's only after every panellist has scored, by a
+  fixed rule in code; the HR head's review card is built by the system (the agent cannot write
+  it), and the decision runs as the HR head with `assertRole` — no agent moves a candidate.
+  Reconciliations and decisions are audited (`panel_review.reconciled`, `panel_review.decided`).
   A scheduling call books only the e-mailed times or up to three alternates checked free when it
   is arranged — by number, never a free-form time — through the same booking core as the
   candidate's link (one booking per offer); a person approves each call (audited

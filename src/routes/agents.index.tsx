@@ -318,7 +318,7 @@ function TaskCard({ task }: { task: AgentTaskView }) {
           <>
             <Button size="sm" disabled={busy} onClick={approve}>
               {busy ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}{" "}
-              Approve
+              {task.subjectType === "panel_review" ? "Approve — go with the panel" : "Approve"}
             </Button>
             {task.subjectType === "org_profile" ? (
               // A profile version is usually sent back with what to change.
@@ -335,13 +335,33 @@ function TaskCard({ task }: { task: AgentTaskView }) {
             <Button
               size="sm"
               variant="outline"
-              disabled={busy}
+              disabled={busy || (task.subjectType === "panel_review" && note.trim().length < 3)}
+              title={
+                task.subjectType === "panel_review"
+                  ? "Puts the candidate on hold — write why in the note first"
+                  : undefined
+              }
               onClick={() =>
                 decide({ status: "rejected", ...(note.trim() ? { reason: note.trim() } : {}) })
               }
             >
-              <X className="size-4" /> Decline
+              <X className="size-4" />{" "}
+              {task.subjectType === "panel_review" ? "Decline — put on hold" : "Decline"}
             </Button>
+            {task.subjectType === "panel_review" ? (
+              // A panel review may end with rejecting the candidate: the HR head's decision, with a reason.
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={busy || note.trim().length < 3}
+                title="Rejects the candidate for this role — write why in the note first"
+                onClick={() =>
+                  decide({ status: "rejected", reason: note.trim(), rejectCandidate: true })
+                }
+              >
+                Reject candidate
+              </Button>
+            ) : null}
           </>
         )}
       </div>

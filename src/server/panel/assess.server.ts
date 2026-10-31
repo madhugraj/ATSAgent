@@ -83,6 +83,8 @@ async function loadRound(orgId: string, interviewId: string, level: PanelLevel) 
     .select({
       assessedAt: panelAssessments.assessedAt,
       summarySentAt: panelAssessments.summarySentAt,
+      outcome: panelAssessments.outcome,
+      reviewDecision: panelAssessments.reviewDecision,
     })
     .from(panelAssessments)
     .where(and(eq(panelAssessments.orgId, orgId), eq(panelAssessments.interviewId, interviewId)))
@@ -95,6 +97,8 @@ async function loadRound(orgId: string, interviewId: string, level: PanelLevel) 
     competencies: plan?.competencies ?? [],
     assessedAt: a?.assessedAt ?? null,
     summarySentAt: a?.summarySentAt ?? null,
+    // The panel has scored, the views differ and the HR head has not reviewed it yet.
+    reviewDue: Boolean(a?.outcome && a.outcome !== "agree" && !a.reviewDecision),
   };
 }
 
@@ -137,6 +141,7 @@ export async function roundFacts(orgId: string, interviewId: string, level: Pane
       `in — ${r.segments.length} turns, about ${Math.round((last?.endMs ?? 0) / 60_000)} minutes, ${speakersOf(r.segments).length} speakers`,
     assessed: Boolean(r.assessedAt),
     summarySent: Boolean(r.summarySentAt),
+    reviewDue: r.reviewDue,
   };
 }
 
@@ -161,6 +166,8 @@ export async function assessRound(
   level: PanelLevel,
 ): Promise<{
   saved: true;
+  /** The panel had already scored and its verdict differs: ask the HR head to review. */
+  panelReviewDue?: true;
   competenciesAssessed: number;
   protectedGroundQuestions: number;
   injectionSuspected: boolean;
@@ -221,8 +228,17 @@ export async function assessRound(
     .insert(panelAssessments)
     .values({ orgId: ctx.orgId, interviewId, applicationId: r.applicationId, level, ...values })
     .onConflictDoUpdate({ target: panelAssessments.interviewId, set: values });
+  // The panel may have scored already (the transcript came late): compare now.
+  const { reconcileAfterAssessment } = await import("./review.server");
+  const late = await reconcileAfterAssessment(
+    ctx.orgId,
+    interviewId,
+    level,
+    ctx.runId ? `agent:panel_l${level}:${ctx.runId}` : `agent:panel_l${level}`,
+  );
   return {
     saved: true,
+    ...(late ? { panelReviewDue: true } : {}),
     competenciesAssessed: view.candidate.competencies.filter((c) => c.rating != null).length,
     protectedGroundQuestions: view.panel.offLimits.length,
     injectionSuspected: view.injectionSuspected,

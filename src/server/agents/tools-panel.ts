@@ -19,6 +19,30 @@ async function levelFor(ctx: ToolContext) {
 
 export function registerPanelTools(): void {
   registerTool({
+    name: "request_panel_review",
+    description:
+      "Ask the HR head to review a round where the panel has finished scoring and your view of the call differs from theirs. A proposal: it opens the HR head's decision — the system states both views side by side and carries out what they decide. Use it only when told a review is due.",
+    input: RoundId,
+    risk: "write",
+    describe: () => "Panel review for the HR head",
+    precheck: async (ctx, i) => {
+      const { reviewPrecheck } = await import("../panel/review.server");
+      return reviewPrecheck(ctx.orgId, i.interviewId, await levelFor(ctx));
+    },
+    proposes: async (ctx, i) => {
+      const level = await levelFor(ctx);
+      return {
+        title: `Panel review: L${level} interview`,
+        summary: `The L${level} panel agent's independent view of the call differs from the panel's scorecards. The facts are below; you decide.`,
+        subject: { type: "panel_review", interviewId: i.interviewId },
+      };
+    },
+    run: async () => {
+      throw new Error("A panel review is decided by the HR head.");
+    },
+  });
+
+  registerTool({
     name: "get_round_for_panel",
     description:
       "Facts about an interview round this agent reads: the candidate, role, round and its competencies, how many are on the panel, whether the call's transcript is in, and whether it is already assessed and summarised. Never the transcript itself or any score.",

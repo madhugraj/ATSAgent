@@ -351,3 +351,21 @@ describe("the transcript event", () => {
     expect(runs[0]!.subjectId).toBe(applicationId);
   });
 });
+
+describe("agree / partial / disagree (a fixed rule)", () => {
+  test("the three cases, by verdict and rating gap", async () => {
+    const { reconcile, panelRatingOf } = await import("../src/lib/panel-reconcile");
+    const r = (pr: number | null, pv: "select" | "hold" | "reject", ar: number, av: typeof pv) =>
+      reconcile({ rating: pr, verdict: pv }, { rating: ar, verdict: av });
+    expect(r(4, "select", 4, "select")).toBe("agree");
+    expect(r(4.5, "select", 3.5, "select")).toBe("agree");
+    expect(r(4, "select", 2, "select")).toBe("partial"); // same verdict, 2 apart
+    expect(r(4, "select", 4, "hold")).toBe("partial"); // select vs hold
+    expect(r(4, "select", 3, "reject")).toBe("disagree"); // opposite verdicts
+    expect(r(2, "reject", 4, "select")).toBe("disagree");
+    expect(r(5, "hold", 2, "hold")).toBe("disagree"); // 3 apart
+    expect(r(null, "hold", 1, "hold")).toBe("agree"); // no panel ratings: verdict only
+    expect(panelRatingOf([4, 3, null])).toBe(3.5);
+    expect(panelRatingOf([null])).toBeNull();
+  });
+});

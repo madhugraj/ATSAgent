@@ -2967,10 +2967,38 @@ export const panelAssessments = pgTable(
     injectionSuspected: boolean("injection_suspected").notNull().default(false),
     assessedAt: timestamp("assessed_at", { withTimezone: true }),
     summarySentAt: timestamp("summary_sent_at", { withTimezone: true }),
+    /** Compared with the panel once all have scored (migration 0062). */
+    outcome: text("outcome").$type<"agree" | "partial" | "disagree">(),
+    panelRating: numeric("panel_rating", { precision: 3, scale: 2 }),
+    panelVerdict: text("panel_verdict").$type<"select" | "hold" | "reject">(),
+    /** The candidate's move was held for the HR head. */
+    held: boolean("held").notNull().default(false),
+    reconciledAt: timestamp("reconciled_at", { withTimezone: true }),
+    reviewDecision: text("review_decision").$type<
+      "go_with_panel" | "confirmed" | "held" | "rejected"
+    >(),
+    reviewNote: text("review_note"),
+    reviewedBy: uuid("reviewed_by").references(() => users.id, { onDelete: "set null" }),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     uniqueIndex("panel_assessments_interview_key").on(t.interviewId),
+    index("panel_assessments_review_open_idx")
+      .on(t.orgId, t.reconciledAt)
+      .where(sql`${t.outcome} in ('partial', 'disagree') and ${t.reviewDecision} is null`),
+    check(
+      "panel_assessments_outcome_check",
+      sql`${t.outcome} is null or ${t.outcome} in ('agree', 'partial', 'disagree')`,
+    ),
+    check(
+      "panel_assessments_panel_verdict_check",
+      sql`${t.panelVerdict} is null or ${t.panelVerdict} in ('select', 'hold', 'reject')`,
+    ),
+    check(
+      "panel_assessments_review_decision_check",
+      sql`${t.reviewDecision} is null or ${t.reviewDecision} in ('go_with_panel', 'confirmed', 'held', 'rejected')`,
+    ),
     index("panel_assessments_org_idx").on(t.orgId),
     index("panel_assessments_application_idx").on(t.applicationId),
     check("panel_assessments_level_check", sql`${t.level} between 1 and 3`),

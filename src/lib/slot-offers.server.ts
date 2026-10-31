@@ -282,7 +282,7 @@ export function roundNotYet(stage: string, level: number): string | null {
 }
 
 /** Withdraw the not-yet-sent "pick a time" e-mails of these offers (their links no longer work). */
-async function withdrawOfferEmails(orgId: string, offerIds: string[]): Promise<void> {
+export async function withdrawOfferEmails(orgId: string, offerIds: string[]): Promise<void> {
   if (!offerIds.length) return;
   const { emailOutbox } = await import("@db/schema");
   await db

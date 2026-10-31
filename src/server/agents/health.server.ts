@@ -82,6 +82,8 @@ export const HEALTH = {
   transcriptsMissing7d: 1,
   /** …a transcript in this long without the level's panel agent assessing it (hours). */
   assessmentWaitHours: 2,
+  /** …a panel review left open by the HR head this long (hours). */
+  reviewWaitHours: 48,
   /** Model replies cut off at the output limit without acting, in 24 h. */
   cutOffReplies24h: 2,
   /** One run asking people this many questions (7 days) is going round in circles. */
@@ -676,6 +678,27 @@ export const RULES: Rule[] = [
         });
       }
       return out;
+    },
+  },
+  {
+    id: "panel.review_unresolved",
+    element: "hitl",
+    severity: "warning",
+    description: `The panel and a round's panel agent saw a candidate differently and the HR head has not reviewed it in ${HEALTH.reviewWaitHours} hours. Serious when the candidate's move is on hold, since they are waiting on it.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ level: number; n: number; held: number }>(sql`
+        select level, count(*)::int n, count(*) filter (where held)::int held
+        from panel_assessments
+        where org_id = ${orgId} and outcome in ('partial', 'disagree')
+          and review_decision is null
+          and reconciled_at < now() - make_interval(hours => ${HEALTH.reviewWaitHours})
+        group by level`);
+      return r.map((x) => ({
+        agentType: `panel_l${x.level}`,
+        title: `${x.n} L${x.level} panel review(s) waiting over ${HEALTH.reviewWaitHours} hours${x.held ? ` (${x.held} with the candidate on hold)` : ""}`,
+        detail: { level: x.level, reviews: x.n, held: x.held },
+        ...(x.held ? { severity: "serious" as const } : {}),
+      }));
     },
   },
   {

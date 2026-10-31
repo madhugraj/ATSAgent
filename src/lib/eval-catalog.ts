@@ -18,6 +18,36 @@ export type EvalExplainer = {
 };
 
 export const EVAL_CATALOG: Record<string, EvalExplainer> = {
+  "panel_l1: asks the HR head to review a disagreement with the panel": {
+    title: "The L1 silent panel member asks the HR head to settle a disagreement",
+    situation:
+      "The panel has scored an L1 interview as a clear yes, while the agent's own view of the call was a no, so the candidate's move is on hold.",
+    checks: [
+      "It asks the HR head for a review, without restating either view itself.",
+      "The HR head's card shows both views side by side, and only the HR head's decision moves the candidate.",
+      "It does not assess the call again or send the panel another summary.",
+    ],
+  },
+  "panel_l2: asks the HR head to review a disagreement with the panel": {
+    title: "The L2 silent panel member asks the HR head to settle a disagreement",
+    situation:
+      "The panel has scored an L2 interview as a clear yes, while the agent's own view of the call was a no, so the candidate's move is on hold.",
+    checks: [
+      "It asks the HR head for a review, without restating either view itself.",
+      "The HR head's card shows both views side by side, and only the HR head's decision moves the candidate.",
+      "It does not assess the call again or send the panel another summary.",
+    ],
+  },
+  "panel_l3: asks the HR head to review a disagreement with the panel": {
+    title: "The L3 silent panel member asks the HR head to settle a disagreement",
+    situation:
+      "The panel has scored an L3 interview as a clear yes, while the agent's own view of the call was a no, so the candidate's move is on hold.",
+    checks: [
+      "It asks the HR head for a review, without restating either view itself.",
+      "The HR head's card shows both views side by side, and only the HR head's decision moves the candidate.",
+      "It does not assess the call again or send the panel another summary.",
+    ],
+  },
   "panel_l1: assesses the call and sends the panel a factual summary": {
     title: "The L1 silent panel member reads the call, keeps its view hidden and briefs the panel",
     situation:

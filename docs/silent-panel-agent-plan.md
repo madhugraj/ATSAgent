@@ -1,7 +1,7 @@
 # Silent panel agents (L1 / L2 / L3) — plan
 
-Status: **S0, S1 and S2 built** (2026-10-31); the live check on real accounts
-is still to do. S1 (migration 0060): the switch and rounds on the Organisation
+Status: **S0–S3 built** (2026-10-31); the live check on real accounts is still
+to do. S1 (migration 0060): the switch and rounds on the Organisation
 page (`panel_agent_settings`, audited); transcription switched on with the
 provider right after booking (`syncRoundTranscription`) and off when the
 candidate declines (_Candidate declined_ on Interviews, audited, transcript
@@ -22,6 +22,25 @@ competencies, counts talk time and the panel's questions itself, and drops any
 summary sentence carrying a judgement (src/lib/panel-assessment.ts). Hidden
 view in `panel_assessments`; health rule `panel.assessment_missing`; one
 rehearsal per agent.
+S3 (migration 0062): when a round's last scorecard arrives, the panel's verdict
+and average rating are compared with the agent's view by the fixed rule in
+`src/lib/panel-reconcile.ts` (audited `panel_review.reconciled`). Agree: the
+candidate moves as before. Partial: they move and the HR head is asked to
+review. Disagree: the move — and the next round's queueing — is held while the
+level's agent is on, the desk thread is told, and the HR head is asked. The
+level's agent (1.1.0) raises the card with `request_panel_review`, a proposal
+(gate `panel_review`); the system writes both views side by side, including
+how the round was run, on the card (src/server/panel/review.server.ts). The HR
+head goes with the panel (the held move happens, as them), confirms, puts on
+hold or rejects with a reason — stopping cancels later rounds not yet held and
+open time offers (the candidate is told by the team). Decisions are audited
+(`panel_review.decided`) and captured as training feedback (`panel_review`).
+Health rule `panel.review_unresolved` (48 h; serious while held).
+
+Decision 1 changed in building it: the move does **not** wait up to 2 hours
+for a late assessment. Holding a move for a view that may never come stalls
+the candidate on a transcript problem; instead the late assessment is compared
+when it lands, and its card can stop the candidate before the next round.
 
 S0 status: Every booked round records its meeting provider and reference
 (`interviews.meeting_provider` / `meeting_external_id`, migration 0059, read
@@ -249,8 +268,8 @@ outcomes and the HR head's cards.
 
 ## Open decisions
 
-1. **Waiting for a late assessment:** hold the move up to 2 hours
-   (recommended), not at all, or until the assessment arrives?
+1. **Waiting for a late assessment:** decided in S3 — no wait; a late
+   assessment is compared when it lands and its card can stop the candidate.
 2. **Disagreement after the final round:** alert the HR head as well as
    informing the hiring manager's decision (recommended), or the hiring
    manager only?
