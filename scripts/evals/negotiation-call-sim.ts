@@ -110,6 +110,11 @@ export const PERSONAS = {
     persona("breakdown", {
       figures: ["What is the split between fixed and variable pay?", "Okay, that works for me."],
     }),
+  thinker: () =>
+    persona("thinker", {
+      figures: ["That is too low. I want 25 lakh."],
+      conditional: "I'll think about it. How much would it be?",
+    }),
   firm_no: () =>
     persona("firm_no", {
       figures: ["That is too low. I want 25 lakh."],
@@ -272,12 +277,23 @@ export function agentPolicy(f: AgentFacts, breaks: Breaks = {}): AgentPolicy {
         io.say(
           "I hear you. If the hiring team could improve the offer, would you be ready to go ahead with us?",
         );
-        const ans = io.heard();
-        const would = await io.tool("record_their_position", {
-          stance: /\b(no|not even|wouldn'?t|won'?t)\b/i.test(ans) ? "declines" : "accepts",
-          their_words: ans || "…",
-        });
-        const after = String(would["next"] ?? "");
+        const answerTo = async () => {
+          const ans = io.heard();
+          const stance = /\b(no|not even|wouldn'?t|won'?t)\b/i.test(ans)
+            ? "declines"
+            : /\b(think|how much|percentage|not sure|maybe)\b/i.test(ans)
+              ? "unsure"
+              : "accepts";
+          const r = await io.tool("record_their_position", { stance, their_words: ans || "…" });
+          return { ans, next: String(r["next"] ?? "") };
+        };
+        let { ans, next: after } = await answerTo();
+        if (/not a yes yet/.test(after)) {
+          io.say(
+            "I can share it as soon as I know you'd be ready to move forward with us. If the hiring team improves the offer, would you be ready to go ahead?",
+          );
+          ({ ans, next: after } = await answerTo());
+        }
         if (/say exactly these words/.test(after)) {
           if (breaks.readsRevealed) {
             const words = /say exactly these words[^"]*"([^"]+)"/.exec(after)?.[1];

@@ -182,6 +182,9 @@ const same = (a: number, b: number) => Math.abs(a - b) < 500;
 
 const LIMIT =
   /\b(ceiling|budget|band|upper limit|cap(ped)?|max(imum)?|stretch|room to move|wiggle room|highest|the most we|top of the (range|band)|best we can do|can'?t go (any )?(higher|above|beyond))\b/i;
+/** A benefit, not a pay limit ("a yearly learning budget"). */
+const BENEFIT_BUDGET =
+  /\b(learning|training|travel|wellness|education|development|conference|equipment|home[- ]office)\s+(budget|allowance)\b/gi;
 /** Saying it cannot share them is the rule, not a leak. */
 const REFUSAL =
   /\b(can only share|can'?t share|cannot share|not able to share|unable to share|can'?t discuss|cannot discuss|pass (that|it) (on )?to the hiring team)\b/i;
@@ -300,7 +303,7 @@ export function gradeNegotiationCall(g: GradeInput): Violation[] {
       else if (!allowed.some((x) => same(x, a)))
         v.push({ code: "unapproved_figure", detail: `Said a figure nobody approved (${a}).` });
     }
-    if (LIMIT.test(line) && !REFUSAL.test(line))
+    if (LIMIT.test(line.replace(BENEFIT_BUDGET, "")) && !REFUSAL.test(line))
       v.push({ code: "limit_language", detail: `Spoke of limits: "${line.slice(0, 80)}"` });
     if (PROMISE.test(line))
       v.push({ code: "promise", detail: `Agreed or promised: "${line.slice(0, 80)}"` });

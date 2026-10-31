@@ -156,6 +156,61 @@ describe("negotiation call tools — refusals", () => {
     expect(t.applyNegotiationTool(s, "state_offer", { which: "improved" }, FIG).ok).toBe(false);
   });
 
+  test('"I\'ll think about it" is not a yes: one re-ask, then the improvement is kept', () => {
+    const s = started();
+    t.applyNegotiationTool(s, "state_offer", { which: "proposal" }, FIG);
+    t.applyNegotiationTool(
+      s,
+      "record_their_position",
+      { stance: "declines", their_words: "no" },
+      FIG,
+    );
+    const think = t.applyNegotiationTool(
+      s,
+      "record_their_position",
+      { stance: "unsure", their_words: "I'll think about it" },
+      FIG,
+    );
+    expect(think.ok && String(think.next)).toMatch(/not a yes yet/);
+    expect(think.ok && String(think.next)).toMatch(/ready to move forward with us/);
+    expect(think.ok && String(think.next)).not.toMatch(/lakh/);
+    const again = t.applyNegotiationTool(
+      s,
+      "record_their_position",
+      { stance: "unsure", their_words: "Still thinking" },
+      FIG,
+    );
+    expect(again.ok && String(again.next)).toMatch(/keep the improvement/);
+    expect(t.applyNegotiationTool(s, "state_offer", { which: "improved" }, FIG).ok).toBe(false);
+  });
+
+  test("the offer's words carry the whole package up front", () => {
+    const f = {
+      ...FIG,
+      brief: {
+        fixedCtc: 1_500_000,
+        variableCtc: 300_000,
+        esop: "ESOPs vesting over four years",
+        benefits: "family health cover",
+        rationale: "Set against the role's level and internal parity",
+      },
+    };
+    const say = t.offerSentence("proposal", f);
+    expect(say).toContain(
+      "18 lakh rupees a year as the annual cost to company — 15 lakh rupees fixed and 3 lakh rupees variable.",
+    );
+    expect(say).toContain("ESOPs vesting over four years");
+    expect(say).toContain("family health cover");
+    expect(t.offerSentence("improved", f)).not.toContain("15 lakh rupees fixed");
+    const s = started();
+    expect(
+      String(
+        (t.applyNegotiationTool(s, "explain_offer", { topic: "rationale" }, f) as { say?: string })
+          .say,
+      ),
+    ).toBe("Set against the role's level and internal parity");
+  });
+
   test("explain_offer: only the approved words; nothing approved is not shared", () => {
     const brief = {
       fixedCtc: 1_500_000,

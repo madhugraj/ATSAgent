@@ -601,6 +601,7 @@ function ArrangeCallDialog({
     esopValue: "",
     review: "",
     benefits: "",
+    rationale: "",
     whyYou: "",
   });
   const setF = (k: keyof typeof d) => (e: { target: { value: string } }) =>
@@ -643,6 +644,7 @@ function ArrangeCallDialog({
         esopValue: esopValue ?? null,
         review: d.review.trim() || null,
         benefits: d.benefits.trim() || null,
+        rationale: d.rationale.trim() || null,
         whyYou,
       };
       const r = await arrange({ data: { negotiationId, improvedCtc: stepRupees ?? null, brief } });
@@ -734,6 +736,16 @@ function ArrangeCallDialog({
             placeholder="e.g. Family health cover, a learning budget, hybrid work"
             value={d.benefits}
             onChange={setF("benefits")}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="neg-rationale">How the figure was set</Label>
+          <Input
+            id="neg-rationale"
+            maxLength={300}
+            placeholder="e.g. Set against the role's level and internal parity, benchmarked on market data"
+            value={d.rationale}
+            onChange={setF("rationale")}
           />
         </div>
         <div className="space-y-1">

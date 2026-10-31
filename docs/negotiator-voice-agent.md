@@ -192,3 +192,13 @@ seed)`) plays the whole call through `FakeLine` + the injectable voice session, 
    kept, and every pay tool refused (no figure was said). Fixed in the gateway for every
    voice agent: each side's pending words carry when they began and are written in the
    order they were spoken (regression test in `scripts/voice.test.ts`).
+6. **2026-10-31, sixth call (0.3.0 + ordering fix).** Five minutes, every rule kept (graders
+   clean): context, why-you, an approved Yavar fact, the package, exploring, the conditional
+   question, the approved split and ESOPs. Short of a great negotiator: it gave the move for
+   "I'll think about it", repeated its go-ahead question, held the ESOPs back until asked
+   ("you did not tell me first hand"), could not say how the figure was set, and its
+   discovery question was clumsy. Fixed in 0.4.0: only a clear yes earns the move (one
+   plain re-ask; "I can share it as soon as I know you'd be ready to move forward"); it
+   waits in silence for the go-ahead; the offer's words carry the whole package; a
+   `rationale` topic answers "why this figure?"; one simple discovery question. The limits
+   grader no longer counts a "learning budget" as a pay limit.

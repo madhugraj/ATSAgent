@@ -44,6 +44,7 @@ export const EXPLAIN_TOPICS = [
   "esop",
   "benefits",
   "why_you",
+  "rationale",
 ] as const;
 export type ExplainTopic = (typeof EXPLAIN_TOPICS)[number];
 
@@ -87,7 +88,7 @@ export const NEGOTIATION_TOOL_DESCRIPTIONS: Record<NegotiationToolName, string> 
   record_their_position:
     "Record the candidate's answer to the figure you read out: stance accepts, declines, wants_more (they want more) or unsure; their_words exactly as they said it, including any figure they named. The result says what you may do next.",
   explain_offer:
-    "Get the approved words about part of the offer, then say them: package (the whole offer), split (fixed and variable), joining_bonus, review (how the pay review works), esop, benefits, or why_you (why the team wants them). Use it whenever they ask about the package, and to build the offer's value. Never describe the package any other way; if the result says a detail is not shared, say the hiring team will share it.",
+    "Get the approved words about part of the offer, then say them: package (the whole offer), split (fixed and variable), joining_bonus, review (how the pay review works), esop, benefits, why_you (why the team wants them), or rationale (how the figure was set — when they ask why this figure or about market research). Use it whenever they ask about the package, and to build the offer's value. Never describe the package any other way; if the result says a detail is not shared, say the hiring team will share it.",
   submit_agreed_terms:
     "They clearly said yes to the figure you just read out: pass it to the hiring team, who confirm it with them. It does not agree anything itself. their_words is their yes, as said.",
   request_human_call:
@@ -150,12 +151,12 @@ export function callBriefProblem(
     return "Fixed and variable must add up to the proposal.";
   if (esopValue != null && esopValue > n.ceiling)
     return "The ESOP value cannot be above the approved ceiling.";
-  for (const t of [b.esop, b.review, b.benefits, ...(b.whyYou ?? [])])
+  for (const t of [b.esop, b.review, b.benefits, b.rationale, ...(b.whyYou ?? [])])
     if (t && /\d[\d,.]*\s*(lakh|lac|crore|cr|lpa|k\b|%|rupees|₹|rs\b)|₹\s*\d/i.test(t))
       return "Keep amounts out of the words — use the amount fields.";
   if ((b.whyYou ?? []).length > 3) return "At most three reasons why the team wants them.";
   if ((b.whyYou ?? []).some((w) => w.length > 200)) return "Keep each reason under 200 characters.";
-  for (const t of [b.esop, b.review, b.benefits])
+  for (const t of [b.esop, b.review, b.benefits, b.rationale])
     if (t && t.length > 300) return "Keep each description under 300 characters.";
   return null;
 }
@@ -205,6 +206,7 @@ export function explainOffer(
     esop,
     benefits,
     why_you: whyYou,
+    rationale: b.rationale?.trim() || null,
   };
   return by[topic] ?? NOT_SHARED;
 }
@@ -236,14 +238,35 @@ export function leverSentence(l: NegotiationLevers): string {
   return ` Along with that, the offer includes ${list}.`;
 }
 
-/** The exact words for one approved figure (pure). */
+/** The rest of the package in words — ESOPs and benefits — as one sentence, or "" (pure). */
+function packageExtras(f: NegotiationFigures): string {
+  const b = f.brief ?? {};
+  const items = [
+    b.esop?.trim()
+      ? `${b.esop.trim().replace(/\.$/, "")}${b.esopValue ? ` valued at ${spokenRupees(b.esopValue)}` : ""}`
+      : "",
+    b.benefits?.trim() ? b.benefits.trim().replace(/\.$/, "") : "",
+  ].filter(Boolean);
+  return items.length ? ` You would also have ${items.join(", and ")}.` : "";
+}
+
+/**
+ * The exact words for one approved figure — the whole package at once, so the
+ * candidate hears every part up front (a real call: "you did not tell me about
+ * the ESOPs first hand") (pure).
+ */
 export function offerSentence(which: Which, f: NegotiationFigures): string {
   const ctc = which === "improved" ? f.stepCtc! : f.proposalCtc;
+  const b = f.brief ?? {};
+  const split =
+    which === "proposal" && b.fixedCtc != null && b.variableCtc != null
+      ? ` — ${spokenRupees(b.fixedCtc)} fixed and ${spokenRupees(b.variableCtc)} variable`
+      : "";
   const lead =
     which === "improved"
       ? `Having heard you, the hiring team can offer ${spokenRupees(ctc)} a year as the annual cost to company.`
-      : `The hiring team would like to offer you ${spokenRupees(ctc)} a year as the annual cost to company.`;
-  return `${lead}${leverSentence(f.levers)} Would that work for you?`;
+      : `The hiring team would like to offer you ${spokenRupees(ctc)} a year as the annual cost to company${split}.`;
+  return `${lead}${leverSentence(f.levers)}${packageExtras(f)} Would that work for you?`;
 }
 
 /** A clear yes: yes-like words and no "no / but / not" (pure; unit-tested). */
@@ -290,6 +313,8 @@ export type NegotiationCallState = {
   conditionalAsked?: boolean;
   /** …and their answer: true = they would go ahead (the move is earned), false = not even then. */
   conditionalYes?: boolean | null;
+  /** The conditional question was asked again once after an answer that was not a yes. */
+  conditionalReasked?: boolean;
 };
 
 export const freshNegotiationState = (): NegotiationCallState => ({
@@ -355,7 +380,7 @@ export function applyNegotiationTool(
         return {
           ok: false,
           error:
-            "Not recorded: ask whether they have a few minutes now and wait for their answer — record what they say to that question.",
+            "Not recorded: they have not answered yet. Say nothing more and do not repeat the question — wait in silence for their answer, then record what they say.",
         };
       if (!granted && !state.askedAgain && UNCLEAR.test(their_words)) {
         state.askedAgain = true;
@@ -412,10 +437,15 @@ export function applyNegotiationTool(
         figures.stepCtc != null && state.stated.proposal && !state.stated.improved && !state.halted;
       if (canMove && state.conditionalAsked && state.conditionalYes == null) {
         // Their answer to the conditional question.
-        if (stance === "declines") {
+        if (stance !== "declines" && stance !== "accepts" && !state.conditionalReasked) {
+          // "I'll think about it" or "how much?" is not a yes: one plain re-ask.
+          state.conditionalReasked = true;
+          next =
+            'That is not a yes yet — do not reveal anything. If they ask how much: "I can share it as soon as I know you\'d be ready to move forward with us." Then ask once more, plainly and warmly, whether they would go ahead if the hiring team improves the offer, and record_their_position with their answer.';
+        } else if (stance !== "accepts") {
           state.conditionalYes = false;
           next =
-            "They would not go ahead even if it improved: keep the improvement. Ask what would make it work for them, sum it up in words (no figures), say the hiring team will come back to them, and use request_human_call with wants_more.";
+            "They did not say they would go ahead if it improved: keep the improvement. Ask what would make it work for them, sum it up in words (no figures), say the hiring team will come back to them, and use request_human_call with wants_more.";
         } else {
           state.conditionalYes = true;
           // Hand it the exact words: real calls invented their own "improved" figure.

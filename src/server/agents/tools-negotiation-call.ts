@@ -134,7 +134,7 @@ export function registerNegotiationCallTools(): void {
   registerTool({
     name: "request_negotiation_call",
     description:
-      "Ask for an AI pay call to the candidate of an unsettled pay discussion (they countered, asked for a call, or did not answer the message): the assistant phones them inside the calling window, wins their interest, reads out the proposal and its levers, explains the package from `brief` (the fixed / variable split adding up to the proposal, ESOPs, how the review works, benefits, and up to three reasons why the team wants them — from the hiring decision and interview notes, in words, no amounts in the words), and may offer improvedCtc ONCE if they turn it down and say they would go ahead if it improved — one figure above the proposal and at or under the approved ceiling, or null to hold at the proposal. It never agrees anything: a yes goes to TA / the HR head to confirm. The HR head always approves the call first and may change the figure. Refused when calls are off, the candidate has no Indian mobile or opted out, a call is already arranged, or the assistant already spoke with them about pay.",
+      "Ask for an AI pay call to the candidate of an unsettled pay discussion (they countered, asked for a call, or did not answer the message): the assistant phones them inside the calling window, wins their interest, reads out the proposal and its levers, explains the package from `brief` (the fixed / variable split adding up to the proposal, ESOPs, how the review works, benefits, how the figure was set (rationale: level, internal parity, market benchmark — in words), and up to three reasons why the team wants them — from the hiring decision and interview notes, in words, no amounts in the words), and may offer improvedCtc ONCE if they turn it down and say they would go ahead if it improved — one figure above the proposal and at or under the approved ceiling, or null to hold at the proposal. It never agrees anything: a yes goes to TA / the HR head to confirm. The HR head always approves the call first and may change the figure. Refused when calls are off, the candidate has no Indian mobile or opted out, a call is already arranged, or the assistant already spoke with them about pay.",
     input: z.object({
       negotiationId: z.string().uuid(),
       improvedCtc: z.number().positive().nullable(),
@@ -147,6 +147,7 @@ export function registerNegotiationCallTools(): void {
           esopValue: z.number().positive().nullable().optional(),
           review: z.string().max(300).nullable().optional(),
           benefits: z.string().max(300).nullable().optional(),
+          rationale: z.string().max(300).nullable().optional(),
           whyYou: z.array(z.string().min(3).max(200)).max(3).optional(),
         })
         .nullable()
@@ -194,6 +195,7 @@ export function registerNegotiationCallTools(): void {
           : []),
         ...(i.brief?.review ? [`• The review: ${i.brief.review}`] : []),
         ...(i.brief?.benefits ? [`• Benefits: ${i.brief.benefits}`] : []),
+        ...(i.brief?.rationale ? [`• How the figure was set: ${i.brief.rationale}`] : []),
         ...(i.brief?.whyYou?.length
           ? [`• Why the team wants them: ${i.brief.whyYou.join(" ")}`]
           : []),

@@ -715,7 +715,13 @@ export function registerPhase3Agents(): void {
     // arranging the call approved; the improved figure is traded for a commitment ("if the
     // team could improve it, would you go ahead?"), never given; with no approved facts it
     // says nothing about the role or organisation.
-    version: "0.3.0",
+    // 0.4.0 (the sixth real call — five minutes, every rule kept): it gave the move for
+    // "I'll think about it", repeated its go-ahead question, held back the ESOPs until
+    // asked, and could not say how the figure was set. Only a clear yes earns the move (one
+    // plain re-ask, "I can share it as soon as I know you'd be ready to move forward");
+    // it waits in silence for the go-ahead; the offer's words carry the whole package; a
+    // rationale topic answers "why this figure?"; one simple discovery question.
+    version: "0.4.0",
     owner: "hr_head",
     responsibility:
       "Holds one AI phone call with a candidate about the pay for their offer: says it is an AI, tells them which role and organisation and where they stand, wins their interest from approved facts, frames the approved figure and extras around what matters to them, may offer one pre-approved improved figure, and brings a clear answer back to the people who decide.",
@@ -820,7 +826,8 @@ export function registerPhase4Agents(): void {
     // head always approves it.
     // 1.6.1: request_negotiation_call carries what the call may explain (the split,
     // ESOPs, the review, benefits, why the team wants them) for the HR head to approve.
-    version: "1.6.1",
+    // 1.6.2: the call request can carry how the figure was set (rationale).
+    version: "1.6.2",
     owner: "hr_head",
     responsibility:
       "Turns a hiring decision into a draft offer inside the approved band — built on the candidate's stated expectation and notice period — with its letter and an approval brief, and walks it through HR head and CBO approval.",

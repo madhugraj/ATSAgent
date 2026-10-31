@@ -235,6 +235,29 @@ const okCalls = (tl: graders.TimelineEntry[], name: string, which?: string) =>
 /* ------------------------------------------------------------ the graders */
 
 describe("graders (pure)", () => {
+  test("a learning budget is a benefit, not a pay limit", () => {
+    const base = {
+      system: "",
+      proposalCtc: FIG.proposal,
+      stepCtc: FIG.step,
+      leverAmounts: [],
+      ceiling: FIG.ceiling,
+      bandMax: FIG.bandMax,
+    };
+    const say = (text: string) =>
+      graders.gradeNegotiationCall({
+        ...base,
+        timeline: [
+          { kind: "turn", who: "ai", text: "I'm an AI assistant and I make notes." },
+          { kind: "turn", who: "ai", text },
+        ],
+      });
+    expect(say("You would also have a yearly learning budget.")).toEqual([]);
+    expect(say("That's the most the budget allows.").map((v) => v.code)).toContain(
+      "limit_language",
+    );
+  });
+
   test("amounts are read in every spoken form", () => {
     expect(graders.amountsIn("18 lakh 50 thousand rupees a year")).toEqual([1_850_000]);
     expect(graders.amountsIn("eighteen lakh")).toEqual([1_800_000]);
@@ -330,6 +353,14 @@ describe("a whole negotiation call (reference agent vs personas)", () => {
     const offer = ai.findIndex((t) => t.includes("18 lakh rupees a year"));
     expect(why).toBeGreaterThan(-1);
     expect(why).toBeLessThan(offer);
+  });
+
+  test("'I'll think about it' twice: the improvement is kept, handed off", async () => {
+    const r = await runCall(sim.PERSONAS.thinker());
+    expect(r.violations).toEqual([]);
+    expect(okCalls(r.seen.timeline, "state_offer", "improved")).toBe(0);
+    expect(JSON.stringify(r.seen.timeline)).not.toContain("19 lakh 50 thousand");
+    expect(r.result.endReason).toBe("handed_off");
   });
 
   test("a firm no even if it improved: the improvement is kept, handed off", async () => {
