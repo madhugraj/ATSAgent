@@ -1761,6 +1761,11 @@ export async function openVoiceSession(opts: {
   let error: string | null = null;
   let isReady = false;
 
+  // When each side's pending words began: both are written out in the order they
+  // were spoken. (A real call: the candidate's "yes" came before the assistant's
+  // long question was closed, was written first, and so never counted as the answer.)
+  let heardSince = 0;
+  let saidSince = 0;
   const flush = (who: VoiceTurn["who"], interrupted = false) => {
     const text = (who === "caller" ? heard : said).trim();
     if (who === "caller") heard = "";
@@ -1774,6 +1779,15 @@ export async function openVoiceSession(opts: {
     };
     transcript.push(turn);
     opts.events.onTurn?.(turn);
+  };
+  const flushBoth = () => {
+    if (said && heard && saidSince <= heardSince) {
+      flush("ai");
+      flush("caller");
+    } else {
+      flush("caller");
+      flush("ai");
+    }
   };
 
   // undici (Node 22) and Bun both accept headers here; credentials stay out of the URL.
@@ -1836,11 +1850,15 @@ export async function openVoiceSession(opts: {
       if (msg.usageMetadata) usageFrames.push(msg.usageMetadata);
       const sc = msg.serverContent;
       if (sc) {
-        if (sc.inputTranscription?.text) heard += sc.inputTranscription.text;
+        if (sc.inputTranscription?.text) {
+          if (!heard) heardSince = Date.now();
+          heard += sc.inputTranscription.text;
+        }
         for (const part of sc.modelTurn?.parts ?? [])
           if (part.inlineData?.data) opts.events.onAudio?.(base64ToPcm16(part.inlineData.data));
         if (sc.outputTranscription?.text) {
           flush("caller");
+          if (!said) saidSince = Date.now();
           said += sc.outputTranscription.text;
           opts.events.onSaying?.(said);
         }
@@ -1849,16 +1867,14 @@ export async function openVoiceSession(opts: {
           flush("ai", true);
         }
         if (sc.turnComplete) {
-          flush("caller");
-          flush("ai");
+          flushBoth();
         }
       }
       // What was said so far is on record before any tool runs: a tool that checks
       // the assistant's own words (e.g. it said it is an AI before a "yes" counts)
       // must see the line it just spoke, not wait for its turn to finish.
       if (msg.toolCall?.functionCalls?.length) {
-        flush("caller");
-        flush("ai");
+        flushBoth();
       }
       for (const fc of msg.toolCall?.functionCalls ?? []) {
         const call: VoiceToolCall = { id: fc.id ?? "", name: fc.name ?? "", args: fc.args ?? {} };
@@ -1880,8 +1896,7 @@ export async function openVoiceSession(opts: {
     });
     ws.addEventListener("close", (ev) => {
       clearTimeout(setupTimer);
-      flush("caller");
-      flush("ai");
+      flushBoth();
       if (!isReady) {
         // Vendor-neutral on purpose: the reason stays in the ledger row.
         error ??= ev.reason || `closed before setup (${ev.code})`;

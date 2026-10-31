@@ -185,3 +185,10 @@ seed)`) plays the whole call through `FakeLine` + the injectable voice session, 
    - The call runs as an HR partner would: context and warmth, understanding what drives
      their decision, why the team wants them, the whole package, the conditional move, a
      clear summary and a warm close. No approved facts → no claims about the role or company.
+5. **2026-10-31, fifth call (0.3.0, with Yavar's approved organisation profile).** The
+   candidate's "yes" to the (now longer) go-ahead question came before the assistant's turn
+   was closed; when the tool ran, the gateway wrote the candidate's words first and the
+   question second, so the yes never counted — three refusals, no consent, no transcript
+   kept, and every pay tool refused (no figure was said). Fixed in the gateway for every
+   voice agent: each side's pending words carry when they began and are written in the
+   order they were spoken (regression test in `scripts/voice.test.ts`).
