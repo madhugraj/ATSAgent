@@ -689,7 +689,23 @@ export async function negotiationNudges(orgId: string, now = new Date()): Promis
       actions: [{ id: "negotiation_outcome" as const, label: "Record the call" }],
       subject,
     };
-    if (n.status === "open")
+    // An AI pay call heard something: a person confirms (or records) it first.
+    if (n.callOutcome && !["agreed", "no_agreement", "cancelled"].includes(n.status))
+      out.push({
+        ...base,
+        id: `negotiation:aicall:${n.id}:${n.callOutcome.callId}`,
+        title: n.callOutcome.agreed
+          ? `${name} said yes on the AI pay call`
+          : `${name} wants the team to come back about pay`,
+        body: n.callOutcome.agreed
+          ? "Nothing is agreed until you confirm it — the form is filled in from the call."
+          : "Their words from the call are on their page. Call them or decide with the HR head.",
+        severity: "urgent",
+        ...(n.callOutcome.agreed
+          ? { actions: [{ id: "negotiation_outcome" as const, label: "Confirm" }] }
+          : {}),
+      });
+    else if (n.status === "open")
       out.push({
         ...base,
         id: `negotiation:open:${n.id}`,

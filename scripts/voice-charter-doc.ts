@@ -9,6 +9,7 @@
 import { writeFileSync } from "node:fs";
 
 import {
+  NEGOTIATION_CALL_CHARTER,
   SCHEDULING_CALL_CHARTER,
   SCREENING_CALL_CHARTER,
   type Rule,
@@ -18,6 +19,7 @@ import {
 const NAME: Record<VoiceCharter["agent"], string> = {
   screening_call: "Screening call agent",
   scheduling_call: "Scheduling call agent",
+  negotiation_call: "Negotiation call agent",
 };
 
 const rows = (title: string, rs: Rule[]) => [
@@ -54,7 +56,7 @@ export function charterDoc(): string {
     "contact given is the organisation's mailbox.",
     "",
   ];
-  for (const ch of [SCREENING_CALL_CHARTER, SCHEDULING_CALL_CHARTER]) {
+  for (const ch of [SCREENING_CALL_CHARTER, SCHEDULING_CALL_CHARTER, NEGOTIATION_CALL_CHARTER]) {
     out.push(`## ${NAME[ch.agent]} (\`${ch.agent}\`)`, "", `**Purpose:** ${ch.purpose}`, "");
     out.push(...rows("Must say", ch.mustSay));
     out.push(...rows("May talk about only", ch.may));

@@ -26,6 +26,7 @@ export type AgentEventType =
   | "assessment.completed"
   | "compensation.submitted"
   | "negotiation.agreed"
+  | "negotiation.needs_call"
   | "screening_call.ended";
 
 export async function emitAgentEvent(e: {

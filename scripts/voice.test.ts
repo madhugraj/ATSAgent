@@ -262,4 +262,57 @@ describe("live voice session ordering", () => {
     server.stop(true);
     expect(saidBeforeTool).toBe("ai: I am an AI assistant and I will note the time.");
   });
+
+  test("the caller's answer comes after the question it answers, though both are pending", async () => {
+    const gw = await import("../src/lib/ai-gateway.server");
+    // The fifth real pay call: a long question, the candidate's "yes" before the turn closed,
+    // then the tool — the yes was written first and never counted as the answer.
+    const server = Bun.serve({
+      port: 0,
+      fetch(req, srv) {
+        return srv.upgrade(req) ? undefined : new Response("no", { status: 400 });
+      },
+      websocket: {
+        async message(ws, raw) {
+          const m = JSON.parse(String(raw));
+          if (!m.setup) return;
+          const send = (x: unknown) => ws.send(JSON.stringify(x));
+          send({ setupComplete: {} });
+          send({ serverContent: { outputTranscription: { text: "Do you have a few minutes?" } } });
+          await new Promise((r) => setTimeout(r, 15));
+          send({ serverContent: { inputTranscription: { text: "Yes, I do." } } });
+          send({
+            toolCall: { functionCalls: [{ id: "t1", name: "record_permission", args: {} }] },
+          });
+        },
+      },
+    });
+    const seen: string[] = [];
+    let atTool = "";
+    let ready!: (s: unknown) => void;
+    const opened = new Promise((r) => (ready = r));
+    const done = gw.openVoiceSession({
+      orgId: null,
+      feature: "negotiation_call",
+      system: "",
+      tools: [],
+      voice: "Kore",
+      config: { provider: "google", model: "fake", apiKey: null },
+      target: { url: `ws://127.0.0.1:${server.port}`, headers: {}, model: "fake" },
+      events: {
+        onTurn: (t) => seen.push(`${t.who}: ${t.text}`),
+        onToolCall: async () => {
+          atTool = seen.join(" | ");
+          return { ok: true };
+        },
+      },
+      ready: (s) => ready(s),
+    });
+    const session = (await opened) as { close: () => Promise<unknown> };
+    for (let i = 0; i < 50 && !atTool; i++) await new Promise((r) => setTimeout(r, 20));
+    await session.close();
+    await done;
+    server.stop(true);
+    expect(atTool).toBe("ai: Do you have a few minutes? | caller: Yes, I do.");
+  });
 });

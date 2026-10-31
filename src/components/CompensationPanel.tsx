@@ -9,7 +9,11 @@ import {
   recordCandidateCompensation,
   sendCandidateCompensationForm,
 } from "@/lib/compensation.functions";
-import { getNegotiation, recordNegotiationCall } from "@/lib/negotiation.functions";
+import {
+  arrangeNegotiationCall,
+  getNegotiation,
+  recordNegotiationCall,
+} from "@/lib/negotiation.functions";
 import { lakhsToRupees } from "@/lib/money";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -341,6 +345,29 @@ const NEGOTIATION_LABEL: Record<string, string> = {
   cancelled: "Cancelled",
 };
 
+/** Where the latest AI pay call stands, in plain words. */
+function aiCallLine(
+  c: { status: string; endReason: string | null; dueAt: string | null },
+  settled: boolean,
+) {
+  const when = c.dueAt
+    ? new Date(c.dueAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })
+    : null;
+  if (["requested", "approved", "callback", "no_answer", "failed"].includes(c.status))
+    return `Arranged${when ? ` — next try ${when}` : ""}`;
+  if (c.status === "dialling" || c.status === "in_progress") return "On the line now";
+  const said: Record<string, string> = {
+    verbal_agreement: settled ? "Done — they said yes" : "Done — they said yes; confirm it below",
+    handed_off: "Done — they want the team to come back to them",
+    declined: "Done — they did not want to discuss pay on the call",
+    not_now: "Done — not a good time for them",
+    opt_out: "Done — they asked not to get AI calls",
+    wrong_person: "Reached someone else",
+    already_settled: "Not needed — settled before the call",
+  };
+  return said[c.endReason ?? ""] ?? "Could not reach them";
+}
+
 /** The pay discussion for one application: the call brief, the answer, the outcome. */
 export function NegotiationSection({ applicationId }: { applicationId: string }) {
   const load = useServerFn(getNegotiation);
@@ -351,8 +378,50 @@ export function NegotiationSection({ applicationId }: { applicationId: string })
   });
   const [briefOpen, setBriefOpen] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [arranging, setArranging] = useState(false);
+  const save = useServerFn(recordNegotiationCall);
+  const [confirming, setConfirming] = useState(false);
   const n = q.data;
   if (!n) return null;
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ["negotiation", applicationId] });
+    void qc.invalidateQueries({ queryKey: ["notifications"] });
+  };
+  const heard = n.callOutcome;
+  const aiCallPending =
+    !!n.aiCall &&
+    [
+      "requested",
+      "approved",
+      "callback",
+      "no_answer",
+      "failed",
+      "dialling",
+      "in_progress",
+    ].includes(n.aiCall.status);
+  async function confirmHeard() {
+    if (!heard?.agreed || heard.agreedCtc == null) return;
+    setConfirming(true);
+    try {
+      await save({
+        data: {
+          negotiationId: n!.id,
+          outcome: {
+            agreed: true,
+            agreedCtc: heard.agreedCtc,
+            joiningBonus: n!.levers?.joiningBonus ?? null,
+            note: `Confirmed from the AI pay call: "${heard.theirWords}"`.slice(0, 1000),
+          },
+        },
+      });
+      toast.success("Confirmed — the Offer agent drafts at it.");
+      refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not confirm");
+    } finally {
+      setConfirming(false);
+    }
+  }
   const canRecord = ["open", "message_sent", "countered", "call_requested", "expired"].includes(
     n.status,
   );
@@ -397,8 +466,64 @@ export function NegotiationSection({ applicationId }: { applicationId: string })
             </dd>
           </>
         ) : null}
+        {n.aiCall ? (
+          <>
+            <dt className="text-muted-foreground">AI pay call</dt>
+            <dd>
+              {aiCallLine(n.aiCall, !canRecord)}
+              {n.callStepCtc != null ? ` · may move once to ${lpa(n.callStepCtc)}` : ""}
+            </dd>
+          </>
+        ) : null}
+        {heard && canRecord ? (
+          <>
+            <dt className="text-muted-foreground">Heard on the call</dt>
+            <dd>
+              {heard.agreed
+                ? `Yes to ${lpa(heard.agreedCtc)} (${heard.which === "improved" ? "the improved figure" : "the proposal"})`
+                : "No yes yet"}
+              {` — "${heard.theirWords}"`}
+            </dd>
+            {heard.structureAsk ? (
+              <>
+                <dt className="text-muted-foreground">Preferred structure</dt>
+                <dd>{`"${heard.structureAsk}" — same total, a different split or terms`}</dd>
+              </>
+            ) : null}
+            {heard.notes ? (
+              <>
+                <dt className="text-muted-foreground">How they feel</dt>
+                <dd>
+                  {heard.notes.feeling === "positive"
+                    ? "Positive"
+                    : heard.notes.feeling === "mixed"
+                      ? "Mixed"
+                      : "Negative"}
+                  {` — matters most: ${heard.notes.priorities}; holding back: ${heard.notes.concerns}`}
+                </dd>
+                <dt className="text-muted-foreground">Call summary</dt>
+                <dd>{heard.notes.summary}</dd>
+              </>
+            ) : null}
+          </>
+        ) : null}
       </dl>
+      {heard?.agreed && canRecord ? (
+        <p className="mt-2 rounded border border-primary/40 bg-background p-2">
+          The assistant only passes a yes on — nothing is agreed until you confirm it.
+        </p>
+      ) : null}
       <div className="mt-2 flex flex-wrap gap-2">
+        {heard?.agreed && heard.agreedCtc != null && canRecord ? (
+          <Button
+            size="sm"
+            className="h-7"
+            disabled={confirming}
+            onClick={() => void confirmHeard()}
+          >
+            Confirm {lpa(heard.agreedCtc)}
+          </Button>
+        ) : null}
         <Button
           size="sm"
           variant="outline"
@@ -408,11 +533,31 @@ export function NegotiationSection({ applicationId }: { applicationId: string })
           {briefOpen ? "Hide the call brief" : "Call brief"}
         </Button>
         {canRecord ? (
-          <Button size="sm" className="h-7" onClick={() => setRecording(true)}>
-            Record the call
+          <Button
+            size="sm"
+            variant={heard?.agreed ? "outline" : "default"}
+            className="h-7"
+            onClick={() => setRecording(true)}
+          >
+            {heard?.agreed ? "Record differently" : "Record the call"}
+          </Button>
+        ) : null}
+        {canRecord ? (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7"
+            disabled={!!n.aiCallBlocked}
+            title={n.aiCallBlocked ?? undefined}
+            onClick={() => setArranging(true)}
+          >
+            Call to negotiate
           </Button>
         ) : null}
       </div>
+      {canRecord && n.aiCallBlocked && !aiCallPending ? (
+        <p className="mt-1 text-muted-foreground">AI pay call: {n.aiCallBlocked}</p>
+      ) : null}
       {briefOpen ? (
         <div className="mt-2 space-y-2 rounded border border-border bg-background p-2">
           <p className="whitespace-pre-wrap">{n.talkTrack}</p>
@@ -428,11 +573,23 @@ export function NegotiationSection({ applicationId }: { applicationId: string })
         <NegotiationOutcomeDialog
           negotiationId={n.id}
           ceiling={n.ceiling}
+          applicationId={applicationId}
           onClose={() => setRecording(false)}
           onSaved={() => {
             setRecording(false);
-            void qc.invalidateQueries({ queryKey: ["negotiation", applicationId] });
-            void qc.invalidateQueries({ queryKey: ["notifications"] });
+            refresh();
+          }}
+        />
+      ) : null}
+      {arranging ? (
+        <ArrangeCallDialog
+          negotiationId={n.id}
+          proposedCtc={n.proposedCtc}
+          ceiling={n.ceiling}
+          onClose={() => setArranging(false)}
+          onDone={() => {
+            setArranging(false);
+            refresh();
           }}
         />
       ) : null}
@@ -440,21 +597,273 @@ export function NegotiationSection({ applicationId }: { applicationId: string })
   );
 }
 
+/** Arrange the AI pay call: the proposal, and at most one improved figure (≤ the ceiling). */
+function ArrangeCallDialog({
+  negotiationId,
+  proposedCtc,
+  ceiling,
+  onClose,
+  onDone,
+}: {
+  negotiationId: string;
+  proposedCtc: number;
+  ceiling: number;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const arrange = useServerFn(arrangeNegotiationCall);
+  const [step, setStep] = useState("");
+  const [busy, setBusy] = useState(false);
+  // What the call may explain, and why the team wants them (the negotiator's material).
+  const [d, setD] = useState({
+    fixed: "",
+    variable: "",
+    esop: "",
+    esopValue: "",
+    review: "",
+    benefits: "",
+    rationale: "",
+    reportsTo: "",
+    whyYou: "",
+    whyJoin: "",
+  });
+  const setF = (k: keyof typeof d) => (e: { target: { value: string } }) =>
+    setD((p) => ({ ...p, [k]: e.target.value }));
+  const stepRupees = lakhsToRupees(step);
+  const fixed = lakhsToRupees(d.fixed);
+  const variable = lakhsToRupees(d.variable);
+  const esopValue = lakhsToRupees(d.esopValue);
+  const whyYou = d.whyYou
+    .split("\n")
+    .map((x) => x.trim())
+    .filter(Boolean);
+  const detailProblem = [fixed, variable, esopValue].some((x) => x != null && Number.isNaN(x))
+    ? "Amounts are lakhs per annum, e.g. 42."
+    : (fixed == null) !== (variable == null)
+      ? "Give both the fixed and the variable part, or neither."
+      : fixed != null && variable != null && Math.abs(fixed + variable - proposedCtc) > 1
+        ? `Fixed and variable must add up to the proposal (${lpa(proposedCtc)}).`
+        : whyYou.length > 3
+          ? "At most three reasons."
+          : null;
+  const stepProblem =
+    stepRupees == null
+      ? null
+      : Number.isNaN(stepRupees)
+        ? "Lakhs per annum, e.g. 19.5."
+        : stepRupees <= proposedCtc
+          ? `Above the proposal (${lpa(proposedCtc)}), or leave it empty to hold.`
+          : stepRupees > ceiling
+            ? `At or under the approved ceiling (${lpa(ceiling)}).`
+            : null;
+  const problem = stepProblem ?? detailProblem;
+  async function submit() {
+    setBusy(true);
+    try {
+      const brief = {
+        fixedCtc: fixed ?? null,
+        variableCtc: variable ?? null,
+        esop: d.esop.trim() || null,
+        esopValue: esopValue ?? null,
+        review: d.review.trim() || null,
+        benefits: d.benefits.trim() || null,
+        rationale: d.rationale.trim() || null,
+        reportsTo: d.reportsTo.trim() || null,
+        whyJoin: d.whyJoin
+          .split("\n")
+          .map((x) => x.trim())
+          .filter(Boolean),
+        whyYou,
+      };
+      const r = await arrange({ data: { negotiationId, improvedCtc: stepRupees ?? null, brief } });
+      toast.success(
+        `Pay call arranged — first try ${new Date(r.dueAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}.`,
+      );
+      onDone();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not arrange the call");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Dialog open onOpenChange={(o) => (!o ? onClose() : undefined)}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Call to negotiate</DialogTitle>
+          <DialogDescription>
+            The AI assistant phones the candidate in calling hours, says it is an AI, and reads out
+            the proposal ({lpa(proposedCtc)}) with its extras. It never says the ceiling and never
+            agrees anything — a yes comes back here for you to confirm.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-1">
+          <Label htmlFor="neg-step">If they say no, it may offer once (₹ L, optional)</Label>
+          <Input
+            id="neg-step"
+            inputMode="decimal"
+            placeholder={`Between ${lpa(proposedCtc)} and ${lpa(ceiling)} — empty to hold`}
+            value={step}
+            onChange={(e) => setStep(e.target.value)}
+          />
+          {stepProblem ? <p className="text-xs text-destructive">{stepProblem}</p> : null}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          What the assistant may explain if they ask — and why the team wants them. It says only
+          what you write here; empty means "the hiring team will share it".
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label htmlFor="neg-fixed">Fixed (₹ L)</Label>
+            <Input id="neg-fixed" inputMode="decimal" value={d.fixed} onChange={setF("fixed")} />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="neg-variable">Variable (₹ L)</Label>
+            <Input
+              id="neg-variable"
+              inputMode="decimal"
+              value={d.variable}
+              onChange={setF("variable")}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="neg-esop">ESOPs (in words)</Label>
+            <Input
+              id="neg-esop"
+              maxLength={300}
+              placeholder="e.g. ESOPs vesting over four years"
+              value={d.esop}
+              onChange={setF("esop")}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="neg-esop-value">ESOP value (₹ L, optional)</Label>
+            <Input
+              id="neg-esop-value"
+              inputMode="decimal"
+              value={d.esopValue}
+              onChange={setF("esopValue")}
+            />
+          </div>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="neg-review">How the pay review works</Label>
+          <Input
+            id="neg-review"
+            maxLength={300}
+            placeholder="e.g. A review at six months, then every April with the company"
+            value={d.review}
+            onChange={setF("review")}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="neg-benefits">Benefits</Label>
+          <Input
+            id="neg-benefits"
+            maxLength={300}
+            placeholder="e.g. Family health cover, a learning budget, hybrid work"
+            value={d.benefits}
+            onChange={setF("benefits")}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="neg-reports">Reports to (job title, never a name)</Label>
+          <Input
+            id="neg-reports"
+            maxLength={80}
+            placeholder="e.g. the Chief Technology Officer"
+            value={d.reportsTo}
+            onChange={setF("reportsTo")}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="neg-rationale">How the figure was set</Label>
+          <Input
+            id="neg-rationale"
+            maxLength={300}
+            placeholder="e.g. Set against the role's level and internal parity, benchmarked on market data"
+            value={d.rationale}
+            onChange={setF("rationale")}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="neg-why">
+            What the panel valued — said as appreciation (up to three lines, no scores or names)
+          </Label>
+          <Textarea
+            id="neg-why"
+            rows={3}
+            placeholder={"e.g. The panel valued how you built and scaled an AI team"}
+            value={d.whyYou}
+            onChange={setF("whyYou")}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="neg-why-join">
+            Why join us — for &quot;why should I choose you?&quot; (up to three lines)
+          </Label>
+          <Textarea
+            id="neg-why-join"
+            rows={3}
+            placeholder={
+              "e.g. You would build the AI team from the ground up, reporting to the CTO"
+            }
+            value={d.whyJoin}
+            onChange={setF("whyJoin")}
+          />
+        </div>
+        {detailProblem ? <p className="text-xs text-destructive">{detailProblem}</p> : null}
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button onClick={() => void submit()} disabled={busy || !!problem}>
+            Arrange the call
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /** What was agreed on a call — or that nothing was. Used on the candidate page and in the pop-up. */
 export function NegotiationOutcomeDialog({
   negotiationId,
   ceiling,
+  applicationId,
   onClose,
   onSaved,
 }: {
   negotiationId: string;
   ceiling: number | null;
+  /** When given, what an AI pay call heard pre-fills the form. */
+  applicationId?: string | undefined;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const save = useServerFn(recordNegotiationCall);
+  const load = useServerFn(getNegotiation);
+  const known = useQuery({
+    queryKey: ["negotiation", applicationId],
+    queryFn: () => load({ data: { applicationId: applicationId! } }),
+    enabled: !!applicationId,
+  });
+  const heard = known.data?.id === negotiationId ? known.data.callOutcome : null;
   const [agreed, setAgreed] = useState(true);
   const [f, setF] = useState({ agreedCtc: "", joiningBonus: "", joiningDate: "", note: "" });
+  const [prefilled, setPrefilled] = useState(false);
+  if (heard?.agreed && heard.agreedCtc != null && !prefilled) {
+    setPrefilled(true);
+    setF((p) => ({
+      ...p,
+      agreedCtc: p.agreedCtc || String(heard.agreedCtc! / 100_000),
+      // The extras were read out with the figure, so the yes covers them too.
+      joiningBonus:
+        p.joiningBonus ||
+        (known.data?.levers?.joiningBonus ? String(known.data.levers.joiningBonus / 100_000) : ""),
+      note: p.note || `Heard on the AI pay call: "${heard.theirWords}"`.slice(0, 1000),
+    }));
+  }
   const [busy, setBusy] = useState(false);
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) =>
     setF((p) => ({ ...p, [k]: e.target.value }));

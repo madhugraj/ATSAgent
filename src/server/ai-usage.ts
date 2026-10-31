@@ -47,6 +47,7 @@ export const AI_FEATURES = [
   "agent_distribution",
   "agent_screening_call",
   "agent_scheduling_call",
+  "agent_negotiation_call",
   "agent_followup",
   "agent_org_context",
   // Organisation context agent (docs/org-context-agent-plan.md): the org desk
@@ -64,6 +65,12 @@ export const AI_FEATURES = [
   "screening_call",
   // Live voice: the call to pick an interview time (docs/voice-scheduling-call-plan.md).
   "scheduling_call",
+  // Live voice: the pay discussion call (docs/negotiator-voice-agent.md).
+  "negotiation_call",
+  // Pay call rehearsals (scripts/evals/negotiation-live-sim.ts): the AI candidate and the
+  // judge that scores the flow (reported, never gating).
+  "eval_candidate_sim",
+  "eval_call_judge",
 ] as const;
 
 export type AiFeature = (typeof AI_FEATURES)[number];

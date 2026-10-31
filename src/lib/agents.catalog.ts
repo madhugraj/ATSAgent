@@ -89,6 +89,13 @@ export const AGENT_CATALOG: AgentInfo[] = [
     description:
       "Phones a candidate who has not picked one of the e-mailed interview times, when the Interview coordinator asks and a person approves: says it is an AI and books one of those times (or another the interviewers are free for) — never changes the interview, never discusses pay or results.",
   },
+  {
+    type: "negotiation_call",
+    label: "Negotiation call agent",
+    phase: 4,
+    description:
+      "Phones a candidate about the pay for their offer, when the Offer agent or TA asks and the HR head approves: says it is an AI, reads out the approved figure and extras, may offer one pre-approved improved figure after a no, and brings their answer back — never says the ceiling, never agrees anything; a person confirms.",
+  },
 
   {
     type: "followup",

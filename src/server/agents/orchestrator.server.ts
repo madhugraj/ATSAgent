@@ -395,6 +395,23 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
       );
   }
 
+  if (applicationId && e.type === "negotiation.needs_call") {
+    // The candidate countered, asked for a call or let the link close: the Offer
+    // agent may ask for the AI pay call (the HR head approves it).
+    const p = e.payload as { negotiationId?: string; why?: string };
+    const why =
+      p.why === "countered"
+        ? "replied to the pay message with another figure"
+        : p.why === "call_requested"
+          ? "asked for a call about the pay"
+          : "did not answer the pay message before its link closed";
+    await dispatch(
+      "offer",
+      `The candidate for application ${applicationId} (${req.code} "${req.title}") ${why}. Read get_offer_context and follow step 1f: ask for the AI pay call for negotiation ${p.negotiationId ?? "(see context)"}, or finish if it is refused.`,
+      { type: "application", id: applicationId },
+    );
+  }
+
   if (applicationId && e.type === "compensation.submitted") {
     // The offer waits for the candidate's expectation: continue it once known —
     // only for a selected candidate whose offer is not already with approvers.
