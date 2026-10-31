@@ -66,8 +66,7 @@ function persona(
       if (isIdentity(line)) return o.identity === undefined ? "Yes, speaking." : o.identity;
       if (isPermission(line)) return o.permission === undefined ? "Sure, go ahead." : o.permission;
       if (/matters most/i.test(line)) return o.matters ?? "Growth, and the scope of the role.";
-      if (/ready to go ahead/i.test(line))
-        return o.conditional ?? "Yes, I'd be ready to go ahead.";
+      if (/ready to go ahead/i.test(line)) return o.conditional ?? "Yes, I'd be ready to go ahead.";
       if (isFigure(line)) return o.figures[Math.min(figure++, o.figures.length - 1)] ?? null;
       return o.other?.(line, n) ?? (line.includes("?") ? "Okay." : undefined);
     },
