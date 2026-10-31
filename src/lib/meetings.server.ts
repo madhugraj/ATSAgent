@@ -55,7 +55,7 @@ async function jsonOrThrow(res: Response, label: string) {
 
 /* ------------------------------------------------------------------- Zoom */
 
-async function zoomToken(s: Record<string, string>) {
+export async function zoomToken(s: Record<string, string>) {
   // Delegated user OAuth (Connect button): refresh the user's token instead of S2S.
   if (s["refresh_token"]) {
     const basic = Buffer.from(

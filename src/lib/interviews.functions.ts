@@ -16,6 +16,7 @@ import {
 import { assertRole, requireOrg } from "./auth.middleware";
 import { canMove, REASON_REQUIRED, STAGE_LABEL, type Stage } from "./lifecycle";
 import { buildIcs } from "./ics";
+import { meetingRefOf, type MeetingRef } from "./meeting-ref";
 
 /* --------------------------------------------------------------- helpers */
 
@@ -232,6 +233,8 @@ export type ScorecardResult = {
   waitingFor: string[];
   /** Why nothing moved: the hiring manager decides. */
   decisionPending?: string;
+  /** The silent panel agent's view against the panel's, when it had one. */
+  panelCheck?: "agree" | "partial" | "disagree";
 };
 
 /**
@@ -397,6 +400,10 @@ export async function submitScorecardCore(
   }
 
   const verdict = thisRound!.verdict ?? data.verdict;
+  // The silent panel agent's hidden view against the panel's (docs/silent-panel-agent-plan.md):
+  // a disagreement holds the move for the HR head while the level's agent is on.
+  const { panelCheck } = await import("../server/panel/review.server");
+  const check = round ? await panelCheck(ctx.orgId, round.id, data.level, verdict) : null;
   // Tell the orchestrator: a switched-on Evaluation agent debriefs the round.
   {
     const { emitAgentEvent } = await import("../server/agents/events");
@@ -414,20 +421,26 @@ export async function submitScorecardCore(
         finalRound: data.level >= progress.finalLevel,
         // "immediate": the round's verdict moves the candidate itself.
         policy: progress.plan.verdictPolicy,
+        ...(check?.holdable ? { heldForPanelReview: true } : {}),
       },
     });
   }
 
   /* Progression under the plan, audited exactly like a manual stage move. */
   const from = app.stage as Stage;
-  const target = progressionFor(
+  const planned = progressionFor(
     data.level,
     verdict,
     progress.finalLevel,
     progress.plan.verdictPolicy,
   );
+  // Held only when something would move; otherwise the review is a note for the HR head.
+  const held = Boolean(check?.holdable && planned);
+  const target = held ? null : planned;
   let movedTo: Stage | null = null;
-  let blocked: string | null = null;
+  let blocked: string | null = held
+    ? `On hold for the HR head: the L${data.level} panel agent's independent view of the call disagrees with the panel.`
+    : null;
   const reason = data.reason?.trim() || `L${data.level} verdict: ${verdict}`;
   if (target && HR_CONTROLLED_TARGETS.has(target)) {
     await assertRole(
@@ -466,9 +479,25 @@ export async function submitScorecardCore(
     .set({ lastActivityAt: now })
     .where(and(eq(applications.orgId, ctx.orgId), eq(applications.id, app.id)));
 
+  if (round && check) {
+    const { recordPanelCheck } = await import("../server/panel/review.server");
+    await recordPanelCheck(
+      { orgId: ctx.orgId, actor, actorUserId: ctx.userId },
+      {
+        interviewId: round.id,
+        applicationId: app.id,
+        requisitionId: app.requisitionId,
+        level: data.level,
+      },
+      check,
+      held,
+      true,
+    );
+  }
+
   /* A select before the final round queues the next round so nothing stalls. */
   let nextInterviewCreated = false;
-  if (verdict === "select" && data.level < progress.finalLevel) {
+  if (verdict === "select" && data.level < progress.finalLevel && !held) {
     const nextLevel = data.level + 1;
     const [already] = await db
       .select({ id: interviews.id })
@@ -502,7 +531,8 @@ export async function submitScorecardCore(
     nextInterviewCreated,
     roundComplete: true,
     waitingFor: [],
-    ...(target === null
+    ...(check ? { panelCheck: check.outcome } : {}),
+    ...(target === null && !held
       ? {
           decisionPending:
             verdict === "select"
@@ -798,6 +828,10 @@ export async function scheduleInterviewCore(
     durationMins: data.durationMins,
     mode: data.mode,
     teamsLink: data.meetingLink?.trim() || null,
+    // The provider's reference for the meeting, read from the link (never from the client).
+    meetingProvider: null as MeetingRef["meetingProvider"] | null,
+    meetingExternalId: null as string | null,
+    ...(data.mode === "online" ? meetingRefOf(data.meetingLink) : null),
     agenda: data.agenda?.trim() || null,
     status: "scheduled",
     panel: await panelOf(ctx.orgId, data.interviewerEmail ?? null, data.panel ?? []),
@@ -878,6 +912,16 @@ export async function scheduleInterviewCore(
       .values({ ...row, orgId: ctx.orgId })
       .returning({ id: interviews.id });
     interviewId = created?.id ?? null;
+  }
+
+  /* The silent panel agent: transcription switched on (or off) for this round's call. */
+  if (interviewId) {
+    try {
+      const { syncRoundTranscription } = await import("../server/panel/transcripts.server");
+      await syncRoundTranscription(ctx.orgId, interviewId);
+    } catch {
+      /* best-effort: the round is booked either way */
+    }
   }
 
   const target = `l${data.level}` as Stage;
@@ -964,6 +1008,13 @@ export async function scheduleInterviewCore(
       };
       if (whereText) templateData["whereText"] = whereText;
       templateData["withText"] = withText;
+      // The candidate is told the call is transcribed, and how to say no.
+      const [tx] = await db
+        .select({ transcription: interviews.transcription })
+        .from(interviews)
+        .where(and(eq(interviews.orgId, ctx.orgId), eq(interviews.id, interviewId)))
+        .limit(1);
+      if (tx?.transcription === "requested") templateData["transcribed"] = "yes";
       if (data.agenda?.trim()) templateData["agenda"] = data.agenda.trim();
       await enqueueEmail({
         orgId: ctx.orgId,

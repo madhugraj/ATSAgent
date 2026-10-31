@@ -43,6 +43,8 @@ const KIND_TOGGLE: Record<
   compensation_form: "stageEnabled",
   offer_negotiation: "offerEnabled",
   screening_call_booked: "stageEnabled",
+  // The silent panel agent's summary to the panel: internal mail to members.
+  panel_summary: null,
 };
 
 export async function getOrgEmailSettings(orgId: string): Promise<EmailSettingsEffective> {

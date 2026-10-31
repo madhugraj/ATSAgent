@@ -31,6 +31,12 @@ type ProviderOAuth = {
   envId: string | undefined;
   envSecret: string | undefined;
   extraAuthorize?: Record<string, string>;
+  /**
+   * Added when the organisation has the silent panel agent on
+   * (docs/silent-panel-agent-plan.md): switch a meeting's transcription on and
+   * read the transcript back. Not asked otherwise — Teams' needs admin consent.
+   */
+  transcriptScope: string;
 };
 
 const OAUTH: Record<MeetingOAuthProvider, ProviderOAuth> = {
@@ -39,12 +45,15 @@ const OAUTH: Record<MeetingOAuthProvider, ProviderOAuth> = {
     // delegated OnlineMeetings.ReadWrite + Calendars.ReadWrite — no access policy needed
     scope:
       "offline_access openid profile email https://graph.microsoft.com/OnlineMeetings.ReadWrite https://graph.microsoft.com/Calendars.ReadWrite",
+    transcriptScope: "https://graph.microsoft.com/OnlineMeetingTranscript.Read.All",
     envId: env.MICROSOFT_OAUTH_CLIENT_ID,
     envSecret: env.MICROSOFT_OAUTH_CLIENT_SECRET,
   },
   google: {
     authorize: "https://accounts.google.com/o/oauth2/v2/auth",
     scope: "openid email https://www.googleapis.com/auth/calendar",
+    transcriptScope:
+      "https://www.googleapis.com/auth/meetings.space.readonly https://www.googleapis.com/auth/meetings.space.settings",
     envId: env.GOOGLE_CALENDAR_OAUTH_CLIENT_ID ?? env.GOOGLE_OAUTH_CLIENT_ID,
     envSecret: env.GOOGLE_CALENDAR_OAUTH_CLIENT_SECRET ?? env.GOOGLE_OAUTH_CLIENT_SECRET,
     extraAuthorize: { access_type: "offline", prompt: "consent" },
@@ -52,6 +61,8 @@ const OAUTH: Record<MeetingOAuthProvider, ProviderOAuth> = {
   zoom: {
     authorize: "https://zoom.us/oauth/authorize",
     scope: "meeting:write meeting:read user:read:user",
+    // Zoom grants the scopes configured on the Zoom app (cloud recordings included there).
+    transcriptScope: "",
     envId: env.ZOOM_OAUTH_CLIENT_ID,
     envSecret: env.ZOOM_OAUTH_CLIENT_SECRET,
   },
@@ -84,15 +95,17 @@ export function buildAuthorizeUrl(
   provider: MeetingOAuthProvider,
   state: string,
   origin: string,
+  opts: { transcripts?: boolean } = {},
 ): string {
   const { clientId } = oauthCredentials(provider);
   const cfg = OAUTH[provider];
+  const scope = [cfg.scope, opts.transcripts ? cfg.transcriptScope : ""].filter(Boolean).join(" ");
   const params = new URLSearchParams({
     response_type: "code",
     client_id: clientId,
     redirect_uri: callbackUrl(provider, origin),
     state,
-    scope: cfg.scope,
+    scope,
     ...cfg.extraAuthorize,
   });
   return `${cfg.authorize}?${params.toString()}`;

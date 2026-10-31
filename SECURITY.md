@@ -46,6 +46,26 @@ We credit reporters in release notes on request.
   and just before dialling — and calls already waiting are cancelled (audited
   `candidate.ai_call_opt_out`; only TA, the HR head or the CBO can clear it, audited
   `candidate.ai_call_opt_in`).
+  Silent panel agent (docs/silent-panel-agent-plan.md): only when the HR head switches it on
+  (audited `panel_agent.settings_changed`) are a round's online meeting's own transcription
+  switched on and its transcript read back, with the organisation's own meeting credentials (the
+  extra read-transcript permission is asked for at connect time only then). The provider's meeting
+  reference is read from the join link on the server, never taken from the browser; Zoom's
+  transcript download is checked to be a Zoom host and fetched through `safeFetch`. The candidate's
+  invite says the call is transcribed; a candidate who declines has it switched off and any stored
+  transcript deleted (audited `interview.transcription_declined`). Transcripts are candidate data:
+  org-scoped (`interview_transcripts`) and deleted with the application and the candidate.
+  The L1–L3 panel agents never see a transcript or their own score: their tools read the
+  transcript, send it to the AI gateway only inside `untrusted(...)` with `INJECTION_RULES`
+  (features `panel_assess`, `panel_summary`, zod-validated), store the view hidden in
+  `panel_assessments` and return counts only — so no approval card, run log or message carries the
+  score. Each agent's tools refuse rounds of another level. Quotes are kept only if they are in the
+  transcript, and any summary sentence carrying a score, verdict or recommendation is dropped
+  before the panel's e-mail is sent.
+  The agent's view is compared with the panel's only after every panellist has scored, by a
+  fixed rule in code; the HR head's review card is built by the system (the agent cannot write
+  it), and the decision runs as the HR head with `assertRole` — no agent moves a candidate.
+  Reconciliations and decisions are audited (`panel_review.reconciled`, `panel_review.decided`).
   A scheduling call books only the e-mailed times or up to three alternates checked free when it
   is arranged — by number, never a free-form time — through the same booking core as the
   candidate's link (one booking per offer); a person approves each call (audited
