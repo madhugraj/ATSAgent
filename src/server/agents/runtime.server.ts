@@ -989,6 +989,26 @@ async function requeueIfUnblocked(runId: string) {
 /* ------------------------------------------------------------ public API */
 
 /** Queue a new run. The goal must not embed untrusted text without untrusted(). */
+/** The unique-index refusal of a second active run on the same requisition. */
+function isActiveRunConflict(e: unknown): boolean {
+  for (let x: unknown = e, i = 0; x && i < 4; x = (x as { cause?: unknown }).cause, i++) {
+    const err = x as {
+      code?: string;
+      constraint_name?: string;
+      constraint?: string;
+      message?: string;
+    };
+    if (
+      err.code === "23505" &&
+      [err.constraint_name, err.constraint, err.message].some((v) =>
+        String(v ?? "").includes("agent_runs_active_requisition_key"),
+      )
+    )
+      return true;
+  }
+  return false;
+}
+
 export async function startRun(input: {
   orgId: string;
   agentType: AgentType;
@@ -1019,27 +1039,57 @@ export async function startRun(input: {
   }
   const startPolicy = await loadPolicy(input.orgId, input.agentType);
   const requestTrace = currentTraceUuid();
-  const [run] = await db
-    .insert(agentRuns)
-    .values({
-      definitionId: definition.id,
-      definitionVersion: definition.version,
-      definitionHash: definition.hash,
-      orgId: input.orgId,
-      agentType: input.agentType,
-      principalUserId: input.principalUserId,
-      goal: input.goal,
-      subjectType: input.subjectType ?? null,
-      subjectId: input.subjectId ?? null,
-      triggerEventId: input.triggerEventId ?? null,
-      maxSteps: input.maxSteps ?? startPolicy.maxStepsPerLeg ?? def.maxSteps ?? 20,
-      ...(startPolicy.maxTokensPerLeg ? { maxTokens: startPolicy.maxTokensPerLeg } : {}),
-      conversationId,
-      transcript: [{ role: "user", content: input.goal } satisfies AgentMessage],
-      // Started from an HTTP request: join its trace, so the request ID finds the run.
-      ...(requestTrace ? { traceId: requestTrace } : {}),
-    })
-    .returning({ id: agentRuns.id });
+  // One active run per organisation, agent and requisition (unique index,
+  // migration 0058): two starts racing past the activeRunFor check — two
+  // panes, a click and an event — get the run that is already working.
+  const insertRun = () =>
+    db
+      .insert(agentRuns)
+      .values({
+        definitionId: definition.id,
+        definitionVersion: definition.version,
+        definitionHash: definition.hash,
+        orgId: input.orgId,
+        agentType: input.agentType,
+        principalUserId: input.principalUserId,
+        goal: input.goal,
+        subjectType: input.subjectType ?? null,
+        subjectId: input.subjectId ?? null,
+        triggerEventId: input.triggerEventId ?? null,
+        maxSteps: input.maxSteps ?? startPolicy.maxStepsPerLeg ?? def.maxSteps ?? 20,
+        ...(startPolicy.maxTokensPerLeg ? { maxTokens: startPolicy.maxTokensPerLeg } : {}),
+        conversationId,
+        transcript: [{ role: "user", content: input.goal } satisfies AgentMessage],
+        // Started from an HTTP request: join its trace, so the request ID finds the run.
+        ...(requestTrace ? { traceId: requestTrace } : {}),
+      })
+      .returning({ id: agentRuns.id });
+  let run: { id: string } | undefined;
+  try {
+    [run] = await insertRun();
+  } catch (e) {
+    if (!isActiveRunConflict(e) || input.subjectType !== "requisition" || !input.subjectId) throw e;
+    const [existing] = await db
+      .select({ id: agentRuns.id })
+      .from(agentRuns)
+      .where(
+        and(
+          eq(agentRuns.orgId, input.orgId),
+          eq(agentRuns.agentType, input.agentType),
+          eq(agentRuns.subjectType, "requisition"),
+          eq(agentRuns.subjectId, input.subjectId),
+          inArray(agentRuns.status, ["queued", "running", "awaiting_human"]),
+        ),
+      )
+      .limit(1);
+    if (!existing) throw e;
+    log.info("agent.run.deduped", {
+      org_id: input.orgId,
+      agent: input.agentType,
+      run_id: existing.id,
+    });
+    return { runId: existing.id };
+  }
   await writeAudit({
     actor: `agent:${input.agentType}:${run!.id}`,
     actorUserId: input.principalUserId,

@@ -2241,6 +2241,13 @@ export const agentRuns = pgTable(
     index("agent_runs_queue_idx").on(t.status, t.updatedAt),
     index("agent_runs_org_status_idx").on(t.orgId, t.status),
     index("agent_runs_subject_idx").on(t.orgId, t.subjectType, t.subjectId),
+    // One active live run per organisation, agent and requisition (migration
+    // 0058): concurrent starts cannot stack duplicate runs on one role.
+    uniqueIndex("agent_runs_active_requisition_key")
+      .on(t.orgId, t.agentType, t.subjectId)
+      .where(
+        sql`${t.subjectType} = 'requisition' and ${t.status} in ('queued', 'running', 'awaiting_human') and ${t.mode} = 'live'`,
+      ),
   ],
 );
 

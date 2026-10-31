@@ -117,8 +117,14 @@ organisation's runs — a kick while another is still driving a long run claims
 and drives what is queued now (claims stay disjoint), so a second pane's run
 starts at once. Measured: two Requisition agent runs started 3 s apart — before,
 the second took its first step after 145 s (once the first paused for approval);
-after, at 9 s, both researching pay at the same time. Still open: the dedupe
-index, the `advanceRequisitionCore` status guard.
+after, at 9 s, both researching pay at the same time. Closed the same day: a
+partial unique index (migration 0058, `agent_runs_active_requisition_key`)
+allows one active live run per organisation, agent and requisition — `startRun`
+returns the run already working instead of stacking a second; and
+`advanceRequisitionCore` writes only from the status it read, so two approvers
+deciding at once leave one step on the trail and the second is told. Both
+races are tests in `scripts/agent-edge-cases.test.ts`. Voice call runs (per
+application) stay outside the index: a crashed call must never block the next.
 
 ### Phase 5 — Org choice
 

@@ -244,10 +244,24 @@ export async function advanceRequisitionCore(
       ...(actor.via ? { via: actor.via } : {}),
     },
   ];
-  await db
+  // Only from the status read above: two approvers deciding at the same
+  // moment both passed the checks, and both wrote — a doubled trail and a
+  // status that skipped a step. The second now finds the role moved on.
+  const moved = await db
     .update(requisitions)
     .set({ status: input.status, approvalTrail: trail as never })
-    .where(and(eq(requisitions.id, input.id), eq(requisitions.orgId, actor.orgId)));
+    .where(
+      and(
+        eq(requisitions.id, input.id),
+        eq(requisitions.orgId, actor.orgId),
+        eq(requisitions.status, current.status),
+      ),
+    )
+    .returning({ id: requisitions.id });
+  if (!moved.length)
+    throw new Error(
+      "Someone else decided this requisition at the same moment — refresh to see where it is now.",
+    );
 
   // Closing a role takes its job-board postings down with it — best-effort.
   if (input.status === "closed") {
