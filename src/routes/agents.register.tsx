@@ -2,11 +2,12 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { explainEval } from "@/lib/eval-catalog";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { ShieldCheck } from "lucide-react";
+import { ArrowUp, ShieldCheck } from "lucide-react";
 
 import { EmptyState, PageHeader } from "@/components/ats";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ROLE_NAME } from "@/lib/agents.catalog";
 import { agentRegister, type AgentRegisterEntry } from "@/lib/agents.functions";
 
@@ -57,12 +58,77 @@ function AgentRegisterPage() {
       ) : !q.data?.length ? (
         <EmptyState title="No agents in this build" />
       ) : (
-        <div className="mt-4 space-y-4">
-          {q.data.map((a) => (
-            <AgentCard key={a.type} a={a} />
-          ))}
-        </div>
+        <RegisterBody agents={q.data} />
       )}
+    </>
+  );
+}
+
+/** The anchor of an agent's card (the index links to it). */
+const anchorOf = (type: string) => `agent-${type}`;
+
+/** Words an agent is found by: its name, id, responsibility and owner. */
+const searchText = (a: AgentRegisterEntry) =>
+  [a.manifest.name, a.type, a.manifest.responsibility, ROLE_NAME[a.manifest.owner] ?? ""]
+    .join(" ")
+    .toLowerCase();
+
+/** An index of every agent (jump to its card) and a filter, above the cards. */
+function RegisterBody({ agents }: { agents: AgentRegisterEntry[] }) {
+  const [filter, setFilter] = useState("");
+  const words = filter.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = agents.filter((a) => words.every((w) => searchText(a).includes(w)));
+  return (
+    <>
+      <nav id="agent-index" aria-label="Agent index" className="panel mt-4 scroll-mt-20 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold">
+            Index{" "}
+            <span className="num font-normal text-muted-foreground">
+              {shown.length === agents.length
+                ? `· ${agents.length} agents`
+                : `· ${shown.length} of ${agents.length}`}
+            </span>
+          </h2>
+          <Input
+            aria-label="Filter agents"
+            placeholder="Filter by name, id, owner or what it does"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="h-8 w-full sm:w-72"
+          />
+        </div>
+        {shown.length ? (
+          <ul className="mt-3 grid gap-x-6 gap-y-1.5 sm:grid-cols-2 xl:grid-cols-3">
+            {shown.map((a) => (
+              <li key={a.type} className="flex items-baseline gap-2 text-sm">
+                <a
+                  href={`#${anchorOf(a.type)}`}
+                  className="text-primary underline-offset-2 hover:underline"
+                >
+                  {a.manifest.name}
+                </a>
+                <Badge
+                  variant={RISK_TONE[a.manifest.riskTier] ?? "secondary"}
+                  className="shrink-0 px-1.5 py-0 text-[10px]"
+                >
+                  {a.manifest.riskTier}
+                </Badge>
+                <span className="shrink-0 text-[11px] text-muted-foreground">
+                  {a.policy.enabled ? "on" : "off"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-3 text-sm text-muted-foreground">No agent matches “{filter}”.</p>
+        )}
+      </nav>
+      <div className="mt-4 space-y-4">
+        {shown.map((a) => (
+          <AgentCard key={a.type} a={a} />
+        ))}
+      </div>
     </>
   );
 }
@@ -89,7 +155,7 @@ function AgentCard({ a }: { a: AgentRegisterEntry }) {
   const [showManifest, setShowManifest] = useState(false);
   const m = a.manifest;
   return (
-    <section className="panel p-5">
+    <section id={anchorOf(a.type)} className="panel scroll-mt-20 p-5">
       <div className="flex flex-wrap items-center gap-2">
         <ShieldCheck className="size-4 text-primary" />
         <h2 className="font-semibold">{m.name}</h2>
@@ -103,6 +169,12 @@ function AgentCard({ a }: { a: AgentRegisterEntry }) {
         <span className="num ml-auto text-[11px] text-muted-foreground">
           id {a.type} · hash {a.hash.slice(0, 12)}
         </span>
+        <a
+          href="#agent-index"
+          className="inline-flex items-center gap-0.5 text-[11px] text-primary underline-offset-2 hover:underline"
+        >
+          <ArrowUp className="size-3" /> Index
+        </a>
       </div>
       <p className="mt-2 text-sm">{m.responsibility}</p>
       <p className="mt-1 text-xs text-muted-foreground">
