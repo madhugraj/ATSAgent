@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-95 tables across 9 domains.
+97 tables across 9 domains.
 
 ## Identity & access
 
@@ -654,6 +654,10 @@ erDiagram
     jsonb unavailable
     text meeting_provider "nullable"
     text meeting_external_id "nullable"
+    text transcription
+    text transcription_detail "nullable"
+    timestamptz transcript_checked_at "nullable"
+    integer transcript_checks
   }
   screening_kits {
     uuid id PK
@@ -1223,6 +1227,9 @@ erDiagram
 | `interview_slot_offers` | `application_id` | `applications` | cascade |
 | `interview_slot_offers` | `interview_id` | `interviews` | no action |
 | `interview_slot_offers` | `org_id` | `organizations` | cascade |
+| `interview_transcripts` | `application_id` | `applications` | cascade |
+| `interview_transcripts` | `interview_id` | `interviews` | cascade |
+| `interview_transcripts` | `org_id` | `organizations` | cascade |
 | `interviews` | `application_id` | `applications` | cascade |
 | `interviews` | `org_id` | `organizations` | cascade |
 | `job_descriptions` | `org_id` | `organizations` | cascade |
@@ -1269,6 +1276,8 @@ erDiagram
 | `org_profiles` | `org_id` | `organizations` | cascade |
 | `org_profiles` | `updated_by` | `users` | no action |
 | `org_profiles` | `website_confirmed_by` | `users` | no action |
+| `panel_agent_settings` | `org_id` | `organizations` | cascade |
+| `panel_agent_settings` | `updated_by` | `users` | no action |
 | `phone_screening_settings` | `org_id` | `organizations` | cascade |
 | `phone_screening_settings` | `updated_by` | `users` | no action |
 | `requisition_board_postings` | `org_id` | `organizations` | cascade |
@@ -1393,7 +1402,8 @@ erDiagram
 | `inbox_messages` | Sourcing & integrations | 16 | — |
 | `integration_credentials` | Sourcing & integrations | 4 | — |
 | `interview_slot_offers` | — | 22 | (token) |
-| `interviews` | Screening & interviews | 19 | — |
+| `interview_transcripts` | — | 8 | (interview_id) |
+| `interviews` | Screening & interviews | 23 | — |
 | `job_descriptions` | Requisitions & job content | 17 | — |
 | `job_index_notifications` | — | 10 | — |
 | `master_items` | Organisations & masters | 8 | — |
@@ -1413,6 +1423,7 @@ erDiagram
 | `org_profile_versions` | Organisations & masters | 16 | (orgId+version) |
 | `org_profiles` | Organisations & masters | 12 | — |
 | `organizations` | Organisations & masters | 26 | (slug), (capture_token), (capture_token_hash) |
+| `panel_agent_settings` | — | 5 | — |
 | `phone_screening_settings` | Screening & interviews | 15 | — |
 | `platform_admins` | Identity & access | 6 | (email) |
 | `product_catalogue_commercials` | Organisations & masters | 8 | — |

@@ -787,9 +787,27 @@ export const interviews = pgTable(
      */
     meetingProvider: text("meeting_provider").$type<"zoom" | "google_meet" | "teams">(),
     meetingExternalId: text("meeting_external_id"),
+    /**
+     * The call's transcript for the silent panel agent (migration 0060): off |
+     * requested | ready | unavailable (detail says why) | candidate_declined.
+     */
+    transcription: text("transcription")
+      .$type<"off" | "requested" | "ready" | "unavailable" | "candidate_declined">()
+      .notNull()
+      .default("off"),
+    transcriptionDetail: text("transcription_detail"),
+    transcriptCheckedAt: timestamp("transcript_checked_at", { withTimezone: true }),
+    transcriptChecks: integer("transcript_checks").notNull().default(0),
   },
   (t) => [
     index("interviews_interviewer_email_idx").on(sql`lower(${t.interviewerEmail})`),
+    index("interviews_transcription_due_idx")
+      .on(t.orgId, t.scheduledAt)
+      .where(sql`${t.transcription} = 'requested'`),
+    check(
+      "interviews_transcription_check",
+      sql`${t.transcription} in ('off', 'requested', 'ready', 'unavailable', 'candidate_declined')`,
+    ),
     check(
       "interviews_meeting_provider_check",
       sql`${t.meetingProvider} is null or ${t.meetingProvider} in ('zoom', 'google_meet', 'teams')`,
@@ -2852,6 +2870,65 @@ export const offerNegotiations = pgTable(
     decidedAt: timestamp("decided_at", { withTimezone: true }),
   },
   (t) => [index("offer_negotiations_app_idx").on(t.applicationId, t.createdAt)],
+);
+
+/* --------------------------------------------------- silent panel agents */
+// docs/silent-panel-agent-plan.md — migration 0060.
+
+/** Per organisation: whether the silent panel agent reads interview calls, and for which rounds. */
+export const panelAgentSettings = pgTable(
+  "panel_agent_settings",
+  {
+    orgId: uuid("org_id")
+      .primaryKey()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    enabled: boolean("enabled").notNull().default(false),
+    levels: integer("levels")
+      .array()
+      .notNull()
+      .default(sql`'{1,2,3}'`),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      "panel_agent_settings_levels_check",
+      sql`${t.levels} <@ array[1, 2, 3] and cardinality(${t.levels}) between 1 and 3`,
+    ),
+  ],
+);
+
+/** A round's call transcript, as the meeting provider wrote it (candidate data). */
+export const interviewTranscripts = pgTable(
+  "interview_transcripts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    interviewId: uuid("interview_id")
+      .notNull()
+      .references(() => interviews.id, { onDelete: "cascade" }),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    provider: text("provider").$type<"zoom" | "google_meet" | "teams">().notNull(),
+    segments: jsonb("segments")
+      .$type<import("../src/lib/vtt").TranscriptSegment[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    segmentCount: integer("segment_count").notNull().default(0),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("interview_transcripts_interview_key").on(t.interviewId),
+    index("interview_transcripts_org_idx").on(t.orgId),
+    index("interview_transcripts_application_idx").on(t.applicationId),
+    check(
+      "interview_transcripts_provider_check",
+      sql`${t.provider} in ('zoom', 'google_meet', 'teams')`,
+    ),
+  ],
 );
 
 /* ------------------------------------------------------- phone screening */

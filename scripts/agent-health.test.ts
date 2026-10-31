@@ -866,6 +866,52 @@ describe("interviewers who can't make it", () => {
   });
 });
 
+describe("silent panel agent", () => {
+  test("an interview call whose transcript never came is flagged; cleared once it is in", async () => {
+    const { applications, candidates, interviews, requisitions } =
+      await import("../drizzle/schema");
+    const [req] = await db
+      .insert(requisitions)
+      .values({
+        orgId,
+        code: `H-T-${stamp}`,
+        title: "Transcript Test",
+        status: "approved",
+      } as never)
+      .returning({ id: requisitions.id });
+    const [cand] = await db
+      .insert(candidates)
+      .values({ orgId, fullName: "Heard", email: `heard-${stamp}@cand.local` } as never)
+      .returning({ id: candidates.id });
+    const [app] = await db
+      .insert(applications)
+      .values({ orgId, requisitionId: req!.id, candidateId: cand!.id, stage: "l1" } as never)
+      .returning({ id: applications.id });
+    const [r] = await db
+      .insert(interviews)
+      .values({
+        orgId,
+        applicationId: app!.id,
+        level: 1,
+        scheduledAt: new Date(Date.now() - 8 * 3600_000),
+        status: "completed",
+        transcription: "unavailable",
+        transcriptionDetail: "No transcript arrived within 6 hours of the call's end.",
+      } as never)
+      .returning({ id: interviews.id });
+    const rule = async () => (await open()).find((i) => i.rule === "panel.transcript_missing");
+    await evaluate();
+    expect(await rule()).toMatchObject({ agentType: "*", severity: "warning" });
+    expect((await rule())!.detail).toMatchObject({ rounds: 1 });
+    // The transcript was started by hand and came in after all: resolved.
+    await db.update(interviews).set({ transcription: "ready" }).where(eq(interviews.id, r!.id));
+    await evaluate();
+    expect(await rule()).toBeUndefined();
+    await db.delete(requisitions).where(eq(requisitions.id, req!.id));
+    await db.delete(candidates).where(eq(candidates.id, cand!.id));
+  });
+});
+
 describe("organisation context rules", () => {
   const days = (n: number) => new Date(Date.now() - n * 864e5);
 

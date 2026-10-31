@@ -23,6 +23,7 @@ export type AgentEventType =
   | "interview.panellist_unavailable"
   | "interview.slots_unanswered"
   | "interview.slots_no_reply"
+  | "interview.transcript_ready"
   | "assessment.completed"
   | "compensation.submitted"
   | "negotiation.agreed"

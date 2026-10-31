@@ -46,6 +46,15 @@ We credit reporters in release notes on request.
   and just before dialling — and calls already waiting are cancelled (audited
   `candidate.ai_call_opt_out`; only TA, the HR head or the CBO can clear it, audited
   `candidate.ai_call_opt_in`).
+  Silent panel agent (docs/silent-panel-agent-plan.md): only when the HR head switches it on
+  (audited `panel_agent.settings_changed`) are a round's online meeting's own transcription
+  switched on and its transcript read back, with the organisation's own meeting credentials (the
+  extra read-transcript permission is asked for at connect time only then). The provider's meeting
+  reference is read from the join link on the server, never taken from the browser; Zoom's
+  transcript download is checked to be a Zoom host and fetched through `safeFetch`. The candidate's
+  invite says the call is transcribed; a candidate who declines has it switched off and any stored
+  transcript deleted (audited `interview.transcription_declined`). Transcripts are candidate data:
+  org-scoped (`interview_transcripts`) and deleted with the application and the candidate.
   A scheduling call books only the e-mailed times or up to three alternates checked free when it
   is arranged — by number, never a free-form time — through the same booking core as the
   candidate's link (one booking per offer); a person approves each call (audited

@@ -41,7 +41,10 @@ async function connectUrl(
     ts: Date.now(),
     ...(expectedDomain ? { emailDomain: expectedDomain } : {}),
   });
-  return { url: buildAuthorizeUrl(provider, state, safeOrigin) };
+  // The silent panel agent reads interview transcripts: ask for that too.
+  const { panelAgentPolicyOf } = await import("../server/panel/transcripts.server");
+  const transcripts = (await panelAgentPolicyOf(orgId)).enabled;
+  return { url: buildAuthorizeUrl(provider, state, safeOrigin, { transcripts }) };
 }
 
 export const startMicrosoftConnect = createServerFn({ method: "POST" })

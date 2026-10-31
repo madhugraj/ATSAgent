@@ -1,7 +1,16 @@
 # Silent panel agents (L1 / L2 / L3) — plan
 
-Status: **S0 code built** (2026-10-31); the live check on real accounts is
-still to do. Every booked round records its meeting provider and reference
+Status: **S0 and S1 built** (2026-10-31); the live check on real accounts is
+still to do. S1 (migration 0060): the switch and rounds on the Organisation
+page (`panel_agent_settings`, audited); transcription switched on with the
+provider right after booking (`syncRoundTranscription`) and off when the
+candidate declines (_Candidate declined_ on Interviews, audited, transcript
+deleted); the consent line in the invite; the read-transcript permission asked
+at connect time only while the agent is on; the fetch sweep on the agent tick
+into `interview_transcripts` (event `interview.transcript_ready`); health rule
+`panel.transcript_missing` (src/server/panel/transcripts.server.ts).
+
+S0 status: Every booked round records its meeting provider and reference
 (`interviews.meeting_provider` / `meeting_external_id`, migration 0059, read
 from the join link in `src/lib/meeting-ref.ts`; existing rounds backfilled).
 `fetchTranscript` (`src/lib/meeting-transcripts.server.ts`) reads a held call's

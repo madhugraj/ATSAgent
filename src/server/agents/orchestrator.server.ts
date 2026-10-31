@@ -810,6 +810,14 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
   } catch (err) {
     log.warn("scheduling_call.trigger_failed", { error: err as Error });
   }
+  // Interview calls the silent panel agent reads: their transcripts are
+  // fetched from the meeting provider after the call (plain code).
+  try {
+    const { sweepTranscripts } = await import("../panel/transcripts.server");
+    await sweepTranscripts(opts.orgId);
+  } catch (err) {
+    log.warn("panel.transcript_sweep_failed", { error: err as Error });
+  }
   // Training data older than each organisation's retention is deleted.
   try {
     const { applyTrainingRetention } = await import("@/lib/training.functions");

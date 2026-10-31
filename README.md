@@ -25,8 +25,9 @@ ATSIQ by Yavar AI is an enterprise recruiting intelligence platform. It combines
 - Candidate email notifications (acknowledgment, stage update, interview invitation, offer) with per-organisation toggles
 - Explainable JD↔CV scoring, social-claim verification and recruiter overrides
 - Contextual screening kits, private audio transcription, grading and interview scorecards
-- AI phone screening (optional, per organisation): the Screening call agent phones shortlisted candidates through the organisation's PBX line and its own AI voice key — says it is an AI, asks consent, asks the kit's questions (never pay), retries and takes callbacks within calling hours, falls back to the written assessment; only the answered questions are graded, and the hiring desk shows the result with *Why this score* and asks a person who moves on (`docs/voice-screening-agent.md`)
+- AI phone screening (optional, per organisation): the Screening call agent phones shortlisted candidates through the organisation's PBX line and its own AI voice key — says it is an AI, asks consent, asks the kit's questions (never pay), retries and takes callbacks within calling hours, falls back to the written assessment; only the answered questions are graded, and the hiring desk shows the result with _Why this score_ and asks a person who moves on (`docs/voice-screening-agent.md`)
 - Google Meet, Microsoft Teams and Zoom meeting integrations
+- Silent panel agent, step 1 of 4 (optional, per organisation and round): online interview calls transcribed by the organisation's own Teams, Zoom or Meet and the transcript read back after the call; the candidate is told in the invite and can decline; later steps add the agent's summary, hidden score and the agree / partial / disagree check against the panel (`docs/silent-panel-agent-plan.md`)
 - Talent pool ownership, referrals, deduplication, internal job postings and reusable organisation knowledge
 - Live compensation research with cited evidence and saved organisation corrections
 - Pay discussions before the letter: a call brief and a person-approved message when the candidate expects more than the approved ceiling

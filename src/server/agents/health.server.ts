@@ -72,6 +72,8 @@ export const HEALTH = {
   aiCallOptOuts7d: 2,
   /** A booked interview this close with an interviewer who said they can't make it (hours). */
   unavailableLeadHours: 24,
+  /** Silent panel agent: interview calls whose transcript never came, in 7 days. */
+  transcriptsMissing7d: 1,
   /** Model replies cut off at the output limit without acting, in 24 h. */
   cutOffReplies24h: 2,
   /** One run asking people this many questions (7 days) is going round in circles. */
@@ -612,6 +614,30 @@ export const RULES: Rule[] = [
           agentType: "interview",
           title: `${n} interview rounds in 7 days where the candidate did not join`,
           detail: { noShows: n },
+        },
+      ];
+    },
+  },
+  {
+    id: "panel.transcript_missing",
+    element: "tools",
+    severity: "warning",
+    description:
+      "Interview calls the silent panel agent should have read have no transcript — transcription was not on in the call, the meeting account's plan does not include it, or the connection lacks permission to read it. Those rounds had no independent check; the panel's verdict applied as usual. Check the meeting provider on the Integrations page.",
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number; reason: string | null }>(sql`
+        select count(*)::int n, (array_agg(transcription_detail order by scheduled_at desc))[1] reason
+        from interviews
+        where org_id = ${orgId} and transcription = 'unavailable'
+          and scheduled_at >= now() - interval '7 days'
+          and status not in ('cancelled', 'no_show')`);
+      const x = r[0];
+      if (!x?.n || x.n < HEALTH.transcriptsMissing7d) return [];
+      return [
+        {
+          agentType: "*",
+          title: `${x.n} interview call(s) in 7 days without a transcript`,
+          detail: { rounds: x.n, latestReason: x.reason },
         },
       ];
     },

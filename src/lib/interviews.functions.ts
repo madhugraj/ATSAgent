@@ -885,6 +885,16 @@ export async function scheduleInterviewCore(
     interviewId = created?.id ?? null;
   }
 
+  /* The silent panel agent: transcription switched on (or off) for this round's call. */
+  if (interviewId) {
+    try {
+      const { syncRoundTranscription } = await import("../server/panel/transcripts.server");
+      await syncRoundTranscription(ctx.orgId, interviewId);
+    } catch {
+      /* best-effort: the round is booked either way */
+    }
+  }
+
   const target = `l${data.level}` as Stage;
   if (app.stage !== target && canMove(app.stage as Stage, target)) {
     await db
@@ -969,6 +979,13 @@ export async function scheduleInterviewCore(
       };
       if (whereText) templateData["whereText"] = whereText;
       templateData["withText"] = withText;
+      // The candidate is told the call is transcribed, and how to say no.
+      const [tx] = await db
+        .select({ transcription: interviews.transcription })
+        .from(interviews)
+        .where(and(eq(interviews.orgId, ctx.orgId), eq(interviews.id, interviewId)))
+        .limit(1);
+      if (tx?.transcription === "requested") templateData["transcribed"] = "yes";
       if (data.agenda?.trim()) templateData["agenda"] = data.agenda.trim();
       await enqueueEmail({
         orgId: ctx.orgId,

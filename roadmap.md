@@ -1,5 +1,14 @@
 # Roadmap
 
+## Silent panel agents (2026-10-31)
+
+- [x] S0 (migration 0059): every booked round records its meeting provider and reference, read from the join link on the server (existing rounds backfilled); `fetchTranscript` reads a held call's transcript back from Zoom, Teams or Meet; `scripts/spike-transcripts.ts`
+- [x] S1 (migration 0060): the switch and rounds (Organisation → Silent panel agent; audited); transcription switched on with the provider after booking (off again when the candidate declines); the read-transcript permission asked at connect time only when the agent is on; the consent line in the candidate's invite; _Candidate declined_ on Interviews (audited; deletes the transcript); the fetch sweep on the agent tick (10 min after the end, backing off, given up after 6 h) into `interview_transcripts`, event `interview.transcript_ready`; health rule `panel.transcript_missing`
+- [ ] S0/S1 on real accounts: reconnect a provider with the transcript permission, hold a call, check the transcript arrives
+- [ ] S2: the L1/L2/L3 panel agents — assessment, the panel's factual summary, hidden scores
+- [ ] S3: agree / partial / disagree against the panel's scorecards; the HR head's cards
+- [ ] S4–S5: views, settings for thresholds, a real test
+
 ## Voice screening agent (2026-10-23)
 
 - [x] M0 voice foundation (docs/voice-screening-agent.md): SIP/RTP/G.711 call stack in TypeScript (`src/server/voice/`), live voice sessions through the AI gateway (`aiVoiceSession`, feature `screening_call`, ledger + training capture), spike script; real test calls placed from a workstation and from inside GKE with two-way audio
@@ -8,7 +17,7 @@
 - [x] M3: Screening agent 1.8.0 (`request_screening_call` — a person approves unless Autonomous; written assessment when a call cannot happen or fell back; reacts to `screening_call.ended`); Screening call agent 1.0.0 (risk tier high; its manifest is the live call's prompt, its tools the live call's contracts; one run per call attempt); 5 evals; health rules `screening_call.not_placed`, `.stuck`, `.failures`, `.answer_rate`, `.declines`, `.short_calls`; AI phone screening on the candidate page (status, Call now, cancel, answers, transcript when consented); manual and README
 - [x] M4 (2026-10-24): a real call through the voice worker on the local stack, end to end (approval → claim → dial → 7 answers through the in-call tools → notice period → graded `phone_ai` run → the call's run closed → ledger attributed → `screening_call.ended`); Screening call agent 1.0.1 fixes what it showed (never answers a question itself; names itself first; keeps the candidate's words of consent); the worker no longer starts agent runs inline
 - [x] Stage 1.1 step A (2026-10-24, docs/voice-screening-stage1.1-plan.md): the call done the way HR does it — who and why first, consent with the written assessment or a person offered, the role and why them, practical details first (current and expected pay recorded for HR only, never discussed), screening questions with active listening, a time agreed and e-mailed when now is not good, calmer turn-taking, 10 minutes; Screening call agent 1.1.0, Screening agent 1.9.0
-- [x] Scoring v2 and the decision in the hiring desk (2026-10-24): only answered questions graded with a spoken-answer rubric; coverage as asked versus planned; the call's thread post with *Why this score*; the Screening agent (1.10.0) asks a person to decide (`screening_decision`: approve → L1 and the Interview coordinator, or hold; decline keeps them in screening or rejects with a reason); a live screening board in the hiring journey
+- [x] Scoring v2 and the decision in the hiring desk (2026-10-24): only answered questions graded with a spoken-answer rubric; coverage as asked versus planned; the call's thread post with _Why this score_; the Screening agent (1.10.0) asks a person to decide (`screening_decision`: approve → L1 and the Interview coordinator, or hold; decline keeps them in screening or rejects with a reason); a live screening board in the hiring journey
 - [x] Interview coordinator 1.8.0 (2026-10-25, found after the first screening approval): a role with no hiring manager made it ask for an e-mail in free text and then guess about a refused address; it now chooses from every active member (`list_panel_options` ranks past interviewers, hiring managers / department heads, then everyone), asks a person to pick by name, reports a refusal as the system said it, and never asks the same question twice; health rule `hitl.repeated_questions`
 - [ ] Stage 1.1 steps B–E: guardrails, recording, HR traceability, fairness
 - [ ] Pilot on one real requisition with HR reviewing the transcripts and grades

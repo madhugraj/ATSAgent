@@ -1,17 +1,18 @@
 /**
- * Read a round's transcript back from the meeting provider after the call
- * (docs/silent-panel-agent-plan.md, S0). Read-only: nothing here changes a
- * meeting. The credentials are the organisation's own (Integrations page),
- * the same ones the meeting was created with.
+ * A round's call transcript (docs/silent-panel-agent-plan.md): switch the
+ * provider's own transcription on or off for a booked meeting (S1), and read
+ * the transcript back after the call (S0). The credentials are the
+ * organisation's own (Integrations page), the same ones the meeting was
+ * created with.
  *
  * What each provider needs (verified in the S0 spike, scripts/spike-transcripts.ts):
- *   - Zoom: cloud recording with audio transcripts on the account; scope to
- *     read cloud recordings.
+ *   - Zoom: cloud recording with audio transcripts on the account; the app's
+ *     scopes (set on the Zoom app) to update meetings and read cloud recordings.
  *   - Teams: transcription allowed by the tenant's meeting policy; Graph
  *     permission OnlineMeetingTranscript.Read.All (delegated, or application
  *     with an application access policy for the organiser).
  *   - Meet: a Workspace edition with transcripts; the Google grant needs the
- *     meetings.space.readonly scope.
+ *     meetings.space.readonly and meetings.space.settings scopes.
  *
  * Transcripts are candidate data: callers store them org-scoped and tied to
  * the application so erasure removes them, and they enter AI prompts only
@@ -82,34 +83,59 @@ async function zoomTranscript(
 
 /* ------------------------------------------------------------------- Teams */
 
+type TeamsGraph = { base: string; headers: Record<string, string>; delegated: boolean };
+
+async function teamsGraph(s: Record<string, string>): Promise<TeamsGraph> {
+  const delegated = Boolean(s["refresh_token"]);
+  const token = delegated ? await msDelegatedToken(s) : await graphToken(s);
+  return {
+    delegated,
+    base: delegated
+      ? "https://graph.microsoft.com/v1.0/me"
+      : `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(s["organizer_email"] ?? "")}`,
+    headers: { Authorization: `Bearer ${token}` },
+  };
+}
+
+/** The online meeting's id, found by its join link (made as a meeting or a calendar event). */
+async function teamsMeetingId(
+  g: TeamsGraph,
+  joinUrl: string,
+): Promise<{ id: string } | { status: number; detail: string }> {
+  const filter = `JoinWebUrl eq '${joinUrl.replace(/'/g, "''")}'`;
+  const found = await fetch(`${g.base}/onlineMeetings?$filter=${encodeURIComponent(filter)}`, {
+    headers: g.headers,
+  });
+  if (!found.ok)
+    return { status: found.status, detail: `Teams meeting lookup returned ${found.status}.` };
+  const id = ((await found.json()) as { value?: { id?: string }[] }).value?.[0]?.id;
+  return id
+    ? { id }
+    : {
+        status: 404,
+        detail: "Teams has no online meeting with this link under the connected account.",
+      };
+}
+
 async function teamsTranscript(
   s: Record<string, string>,
   joinUrl: string,
 ): Promise<TranscriptFetch> {
-  const delegated = Boolean(s["refresh_token"]);
-  const token = delegated ? await msDelegatedToken(s) : await graphToken(s);
-  const base = delegated
-    ? "https://graph.microsoft.com/v1.0/me"
-    : `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(s["organizer_email"] ?? "")}`;
-  const headers = { Authorization: `Bearer ${token}` };
+  const g = await teamsGraph(s);
+  const { base, headers, delegated } = g;
   const denied = (status: number) => ({
     status: "unavailable" as const,
     detail: `Microsoft refused to share the transcript (${status}) — grant OnlineMeetingTranscript.Read.All${delegated ? "" : " with an application access policy for the organiser"}.`,
   });
 
-  const filter = `JoinWebUrl eq '${joinUrl.replace(/'/g, "''")}'`;
-  const found = await fetch(`${base}/onlineMeetings?$filter=${encodeURIComponent(filter)}`, {
-    headers,
-  });
-  if (found.status === 401 || found.status === 403) return denied(found.status);
-  if (!found.ok)
-    return { status: "pending", detail: `Teams meeting lookup returned ${found.status}.` };
-  const meetingId = ((await found.json()) as { value?: { id?: string }[] }).value?.[0]?.id;
-  if (!meetingId)
-    return {
-      status: "unavailable",
-      detail: "Teams has no online meeting with this link under the connected account.",
-    };
+  const found = await teamsMeetingId(g, joinUrl);
+  if ("status" in found) {
+    if (found.status === 401 || found.status === 403) return denied(found.status);
+    return found.status === 404
+      ? { status: "unavailable", detail: found.detail }
+      : { status: "pending", detail: found.detail };
+  }
+  const meetingId = found.id;
 
   const list = await fetch(`${base}/onlineMeetings/${encodeURIComponent(meetingId)}/transcripts`, {
     headers,
@@ -214,6 +240,92 @@ async function meetTranscript(s: Record<string, string>, code: string): Promise<
         endMs: rel(e.endTime),
       })),
   };
+}
+
+/* ------------------------------------------------- switching transcription */
+
+export type TranscriptionSwitch = { ok: true } | { ok: false; detail: string };
+
+async function failed(res: Response, label: string): Promise<TranscriptionSwitch> {
+  const detail = (await res.text().catch(() => "")).slice(0, 200);
+  return { ok: false, detail: `${label} returned ${res.status}${detail ? `: ${detail}` : ""}.` };
+}
+
+/** Zoom: cloud recording (with the account's audio transcripts) starts with the meeting. */
+async function zoomSwitch(
+  s: Record<string, string>,
+  meetingId: string,
+  on: boolean,
+): Promise<TranscriptionSwitch> {
+  const token = await zoomToken(s);
+  const res = await fetch(`https://api.zoom.us/v2/meetings/${encodeURIComponent(meetingId)}`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ settings: { auto_recording: on ? "cloud" : "none" } }),
+  });
+  return res.ok ? { ok: true } : failed(res, "Zoom meeting update");
+}
+
+/** Teams: the meeting records (and, under the tenant's policy, transcribes) automatically. */
+async function teamsSwitch(
+  s: Record<string, string>,
+  joinUrl: string,
+  on: boolean,
+): Promise<TranscriptionSwitch> {
+  const g = await teamsGraph(s);
+  const found = await teamsMeetingId(g, joinUrl);
+  if ("status" in found) return { ok: false, detail: found.detail };
+  const res = await fetch(`${g.base}/onlineMeetings/${encodeURIComponent(found.id)}`, {
+    method: "PATCH",
+    headers: { ...g.headers, "Content-Type": "application/json" },
+    body: JSON.stringify({ recordAutomatically: on }),
+  });
+  return res.ok ? { ok: true } : failed(res, "Teams meeting update");
+}
+
+/** Meet: the space generates a transcript automatically. */
+async function meetSwitch(
+  s: Record<string, string>,
+  code: string,
+  on: boolean,
+): Promise<TranscriptionSwitch> {
+  const token = await googleToken(s);
+  const headers = { Authorization: `Bearer ${token}` };
+  const space = await fetch(`${MEET_API}/spaces/${encodeURIComponent(code)}`, { headers });
+  if (!space.ok) return failed(space, "Meet space lookup");
+  const name = String(((await space.json()) as { name?: string }).name ?? "");
+  if (!/^spaces\/[\w-]+$/.test(name)) return { ok: false, detail: "Meet returned no space." };
+  const mask = "config.artifactConfig.transcriptionConfig.autoTranscriptionGeneration";
+  const res = await fetch(`${MEET_API}/${name}?updateMask=${encodeURIComponent(mask)}`, {
+    method: "PATCH",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      config: {
+        artifactConfig: { transcriptionConfig: { autoTranscriptionGeneration: on ? "ON" : "OFF" } },
+      },
+    }),
+  });
+  return res.ok ? { ok: true } : failed(res, "Meet space update");
+}
+
+/**
+ * Switch the provider's own transcription on (a round the silent panel agent
+ * reads) or off (the candidate declined) for an already booked meeting.
+ * Best-effort: the caller records a failure and the booking stands.
+ */
+export async function setMeetingTranscription(
+  ref: MeetingRef,
+  secrets: Record<string, string>,
+  on: boolean,
+): Promise<TranscriptionSwitch> {
+  try {
+    if (ref.meetingProvider === "zoom") return await zoomSwitch(secrets, ref.meetingExternalId, on);
+    if (ref.meetingProvider === "teams")
+      return await teamsSwitch(secrets, ref.meetingExternalId, on);
+    return await meetSwitch(secrets, ref.meetingExternalId, on);
+  } catch (e) {
+    return { ok: false, detail: (e as Error).message.slice(0, 300) };
+  }
 }
 
 /* ----------------------------------------------------------------- dispatch */
