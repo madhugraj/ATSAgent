@@ -3,6 +3,7 @@ import { createServerFn } from "@tanstack/react-start";
 
 import { requireIdentity, type AppRole } from "./auth.middleware";
 import { db } from "../server/db";
+import { taskIsRemindable } from "../server/agents/task-liveness";
 import {
   agentIssues,
   agentPolicies,
@@ -287,10 +288,13 @@ export const myNotifications = createServerFn({ method: "GET" })
           createdAt: agentTasks.createdAt,
         })
         .from(agentTasks)
+        .innerJoin(agentRuns, eq(agentRuns.id, agentTasks.runId))
         .where(
           and(
             eq(agentTasks.orgId, orgId),
             eq(agentTasks.status, "open"),
+            // Never pop up a request whose agent stopped or whose subject was deleted.
+            taskIsRemindable(),
             member.isOwner
               ? undefined
               : or(

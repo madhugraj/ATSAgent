@@ -35,5 +35,8 @@ export async function eraseCandidatesCore(
     if (file.resumeFilePath) await deleteObject(file.resumeFilePath);
   }
   await db.delete(candidates).where(and(inArray(candidates.id, ids), eq(candidates.orgId, orgId)));
+  // Agent requests about these candidates' applications can no longer be decided.
+  const { afterSubjectsDeleted } = await import("./agents/runtime.server");
+  await afterSubjectsDeleted(orgId);
   return found.map(({ id, fullName }) => ({ id, fullName }));
 }

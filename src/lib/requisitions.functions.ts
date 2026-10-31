@@ -103,6 +103,8 @@ export const deleteRequisition = createServerFn({ method: "POST" })
       entityId: req.id,
       detail: { code: req.code, title: req.title, reason: data.reason?.trim() || null },
     });
+    const { afterSubjectsDeleted } = await import("../server/agents/runtime.server");
+    await afterSubjectsDeleted(context.orgId);
     return { ok: true as const, code: req.code };
   });
 

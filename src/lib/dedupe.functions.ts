@@ -161,6 +161,9 @@ export const mergeCandidatesFn = createServerFn({ method: "POST" })
     await db
       .delete(candidates)
       .where(and(inArray(candidates.id, dupeIds), eq(candidates.orgId, context.orgId)));
+    // Agent requests about a duplicate's dropped applications no longer apply.
+    const { afterSubjectsDeleted } = await import("../server/agents/runtime.server");
+    await afterSubjectsDeleted(context.orgId);
 
     return { merged: others.length, movedApplications: moved };
   });
