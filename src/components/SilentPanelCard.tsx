@@ -71,9 +71,10 @@ export function SilentPanelCard({ canEdit }: { canEdit: boolean }) {
         When on, the online interview rounds you choose are transcribed by your own meeting tool
         (Teams, Zoom or Google Meet), and the transcript is kept with the candidate. The candidate
         is told in their invite and can ask for it to be switched off; the hiring team records that
-        on the Interviews page. In later steps the agent reads the transcript after the call, sends
-        the panel a factual summary, and compares its own view with the panel's scorecards. It never
-        speaks in the call and never decides — the panel and the HR head do.
+        on the Interviews page. Switch on the L1, L2 and L3 panel agents in Agent settings: after
+        the call each reads its round&apos;s transcript, keeps its own view hidden until the panel
+        has scored, and e-mails the panel a factual summary with no score. They never speak in the
+        call and never decide — the panel and the HR head do.
       </p>
       {p.enabled && missing.length ? (
         <p className="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">

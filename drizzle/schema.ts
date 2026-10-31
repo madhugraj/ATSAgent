@@ -1188,7 +1188,8 @@ export type EmailOutboxKind =
   | "interview_slots"
   | "compensation_form"
   | "offer_negotiation"
-  | "screening_call_booked";
+  | "screening_call_booked"
+  | "panel_summary";
 export type EmailOutboxStatus = "queued" | "sent" | "failed" | "suppressed";
 export type EmailOutboxAttachment = {
   filename: string;
@@ -2109,7 +2110,10 @@ export type AgentType =
   | "distribution"
   | "screening_call"
   | "scheduling_call"
-  | "org_context";
+  | "org_context"
+  | "panel_l1"
+  | "panel_l2"
+  | "panel_l3";
 export type AgentAutonomy = "suggest" | "act_and_notify" | "autonomous";
 export type AgentRunStatus =
   "queued" | "running" | "awaiting_human" | "done" | "failed" | "cancelled";
@@ -2927,6 +2931,56 @@ export const interviewTranscripts = pgTable(
     check(
       "interview_transcripts_provider_check",
       sql`${t.provider} in ('zoom', 'google_meet', 'teams')`,
+    ),
+  ],
+);
+
+/**
+ * The round's panel agent's own view of the call (migration 0061) — hidden
+ * until the panel has scored. Candidate data: deleted with the application.
+ */
+export const panelAssessments = pgTable(
+  "panel_assessments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    interviewId: uuid("interview_id")
+      .notNull()
+      .references(() => interviews.id, { onDelete: "cascade" }),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    level: integer("level").notNull(),
+    agentRunId: uuid("agent_run_id").references(() => agentRuns.id, { onDelete: "set null" }),
+    rating: integer("rating"),
+    verdict: text("verdict").$type<"select" | "hold" | "reject">(),
+    candidate: jsonb("candidate")
+      .$type<import("../src/lib/panel-assessment").CandidateView>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    panel: jsonb("panel")
+      .$type<import("../src/lib/panel-assessment").PanelView>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    injectionSuspected: boolean("injection_suspected").notNull().default(false),
+    assessedAt: timestamp("assessed_at", { withTimezone: true }),
+    summarySentAt: timestamp("summary_sent_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("panel_assessments_interview_key").on(t.interviewId),
+    index("panel_assessments_org_idx").on(t.orgId),
+    index("panel_assessments_application_idx").on(t.applicationId),
+    check("panel_assessments_level_check", sql`${t.level} between 1 and 3`),
+    check(
+      "panel_assessments_rating_check",
+      sql`${t.rating} is null or ${t.rating} between 1 and 5`,
+    ),
+    check(
+      "panel_assessments_verdict_check",
+      sql`${t.verdict} is null or ${t.verdict} in ('select', 'hold', 'reject')`,
     ),
   ],
 );

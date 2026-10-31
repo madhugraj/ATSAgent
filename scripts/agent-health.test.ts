@@ -912,6 +912,71 @@ describe("silent panel agent", () => {
   });
 });
 
+describe("panel agents", () => {
+  test("a transcript in for hours with no assessment is flagged, only while the level's agent is on", async () => {
+    const {
+      agentPolicies,
+      applications,
+      candidates,
+      interviews,
+      interviewTranscripts,
+      panelAssessments,
+      requisitions,
+    } = await import("../drizzle/schema");
+    const [req] = await db
+      .insert(requisitions)
+      .values({ orgId, code: `H-PA-${stamp}`, title: "Assess Test", status: "approved" } as never)
+      .returning({ id: requisitions.id });
+    const [cand] = await db
+      .insert(candidates)
+      .values({ orgId, fullName: "Unread", email: `unread-${stamp}@cand.local` } as never)
+      .returning({ id: candidates.id });
+    const [app] = await db
+      .insert(applications)
+      .values({ orgId, requisitionId: req!.id, candidateId: cand!.id, stage: "l2" } as never)
+      .returning({ id: applications.id });
+    const [r] = await db
+      .insert(interviews)
+      .values({
+        orgId,
+        applicationId: app!.id,
+        level: 2,
+        scheduledAt: new Date(Date.now() - 5 * 3600_000),
+        status: "completed",
+        transcription: "ready",
+      } as never)
+      .returning({ id: interviews.id });
+    await db.insert(interviewTranscripts).values({
+      orgId,
+      interviewId: r!.id,
+      applicationId: app!.id,
+      provider: "zoom",
+      segments: [],
+      fetchedAt: new Date(Date.now() - 3 * 3600_000),
+    });
+    const rule = async () => (await open()).find((i) => i.rule === "panel.assessment_missing");
+    // The L2 panel agent is off: nobody was meant to read it.
+    await evaluate();
+    expect(await rule()).toBeUndefined();
+    await db.insert(agentPolicies).values({ orgId, agentType: "panel_l2", enabled: true } as never);
+    await evaluate();
+    expect(await rule()).toMatchObject({ agentType: "panel_l2", severity: "warning" });
+    // Assessed: resolved.
+    await db.insert(panelAssessments).values({
+      orgId,
+      interviewId: r!.id,
+      applicationId: app!.id,
+      level: 2,
+      assessedAt: new Date(),
+    });
+    await evaluate();
+    expect(await rule()).toBeUndefined();
+    await db.delete(agentPolicies).where(eq(agentPolicies.orgId, orgId));
+    await db.delete(requisitions).where(eq(requisitions.id, req!.id));
+    await db.delete(candidates).where(eq(candidates.id, cand!.id));
+  });
+});
+
 describe("organisation context rules", () => {
   const days = (n: number) => new Date(Date.now() - n * 864e5);
 

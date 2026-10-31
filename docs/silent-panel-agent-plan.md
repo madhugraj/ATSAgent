@@ -1,7 +1,7 @@
 # Silent panel agents (L1 / L2 / L3) — plan
 
-Status: **S0 and S1 built** (2026-10-31); the live check on real accounts is
-still to do. S1 (migration 0060): the switch and rounds on the Organisation
+Status: **S0, S1 and S2 built** (2026-10-31); the live check on real accounts
+is still to do. S1 (migration 0060): the switch and rounds on the Organisation
 page (`panel_agent_settings`, audited); transcription switched on with the
 provider right after booking (`syncRoundTranscription`) and off when the
 candidate declines (_Candidate declined_ on Interviews, audited, transcript
@@ -9,6 +9,19 @@ deleted); the consent line in the invite; the read-transcript permission asked
 at connect time only while the agent is on; the fetch sweep on the agent tick
 into `interview_transcripts` (event `interview.transcript_ready`); health rule
 `panel.transcript_missing` (src/server/panel/transcripts.server.ts).
+S2 (migration 0061): the L1, L2 and L3 panel agents (`panel_l1`–`panel_l3`,
+1.0.0, one definition, risk tier high, owner HR head), started by
+`interview.transcript_ready` for the round's own level when switched on in
+Agent settings. Tools `get_round_for_panel`, `assess_round` (feature
+`panel_assess`) and `send_panel_summary` (feature `panel_summary`, e-mail kind
+`panel_summary`) are level-checked and never hand the agent the transcript or
+its score — counts only, so nothing reaches an approval card or the run log
+(src/server/panel/assess.server.ts). The system keeps only evidence and
+protected-ground quotes really in the transcript and only the round's own
+competencies, counts talk time and the panel's questions itself, and drops any
+summary sentence carrying a judgement (src/lib/panel-assessment.ts). Hidden
+view in `panel_assessments`; health rule `panel.assessment_missing`; one
+rehearsal per agent.
 
 S0 status: Every booked round records its meeting provider and reference
 (`interviews.meeting_provider` / `meeting_external_id`, migration 0059, read

@@ -49,6 +49,9 @@ export const AI_FEATURES = [
   "agent_scheduling_call",
   "agent_followup",
   "agent_org_context",
+  "agent_panel_l1",
+  "agent_panel_l2",
+  "agent_panel_l3",
   // Organisation context agent (docs/org-context-agent-plan.md): the org desk
   // conversation turns, website-page extraction and document OCR.
   "org_desk",
@@ -64,6 +67,10 @@ export const AI_FEATURES = [
   "screening_call",
   // Live voice: the call to pick an interview time (docs/voice-scheduling-call-plan.md).
   "scheduling_call",
+  // Silent panel agents (docs/silent-panel-agent-plan.md): the agent's own
+  // assessment of an interview call, and the panel's factual summary of it.
+  "panel_assess",
+  "panel_summary",
 ] as const;
 
 export type AiFeature = (typeof AI_FEATURES)[number];

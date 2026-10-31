@@ -14,7 +14,13 @@ import { sourceLabel } from "@/lib/job-channels";
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
 
 import { db } from "../db";
-import { agentIssues, agentRuntimeHeartbeat, type AgentIssueSeverity } from "@db/schema";
+import {
+  agentIssues,
+  agentRuntimeHeartbeat,
+  type AgentIssueSeverity,
+  type AgentType,
+} from "@db/schema";
+import { loadPolicy } from "./policy";
 import { writeAudit } from "../audit";
 import { log } from "../log";
 
@@ -74,6 +80,8 @@ export const HEALTH = {
   unavailableLeadHours: 24,
   /** Silent panel agent: interview calls whose transcript never came, in 7 days. */
   transcriptsMissing7d: 1,
+  /** …a transcript in this long without the level's panel agent assessing it (hours). */
+  assessmentWaitHours: 2,
   /** Model replies cut off at the output limit without acting, in 24 h. */
   cutOffReplies24h: 2,
   /** One run asking people this many questions (7 days) is going round in circles. */
@@ -640,6 +648,34 @@ export const RULES: Rule[] = [
           detail: { rounds: x.n, latestReason: x.reason },
         },
       ];
+    },
+  },
+  {
+    id: "panel.assessment_missing",
+    element: "skills",
+    severity: "warning",
+    description: `An interview call's transcript has been in for ${HEALTH.assessmentWaitHours} hours or more and its level's panel agent (switched on) has not assessed it — its assessment failed or the run is waiting for a person's approval. That round will have no independent check unless it is assessed before the panel finishes scoring.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ level: number; n: number }>(sql`
+        select i.level, count(*)::int n
+        from interviews i join interview_transcripts t on t.interview_id = i.id
+        where i.org_id = ${orgId} and i.transcription = 'ready'
+          and t.fetched_at < now() - make_interval(hours => ${HEALTH.assessmentWaitHours})
+          and t.fetched_at >= now() - interval '7 days'
+          and not exists (select 1 from panel_assessments a
+            where a.interview_id = i.id and a.assessed_at is not null)
+        group by i.level`);
+      const out: Finding[] = [];
+      for (const x of r) {
+        const agentType = `panel_l${x.level}` as AgentType;
+        if (!(await loadPolicy(orgId, agentType)).enabled) continue;
+        out.push({
+          agentType,
+          title: `${x.n} L${x.level} interview call(s) with a transcript but no assessment`,
+          detail: { level: x.level, rounds: x.n },
+        });
+      }
+      return out;
     },
   },
   {

@@ -763,6 +763,32 @@ export function scenarios(): ScriptedScenario[] {
         say("A stand-in was approved; Kiran keeps the booked time."),
       ],
     },
+    // Silent panel agents (docs/silent-panel-agent-plan.md): one rehearsal per level.
+    ...([1, 2, 3] as const).map((level): ScriptedScenario => ({
+      name: `panel_l${level}: assesses the call and sends the panel a factual summary`,
+      agentType: `panel_l${level}`,
+      autonomy: "autonomous",
+      setup: async ({ orgId, userId }) => {
+        const requisitionId = await seedRequisition(orgId, userId, "approved");
+        const app = await seedApplication(orgId, requisitionId, "Sana", `l${level}`, 84);
+        const round = await seedTranscribedRound(orgId, app, level);
+        return { requisitionId, app, round };
+      },
+      goal: (d) =>
+        `Assess the L${level} call round=${d["round"]} of app=${d["app"]}\n\nRequisition id: ${d["requisitionId"]}`,
+      expect: {
+        status: "done",
+        calls: ["get_round_for_panel", "assess_round", "send_panel_summary"],
+        neverCalls: ["request_approval"],
+        maxSteps: 6,
+      },
+      script: [
+        (m) => call("r", "get_round_for_panel", { interviewId: fromGoal(m, "round") }),
+        (m) => call("a", "assess_round", { interviewId: fromGoal(m, "round") }),
+        (m) => call("s", "send_panel_summary", { interviewId: fromGoal(m, "round") }),
+        say(`L${level} round with Sana assessed; the panel has its factual summary.`),
+      ],
+    })),
     {
       name: "evaluation: debriefs and asks the hiring manager to decide",
       agentType: "evaluation",
@@ -2341,6 +2367,62 @@ async function seedRequisition(
       goodToHave: [],
     } as never);
   }
+  return r!.id;
+}
+
+/** A held, transcribed interview round of the given level (the panel agents' rehearsals). */
+async function seedTranscribedRound(
+  orgId: string,
+  applicationId: string,
+  level: number,
+): Promise<string> {
+  const { db } = await import("../../src/server/db");
+  const { interviews, interviewTranscripts } = await import("../../drizzle/schema");
+  const [r] = await db
+    .insert(interviews)
+    .values({
+      orgId,
+      applicationId,
+      level,
+      interviewer: "Priya",
+      interviewerEmail: "priya@eval.local",
+      panel: [{ name: "Arun", email: "arun@eval.local" }],
+      scheduledAt: new Date(Date.now() - 2 * 3600_000),
+      durationMins: 45,
+      mode: "online",
+      status: "completed",
+      transcription: "ready",
+    } as never)
+    .returning({ id: interviews.id });
+  const segments = [
+    {
+      speaker: "Priya",
+      text: "Tell us how you run Kubernetes clusters in production?",
+      startMs: 0,
+      endMs: 4000,
+    },
+    {
+      speaker: "Sana",
+      text: "I run three clusters and I cut p99 latency by forty percent with request batching.",
+      startMs: 5000,
+      endMs: 20000,
+    },
+    { speaker: "Arun", text: "Which Go services did you own?", startMs: 21000, endMs: 24000 },
+    {
+      speaker: "Sana",
+      text: "The ingest service and the scheduler, both in Go.",
+      startMs: 25000,
+      endMs: 40000,
+    },
+  ];
+  await db.insert(interviewTranscripts).values({
+    orgId,
+    interviewId: r!.id,
+    applicationId,
+    provider: "teams",
+    segments,
+    segmentCount: segments.length,
+  });
   return r!.id;
 }
 

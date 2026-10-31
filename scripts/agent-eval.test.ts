@@ -30,6 +30,36 @@ const JD = {
   full_text: "# Platform SRE",
 };
 const AI_FIXTURES: Record<string, unknown> = {
+  // Silent panel agents: the evidence quote is in the rehearsal's transcript.
+  panel_assess: {
+    candidate_speaker: "Sana",
+    rating: 4,
+    verdict: "select",
+    competencies: [
+      {
+        name: "Kubernetes",
+        rating: 4,
+        evidence: ["I cut p99 latency by forty percent with request batching"],
+        note: "Concrete production work.",
+      },
+    ],
+    strengths: ["Production Kubernetes experience"],
+    gaps: ["Little on testing"],
+    open_questions: ["How was the batching rolled out safely?"],
+    panel: { covered: ["Kubernetes"], missed: [], off_limits: [], notes: null },
+    suspected_prompt_injection: false,
+  },
+  panel_summary: {
+    overview: "A short technical conversation about running Kubernetes and Go services.",
+    topics: [
+      {
+        topic: "Kubernetes",
+        asked: "How the candidate runs clusters in production.",
+        answered: "Runs three clusters; cut p99 latency by forty percent with request batching.",
+      },
+    ],
+    suspected_prompt_injection: false,
+  },
   offer_letter: {
     subject: "Offer of employment — Platform SRE",
     greeting: "Dear Sana,",
@@ -79,6 +109,7 @@ const { registerPhase4Tools } = await import("../src/server/agents/tools-phase4"
 const { registerSourcingTools } = await import("../src/server/agents/tools-sourcing");
 const { registerDistributionTools } = await import("../src/server/agents/tools-distribution");
 const { registerOrgTools } = await import("../src/server/agents/tools-org");
+const { registerPanelTools } = await import("../src/server/agents/tools-panel");
 const {
   registerPhase1Agents,
   registerPhase2Agents,
@@ -86,6 +117,7 @@ const {
   registerPhase4Agents,
   registerPhase6Agents,
   registerOrgAgents,
+  registerPanelAgents,
 } = await import("../src/server/agents/definitions");
 const { runScenario } = await import("../src/server/agents/eval.server");
 const { scenarios } = await import("./evals/scenarios");
@@ -99,12 +131,14 @@ const registerReal = () => {
   registerSourcingTools();
   registerDistributionTools();
   registerOrgTools();
+  registerPanelTools();
   registerPhase1Agents();
   registerPhase2Agents();
   registerPhase3Agents();
   registerPhase4Agents();
   registerPhase6Agents();
   registerOrgAgents();
+  registerPanelAgents();
 };
 
 beforeAll(() => {

@@ -18,6 +18,36 @@ export type EvalExplainer = {
 };
 
 export const EVAL_CATALOG: Record<string, EvalExplainer> = {
+  "panel_l1: assesses the call and sends the panel a factual summary": {
+    title: "The L1 silent panel member reads the call, keeps its view hidden and briefs the panel",
+    situation:
+      "An L1 interview with two people on the panel has just ended, and the call's transcript is in.",
+    checks: [
+      "It checks the round first, then records its own view of the candidate and of the round.",
+      "It never says its score or verdict, and the panel's summary carries none.",
+      "Everyone on the panel gets the same factual summary of what was asked and answered, once.",
+    ],
+  },
+  "panel_l2: assesses the call and sends the panel a factual summary": {
+    title: "The L2 silent panel member reads the call, keeps its view hidden and briefs the panel",
+    situation:
+      "An L2 interview with two people on the panel has just ended, and the call's transcript is in.",
+    checks: [
+      "It checks the round first, then records its own view of the candidate and of the round.",
+      "It never says its score or verdict, and the panel's summary carries none.",
+      "Everyone on the panel gets the same factual summary of what was asked and answered, once.",
+    ],
+  },
+  "panel_l3: assesses the call and sends the panel a factual summary": {
+    title: "The L3 silent panel member reads the call, keeps its view hidden and briefs the panel",
+    situation:
+      "An L3 interview with two people on the panel has just ended, and the call's transcript is in.",
+    checks: [
+      "It checks the round first, then records its own view of the candidate and of the round.",
+      "It never says its score or verdict, and the panel's summary carries none.",
+      "Everyone on the panel gets the same factual summary of what was asked and answered, once.",
+    ],
+  },
   "copilot: hands a new role to the requisition agent after confirmation": {
     title: "Passes a new hiring need to the right agent",
     situation:

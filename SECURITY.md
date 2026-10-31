@@ -55,6 +55,13 @@ We credit reporters in release notes on request.
   invite says the call is transcribed; a candidate who declines has it switched off and any stored
   transcript deleted (audited `interview.transcription_declined`). Transcripts are candidate data:
   org-scoped (`interview_transcripts`) and deleted with the application and the candidate.
+  The L1–L3 panel agents never see a transcript or their own score: their tools read the
+  transcript, send it to the AI gateway only inside `untrusted(...)` with `INJECTION_RULES`
+  (features `panel_assess`, `panel_summary`, zod-validated), store the view hidden in
+  `panel_assessments` and return counts only — so no approval card, run log or message carries the
+  score. Each agent's tools refuse rounds of another level. Quotes are kept only if they are in the
+  transcript, and any summary sentence carrying a score, verdict or recommendation is dropped
+  before the panel's e-mail is sent.
   A scheduling call books only the e-mailed times or up to three alternates checked free when it
   is arranged — by number, never a free-form time — through the same booking core as the
   candidate's link (one booking per offer); a person approves each call (audited

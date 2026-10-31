@@ -69,6 +69,27 @@ export const AGENT_CATALOG: AgentInfo[] = [
       "Builds and keeps the organisation's profile from its records, its own website and its documents — the approved facts every other agent works from. Every version waits for the HR head's approval.",
   },
   {
+    type: "panel_l1",
+    label: "L1 panel agent",
+    phase: 3,
+    description:
+      "A silent member of every L1 interview panel: reads the call's transcript from your own meeting tool, keeps its own view of the candidate and of how the round was run hidden until the panel has scored, and e-mails the panel a factual summary of the call — never a score. It never speaks in the call and never decides.",
+  },
+  {
+    type: "panel_l2",
+    label: "L2 panel agent",
+    phase: 3,
+    description:
+      "A silent member of every L2 interview panel: reads the call's transcript from your own meeting tool, keeps its own view of the candidate and of how the round was run hidden until the panel has scored, and e-mails the panel a factual summary of the call — never a score. It never speaks in the call and never decides.",
+  },
+  {
+    type: "panel_l3",
+    label: "L3 panel agent",
+    phase: 3,
+    description:
+      "A silent member of every L3 interview panel: reads the call's transcript from your own meeting tool, keeps its own view of the candidate and of how the round was run hidden until the panel has scored, and e-mails the panel a factual summary of the call — never a score. It never speaks in the call and never decides.",
+  },
+  {
     type: "screening",
     label: "Screening agent",
     phase: 2,

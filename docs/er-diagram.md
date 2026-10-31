@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-97 tables across 9 domains.
+98 tables across 9 domains.
 
 ## Identity & access
 
@@ -1278,6 +1278,10 @@ erDiagram
 | `org_profiles` | `website_confirmed_by` | `users` | no action |
 | `panel_agent_settings` | `org_id` | `organizations` | cascade |
 | `panel_agent_settings` | `updated_by` | `users` | no action |
+| `panel_assessments` | `agent_run_id` | `agent_runs` | no action |
+| `panel_assessments` | `application_id` | `applications` | cascade |
+| `panel_assessments` | `interview_id` | `interviews` | cascade |
+| `panel_assessments` | `org_id` | `organizations` | cascade |
 | `phone_screening_settings` | `org_id` | `organizations` | cascade |
 | `phone_screening_settings` | `updated_by` | `users` | no action |
 | `requisition_board_postings` | `org_id` | `organizations` | cascade |
@@ -1424,6 +1428,7 @@ erDiagram
 | `org_profiles` | Organisations & masters | 12 | — |
 | `organizations` | Organisations & masters | 26 | (slug), (capture_token), (capture_token_hash) |
 | `panel_agent_settings` | — | 5 | — |
+| `panel_assessments` | — | 14 | (interview_id) |
 | `phone_screening_settings` | Screening & interviews | 15 | — |
 | `platform_admins` | Identity & access | 6 | (email) |
 | `product_catalogue_commercials` | Organisations & masters | 8 | — |

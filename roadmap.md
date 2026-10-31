@@ -5,7 +5,7 @@
 - [x] S0 (migration 0059): every booked round records its meeting provider and reference, read from the join link on the server (existing rounds backfilled); `fetchTranscript` reads a held call's transcript back from Zoom, Teams or Meet; `scripts/spike-transcripts.ts`
 - [x] S1 (migration 0060): the switch and rounds (Organisation → Silent panel agent; audited); transcription switched on with the provider after booking (off again when the candidate declines); the read-transcript permission asked at connect time only when the agent is on; the consent line in the candidate's invite; _Candidate declined_ on Interviews (audited; deletes the transcript); the fetch sweep on the agent tick (10 min after the end, backing off, given up after 6 h) into `interview_transcripts`, event `interview.transcript_ready`; health rule `panel.transcript_missing`
 - [ ] S0/S1 on real accounts: reconnect a provider with the transcript permission, hold a call, check the transcript arrives
-- [ ] S2: the L1/L2/L3 panel agents — assessment, the panel's factual summary, hidden scores
+- [x] S2 (migration 0061): the L1, L2 and L3 panel agents (1.0.0, risk tier high, switched on in Agent settings) started by `interview.transcript_ready` for their own level; `assess_round` stores the hidden view in `panel_assessments` (quotes checked against the transcript, round competencies only, talk time and questions counted in code, prompt injection flagged) and returns counts only; `send_panel_summary` e-mails each panellist a factual summary with judgement sentences removed; health rule `panel.assessment_missing`; one rehearsal per agent
 - [ ] S3: agree / partial / disagree against the panel's scorecards; the HR head's cards
 - [ ] S4–S5: views, settings for thresholds, a real test
 

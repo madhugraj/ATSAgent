@@ -172,7 +172,10 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
       | "interview"
       | "evaluation"
       | "offer"
-      | "onboarding",
+      | "onboarding"
+      | "panel_l1"
+      | "panel_l2"
+      | "panel_l3",
     goal: string,
     /** Per-candidate work (evaluation) de-duplicates on the application instead. */
     subject: { type: "requisition" | "application"; id: string } = {
@@ -301,6 +304,17 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
       }`,
       p.applicationId ? { type: "application", id: p.applicationId } : undefined,
     );
+  }
+
+  // Silent panel agents: the round's own level's agent reads the call.
+  if (e.type === "interview.transcript_ready" && applicationId) {
+    const p = e.payload as { level?: number; interviewId?: string };
+    if (p.interviewId && (p.level === 1 || p.level === 2 || p.level === 3))
+      await dispatch(
+        `panel_l${p.level}`,
+        `The call of the L${p.level} interview round ${p.interviewId} (candidate application ${applicationId}, ${req.code} "${req.title}") has its transcript. Assess it and send the panel the factual summary.`,
+        { type: "application", id: applicationId },
+      );
   }
 
   if (e.type === "interview.panellist_unavailable" && applicationId) {
