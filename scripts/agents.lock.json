@@ -39,6 +39,18 @@
     "version": "1.0.5",
     "hash": "ec13eeb7cd2badb5b7630e9ce3f63232f15fb2e6e9afb4b6738cf3d51b782eb3"
   },
+  "panel_l1": {
+    "version": "1.1.0",
+    "hash": "ca46cf76486b3b41dc36dc341e8bfcf1f8865d442e772312175dc6adc3844865"
+  },
+  "panel_l2": {
+    "version": "1.1.0",
+    "hash": "a2c01acd21070b7c7b3bfa484559fdae23be9137b99f14a866c8781049294116"
+  },
+  "panel_l3": {
+    "version": "1.1.0",
+    "hash": "b72ba6fc65692be16d1a5de93889f1f702ed0c67baa70a12b26f9d66b7c9ee0e"
+  },
   "publishing": {
     "version": "1.4.4",
     "hash": "8cfceff5e69ef697711f98e88a1f334433740269902aa5a43447b7b7a3b89786"

@@ -1223,6 +1223,8 @@ export type Database = {
           scheduled_at: string | null;
           status: string;
           teams_link: string | null;
+          transcription: string;
+          transcription_detail: string | null;
         };
         Insert: {
           agenda?: string | null;

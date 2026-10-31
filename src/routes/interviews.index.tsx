@@ -15,6 +15,7 @@ import {
   requisitionsQuery,
 } from "@/lib/data";
 import { scheduleInterview, submitScorecard } from "@/lib/interviews.functions";
+import { declineRoundTranscription } from "@/lib/panel-agent.functions";
 import { createMeetingLink, meetingProviders } from "@/lib/meetings.functions";
 import { buildIcs, downloadIcs } from "@/lib/ics";
 import { STAGE_LABEL } from "@/lib/lifecycle";
@@ -59,6 +60,14 @@ const LEVELS = [
   { level: 3, label: "L3 — Leadership & culture" },
 ];
 
+/** A round's call transcript for the silent panel agent, in a word or two. */
+const TRANSCRIPTION_LABEL: Record<string, string> = {
+  requested: "Transcribed ·",
+  ready: "Transcript in ·",
+  unavailable: "No transcript",
+  candidate_declined: "Not transcribed (candidate's wish)",
+};
+
 function localInputValue(date: Date) {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
@@ -76,6 +85,24 @@ function Interviews() {
   const doSchedule = useServerFn(scheduleInterview);
   const doSubmit = useServerFn(submitScorecard);
   const mintLink = useServerFn(createMeetingLink);
+  const doDecline = useServerFn(declineRoundTranscription);
+
+  /** The candidate replied that they do not want the call transcribed. */
+  async function declineTranscription(interviewId: string) {
+    if (
+      !window.confirm(
+        "Record that the candidate does not want this call transcribed? Transcription is switched off and any transcript is deleted.",
+      )
+    )
+      return;
+    try {
+      await doDecline({ data: { interviewId, note: "" } });
+      toast.success("Transcription switched off for this round.");
+      qc.invalidateQueries({ queryKey: ["interviews"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not record that");
+    }
+  }
   const providers = useQuery({
     queryKey: ["meeting_providers"],
     queryFn: () => meetingProviders(),
@@ -624,6 +651,25 @@ function Interviews() {
                                       </Button>
                                     ) : null}
                                   </div>
+                                  {round && round.transcription !== "off" ? (
+                                    <span
+                                      className="flex items-center gap-1 text-[11px] text-muted-foreground"
+                                      title={round.transcription_detail ?? undefined}
+                                    >
+                                      {TRANSCRIPTION_LABEL[round.transcription] ??
+                                        round.transcription}
+                                      {round.transcription === "requested" ||
+                                      round.transcription === "ready" ? (
+                                        <button
+                                          type="button"
+                                          className="underline"
+                                          onClick={() => void declineTranscription(round.id)}
+                                        >
+                                          Candidate declined
+                                        </button>
+                                      ) : null}
+                                    </span>
+                                  ) : null}
                                 </div>
                               )}
                             </td>

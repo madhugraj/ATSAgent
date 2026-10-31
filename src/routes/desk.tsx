@@ -947,6 +947,8 @@ function TaskCard({
   // A screening decision: approve moves the candidate on; declining keeps them
   // in screening or, with a reason, rejects them (the person's decision).
   const screening = kind === "gate" && card["subjectType"] === "screening_decision";
+  // A panel review: approve goes with the panel; declining holds or rejects (with a reason).
+  const review = kind === "gate" && card["subjectType"] === "panel_review";
   const proceed = card["recommendation"] === "proceed";
   // A panel proposal: approve it, or change the people (the decider's choice).
   const panel = kind === "gate" && card["subjectType"] === "panel_approval";
@@ -1051,24 +1053,30 @@ function TaskCard({
               placeholder={
                 screening
                   ? "Why? (required — e.g. the evaluation depth is not enough for this role)"
-                  : sendable
-                    ? "What should change? (e.g. social profiling 25%) — or why you are declining"
-                    : kind === "gate"
-                      ? "Why are you declining? (required — the agent and the team act on it)"
-                      : "Why? (optional — tells the agent what to change)"
+                  : review
+                    ? "Why? (required — kept on record with the candidate)"
+                    : sendable
+                      ? "What should change? (e.g. social profiling 25%) — or why you are declining"
+                      : kind === "gate"
+                        ? "Why are you declining? (required — the agent and the team act on it)"
+                        : "Why? (optional — tells the agent what to change)"
               }
               onChange={(e) => setWhy(e.target.value)}
             />
-            {screening ? (
+            {screening || review ? (
               <div className="flex flex-wrap gap-2">
                 <Button
                   size="sm"
                   variant="outline"
                   disabled={busy || why.trim().length < 3}
-                  title="Nothing moves; your reason is noted on the candidate"
+                  title={
+                    review
+                      ? "The candidate goes on hold; later rounds not yet held are cancelled"
+                      : "Nothing moves; your reason is noted on the candidate"
+                  }
                   onClick={() => decide({ status: "rejected", reason: why.trim() })}
                 >
-                  Keep in screening
+                  {review ? "Put on hold" : "Keep in screening"}
                 </Button>
                 <Button
                   size="sm"
@@ -1142,11 +1150,13 @@ function TaskCard({
             <Button size="sm" disabled={busy} onClick={() => decide({ status: "approved" })}>
               {panel
                 ? "Approve this panel"
-                : screening
-                  ? proceed
-                    ? "Approve — move to interview (L1)"
-                    : "Approve — put on hold"
-                  : "Approve"}
+                : review
+                  ? "Approve — go with the panel"
+                  : screening
+                    ? proceed
+                      ? "Approve — move to interview (L1)"
+                      : "Approve — put on hold"
+                    : "Approve"}
             </Button>
             {panel ? (
               <Button size="sm" variant="outline" disabled={busy} onClick={() => setChanging(true)}>

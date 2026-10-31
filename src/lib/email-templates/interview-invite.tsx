@@ -19,6 +19,8 @@ interface Props {
   /** "the hiring team" / "a panel of 3 from the hiring team" — never a name. */
   withText?: string;
   agenda?: string;
+  /** "yes" when the call is transcribed for the silent panel agent. */
+  transcribed?: string;
 }
 
 const { text, detail, link } = layoutStyles;
@@ -34,6 +36,7 @@ const Email = ({
   whereText,
   withText,
   agenda,
+  transcribed,
 }: Props) => (
   <EmailLayout
     preview={`${roundLabel} scheduled for ${jobTitle}`}
@@ -62,6 +65,14 @@ const Email = ({
     ) : null}
     {withText ? <p style={detail}>With: {withText}</p> : null}
     {agenda ? <p style={text}>{agenda}</p> : null}
+    {transcribed === "yes" ? (
+      <p style={text}>
+        This call will be transcribed so the team has an accurate record, and an AI note-taker uses
+        the transcript to help them review the interview consistently. The people on the panel make
+        the decision. If you would rather the call were not transcribed, reply to this email before
+        the interview and we will switch it off; it will not affect how you are assessed.
+      </p>
+    ) : null}
     <p style={text}>
       A calendar invite (.ics) is attached — please accept it so the slot is held for you. If the
       time does not work, reply to this email and the team will reschedule.
@@ -88,5 +99,6 @@ export const template = {
     whereText: "https://teams.microsoft.com/l/meetup-join/example",
     withText: "a panel of 2 from the hiring team",
     agenda: "Technical discussion on backend architecture and system design.",
+    transcribed: "yes",
   },
 } satisfies TemplateEntry;
