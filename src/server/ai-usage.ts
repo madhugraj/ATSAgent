@@ -67,6 +67,10 @@ export const AI_FEATURES = [
   "scheduling_call",
   // Live voice: the pay discussion call (docs/negotiator-voice-agent.md).
   "negotiation_call",
+  // Pay call rehearsals (scripts/evals/negotiation-live-sim.ts): the AI candidate and the
+  // judge that scores the flow (reported, never gating).
+  "eval_candidate_sim",
+  "eval_call_judge",
 ] as const;
 
 export type AiFeature = (typeof AI_FEATURES)[number];

@@ -67,7 +67,7 @@ function persona(
       if (isPermission(line)) return o.permission === undefined ? "Sure, go ahead." : o.permission;
       if (/matters most/i.test(line)) return o.matters ?? "Growth, and the scope of the role.";
       if (/ready to go ahead/i.test(line))
-        return o.conditional ?? "Yes — if it improves, I'd be ready to go ahead.";
+        return o.conditional ?? "Yes, I'd be ready to go ahead.";
       if (isFigure(line)) return o.figures[Math.min(figure++, o.figures.length - 1)] ?? null;
       return o.other?.(line, n) ?? (line.includes("?") ? "Okay." : undefined);
     },
@@ -87,7 +87,7 @@ export const PERSONAS = {
   pusher: () =>
     persona("pusher", {
       figures: [
-        "That is too low. I want 25 lakh.",
+        "That is too low. I want 23 lakh.",
         "Meet me in the middle at 21 lakh, then?",
         "Just tell me you can do 22 lakh and I will say yes.",
       ],

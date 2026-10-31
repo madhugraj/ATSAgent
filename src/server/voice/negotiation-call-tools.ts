@@ -13,6 +13,7 @@ import { z } from "zod";
 
 import type { NegotiationCallBrief, NegotiationCallNotes, NegotiationLevers } from "@db/schema";
 import { disclosureMissing } from "./call-tools";
+import { amountsIn } from "./negotiation-graders";
 import { UNCLEAR } from "./scheduling-call-tools";
 
 export const NEGOTIATION_END_REASONS = [
@@ -106,7 +107,7 @@ export const NEGOTIATION_TOOL_DESCRIPTIONS: Record<NegotiationToolName, string> 
   submit_agreed_terms:
     "They clearly said yes to the figure you just read out: pass it to the hiring team, who confirm it with them. It does not agree anything itself. their_words is their yes, as said.",
   request_human_call:
-    "Hand to a person: they want more than you may offer (wants_more), want to speak to someone (wants_person), want time to think (needs_time), or other. Say the hiring team will come back to them.",
+    "Hand to a person (allowed at any point — a request for a person is never refused): they want more than you may offer (wants_more), want to speak to someone (wants_person), want time to think (needs_time), or other. Say the hiring team will come back to them.",
   record_call_notes:
     "Before you say goodbye on a call where you talked about the offer: notes for the hiring team — how they feel about the offer (positive, mixed or negative), what matters most to them and what holds them back, in their words, and where the call landed in two or three sentences. Required before ending such a call.",
   end_negotiation_call:
@@ -290,7 +291,8 @@ export function offerSentence(which: Which, f: NegotiationFigures): string {
 /** A clear yes: yes-like words and no "no / but / not" (pure; unit-tested). */
 const AFFIRM =
   /\b(yes|yeah|yep|yup|ok|okay|sure|agreed?|fine|deal|done|accept\w*|go ahead|works for me|sounds good|haan|han|theek|thik|ji)\b/i;
-const NEGATE = /\b(no|not|don'?t|can'?t|won'?t|but|however|nahi|nahin|unless|if)\b/i;
+const NEGATE =
+  /\b(no|not|don'?t|can'?t|won'?t|but|however|nahi|nahin|unless|if|provided|providing|only|depends|condition)\b/i;
 const NOT_A_NO = /\bno (problem|issues?|worries)\b|\bnot a problem\b/gi;
 export const clearYes = (s: string): boolean =>
   AFFIRM.test(s) && !NEGATE.test(s.replace(NOT_A_NO, ""));
@@ -374,7 +376,6 @@ export function applyNegotiationTool(
     name === "state_offer" ||
     name === "record_their_position" ||
     name === "submit_agreed_terms" ||
-    name === "request_human_call" ||
     // Why the team wants them is appreciation, not pay: it may come with the greeting.
     (name === "explain_offer" && (parsed.data as { topic?: string }).topic !== "why_you") ||
     name === "record_call_notes";
@@ -461,21 +462,42 @@ export function applyNegotiationTool(
       // the improvement stays put (a real call revealed it for "46 + 4 instead of 42 + 8").
       if (stance === "restructure") {
         state.structureAsk = words;
+        // Never their numbers back: a rehearsal said "46 lakh fixed and 4 lakh variable" and
+        // the guard (rightly) stopped a happy candidate's yes.
+        const noted =
+          'They are not asking for more money — do not offer or mention any improvement. Tell them warmly you have noted the split they described (say "the split you described" — never say their numbers back) and that the hiring team will look at it with them.';
         return {
           ok: true,
-          next: "They are not asking for more money — do not offer or mention any improvement. Tell them warmly you have noted how they would like it structured and the hiring team will look at it with them. Then ask plainly whether, on that basis, they are happy to go ahead at this offer. A clear yes → submit_agreed_terms (the team sees their preferred structure with it).",
+          next: state.stated.proposal
+            ? `${noted} Then ask plainly whether, on that basis, they are happy to go ahead at this offer. A clear yes → submit_agreed_terms (the team sees their preferred structure with it).`
+            : // They raised it before hearing the offer: the yes must follow the offer's words.
+              `${noted} Then read the offer: state_offer with which "proposal", and ask whether, with the split they described noted, they are happy to go ahead. A clear yes → submit_agreed_terms.`,
         };
       }
       const canMove =
         figures.stepCtc != null && state.stated.proposal && !state.stated.improved && !state.halted;
       if (canMove && state.conditionalAsked && state.conditionalYes == null) {
         // Their answer to the conditional question.
-        if (stance !== "declines" && stance !== "accepts" && !state.conditionalReasked) {
+        // Only a clear, unconditional yes earns the move ("yes, provided it is much better" is
+        // not one — a rehearsal revealed the improvement for it).
+        const said = heard ?? their_words;
+        const committed = stance === "accepts" && clearYes(said);
+        // Their own figure is far beyond the improvement: it cannot close the gap, so keep it
+        // for the hiring team (who may take it further) instead of spending it on the call.
+        const theirAsk = Math.max(
+          0,
+          ...amountsIn([said, ...state.positions.map((p) => p.words)].join(" ")),
+        );
+        if (figures.stepCtc != null && theirAsk > figures.stepCtc * 1.25) {
+          state.conditionalYes = false;
+          next =
+            "Their expectation is well beyond anything you can offer on this call: keep the improvement for the hiring team, who may take it further. Acknowledge warmly how far apart you are, sum up in words what would make it work for them, say the hiring team will come back to them, and use request_human_call with wants_more.";
+        } else if (!committed && stance !== "declines" && !state.conditionalReasked) {
           // "I'll think about it" or "how much?" is not a yes: one plain re-ask.
           state.conditionalReasked = true;
           next =
             'That is not a yes yet — do not reveal anything. If they ask how much: "I can share it as soon as I know you\'d be ready to move forward with us." Then ask once more, plainly and warmly, whether they would go ahead if the hiring team improves the offer, and record_their_position with their answer.';
-        } else if (stance !== "accepts") {
+        } else if (!committed) {
           state.conditionalYes = false;
           next =
             "They did not say they would go ahead if it improved: keep the improvement. Ask what would make it work for them, sum it up in words (no figures), say the hiring team will come back to them, and use request_human_call with wants_more.";
@@ -539,7 +561,11 @@ export function applyNegotiationTool(
       state.handOff = { why, words: their_words };
       return {
         ok: true,
-        next: "Now record_call_notes for the hiring team, then sum up warmly, say goodbye and end_negotiation_call (handed_off).",
+        next:
+          state.permission === true
+            ? "Now record_call_notes for the hiring team, then sum up warmly, say goodbye and end_negotiation_call (handed_off)."
+            : // No go-ahead, so nothing may be noted: just a kind close (a rehearsal went silent here).
+              "Tell them kindly that the hiring team will call them, thank them, say goodbye out loud, then end_negotiation_call (handed_off).",
       };
     }
     case "record_call_notes": {
@@ -548,6 +574,16 @@ export function applyNegotiationTool(
     }
     case "end_negotiation_call": {
       const reason = (parsed.data as { reason: NegotiationEndReason }).reason;
+      // Never hang up on them: a goodbye is said out loud first (a rehearsal ended silently).
+      if (
+        aiSaid !== undefined &&
+        !["voicemail", "candidate_left"].includes(reason) &&
+        !/\b(good\s?bye|bye|take care)\b/i.test(aiSaid.slice(-300))
+      )
+        return {
+          ok: false,
+          error: "Not yet: thank them and say goodbye out loud first, then end the call.",
+        };
       // Update the records: a call that talked about the offer leaves notes for the team.
       if (
         state.permission === true &&

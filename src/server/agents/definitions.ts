@@ -734,7 +734,18 @@ export function registerPhase3Agents(): void {
     // unlocks the improvement, is recorded for the team and closes at the current figure;
     // a positive answer is closed with a plain question; notes come before goodbye; what the
     // team valued is said in its approved words, nothing added.
-    version: "0.6.0",
+    // 0.6.1 (rehearsals against an AI candidate — smart, sweet, adversarial, clumsy, clean):
+    // "yes, provided it is much better" is not a commitment; an expectation far beyond the
+    // improvement keeps the move for the team; a request for a person is never refused;
+    // a misheard figure is read again; "I need time" is closed warmly with next steps;
+    // a goodbye is said before the call ends; no exclamation marks.
+    // 0.6.2 (the adversarial rehearsal scored 2/5: safe but robotic): de-escalates —
+    // names their frustration, never repeats a sentence, hands to a person at once when asked
+    // and closes kindly (before a go-ahead there is nothing to note; every call ends with a
+    // spoken goodbye).
+    // 0.6.3 (the clean rehearsal): never says their split back ("the split you described");
+    // a split raised before the offer is noted, then the offer is read, then the yes.
+    version: "0.6.3",
     owner: "hr_head",
     responsibility:
       "Holds one AI phone call with a candidate about the pay for their offer: says it is an AI, tells them which role and organisation and where they stand, wins their interest from approved facts, frames the approved figure and extras around what matters to them, may offer one pre-approved improved figure, and brings a clear answer back to the people who decide.",

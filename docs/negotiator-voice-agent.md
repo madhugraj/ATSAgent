@@ -230,3 +230,19 @@ offer ends; shown on the candidate's pay discussion) **and close warmly.**
    figure; a positive answer is closed plainly ("Shall I let the hiring team know you are
    happy to go ahead?"); the step results after a yes or a hand-off say to record the notes
    before goodbye; what the team valued is said in its approved words.
+
+### Rehearsals against an AI candidate (2026-10-31)
+
+`scripts/evals/negotiation-live-sim.ts` plays the real agent (prompt, tools, code rules,
+live guard, graders) in text mode against an AI candidate in five personas — smart, sweet,
+adversarial, clumsy, clean — and a judge scores the flow (reported, never gating; AI
+features `eval_candidate_sim`, `eval_call_judge`). What the rehearsals found and fixed
+(0.6.1–0.6.3): "yes, provided it is much better" was taken as a commitment (now only a
+clear, unconditional yes; an expectation more than 25% above the improvement keeps the move
+for the team); a request for a person was refused before the go-ahead; misheard figures
+were not read again; "I need time" ended abruptly; calls ended without a spoken goodbye
+(now enforced); a hostile candidate got repeated sentences (now: name the feeling, never
+repeat, hand off at once); the assistant said the candidate's split back ("46 lakh fixed")
+and the guard stopped a happy yes (now "the split you described"). Final sweep: no rule
+broken in any persona; judge overall 5 (sweet, smart), 4 (clumsy, clean), 3 (adversarial —
+safe, de-escalates and hands off).

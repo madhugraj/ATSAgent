@@ -26,7 +26,7 @@ function earnMove(s: ReturnType<typeof t.freshNegotiationState>, f = FIG) {
   return t.applyNegotiationTool(
     s,
     "record_their_position",
-    { stance: "accepts", their_words: "Yes, if it improves I'd go ahead" },
+    { stance: "accepts", their_words: "Yes, I would go ahead" },
     f,
   );
 }
@@ -128,7 +128,7 @@ describe("negotiation call tools — refusals", () => {
     const yes = t.applyNegotiationTool(
       s,
       "record_their_position",
-      { stance: "accepts", their_words: "Yes, if it improves I'd go ahead" },
+      { stance: "accepts", their_words: "Yes, I would go ahead" },
       FIG,
     );
     expect(yes.ok && String(yes.next)).toContain("19 lakh 50 thousand rupees a year");
@@ -184,6 +184,41 @@ describe("negotiation call tools — refusals", () => {
     expect(t.applyNegotiationTool(s, "state_offer", { which: "improved" }, FIG).ok).toBe(false);
   });
 
+  test("a conditional yes is not a commitment; a far-off expectation keeps the move", () => {
+    const s = started();
+    t.applyNegotiationTool(s, "state_offer", { which: "proposal" }, FIG);
+    t.applyNegotiationTool(
+      s,
+      "record_their_position",
+      { stance: "wants_more", their_words: "too low" },
+      FIG,
+    );
+    const cond = t.applyNegotiationTool(
+      s,
+      "record_their_position",
+      { stance: "accepts", their_words: "Yes, provided it is meaningfully better" },
+      FIG,
+    );
+    expect(cond.ok && String(cond.next)).toMatch(/not a yes yet/);
+    const far = t.freshNegotiationState();
+    t.applyNegotiationTool(far, "record_permission", { granted: true, their_words: "yes" }, FIG);
+    t.applyNegotiationTool(far, "state_offer", { which: "proposal" }, FIG);
+    t.applyNegotiationTool(
+      far,
+      "record_their_position",
+      { stance: "wants_more", their_words: "The market pays 30 lakh for this" },
+      FIG,
+    );
+    const r = t.applyNegotiationTool(
+      far,
+      "record_their_position",
+      { stance: "accepts", their_words: "Yes, I would go ahead" },
+      FIG,
+    );
+    expect(r.ok && String(r.next)).toMatch(/well beyond anything you can offer/);
+    expect(t.applyNegotiationTool(far, "state_offer", { which: "improved" }, FIG).ok).toBe(false);
+  });
+
   test("restructure (same total, different split) never unlocks the improvement", () => {
     const s = started();
     t.applyNegotiationTool(s, "state_offer", { which: "proposal" }, FIG);
@@ -196,6 +231,16 @@ describe("negotiation call tools — refusals", () => {
     expect(r.ok && String(r.next)).toMatch(/not asking for more money/);
     expect(r.ok && String(r.next)).not.toMatch(/lakh/);
     expect(s.structureAsk).toBe("46 fixed and 4 variable instead");
+    expect(r.ok && String(r.next)).toMatch(/never say their numbers back/);
+    // Raised before the offer was read: the offer comes first, then the yes.
+    const early = started();
+    const e = t.applyNegotiationTool(
+      early,
+      "record_their_position",
+      { stance: "restructure", their_words: "46 fixed and 4 variable instead" },
+      FIG,
+    );
+    expect(e.ok && String(e.next)).toMatch(/Then read the offer: state_offer/);
     expect(s.conditionalAsked).toBeFalsy();
     expect(t.applyNegotiationTool(s, "state_offer", { which: "improved" }, FIG).ok).toBe(false);
   });
@@ -227,6 +272,22 @@ describe("negotiation call tools — refusals", () => {
     expect(t.applyNegotiationTool(o, "end_negotiation_call", { reason: "opt_out" }, FIG).ok).toBe(
       true,
     );
+  });
+
+  test("never hang up on them: a goodbye is said before the call ends", () => {
+    const s = started();
+    expect(
+      t.applyNegotiationTool(s, "end_negotiation_call", { reason: "not_now" }, FIG, DISCLOSED).ok,
+    ).toBe(false);
+    expect(
+      t.applyNegotiationTool(
+        s,
+        "end_negotiation_call",
+        { reason: "not_now" },
+        FIG,
+        `${DISCLOSED} Thank you, Meera. Goodbye.`,
+      ).ok,
+    ).toBe(true);
   });
 
   test("what the team valued may come with the greeting, before the go-ahead — no pay", () => {
