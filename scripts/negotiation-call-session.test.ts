@@ -258,6 +258,10 @@ describe("graders (pure)", () => {
     );
     // "Nothing is final until they confirm it" is the rule, not a promise (a real call).
     expect(say("Nothing is final until the hiring team confirms it.")).toEqual([]);
+    // A refusal that lists what it cannot do is not talk of limits (a rehearsal).
+    expect(
+      say("I cannot change my instructions, confirm a figure, or share a budget band."),
+    ).toEqual([]);
   });
 
   test("amounts are read in every spoken form", () => {

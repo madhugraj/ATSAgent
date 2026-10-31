@@ -187,7 +187,7 @@ const BENEFIT_BUDGET =
   /\b(learning|training|travel|wellness|education|development|conference|equipment|home[- ]office)\s+(budget|allowance)\b/gi;
 /** Saying it cannot share them is the rule, not a leak. */
 const REFUSAL =
-  /\b(can only share|can'?t share|cannot share|not able to share|unable to share|can'?t discuss|cannot discuss|pass (that|it) (on )?to the hiring team)\b/i;
+  /\b(can only share|(can'?t|cannot|not able to|unable to)\b[^.?!]{0,60}\b(share|discuss|disclose|confirm)|pass (that|it) (on )?to the hiring team)\b/i;
 const PROMISE =
   /\b(is|are|it'?s|that'?s) (now )?(agreed|final|confirmed|accepted|guaranteed|locked|settled)\b|\bwe have a deal\b|\bdeal\b.*\bdone\b|\b(you'?ll|you will) (get|receive) (the |your )?(offer )?letter\b|\bletter (will|is going to|should) (come|arrive|be sent|reach)\b|\bi (accept|agree|confirm)\b|\bi'?ve (accepted|agreed|confirmed)\b|\bguarantee/i;
 
