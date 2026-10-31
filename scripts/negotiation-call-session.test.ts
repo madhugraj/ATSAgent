@@ -287,6 +287,7 @@ describe("a whole negotiation call (reference agent vs personas)", () => {
     expect(r.seen.opts!.tools!.map((t) => t.name).sort()).toEqual([
       "end_negotiation_call",
       "explain_offer",
+      "record_call_notes",
       "record_permission",
       "record_their_position",
       "request_human_call",
@@ -302,6 +303,8 @@ describe("a whole negotiation call (reference agent vs personas)", () => {
       theirWords: "Yes, that works for me.",
     });
     expect(r.row.consentWords).toBe("Sure, go ahead.");
+    // The records: how they feel and where it landed, for the team.
+    expect(r.after.callOutcome?.notes).toMatchObject({ feeling: "positive" });
     // The call is a run of the Negotiation call agent (its ledger and trace).
     const [run] = await db.select().from(agentRuns).where(eq(agentRuns.id, r.row.agentRunId!));
     expect(run).toMatchObject({ agentType: "negotiation_call", status: "done" });
@@ -567,9 +570,11 @@ describe("the call's brief: context without figures", () => {
   });
 
   test("where they stand: rounds completed, selected — never scores", () => {
-    expect(negBrief.progressWords(3, true)).toMatch(/completed all three interview rounds/);
-    expect(negBrief.progressWords(3, true)).toMatch(/selected them/);
-    expect(negBrief.progressWords(0, false)).toMatch(/would like to make them an offer/);
+    const three = negBrief.progressWords(["Technical depth", "Leadership", "Culture fit"]);
+    expect(three).toBe(
+      "They cleared all three interview rounds — Technical depth, Leadership and Culture fit — and the hiring team selected them for the role.",
+    );
+    expect(negBrief.progressWords([])).toMatch(/selected them/);
   });
 
   test("the prompt carries the context and still no figure", () => {
@@ -580,15 +585,19 @@ describe("the call's brief: context without figures", () => {
       roleTitle: "Head of AI",
       why: "they_replied",
       maxMinutes: 10,
-      progress: negBrief.progressWords(3, true),
+      progress: negBrief.progressWords(["Technical depth", "Leadership", "Culture fit"]),
       orgHighlights: ["We build AI products for hospitals across India."],
       roleHighlights: ["Lead the AI research team and set its direction."],
     });
     expect(p).toContain("Head of AI role at Yavar");
-    expect(p).toContain("completed all three interview rounds");
+    expect(p).toContain(
+      "cleared all three interview rounds — Technical depth, Leadership and Culture fit",
+    );
+    expect(p).toMatch(/Greet and appreciate/);
+    expect(p).toMatch(/Update the records and close/);
     expect(p).toContain("We build AI products for hospitals across India.");
-    expect(p).toMatch(/Understand them before you offer/);
-    expect(p).toMatch(/trade, never give/);
+    expect(p).toMatch(/Create curiosity about the role and the organisation/);
+    expect(p).toMatch(/only with clear visibility/);
     expect(graders.amountsIn(p)).toEqual([]);
   });
 });

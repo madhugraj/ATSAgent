@@ -28,8 +28,8 @@
     "hash": "e9cbe409177ca0f8bf7018f8fea8dc1e4fa90077e3e5e822851c306704e68593"
   },
   "negotiation_call": {
-    "version": "0.4.0",
-    "hash": "ec1f24a32b2f354192a9017cdd2ef8e8e52af8c9a7f0b9093272bdd434de3afa"
+    "version": "0.5.0",
+    "hash": "c944eca2e0b1930fd3339d2191d4a839a8da93bf46d9e10461a2b1bc636a7899"
   },
   "offer": {
     "version": "1.6.2",

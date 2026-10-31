@@ -484,6 +484,21 @@ export function NegotiationSection({ applicationId }: { applicationId: string })
                 : "No yes yet"}
               {` — "${heard.theirWords}"`}
             </dd>
+            {heard.notes ? (
+              <>
+                <dt className="text-muted-foreground">How they feel</dt>
+                <dd>
+                  {heard.notes.feeling === "positive"
+                    ? "Positive"
+                    : heard.notes.feeling === "mixed"
+                      ? "Mixed"
+                      : "Negative"}
+                  {` — matters most: ${heard.notes.priorities}; holding back: ${heard.notes.concerns}`}
+                </dd>
+                <dt className="text-muted-foreground">Call summary</dt>
+                <dd>{heard.notes.summary}</dd>
+              </>
+            ) : null}
           </>
         ) : null}
       </dl>
@@ -749,7 +764,9 @@ function ArrangeCallDialog({
           />
         </div>
         <div className="space-y-1">
-          <Label htmlFor="neg-why">Why the team wants them (up to three lines)</Label>
+          <Label htmlFor="neg-why">
+            What the panel valued — said as appreciation (up to three lines, no scores or names)
+          </Label>
           <Textarea
             id="neg-why"
             rows={3}

@@ -48,14 +48,21 @@ export function safeHighlights(lines: (string | null | undefined)[]): string[] {
   return out;
 }
 
-/** Where they stand, in words the assistant may say (pure; unit-tested). Never scores. */
-export function progressWords(rounds: number, finalComplete: boolean): string {
-  const n = ["", "one", "two", "three", "four", "five"][rounds] ?? String(rounds);
-  if (rounds > 0 && finalComplete)
-    return `They have completed all ${n} interview ${rounds === 1 ? "round" : "rounds"} for the role, and the hiring team has selected them — the team would like to make them an offer.`;
-  if (rounds > 0)
-    return `They have completed ${n} interview ${rounds === 1 ? "round" : "rounds"}, and the hiring team would like to make them an offer.`;
-  return "The hiring team would like to make them an offer for the role.";
+/**
+ * Where they stand (pure; unit-tested). A pay discussion exists only after the
+ * hiring decision, so the candidate cleared every round of the role's plan and
+ * was selected — named by round, never scores, ratings or who interviewed.
+ */
+export function progressWords(roundNames: string[]): string {
+  const names = roundNames.map((n) => n.trim()).filter(Boolean);
+  if (!names.length)
+    return "They cleared the interviews, and the hiring team selected them for the role.";
+  const n = ["", "one", "two", "three", "four", "five"][names.length] ?? String(names.length);
+  const list =
+    names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+  return names.length === 1
+    ? `They cleared the interview round — ${list} — and the hiring team selected them for the role.`
+    : `They cleared all ${n} interview rounds — ${list} — and the hiring team selected them for the role.`;
 }
 
 /** Why the call, from the discussion's state (pure). */
@@ -113,7 +120,7 @@ export async function loadNegotiationBrief(
   if (!row) return null;
   const policy = await phoneScreeningPolicyOf(orgId);
   const [progress, orgHighlights, roleHighlights] = await Promise.all([
-    progressFor(orgId, row.applicationId),
+    progressFor(orgId, row.requisitionId),
     orgFacts(orgId),
     roleFacts(orgId, row.requisitionId),
   ]);
@@ -142,14 +149,14 @@ export async function loadNegotiationBrief(
   };
 }
 
-/** Rounds completed (never how they did). A failure leaves the plain line. */
-async function progressFor(orgId: string, applicationId: string): Promise<string> {
+/** The rounds of the role's interview plan (never how they did). A failure leaves the plain line. */
+async function progressFor(orgId: string, requisitionId: string): Promise<string> {
   try {
-    const { progressOf } = await import("@/lib/interview-plan.server");
-    const p = await progressOf(orgId, applicationId);
-    return progressWords(p.rounds.filter((r) => r.complete).length, p.finalComplete);
+    const { planFor } = await import("@/lib/interview-plan.server");
+    const { plan } = await planFor(orgId, requisitionId);
+    return progressWords(plan.rounds.map((r) => r.name));
   } catch {
-    return progressWords(0, false);
+    return progressWords([]);
   }
 }
 

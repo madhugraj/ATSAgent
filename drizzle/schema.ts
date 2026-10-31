@@ -2812,6 +2812,15 @@ export type NegotiationCallOutcome = {
   /** What the candidate said, as heard. */
   theirWords: string;
   at: string;
+  /** The assistant's notes for the team: how they felt, what matters to them, their concerns. */
+  notes?: NegotiationCallNotes | null | undefined;
+};
+
+export type NegotiationCallNotes = {
+  feeling: "positive" | "mixed" | "negative";
+  priorities: string;
+  concerns: string;
+  summary: string;
 };
 
 /** What can make an offer work besides base pay. */

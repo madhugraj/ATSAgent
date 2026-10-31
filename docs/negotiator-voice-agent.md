@@ -202,3 +202,17 @@ seed)`) plays the whole call through `FakeLine` + the injectable voice session, 
    waits in silence for the go-ahead; the offer's words carry the whole package; a
    `rationale` topic answers "why this figure?"; one simple discovery question. The limits
    grader no longer counts a "learning budget" as a pay limit.
+
+### The flow (0.5.0, from the candidate's view of the sixth call)
+
+At offer stage the candidate cleared every round and was selected; the call delivers good
+news. It follows an HR partner's flow, in order: **introduce → greet and appreciate** (the
+rounds they cleared, named from the role's interview plan, and what the team valued as
+approved with the call — no scores, panel names or exaggeration) **→ create curiosity**
+about the role and the organisation (approved facts, tied to what matters to them) **→
+reveal the offer with warmth** (the whole package) **→ understand how they feel** (the offer
+ends by asking; feelings are acknowledged before anything else) **→ the revised offer only
+with clear visibility** (a clear "yes, I'd go ahead" first) **→ re-negotiate and convince**
+on value, with no new figures **→ update the records** (`record_call_notes`: how they feel,
+what matters, what holds them back, where it landed — required before a call about the
+offer ends; shown on the candidate's pay discussion) **and close warmly.**

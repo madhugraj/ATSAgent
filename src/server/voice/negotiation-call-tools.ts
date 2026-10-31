@@ -11,7 +11,7 @@
  */
 import { z } from "zod";
 
-import type { NegotiationCallBrief, NegotiationLevers } from "@db/schema";
+import type { NegotiationCallBrief, NegotiationCallNotes, NegotiationLevers } from "@db/schema";
 import { disclosureMissing } from "./call-tools";
 import { UNCLEAR } from "./scheduling-call-tools";
 
@@ -75,6 +75,16 @@ export const NEGOTIATION_TOOL_INPUTS = {
     why: z.enum(HAND_OFF_WHY),
     their_words: z.string().trim().min(1).max(400),
   }),
+  record_call_notes: z.object({
+    /** How they feel about the offer overall. */
+    feeling: z.enum(["positive", "mixed", "negative"]),
+    /** What matters most to them, in their words. */
+    priorities: z.string().trim().min(2).max(300),
+    /** What holds them back, in their words ("none" if nothing). */
+    concerns: z.string().trim().min(2).max(300),
+    /** Where the call landed, in two or three sentences for the hiring team. */
+    summary: z.string().trim().min(10).max(500),
+  }),
   end_negotiation_call: z.object({ reason: z.enum(NEGOTIATION_END_REASONS) }),
 } as const;
 export type NegotiationToolName = keyof typeof NEGOTIATION_TOOL_INPUTS;
@@ -93,6 +103,8 @@ export const NEGOTIATION_TOOL_DESCRIPTIONS: Record<NegotiationToolName, string> 
     "They clearly said yes to the figure you just read out: pass it to the hiring team, who confirm it with them. It does not agree anything itself. their_words is their yes, as said.",
   request_human_call:
     "Hand to a person: they want more than you may offer (wants_more), want to speak to someone (wants_person), want time to think (needs_time), or other. Say the hiring team will come back to them.",
+  record_call_notes:
+    "Before you say goodbye on a call where you talked about the offer: notes for the hiring team — how they feel about the offer (positive, mixed or negative), what matters most to them and what holds them back, in their words, and where the call landed in two or three sentences. Required before ending such a call.",
   end_negotiation_call:
     "Hang up after saying goodbye out loud, with why the call ended: verbal_agreement, handed_off, declined (they do not want to discuss pay), not_now, opt_out (they asked not to be called by the AI assistant again), wrong_person, voicemail, candidate_left, other.",
 };
@@ -266,7 +278,9 @@ export function offerSentence(which: Which, f: NegotiationFigures): string {
     which === "improved"
       ? `Having heard you, the hiring team can offer ${spokenRupees(ctc)} a year as the annual cost to company.`
       : `The hiring team would like to offer you ${spokenRupees(ctc)} a year as the annual cost to company${split}.`;
-  return `${lead}${leverSentence(f.levers)}${packageExtras(f)} Would that work for you?`;
+  // The proposal invites how they feel; the improved figure asks for their answer.
+  const ask = which === "proposal" ? "How do you feel about it?" : "Would that work for you?";
+  return `${lead}${leverSentence(f.levers)}${packageExtras(f)} ${ask}`;
 }
 
 /** A clear yes: yes-like words and no "no / but / not" (pure; unit-tested). */
@@ -315,6 +329,8 @@ export type NegotiationCallState = {
   conditionalYes?: boolean | null;
   /** The conditional question was asked again once after an answer that was not a yes. */
   conditionalReasked?: boolean;
+  /** The notes for the team (required before a call about the offer ends). */
+  notes?: NegotiationCallNotes | null;
 };
 
 export const freshNegotiationState = (): NegotiationCallState => ({
@@ -353,7 +369,9 @@ export function applyNegotiationTool(
     name === "record_their_position" ||
     name === "submit_agreed_terms" ||
     name === "request_human_call" ||
-    name === "explain_offer";
+    // Why the team wants them is appreciation, not pay: it may come with the greeting.
+    (name === "explain_offer" && (parsed.data as { topic?: string }).topic !== "why_you") ||
+    name === "record_call_notes";
   if (needsPermission && state.permission !== true)
     return {
       ok: false,
@@ -505,8 +523,25 @@ export function applyNegotiationTool(
       state.handOff = { why, words: their_words };
       return { ok: true };
     }
+    case "record_call_notes": {
+      state.notes = parsed.data as NegotiationCallNotes;
+      return { ok: true };
+    }
     case "end_negotiation_call": {
-      state.endReason = (parsed.data as { reason: NegotiationEndReason }).reason;
+      const reason = (parsed.data as { reason: NegotiationEndReason }).reason;
+      // Update the records: a call that talked about the offer leaves notes for the team.
+      if (
+        state.permission === true &&
+        state.stated.proposal &&
+        !state.notes &&
+        !["opt_out", "wrong_person", "voicemail", "candidate_left"].includes(reason)
+      )
+        return {
+          ok: false,
+          error:
+            "Not yet: first record_call_notes for the hiring team (how they feel, what matters, their concerns, where it landed), then say goodbye and end.",
+        };
+      state.endReason = reason;
       return { ok: true };
     }
   }

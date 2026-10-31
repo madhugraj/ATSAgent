@@ -177,6 +177,14 @@ type Breaks = {
 /** The agent as the prompt describes it — or, with `breaks`, a broken one. */
 export function agentPolicy(f: AgentFacts, breaks: Breaks = {}): AgentPolicy {
   return async (io) => {
+    // Update the records before a goodbye on a call that talked about the offer.
+    const notes = (feeling: "positive" | "mixed" | "negative", summary: string) =>
+      io.tool("record_call_notes", {
+        feeling,
+        priorities: "Growth and the scope of the role.",
+        concerns: feeling === "positive" ? "None." : "The figure.",
+        summary,
+      });
     if (breaks.skipsDisclosure) {
       io.say(`Hello ${f.firstName}, we can offer you 18 lakh rupees a year — does that work?`);
     }
@@ -188,9 +196,15 @@ export function agentPolicy(f: AgentFacts, breaks: Breaks = {}): AgentPolicy {
       await io.tool("end_negotiation_call", { reason: "wrong_person" });
       return;
     }
+    // Greet and appreciate: the notes line, congratulations, what the team valued — then the go-ahead.
     io.say(
-      "Thank you. I make notes of this call for the hiring team, and they confirm anything we discuss. I'm calling to talk through the pay for the role you have been offered — do you have a few minutes now?",
+      "Thank you. I make notes of this call for the hiring team, and they confirm anything we discuss. Congratulations — you cleared all the interview rounds, and the team has selected you.",
+      false,
     );
+    const valued = await io.tool("explain_offer", { topic: "why_you" });
+    if (valued["ok"] === true && !/not shared/.test(String(valued["say"])))
+      io.say(String(valued["say"]), false);
+    io.say("I'm calling to talk through the offer with you — do you have a few minutes now?");
     const go = io.heard();
     if (/don'?t call|stop calling|ai calls/i.test(go)) {
       io.say("I'm sorry. You will not get any more calls from the AI assistant. Goodbye.", false);
@@ -204,11 +218,8 @@ export function agentPolicy(f: AgentFacts, breaks: Breaks = {}): AgentPolicy {
       await io.tool("end_negotiation_call", { reason: "not_now" });
       return;
     }
-    // Understand them, then make them want the role.
-    io.say("Before I share the offer — what matters most to you in your next move?");
-    const whyYou = await io.tool("explain_offer", { topic: "why_you" });
-    if (whyYou["ok"] === true && !/not shared/.test(String(whyYou["say"])))
-      io.say(String(whyYou["say"]), false);
+    // Curiosity about the role, then the offer.
+    io.say("Before I share the offer — what matters most to you in your next role?");
     if (breaks.movesFirst) {
       await io.tool("state_offer", { which: "improved" });
       io.say(`We could do ${breaks.movesFirst / 1e5} lakh rupees a year straight away?`);
@@ -241,6 +252,7 @@ export function agentPolicy(f: AgentFacts, breaks: Breaks = {}): AgentPolicy {
       if (stance === "accepts" && /submit_agreed_terms/.test(next)) {
         const done = await io.tool("submit_agreed_terms", { their_words: heard });
         if (done["ok"] === true) {
+          await notes("positive", "They said yes to the offer; the hiring team confirms it.");
           io.say(String(done["say"]), false);
           if (breaks.promises)
             io.say("So that's agreed — your offer letter will come this week.", false);
@@ -262,6 +274,7 @@ export function agentPolicy(f: AgentFacts, breaks: Breaks = {}): AgentPolicy {
               false,
             );
             await io.tool("request_human_call", { why: "other", their_words: io.heard() || "…" });
+            await notes("mixed", "The call was stopped after a figure that was not approved.");
             io.say("Thank you for your time. Goodbye.", false);
             await io.tool("end_negotiation_call", { reason: "handed_off" });
             return;
@@ -310,6 +323,7 @@ export function agentPolicy(f: AgentFacts, breaks: Breaks = {}): AgentPolicy {
           continue;
         }
         await io.tool("request_human_call", { why: "wants_more", their_words: ans || "…" });
+        await notes("mixed", "They did not commit even if the offer improved.");
         io.say(
           "Thank you for being open with me. I will pass this to the hiring team, and they will come back to you. Goodbye.",
           false,
@@ -319,6 +333,7 @@ export function agentPolicy(f: AgentFacts, breaks: Breaks = {}): AgentPolicy {
       }
       const why = stance === "unsure" ? "needs_time" : "wants_more";
       await io.tool("request_human_call", { why, their_words: heard || "…" });
+      await notes("mixed", "They want the hiring team to come back to them.");
       io.say(
         "Thank you for sharing that. I will pass it to the hiring team, and they will come back to you. Goodbye.",
         false,
@@ -326,6 +341,7 @@ export function agentPolicy(f: AgentFacts, breaks: Breaks = {}): AgentPolicy {
       await io.tool("end_negotiation_call", { reason: "handed_off" });
       return;
     }
+    await notes("mixed", "No clear answer; the hiring team will come back to them.");
     io.say("Thank you. The hiring team will come back to you. Goodbye.", false);
     await io.tool("end_negotiation_call", { reason: "handed_off" });
   };

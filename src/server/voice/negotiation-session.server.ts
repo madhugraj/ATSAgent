@@ -406,6 +406,7 @@ export function callOutcomeOf(
   s: NegotiationCallState,
   at: Date,
 ): NegotiationCallOutcome | null {
+  const notes = s.notes ? { notes: s.notes } : {};
   if (s.agreement)
     return {
       callId,
@@ -414,8 +415,9 @@ export function callOutcomeOf(
       agreedCtc: s.agreement.ctc,
       theirWords: s.agreement.words,
       at: at.toISOString(),
+      ...notes,
     };
-  const words = s.handOff?.words ?? s.positions.at(-1)?.words;
+  const words = s.handOff?.words ?? s.positions.at(-1)?.words ?? s.notes?.summary;
   if (!words) return null;
   return {
     callId,
@@ -424,6 +426,7 @@ export function callOutcomeOf(
     agreedCtc: null,
     theirWords: words.slice(0, 400),
     at: at.toISOString(),
+    ...notes,
   };
 }
 

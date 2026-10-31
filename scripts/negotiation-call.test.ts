@@ -184,6 +184,43 @@ describe("negotiation call tools — refusals", () => {
     expect(t.applyNegotiationTool(s, "state_offer", { which: "improved" }, FIG).ok).toBe(false);
   });
 
+  test("update the records: a call about the offer cannot end without notes", () => {
+    const s = started();
+    t.applyNegotiationTool(s, "state_offer", { which: "proposal" }, FIG);
+    const end = t.applyNegotiationTool(s, "end_negotiation_call", { reason: "handed_off" }, FIG);
+    expect(end.ok).toBe(false);
+    expect(
+      t.applyNegotiationTool(
+        s,
+        "record_call_notes",
+        {
+          feeling: "mixed",
+          priorities: "Growth",
+          concerns: "The fixed pay",
+          summary: "They like the role but want a higher fixed component.",
+        },
+        FIG,
+      ).ok,
+    ).toBe(true);
+    expect(
+      t.applyNegotiationTool(s, "end_negotiation_call", { reason: "handed_off" }, FIG).ok,
+    ).toBe(true);
+    // An opt-out ends at once.
+    const o = started();
+    t.applyNegotiationTool(o, "state_offer", { which: "proposal" }, FIG);
+    expect(t.applyNegotiationTool(o, "end_negotiation_call", { reason: "opt_out" }, FIG).ok).toBe(
+      true,
+    );
+  });
+
+  test("what the team valued may come with the greeting, before the go-ahead — no pay", () => {
+    const f = { ...FIG, brief: { whyYou: ["The panel valued how you scaled an AI team."] } };
+    const cold = t.freshNegotiationState();
+    expect(t.applyNegotiationTool(cold, "explain_offer", { topic: "why_you" }, f).ok).toBe(true);
+    expect(t.applyNegotiationTool(cold, "explain_offer", { topic: "split" }, f).ok).toBe(false);
+    expect(t.applyNegotiationTool(cold, "state_offer", { which: "proposal" }, f).ok).toBe(false);
+  });
+
   test("the offer's words carry the whole package up front", () => {
     const f = {
       ...FIG,

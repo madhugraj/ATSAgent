@@ -721,7 +721,14 @@ export function registerPhase3Agents(): void {
     // plain re-ask, "I can share it as soon as I know you'd be ready to move forward");
     // it waits in silence for the go-ahead; the offer's words carry the whole package; a
     // rationale topic answers "why this figure?"; one simple discovery question.
-    version: "0.4.0",
+    // 0.5.0 (the candidate's view of the sixth call: no congratulations, no empathy, up and
+    // down): follows an HR partner's flow — introduce; greet and appreciate (the rounds they
+    // cleared, by name, and what the team valued — no scores, no exaggeration); create
+    // curiosity about the role and the organisation; reveal the offer with warmth; ask how
+    // they feel and acknowledge it; the revised offer only with a clear commitment; then
+    // persuade on value; update the records (record_call_notes, required before a call about
+    // the offer ends) and close.
+    version: "0.5.0",
     owner: "hr_head",
     responsibility:
       "Holds one AI phone call with a candidate about the pay for their offer: says it is an AI, tells them which role and organisation and where they stand, wins their interest from approved facts, frames the approved figure and extras around what matters to them, may offer one pre-approved improved figure, and brings a clear answer back to the people who decide.",
