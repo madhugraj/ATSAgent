@@ -30,6 +30,20 @@ const RISK_TONE: Record<string, "default" | "secondary" | "destructive"> = {
   high: "destructive",
 };
 
+/** What each kind of human decision an agent may ask for is, in plain words. */
+const GATE_LABEL: Record<string, string> = {
+  general: "Questions and approvals to a named role",
+  requisition: "Requisition approval (performed by the approver)",
+  jd: "JD approval (performed by the approver)",
+  rejection: "Candidate rejection batches",
+  screening_decision: "Who moves on after screening",
+  hiring_decision: "The hiring decision (the hiring manager decides)",
+  panel_approval: "Who interviews for a round",
+  panel_substitute: "A stand-in for a panellist who can't make it",
+  panel_review:
+    "A review when its view of an interview differs from the panel's (the HR head decides)",
+  org_profile: "Organisation profile approval",
+};
 function AgentRegisterPage() {
   const q = useQuery({
     queryKey: ["agent_register"],
@@ -117,13 +131,7 @@ function AgentCard({ a }: { a: AgentRegisterEntry }) {
         <List title="Must never" items={m.mustNever} />
         <List
           title="Human decisions it may request"
-          items={m.gates.map((g) =>
-            g === "general"
-              ? "Questions and approvals to a named role"
-              : g === "rejection"
-                ? "Candidate rejection batches"
-                : `${g === "jd" ? "JD" : "Requisition"} approval (performed by the approver)`,
-          )}
+          items={m.gates.map((g) => GATE_LABEL[g] ?? g.replace(/_/g, " "))}
         />
         <List title="AI skills used" items={m.skills} />
       </div>
