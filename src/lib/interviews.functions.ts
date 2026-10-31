@@ -16,6 +16,7 @@ import {
 import { assertRole, requireOrg } from "./auth.middleware";
 import { canMove, REASON_REQUIRED, STAGE_LABEL, type Stage } from "./lifecycle";
 import { buildIcs } from "./ics";
+import { meetingRefOf, type MeetingRef } from "./meeting-ref";
 
 /* --------------------------------------------------------------- helpers */
 
@@ -798,6 +799,10 @@ export async function scheduleInterviewCore(
     durationMins: data.durationMins,
     mode: data.mode,
     teamsLink: data.meetingLink?.trim() || null,
+    // The provider's reference for the meeting, read from the link (never from the client).
+    meetingProvider: null as MeetingRef["meetingProvider"] | null,
+    meetingExternalId: null as string | null,
+    ...(data.mode === "online" ? meetingRefOf(data.meetingLink) : null),
     agenda: data.agenda?.trim() || null,
     status: "scheduled",
     panel: await panelOf(ctx.orgId, data.interviewerEmail ?? null, data.panel ?? []),

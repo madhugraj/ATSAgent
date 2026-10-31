@@ -780,8 +780,25 @@ export const interviews = pgTable(
       .$type<{ email: string; note: string | null; at: string }[]>()
       .notNull()
       .default(sql`'[]'::jsonb`),
+    /**
+     * The meeting's provider and the reference its API finds it by after the
+     * call (Zoom id, Meet code, Teams join link) — read from the link when the
+     * round is booked (src/lib/meeting-ref.ts, migration 0059).
+     */
+    meetingProvider: text("meeting_provider").$type<"zoom" | "google_meet" | "teams">(),
+    meetingExternalId: text("meeting_external_id"),
   },
-  (t) => [index("interviews_interviewer_email_idx").on(sql`lower(${t.interviewerEmail})`)],
+  (t) => [
+    index("interviews_interviewer_email_idx").on(sql`lower(${t.interviewerEmail})`),
+    check(
+      "interviews_meeting_provider_check",
+      sql`${t.meetingProvider} is null or ${t.meetingProvider} in ('zoom', 'google_meet', 'teams')`,
+    ),
+    check(
+      "interviews_meeting_ref_check",
+      sql`(${t.meetingProvider} is null) = (${t.meetingExternalId} is null)`,
+    ),
+  ],
 );
 
 /**

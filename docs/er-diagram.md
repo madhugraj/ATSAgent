@@ -652,6 +652,8 @@ erDiagram
     text outcome_note "nullable"
     timestamptz completed_at "nullable"
     jsonb unavailable
+    text meeting_provider "nullable"
+    text meeting_external_id "nullable"
   }
   screening_kits {
     uuid id PK
@@ -1391,7 +1393,7 @@ erDiagram
 | `inbox_messages` | Sourcing & integrations | 16 | — |
 | `integration_credentials` | Sourcing & integrations | 4 | — |
 | `interview_slot_offers` | — | 22 | (token) |
-| `interviews` | Screening & interviews | 17 | — |
+| `interviews` | Screening & interviews | 19 | — |
 | `job_descriptions` | Requisitions & job content | 17 | — |
 | `job_index_notifications` | — | 10 | — |
 | `master_items` | Organisations & masters | 8 | — |
