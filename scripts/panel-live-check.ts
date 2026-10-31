@@ -16,19 +16,29 @@
  * wiring; this checks how a real model judges. Results vary a little between
  * runs and models; run it before a pilot and whenever the prompts change.
  *
- *   EVAL_PROVIDER=openai|anthropic|google EVAL_API_KEY=… EVAL_MODEL=… \
+ * With the organisation's own AI model (Integrations → AI model), as the
+ * agents use it — the key stays where it is stored; the calls appear in the
+ * organisation's AI usage like any other:
+ *
+ *   DATABASE_URL=… SECRET_ENCRYPTION_KEY=… EVAL_ORG_ID=<organisation id> \
  *   bun scripts/panel-live-check.ts
  *
- * The key is used for these calls only and never stored. No database writes.
+ * Or with a test key of your own (used for these calls only, never stored):
+ *
+ *   EVAL_PROVIDER=openai|anthropic|google EVAL_API_KEY=… EVAL_MODEL=… \
+ *   bun scripts/panel-live-check.ts
  */
 process.env["DATABASE_URL"] ??= "postgres://unused@127.0.0.1:1/unused";
 process.env["SESSION_SECRET"] ??= "panel-live-check-only-0123456789abcdef";
 
+const orgId = process.env["EVAL_ORG_ID"] || null;
 const provider = process.env["EVAL_PROVIDER"] as "openai" | "anthropic" | "google" | undefined;
 const apiKey = process.env["EVAL_API_KEY"];
 const model = process.env["EVAL_MODEL"];
-if (!provider || !apiKey || !model) {
-  console.error("Set EVAL_PROVIDER, EVAL_API_KEY and EVAL_MODEL to run the live check.");
+if (!orgId && (!provider || !apiKey || !model)) {
+  console.error(
+    "Set EVAL_ORG_ID (use the organisation's saved AI model), or EVAL_PROVIDER, EVAL_API_KEY and EVAL_MODEL.",
+  );
   process.exit(2);
 }
 
@@ -38,7 +48,8 @@ const { AssessOutput, SummaryOutput, buildAssessment, scrubSummary } =
 const { assessPrompt, summaryPrompt } = await import("../src/server/panel/prompts");
 type Seg = { speaker: string | null; text: string; startMs: number; endMs: number };
 
-const config = { provider, model, apiKey };
+/** The organisation's saved model, or the test key given. */
+const via = orgId ? { orgId } : { config: { provider: provider!, model: model!, apiKey: apiKey! } };
 const competencies = ["Kubernetes operations", "Go services", "Incident handling"];
 const base = {
   jobTitle: "Platform SRE",
@@ -146,7 +157,7 @@ async function assess(key: keyof typeof CALLS) {
     segments: c.segments,
   });
   const res = await aiJson({
-    config,
+    ...via,
     feature: "panel_assess",
     system,
     prompt,
@@ -204,7 +215,7 @@ ok(
 {
   const { system, prompt } = summaryPrompt({ ...base, segments: CALLS.strong!.segments });
   const res = await aiJson({
-    config,
+    ...via,
     feature: "panel_summary",
     system,
     prompt,
@@ -226,7 +237,9 @@ ok(
   );
 }
 
-console.log(`\nSilent panel agents — live judgement check (${provider} ${model})\n`);
+console.log(
+  `\nSilent panel agents — live judgement check (${orgId ? "the organisation's saved AI model" : "the test key given"})\n`,
+);
 console.table(
   checks.map((c) => ({ result: c.pass ? "PASS" : "FAIL", check: c.check, got: c.got })),
 );
