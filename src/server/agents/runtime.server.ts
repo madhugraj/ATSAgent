@@ -70,7 +70,13 @@ const LEASE_MINUTES = 10;
 const MAX_ATTEMPTS = 3;
 /** Model turns per run per tick, so one long run cannot starve the queue. */
 const TURNS_PER_TICK = 8;
-const CONCURRENCY = 2;
+/**
+ * Runs one tick drives at the same time. Runs wait on the model and the
+ * network, not the CPU, so they interleave in one process; independent
+ * hiring needs (the desk's side-by-side tracks) each need their own worker.
+ * AGENT_CONCURRENCY raises or lowers it (1–20).
+ */
+const CONCURRENCY = Math.min(Math.max(Number(process.env["AGENT_CONCURRENCY"]) || 6, 1), 20);
 const PREVIEW_CHARS = 600;
 
 /**
@@ -182,6 +188,11 @@ import {
   type PanelApprovalSubject,
   type PanelSubstituteSubject,
 } from "./panel-gate.server";
+import {
+  expertBriefGateFor,
+  performExpertBriefGate,
+  type ExpertBriefSubject,
+} from "./expert-gate.server";
 
 /* --------------------------------------------- gates tied to real records */
 
@@ -213,6 +224,7 @@ type DocumentValidationSubject = {
 /** An organisation profile version waiting for the HR head or owner (docs/org-context-agent-plan.md). */
 type OrgProfileSubject = { type: "org_profile"; versionId: string; expects?: string };
 type GateSubject =
+  | ExpertBriefSubject
   | OrgProfileSubject
   | PanelApprovalSubject
   | PanelSubstituteSubject
@@ -364,6 +376,7 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
     };
   }
   if (subject.type === "panel_approval") return panelGateFor(orgId, subject);
+  if (subject.type === "expert_brief") return expertBriefGateFor(orgId, subject);
   if (subject.type === "panel_substitute") return substituteGateFor(orgId, subject);
   if (subject.type === "offer" || subject.type === "offer_release") {
     const offerId = "offerId" in subject ? subject.offerId : subject.id;
@@ -666,6 +679,8 @@ async function performGate(
     return;
   }
   if (subject.type === "panel_approval") return performPanelGate(orgId, userId, subject, decision);
+  if (subject.type === "expert_brief")
+    return performExpertBriefGate(orgId, userId, subject, decision);
   if (subject.type === "panel_substitute")
     return performSubstituteGate(orgId, userId, org.memberEmail, subject, decision);
   if (subject.type === "offer" || subject.type === "offer_release") {
@@ -974,6 +989,26 @@ async function requeueIfUnblocked(runId: string) {
 /* ------------------------------------------------------------ public API */
 
 /** Queue a new run. The goal must not embed untrusted text without untrusted(). */
+/** The unique-index refusal of a second active run on the same requisition. */
+function isActiveRunConflict(e: unknown): boolean {
+  for (let x: unknown = e, i = 0; x && i < 4; x = (x as { cause?: unknown }).cause, i++) {
+    const err = x as {
+      code?: string;
+      constraint_name?: string;
+      constraint?: string;
+      message?: string;
+    };
+    if (
+      err.code === "23505" &&
+      [err.constraint_name, err.constraint, err.message].some((v) =>
+        String(v ?? "").includes("agent_runs_active_requisition_key"),
+      )
+    )
+      return true;
+  }
+  return false;
+}
+
 export async function startRun(input: {
   orgId: string;
   agentType: AgentType;
@@ -1004,27 +1039,57 @@ export async function startRun(input: {
   }
   const startPolicy = await loadPolicy(input.orgId, input.agentType);
   const requestTrace = currentTraceUuid();
-  const [run] = await db
-    .insert(agentRuns)
-    .values({
-      definitionId: definition.id,
-      definitionVersion: definition.version,
-      definitionHash: definition.hash,
-      orgId: input.orgId,
-      agentType: input.agentType,
-      principalUserId: input.principalUserId,
-      goal: input.goal,
-      subjectType: input.subjectType ?? null,
-      subjectId: input.subjectId ?? null,
-      triggerEventId: input.triggerEventId ?? null,
-      maxSteps: input.maxSteps ?? startPolicy.maxStepsPerLeg ?? def.maxSteps ?? 20,
-      ...(startPolicy.maxTokensPerLeg ? { maxTokens: startPolicy.maxTokensPerLeg } : {}),
-      conversationId,
-      transcript: [{ role: "user", content: input.goal } satisfies AgentMessage],
-      // Started from an HTTP request: join its trace, so the request ID finds the run.
-      ...(requestTrace ? { traceId: requestTrace } : {}),
-    })
-    .returning({ id: agentRuns.id });
+  // One active run per organisation, agent and requisition (unique index,
+  // migration 0058): two starts racing past the activeRunFor check — two
+  // panes, a click and an event — get the run that is already working.
+  const insertRun = () =>
+    db
+      .insert(agentRuns)
+      .values({
+        definitionId: definition.id,
+        definitionVersion: definition.version,
+        definitionHash: definition.hash,
+        orgId: input.orgId,
+        agentType: input.agentType,
+        principalUserId: input.principalUserId,
+        goal: input.goal,
+        subjectType: input.subjectType ?? null,
+        subjectId: input.subjectId ?? null,
+        triggerEventId: input.triggerEventId ?? null,
+        maxSteps: input.maxSteps ?? startPolicy.maxStepsPerLeg ?? def.maxSteps ?? 20,
+        ...(startPolicy.maxTokensPerLeg ? { maxTokens: startPolicy.maxTokensPerLeg } : {}),
+        conversationId,
+        transcript: [{ role: "user", content: input.goal } satisfies AgentMessage],
+        // Started from an HTTP request: join its trace, so the request ID finds the run.
+        ...(requestTrace ? { traceId: requestTrace } : {}),
+      })
+      .returning({ id: agentRuns.id });
+  let run: { id: string } | undefined;
+  try {
+    [run] = await insertRun();
+  } catch (e) {
+    if (!isActiveRunConflict(e) || input.subjectType !== "requisition" || !input.subjectId) throw e;
+    const [existing] = await db
+      .select({ id: agentRuns.id })
+      .from(agentRuns)
+      .where(
+        and(
+          eq(agentRuns.orgId, input.orgId),
+          eq(agentRuns.agentType, input.agentType),
+          eq(agentRuns.subjectType, "requisition"),
+          eq(agentRuns.subjectId, input.subjectId),
+          inArray(agentRuns.status, ["queued", "running", "awaiting_human"]),
+        ),
+      )
+      .limit(1);
+    if (!existing) throw e;
+    log.info("agent.run.deduped", {
+      org_id: input.orgId,
+      agent: input.agentType,
+      run_id: existing.id,
+    });
+    return { runId: existing.id };
+  }
   await writeAudit({
     actor: `agent:${input.agentType}:${run!.id}`,
     actorUserId: input.principalUserId,
@@ -1310,6 +1375,12 @@ export async function runAgentTick(
      * starting another run would take the scripted model's replies).
      */
     onlyRunId?: string;
+    /**
+     * Claim and drive queued runs only — no events, no sweeps. A second
+     * inline kick while the first is still driving a long run uses this, so
+     * a run started meanwhile gets its own worker instead of waiting.
+     */
+    runsOnly?: boolean;
   } = {},
 ): Promise<TickCounts> {
   const max = Math.min(Math.max(opts.max ?? 10, 1), 50);
@@ -1325,7 +1396,7 @@ export async function runAgentTick(
   const now = new Date();
 
   // 0. Turn lifecycle events into agent runs and close gates decided elsewhere.
-  if (!opts.onlyRunId)
+  if (!opts.onlyRunId && !opts.runsOnly)
     try {
       const { processAgentEvents } = await import("./orchestrator.server");
       counts.events = (await processAgentEvents(opts.orgId ? { orgId: opts.orgId } : {})).processed;
@@ -1472,6 +1543,16 @@ export async function runAgentTick(
 
 /* -------------------------------------------------------------- internals */
 
+/** Extend this worker's lease on a running run; false when the run is no longer ours. */
+async function renewLease(run: AgentRun): Promise<boolean> {
+  const held = await db
+    .update(agentRuns)
+    .set({ leaseUntil: new Date(Date.now() + LEASE_MINUTES * 60_000) })
+    .where(and(eq(agentRuns.id, run.id), eq(agentRuns.status, "running")))
+    .returning({ id: agentRuns.id });
+  return held.length > 0;
+}
+
 async function driveRun(run: AgentRun): Promise<"done" | "awaiting" | "yielded" | "failed"> {
   const def = getAgent(run.agentType);
   if (!def) {
@@ -1571,6 +1652,10 @@ async function driveRun(run: AgentRun): Promise<"done" | "awaiting" | "yielded" 
     run.lastError = null;
   }
   for (let turn = 0; turn < TURNS_PER_TICK; turn++) {
+    // Keep the claim while working: a slow run must not be reclaimed by the
+    // next tick mid-turn (a second worker on the same run). A run no longer
+    // ours — cancelled, or reclaimed after a stall — stops here.
+    if (turn > 0 && !(await renewLease(run))) return "yielded";
     if (await overBudget(run, policy.monthlyTokenBudget)) {
       await save(run, transcript, null, stepCount, tokensUsed);
       await pauseForBudget(run);
@@ -1866,6 +1951,25 @@ async function openDecision(
   let args: unknown = call.args;
   let assigneeUserId: string | undefined;
   let detail = "";
+  // A question for "the hiring manager" on a run about one role goes to THAT
+  // role's hiring manager (a named member who can sign in), not to whoever
+  // holds the hiring-manager role anywhere in the organisation.
+  if (
+    d.kind === "clarification" &&
+    assigneeRole === "hiring_manager" &&
+    run.subjectType === "requisition" &&
+    run.subjectId
+  ) {
+    const [req] = await db
+      .select({ hm: requisitions.hiringManagerMemberId })
+      .from(requisitions)
+      .where(and(eq(requisitions.id, run.subjectId), eq(requisitions.orgId, run.orgId)))
+      .limit(1);
+    if (req?.hm) {
+      const { deciderOf } = await import("./panel-gate.server");
+      assigneeUserId = (await deciderOf(run.orgId, req.hm)).assigneeUserId;
+    }
+  }
   if (d.subject) {
     const gate = await gateFor(run.orgId, d.subject);
     if ("error" in gate) return toolError(gate.error, true);

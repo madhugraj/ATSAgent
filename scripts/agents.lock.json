@@ -11,6 +11,10 @@
     "version": "1.2.4",
     "hash": "8dfb69f233494b568fb4102819419ba4c9a01ceca0e4b8a0c3e3b37fec69ff07"
   },
+  "expert_interview": {
+    "version": "1.0.0",
+    "hash": "719d56ca8baa148071de7c0bd726c9c4eced9e6f2aba01cddc712721388aec3d"
+  },
   "followup": {
     "version": "1.4.4",
     "hash": "6ae2844058dad5536d89165bcb0c560f66f8c5918e42b01145d45100d571f715"
@@ -36,8 +40,8 @@
     "hash": "1526ae9402415f70382f6ad580692fb28c3bade9d372f97045a650f95623f524"
   },
   "org_context": {
-    "version": "1.0.5",
-    "hash": "ec13eeb7cd2badb5b7630e9ce3f63232f15fb2e6e9afb4b6738cf3d51b782eb3"
+    "version": "1.1.0",
+    "hash": "d3f80f9ca5ad4f83b2004834aebf8456d57f49c47dc903ddfcc14702edb3ed0f"
   },
   "publishing": {
     "version": "1.4.4",

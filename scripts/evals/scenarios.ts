@@ -1831,6 +1831,206 @@ export function scenarios(): ScriptedScenario[] {
         say("A person must review the held-back page; the version is with the HR head."),
       ],
     },
+    (() => {
+      // The first version is rejected as too thin; the agent rewrites from
+      // the sources' text and asks again — never re-reads guessed pages.
+      let decisions = 0;
+      const culture =
+        "Engineers own a customer workflow end to end and ship to production every week.";
+      return {
+        name: "org_context: reworks a draft rejected as too thin from the sources' text",
+        agentType: "org_context",
+        autonomy: "act_and_notify",
+        setup: async ({ orgId }: { orgId: string }) => {
+          const { db } = await import("../../src/server/db");
+          const { orgContextSources, orgProfiles } = await import("../../drizzle/schema");
+          const { createHash } = await import("node:crypto");
+          await db
+            .insert(orgProfiles)
+            .values({ orgId, websiteUrl: "https://www.acme-instruments.test/" })
+            .onConflictDoNothing();
+          await db.insert(orgContextSources).values({
+            orgId,
+            kind: "website_page",
+            url: "https://www.acme-instruments.test/about",
+            sha256: createHash("sha256").update("about").digest("hex"),
+            text: `Acme builds inspection instruments for steel plants.\n${culture}`,
+            fetchedAt: new Date(),
+          });
+          return {};
+        },
+        goal: () =>
+          "Build the organisation's profile: read the organisation's records, its website, every uploaded document and what the admin said in the chat (read_org_sources), write what you find as profile items with their exact quotes, then submit the version for approval.",
+        decide: () =>
+          decisions++ === 0
+            ? { status: "rejected", reason: "Not enough — go deeper on how we work." }
+            : { status: "approved" },
+        expect: {
+          status: "done",
+          calls: [
+            "read_org_profile",
+            "read_org_records",
+            "read_org_sources",
+            "propose_profile_items",
+            "submit_profile_version",
+            "request_approval",
+          ],
+          gateRole: "hr_head",
+        },
+        script: [
+          () => call("p", "read_org_profile", {}),
+          () => call("r", "read_org_records", {}),
+          () => call("src", "read_org_sources", {}),
+          (m) => {
+            const page = (lastTool(m)["websitePages"] as { sourceId: string }[])[0]!;
+            return call("a", "propose_profile_items", {
+              section: "about",
+              items: [
+                {
+                  text: "Acme builds inspection instruments for steel plants.",
+                  visibility: "candidate",
+                  sourceId: page.sourceId,
+                  quote: "Acme builds inspection instruments for steel plants.",
+                },
+              ],
+            });
+          },
+          () => call("s", "submit_profile_version", {}),
+          (m) => {
+            const submitted = toolResult(m, "submit_profile_version") as { versionId: string };
+            return call("g", "request_approval", {
+              title: "Approve the organisation profile",
+              summary: "About Acme, from its website. Culture and hiring norms are thin.",
+              assignee_role: "hr_head",
+              subject: { type: "org_profile", versionId: submitted.versionId },
+            });
+          },
+          // Rejected: "go deeper on how we work" — back to the text, not to guessing pages.
+          () => call("src2", "read_org_sources", {}),
+          (m) => {
+            const page = (lastTool(m)["websitePages"] as { sourceId: string }[])[0]!;
+            return call("c", "propose_profile_items", {
+              section: "culture",
+              items: [
+                { text: culture, visibility: "candidate", sourceId: page.sourceId, quote: culture },
+              ],
+            });
+          },
+          () => call("s2", "submit_profile_version", {}),
+          (m) => {
+            const submitted = toolResult(m, "submit_profile_version") as { versionId: string };
+            return call("g2", "request_approval", {
+              title: "Approve the organisation profile",
+              summary: "Added how Acme works, from its About page.",
+              assignee_role: "hr_head",
+              subject: { type: "org_profile", versionId: submitted.versionId },
+            });
+          },
+          say("Reworked the profile with how Acme works; the version is with the HR head."),
+        ],
+      } satisfies ScriptedScenario;
+    })(),
+    {
+      name: "expert_interview: interviews the hiring manager and proposes the brief for their approval",
+      agentType: "expert_interview",
+      autonomy: "act_and_notify",
+      setup: async ({ orgId, userId }) => {
+        const { db } = await import("../../src/server/db");
+        const { orgMembers, requisitions } = await import("../../drizzle/schema");
+        const { eq, and } = await import("drizzle-orm");
+        const [existing] = await db
+          .select({ id: orgMembers.id })
+          .from(orgMembers)
+          .where(and(eq(orgMembers.orgId, orgId), eq(orgMembers.userId, userId)))
+          .limit(1);
+        const hm =
+          existing ??
+          (
+            await db
+              .insert(orgMembers)
+              .values({
+                orgId,
+                userId,
+                email: `hm-${orgId.slice(0, 8)}@eval.test`,
+                fullName: "Eval Hiring Manager",
+                status: "active",
+              } as never)
+              .returning({ id: orgMembers.id })
+          )[0]!;
+        const [req] = await db
+          .insert(requisitions)
+          .values({
+            orgId,
+            code: `REQ-EXP-${Date.now()}`,
+            title: "Platform SRE",
+            status: "approved",
+            mustHaveSkills: ["Kubernetes", "Terraform"],
+            hiringManagerMemberId: hm.id,
+            createdBy: userId,
+          } as never)
+          .returning({ id: requisitions.id });
+        return { requisitionId: req!.id };
+      },
+      goal: (s) =>
+        `Interview the hiring manager of "Platform SRE" about what the role really needs, and propose its expert brief for their approval.\n\nRequisition id: ${s["requisitionId"]}`,
+      decide: (t) =>
+        t.kind === "clarification"
+          ? {
+              status: "answered",
+              answer:
+                "Kubernetes matters most — we run 40 clusters and they will be on call for them. Terraform is nice, not essential. Never hire someone who has not carried a pager. First months: own the cluster upgrade programme. Success after six months: upgrades with no customer-visible incident. I ask: tell me about the worst outage you handled — a great answer names the root cause and what they changed after; a weak one blames others.",
+            }
+          : { status: "approved" },
+      expect: {
+        status: "done",
+        calls: ["read_role_for_expert", "ask_human", "propose_expert_brief"],
+        maxSteps: 12,
+      },
+      script: [
+        (m) => {
+          const goal = m.map((x) => x.content ?? "").join("\n");
+          const id = /Requisition id: ([0-9a-f-]{36})/.exec(goal)![1]!;
+          return call("r", "read_role_for_expert", { requisitionId: id });
+        },
+        () =>
+          call("q", "ask_human", {
+            assignee_role: "hiring_manager",
+            question:
+              "1. Which of Kubernetes and Terraform truly matter for this team, and why?\n2. What rules a candidate out?\n3. What will they work on first?\n4. What does success look like after six months?\n5. A question you would ask, and what a great answer sounds like?",
+          }),
+        (m) => {
+          const goal = m.map((x) => x.content ?? "").join("\n");
+          const id = /Requisition id: ([0-9a-f-]{36})/.exec(goal)![1]!;
+          return call("b", "propose_expert_brief", {
+            requisitionId: id,
+            brief: {
+              mustHaves: [
+                { skill: "Kubernetes", why: "They will be on call for the team's 40 clusters." },
+              ],
+              niceToHaves: ["Terraform"],
+              dealBreakers: ["Has never carried a pager"],
+              firstMonthsWork: "Own the cluster upgrade programme.",
+              successAfterSixMonths: "Upgrades with no customer-visible incident.",
+              screeningQuestions: [
+                {
+                  question: "Tell me about the worst outage you handled.",
+                  strongAnswer: "Names the root cause and what they changed afterwards.",
+                  weakAnswer: "Blames others; no change followed.",
+                },
+              ],
+              rounds: [
+                {
+                  level: 1,
+                  focus: "On-call depth",
+                  competencies: ["Kubernetes", "Incident handling"],
+                },
+              ],
+            },
+          });
+        },
+        say("The hiring manager approved the role's expert brief."),
+      ],
+    },
     {
       name: "org_context: refuses pay figures and staff names",
       agentType: "org_context",

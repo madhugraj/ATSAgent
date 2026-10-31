@@ -318,6 +318,7 @@ export async function conversationForSubject(
 /* ---------------------------------------------------------- model turn */
 
 const Command = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("split_needs") }),
   z.object({ type: z.literal("none") }),
   z.object({
     type: z.literal("screen"),
@@ -351,6 +352,13 @@ const Command = z.discriminatedUnion("type", [
   }),
 ]);
 
+const NeedSeed = z.object({
+  /** The role as the person named it (the thread's starting title). */
+  title: z.string().min(2).max(120),
+  /** The details said for THIS need (all optional — the thread asks for the rest). */
+  slots: DeskSlots.partial().default({}),
+});
+
 const TurnOutput = z.object({
   slots: DeskSlots.default({}),
   command: Command.default({ type: "none" }),
@@ -362,6 +370,12 @@ const TurnOutput = z.object({
    * empty line means the message truly added nothing.
    */
   understood: z.string().max(300).default(""),
+  /**
+   * 2–3 distinct hiring needs named together: one entry each, with the details
+   * said per need. The desk fans them out into parallel threads. Empty unless
+   * the command is split_needs.
+   */
+  needs: z.array(NeedSeed).max(3).default([]),
 });
 export type DeskTurn = z.infer<typeof TurnOutput>;
 
@@ -380,6 +394,7 @@ const SYSTEM = [
   '- Templates: whenever the person names or asks about a template ("use the Yavar template", "which template did you use?"), return {"type":"feedback","text":"<their words>","template":"<the name as they said it>"} — even when no request is open. The system checks the templates (by name and by content) and answers. Never state from memory or from earlier messages which templates exist; FACTS lists them.',
   '- When OPEN REQUESTS lists a request and the person comments on it, objects to it or asks for a change ("give more weight to experience", "budget is too high", "use Pune instead") — or answers an agent\'s question — → {"type":"feedback","text":"<what they want, faithfully, in their words>"}. The system sends it to the agent, which revises and asks again. This includes a job description waiting for approval: "use the X template", "make it shorter", "add a section on Y" are feedback (changes to the JD), not an approval decision; when they name a template add "template":"<the name as they said it>".',
   '- The reply must never promise an action ("I\'ll benchmark…", "I\'ll check…"): the desk acts only through commands, and the system reports what it did. With a research command the reply can be empty.',
+  '- When the LATEST message names 2–3 distinct hiring needs, each with its own role ("I have 3 requirements: Head of AI, Intern, Data Scientist"), the desk runs them in PARALLEL: return needs: [{title, slots}] — one entry per need, its title and the details said for it in slots — and command {"type":"split_needs"}. Each need becomes its own thread with its own questions and its own approvals. Only for genuinely distinct needs in the LATEST message; one role with extra context is not a split. The first need\'s details also go in "slots" as usual.',
   '- "understood": one short line stating what the LATEST message adds or asks, in the person\'s terms ("Three roles named — Head of AI, Intern, Data Scientist; asking which to start with"). Fill it even when no slot could be set yet; leave it empty only when the message truly added nothing.',
   '- "reply": one short, friendly message. If MISSING lists details, ask for the FIRST missing one only, in one sentence, offering a typical example. Otherwise acknowledge briefly. Never claim that anything was created, approved or sent.',
   "- Questions about the role, its status, the candidates or how to do something: answer ONLY from FACTS and APP RULES below. Never describe screens, menus, statuses or abilities that are not listed there; if the facts do not answer the question, say you do not know and where to look.",
@@ -526,6 +541,7 @@ async function agentOn(orgId: string, type: AgentType): Promise<boolean> {
 }
 
 const AGENT_NAME: Record<string, string> = {
+  expert_interview: "Role expert interview agent",
   publishing: "Publishing agent",
   requisition: "Requisition agent",
   jd: "JD agent",
@@ -552,6 +568,17 @@ async function startForThread(
     return null;
   }
   const { startRun } = await import("../agents/runtime.server");
+  const { activeRunFor } = await import("../agents/tools");
+  // One run per requisition per agent: the desk path used to bypass the
+  // dispatch dedupe, so a re-ask could stack a second active run.
+  if (await activeRunFor(conv.orgId, agentType, requisitionId)) {
+    await postMessage(conv, {
+      role: "desk",
+      body: `The ${AGENT_NAME[agentType] ?? agentType} is already working on this role — its requests will appear here as they come.`,
+      agentType,
+    });
+    return null;
+  }
   const { runId } = await startRun({
     orgId: conv.orgId,
     agentType,
@@ -1129,6 +1156,14 @@ async function handleUserMessageInner(
   )
     await supersedeProposal(conv);
 
+  // 2–3 hiring needs named together: fan out into parallel threads, one per
+  // need — the first stays in this thread, the rest get their own, each with
+  // its own questions and its own approvals.
+  if (turn.command.type === "split_needs" && turn.needs.length >= 2) {
+    await splitNeeds(conv, userId, turn.needs);
+    return;
+  }
+
   // Commands the person gave in words.
   const cmd = turn.command;
   if (conv.status === "closed" && cmd.type !== "none") {
@@ -1381,7 +1416,9 @@ export async function onTaskOpened(
     agentType: run.agentType,
     body:
       task.kind === "clarification"
-        ? "I have a question before I continue."
+        ? run.agentType === "expert_interview"
+          ? "A few questions for the hiring manager about what this role really needs."
+          : "I have a question before I continue."
         : task.kind === "gate"
           ? step
             ? `${step.replace(" · ", " — waiting for the ")}.`
@@ -1394,7 +1431,10 @@ export async function onTaskOpened(
                 : (task.proposedAction as { args?: { subject?: { type?: string } } } | null)?.args
                       ?.subject?.type === "panel_substitute"
                   ? "A panellist can't make an interview — approve the stand-in, or decline and say who instead."
-                  : "This needs a decision."
+                  : (task.proposedAction as { args?: { subject?: { type?: string } } } | null)?.args
+                        ?.subject?.type === "expert_brief"
+                    ? "The role's expert brief, written from the hiring manager's answers — the hiring manager approves it or says what to change."
+                    : "This needs a decision."
           : revision
             ? `Revised as you asked ("${revision.reason}")${
                 revision.changes.length
@@ -2479,6 +2519,49 @@ export async function startStage(
   );
 }
 
+/**
+ * Ask the role's hiring manager what the role really needs (the Role expert
+ * interview agent): its questions go to that hiring manager's inbox, and the
+ * brief it writes comes back to them for approval.
+ */
+export async function startExpertInterview(
+  conv: Conversation,
+  userId: string,
+): Promise<string | null> {
+  if (!conv.requisitionId) {
+    await postMessage(conv, {
+      role: "desk",
+      body: "There is no role yet to interview the hiring manager about — create the requisition first.",
+    });
+    return null;
+  }
+  const [req] = await db
+    .select({
+      code: requisitions.code,
+      title: requisitions.title,
+      hm: requisitions.hiringManagerMemberId,
+    })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, conv.orgId)))
+    .limit(1);
+  if (!req) return null;
+  if (!req.hm) {
+    await postMessage(conv, {
+      role: "desk",
+      body: "Set the role's hiring manager first (in the interview plan card) — they are the one the questions go to.",
+    });
+    return null;
+  }
+  return startForThread(
+    conv,
+    "expert_interview",
+    userId,
+    `Interview the hiring manager of ${req.code} "${req.title}" about what the role really needs, and propose its expert brief for their approval.`,
+    conv.requisitionId,
+    "I've asked the Role expert interview agent to put a few questions to the hiring manager. Their answers become the role's expert brief, which they approve.",
+  );
+}
+
 /** An agent was switched on: continue every thread that was waiting for it. */
 export async function resumeThreadsForAgent(
   orgId: string,
@@ -3053,11 +3136,16 @@ export async function advanceGathering(
     await postMessage(conv, {
       role: "desk",
       body: `To write a strong job description for ${slots.roleTitle}: what are the 3–5 key responsibilities, who does this role report to, and what does success look like after 12 months? Any education requirement? Answer in your own words — or say "research it" and I'll draft these from typical market practice for this role.`,
-      card: thinking(
-        understood,
-        slots,
-        "All required details are in. One optional question for a deeper job description.",
-      ),
+      card: {
+        ...thinking(
+          understood,
+          slots,
+          "All required details are in. One optional question for a deeper job description.",
+        ),
+        // The optional JD details can be drafted from market practice: the
+        // person presses the button instead of typing "research it".
+        jdResearch: true,
+      },
     });
     return;
   }
@@ -3066,11 +3154,17 @@ export async function advanceGathering(
     .set({ status: "confirming" })
     .where(eq(hiringConversations.id, conv.id));
   const similar = await findSimilarRoles(conv.orgId, slots);
+  // "Research it" for the JD details is done when the JD is written (jdBrief
+  // hands it to the JD agent) — say so, or the ask looks silently dropped.
+  const jdNote =
+    slots.researchRole && (!slots.responsibilities || !slots.successMeasures)
+      ? " The responsibilities and success measures will be drafted from market practice when the job description is written."
+      : "";
   await postMessage(conv, {
     role: "desk",
     body: similar.length
-      ? `Got it: ${describeNeed(slots)}. I found ${plural(similar.length, "similar role")}. Continue with one of them, reuse an approved JD for a new role, or create a new role.`
-      : `Got it: ${describeNeed(slots)}. There is no similar role yet — shall I create a new one?`,
+      ? `Got it: ${describeNeed(slots)}.${jdNote} I found ${plural(similar.length, "similar role")}. Continue with one of them, reuse an approved JD for a new role, or create a new role.`
+      : `Got it: ${describeNeed(slots)}.${jdNote} There is no similar role yet — shall I create a new one?`,
     card: {
       type: "similar_roles",
       slots,
@@ -3084,14 +3178,34 @@ export async function advanceGathering(
   });
 }
 
+// The research model answers in its own shape: numbers may arrive as strings,
+// reasoning can run long, lists can overshoot. Accept the reasonable forms and
+// normalise here — a strict parse turned usable research into "incomplete".
+const researchNumLpa = z.preprocess(
+  (v) => (typeof v === "string" ? (v.trim() === "" ? null : Number(v)) : v),
+  z.number().min(0).max(1000).nullable().default(null),
+);
+const researchSkillList = z.preprocess(
+  (v) =>
+    Array.isArray(v)
+      ? v
+          .map((s) => String(s).trim().slice(0, 60))
+          .filter(Boolean)
+          .slice(0, 10)
+      : [],
+  z.array(z.string().min(1).max(60)).max(10).default([]),
+);
 const Proposal = z.object({
-  mustHaveSkills: z.array(z.string().min(1).max(60)).max(10).default([]),
-  goodToHaveSkills: z.array(z.string().min(1).max(60)).max(10).default([]),
-  experienceMin: z.number().min(0).max(40).nullable().default(null),
-  experienceMax: z.number().min(0).max(50).nullable().default(null),
-  budgetLpaMin: z.number().min(0).max(1000).nullable().default(null),
-  budgetLpaMax: z.number().min(0).max(1000).nullable().default(null),
-  reasoning: z.string().max(1200).default(""),
+  mustHaveSkills: researchSkillList.default([]),
+  goodToHaveSkills: researchSkillList.default([]),
+  experienceMin: researchNumLpa,
+  experienceMax: researchNumLpa,
+  budgetLpaMin: researchNumLpa,
+  budgetLpaMax: researchNumLpa,
+  reasoning: z.preprocess(
+    (v) => (typeof v === "string" ? v.slice(0, 1200) : ""),
+    z.string().max(1200).default(""),
+  ),
   sources: z
     .array(z.object({ title: z.string().max(200), url: z.string().max(500) }))
     .max(8)
@@ -3145,6 +3259,11 @@ export async function researchRole(
   }
   const parsed = Proposal.safeParse(res.data);
   if (!parsed.success) {
+    // Diagnoseable: which fields the model got wrong stays server-side.
+    log.warn("desk.research_parse_failed", {
+      org_id: conv.orgId,
+      issues: parsed.error.issues.slice(0, 5).map((i) => `${i.path.join(".")}: ${i.message}`),
+    });
     await postMessage(conv, {
       role: "desk",
       body: "The research came back incomplete. Tell me the details yourself, or ask again.",
@@ -4381,6 +4500,40 @@ export async function deleteThread(
   };
 }
 
+/**
+ * Delete a thread — and with scope "split", the other tracks of its fan-out.
+ * Each sibling passes the same rules as a single delete (deletionAllowed:
+ * the starter or HR leadership; a draft only by leadership); one that may
+ * not go is kept and named with the reason, never silently skipped.
+ */
+export async function deleteThreads(
+  conv: Conversation,
+  userId: string,
+  reason: string,
+  scope: "track" | "split",
+  now = new Date(),
+): Promise<
+  Awaited<ReturnType<typeof deleteThread>> & {
+    alsoDeleted: number;
+    kept: { title: string; why: string }[];
+  }
+> {
+  // Read the group before this thread leaves it (siblings skip deleted ones).
+  const siblings = scope === "split" ? await deskSiblings(conv.orgId, conv.id) : [];
+  const res = await deleteThread(conv, userId, reason, now);
+  const kept: { title: string; why: string }[] = [];
+  let alsoDeleted = 0;
+  for (const sib of siblings) {
+    try {
+      await deleteThread(await loadConversation(conv.orgId, sib.id), userId, reason, now);
+      alsoDeleted++;
+    } catch (e) {
+      kept.push({ title: sib.title, why: e instanceof Error ? e.message : "Not deleted." });
+    }
+  }
+  return { ...res, alsoDeleted, kept };
+}
+
 /** Chats deleted in the last 30 days (owners restore them). */
 export async function deletedThreads(orgId: string, now = new Date()) {
   return db
@@ -4471,4 +4624,140 @@ export async function purgeDeletedThreads(now = new Date()): Promise<number> {
       detail: { title: g.title, afterDays: RESTORE_DAYS },
     });
   return gone.length;
+}
+
+/**
+ * Fan a multi-need message out into parallel hiring threads. The first need
+ * stays in this thread; the rest get their own thread each, seeded with the
+ * details said for them and an opening question for what is missing. Every
+ * thread keeps its own questions, runs and approvals — the runs proceed in
+ * parallel exactly as single-need threads do today.
+ */
+export async function splitNeeds(
+  conv: Conversation,
+  userId: string,
+  needs: { title: string; slots: DeskSlots }[],
+): Promise<void> {
+  const [first, ...rest] = needs;
+  const items: { id: string; title: string }[] = [];
+  const firstName = (conv.slots as DeskSlots).roleTitle || first?.title || "the first role";
+  items.push({ id: conv.id, title: firstName });
+  // All threads of one fan-out share this id — the tracks chip in any of
+  // them shows the others' statuses and what needs the person.
+  const groupId = crypto.randomUUID();
+  await db
+    .update(hiringConversations)
+    .set({ splitGroupId: groupId })
+    .where(eq(hiringConversations.id, conv.id));
+
+  for (const need of rest) {
+    const [child] = await db
+      .insert(hiringConversations)
+      .values({
+        orgId: conv.orgId,
+        createdBy: userId,
+        title: need.title,
+        splitGroupId: groupId,
+        // The child starts from ITS OWN details only — never the first
+        // thread's role or the details said for it.
+        slots: mergeSlots({} as DeskSlots, need.slots) as never,
+      })
+      .returning();
+    const childSlots = (child!.slots ?? {}) as DeskSlots;
+    const missing = missingSlots(childSlots);
+    const known = describeNeed(childSlots);
+    await postMessage(child!, {
+      role: "desk",
+      body: `Starting with ${need.title}${known ? ` — ${known}` : ""}. ${
+        missing.length
+          ? FALLBACK_QUESTION[missing[0]!]
+          : "All the required details are in — I'll look for similar roles next."
+      }`,
+      // Same card as any gathering turn: Research it from the market works
+      // from the first message in a fanned-out thread too.
+      ...(missing.length ? { card: thinking([], childSlots, nextStepText(missing[0]!)) } : {}),
+    });
+    items.push({ id: child!.id, title: need.title });
+  }
+
+  await postMessage(conv, {
+    role: "desk",
+    body: `${plural(needs.length, "track")} running in parallel — one thread each, and I'll ask what is missing in each separately. This thread is ${firstName}; the card below opens all of them side by side.`,
+    card: { type: "needs_fanout", items } as never,
+  });
+}
+
+/* ------------------------------------------------- tracks chip (siblings) */
+
+export type DeskTrackView = {
+  id: string;
+  title: string;
+  status: string;
+  /** Open agent requests waiting for the person in this thread. */
+  needsYou: number;
+  /** This is the thread being viewed. */
+  self: boolean;
+};
+
+/**
+ * The other threads of the same fan-out, with what needs the person in each.
+ * Threads created before `split_group_id` existed are linked lazily from
+ * their fan-out card's track list, so older splits get the chip too.
+ */
+export async function deskSiblings(
+  orgId: string,
+  conversationId: string,
+): Promise<DeskTrackView[]> {
+  const [conv] = await db
+    .select({ splitGroupId: hiringConversations.splitGroupId })
+    .from(hiringConversations)
+    .where(and(eq(hiringConversations.id, conversationId), eq(hiringConversations.orgId, orgId)))
+    .limit(1);
+  if (!conv) return [];
+  let groupId = conv.splitGroupId;
+  if (!groupId) {
+    // Write-behind: derive the group from this thread's fan-out card.
+    const msgs = await db
+      .select({ id: hiringMessages.id, card: hiringMessages.card })
+      .from(hiringMessages)
+      .where(eq(hiringMessages.conversationId, conversationId));
+    const fanout = msgs.find((m) => (m.card as { type?: string } | null)?.type === "needs_fanout");
+    const items =
+      (fanout?.card as { items?: { id: string }[] } | null)?.items ?? ([] as { id: string }[]);
+    if (items.length < 2) return [];
+    // The fan-out card's message id IS the group id: deterministic, so every
+    // thread of the split derives and stamps the same value whenever it runs.
+    groupId = fanout!.id;
+    await db
+      .update(hiringConversations)
+      .set({ splitGroupId: groupId })
+      .where(
+        and(
+          eq(hiringConversations.orgId, orgId),
+          inArray(hiringConversations.id, [conversationId, ...items.map((i) => i.id)]),
+        ),
+      );
+  }
+  const rows = (await db.execute(sql`
+    select hc.id, hc.title, hc.status, hc.created_by,
+      (select count(*)::int from agent_tasks t
+         join agent_runs r on r.id = t.run_id
+        where r.conversation_id = hc.id and t.status = 'open') as needs_you
+    from hiring_conversations hc
+    where hc.org_id = ${orgId} and hc.split_group_id = ${groupId}
+      and hc.id <> ${conversationId} and hc.deleted_at is null
+    order by hc.created_at`)) as unknown as {
+    id: string;
+    title: string;
+    status: string;
+    created_by: string;
+    needs_you: number;
+  }[];
+  return rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    status: r.status,
+    needsYou: r.needs_you,
+    self: false,
+  }));
 }

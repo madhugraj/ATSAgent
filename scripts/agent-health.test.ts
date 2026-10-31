@@ -580,6 +580,61 @@ describe("an agent going round in circles", () => {
   });
 });
 
+describe("an agent re-reading instead of working", () => {
+  test("a run that calls the same read tool again and again is flagged", async () => {
+    const id = await run("org_context");
+    let seq = 100;
+    const read = (n: number) =>
+      db.insert(agentSteps).values(
+        Array.from({ length: n }, () => ({
+          runId: id,
+          orgId,
+          seq: seq++,
+          kind: "tool",
+          toolName: "read_org_website",
+          status: "ok",
+        })) as never,
+      );
+    await read(HEALTH.repeatedReadsPerRun - 1);
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "tools.repeated_reads")).toBeUndefined();
+    await read(1);
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "tools.repeated_reads")).toMatchObject({
+      agentType: "org_context",
+      severity: "warning",
+    });
+  });
+});
+
+describe("a hiring manager who never answers the expert interview", () => {
+  test("flagged once the questions are older than the limit", async () => {
+    const id = await run("expert_interview");
+    const [t] = await db
+      .insert(agentTasks)
+      .values({
+        orgId,
+        runId: id,
+        kind: "clarification",
+        title: "Questions",
+        body: "1. What matters?",
+        assigneeRole: "hiring_manager",
+      } as never)
+      .returning({ id: agentTasks.id });
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "expert_interview.unanswered")).toBeUndefined();
+    await db
+      .update(agentTasks)
+      .set({ createdAt: ago(60 * (HEALTH.expertUnansweredHours + 1)) })
+      .where(eq(agentTasks.id, t!.id));
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "expert_interview.unanswered")).toMatchObject({
+      agentType: "expert_interview",
+      severity: "warning",
+    });
+  });
+});
+
 describe("scheduler heartbeat", () => {
   test("a tick records liveness; an old tick reads as stopped", async () => {
     await heartbeatAndMaybeEvaluate({ claimed: 0 });

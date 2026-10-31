@@ -11,13 +11,16 @@ import {
   CheckCircle2,
   Circle,
   CircleDot,
+  Columns2,
   Loader2,
+  Maximize2,
   MessageSquarePlus,
   RotateCcw,
   Send,
   Sparkles,
   Trash2,
   UserRound,
+  X,
 } from "lucide-react";
 
 import { EmptyState, PageHeader } from "@/components/ats";
@@ -46,11 +49,13 @@ import {
   rescoreDeskCandidates,
   startDeskSourcing,
   startDeskDistribution,
+  startDeskExpertInterview,
   chooseDeskRole,
   chooseHiringManagerOption,
   closeDeskRole,
   deleteDeskConversation,
   getDeskConversation,
+  getDeskThreads,
   listDeletedDeskConversations,
   restoreDeskConversation,
   listDeskConversations,
@@ -63,12 +68,13 @@ import {
   sendDeskMessage,
   startDeskConversation,
   type DeskCardView,
+  type DeskConversationSummary,
   type DeskConversationView,
   type DeskMessageView,
 } from "@/lib/hiring-desk.functions";
 
 export const Route = createFileRoute("/desk")({
-  validateSearch: z.object({ c: z.string().optional() }),
+  validateSearch: z.object({ c: z.string().optional(), split: z.string().optional() }),
   head: () => ({
     meta: [
       { title: "Hiring desk — ATSIQ" },
@@ -89,8 +95,12 @@ const EXAMPLES = [
 ];
 
 function DeskPage() {
-  const { c } = Route.useSearch();
+  const { c, split } = Route.useSearch();
   const navigate = useNavigate({ from: "/desk" });
+  const splitIds = (split ?? "")
+    .split(",")
+    .filter((s) => /^[-0-9a-f]{36}$/.test(s))
+    .slice(0, 3);
   const list = useQuery({
     queryKey: ["desk_list"],
     queryFn: () => listDeskConversations(),
@@ -113,42 +123,132 @@ function DeskPage() {
       <div className="mt-4">
         <OrgProfileNotice />
       </div>
-      <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
-        <aside className="panel h-fit max-h-[70vh] overflow-y-auto p-2">
-          {list.isLoading ? (
-            <p className="p-3 text-sm text-muted-foreground">Loading…</p>
-          ) : !list.data?.length ? (
-            <p className="p-3 text-sm text-muted-foreground">No conversations yet.</p>
+      {splitIds.length >= 2 ? (
+        <SplitDesk ids={splitIds} />
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
+          <aside className="panel h-fit max-h-[70vh] overflow-y-auto p-2">
+            {list.isLoading ? (
+              <p className="p-3 text-sm text-muted-foreground">Loading…</p>
+            ) : !list.data?.length ? (
+              <p className="p-3 text-sm text-muted-foreground">No conversations yet.</p>
+            ) : (
+              <ThreadList
+                rows={list.data}
+                current={c}
+                onSelect={(id) => select(id)}
+                onSideBySide={(ids) => void navigate({ search: { split: ids.join(",") } })}
+              />
+            )}
+            <RecentlyDeleted onRestored={(id) => select(id)} />
+          </aside>
+          {c ? (
+            <Thread id={c} onDeleted={() => select(undefined)} />
           ) : (
-            <ul className="space-y-1">
-              {list.data.map((t) => (
-                <li key={t.id}>
-                  <button
-                    type="button"
-                    onClick={() => select(t.id)}
-                    className={`w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted ${c === t.id ? "bg-muted" : ""}`}
-                  >
-                    <p className="truncate font-medium">{t.title}</p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {t.requisitionCode ?? STATUS_LABEL[t.status] ?? t.status} ·{" "}
-                      {new Date(t.updatedAt).toLocaleDateString()}
-                      {t.mine ? "" : " · team"}
-                    </p>
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <NewThread onStarted={(id) => select(id)} />
           )}
-          <RecentlyDeleted onRestored={(id) => select(id)} />
-        </aside>
-        {c ? (
-          <Thread id={c} onDeleted={() => select(undefined)} />
-        ) : (
-          <NewThread onStarted={(id) => select(id)} />
-        )}
-      </div>
+        </div>
+      )}
     </>
   );
+}
+
+/**
+ * The conversation list. The threads of one fan-out sit together under one
+ * heading with a "Side by side" action — listed loose, a few splits made a
+ * wall of near-identical titles with no way to tell which belonged together.
+ */
+function ThreadList({
+  rows,
+  current,
+  onSelect,
+  onSideBySide,
+}: {
+  rows: DeskConversationSummary[];
+  current: string | undefined;
+  onSelect: (id: string) => void;
+  onSideBySide: (ids: string[]) => void;
+}) {
+  // Groups keep the position of their most recently updated thread.
+  const blocks: { group: string | null; items: DeskConversationSummary[] }[] = [];
+  const byGroup = new Map<string, DeskConversationSummary[]>();
+  for (const r of rows) {
+    if (!r.splitGroupId) {
+      blocks.push({ group: null, items: [r] });
+      continue;
+    }
+    const g = byGroup.get(r.splitGroupId);
+    if (g) g.push(r);
+    else {
+      const items = [r];
+      byGroup.set(r.splitGroupId, items);
+      blocks.push({ group: r.splitGroupId, items });
+    }
+  }
+  const row = (t: DeskConversationSummary, inGroup: boolean) => (
+    <li key={t.id}>
+      <button
+        type="button"
+        onClick={() => onSelect(t.id)}
+        className={`w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted ${
+          current === t.id ? "bg-muted" : ""
+        } ${inGroup ? "pl-5" : ""}`}
+      >
+        <p className="truncate font-medium">{t.title}</p>
+        <p className="truncate text-xs text-muted-foreground">
+          {t.requisitionCode ?? STATUS_LABEL[t.status] ?? t.status} ·{" "}
+          {new Date(t.updatedAt).toLocaleDateString()}
+          {t.mine ? "" : " · team"}
+        </p>
+      </button>
+    </li>
+  );
+  return (
+    <ul className="space-y-1">
+      {blocks.map((b) =>
+        b.group && b.items.length >= 2 ? (
+          <li key={b.group} className="rounded-md border border-border/70 py-1">
+            <div className="flex items-center gap-1 px-3 py-1">
+              <span className="flex-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                {b.items.length} needs in parallel
+              </span>
+              <button
+                type="button"
+                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-primary hover:bg-primary/10"
+                onClick={() => onSideBySide(b.items.slice(0, 3).map((i) => i.id))}
+              >
+                <Columns2 className="size-3" /> Side by side
+              </button>
+            </div>
+            <ul className="space-y-0.5">{b.items.map((t) => row(t, true))}</ul>
+          </li>
+        ) : (
+          b.items.map((t) => row(t, false))
+        ),
+      )}
+    </ul>
+  );
+}
+
+/**
+ * Fan-outs whose side-by-side view this tab already opened, so Exit sticks —
+ * kept for the tab's session (a reload must not snap the person back in).
+ */
+const AUTO_SPLIT_KEY = "desk.autoSplitShown";
+function autoSplitSeen(id: string): boolean {
+  try {
+    return (JSON.parse(sessionStorage.getItem(AUTO_SPLIT_KEY) ?? "[]") as string[]).includes(id);
+  } catch {
+    return false;
+  }
+}
+function markAutoSplitSeen(id: string) {
+  try {
+    const seen = JSON.parse(sessionStorage.getItem(AUTO_SPLIT_KEY) ?? "[]") as string[];
+    sessionStorage.setItem(AUTO_SPLIT_KEY, JSON.stringify([...seen, id].slice(-50)));
+  } catch {
+    // Storage unavailable: the view simply may open again.
+  }
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -237,6 +337,237 @@ function Composer({
   );
 }
 
+/**
+ * Side-by-side supervision for 2–3 parallel hiring needs: one column per
+ * thread, each an independent live view (messages, cards, composer). The
+ * entrance is the fan-out made visible — the columns rise in sequence.
+ *
+ * All columns are fed by ONE poll (getDeskThreads) that seeds each pane's
+ * cache: one poll per pane hit the server-function rate limit, and a throttled
+ * pane silently froze — a reply showed in one column and not in another.
+ */
+function SplitDesk({ ids }: { ids: string[] }) {
+  const navigate = useNavigate({ from: "/desk" });
+  const qc = useQueryClient();
+  const key = ids.join(",");
+  const all = useQuery({
+    queryKey: ["desk_split", key],
+    queryFn: async () => {
+      const rows = await getDeskThreads({ data: { ids } });
+      for (const r of rows) if (r.view) qc.setQueryData(["desk", r.id], r.view);
+      return rows;
+    },
+    refetchInterval: 4_000,
+  });
+  const [entered, setEntered] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setEntered(true), 30);
+    return () => clearTimeout(t);
+  }, []);
+  // Deleting one track drops that one from the view; the others stay side by
+  // side. Fewer than two left — back to the normal single-thread desk.
+  const drop = (gone: string[]) => {
+    const rest = ids.filter((x) => !gone.includes(x));
+    if (rest.length >= 2) void navigate({ search: { split: rest.join(",") } });
+    else void navigate({ search: rest.length ? { c: rest[0] } : {} });
+  };
+  // A thread deleted elsewhere (another tab, another person) leaves the view.
+  const missing = (all.data ?? []).filter((r) => r.missing).map((r) => r.id);
+  useEffect(() => {
+    if (missing.length) drop(missing);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [missing.join(",")]);
+  const views = new Map((all.data ?? []).map((r) => [r.id, r.view]));
+  const waiting = [...views.values()].filter((v) => v && v.tracks.find((t) => t.self)?.needsYou);
+  return (
+    <div>
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <p className="flex-1 text-xs text-muted-foreground">
+          {ids.length} hiring needs side by side — each column is its own thread, with its own
+          questions, agents and approvals.
+          {waiting.length ? (
+            <span className="ml-1 font-medium text-amber-700">
+              {waiting.length} waiting for you.
+            </span>
+          ) : null}
+          {all.isError ? <span className="ml-1 text-destructive">Reconnecting…</span> : null}
+        </p>
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-1"
+          onClick={() => void navigate({ search: { c: ids[0] } })}
+        >
+          <X className="size-3.5" /> Exit side by side
+        </Button>
+      </div>
+      <div
+        className="grid gap-3"
+        style={{ gridTemplateColumns: `repeat(${ids.length}, minmax(0, 1fr))` }}
+      >
+        {ids.map((id, i) => (
+          <div
+            key={id}
+            className={`min-w-0 transition-all duration-500 ${
+              entered ? "translate-y-0 opacity-100" : "translate-y-6 opacity-0"
+            }`}
+            style={{ transitionDelay: `${i * 180}ms` }}
+          >
+            <Thread
+              id={id}
+              compact
+              onDeleted={(also) => drop([id, ...(also ?? [])])}
+              onFocus={() => void navigate({ search: { c: id } })}
+              onChangedAll={() => void qc.invalidateQueries({ queryKey: ["desk_split", key] })}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The desk fanned a multi-need message out. The card lists the tracks as
+ * they are NOW (a deleted one says so) and opens the live ones side by side.
+ */
+function NeedsFanoutCard({
+  card,
+  conv,
+  inSplit,
+}: {
+  card: DeskCardView;
+  conv: DeskConversationView;
+  /** Rendered inside one of the side-by-side panes: the split is already on. */
+  inSplit?: boolean | undefined;
+}) {
+  const navigate = useNavigate({ from: "/desk" });
+  const items = (card["items"] as unknown as { id: string; title: string }[]) ?? [];
+  const live = new Map(conv.tracks.map((t) => [t.id, t]));
+  const liveIds = items.map((i) => i.id).filter((id) => live.has(id) || id === conv.id);
+  return (
+    <div className="space-y-2 rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm">
+      <p className="font-medium">Running {items.length} hiring needs in parallel</p>
+      <ul className="space-y-1">
+        {items.map((i, n) => {
+          const t = live.get(i.id);
+          return (
+            <li key={i.id} className="flex items-center gap-2 text-xs">
+              <span className={t ? "" : "text-muted-foreground line-through"}>
+                {n + 1}. {t?.title ?? i.title}
+              </span>
+              <span className="text-muted-foreground">
+                {t ? (STATUS_LABEL[t.status] ?? t.status) : "deleted"}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      {!inSplit && liveIds.length >= 2 ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-1"
+          onClick={() => void navigate({ search: { split: liveIds.join(",") } })}
+        >
+          <Columns2 className="size-3.5" /> Open side by side
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The one control for a fan-out: the tracks chip. In the header of any
+ * thread of a split, it shows how many tracks are running and what needs
+ * the person; the dropdown lists every track (open it, or all side by side).
+ * In side-by-side view it carries the Focus action instead of Exit.
+ */
+function TracksChip({
+  tracks,
+  compact,
+  onOpenTrack,
+  onSideBySide,
+}: {
+  tracks: { id: string; title: string; status: string; needsYou: number; self: boolean }[];
+  compact?: boolean | undefined;
+  onOpenTrack: (id: string) => void;
+  onSideBySide: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const waiting = tracks.filter((t) => !t.self && t.needsYou > 0);
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${
+          waiting.length
+            ? "border-amber-500/60 bg-amber-500/10 text-amber-700"
+            : "border-border text-muted-foreground"
+        }`}
+      >
+        {tracks.length} tracks
+        {waiting.length ? (
+          <>
+            <span className="inline-block size-1.5 rounded-full bg-amber-500" />
+            {waiting.length} need{waiting.length === 1 ? "s" : ""} you
+          </>
+        ) : null}
+      </button>
+      {open ? (
+        <div className="absolute right-0 z-20 mt-1 w-72 space-y-1 rounded-md border border-border bg-background p-2 shadow-lg">
+          {tracks.map((t) => (
+            <div
+              key={t.id}
+              className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-xs ${
+                t.self ? "bg-muted/60" : ""
+              }`}
+            >
+              <span className="min-w-0 flex-1 truncate font-medium">{t.title}</span>
+              <span className="shrink-0 text-muted-foreground">
+                {STATUS_LABEL[t.status] ?? t.status}
+              </span>
+              {t.needsYou > 0 ? (
+                <span className="shrink-0 font-medium text-amber-600">
+                  {t.needsYou} need{t.needsYou === 1 ? "s" : ""} you
+                </span>
+              ) : null}
+              {t.self ? (
+                <span className="shrink-0 text-muted-foreground">this thread</span>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setOpen(false);
+                    onOpenTrack(t.id);
+                  }}
+                >
+                  Open
+                </Button>
+              )}
+            </div>
+          ))}
+          <div className="border-t border-border pt-1">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="w-full text-xs"
+              onClick={() => {
+                setOpen(false);
+                onSideBySide();
+              }}
+            >
+              {compact ? "Show all side by side" : "Run side by side"}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /* -------------------------------------------------------------- thread */
 
 /** Chats deleted in the last 30 days, with Restore — shown to owners only (the server checks). */
@@ -306,28 +637,39 @@ function DeleteThreadButton({
   onDeleted,
 }: {
   conv: DeskConversationView;
-  onDeleted: () => void;
+  onDeleted: (also?: string[]) => void;
 }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const others = conv.tracks.filter((t) => !t.self);
+  const [scope, setScope] = useState<"track" | "split">("track");
   const what = conv.canDelete;
   if (!what) return null;
   const draft = what.kind === "draft";
   async function confirm() {
     setBusy(true);
     try {
-      await deleteDeskConversation({ data: { id: conv.id, reason: reason.trim() } });
+      const res = await deleteDeskConversation({
+        data: { id: conv.id, reason: reason.trim(), scope: others.length ? scope : "track" },
+      });
       toast.success(
-        draft
-          ? `Chat and draft ${what && "code" in what ? what.code : ""} deleted`
-          : "Chat deleted",
+        res.alsoDeleted
+          ? `${res.alsoDeleted + 1} tracks deleted`
+          : draft
+            ? `Chat and draft ${what && "code" in what ? what.code : ""} deleted`
+            : "Chat deleted",
       );
+      // A track that could not go (in approval, or someone else's) stays — say why.
+      for (const k of res.kept) toast.warning(`${k.title} was kept: ${k.why}`);
       setOpen(false);
       void qc.invalidateQueries({ queryKey: ["desk_list"] });
       void qc.invalidateQueries({ queryKey: ["desk_deleted"] });
-      onDeleted();
+      const keptTitles = new Set(res.kept.map((k) => k.title));
+      onDeleted(
+        scope === "split" ? others.filter((t) => !keptTitles.has(t.title)).map((t) => t.id) : [],
+      );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not delete");
     } finally {
@@ -361,6 +703,37 @@ function DeleteThreadButton({
               removed for good. The deletion is recorded in the audit log.
             </DialogDescription>
           </DialogHeader>
+          {others.length ? (
+            <fieldset className="space-y-1 rounded-md border border-border p-2 text-sm">
+              <legend className="px-1 text-xs font-medium">
+                This chat is one of {others.length + 1} needs started together
+              </legend>
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="delete-scope"
+                  checked={scope === "track"}
+                  onChange={() => setScope("track")}
+                />
+                Only {conv.title}
+              </label>
+              <label className="flex items-start gap-2">
+                <input
+                  type="radio"
+                  name="delete-scope"
+                  className="mt-1"
+                  checked={scope === "split"}
+                  onChange={() => setScope("split")}
+                />
+                <span>
+                  All {others.length + 1}: also {others.map((t) => t.title).join(", ")}
+                  <span className="block text-xs text-muted-foreground">
+                    A track already in approval or later is kept — you will be told which.
+                  </span>
+                </span>
+              </label>
+            </fieldset>
+          ) : null}
           <div className="space-y-1">
             <label className="text-xs font-medium" htmlFor="delete-reason">
               {draft ? "Why? (required)" : "Why? (optional)"}
@@ -391,12 +764,31 @@ function DeleteThreadButton({
   );
 }
 
-function Thread({ id, onDeleted }: { id: string; onDeleted: () => void }) {
+function Thread({
+  id,
+  onDeleted,
+  compact,
+  onFocus,
+  onChangedAll,
+}: {
+  id: string;
+  /** This thread was deleted (with `also`: the other tracks deleted with it). */
+  onDeleted: (also?: string[]) => void;
+  /** Split-screen column: no journey panel, taller conversation. */
+  compact?: boolean;
+  /** Split-screen column: open this thread on its own. */
+  onFocus?: () => void;
+  /** Split-screen column: refresh every pane (the split's one poll). */
+  onChangedAll?: () => void;
+}) {
   const qc = useQueryClient();
   const q = useQuery({
     queryKey: ["desk", id],
     queryFn: () => getDeskConversation({ data: { id } }),
-    refetchInterval: 4_000,
+    // In a split the columns are fed by the split's one poll (SplitDesk);
+    // a pane polling on its own multiplied the calls into the rate limit.
+    refetchInterval: compact ? false : 4_000,
+    staleTime: compact ? 60_000 : 0,
   });
   const [text, setText] = useState("");
   const [pending, setPending] = useState<string | null>(null);
@@ -410,9 +802,42 @@ function Thread({ id, onDeleted }: { id: string; onDeleted: () => void }) {
   }, [count, pending]);
 
   const refresh = () => {
-    qc.invalidateQueries({ queryKey: ["desk", id] });
+    if (onChangedAll) onChangedAll();
+    else qc.invalidateQueries({ queryKey: ["desk", id] });
     qc.invalidateQueries({ queryKey: ["desk_list"] });
   };
+
+  // While focused on one track, the others still move: when a sibling's
+  // open requests rise, say so — nobody should have to remember to look.
+  const prevNeeds = useRef<Record<string, number>>({});
+  useEffect(() => {
+    const tracks = q.data?.tracks ?? [];
+    if (!tracks.length) return;
+    const prev = prevNeeds.current;
+    for (const t of tracks) {
+      if (t.self) continue;
+      const before = prev[t.id];
+      if (before !== undefined && t.needsYou > before) toast(`${t.title} is waiting for you`);
+    }
+    prevNeeds.current = Object.fromEntries(tracks.map((t) => [t.id, t.needsYou]));
+  }, [q.data?.tracks]);
+
+  // The fan-out made visible: when the desk splits a multi-need message into
+  // parallel tracks, open them side by side — once per fan-out, and only the
+  // tracks still alive (a deleted track must not come back as a column).
+  const navigate = useNavigate({ from: "/desk" });
+  const fanout = [...(q.data?.messages ?? [])]
+    .reverse()
+    .find((m) => (m.card as { type?: string } | null)?.type === "needs_fanout");
+  const liveTracks = (q.data?.tracks ?? []).map((t) => t.id);
+  useEffect(() => {
+    if (compact || !fanout || liveTracks.length < 2 || autoSplitSeen(fanout.id)) return;
+    // Only right after the fan-out: an old split reopened later is just a thread.
+    if (Date.now() - new Date(fanout.at).getTime() > 10 * 60_000) return;
+    markAutoSplitSeen(fanout.id);
+    void navigate({ search: { split: liveTracks.slice(0, 3).join(",") } });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [compact, fanout?.id, liveTracks.length]);
 
   async function send() {
     const message = text.trim();
@@ -430,7 +855,15 @@ function Thread({ id, onDeleted }: { id: string; onDeleted: () => void }) {
     }
   }
 
-  if (q.isLoading)
+  // Deleted from somewhere else (another view, another tab): leave the
+  // thread instead of sitting on an error. (In a split, SplitDesk does this.)
+  const missing = q.error instanceof Error && /not found/i.test(q.error.message);
+  useEffect(() => {
+    if (missing && !compact) onDeleted();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [missing, compact]);
+
+  if (q.isLoading || (compact && !q.data && !q.error))
     return <section className="panel p-6 text-sm text-muted-foreground">Loading…</section>;
   if (!q.data)
     return (
@@ -449,18 +882,57 @@ function Thread({ id, onDeleted }: { id: string; onDeleted: () => void }) {
   const hidden = showAll ? 0 : Math.max(0, d.messages.length - RECENT_MESSAGES);
   const visible = d.messages.filter((m, i) => i >= hidden || isOpenTask(m));
   const folded = d.messages.length - visible.length;
+  // The person's message (or a button they pressed — "Research … from the
+  // market") is the last word and the desk has not answered yet: it is still
+  // working. Shown to every viewer and every pane, not only the one that
+  // clicked — research takes up to a minute and looked like nothing happened.
+  const last = d.messages.at(-1);
+  const deskWorking =
+    !pending && last?.role === "user" && Date.now() - new Date(last.at).getTime() < 3 * 60_000;
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+    <div className={compact ? "" : "grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]"}>
       {/* The journey: first on small screens, a sticky column on wide ones. */}
-      <div className="xl:order-2">
-        <JourneyPanel conv={d} onChanged={refresh} />
-      </div>
+      {!compact ? (
+        <div className="xl:order-2">
+          <JourneyPanel conv={d} onChanged={refresh} />
+        </div>
+      ) : null}
       {/* The conversation: fixed height, scrolls inside, composer always visible. */}
-      <section className="panel flex h-[calc(100vh-13rem)] min-h-[460px] flex-col xl:order-1">
+      <section
+        className={`panel flex ${
+          compact ? "h-[calc(100vh-7.5rem)]" : "h-[calc(100vh-13rem)]"
+        } min-h-[460px] flex-col xl:order-1`}
+      >
         <header className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
           <h2 className="font-semibold">{d.title}</h2>
           <Badge variant="outline">{STATUS_LABEL[d.status] ?? d.status}</Badge>
+          {!compact && (d.tracks?.length ?? 0) >= 2 ? (
+            <TracksChip
+              tracks={d.tracks}
+              onOpenTrack={(id) => void navigate({ search: { c: id } })}
+              onSideBySide={() =>
+                void navigate({ search: { split: d.tracks.map((t) => t.id).join(",") } })
+              }
+            />
+          ) : null}
+          {openTasks > 0 ? (
+            <span
+              className="inline-block size-2 rounded-full bg-amber-500"
+              title={`${openTasks} request${openTasks === 1 ? "" : "s"} waiting for you`}
+            />
+          ) : null}
           <DeleteThreadButton conv={d} onDeleted={onDeleted} />
+          {onFocus ? (
+            <button
+              type="button"
+              aria-label="Open this thread on its own"
+              title="Open this thread on its own"
+              className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={onFocus}
+            >
+              <Maximize2 className="size-4" />
+            </button>
+          ) : null}
           {d.requisition ? (
             <Link
               to="/requisitions/$id"
@@ -471,6 +943,16 @@ function Thread({ id, onDeleted }: { id: string; onDeleted: () => void }) {
             </Link>
           ) : null}
         </header>
+        {compact ? (
+          <details className="border-b border-border px-4 py-2 text-xs">
+            <summary className="cursor-pointer select-none font-medium text-muted-foreground">
+              Hiring journey
+            </summary>
+            <div className="mt-2">
+              <JourneyPanel conv={d} onChanged={refresh} />
+            </div>
+          </details>
+        ) : null}
         <div ref={list} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
           {folded > 0 ? (
             <button
@@ -488,6 +970,7 @@ function Thread({ id, onDeleted }: { id: string; onDeleted: () => void }) {
               conv={d}
               onChanged={refresh}
               superseded={superseded.get(m.id) ?? null}
+              compact={compact}
             />
           ))}
           {pending ? (
@@ -497,6 +980,11 @@ function Thread({ id, onDeleted }: { id: string; onDeleted: () => void }) {
                 <Loader2 className="size-3 animate-spin" /> The desk is thinking…
               </p>
             </>
+          ) : deskWorking ? (
+            <p className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="size-3 animate-spin" /> The desk is working on it — research can
+              take up to a minute…
+            </p>
           ) : null}
         </div>
         <footer className="border-t border-border p-3">
@@ -579,12 +1067,15 @@ function Message({
   conv,
   onChanged,
   superseded,
+  compact,
 }: {
   m: DeskMessageView;
   conv: DeskConversationView;
   onChanged: () => void;
   /** Why this message's card no longer applies (it is folded), or null. */
   superseded?: string | null;
+  /** Rendered inside a side-by-side pane: cards drop actions that manage the view. */
+  compact?: boolean | undefined;
 }) {
   const [reopen, setReopen] = useState(false);
   if (superseded && !reopen)
@@ -607,7 +1098,7 @@ function Message({
       {m.body ? <Bubble role={m.role} body={m.body} {...(who ? { who } : {})} /> : null}
       {m.card ? (
         <div className="ml-9 space-y-2">
-          <Card card={m.card} conv={conv} onChanged={onChanged} />
+          <Card card={m.card} conv={conv} onChanged={onChanged} compact={compact} />
           {m.card.type !== "reasoning" && m.card["why"] ? (
             <Thinking why={m.card["why"] as Why} />
           ) : null}
@@ -623,13 +1114,18 @@ function Card({
   card,
   conv,
   onChanged,
+  compact,
 }: {
   card: DeskCardView;
   conv: DeskConversationView;
   onChanged: () => void;
+  /** Inside a side-by-side pane: no view-managing actions on cards. */
+  compact?: boolean | undefined;
 }) {
   if (card.type === "similar_roles")
     return <SimilarRolesCard card={card} conv={conv} onChanged={onChanged} />;
+  if (card.type === "needs_fanout")
+    return <NeedsFanoutCard card={card} conv={conv} inSplit={compact} />;
   if (card.type === "hiring_manager_options")
     return <HiringManagerOptionsCard card={card} conv={conv} onChanged={onChanged} />;
   if (card.type === "ranked_candidates")
@@ -646,7 +1142,13 @@ function Card({
     return <Thinking why={card as unknown as Why} conv={conv} onChanged={onChanged} />;
   if (card.type === "jd") return <JdCard card={card} />;
   if (card.type === "interview_plan")
-    return <InterviewPlanThreadCard requisitionId={String(card["requisitionId"])} />;
+    return (
+      <InterviewPlanThreadCard
+        requisitionId={String(card["requisitionId"])}
+        conv={conv}
+        onChanged={onChanged}
+      />
+    );
   if (card.type === "next_steps")
     return <NextStepsCard card={card} conv={conv} onChanged={onChanged} />;
   if (card.type === "rescore") return <RescoreCard card={card} conv={conv} onChanged={onChanged} />;
@@ -1823,7 +2325,26 @@ function CloseRoleCard({
 
 /* ------------------------------------------------- thinking & proposals */
 
-type Why = { understood?: { label: string; value: string }[]; missing?: string[]; next?: string };
+type Why = {
+  understood?: { label: string; value: string }[];
+  missing?: string[];
+  next?: string;
+  /** The optional JD details can be drafted from market practice — one press. */
+  jdResearch?: boolean;
+};
+
+/**
+ * Market research fills a known role's skills and experience: offer it only
+ * once the role is named and while either is still open — from the thread's
+ * live details, not the card's snapshot. Before the role is known ("which
+ * of the two roles first?") it can only answer "which role should I research?".
+ */
+function researchable(conv: DeskConversationView): boolean {
+  const s = conv.slots as { roleTitle?: string; mustHaveSkills?: string[]; experienceMin?: number };
+  return (
+    Boolean(s.roleTitle) && (!(s.mustHaveSkills ?? []).length || s.experienceMin === undefined)
+  );
+}
 
 /** "How I read that": what the desk understood, what is missing, what it does next. */
 function Thinking({
@@ -1838,9 +2359,7 @@ function Thinking({
   const [busy, setBusy] = useState(false);
   const understood = why.understood ?? [];
   const missing = why.missing ?? [];
-  const canResearch =
-    conv?.status === "gathering" &&
-    missing.some((m) => m === "must-have skills" || m === "experience");
+  const canResearch = conv?.status === "gathering" && researchable(conv);
   async function research() {
     if (!conv) return;
     setBusy(true);
@@ -1854,6 +2373,18 @@ function Thinking({
       onChanged?.();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not research this");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function draftFromMarket() {
+    if (!conv) return;
+    setBusy(true);
+    try {
+      await sendDeskMessage({ data: { id: conv.id, message: "research it" } });
+      onChanged?.();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not draft");
     } finally {
       setBusy(false);
     }
@@ -1888,6 +2419,18 @@ function Thinking({
           Research it from the market
         </Button>
       ) : null}
+      {why.jdResearch && conv ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="mt-2 gap-1"
+          disabled={busy}
+          onClick={() => void draftFromMarket()}
+        >
+          {busy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+          Draft responsibilities from market practice
+        </Button>
+      ) : null}
     </details>
   );
 }
@@ -1907,6 +2450,27 @@ function HiringManagerOptionsCard({
   const options =
     (card["options"] as unknown as { memberId: string; name: string; email: string }[]) ?? [];
   const open = conv.status === "gathering";
+  // Skills / experience can still be researched even while the hiring
+  // manager is the question on the card — research stays available for as
+  // long as those details are missing, not only on the turn that asked.
+  const missing = why.missing ?? [];
+  const canResearch = open && researchable(conv);
+  async function research() {
+    setBusy(true);
+    try {
+      await researchDeskRole({
+        data: {
+          id: conv.id,
+          fields: missing.includes("experience") ? ["skills", "experience"] : ["skills"],
+        },
+      });
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not research this");
+    } finally {
+      setBusy(false);
+    }
+  }
   async function pick(memberId: string) {
     setBusy(true);
     try {
@@ -1969,6 +2533,18 @@ function HiringManagerOptionsCard({
           No active team members found — the admin adds people on the Team page.
         </p>
       )}
+      {canResearch ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-1"
+          disabled={busy}
+          onClick={() => void research()}
+        >
+          {busy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+          Research it from the market
+        </Button>
+      ) : null}
     </div>
   );
 }
@@ -2150,7 +2726,61 @@ function BudgetPaused({
 
 /** A job description shown in the thread: the saved text of one version. */
 /** The role's hiring manager and interview plan, editable in the thread. */
-function InterviewPlanThreadCard({ requisitionId }: { requisitionId: string }) {
+/**
+ * The Role expert interview agent, from the thread: ask the role's hiring
+ * manager what it really needs. Once their brief is approved, say so —
+ * screening kits and the interview rounds work from it.
+ */
+function ExpertInterviewAction({
+  conv,
+  onChanged,
+}: {
+  conv: DeskConversationView;
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const at = conv.requisition?.expertBriefAt ?? null;
+  async function start() {
+    setBusy(true);
+    try {
+      await startDeskExpertInterview({ data: { id: conv.id } });
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not start the interview");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="space-y-1 rounded-md border border-dashed border-border p-2">
+      <p className="text-xs text-muted-foreground">
+        {at
+          ? `Expert brief approved by the hiring manager on ${new Date(at).toLocaleDateString()} — screening and interviews work from it.`
+          : "Ask the hiring manager what this role really needs: must-haves and why, deal-breakers, and the questions that tell strong from weak. They approve the brief before screening uses it."}
+      </p>
+      <Button
+        size="sm"
+        variant="outline"
+        className="gap-1"
+        disabled={busy}
+        onClick={() => void start()}
+      >
+        {busy ? <Loader2 className="size-4 animate-spin" /> : <UserRound className="size-4" />}
+        {at ? "Interview the hiring manager again" : "Ask the hiring manager what this role needs"}
+      </Button>
+    </div>
+  );
+}
+
+function InterviewPlanThreadCard({
+  requisitionId,
+  conv,
+  onChanged,
+}: {
+  requisitionId: string;
+  conv: DeskConversationView;
+  onChanged: () => void;
+}) {
   return (
     <div className="space-y-3 rounded-lg border border-border p-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
@@ -2167,6 +2797,7 @@ function InterviewPlanThreadCard({ requisitionId }: { requisitionId: string }) {
         <p className="text-xs text-muted-foreground">Hiring manager</p>
         <HiringManagerPicker requisitionId={requisitionId} />
       </div>
+      <ExpertInterviewAction conv={conv} onChanged={onChanged} />
       <InterviewPlanCard requisitionId={requisitionId} />
     </div>
   );

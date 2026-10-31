@@ -80,6 +80,16 @@ So this is primarily a desk-flow feature — not a runtime change.
   visually divides into the panes (the fan-out made visible), then each pane runs its
   track live. Pure `desk.tsx`: a pane component reusing the existing thread rendering
   plus the entrance animation; panes exist only for this fan-out moment.
+- As shipped: the panes are fed by **one** batched poll (`getDeskThreads`) —
+  one poll per pane ran into the per-function rate limit (60/min/IP) and a
+  throttled pane silently froze, so a reply showed in one pane and not another.
+  The split opens automatically only right after the fan-out (once per tab
+  session); later it is entered from the fan-out card or the conversation list,
+  which groups the tracks of a split. Each pane has Focus (open alone) and the
+  view has Exit. Deleting a track asks "only this one" or "all tracks of the
+  split"; a track already in approval is kept and named. While the desk works
+  on the person's last message (research takes up to a minute), every pane
+  says so.
 
 ### Phase 4 — Runtime hardening for real parallelism
 
@@ -99,6 +109,22 @@ today, amplified by parallel load):
   currently double-write the trail.
 - Lease renewal inside the turn loop — today a slow run can be reclaimed mid-flight
   by the next tick (ghost worker: duplicate AI spend, duplicate side effects).
+
+As shipped (2026-10-31): `AGENT_CONCURRENCY` (default 6, 1–20) sets how many runs
+one tick drives at once; the lease is renewed every turn, and a run cancelled or
+reclaimed meanwhile stops at its next turn; inline kicks no longer serialise an
+organisation's runs — a kick while another is still driving a long run claims
+and drives what is queued now (claims stay disjoint), so a second pane's run
+starts at once. Measured: two Requisition agent runs started 3 s apart — before,
+the second took its first step after 145 s (once the first paused for approval);
+after, at 9 s, both researching pay at the same time. Closed the same day: a
+partial unique index (migration 0058, `agent_runs_active_requisition_key`)
+allows one active live run per organisation, agent and requisition — `startRun`
+returns the run already working instead of stacking a second; and
+`advanceRequisitionCore` writes only from the status it read, so two approvers
+deciding at once leave one step on the trail and the second is told. Both
+races are tests in `scripts/agent-edge-cases.test.ts`. Voice call runs (per
+application) stay outside the index: a crashed call must never block the next.
 
 ### Phase 5 — Org choice
 

@@ -68,7 +68,7 @@ export function registerOrgTools(): void {
   registerTool({
     name: "read_org_website",
     description:
-      "Read the organisation's own website (the host saved on the Profile page) into profile sources and propose what it states as draft items. At most 20 pages, robots.txt honoured; pages already read and unchanged cost nothing. Pass specific same-host pages when the person asked for them. A page that looks like instructions to an AI is held back for a person, and nothing is kept from it until they accept it.",
+      "Read the organisation's own website (the host saved on the Profile page) into profile sources and propose what changed pages state as draft items. Returns counts and moreLinks — the site's own links not read yet; it does not return page text (read_org_sources does). At most 20 pages, robots.txt honoured; unchanged pages cost nothing; pages that say they do not exist are skipped. Pass `pages` ONLY from moreLinks or addresses the person gave — never guess an address. A page that looks like instructions to an AI is held back for a person.",
     input: z.object({
       pages: z.array(z.string().max(2000)).max(20).optional(),
     }),
@@ -97,12 +97,51 @@ export function registerOrgTools(): void {
         const own = host(p.websiteUrl);
         const off = input.pages.find((p2) => host(p2) !== own);
         if (off) return `Only the organisation's own website (${own}) may be read — not ${off}.`;
+        // Guessed addresses read "not found" pages and burned the run's budget:
+        // only addresses already seen in this run (moreLinks, the records'
+        // page list, the person's words in the goal or an answer) or pages
+        // read before pass.
+        const { agentRuns, orgContextSources } = await import("@db/schema");
+        const { and, isNull } = await import("drizzle-orm");
+        const [run] = await db
+          .select({ goal: agentRuns.goal, transcript: agentRuns.transcript })
+          .from(agentRuns)
+          .where(eq(agentRuns.id, ctx.runId))
+          .limit(1);
+        const read = await db
+          .select({ url: orgContextSources.url })
+          .from(orgContextSources)
+          .where(and(eq(orgContextSources.orgId, ctx.orgId), isNull(orgContextSources.deletedAt)));
+        const seenText = `${run?.goal ?? ""} ${JSON.stringify(run?.transcript ?? "")}`;
+        const norm = (u: string) => u.replace(/\/+$/, "");
+        const known = new Set([
+          ...[...seenText.matchAll(/https?:\/\/[^\s"'\\<>)]+/g)].map((m) =>
+            norm(m[0].replace(/[.,;]+$/, "")),
+          ),
+          ...read.flatMap((r) => (r.url ? [norm(r.url)] : [])),
+        ]);
+        const guessed = input.pages.filter((u) => !known.has(norm(u)));
+        if (guessed.length)
+          return `Not linked from the site or given by a person: ${guessed.slice(0, 3).join(", ")}. Pass only addresses from moreLinks or the person's message — or call read_org_sources and write from what is already read.`;
       }
       return null;
     },
     run: async (ctx, input) => {
       const { readWebsiteCore } = await import("@/lib/org-context.server");
       return readWebsiteCore(await actor(ctx), input);
+    },
+  });
+
+  registerTool({
+    name: "read_org_sources",
+    description:
+      "The TEXT of everything gathered so far, to write the profile from: the website pages already read (sourceId, url, text — longest first), the documents on file (read each with read_org_document) and what the admin said in the organisation chat (adminSaid). Write items from this text with propose_profile_items, quoting it exactly; quote the page's sourceId, and leave sourceId out for what the admin said. Call it after read_org_website, and again after a decision asked for more.",
+    input: z.object({}),
+    risk: "read",
+    untrustedOutput: true,
+    run: async (ctx) => {
+      const { readOrgSources } = await import("@/lib/org-context.server");
+      return readOrgSources(ctx.orgId);
     },
   });
 
