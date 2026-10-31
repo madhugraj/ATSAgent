@@ -100,6 +100,7 @@ beforeAll(async () => {
       windowStartMinute: 0,
       windowEndMinute: 1440,
       callDays: [1, 2, 3, 4, 5, 6, 7],
+      negotiationEnabled: true,
     },
   );
 });
@@ -791,6 +792,30 @@ describe("asking for a negotiation call", () => {
         brief: { reportsTo: "the Chief Technology Officer" },
       }),
     ).toMatchObject({ ok: true });
+  });
+
+  test("switched off for the organisation: no call asked for, none dialled", async () => {
+    const { negotiation, call } = await arranged();
+    const on = await settings.phoneScreeningPolicyOf(orgId);
+    await settings.setPhoneScreeningPolicyCore(
+      orgId,
+      { userId, memberEmail: hr },
+      { ...on, negotiationEnabled: false },
+    );
+    try {
+      expect(
+        await request.checkNegotiationCall(orgId, negotiation.id, { byPerson: true }),
+      ).toMatchObject({ ok: false, reason: expect.stringMatching(/switched off/) });
+      await db
+        .update(screeningCalls)
+        .set({ status: "approved", attempt: 0, dueAt: new Date(Date.now() - 60_000) })
+        .where(eq(screeningCalls.id, call.id));
+      const due = (await dispatcher.dueCalls(new Date(), 500)) as unknown as { id: string }[];
+      expect(due.map((d) => d.id)).not.toContain(call.id);
+    } finally {
+      await settings.setPhoneScreeningPolicyCore(orgId, { userId, memberEmail: hr }, on);
+      await db.delete(screeningCalls).where(eq(screeningCalls.id, call.id));
+    }
   });
 
   test("settled or opted out: no call", async () => {

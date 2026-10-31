@@ -715,6 +715,7 @@ erDiagram
     integer max_reschedules
     boolean scheduling_enabled
     integer scheduling_wait_hours
+    boolean negotiation_enabled
     text voice
     text next_steps_text "nullable"
     uuid updated_by FK
@@ -1414,7 +1415,7 @@ erDiagram
 | `org_profile_versions` | Organisations & masters | 16 | (orgId+version) |
 | `org_profiles` | Organisations & masters | 12 | — |
 | `organizations` | Organisations & masters | 26 | (slug), (capture_token), (capture_token_hash) |
-| `phone_screening_settings` | Screening & interviews | 15 | — |
+| `phone_screening_settings` | Screening & interviews | 16 | — |
 | `platform_admins` | Identity & access | 6 | (email) |
 | `product_catalogue_commercials` | Organisations & masters | 8 | — |
 | `requisition_board_postings` | — | 16 | (requisitionId+provider) |

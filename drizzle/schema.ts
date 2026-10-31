@@ -2928,6 +2928,8 @@ export const phoneScreeningSettings = pgTable(
     schedulingEnabled: boolean("scheduling_enabled").notNull().default(false),
     /** Hours an e-mailed interview-time offer waits unanswered before a scheduling call. */
     schedulingWaitHours: integer("scheduling_wait_hours").notNull().default(24),
+    /** Pay negotiation calls (docs/negotiator-voice-agent.md) switched on (0058). */
+    negotiationEnabled: boolean("negotiation_enabled").notNull().default(false),
     /** The assistant's voice (one of the voice service's prebuilt voices). */
     voice: text("voice").notNull().default("Kore"),
     /** What the assistant tells candidates happens next (≤ 300 characters). */

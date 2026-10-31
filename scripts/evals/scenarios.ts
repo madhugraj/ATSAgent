@@ -2453,6 +2453,13 @@ async function seedNegotiationCall(
     .where(eq(requisitions.id, requisitionId));
   const app = await seedApplication(orgId, requisitionId, name, "l3", 86);
   await seedPhoneScreening(orgId, userId, app);
+  {
+    const { phoneScreeningSettings } = await import("../../drizzle/schema");
+    await db
+      .update(phoneScreeningSettings)
+      .set({ negotiationEnabled: true })
+      .where(eq(phoneScreeningSettings.orgId, orgId));
+  }
   const [a] = await db
     .select({ candidateId: applications.candidateId })
     .from(applications)

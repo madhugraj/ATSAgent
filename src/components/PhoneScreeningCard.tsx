@@ -296,6 +296,30 @@ export function PhoneScreeningCard({ canEdit }: { canEdit: boolean }) {
           </p>
         </div>
       </div>
+      <div className="space-y-2 rounded-md border border-border p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-medium">Pay negotiation calls</h3>
+          <div className="flex items-center gap-2">
+            <Label htmlFor="ps-negotiation" className="text-xs text-muted-foreground">
+              {p.negotiationEnabled ? "On" : "Off"}
+            </Label>
+            <Switch
+              id="ps-negotiation"
+              checked={p.negotiationEnabled}
+              disabled={!canEdit}
+              onCheckedChange={(negotiationEnabled) => set({ negotiationEnabled })}
+            />
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          The Negotiation call agent phones a selected candidate about an approved offer: it
+          congratulates them, explains the role and the whole package, listens to how they feel, and
+          may offer one pre-approved improved figure — only after they say they would go ahead. It
+          never says the ceiling or band and never agrees anything: a yes comes back to TA or the HR
+          head to confirm. The HR head approves each call (or TA arranges it from &quot;Call to
+          negotiate&quot; on the candidate&apos;s pay discussion).
+        </p>
+      </div>
       {canEdit ? (
         <Button variant="outline" disabled={busy || !valid || !draft} onClick={() => void save()}>
           Save phone screening

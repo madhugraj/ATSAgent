@@ -27,6 +27,8 @@ export async function dueCalls(now: Date, limit = 50) {
     where c.status in ('approved', 'callback', 'no_answer', 'failed')
       -- Scheduling calls only while the organisation keeps them switched on.
       and (c.purpose <> 'scheduling' or coalesce(s.scheduling_enabled, false))
+      -- Pay negotiation calls only while the organisation keeps them switched on.
+      and (c.purpose <> 'negotiation' or coalesce(s.negotiation_enabled, false))
       -- Never a candidate who asked not to be called by the AI assistant.
       and cand.ai_call_opt_out_at is null
       and c.due_at is not null and c.due_at <= ${now.toISOString()}::timestamptz

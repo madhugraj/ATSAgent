@@ -265,3 +265,11 @@ safe, de-escalates and hands off).
    be said once (and count as said); never the same question, fact or figure twice; a
    `why_join` pitch (up to three reasons to join, approved with the call) answers "why should
    I choose you?".
+
+### Switching it on
+
+Organisation → Phone calls → **Pay negotiation calls** (`phone_screening_settings.negotiation_enabled`,
+off by default). While it is off, no negotiation call can be asked for (the Offer agent's
+request and "Call to negotiate" are refused with the reason) and the dispatcher dials none.
+Like the other voice agents, the agent's entry in the Agent register is governed by this
+switch, not by the background agents' on/off.

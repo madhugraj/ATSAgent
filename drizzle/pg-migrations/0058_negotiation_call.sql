@@ -7,6 +7,8 @@
 --   offer (above the proposal, at or under the ceiling); null = hold.
 -- * offer_negotiations.call_outcome: what the call heard. It pre-fills the
 --   confirm form; only a person's confirmation marks the discussion agreed.
+-- * phone_screening_settings.negotiation_enabled: pay negotiation calls are
+--   switched on per organisation (off by default).
 -- * offer_negotiations.call_brief: what the person arranging the call approved
 --   for it to explain — the fixed / variable split, ESOPs, how the review works,
 --   benefits, and why the team wants this candidate.
@@ -33,3 +35,4 @@ do $$ begin
 exception when duplicate_object then null; end $$;
 alter table offer_negotiations add column if not exists call_outcome jsonb;
 alter table offer_negotiations add column if not exists call_brief jsonb;
+alter table phone_screening_settings add column if not exists negotiation_enabled boolean not null default false;

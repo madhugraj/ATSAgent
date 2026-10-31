@@ -61,6 +61,13 @@ export async function checkNegotiationCall(
   negotiationId: string,
   opts: { byPerson?: boolean; step?: number | null; brief?: NegotiationCallBrief | null } = {},
 ): Promise<NegotiationCallCheck> {
+  const policy = await phoneScreeningPolicyOf(orgId);
+  if (!policy.negotiationEnabled)
+    return {
+      ok: false,
+      reason:
+        "Pay negotiation calls are switched off for this organisation (Organisation → Phone calls).",
+    };
   const ready = await phoneScreeningReadiness(orgId);
   if (!ready.enabled)
     return { ok: false, reason: "Phone calls are switched off for this organisation." };
