@@ -76,8 +76,14 @@ We credit reporters in release notes on request.
   The Service health page and its server function are platform-admin only; SLO alert webhooks are
   HMAC-signed and sent through `safeFetch`; SLO alert notifications are audited. Incoming
   `traceparent` headers are validated and only their ids are reused.
-- AI safety: untrusted CV, JD, profile and mail text is delimited before prompting; structured model
-  responses are schema-validated before use. AI decisions retain evidence and permit audited human override.
+- AI safety (full reference: `docs/guardrails.md`): untrusted CV, JD, profile and mail text is
+  fenced with `untrusted()` before prompting, and every fence look-alike (any case, spacing,
+  attributes, full-width brackets, invisible characters) is stripped so the fence cannot be closed
+  early. Structured model responses are schema-validated before use, including the CV scorer.
+  A deterministic tripwire checks CV text at intake and scoring alongside the model's own flag; a
+  flagged candidate is never recommended "select" and never auto-advances. An agent run whose tool
+  output tripped the tripwire is tainted: every later write or outbound action waits for a person,
+  whatever the autonomy level. AI decisions retain evidence and permit audited human override.
 - AI usage ledger: every provider request is recorded in `ai_usage_events`
   (organisation, feature, provider, model, token counts, attempt, latency, outcome) directly from
   the gateway. The ledger is read-only to platform super admins via `/platform-ai-usage` and gives

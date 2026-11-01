@@ -87,7 +87,7 @@ export async function scoreUnscored(opts: {
           const [cand] = await db
             .select()
             .from(candidates)
-            .where(eq(candidates.id, app.candidateId))
+            .where(and(eq(candidates.id, app.candidateId), eq(candidates.orgId, opts.orgId)))
             .limit(1);
           if (!req || !cand) throw new Error("Requisition or candidate missing");
           reqTitle = req.title;
@@ -102,7 +102,9 @@ export async function scoreUnscored(opts: {
               qualifications: jobDescriptions.qualifications,
             })
             .from(jobDescriptions)
-            .where(eq(jobDescriptions.requisitionId, req.id))
+            .where(
+              and(eq(jobDescriptions.requisitionId, req.id), eq(jobDescriptions.orgId, opts.orgId)),
+            )
             .orderBy(desc(jobDescriptions.version))
             .limit(1);
 
@@ -214,13 +216,21 @@ export async function scoreUnscored(opts: {
               });
           }
 
+          // The scorer saw an injection attempt the intake parse missed: remember
+          // it on the candidate so every later step (agents, autoscore) sees it.
+          const injection = cand.suspectedPromptInjection || result.injection_suspected;
+          if (result.injection_suspected && !cand.suspectedPromptInjection) {
+            await db
+              .update(candidates)
+              .set({ suspectedPromptInjection: true })
+              .where(and(eq(candidates.id, cand.id), eq(candidates.orgId, opts.orgId)));
+          }
+
           if ((AUTO_STAGES as readonly string[]).includes(app.stage)) {
             // A candidate whose CV tripped the injection detector never advances
             // automatically — the score is recorded, a human decides the stage.
             const nextStage =
-              cand.suspectedPromptInjection || result.overall_score < 75
-                ? "ai_screened"
-                : "shortlisted";
+              injection || result.overall_score < 75 ? "ai_screened" : "shortlisted";
             await db
               .update(applications)
               .set({ stage: nextStage, lastActivityAt: now })
@@ -232,7 +242,7 @@ export async function scoreUnscored(opts: {
               fromStage: app.stage,
               toStage: nextStage,
               actor: AUTO_STAGE_ACTOR,
-              reason: `Auto-${nextStage === "shortlisted" ? "shortlisted" : "screened"} by matching score ${result.overall_score}/100${cand.suspectedPromptInjection ? " — prompt-injection flag held at ai_screened" : ""}`,
+              reason: `Auto-${nextStage === "shortlisted" ? "shortlisted" : "screened"} by matching score ${result.overall_score}/100${injection ? " — prompt-injection flag held at ai_screened" : ""}`,
               source: "ai",
             });
           }

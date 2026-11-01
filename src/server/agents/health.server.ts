@@ -300,7 +300,7 @@ export const RULES: Rule[] = [
     id: "tools.injection",
     element: "tools",
     severity: "warning",
-    description: `Third-party text (CV, mail, document) returned by a tool looked like instructions to the model in the last 24 hours (serious from ${HEALTH.injectionSerious24h}). The text stays fenced as data; review the runs.`,
+    description: `Third-party text (CV, mail, document) returned by a tool looked like instructions to the model in the last 24 hours (serious from ${HEALTH.injectionSerious24h}). The text stays fenced as data, and the rest of each such run asks a person before any write or outbound action; review the runs.`,
     evaluate: async (orgId) => {
       const r = await rows<{ agent_type: string; n: number; runs: number }>(sql`
         select r.agent_type, count(*)::int n, count(distinct st.run_id)::int runs

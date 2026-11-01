@@ -48,6 +48,9 @@ jobs:
       - name: Unit tests (agent gateway)
         run: bun test scripts/agent-gateway.test.ts
 
+      - name: Prompt-injection guardrails (fence, tripwire, taint, scorer schema)
+        run: bun test scripts/guardrails.test.ts
+
       - name: Integration tests
         run: bun test scripts/integration.verify.test.ts
 

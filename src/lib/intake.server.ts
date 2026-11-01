@@ -9,6 +9,7 @@ import { createHash } from "crypto";
 import { z } from "zod";
 
 import { db } from "../server/db";
+import { looksLikeInjection } from "../server/agents/injection";
 import { contentTypeFor, putObject, resumeObjectPath, safeFileName } from "../server/storage";
 import { applications, candidates } from "@db/schema";
 import { aiJson } from "./ai-gateway.server";
@@ -302,7 +303,10 @@ async function ingestCandidateInner(input: {
     source: input.source,
     resumeText: input.resumeText,
     orgId: input.orgId,
-    suspectedPromptInjection: Boolean(p?.suspected_prompt_injection),
+    // The parser model's own flag, or the deterministic tripwire on the raw CV
+    // text (it catches what a model talked out of flagging would miss).
+    suspectedPromptInjection:
+      Boolean(p?.suspected_prompt_injection) || looksLikeInjection(input.resumeText ?? ""),
     lastSyncedAt: new Date(),
   };
 

@@ -1,5 +1,15 @@
 # Roadmap
 
+## Prompt-injection guardrails — P0 (2026-11-01)
+
+- [x] `docs/guardrails.md`: every security control by layer, the v2.0 threat landscape mapped attack by attack, open items, how it is verified
+- [x] Fence hardening: `sanitizeUntrusted` strips every `untrusted_data` look-alike and invisible characters until stable; labels sanitised
+- [x] CV scorer: zod `ScoreAiSchema` (conservative fallbacks), `injection_suspected` from the model flag or the tripwire; never "select", held at `ai_screened`, flag saved on the candidate
+- [x] Intake: the tripwire runs on the raw CV text alongside the parser's flag; broader tripwire patterns (top-rating, bypass-evaluation, spaced fence tags)
+- [x] Agent taint: after a tripwire hit in a run, every write / external action waits for a person (card states why); red-team evals incl. a hijacked model that tries to e-mail out (`neverRuns`)
+- [ ] P1: hidden-text stripping in PDF extraction; organisation-wide AI spend cap; two-person rule for org-profile edits; live red-team run before Autonomous; prompt-echo check
+- [ ] P2: isolated no-network parser job and Cloud Run egress firewall; shared rate limiter; SHA-pinned Actions, Renovate, SBOM/provenance; step-up re-auth for release and bulk rejection
+
 ## Voice screening agent (2026-10-23)
 
 - [x] M0 voice foundation (docs/voice-screening-agent.md): SIP/RTP/G.711 call stack in TypeScript (`src/server/voice/`), live voice sessions through the AI gateway (`aiVoiceSession`, feature `screening_call`, ledger + training capture), spike script; real test calls placed from a workstation and from inside GKE with two-way audio
