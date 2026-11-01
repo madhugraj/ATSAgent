@@ -37,6 +37,16 @@ open time offers (the candidate is told by the team). Decisions are audited
 (`panel_review.decided`) and captured as training feedback (`panel_review`).
 Health rule `panel.review_unresolved` (48 h; serious while held).
 
+After the first real Teams call (2026-10-31, migration 0063): the app found
+the meeting and Microsoft accepted automatic recording, but refused the
+transcript (403, no `OnlineMeetingTranscript.Read.All` yet) and the round was
+marked "No transcript" for good. Two changes: a permission refusal is retried
+until the 6-hour limit (an admin can grant it after the call), and checks start
+10 minutes after the call's **start** (a call often ends early). _Try again_ on
+a round with no transcript (Interviews page, the hiring team, audited
+`interview.transcription_retried`) restarts the fetch with a fresh 6 hours
+(`interviews.transcript_wait_from`).
+
 Decision 1 changed in building it: the move does **not** wait up to 2 hours
 for a late assessment. Holding a move for a view that may never come stalls
 the candidate on a transcript problem; instead the late assessment is compared

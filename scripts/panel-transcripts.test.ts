@@ -7,7 +7,7 @@
  * Run: DATABASE_URL=postgres://…/atsagent_test bun test scripts/panel-transcripts.test.ts
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 
 const { db } = await import("../src/server/db");
 const {
@@ -38,6 +38,8 @@ let applicationId: string;
 type Call = { method: string; url: string; body?: string };
 let calls: Call[] = [];
 let transcriptsReady = false;
+/** Teams refuses the transcript, as before the permission is granted (the first real call). */
+let transcriptsDenied = false;
 const realFetch = globalThis.fetch;
 
 function stubTeams() {
@@ -49,6 +51,13 @@ function stubTeams() {
     if (url.startsWith("https://login.microsoftonline.com/")) return json({ access_token: "t" });
     if (url.includes("/me/onlineMeetings?$filter=")) return json({ value: [{ id: "m1" }] });
     if (url.endsWith("/me/onlineMeetings/m1") && method === "PATCH") return json({});
+    if (url.endsWith("/onlineMeetings/m1/transcripts") && transcriptsDenied)
+      return new Response(
+        JSON.stringify({
+          error: { message: "API requires one of 'OnlineMeetingTranscript.Read.All'." },
+        }),
+        { status: 403 },
+      );
     if (url.endsWith("/onlineMeetings/m1/transcripts"))
       return json({
         value: transcriptsReady ? [{ id: "t1", createdDateTime: "2026-10-31T10:00:00Z" }] : [],
@@ -296,6 +305,70 @@ describe("after the call", () => {
     const r = await round(id);
     expect(r.transcription).toBe("unavailable");
     expect(r.transcriptionDetail).toContain("within 6 hours");
+    await db.delete(interviews).where(eq(interviews.id, id));
+  });
+
+  test("a call that ended early is checked from 10 minutes after its start", async () => {
+    transcriptsReady = false;
+    transcriptsDenied = false;
+    // Started 15 minutes ago, booked for an hour: the booked end is still ahead.
+    const id = await book(1, new Date(Date.now() - 15 * 60_000));
+    await db.update(interviews).set({ durationMins: 60 }).where(eq(interviews.id, id));
+    calls = [];
+    await panel.sweepTranscripts(orgId);
+    expect(calls.some((c) => c.url.endsWith("/onlineMeetings/m1/transcripts"))).toBe(true);
+    expect((await round(id)).transcriptChecks).toBe(1);
+    // …but it was 5 minutes ago: not yet.
+    const soon = await book(1, new Date(Date.now() - 5 * 60_000));
+    calls = [];
+    await panel.sweepTranscripts(orgId);
+    expect((await round(soon)).transcriptChecks).toBe(0);
+    await db.delete(interviews).where(inArray(interviews.id, [id, soon]));
+  });
+
+  test("a permission refusal keeps trying for 6 hours; Try again gives a fresh 6 and recovers it", async () => {
+    transcriptsReady = false;
+    transcriptsDenied = true;
+    const id = await book(1, new Date(Date.now() - 2 * 3600_000));
+    await panel.sweepTranscripts(orgId);
+    let r = await round(id);
+    expect(r.transcription).toBe("requested"); // an admin can still grant it
+    expect(r.transcriptionDetail).toMatch(
+      /^Still trying — Microsoft refused to share the transcript \(403\)/,
+    );
+    expect(r.transcriptChecks).toBe(1);
+
+    // Past 6 hours from the booked end: given up, with Microsoft's reason.
+    await db
+      .update(interviews)
+      .set({ scheduledAt: new Date(Date.now() - 8 * 3600_000), transcriptCheckedAt: null })
+      .where(eq(interviews.id, id));
+    await panel.sweepTranscripts(orgId);
+    r = await round(id);
+    expect(r.transcription).toBe("unavailable");
+    expect(r.transcriptionDetail).toContain("OnlineMeetingTranscript.Read.All");
+
+    // The permission is granted; the hiring team presses Try again.
+    transcriptsDenied = false;
+    transcriptsReady = true;
+    await panel.retryRoundTranscriptionCore({ orgId, userId, email: actor().memberEmail }, id);
+    r = await round(id);
+    expect(r).toMatchObject({ transcription: "requested", transcriptChecks: 0 });
+    expect(r.transcriptWaitFrom).not.toBeNull();
+    await panel.sweepTranscripts(orgId);
+    expect((await round(id)).transcription).toBe("ready");
+    const audit = await db
+      .select()
+      .from(auditLog)
+      .where(
+        and(eq(auditLog.entityId, id), eq(auditLog.action, "interview.transcription_retried")),
+      );
+    expect(audit).toHaveLength(1);
+    // Only a round whose transcript did not come can be retried.
+    await expect(
+      panel.retryRoundTranscriptionCore({ orgId, userId, email: actor().memberEmail }, id),
+    ).rejects.toThrow("Only a round whose transcript did not come");
+    transcriptsReady = false;
     await db.delete(interviews).where(eq(interviews.id, id));
   });
 

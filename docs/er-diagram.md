@@ -658,6 +658,7 @@ erDiagram
     text transcription_detail "nullable"
     timestamptz transcript_checked_at "nullable"
     integer transcript_checks
+    timestamptz transcript_wait_from "nullable"
   }
   screening_kits {
     uuid id PK
@@ -1408,7 +1409,7 @@ erDiagram
 | `integration_credentials` | Sourcing & integrations | 4 | — |
 | `interview_slot_offers` | — | 22 | (token) |
 | `interview_transcripts` | — | 8 | (interview_id) |
-| `interviews` | Screening & interviews | 23 | — |
+| `interviews` | Screening & interviews | 24 | — |
 | `job_descriptions` | Requisitions & job content | 17 | — |
 | `job_index_notifications` | — | 10 | — |
 | `master_items` | Organisations & masters | 8 | — |

@@ -7,9 +7,12 @@
  * A round is transcribed when the agent is on for its level and its meeting is
  * on a provider we can read back. Transcription is switched on with the
  * provider right after booking; a candidate who declines has it switched off
- * and any stored transcript deleted. After the call the sweep asks the
- * provider every 10 minutes, then less often, for up to 6 hours; then the
- * round is marked unavailable (health rule panel.transcript_missing).
+ * and any stored transcript deleted. From 10 minutes after the call's start
+ * the sweep asks the provider, then less often, until 6 hours after its
+ * booked end; then the round is marked unavailable (health rule
+ * panel.transcript_missing). A permission refusal is retried in that window —
+ * an admin can grant it after the call — and "Try again" gives a round with
+ * no transcript a fresh 6 hours.
  */
 import { and, eq, inArray, sql } from "drizzle-orm";
 
@@ -176,7 +179,7 @@ export async function syncRoundTranscription(orgId: string, interviewId: string)
   if (!r || r.transcription === "ready" || r.transcription === "candidate_declined") return;
   const policy = await panelAgentPolicyOf(orgId);
   const ref = r.mode === "online" ? refOf(r) : null;
-  const reset = { transcriptChecks: 0, transcriptCheckedAt: null };
+  const reset = { transcriptChecks: 0, transcriptCheckedAt: null, transcriptWaitFrom: null };
   if (!policy.enabled || !policy.levels.includes(r.level) || !ref) {
     if (r.transcription !== "off")
       await db
@@ -256,12 +259,58 @@ export async function declineRoundTranscriptionCore(
   });
 }
 
+/**
+ * "Try again" on a round whose transcript did not come (e.g. the meeting
+ * account's transcript permission was granted after the call): the fetch
+ * starts over with a fresh 6 hours from now. Audited.
+ */
+export async function retryRoundTranscriptionCore(
+  ctx: { orgId: string; userId: string; email: string },
+  interviewId: string,
+): Promise<void> {
+  const [r] = await db
+    .select({
+      level: interviews.level,
+      transcription: interviews.transcription,
+      detail: interviews.transcriptionDetail,
+      meetingProvider: interviews.meetingProvider,
+    })
+    .from(interviews)
+    .where(and(eq(interviews.orgId, ctx.orgId), eq(interviews.id, interviewId)))
+    .limit(1);
+  if (!r) throw new Error("Interview round not found.");
+  if (r.transcription !== "unavailable")
+    throw new Error("Only a round whose transcript did not come can be tried again.");
+  if (!r.meetingProvider)
+    throw new Error("This round has no meeting the transcript can be read from.");
+  await db
+    .update(interviews)
+    .set({
+      transcription: "requested",
+      transcriptionDetail: null,
+      transcriptChecks: 0,
+      transcriptCheckedAt: null,
+      transcriptWaitFrom: new Date(),
+    })
+    .where(and(eq(interviews.orgId, ctx.orgId), eq(interviews.id, interviewId)));
+  await writeAudit({
+    actor: ctx.email,
+    actorUserId: ctx.userId,
+    orgId: ctx.orgId,
+    action: "interview.transcription_retried",
+    entityType: "interview",
+    entityId: interviewId,
+    detail: { level: r.level, lastAnswer: r.detail },
+  });
+}
+
 /* ------------------------------------------------------------------ sweep */
 
 /**
- * Rounds whose call has ended and whose transcript is due a check: 10 min
- * after the end, then doubling, at most every 2 hours; given up 6 hours after
- * the end. Only organisations with the agent switched on.
+ * Rounds whose transcript is due a check: from 10 min after the call's start
+ * (a call often ends early), then doubling, at most every 2 hours; given up 6
+ * hours after the booked end — or after a "Try again". A permission refusal
+ * is retried in that window. Only organisations with the agent switched on.
  */
 export async function sweepTranscripts(onlyOrgId?: string, max = 20): Promise<number> {
   const due = await db
@@ -273,6 +322,7 @@ export async function sweepTranscripts(onlyOrgId?: string, max = 20): Promise<nu
       meetingProvider: interviews.meetingProvider,
       meetingExternalId: interviews.meetingExternalId,
       endsAt: sql<Date>`${interviews.scheduledAt} + make_interval(mins => ${interviews.durationMins})`,
+      waitFrom: interviews.transcriptWaitFrom,
       requisitionId: applications.requisitionId,
     })
     .from(interviews)
@@ -283,7 +333,7 @@ export async function sweepTranscripts(onlyOrgId?: string, max = 20): Promise<nu
         eq(panelAgentSettings.enabled, true),
         eq(interviews.transcription, "requested"),
         inArray(interviews.status, ["scheduled", "rescheduled", "completed"]),
-        sql`${interviews.scheduledAt} + make_interval(mins => ${interviews.durationMins} + 10) < now()`,
+        sql`${interviews.scheduledAt} + interval '10 minutes' < now()`,
         sql`(${interviews.transcriptCheckedAt} is null or ${interviews.transcriptCheckedAt} <
           now() - least(interval '10 minutes' * power(2, ${interviews.transcriptChecks}), interval '2 hours'))`,
         onlyOrgId ? eq(interviews.orgId, onlyOrgId) : undefined,
@@ -298,7 +348,8 @@ export async function sweepTranscripts(onlyOrgId?: string, max = 20): Promise<nu
   for (const r of due) {
     const orgId = r.orgId!;
     const where = and(eq(interviews.orgId, orgId), eq(interviews.id, r.id));
-    const giveUp = new Date(r.endsAt).getTime() + TRANSCRIPT_WAIT_HOURS * 3600_000 < Date.now();
+    const giveUp =
+      new Date(r.waitFrom ?? r.endsAt).getTime() + TRANSCRIPT_WAIT_HOURS * 3600_000 < Date.now();
     const ref = refOf(r);
     let result: Awaited<ReturnType<typeof fetchTranscript>>;
     if (!ref) {
@@ -342,7 +393,9 @@ export async function sweepTranscripts(onlyOrgId?: string, max = 20): Promise<nu
       continue;
     }
     const detail = result.status === "ready" ? "The transcript came back empty." : result.detail;
-    if (result.status === "unavailable" || giveUp) {
+    // A missing permission can be granted after the call: keep trying in the window.
+    const final = result.status === "unavailable" && !result.permission;
+    if (final || giveUp) {
       await db
         .update(interviews)
         .set({
@@ -350,7 +403,7 @@ export async function sweepTranscripts(onlyOrgId?: string, max = 20): Promise<nu
           transcriptionDetail:
             result.status === "unavailable"
               ? detail
-              : `No transcript arrived within ${TRANSCRIPT_WAIT_HOURS} hours of the call's end (last answer: ${detail})`,
+              : `No transcript arrived within ${TRANSCRIPT_WAIT_HOURS} hours (last answer: ${detail})`,
           transcriptCheckedAt: new Date(),
         })
         .where(where);
@@ -359,7 +412,7 @@ export async function sweepTranscripts(onlyOrgId?: string, max = 20): Promise<nu
     await db
       .update(interviews)
       .set({
-        transcriptionDetail: detail,
+        transcriptionDetail: result.status === "unavailable" ? `Still trying — ${detail}` : detail,
         transcriptCheckedAt: new Date(),
         transcriptChecks: sql`${interviews.transcriptChecks} + 1`,
       })

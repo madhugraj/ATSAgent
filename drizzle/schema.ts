@@ -798,6 +798,8 @@ export const interviews = pgTable(
     transcriptionDetail: text("transcription_detail"),
     transcriptCheckedAt: timestamp("transcript_checked_at", { withTimezone: true }),
     transcriptChecks: integer("transcript_checks").notNull().default(0),
+    /** When the current wait for the transcript started; null = the booked end (migration 0063). */
+    transcriptWaitFrom: timestamp("transcript_wait_from", { withTimezone: true }),
   },
   (t) => [
     index("interviews_interviewer_email_idx").on(sql`lower(${t.interviewerEmail})`),

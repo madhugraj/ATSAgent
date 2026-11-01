@@ -29,8 +29,12 @@ export type TranscriptFetch =
   | { status: "ready"; segments: TranscriptSegment[] }
   /** Not there yet: the call has not ended, or the provider is still processing it. */
   | { status: "pending"; detail: string }
-  /** It will not come: no permission, transcription off, or the meeting is gone. */
-  | { status: "unavailable"; detail: string };
+  /**
+   * It will not come as things stand: transcription off, or the meeting is
+   * gone — or (`permission`) the connection may not read it, which an admin
+   * can fix, so the caller keeps trying for a while.
+   */
+  | { status: "unavailable"; detail: string; permission?: true };
 
 const MAX_TRANSCRIPT_BYTES = 5_000_000;
 const MAX_SEGMENTS = 5_000;
@@ -51,6 +55,7 @@ async function zoomTranscript(
   if (res.status === 401 || res.status === 403)
     return {
       status: "unavailable",
+      permission: true,
       detail: `Zoom refused to share the recording (${res.status}) — the app needs permission to read cloud recordings.`,
     };
   if (!res.ok) return { status: "pending", detail: `Zoom recordings returned ${res.status}.` };
@@ -125,6 +130,7 @@ async function teamsTranscript(
   const { base, headers, delegated } = g;
   const denied = (status: number) => ({
     status: "unavailable" as const,
+    permission: true as const,
     detail: `Microsoft refused to share the transcript (${status}) — grant OnlineMeetingTranscript.Read.All${delegated ? "" : " with an application access policy for the organiser"}.`,
   });
 
@@ -174,6 +180,7 @@ async function meetTranscript(s: Record<string, string>, code: string): Promise<
   const headers = { Authorization: `Bearer ${token}` };
   const denied = (status: number) => ({
     status: "unavailable" as const,
+    permission: true as const,
     detail: `Google refused to share the transcript (${status}) — reconnect Google Meet on the Integrations page so the grant includes reading Meet transcripts.`,
   });
   const get = async (path: string) => {
