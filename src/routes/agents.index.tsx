@@ -39,6 +39,7 @@ import {
   type AgentRunView,
   type AgentTaskView,
 } from "@/lib/agents.functions";
+import { withStepUp } from "@/lib/step-up-client";
 
 const TABS = ["decisions", "acted", "activity"] as const;
 type AgentsTab = (typeof TABS)[number];
@@ -224,7 +225,7 @@ function TaskCard({ task }: { task: AgentTaskView }) {
   async function decide(decision: AgentDecisionInput) {
     setBusy(true);
     try {
-      const res = await decideAgentTask({ data: { taskId: task.id, decision } });
+      const res = await withStepUp(() => decideAgentTask({ data: { taskId: task.id, decision } }));
       if (res.noLongerRelevant) toast.info(res.noLongerRelevant);
       else
         toast.success(

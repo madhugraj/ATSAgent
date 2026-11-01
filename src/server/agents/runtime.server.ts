@@ -1932,7 +1932,12 @@ async function handleCall(
     });
   }
 
-  const verdict = decideToolCall(tool.risk, policy, tool.templateOf?.(parsed.data) ?? null);
+  // Taint: once this run has read third-party text that tripped the injection
+  // tripwire, no write or outbound action runs without a person.
+  const tainted = tool.risk !== "read" && (await runTainted(run));
+  const verdict = decideToolCall(tool.risk, policy, tool.templateOf?.(parsed.data) ?? null, {
+    tainted,
+  });
   if (run.mode === "replay" && tool.risk !== "read") {
     return simulated(
       run,
@@ -1943,10 +1948,11 @@ async function handleCall(
     );
   }
   if (verdict === "approve") {
+    const brief = tool.brief ? await tool.brief(ctx, parsed.data).catch(() => "") : "";
     const taskId = await openTask(run, {
       kind: "approval",
       title: tool.describe?.(parsed.data) ?? `Allow the agent to run ${tool.name}`,
-      body: tool.brief ? await tool.brief(ctx, parsed.data).catch(() => "") : "",
+      body: tainted ? [TAINT_NOTE, brief].filter(Boolean).join("\n\n") : brief,
       // Most approvals go to the person the agent works for; some tools name
       // the role that must approve them (e.g. job-board posts → HR head).
       assigneeRole: tool.approverRole ?? null,
@@ -1970,6 +1976,26 @@ async function handleCall(
     kind: "message",
     message: await execute(run, ctx, tool.name, call, parsed.data, seq, notify),
   };
+}
+
+/** Said on an approval card when the run is tainted (system-stated, never the agent's words). */
+export const TAINT_NOTE =
+  "Held for you: earlier in this run the agent read candidate or third-party text that looked like an attempt to instruct it. Check this action against the facts before approving.";
+
+/** Has any earlier step of this run read third-party text that tripped the tripwire? */
+async function runTainted(run: AgentRun): Promise<boolean> {
+  const [hit] = await db
+    .select({ id: agentSteps.id })
+    .from(agentSteps)
+    .where(
+      and(
+        eq(agentSteps.runId, run.id),
+        eq(agentSteps.orgId, run.orgId),
+        eq(agentSteps.injectionSuspected, true),
+      ),
+    )
+    .limit(1);
+  return Boolean(hit);
 }
 
 /**

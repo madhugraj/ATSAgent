@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
@@ -27,6 +27,8 @@ export const getAiSettings = createServerFn({ method: "POST" })
         lastTestStatus: aiSettings.lastTestStatus,
         lastTestMessage: aiSettings.lastTestMessage,
         lastTestedAt: aiSettings.lastTestedAt,
+        monthlyTokenCap: aiSettings.monthlyTokenCap,
+        dailyScoresPerRequisition: aiSettings.dailyScoresPerRequisition,
       })
       .from(aiSettings)
       .where(eq(aiSettings.orgId, context.orgId))
@@ -56,6 +58,15 @@ export const getAiSettings = createServerFn({ method: "POST" })
         openai: await hasProviderKey(context.orgId, "openai"),
         anthropic: await hasProviderKey(context.orgId, "anthropic"),
         google: await hasProviderKey(context.orgId, "google"),
+      },
+      // Denial-of-wallet limits (migration 0064) and this month's use against them.
+      limits: {
+        monthly_token_cap: data?.monthlyTokenCap ?? null,
+        daily_scores_per_requisition: data?.dailyScoresPerRequisition ?? null,
+        month_tokens_used: await (async () => {
+          const { monthTokensUsed } = await import("../server/ai-spend-cap");
+          return monthTokensUsed(context.orgId);
+        })(),
       },
       // Phone screening's AI voice: booleans only, never the credential.
       voice: await (async () => {
@@ -94,6 +105,59 @@ export const saveAiSettings = createServerFn({ method: "POST" })
         provider: data.provider,
         model: data.model,
         keyChanged: Boolean(data.apiKey.trim()),
+      },
+    });
+    return { ok: true };
+  });
+
+const LimitsInput = z.object({
+  /** Null removes the cap. */
+  monthlyTokenCap: z.number().int().min(10_000).max(1_000_000_000_000).nullable(),
+  dailyScoresPerRequisition: z.number().int().min(1).max(100_000).nullable(),
+});
+
+/** Set the organisation's AI spend limits (docs/guardrails.md, P1-2). HR head; audited. */
+export const saveAiLimits = createServerFn({ method: "POST" })
+  .middleware([requireRole("hr_head")])
+  .inputValidator((data: unknown) => LimitsInput.parse(data))
+  .handler(async ({ data, context }) => {
+    const [existing] = await db
+      .select({
+        id: aiSettings.id,
+        monthlyTokenCap: aiSettings.monthlyTokenCap,
+        dailyScoresPerRequisition: aiSettings.dailyScoresPerRequisition,
+      })
+      .from(aiSettings)
+      .where(eq(aiSettings.orgId, context.orgId))
+      .limit(1);
+    const payload = {
+      monthlyTokenCap: data.monthlyTokenCap,
+      dailyScoresPerRequisition: data.dailyScoresPerRequisition,
+      updatedAt: new Date(),
+    };
+    if (existing) {
+      await db
+        .update(aiSettings)
+        .set(payload)
+        .where(and(eq(aiSettings.id, existing.id), eq(aiSettings.orgId, context.orgId)));
+    } else {
+      await db.insert(aiSettings).values({ ...payload, orgId: context.orgId, singleton: true });
+    }
+    const { clearSpendCapCache } = await import("../server/ai-spend-cap");
+    clearSpendCapCache(context.orgId);
+    const { writeAudit } = await import("../server/audit");
+    await writeAudit({
+      actor: context.memberEmail,
+      actorUserId: context.userId,
+      orgId: context.orgId,
+      action: "ai.limits.save",
+      entityType: "ai_settings",
+      detail: {
+        from: {
+          monthlyTokenCap: existing?.monthlyTokenCap ?? null,
+          dailyScoresPerRequisition: existing?.dailyScoresPerRequisition ?? null,
+        },
+        to: data,
       },
     });
     return { ok: true };

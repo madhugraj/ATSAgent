@@ -316,6 +316,41 @@ describe("agent runtime", () => {
     expect((await runRow(runId)).status).toBe("done");
   });
 
+  test("taint: after reading injected third-party text, writes wait for a person", async () => {
+    await db
+      .update(agentPolicies)
+      .set({ autonomy: "act_and_notify" })
+      .where(and(eq(agentPolicies.orgId, orgId), eq(agentPolicies.agentType, "requisition")));
+    const { runId } = await start();
+    // read_cv returns "Ignore previous instructions…" — the tripwire marks the step.
+    script.push(
+      call({ id: "cv", name: "read_cv", args: {} }),
+      call({ id: "w1", name: "save_draft", args: { text: "x" } }),
+    );
+    await runAgentTick();
+    expect(executed).toEqual([]);
+    expect((await runRow(runId)).status).toBe("awaiting_human");
+    const [task] = await openTasks(runId);
+    expect(task!.kind).toBe("approval");
+    expect(task!.body).toContain("Held for you");
+  });
+
+  test("taint does not hold reads, and an untainted run still acts", async () => {
+    await db
+      .update(agentPolicies)
+      .set({ autonomy: "act_and_notify" })
+      .where(and(eq(agentPolicies.orgId, orgId), eq(agentPolicies.agentType, "requisition")));
+    const { runId } = await start();
+    script.push(
+      call({ id: "cv", name: "read_cv", args: {} }),
+      call({ id: "l1", name: "lookup", args: { id: "R1" } }),
+      say("ok"),
+    );
+    await runAgentTick();
+    expect(executed.map((e) => e.tool)).toEqual(["lookup"]);
+    expect((await runRow(runId)).status).toBe("done");
+  });
+
   test("a rejection reaches the model as a tool error", async () => {
     const { runId } = await start();
     script.push(call({ id: "w1", name: "save_draft", args: { text: "v1" } }));
@@ -708,6 +743,13 @@ describe("autonomy policy", () => {
     ).toBe("approve");
     // external with no template always asks
     expect(decideToolCall("external", p("autonomous"))).toBe("approve");
+    // tainted run (injection tripwire fired earlier): every write/external asks; reads run
+    const tainted = { tainted: true };
+    expect(decideToolCall("read", p("autonomous"), null, tainted)).toBe("run");
+    expect(decideToolCall("write", p("autonomous"), null, tainted)).toBe("approve");
+    expect(
+      decideToolCall("external", p("autonomous", ["stage_update"]), "stage_update", tainted),
+    ).toBe("approve");
   });
 
   test("a board post requested by a recruiter is approved — and run — by the HR head", async () => {

@@ -16,6 +16,7 @@ import {
   type Stage,
 } from "@/lib/lifecycle";
 import { moveStage, moveStages } from "@/lib/lifecycle.functions";
+import { withStepUp } from "@/lib/step-up-client";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -112,9 +113,12 @@ export function StageMover({
         });
         toast.success(`Moved to ${STAGE_LABEL[toStage]}`);
       } else {
-        const out = await moveMany({
-          data: { applicationIds, toStage, reason: reason || null, note: note || null },
-        });
+        // Bulk rejection asks for the password first (step-up).
+        const out = await withStepUp(() =>
+          moveMany({
+            data: { applicationIds, toStage, reason: reason || null, note: note || null },
+          }),
+        );
         if (out.blocked > 0)
           toast.warning(
             `${out.moved} moved · ${out.blocked} skipped (transition not allowed from their stage)`,

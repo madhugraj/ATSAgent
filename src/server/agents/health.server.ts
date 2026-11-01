@@ -121,6 +121,11 @@ export const HEALTH = {
   rereadSeriousFailures: 2,
   /** Profile items refused from sources in 7 days before it is flagged. */
   refusedItems7d: 5,
+  /** Score drift after a profile approval: mean CV score moved by at least this many points… */
+  scoreDriftPoints: 10,
+  /** …with at least this many scorings before and after (days each side below). */
+  scoreDriftMinSamples: 20,
+  scoreDriftWindowDays: 14,
 } as const;
 
 export type HealthElement =
@@ -155,6 +160,21 @@ const rows = async <T>(q: ReturnType<typeof sql>) => (await db.execute(q)) as un
 /* ------------------------------------------------------------------ rules */
 
 export const RULES: Rule[] = [
+  {
+    id: "harness.autonomous_unverified",
+    element: "harness",
+    severity: "warning",
+    description:
+      "An agent works at Autonomous, but the organisation's AI model has no passed model safety check from the last 30 days — the model was changed, the check expired or it failed. Autonomous actions are not re-verified against prompt injection until the check is run again (Agent settings → Model safety check).",
+    evaluate: async (orgId) => {
+      const { autonomousWithoutCheck } = await import("../redteam/check.server");
+      return (await autonomousWithoutCheck(orgId)).map((agentType) => ({
+        agentType,
+        title: "Autonomous with no current model safety check",
+        detail: {},
+      }));
+    },
+  },
   {
     id: "harness.stuck_run",
     element: "harness",
@@ -322,7 +342,7 @@ export const RULES: Rule[] = [
     id: "tools.injection",
     element: "tools",
     severity: "warning",
-    description: `Third-party text (CV, mail, document) returned by a tool looked like instructions to the model in the last 24 hours (serious from ${HEALTH.injectionSerious24h}). The text stays fenced as data; review the runs.`,
+    description: `Third-party text (CV, mail, document) returned by a tool looked like instructions to the model in the last 24 hours (serious from ${HEALTH.injectionSerious24h}). The text stays fenced as data, and the rest of each such run asks a person before any write or outbound action; review the runs.`,
     evaluate: async (orgId) => {
       const r = await rows<{ agent_type: string; n: number; runs: number }>(sql`
         select r.agent_type, count(*)::int n, count(distinct st.run_id)::int runs
@@ -1255,6 +1275,71 @@ export const RULES: Rule[] = [
         title: `The approved organisation profile (version ${x.version}) is ${x.days} days old${docs[0]?.n ? ` and ${docs[0].n} document(s) arrived after it` : ""}`,
         detail: { version: x.version, days: x.days, documentsAfter: docs[0]?.n ?? 0 },
       }));
+    },
+  },
+  {
+    id: "context.score_drift",
+    element: "context",
+    severity: "warning",
+    description: `The average CV score moved by ${HEALTH.scoreDriftPoints} points or more in the ${HEALTH.scoreDriftWindowDays} days after the organisation profile was approved, compared with the ${HEALTH.scoreDriftWindowDays} days before. The profile is part of what the scorer reads, so a change in it can tilt every score — check the latest version for wording that favours or disfavours particular candidates (serious when the version was self-approved).`,
+    evaluate: async (orgId) => {
+      const r = await rows<{
+        version: number;
+        version_id: string;
+        before_avg: number | null;
+        before_n: number;
+        after_avg: number | null;
+        after_n: number;
+      }>(sql`
+        with v as (
+          select v.id, v.version, v.decided_at from org_profiles p
+          join org_profile_versions v on v.id = p.current_version_id
+          where p.org_id = ${orgId} and v.decided_at is not null)
+        select v.version, v.id version_id,
+          (select avg(overall_score)::float from match_scores m where m.org_id = ${orgId}
+             and m.computed_at >= v.decided_at - make_interval(days => ${HEALTH.scoreDriftWindowDays})
+             and m.computed_at < v.decided_at) before_avg,
+          (select count(*)::int from match_scores m where m.org_id = ${orgId}
+             and m.computed_at >= v.decided_at - make_interval(days => ${HEALTH.scoreDriftWindowDays})
+             and m.computed_at < v.decided_at) before_n,
+          (select avg(overall_score)::float from match_scores m where m.org_id = ${orgId}
+             and m.computed_at >= v.decided_at
+             and m.computed_at < v.decided_at + make_interval(days => ${HEALTH.scoreDriftWindowDays})) after_avg,
+          (select count(*)::int from match_scores m where m.org_id = ${orgId}
+             and m.computed_at >= v.decided_at
+             and m.computed_at < v.decided_at + make_interval(days => ${HEALTH.scoreDriftWindowDays})) after_n
+        from v`);
+      const x = r[0];
+      if (
+        !x ||
+        x.before_avg == null ||
+        x.after_avg == null ||
+        x.before_n < HEALTH.scoreDriftMinSamples ||
+        x.after_n < HEALTH.scoreDriftMinSamples
+      )
+        return [];
+      const drift = Math.round(x.after_avg - x.before_avg);
+      if (Math.abs(drift) < HEALTH.scoreDriftPoints) return [];
+      const self = await rows<{ n: number }>(sql`
+        select count(*)::int n from audit_log
+        where org_id = ${orgId} and entity_id = ${x.version_id}
+          and action = 'org_profile.approved' and (detail->>'selfApproved') = 'true'`);
+      const selfApproved = (self[0]?.n ?? 0) > 0;
+      return [
+        {
+          agentType: "org_context",
+          title: `Average CV score ${drift > 0 ? "rose" : "fell"} ${Math.abs(drift)} points after organisation profile version ${x.version} was approved${selfApproved ? " (self-approved)" : ""}`,
+          detail: {
+            version: x.version,
+            beforeAvg: Math.round(x.before_avg),
+            afterAvg: Math.round(x.after_avg),
+            beforeScorings: x.before_n,
+            afterScorings: x.after_n,
+            selfApproved,
+          },
+          ...(selfApproved ? { severity: "serious" as const } : {}),
+        },
+      ];
     },
   },
   {

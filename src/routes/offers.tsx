@@ -5,6 +5,7 @@ import { toast } from "sonner";
 
 import { applicationsQuery, candidatesQuery, offersQuery, requisitionsQuery } from "@/lib/data";
 import { advanceOffer, createOffer, sendBackOffer } from "@/lib/offers.functions";
+import { withStepUp } from "@/lib/step-up-client";
 import { EmptyState, PageHeader, StatusBadge, inr } from "@/components/ats";
 import { OfferLetterDialog } from "@/components/OfferLetterDialog";
 import { PreOnboardingDialog } from "@/components/PreOnboardingDialog";
@@ -129,17 +130,20 @@ function Offers() {
       { from: status, to: step.next, at: new Date().toISOString() },
     ];
     try {
-      await advanceOffer({
-        data: {
-          id,
-          status: step.next,
-          approvalTrail: next,
-          applicationStage:
-            step.stage === "offer_released" || step.stage === "offer_accepted"
-              ? step.stage
-              : undefined,
-        },
-      });
+      // Release asks for the password first (step-up); see withStepUp.
+      await withStepUp(() =>
+        advanceOffer({
+          data: {
+            id,
+            status: step.next,
+            approvalTrail: next,
+            applicationStage:
+              step.stage === "offer_released" || step.stage === "offer_accepted"
+                ? step.stage
+                : undefined,
+          },
+        }),
+      );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not update the offer");
       return;

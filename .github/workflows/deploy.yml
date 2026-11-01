@@ -9,6 +9,8 @@
 #      key as the repo secret GCP_SA_KEY.
 #   3. Add repo secrets GCP_PROJECT and repo variables GCP_REGION, GCP_REPOSITORY.
 #   4. Set the repo variable DEPLOY_ENABLED=true.
+#   5. Optional (recommended): the sandboxed document parser — run
+#      infra/network/parser-sandbox.sh once, then set PARSER_ENABLED=true.
 name: Deploy
 
 on:
@@ -26,15 +28,15 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - id: auth
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      - uses: google-github-actions/setup-gcloud@v2
-      - uses: oven-sh/setup-bun@v2
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
 
       - name: Configure Artifact Registry
         run: gcloud auth configure-docker "${{ vars.GCP_REGION }}-docker.pkg.dev" --quiet
@@ -50,21 +52,74 @@ jobs:
       - name: Run database migrations
         run: bun scripts/migrate-pg.mjs
 
-      - name: Build and push image
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      # Supply chain (docs/guardrails.md P2-3): BuildKit attaches an SBOM (SPDX,
+      # every OS and npm package in the image) and SLSA provenance (max mode:
+      # source commit, build steps) to the pushed image. Deploys use the digest,
+      # so what runs is exactly what was attested.
+      - name: Build and push image (with SBOM and provenance)
         run: |
           IMAGE="${{ vars.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/${{ vars.GCP_REPOSITORY }}/atsiq:${{ github.sha }}"
-          docker build -t "$IMAGE" .
-          docker push "$IMAGE"
-          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          docker buildx build \
+            --sbom=true \
+            --provenance=mode=max \
+            --metadata-file /tmp/build-meta.json \
+            --push -t "$IMAGE" .
+          DIGEST=$(jq -r '."containerimage.digest"' /tmp/build-meta.json)
+          echo "IMAGE=${IMAGE%%:*}@${DIGEST}" >> "$GITHUB_ENV"
+
+      - name: Keep the SBOM with the run
+        run: |
+          docker buildx imagetools inspect "$IMAGE" --format '{{ json .SBOM }}' > sbom.spdx.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sbom-${{ github.sha }}
+          path: sbom.spdx.json
+          retention-days: 90
+
+      # Sandboxed document parser (docs/guardrails.md P2-1). One-time network
+      # setup first: infra/network/parser-sandbox.sh, then PARSER_ENABLED=true.
+      # No egress (deny-all VPC, no NAT), no roles, IAM-only invocation, one
+      # document per instance. The app then parses every uploaded or mailed
+      # document here, never in its own process.
+      - name: Deploy document parser (sandbox)
+        if: vars.PARSER_ENABLED == 'true'
+        run: |
+          gcloud run deploy atsiq-parser \
+            --image "$IMAGE" \
+            --region "${{ vars.GCP_REGION }}" \
+            --command node --args .output/parser-worker/index.mjs \
+            --port 8080 \
+            --no-allow-unauthenticated \
+            --service-account "atsiq-parser@${{ secrets.GCP_PROJECT }}.iam.gserviceaccount.com" \
+            --network atsiq-sandbox --subnet atsiq-parser --vpc-egress all-traffic \
+            --concurrency 1 --max-instances 10 --memory 1Gi --cpu 1 --timeout 60 \
+            --set-secrets "PARSER_TOKEN=atsiq-parser-token:latest" \
+            --quiet
+          PARSER_URL=$(gcloud run services describe atsiq-parser --region "${{ vars.GCP_REGION }}" --format 'value(status.url)')
+          echo "PARSER_URL=$PARSER_URL" >> "$GITHUB_ENV"
+          # Only the app's runtime identity may call the parser.
+          APP_SA=$(gcloud run services describe atsiq --region "${{ vars.GCP_REGION }}" --format 'value(spec.template.spec.serviceAccountName)' || true)
+          APP_SA=${APP_SA:-$(gcloud projects describe "${{ secrets.GCP_PROJECT }}" --format 'value(projectNumber)')-compute@developer.gserviceaccount.com}
+          gcloud run services add-iam-policy-binding atsiq-parser --region "${{ vars.GCP_REGION }}" \
+            --member "serviceAccount:${APP_SA}" --role roles/run.invoker --quiet
 
       - name: Deploy service
         run: |
+          SECRETS="DATABASE_URL=atsiq-database-url:latest,SESSION_SECRET=atsiq-session-secret:latest,SECRET_ENCRYPTION_KEY=atsiq-secret-encryption-key:latest,SMTP_URL=atsiq-smtp-url:latest,INBOUND_EMAIL_SECRET=atsiq-inbound-email-secret:latest,CRON_SECRET=atsiq-cron-secret:latest"
+          # One rate limit across every instance (docs/guardrails.md P2-2).
+          ENVS="PUBLIC_SITE_URL=https://atsiq.yavar.ai,TRUSTED_PROXY_COUNT=1,RATE_LIMIT_STORE=postgres"
+          if [ -n "${PARSER_URL:-}" ]; then
+            SECRETS="$SECRETS,PARSER_TOKEN=atsiq-parser-token:latest"
+            ENVS="$ENVS,PARSER_URL=$PARSER_URL"
+          fi
           gcloud run deploy atsiq \
             --image "$IMAGE" \
             --region "${{ vars.GCP_REGION }}" \
             --port 3000 \
             --allow-unauthenticated \
-            --set-secrets "DATABASE_URL=atsiq-database-url:latest,SESSION_SECRET=atsiq-session-secret:latest,SECRET_ENCRYPTION_KEY=atsiq-secret-encryption-key:latest,SMTP_URL=atsiq-smtp-url:latest,INBOUND_EMAIL_SECRET=atsiq-inbound-email-secret:latest,CRON_SECRET=atsiq-cron-secret:latest" \
-            --set-env-vars "PUBLIC_SITE_URL=https://atsiq.yavar.ai,TRUSTED_PROXY_COUNT=1" \
+            --set-secrets "$SECRETS" \
+            --set-env-vars "$ENVS" \
             --add-cloudsql-instances "${{ secrets.GCP_PROJECT }}:${{ vars.GCP_REGION }}:atsiq" \
             --quiet

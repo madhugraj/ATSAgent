@@ -313,7 +313,12 @@ describe("versions and decisions", () => {
     expect(d2.version).toBe(2);
     expect(d2.sections).toEqual((await reload(v1)).sections);
     await core.submitDraftCore(as(hr), { versionId: d2.id });
-    await core.decideVersionCore(as(hr), { versionId: d2.id, decision: "approve" });
+    // Two-person rule: the HR head wrote d2, and an owner exists to approve it.
+    await expect(
+      core.decideVersionCore(as(hr), { versionId: d2.id, decision: "approve" }),
+    ).rejects.toThrow(/another HR head or an owner must approve/);
+    expect((await reload(d2.id)).status).toBe("pending");
+    await core.decideVersionCore(as(owner), { versionId: d2.id, decision: "approve" });
     expect((await reload(v1)).status).toBe("superseded");
     const state = await core.profileState(orgId);
     expect(state.approved!.id).toBe(d2.id);
@@ -338,6 +343,66 @@ describe("versions and decisions", () => {
 });
 
 /* ------------------------------------------------------- the approval card */
+
+describe("two-person rule", () => {
+  test("an editor from the audit trail cannot approve; send back is still allowed", async () => {
+    const d = await core.startDraftCore(as(cbo));
+    await core.saveDraftCore(as(hr), {
+      versionId: d.id,
+      sections: { ...d.sections, about: [item("We run hospitals in Tamil Nadu.", "candidate")] },
+    });
+    await core.saveDraftCore(as(cbo), { versionId: d.id, sections: (await reload(d.id)).sections });
+    await core.submitDraftCore(as(cbo), { versionId: d.id });
+    const authors = await core.authorsOf(orgId, await reload(d.id));
+    expect([...authors].sort()).toEqual([cbo, hr].sort());
+    // hr edited in the middle (only the audit trail remembers it): refused.
+    await expect(
+      core.decideVersionCore(as(hr), { versionId: d.id, decision: "approve" }),
+    ).rejects.toThrow(/another HR head or an owner must approve/);
+    await core.decideVersionCore(as(hr), {
+      versionId: d.id,
+      decision: "send_back",
+      note: "Name the cities",
+    });
+    expect((await reload(d.id)).status).toBe("changes_requested");
+    await core.discardDraftCore(as(cbo), { versionId: d.id });
+  });
+
+  test("with no other owner or HR head, the author may approve; recorded as self-approved", async () => {
+    const stamp2 = `${stamp}-solo`;
+    const [solo] = await db
+      .insert(users)
+      .values({ email: `op-solo-${stamp2}@test.local` })
+      .returning({ id: users.id });
+    const [soloOrg] = await db
+      .insert(organizations)
+      .values({ name: "Solo Org", slug: `op-solo-${stamp2}`, status: "active" })
+      .returning({ id: organizations.id });
+    await db.insert(orgMembers).values({
+      orgId: soloOrg!.id,
+      userId: solo!.id,
+      email: `solo-${stamp2}@x.local`,
+      status: "active",
+      isOwner: true,
+    } as never);
+    const me = { userId: solo!.id, orgId: soloOrg!.id };
+    const d = await core.startDraftCore(me);
+    await core.saveDraftCore(me, {
+      versionId: d.id,
+      sections: { about: [item("A two-person studio.", "candidate")] },
+    });
+    await core.submitDraftCore(me, { versionId: d.id });
+    await core.decideVersionCore(me, { versionId: d.id, decision: "approve" });
+    expect((await reload(d.id)).status).toBe("approved");
+    const [row] = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.orgId, soloOrg!.id), eq(auditLog.action, "org_profile.approved")));
+    expect(row!.detail).toMatchObject({ selfApproved: true });
+    await db.delete(organizations).where(eq(organizations.id, soloOrg!.id));
+    await db.delete(users).where(eq(users.id, solo!.id));
+  });
+});
 
 describe("an agent's request is decided by a person", () => {
   async function gate(versionId: string) {

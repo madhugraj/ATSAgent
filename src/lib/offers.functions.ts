@@ -355,12 +355,18 @@ export const advanceOffer = createServerFn({ method: "POST" })
       })
       .parse(data),
   )
-  .handler(async ({ data, context }) =>
-    advanceOfferCore(
+  .handler(async ({ data, context }) => {
+    // Releasing an offer to the candidate needs a fresh password (step-up).
+    if (data.status === "released") {
+      const { assertStepUp } = await import("../server/step-up");
+      const { getRequest } = await import("@tanstack/react-start/server");
+      await assertStepUp(context.userId, getRequest());
+    }
+    return advanceOfferCore(
       { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
       data,
-    ),
-  );
+    );
+  });
 
 /** Offer moves that need settled terms (expected CTC, notice, joining date). */
 const TERMS_GATED = new Set(["pending_hr", "pending_cbo", "approved", "released"]);

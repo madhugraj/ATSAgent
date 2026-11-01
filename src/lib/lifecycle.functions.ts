@@ -74,6 +74,12 @@ export const moveStages = createServerFn({ method: "POST" })
         "Only the HR head or an owner can move candidates into an offer or hiring stage.",
       );
     }
+    // Rejecting several candidates at once needs a fresh password (step-up).
+    if (data.toStage === "rejected" && data.applicationIds.length > 1) {
+      const { assertStepUp } = await import("../server/step-up");
+      const { getRequest } = await import("@tanstack/react-start/server");
+      await assertStepUp(context.userId, getRequest());
+    }
 
     const apps = await db
       .select({ id: applications.id, stage: applications.stage })

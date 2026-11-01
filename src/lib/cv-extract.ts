@@ -2,6 +2,9 @@
  * Browser-side resume text extraction for bulk CV upload.
  * PDF via pdf.js, DOCX via mammoth, everything else read as plain text.
  * All imports are dynamic so nothing touches the SSR bundle.
+ * Hidden text (white on white, tiny, invisible, hidden Word runs) is removed and
+ * replaced by one marker line — see src/lib/document-hidden-text.ts. The server
+ * re-checks what it receives (tripwire); this keeps honest uploads clean.
  */
 export async function extractResumeText(file: File): Promise<string> {
   const name = file.name.toLowerCase();
@@ -15,33 +18,34 @@ export async function extractResumeText(file: File): Promise<string> {
     const buf = await file.arrayBuffer();
     const doc = await pdfjs.getDocument({ data: new Uint8Array(buf) }).promise;
 
-    const pages: string[] = [];
-    for (let i = 1; i <= doc.numPages; i++) {
-      const page = await doc.getPage(i);
-      const content = await page.getTextContent();
-      pages.push(
-        content.items
-          .map((it) => ("str" in it ? it.str : ""))
-          .join(" ")
-          .replace(/\s+/g, " "),
-      );
-    }
-    const text = pages.join("\n\n").trim();
+    const { pdfVisibleText, withHiddenMarker } = await import("./document-hidden-text");
+    const { text: visible, hidden } = await pdfVisibleText(
+      doc,
+      pdfjs.OPS as Record<string, number>,
+      "\n\n",
+    );
+    const text = visible.trim();
     if (text.length < 20) {
       throw new Error(
         "This PDF has no selectable text (it looks like a scan or image). Export a text PDF or upload the DOCX.",
       );
     }
-    return text;
+    return withHiddenMarker(text, hidden);
   }
 
   if (name.endsWith(".docx")) {
     const mammoth = await import("mammoth/mammoth.browser");
     const buf = await file.arrayBuffer();
     const { value } = await mammoth.extractRawText({ arrayBuffer: buf });
-    const text = value.trim();
+    let text = value.trim();
     if (text.length < 20) throw new Error("No readable text found in this Word file");
-    return text;
+    // Hidden Word runs: find them in the document XML and cut them out of the text.
+    const { unzipSync, strFromU8 } = await import("fflate");
+    const { stripHiddenDocxRuns, withHiddenMarker } = await import("./document-hidden-text");
+    const xml = unzipSync(new Uint8Array(buf))["word/document.xml"];
+    const { hidden } = xml ? stripHiddenDocxRuns(strFromU8(xml)) : { hidden: [] };
+    for (const h of hidden) if (h.trim().length >= 4) text = text.split(h).join(" ");
+    return withHiddenMarker(text.replace(/[ \t]+/g, " ").trim(), hidden);
   }
 
   if (name.endsWith(".doc")) {

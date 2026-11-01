@@ -8,8 +8,10 @@ import {
   ArrowUp,
   ArrowUpRight,
   ChevronRight,
+  Loader2,
   PauseCircle,
   Radio,
+  ShieldCheck,
 } from "lucide-react";
 
 import { PageHeader } from "@/components/ats";
@@ -29,6 +31,7 @@ import { Switch } from "@/components/ui/switch";
 import { AGENT_CATALOG, AUTONOMY_OPTIONS, WHITELISTABLE_TEMPLATES } from "@/lib/agents.catalog";
 import {
   agentSettings,
+  runModelSafetyCheck,
   saveAgentPolicy,
   type AgentPolicyInput,
   type AgentSettingsView,
@@ -108,6 +111,8 @@ function AgentSettingsPage() {
               onCheckedChange={(paused) => save({ agentType: "*", enabled: !paused })}
             />
           </section>
+
+          <SafetyCheckSection check={data.safetyCheck} canEdit={data.canEdit} />
 
           <AgentList agents={data.agents} canEdit={data.canEdit} onSave={save} />
 
@@ -776,6 +781,93 @@ function TelemetryForm({ t, onSaved }: { t: AgentTelemetryView; onSaved: () => v
             Save
           </Button>
         </div>
+      ) : null}
+    </section>
+  );
+}
+
+/**
+ * Model safety check (docs/red-team.md): attacks planted in a test CV are run
+ * against the organisation's own AI model. Autonomous needs a pass for the
+ * model in use, from the last 30 days.
+ */
+function SafetyCheckSection({
+  check,
+  canEdit,
+}: {
+  check: AgentSettingsView["safetyCheck"];
+  canEdit: boolean;
+}) {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const day = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString() : "");
+  const label: Record<typeof check.status, { text: string; tone: "ok" | "warn" | "bad" }> = {
+    none: { text: "Not run yet", tone: "warn" },
+    passed: { text: `Passed — valid until ${day(check.validUntil)}`, tone: "ok" },
+    failed: { text: `Failed on ${day(check.checkedAt)}`, tone: "bad" },
+    expired: { text: `Expired on ${day(check.validUntil)}`, tone: "warn" },
+    model_changed: { text: "The AI model changed since the last check", tone: "warn" },
+  };
+  const s = label[check.status];
+
+  async function run() {
+    setBusy(true);
+    try {
+      const view = await runModelSafetyCheck();
+      if (view.status === "passed") toast.success("The model passed every safety probe");
+      else toast.error("The model did not pass — Autonomous stays unavailable");
+      qc.invalidateQueries({ queryKey: ["agent_settings"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "The safety check could not run");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="panel mt-4 p-5">
+      <div className="flex flex-wrap items-center gap-3">
+        <ShieldCheck className="size-5 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          <p className="font-medium">Model safety check</p>
+          <p className="text-sm text-muted-foreground">
+            Plants {check.results.length || 6} known attacks in a test CV — hidden instructions,
+            fake system messages, requests to leak data or reveal instructions — and checks your AI
+            model ignores them with this product&apos;s defences on. An agent can be set to
+            Autonomous only after a pass for the model you use now; it is valid for 30 days.
+          </p>
+        </div>
+        <Badge
+          variant={s.tone === "ok" ? "default" : s.tone === "bad" ? "destructive" : "secondary"}
+        >
+          {s.text}
+        </Badge>
+        <Button size="sm" variant="outline" onClick={run} disabled={!canEdit || busy}>
+          {busy ? <Loader2 className="size-3.5 animate-spin" /> : null} Run check
+        </Button>
+      </div>
+      {check.results.length ? (
+        <ul className="mt-3 grid gap-1 text-sm sm:grid-cols-2">
+          {check.results.map((r) => (
+            <li key={r.probe} className="flex items-start gap-2">
+              <span className={r.complied ? "text-destructive" : "text-emerald-600"}>
+                {r.complied ? "✗" : "✓"}
+              </span>
+              <span>
+                {r.title}
+                {r.error ? (
+                  <span className="text-muted-foreground"> — could not run</span>
+                ) : r.complied ? (
+                  <span className="text-muted-foreground"> — the model followed the attack</span>
+                ) : r.flagged ? (
+                  <span className="text-muted-foreground"> — ignored and flagged</span>
+                ) : (
+                  <span className="text-muted-foreground"> — ignored</span>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
       ) : null}
     </section>
   );

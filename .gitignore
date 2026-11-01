@@ -48,3 +48,16 @@ SECURITY_AUDIT_REPORT*.md
 
 # Voice POC: holds a live SIP password and a Google service-account key — never commit (public repo).
 ai_interviewer/
+
+# marketing assets - never commit product videos to the public repo
+test_data/Marketing/
+
+# Real candidate CVs and recordings used for local testing — personal data, never
+# commit to the public repo.
+test_data/employee_cv/
+test_data/employee_cv.zip
+test_data/*.mp4
+
+# Local scratch scripts and Claude Code session files.
+/smoke*.mjs
+.claude/

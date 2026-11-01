@@ -156,6 +156,18 @@ gcloud run deploy atsiq \
 
 > **`TRUSTED_PROXY_COUNT=1` is required** (one proxy hop in front of the app).
 > The service must only be reachable through that proxy.
+>
+> **`RATE_LIMIT_STORE=postgres`** (set by the CI deploy) keeps one rate limit
+> across all instances. Add it to `--set-env-vars` in a manual deploy.
+
+**Sandboxed document parser (recommended).** Run `infra/network/parser-sandbox.sh` once
+(`GCP_PROJECT`, `GCP_REGION`, `DEPLOY_SA`). It creates the no-egress network, the
+`atsiq-parser` service account and the `atsiq-parser-token` secret. Then set the repo
+variable `PARSER_ENABLED=true`. The next deploy runs `atsiq-parser` (no egress, IAM-only,
+one document per instance), grants the app `run.invoker` on it, and sets `PARSER_URL` and
+`PARSER_TOKEN` on the app. Smoke test: e-mail a PDF CV to the careers inbox and check the
+candidate's text appears; the parser's logs show the request, and nothing else can call
+it (an unauthenticated `curl` to its URL gets 403).
 
 Scaling guidance: start with `--min-instances 1 --max-instances 3 --cpu 1 --memory 1Gi`. More replicas are fine — sessions are DB-backed, the app is stateless.
 

@@ -18,6 +18,7 @@ import { AuthGate } from "@/components/AuthGate";
 import { AppShell } from "@/components/AppShell";
 import { OrgGate } from "@/components/OrgGate";
 import { Toaster } from "@/components/ui/sonner";
+import { StepUpDialog } from "@/components/StepUpDialog";
 
 function NotFoundComponent() {
   return (
@@ -171,6 +172,7 @@ function RootComponent() {
           </AppShell>
         </OrgGate>
       </AuthGate>
+      <StepUpDialog />
       <Toaster />
     </QueryClientProvider>
   );
