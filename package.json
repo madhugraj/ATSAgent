@@ -111,7 +111,7 @@
     "@xmldom/xmldom": "0.8.15",
     "drizzle-kit": "^0.31.10",
     "drizzle-orm": "^0.45.2",
-    "eslint": "^9.32.0",
+    "eslint": "^10.13.0",
     "eslint-config-prettier": "^10.1.1",
     "eslint-plugin-prettier": "^5.2.6",
     "eslint-plugin-react-hooks": "^5.2.0",
