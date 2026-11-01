@@ -1225,6 +1225,7 @@ export type Database = {
           teams_link: string | null;
           transcription: string;
           transcription_detail: string | null;
+          meeting_provider: string | null;
         };
         Insert: {
           agenda?: string | null;

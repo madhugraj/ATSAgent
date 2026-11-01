@@ -15,7 +15,7 @@ import {
   requisitionsQuery,
 } from "@/lib/data";
 import { scheduleInterview, submitScorecard } from "@/lib/interviews.functions";
-import { declineRoundTranscription } from "@/lib/panel-agent.functions";
+import { declineRoundTranscription, retryRoundTranscription } from "@/lib/panel-agent.functions";
 import { createMeetingLink, meetingProviders } from "@/lib/meetings.functions";
 import { buildIcs, downloadIcs } from "@/lib/ics";
 import { STAGE_LABEL } from "@/lib/lifecycle";
@@ -64,7 +64,7 @@ const LEVELS = [
 const TRANSCRIPTION_LABEL: Record<string, string> = {
   requested: "Transcribed ·",
   ready: "Transcript in ·",
-  unavailable: "No transcript",
+  unavailable: "No transcript ·",
   candidate_declined: "Not transcribed (candidate's wish)",
 };
 
@@ -86,6 +86,18 @@ function Interviews() {
   const doSubmit = useServerFn(submitScorecard);
   const mintLink = useServerFn(createMeetingLink);
   const doDecline = useServerFn(declineRoundTranscription);
+  const doRetry = useServerFn(retryRoundTranscription);
+
+  /** The transcript did not come (e.g. a permission since granted): fetch it again. */
+  async function retryTranscription(interviewId: string) {
+    try {
+      await doRetry({ data: { interviewId } });
+      toast.success("Fetching the transcript again — it is checked over the next 6 hours.");
+      qc.invalidateQueries({ queryKey: ["interviews"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not try again");
+    }
+  }
 
   /** The candidate replied that they do not want the call transcribed. */
   async function declineTranscription(interviewId: string) {
@@ -658,6 +670,16 @@ function Interviews() {
                                     >
                                       {TRANSCRIPTION_LABEL[round.transcription] ??
                                         round.transcription}
+                                      {round.transcription === "unavailable" &&
+                                      round.meeting_provider ? (
+                                        <button
+                                          type="button"
+                                          className="underline"
+                                          onClick={() => void retryTranscription(round.id)}
+                                        >
+                                          Try again
+                                        </button>
+                                      ) : null}
                                       {round.transcription === "requested" ||
                                       round.transcription === "ready" ? (
                                         <button

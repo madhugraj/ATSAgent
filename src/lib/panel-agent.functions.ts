@@ -73,3 +73,22 @@ export const declineRoundTranscription = createServerFn({ method: "POST" })
     );
     return { ok: true };
   });
+
+/** Fetch a round's transcript again (e.g. after the permission was granted) — the hiring team; audited. */
+export const retryRoundTranscription = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) => z.object({ interviewId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await assertRole(
+      context.userId,
+      context.orgId,
+      ["recruiter", "hiring_manager", "hr_head", "president_cbo"],
+      "Only the hiring team can fetch a round's transcript again.",
+    );
+    const { retryRoundTranscriptionCore } = await import("../server/panel/transcripts.server");
+    await retryRoundTranscriptionCore(
+      { orgId: context.orgId, userId: context.userId, email: context.memberEmail },
+      data.interviewId,
+    );
+    return { ok: true };
+  });

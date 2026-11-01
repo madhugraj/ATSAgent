@@ -27,6 +27,16 @@ cd /Users/yavar/Documents/CoE/ATSAgent-desk && bun --env-file=.env.local scripts
 | SMTP for the panel's summary                                        | set                                                                                                                               |
 | Scheduler                                                           | restarted on the port-9000 code; the two old ticks from 29 Oct (run from `ATSAgent`, old code, silent for 14 h) should be stopped |
 
+## First call (2026-10-31, 22:00 IST, round `b230d692-a29d-4c6a-9736-e0bbce1926f5`)
+
+Booked on a TEST role (`REQ-TEST-TEAMS`) with madhu.r@yavar.ai and
+madhugraj@gmail.com; both invites delivered (after the app's 5-minute hold).
+Microsoft found the meeting and accepted automatic recording (and transcription
+is allowed on it); reading the transcript was refused — 403, the connection
+has no `OnlineMeetingTranscript.Read.All`. At 22:40 the round was marked _No
+transcript_. After the permission is granted and Teams reconnected, press
+**Try again** under that round.
+
 ## Steps
 
 1. **Microsoft admin (Entra).** On the platform's app registration (the one
@@ -69,8 +79,12 @@ cd /Users/yavar/Documents/CoE/ATSAgent-desk && bun --env-file=.env.local scripts
    ```
 
    It prints pending / unavailable with Microsoft's reason, or the speakers and
-   segment count. Hover the round for the stored reason; after 6 h it becomes
+   segment count. Hover the round for the stored reason. Checks start 10
+   minutes after the call's start; a permission refusal shows **Still trying —
+   …** and is retried until 6 h after the booked end, then the round becomes
    **No transcript** and the health rule `panel.transcript_missing` fires.
+   Once the cause is fixed, **Try again** under the round fetches it again
+   with a fresh 6 hours.
 
 9. **The agent.** Within a minute of the transcript: _Agent activity_ shows an
    **L1 panel agent** run (round read → assessed → summary sent) that never
