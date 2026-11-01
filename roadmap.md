@@ -59,7 +59,16 @@ Plan: `docs/org-context-agent-plan.md` (decided 2026-10-27; O0 built 2026-10-27,
 - [x] O1 — the `request_approval` subject `org_profile` landed with the agent: every agent's manifest hash changed, so all fifteen existing agents got version bumps and the lock was refreshed
 - [x] O2 — agents read the approved profile (`orgContextFor`, 2026-10-28): candidate / internal audiences, code-rendered never-say and tone rules, word caps per purpose; the runtime injects it into the Requisition, JD, Intake and Screening agents and stamps each run with the version it read (`agent_runs.org_profile_version_id`); candidate scoring weighs domain experience against it; screening kits may verify domain and regulators; the JD (button, import path and agent alike) writes "About us" only from candidate-visible lines and `saveJobDescriptionCore` refuses a JD that repeats an internal-only line or makes an absolute guarantee; the hiring desk words its questions for the organisation's domain; the organisation desk thread kind never mixes with hiring threads
 - [x] O2 — monthly website re-read (the sweep starts one run per due organisation; changed pages become draft items, never auto-approved) and five health rules (`context.profile_missing`, `context.profile_stale`, `context.reread_failed`, `context.review_waiting`, `context.items_refused`)
+- [x] Organisation context agent 1.1.0 + the agent workspace (2026-10-30): the agent writes the profile from the sources' text (`read_org_sources`), refuses guessed page addresses, reworks a declined draft from the decider's note; the Profile page is one workspace — status bar with Stop, conversation (website, documents through the clip, facts added at once) beside the live draft with sources, coverage, "new" lines and the approval decision; a Profile-page decision wakes the agent at once.
 - [ ] O3 domain packs; O4 voice agents read the profile; O5 pilot
+
+## Role expert interview agent (2026-10-30)
+
+- [x] Role expert interview agent 1.0.0 (owner HR head, migration 0057): from the desk's interview-plan card ("Ask the hiring manager what this role needs"), it puts at most two rounds of role-specific questions to the role's own hiring manager (a question for the hiring manager on a run about one role now goes to that role's hiring manager, not to every hiring manager), then proposes the role's expert brief — must-haves and why, nice-to-haves, deal-breakers, first months, success after six months, 3–6 screening questions with strong / weak answers, each round's focus and rubric — written only from their answers.
+- [x] The `expert_brief` gate: the role's hiring manager (else the HR head) approves, sends back or declines; approving stores the brief on the role and applies each round's focus and rubric to the interview plan; a stale card is refused; audited (`requisition.expert_brief_approved`).
+- [x] Screening kits ask the approved brief's questions (with its strong / weak answers), weigh its must-haves and probe its deal-breakers.
+- [x] Health rule `expert_interview.unanswered` (questions open over 72 h); rehearsal "interviews the hiring manager and proposes the brief".
+- [ ] Start it from the requisition page, and a hiring manager's own chat with the agent (today: questions arrive as a card in their inbox).
 
 ## Distribution agent (2026-10-21)
 

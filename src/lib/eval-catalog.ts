@@ -384,6 +384,26 @@ export const EVAL_CATALOG: Record<string, EvalExplainer> = {
       "The rest of the work continues, and the HR head still decides on the draft.",
     ],
   },
+  "org_context: reworks a draft rejected as too thin from the sources' text": {
+    title: "Goes deeper when the HR head says the profile is too thin",
+    situation:
+      "The website's About page says what the organisation makes and how its engineers work; the first draft only covers what it makes, and the HR head declines it as not enough.",
+    checks: [
+      "It goes back to the words already read from the website instead of guessing new page addresses.",
+      "It adds how the organisation works, quoting the page, on top of what the declined draft already held.",
+      "It asks the HR head again, and only a person's approval makes it the profile.",
+    ],
+  },
+  "expert_interview: interviews the hiring manager and proposes the brief for their approval": {
+    title: "Asks the hiring manager what the role really needs and writes it down",
+    situation:
+      "An approved platform reliability role with a hiring manager who can sign in, and no expert brief yet.",
+    checks: [
+      "It reads what the role already states, then puts one set of specific questions to the hiring manager.",
+      "The brief it writes holds only what the hiring manager said: the must-have and why, the deal-breaker, the first months, success after six months and a screening question with strong and weak answers.",
+      "The hiring manager approves the brief before anything uses it.",
+    ],
+  },
   "org_context: refuses pay figures and staff names": {
     title: "Keeps pay figures and staff names out of the profile",
     situation:

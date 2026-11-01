@@ -432,3 +432,133 @@ describe("hiring manager options card", () => {
     await db.delete(orgMembers).where(eq(orgMembers.id, member!.id));
   });
 });
+
+describe("parallel hiring needs", () => {
+  test("deleting a split: one track keeps the rest; the whole split takes every track", async () => {
+    // Deleting needs a member of the organisation; the starter may delete a
+    // chat that has no requisition yet.
+    const { orgMembers } = await import("../drizzle/schema");
+    const [member] = await db
+      .insert(orgMembers)
+      .values({ orgId, userId, email: `split-${stamp}@team.local`, status: "active" } as never)
+      .returning({ id: orgMembers.id });
+    const make = async () => {
+      const [conv] = await db
+        .insert(hiringConversations)
+        .values({ orgId, createdBy: userId, title: "Head of AI" })
+        .returning();
+      await desk.splitNeeds(conv!, userId, [
+        { title: "Head of AI", slots: { roleTitle: "Head of AI" } },
+        { title: "Intern - AI", slots: { roleTitle: "Intern - AI" } },
+        { title: "Data Scientist", slots: { roleTitle: "Data Scientist" } },
+      ]);
+      return (
+        await db.select().from(hiringConversations).where(eq(hiringConversations.id, conv!.id))
+      )[0]!;
+    };
+    const alive = async (groupId: string) =>
+      (
+        await db
+          .select({ id: hiringConversations.id, deletedAt: hiringConversations.deletedAt })
+          .from(hiringConversations)
+          .where(eq(hiringConversations.splitGroupId, groupId))
+      ).filter((r) => !r.deletedAt).length;
+
+    // One track: the other two stay, and they no longer list the deleted one.
+    const a = await make();
+    const one = await desk.deleteThreads(a, userId, "", "track");
+    expect(one.alsoDeleted).toBe(0);
+    expect(await alive(a.splitGroupId!)).toBe(2);
+    const left = (
+      await db
+        .select({ id: hiringConversations.id })
+        .from(hiringConversations)
+        .where(eq(hiringConversations.splitGroupId, a.splitGroupId!))
+    ).find((r) => r.id !== a.id)!;
+    expect((await desk.deskSiblings(orgId, left.id)).map((s) => s.id)).not.toContain(a.id);
+
+    // The whole split: nothing of it is left behind.
+    const b = await make();
+    const all = await desk.deleteThreads(b, userId, "", "split");
+    expect(all.alsoDeleted).toBe(2);
+    expect(all.kept).toEqual([]);
+    expect(await alive(b.splitGroupId!)).toBe(0);
+
+    for (const g of [a.splitGroupId!, b.splitGroupId!]) {
+      const rows = await db
+        .select({ id: hiringConversations.id })
+        .from(hiringConversations)
+        .where(eq(hiringConversations.splitGroupId, g));
+      for (const r of rows) {
+        await db.delete(hiringMessages).where(eq(hiringMessages.conversationId, r.id));
+        await db.delete(hiringConversations).where(eq(hiringConversations.id, r.id));
+      }
+    }
+    await db.delete(orgMembers).where(eq(orgMembers.id, member!.id));
+  });
+
+  test("a 3-need message fans out into three threads, each with only its own details", async () => {
+    const c = await thread();
+    const conv = (
+      await db.select().from(hiringConversations).where(eq(hiringConversations.id, c.id))
+    )[0]!;
+    await db
+      .update(hiringConversations)
+      .set({
+        slots: { roleTitle: "Head of AI", location: "Chennai" } as never,
+        title: "Head of AI",
+      })
+      .where(eq(hiringConversations.id, c.id));
+    const fresh = (
+      await db.select().from(hiringConversations).where(eq(hiringConversations.id, c.id))
+    )[0]!;
+
+    await desk.splitNeeds(fresh, userId, [
+      { title: "Head of AI", slots: { roleTitle: "Head of AI", location: "Chennai" } },
+      { title: "Intern - AI", slots: { roleTitle: "Intern - AI" } },
+      { title: "Data Scientist", slots: { roleTitle: "Data Scientist", experienceMin: 3 } },
+    ]);
+
+    // The parent carries the fan-out card; each child got its opening question.
+    const parentMsgs = await db
+      .select()
+      .from(hiringMessages)
+      .where(eq(hiringMessages.conversationId, c.id));
+    const fanout = parentMsgs.find(
+      (m) => (m.card as { type?: string } | null)?.type === "needs_fanout",
+    );
+    expect(fanout).toBeTruthy();
+    const items = ((fanout!.card as { items?: { id: string }[] }).items ?? []).map((i) => i.id);
+    expect(items).toHaveLength(3);
+
+    // The children hold only their own details — never the first thread's role.
+    const byId = async (id: string) =>
+      (await db.select().from(hiringConversations).where(eq(hiringConversations.id, id)))[0]!;
+    const intern = await byId(items[1]!);
+    expect(intern.title).toBe("Intern - AI");
+    expect((intern.slots as { roleTitle?: string }).roleTitle).toBe("Intern - AI");
+    expect((intern.slots as { location?: string }).location).toBeUndefined();
+    const ds = await byId(items[2]!);
+    expect(ds.title).toBe("Data Scientist");
+    expect((ds.slots as { experienceMin?: number }).experienceMin).toBe(3);
+
+    // deskSiblings never lists the thread itself: the parent sees its two
+    // children, each child sees only the parent.
+    const parentSibs = await desk.deskSiblings(orgId, c.id);
+    expect(parentSibs.map((s) => s.title)).toEqual(["Intern - AI", "Data Scientist"]);
+    const childSibs = await desk.deskSiblings(orgId, items[1]!);
+    expect(childSibs.map((s) => s.title)).toEqual(["Head of AI", "Data Scientist"]);
+    for (const id of items) {
+      const m = await db
+        .select({ body: hiringMessages.body })
+        .from(hiringMessages)
+        .where(eq(hiringMessages.conversationId, id));
+      expect(m.length).toBeGreaterThanOrEqual(1);
+    }
+
+    await db.delete(hiringMessages).where(eq(hiringMessages.conversationId, items[1]!));
+    await db.delete(hiringMessages).where(eq(hiringMessages.conversationId, items[2]!));
+    await db.delete(hiringConversations).where(eq(hiringConversations.id, items[1]!));
+    await db.delete(hiringConversations).where(eq(hiringConversations.id, items[2]!));
+  });
+});

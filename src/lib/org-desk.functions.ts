@@ -8,6 +8,8 @@ import { createServerFn } from "@tanstack/react-start";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
+import { PROFILE_SECTIONS } from "./org-profile";
+
 import { db } from "../server/db";
 import { agentTasks, hiringConversations, hiringMessages } from "@db/schema";
 import { requireOrg } from "./auth.middleware";
@@ -82,10 +84,33 @@ export type OrgDeskThreadView = {
   messages: OrgDeskMessageView[];
   /** Status of every agent request shown in the thread. */
   tasks: Record<string, string>;
+  /** What the person answered to each question (shown under it). */
+  answers: Record<string, string>;
   /** Whether the viewer may decide each request, and who it waits for otherwise. */
   deciders: Record<string, { canDecide: boolean; waitingFor: string | null }>;
   /** What the agent is doing right now (its latest run in this thread). */
   activity: OrgDeskActivityView | null;
+};
+
+const sectionTitle = (key: string | undefined) => {
+  const found = PROFILE_SECTIONS.find((x) => x.key === key);
+  return found ? `“${found.title}”` : "the draft";
+};
+
+/**
+ * While a run is working, what it is doing NOW: a step is recorded only once
+ * it finishes, so the last finished step names the one in progress by the
+ * agent's fixed order (records → website → sources → writing → approval).
+ * Showing the finished one read as "stuck on the records" during a website
+ * read that takes a minute.
+ */
+const NOW_AFTER: Record<string, string> = {
+  read_org_profile: "reading your organisation's records",
+  read_org_records: "reading your website",
+  read_org_website: "reading what your website, documents and answers say",
+  read_org_sources: "writing the draft",
+  read_org_document: "writing the draft",
+  submit_profile_version: "asking for approval",
 };
 
 /** Tool names in words people can read (ids and flags stay out). */
@@ -93,8 +118,9 @@ const STEP_WORDS: Record<string, string> = {
   read_org_profile: "reading the profile as it stands",
   read_org_records: "reading your organisation's records",
   read_org_website: "reading your website",
+  read_org_sources: "reading what your website, documents and answers say",
   read_org_document: "reading an uploaded document",
-  propose_profile_items: "proposing profile items into the draft",
+  propose_profile_items: "writing the draft",
   submit_profile_version: "submitting the draft for approval",
   ask_human: "asking you a question",
   request_approval: "asking for approval",
@@ -153,10 +179,13 @@ export const getOrgDeskThread = createServerFn({ method: "GET" })
           kind: agentSteps.kind,
           toolName: agentSteps.toolName,
           status: agentSteps.status,
+          input: agentSteps.input,
           createdAt: agentSteps.createdAt,
         })
         .from(agentSteps)
-        .where(eq(agentSteps.runId, run.id))
+        // The latest thing it DID (a model turn between tools reads as
+        // "thinking" most of the time and says nothing).
+        .where(and(eq(agentSteps.runId, run.id), inArray(agentSteps.kind, ["tool", "decision"])))
         .orderBy(desc(agentSteps.seq))
         .limit(1);
       activity = {
@@ -169,13 +198,20 @@ export const getOrgDeskThread = createServerFn({ method: "GET" })
         lastStep: step
           ? {
               text:
-                step.kind === "tool" && step.toolName
-                  ? (STEP_WORDS[step.toolName] ?? "working")
-                  : step.kind === "model"
-                    ? "thinking"
-                    : step.kind === "decision"
-                      ? "a person decided"
-                      : "working",
+                run.status === "running" &&
+                step.kind === "tool" &&
+                step.toolName &&
+                NOW_AFTER[step.toolName]
+                  ? NOW_AFTER[step.toolName]!
+                  : step.kind === "tool" && step.toolName === "propose_profile_items"
+                    ? `writing ${sectionTitle((step.input as { section?: string } | null)?.section)}`
+                    : step.kind === "tool" && step.toolName
+                      ? (STEP_WORDS[step.toolName] ?? "working")
+                      : step.kind === "model"
+                        ? "thinking"
+                        : step.kind === "decision"
+                          ? "a person decided"
+                          : "working",
               at: step.createdAt.toISOString(),
             }
           : null,
@@ -194,10 +230,31 @@ export const getOrgDeskThread = createServerFn({ method: "GET" })
         at: m.createdAt.toISOString(),
       })),
       tasks: await taskStatusesFor(context.orgId, taskIds),
+      answers: await taskAnswersFor(context.orgId, taskIds),
       deciders,
       activity,
     };
   });
+
+async function taskAnswersFor(orgId: string, ids: string[]): Promise<Record<string, string>> {
+  if (!ids.length) return {};
+  const rows = await db
+    .select({ id: agentTasks.id, response: agentTasks.response })
+    .from(agentTasks)
+    .where(
+      and(
+        eq(agentTasks.orgId, orgId),
+        inArray(agentTasks.id, ids),
+        eq(agentTasks.status, "answered"),
+      ),
+    );
+  return Object.fromEntries(
+    rows.flatMap((r) => {
+      const a = (r.response as { answer?: unknown } | null)?.answer;
+      return typeof a === "string" && a.trim() ? [[r.id, a]] : [];
+    }),
+  );
+}
 
 async function taskStatusesFor(orgId: string, ids: string[]): Promise<Record<string, string>> {
   if (!ids.length) return {};
@@ -222,6 +279,23 @@ export const sendOrgDeskMessage = createServerFn({ method: "POST" })
     if (conv.kind !== "org_profile") throw new Error("Conversation not found.");
     const { handleOrgUserMessage } = await import("../server/desk/org-desk.server");
     await handleOrgUserMessage(conv, context.userId, data.message);
+    return { ok: true as const };
+  });
+
+/** An owner confirms a website outside the registered e-mail domain, from its card. */
+export const confirmWebsiteFromDesk = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .inputValidator((d: unknown) =>
+    z.object({ id: z.string().uuid(), url: z.string().url().max(400) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await actorCtx(context);
+    await registered();
+    const { loadConversation } = await import("../server/desk/desk.server");
+    const conv = await loadConversation(context.orgId, data.id);
+    if (conv.kind !== "org_profile") throw new Error("Conversation not found.");
+    const { confirmWebsiteFromChat } = await import("../server/desk/org-desk.server");
+    await confirmWebsiteFromChat(conv, context.userId, data.url);
     return { ok: true as const };
   });
 

@@ -14,12 +14,13 @@
  */
 import { createHash } from "node:crypto";
 
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 
 import { db } from "../server/db";
 import { writeAudit } from "../server/audit";
 import {
   hiringConversations,
+  hiringMessages,
   orgContextSources,
   orgProfileVersions,
   orgProfiles,
@@ -467,7 +468,24 @@ export type WebsiteReadResult = {
   itemsKept: number;
   itemsRefused: { section: string; reason: string }[];
   status: "ok" | "unchanged" | "failed";
+  /**
+   * Same-host links found on the pages but not read within this read's page
+   * budget — the ONLY addresses worth passing as `pages` next time. A run
+   * that guessed addresses (/handbook, /pricing…) read "not found" pages
+   * until its budget ran out.
+   */
+  moreLinks: string[];
 };
+
+/** A short page that says it does not exist: never a source. */
+export function isNotFoundPage(text: string): boolean {
+  return (
+    text.length < 600 &&
+    /\b(404|page not found|not found|doesn['’]t exist|does not exist|no longer available)\b/i.test(
+      text,
+    )
+  );
+}
 
 /**
  * Read the organisation's own website into sources and, for every page whose
@@ -522,6 +540,7 @@ export async function readWebsiteCore(
     itemsKept: 0,
     itemsRefused: [],
     status: "unchanged",
+    moreLinks: [],
   };
   let fetchFailures = 0;
 
@@ -531,6 +550,10 @@ export async function readWebsiteCore(
     pageHtml: string,
     pageText: string,
   ): Promise<void> => {
+    if (isNotFoundPage(pageText)) {
+      skipped.push({ url, why: "the page says it does not exist" });
+      return;
+    }
     result.pagesFetched++;
     const hash = sha256(pageText);
     const [existing] = await db
@@ -713,6 +736,21 @@ export async function readWebsiteCore(
     flagged: result.flagged.length,
   });
   result.status = status;
+  const known = new Set(
+    (
+      await db
+        .select({ url: orgContextSources.url })
+        .from(orgContextSources)
+        .where(
+          and(
+            eq(orgContextSources.orgId, actor.orgId),
+            eq(orgContextSources.kind, "website_page"),
+            isNull(orgContextSources.deletedAt),
+          ),
+        )
+    ).map((r) => r.url),
+  );
+  result.moreLinks = queue.filter((u) => !seen.has(u) && !known.has(u)).slice(0, 20);
   return result;
 }
 
@@ -1081,7 +1119,9 @@ function holdsItem(existing: OrgProfileItem[], item: Partial<OrgProfileItem>): b
 async function ensureOpenDraft(actor: ProfileActor) {
   const state = await profileState(actor.orgId);
   if (state.open) return state.open;
-  return startDraftCore(actor);
+  // Proposals after a decline build on the declined draft (the decline's
+  // note is the rework brief), not on the older approved version.
+  return startDraftCore(actor, { continueDeclined: true });
 }
 
 /* --------------------------------------------------------- propose / read */
@@ -1247,6 +1287,85 @@ export async function readOrgRecords(orgId: string) {
       createdAt: d.createdAt,
     })),
     websitePages: pages.filter((p): p is { url: string; fetchedAt: Date } => Boolean(p.url)),
+  };
+}
+
+/** Per page and in total: what one read of the sources may hand the agent. */
+const SOURCE_PAGE_CHARS = 3_000;
+const SOURCE_TOTAL_CHARS = 30_000;
+const SOURCE_CHAT_CHARS = 6_000;
+
+/**
+ * Everything already gathered, as text the agent can write the profile from:
+ * the website pages read (longest first), the documents on file (read each
+ * with read_org_document) and what the admin said in the organisation chat.
+ * The website read used to hand the agent only counts — it never saw what
+ * the site said, so it could not deepen a thin draft or act on "go deeper".
+ * Pages held back by the injection tripwire stay out until a person accepts
+ * them; "not found" pages never count.
+ */
+export async function readOrgSources(orgId: string) {
+  const rows = await db
+    .select({
+      id: orgContextSources.id,
+      kind: orgContextSources.kind,
+      url: orgContextSources.url,
+      fileName: orgContextSources.fileName,
+      text: orgContextSources.text,
+      injectionFlagged: orgContextSources.injectionFlagged,
+    })
+    .from(orgContextSources)
+    .where(and(eq(orgContextSources.orgId, orgId), isNull(orgContextSources.deletedAt)));
+  const pages = rows
+    .filter((r) => r.kind === "website_page" && !r.injectionFlagged && r.text.trim())
+    .filter((r) => !isNotFoundPage(r.text))
+    .sort((a, b) => b.text.length - a.text.length);
+  let budget = SOURCE_TOTAL_CHARS;
+  const pageOut: { sourceId: string; url: string; text: string; cut: boolean }[] = [];
+  for (const p of pages) {
+    if (budget <= 200) break;
+    const take = Math.min(SOURCE_PAGE_CHARS, budget, p.text.length);
+    pageOut.push({
+      sourceId: p.id,
+      url: p.url ?? "",
+      text: p.text.slice(0, take),
+      cut: take < p.text.length,
+    });
+    budget -= take;
+  }
+  const thread = await orgDeskThread(orgId);
+  const adminSaid: string[] = [];
+  if (thread) {
+    const said = await db
+      .select({ body: hiringMessages.body })
+      .from(hiringMessages)
+      .where(
+        and(
+          eq(hiringMessages.conversationId, thread.id),
+          eq(hiringMessages.orgId, orgId),
+          eq(hiringMessages.role, "user"),
+        ),
+      )
+      .orderBy(desc(hiringMessages.createdAt))
+      .limit(40);
+    let room = SOURCE_CHAT_CHARS;
+    // Button presses echoed into the chat are not statements about the organisation.
+    for (const m of said.filter(
+      (m) => !/^(build the draft|read the website)/i.test(m.body.trim()),
+    )) {
+      if (room <= 0) break;
+      adminSaid.unshift(m.body.slice(0, room));
+      room -= m.body.length;
+    }
+  }
+  return {
+    websitePages: pageOut,
+    pagesNotShown: pages.length - pageOut.length,
+    heldBackForAPerson: rows.filter((r) => r.kind === "website_page" && r.injectionFlagged).length,
+    documents: rows
+      .filter((r) => r.kind === "document")
+      .map((r) => ({ id: r.id, fileName: r.fileName ?? "document", chars: r.text.length })),
+    adminSaid,
   };
 }
 

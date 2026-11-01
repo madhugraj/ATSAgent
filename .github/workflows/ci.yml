@@ -96,6 +96,9 @@ jobs:
       - name: Interview plans, panels and the hiring decision
         run: bun test scripts/agent-interview-panel.test.ts
 
+      - name: Role expert interview (the hiring manager's brief)
+        run: bun test scripts/expert-brief.test.ts
+
       - name: Cost per candidate, offer answers and negotiation
         run: bun test scripts/agent-hiring-cost-offer.test.ts
       - name: Agent unhappy paths (declines, rejections, closed roles, pricing)

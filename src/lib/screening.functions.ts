@@ -217,6 +217,7 @@ export async function prepareScreeningKitForPairing(input: {
     missingSkills: match?.missingSkills ?? [],
     riskFlags: match?.riskFlags ?? [],
     writtenAssessment: await writtenAssessmentFor(input.orgId, candidate.id, requisition.id),
+    expertBrief: requisition.expertBrief ?? null,
   });
 
   const [row] = await db

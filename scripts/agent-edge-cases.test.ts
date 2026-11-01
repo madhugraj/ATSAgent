@@ -242,6 +242,52 @@ describe("two people acting on the same thing", () => {
     expect(runs).toHaveLength(1);
   });
 
+  test("starts racing on one role (two panes, a click and an event) get one run", async () => {
+    const { startRun } = await import("../src/server/agents/runtime.server");
+    const start = () =>
+      startRun({
+        orgId,
+        agentType: "requisition",
+        principalUserId: hr,
+        goal: `Complete the role.\n\nRequisition id: ${role}`,
+        subjectType: "requisition",
+        subjectId: role,
+      });
+    const ids = (await Promise.all([start(), start(), start()])).map((r) => r.runId);
+    expect(new Set(ids).size).toBe(1);
+    const active = (await db.select().from(agentRuns).where(eq(agentRuns.orgId, orgId))).filter(
+      (r) =>
+        r.agentType === "requisition" && ["queued", "running", "awaiting_human"].includes(r.status),
+    );
+    expect(active).toHaveLength(1);
+  });
+
+  test("two approvers deciding the same requisition at once: one step on the trail", async () => {
+    const [r] = await db
+      .insert(requisitions)
+      .values({
+        orgId,
+        code: `REQ-RACE-${stamp}`,
+        title: "Race",
+        status: "pending_hr",
+        createdBy: hr,
+      } as never)
+      .returning({ id: requisitions.id });
+    const { advanceRequisitionCore } = await import("../src/lib/requisitions.server");
+    const results = await Promise.allSettled([
+      advanceRequisitionCore(asHr(), { id: r!.id, status: "pending_cbo" }),
+      advanceRequisitionCore(asHr(), { id: r!.id, status: "pending_cbo" }),
+    ]);
+    expect(results.filter((x) => x.status === "fulfilled")).toHaveLength(1);
+    const failed = results.find((x) => x.status === "rejected") as PromiseRejectedResult;
+    expect(String(failed.reason)).toMatch(/same moment|cannot move from pending_cbo/);
+    const [after] = await db.select().from(requisitions).where(eq(requisitions.id, r!.id));
+    expect(after!.status).toBe("pending_cbo");
+    expect(
+      (after!.approvalTrail as { to: string }[]).filter((t) => t.to === "pending_cbo"),
+    ).toHaveLength(1);
+  });
+
   test("a gate decided twice: the second is refused", async () => {
     const [run] = await db
       .insert(agentRuns)

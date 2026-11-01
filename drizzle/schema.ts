@@ -426,6 +426,13 @@ export const requisitions = pgTable(
     /** Interview rounds, rubric and verdict policy for this role (null = the default from its must-haves). */
     interviewPlan:
       jsonb("interview_plan").$type<import("../src/lib/interview-plan").InterviewPlan>(),
+    /**
+     * What the role's hiring manager said the role really needs, captured by
+     * the Role expert interview agent and approved by them (migration 0057):
+     * must-haves with why, deal-breakers, must-ask screening questions and
+     * each round's focus. Null until approved.
+     */
+    expertBrief: jsonb("expert_brief").$type<import("../src/lib/expert-brief").ExpertBrief>(),
     ctcBandMin: numeric("ctc_band_min", { precision: 14, scale: 2 }),
     ctcBandMax: numeric("ctc_band_max", { precision: 14, scale: 2 }),
     /** Ladder key the budget CTC was benchmarked against (see career-ladder.ts). */
@@ -2074,7 +2081,8 @@ export type AgentType =
   | "distribution"
   | "screening_call"
   | "scheduling_call"
-  | "org_context";
+  | "org_context"
+  | "expert_interview";
 export type AgentAutonomy = "suggest" | "act_and_notify" | "autonomous";
 export type AgentRunStatus =
   "queued" | "running" | "awaiting_human" | "done" | "failed" | "cancelled";
@@ -2233,6 +2241,13 @@ export const agentRuns = pgTable(
     index("agent_runs_queue_idx").on(t.status, t.updatedAt),
     index("agent_runs_org_status_idx").on(t.orgId, t.status),
     index("agent_runs_subject_idx").on(t.orgId, t.subjectType, t.subjectId),
+    // One active live run per organisation, agent and requisition (migration
+    // 0058): concurrent starts cannot stack duplicate runs on one role.
+    uniqueIndex("agent_runs_active_requisition_key")
+      .on(t.orgId, t.agentType, t.subjectId)
+      .where(
+        sql`${t.subjectType} = 'requisition' and ${t.status} in ('queued', 'running', 'awaiting_human') and ${t.mode} = 'live'`,
+      ),
   ],
 );
 
@@ -2452,10 +2467,17 @@ export const hiringConversations = pgTable(
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     deletedBy: uuid("deleted_by").references(() => users.id, { onDelete: "set null" }),
     deleteReason: text("delete_reason"),
+    /**
+     * Links the threads of one fan-out (parallel hiring needs, migration
+     * 0056): all threads of a split share this id, so any of them can show
+     * the tracks chip — the others' statuses and what needs the person.
+     */
+    splitGroupId: uuid("split_group_id"),
   },
   (t) => [
     index("hiring_conversations_org_idx").on(t.orgId, t.updatedAt),
     index("hiring_conversations_org_kind_idx").on(t.orgId, t.kind, t.updatedAt),
+    index("hiring_conversations_split_group_idx").on(t.splitGroupId),
   ],
 );
 

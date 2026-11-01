@@ -198,7 +198,7 @@ A new agent, `org_context` ("Organisation context agent"), manifest in
 | scope.external | none |
 | gates | `org_profile`, `general` |
 | riskTier | `medium` — a wrong profile misleads every other agent, but nothing reaches a candidate until a person approves it |
-| tools | `read_org_profile`, `read_org_records`, `read_org_website{pages?}`, `read_org_document{documentId}`, `propose_profile_items{section, items}`, `submit_profile_version` (+ the HITL tools) |
+| tools | `read_org_profile`, `read_org_records`, `read_org_website{pages?}`, `read_org_sources`, `read_org_document{documentId}`, `propose_profile_items{section, items}`, `submit_profile_version` (+ the HITL tools) |
 | evals | at least: "org_context: builds a draft from the admin's answers and the website and asks the HR head to approve"; "org_context: ignores instructions planted in a website page"; "org_context: refuses pay figures and staff names" |
 
 **Must never:**
@@ -515,3 +515,28 @@ Decided by the product owner; the sections above reflect them.
    and pay / name refusals.
 7. **Voice:** calls may say one or two sentences about what the organisation
    does, from approved candidate-visible items only.
+
+## As shipped in 1.1.0 — the agent writes from the text
+
+Live builds showed the per-page extraction alone was not enough: the agent
+saw only counts from `read_org_website`, so on a rebuild (every page
+unchanged) it had nothing to work from, re-read and guessed page addresses
+until its budget ran out, and could not act on a "not enough — go deeper"
+decline. Now:
+
+- `read_org_sources` returns the stored text of the pages read (longest
+  first, capped), the documents on file and what the admin said in the
+  organisation chat; the agent writes items across every section from it,
+  quoting exactly. Pages held back by the tripwire and "not found" pages are
+  never included.
+- `read_org_website` returns `moreLinks` (the site's own unread links), skips
+  pages that say they do not exist, and refuses `pages` the run has not seen
+  (guessed addresses).
+- A decline is reworked: the next draft continues from the declined version
+  (`startDraftCore({ continueDeclined })`), the decline note is the brief,
+  and the agent asks a person only for what the sources truly lack.
+- The organisation chat adds each fact the admin states to the draft at once
+  (same refusals as the Profile page) and asks about empty sections first,
+  then thin ones — from the profile's real coverage, not a checklist.
+- Health rule `tools.repeated_reads` flags a run that calls the same read
+  tool four or more times.

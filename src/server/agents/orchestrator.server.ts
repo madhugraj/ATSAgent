@@ -546,30 +546,41 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
 /* ------------------------------------------------------ inline kick (dev UX) */
 
 const kicking = new Set<string>();
+/** Inline kick loops in flight in this process — a ceiling against storms. */
+let inFlight = 0;
+const MAX_INLINE_KICKS = 12;
 
 /**
  * Best-effort: process this org's events and advance its runs right away, so
  * people see agents react without waiting for the next scheduler tick. The
  * scheduler (/api/public/agent-tick) remains the source of truth. Disabled in
  * tests and with AGENT_INLINE_KICK=0.
+ *
+ * Runs are independent: a kick while another kick for the same organisation
+ * is still driving a long run does not wait behind it — it claims and drives
+ * what is queued now (claims are disjoint, so two kicks never drive the same
+ * run). Only events and sweeps stay with one kick per organisation at a time.
  */
 export function kickAgents(orgId: string): void {
   if (process.env["NODE_ENV"] === "test" || process.env["AGENT_INLINE_KICK"] === "0") return;
-  if (kicking.has(orgId)) return;
-  kicking.add(orgId);
+  if (inFlight >= MAX_INLINE_KICKS) return; // the scheduler picks the rest up
+  const lead = !kicking.has(orgId);
+  if (lead) kicking.add(orgId);
+  inFlight++;
   void (async () => {
     try {
       const { ensureAgentsRegistered } = await import("./index");
       ensureAgentsRegistered();
       const { runAgentTick } = await import("./runtime.server");
       for (let i = 0; i < 3; i++) {
-        const c = await runAgentTick({ orgId, max: 3 });
+        const c = await runAgentTick({ orgId, max: 3, ...(lead ? {} : { runsOnly: true }) });
         if (!c.claimed && !c.reclaimed) break;
       }
     } catch (err) {
       log.warn("agent.kick.failed", { org_id: orgId, error: err as Error });
     } finally {
-      kicking.delete(orgId);
+      inFlight--;
+      if (lead) kicking.delete(orgId);
     }
   })();
 }

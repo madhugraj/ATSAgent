@@ -102,46 +102,58 @@ export async function createRequisitionCore(
   // The organisation may insist on an approved organisation profile first.
   const { assertProfileAllowsRequisition } = await import("./org-profile.server");
   await assertProfileAllowsRequisition(actor.orgId);
+  // Parallel creates (three needs fanned out at once) race on the next code:
+  // retry the read-then-insert on the (orgId, code) unique conflict.
   const year = new Date().getFullYear();
-  const [latest] = await db
-    .select({ code: requisitions.code })
-    .from(requisitions)
-    .where(and(eq(requisitions.orgId, actor.orgId), like(requisitions.code, `REQ-${year}-%`)))
-    .orderBy(desc(requisitions.code))
-    .limit(1);
-  const next = Number(latest?.code?.match(/REQ-\d{4}-(\d+)$/)?.[1] ?? 0) + 1;
-  const code = `REQ-${year}-${String(next).padStart(3, "0")}`;
-
-  const [row] = await db
-    .insert(requisitions)
-    .values({
-      orgId: actor.orgId,
-      code,
-      title: f.title,
-      departmentId: f.departmentId,
-      location: f.location,
-      workMode: f.workMode ?? null,
-      openings: f.openings || 1,
-      experienceMin: f.experienceMin || 0,
-      experienceMax: f.experienceMax || 0,
-      budgetCtc: String(f.budgetCtc || 0),
-      ctcBandMin: f.ctcBandMin != null ? String(f.ctcBandMin) : null,
-      ctcBandMax: f.ctcBandMax != null ? String(f.ctcBandMax) : null,
-      maxNoticePeriodDays: f.maxNoticePeriodDays,
-      workAuthorizationRequired: f.workAuthorizationRequired,
-      hiringManager: f.hiringManager,
-      mustHaveSkills: f.mustHaveSkills,
-      goodToHaveSkills: f.goodToHaveSkills,
-      responsibilities: f.responsibilities,
-      educationRequirement: f.educationRequirement,
-      billingType: f.billingType,
-      engagementType: f.engagementType,
-      clientName: f.clientName,
-      costCenter: f.costCenter,
-      createdBy: actor.userId,
-      status,
-    })
-    .returning({ id: requisitions.id });
+  let row: { id: string } | undefined;
+  let code = "";
+  for (let attempt = 0; attempt < 5 && !row; attempt++) {
+    const [latest] = await db
+      .select({ code: requisitions.code })
+      .from(requisitions)
+      .where(and(eq(requisitions.orgId, actor.orgId), like(requisitions.code, `REQ-${year}-%`)))
+      .orderBy(desc(requisitions.code))
+      .limit(1);
+    const next = Number(latest?.code?.match(/REQ-\d{4}-(\d+)$/)?.[1] ?? 0) + 1;
+    code = `REQ-${year}-${String(next).padStart(3, "0")}`;
+    try {
+      [row] = await db
+        .insert(requisitions)
+        .values({
+          orgId: actor.orgId,
+          code,
+          title: f.title,
+          departmentId: f.departmentId,
+          location: f.location,
+          workMode: f.workMode ?? null,
+          openings: f.openings || 1,
+          experienceMin: f.experienceMin || 0,
+          experienceMax: f.experienceMax || 0,
+          budgetCtc: String(f.budgetCtc || 0),
+          ctcBandMin: f.ctcBandMin != null ? String(f.ctcBandMin) : null,
+          ctcBandMax: f.ctcBandMax != null ? String(f.ctcBandMax) : null,
+          maxNoticePeriodDays: f.maxNoticePeriodDays,
+          workAuthorizationRequired: f.workAuthorizationRequired,
+          hiringManager: f.hiringManager,
+          mustHaveSkills: f.mustHaveSkills,
+          goodToHaveSkills: f.goodToHaveSkills,
+          responsibilities: f.responsibilities,
+          educationRequirement: f.educationRequirement,
+          billingType: f.billingType,
+          engagementType: f.engagementType,
+          clientName: f.clientName,
+          costCenter: f.costCenter,
+          createdBy: actor.userId,
+          status,
+        })
+        .returning({ id: requisitions.id });
+    } catch (e) {
+      // A concurrent create took the code: re-read and try the next one.
+      if (!String(e).includes("requisitions_org_code_key") && !String(e).includes("duplicate key"))
+        throw e;
+    }
+  }
+  if (!row) throw new Error("Could not allocate a requisition code; try again.");
 
   await emitAgentEvent({
     orgId: actor.orgId,
@@ -232,10 +244,24 @@ export async function advanceRequisitionCore(
       ...(actor.via ? { via: actor.via } : {}),
     },
   ];
-  await db
+  // Only from the status read above: two approvers deciding at the same
+  // moment both passed the checks, and both wrote — a doubled trail and a
+  // status that skipped a step. The second now finds the role moved on.
+  const moved = await db
     .update(requisitions)
     .set({ status: input.status, approvalTrail: trail as never })
-    .where(and(eq(requisitions.id, input.id), eq(requisitions.orgId, actor.orgId)));
+    .where(
+      and(
+        eq(requisitions.id, input.id),
+        eq(requisitions.orgId, actor.orgId),
+        eq(requisitions.status, current.status),
+      ),
+    )
+    .returning({ id: requisitions.id });
+  if (!moved.length)
+    throw new Error(
+      "Someone else decided this requisition at the same moment — refresh to see where it is now.",
+    );
 
   // Closing a role takes its job-board postings down with it — best-effort.
   if (input.status === "closed") {

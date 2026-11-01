@@ -69,6 +69,13 @@ export const AGENT_CATALOG: AgentInfo[] = [
       "Builds and keeps the organisation's profile from its records, its own website and its documents — the approved facts every other agent works from. Every version waits for the HR head's approval.",
   },
   {
+    type: "expert_interview",
+    label: "Role expert interview agent",
+    phase: 2,
+    description:
+      "Interviews a role's hiring manager in two short rounds of questions and writes the role expert brief — must-haves and why, deal-breakers, what good looks like, must-ask screening questions and each interview round's rubric. The hiring manager approves it before screening and interviews use it.",
+  },
+  {
     type: "screening",
     label: "Screening agent",
     phase: 2,
