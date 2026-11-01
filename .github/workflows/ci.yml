@@ -48,8 +48,17 @@ jobs:
       - name: Unit tests (agent gateway)
         run: bun test scripts/agent-gateway.test.ts
 
-      - name: Prompt-injection guardrails (fence, tripwire, taint, scorer schema)
+      - name: Prompt-injection guardrails (fence, tripwire, taint, scorer schema, echo, probes)
         run: bun test scripts/guardrails.test.ts
+
+      - name: Hidden text in CVs (PDF and Word)
+        run: bun test scripts/hidden-text.test.ts
+
+      - name: Spend caps and public-apply flagging
+        run: bun test scripts/guardrails-p1.test.ts
+
+      - name: Model safety check (red-team probes)
+        run: bun test scripts/redteam-check.test.ts
 
       - name: Integration tests
         run: bun test scripts/integration.verify.test.ts

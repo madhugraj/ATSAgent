@@ -168,6 +168,21 @@ export async function resolveAiConfig(orgId?: string | null): Promise<AiConfig> 
 }
 
 /** Persist a bring-your-own-key for a provider. Blank value leaves it untouched. */
+/**
+ * Denial-of-wallet guard (src/server/ai-spend-cap.ts): the refusal when the
+ * organisation has used its monthly AI token cap. Calls that force a config
+ * (model test, evals) are not counted against it.
+ */
+async function capRefusal(opts: {
+  orgId?: string | null | undefined;
+  config?: AiConfig | undefined;
+}): Promise<{ ok: false; status: number; message: string } | null> {
+  if (opts.config || !opts.orgId) return null;
+  const { spendCapRefusal } = await import("../server/ai-spend-cap");
+  const message = await spendCapRefusal(opts.orgId);
+  return message ? { ok: false, status: 429, message } : null;
+}
+
 export async function writeProviderKey(orgId: string, provider: AiProvider, apiKey: string) {
   if (!apiKey.trim()) return;
   const { encryptSecret } = await import("../server/crypto");
@@ -365,7 +380,28 @@ type SchemaLike<T> = {
     | { success: false; error: { issues: { path: PropertyKey[]; message: string }[] } };
 };
 
-async function aiJsonCall<T>(opts: {
+/**
+ * Prompt-echo guard (src/lib/prompt-echo.ts): a string in the model's JSON
+ * that repeats our instructions is replaced before anything sees it.
+ */
+async function aiJsonCall<T>(
+  opts: Parameters<typeof aiJsonValidated<T>>[0],
+): Promise<AiJsonResult<T>> {
+  const r = await aiJsonValidated<T>(opts);
+  if (!r.ok) return r;
+  const { redactPromptEcho } = await import("./prompt-echo");
+  const { data, paths } = redactPromptEcho(r.data, opts.system);
+  if (!paths.length) return r;
+  const { log } = await import("../server/log");
+  log.warn("ai.prompt_echo.redacted", {
+    feature: opts.feature,
+    ...(opts.orgId ? { org_id: opts.orgId } : {}),
+    paths,
+  });
+  return { ...r, data };
+}
+
+async function aiJsonValidated<T>(opts: {
   system: string;
   prompt: string;
   images?: AiImage[];
@@ -428,6 +464,8 @@ async function aiJsonOnce<T>(
       message: "No AI model key saved. Add one on the Integrations page.",
     };
   }
+  const capped = await capRefusal(opts);
+  if (capped) return capped;
 
   const images = (opts.images ?? []).slice(0, 8);
   const docs = (opts.docs ?? []).slice(0, 2);
@@ -827,6 +865,8 @@ async function aiResearchJsonCall<T>(opts: {
 }): Promise<AiResearchResult<T>> {
   const cfg = opts.config ?? (await resolveAiConfig(opts.orgId));
   if (!cfg.apiKey) return NO_KEY_ERROR;
+  const capped = await capRefusal(opts);
+  if (capped) return capped;
 
   const startedAt = Date.now();
   const fail = async (attempt: number, usage: AiUsage | null, message: string, status = 502) => {
@@ -1349,6 +1389,8 @@ async function aiAgentStepCall(opts: {
 }): Promise<AgentStepResult> {
   const cfg = opts.config ?? (await resolveAiConfig(opts.orgId));
   if (!cfg.apiKey) return NO_KEY_ERROR;
+  const capped = await capRefusal(opts);
+  if (capped) return capped;
 
   const tools = opts.tools ?? [];
   const startedAt = Date.now();
@@ -1954,6 +1996,8 @@ export async function aiVoiceSession(opts: {
     message:
       "Phone screening needs the organisation's AI voice key. Add it on the Integrations page.",
   };
+  const capped = await capRefusal(opts);
+  if (capped) return capped;
   let config: AiConfig;
   let target: VoiceTarget;
   // The organisation's stored service account wins over its API key.

@@ -15,11 +15,13 @@ import { writeAudit } from "../server/audit";
 import {
   agentRuns,
   agentTasks,
+  auditLog,
   hrmsEmployees,
   orgMembers,
   orgProfileVersions,
   orgProfiles,
   organizations,
+  userRoles,
   users,
 } from "@db/schema";
 import { looksLikeInjection } from "../server/agents/injection";
@@ -286,6 +288,80 @@ export async function discardDraftCore(
   await audit(actor, "draft_discarded", v.id, { version: v.version });
 }
 
+/**
+ * Everyone who wrote this version: who started, last edited and submitted it,
+ * plus every editor the audit trail recorded (intermediate edits).
+ */
+export async function authorsOf(orgId: string, v: VersionRow): Promise<Set<string>> {
+  const out = new Set<string>(
+    [v.createdBy, v.updatedBy, v.submittedBy].filter((x): x is string => Boolean(x)),
+  );
+  const rows = await db
+    .selectDistinct({ userId: auditLog.actorUserId })
+    .from(auditLog)
+    .where(
+      and(
+        eq(auditLog.orgId, orgId),
+        eq(auditLog.entityId, v.id),
+        inArray(auditLog.action, [
+          "org_profile.draft_started",
+          "org_profile.edited",
+          "org_profile.submitted",
+        ]),
+      ),
+    );
+  for (const r of rows) if (r.userId) out.add(r.userId);
+  return out;
+}
+
+/** Active members who may approve the profile (owners and HR heads), as user ids. */
+async function approversOf(orgId: string): Promise<string[]> {
+  const owners = await db
+    .select({ userId: orgMembers.userId })
+    .from(orgMembers)
+    .where(
+      and(
+        eq(orgMembers.orgId, orgId),
+        eq(orgMembers.status, "active"),
+        eq(orgMembers.isOwner, true),
+      ),
+    );
+  const heads = await db
+    .select({ userId: userRoles.userId })
+    .from(userRoles)
+    .innerJoin(
+      orgMembers,
+      and(
+        eq(orgMembers.userId, userRoles.userId),
+        eq(orgMembers.orgId, userRoles.orgId),
+        eq(orgMembers.status, "active"),
+      ),
+    )
+    .where(and(eq(userRoles.orgId, orgId), eq(userRoles.role, "hr_head")));
+  return [...new Set([...owners, ...heads].map((r) => r.userId).filter(Boolean) as string[])];
+}
+
+export const TWO_PERSON_MESSAGE =
+  "You wrote or edited this version, so another HR head or an owner must approve it. Send it back or ask them to decide.";
+
+/**
+ * Two-person rule (docs/guardrails.md, P1-3): the profile feeds every
+ * agent's and the scorer's context, so whoever wrote a version may not also
+ * approve it — unless the organisation has no other owner or HR head, in
+ * which case the approval is recorded as a self-approval.
+ */
+export async function twoPersonCheck(
+  orgId: string,
+  approverId: string,
+  v: VersionRow,
+): Promise<{ selfApproved: boolean }> {
+  const authors = await authorsOf(orgId, v);
+  if (!authors.has(approverId)) return { selfApproved: false };
+  const others = (await approversOf(orgId)).filter((u) => !authors.has(u));
+  if (others.length) throw new Error(TWO_PERSON_MESSAGE);
+  return { selfApproved: true };
+}
+
 export type ProfileDecision =
   | { decision: "approve"; note?: string | null }
   | { decision: "decline" | "send_back"; note: string };
@@ -315,6 +391,10 @@ export async function decideVersionCore(
         ? "Say what should change (at least a few words)."
         : "Say why you are declining (at least a few words).",
     );
+  const { selfApproved } =
+    input.decision === "approve"
+      ? await twoPersonCheck(actor.orgId, actor.userId, v)
+      : { selfApproved: false };
   const now = new Date();
   const status =
     input.decision === "approve"
@@ -367,7 +447,7 @@ export async function decideVersionCore(
         ? "sent_back"
         : "declined",
     v.id,
-    { version: v.version, note },
+    { version: v.version, note, ...(selfApproved ? { selfApproved: true } : {}) },
   );
   await closeGateTasks(actor.orgId, v.id, actor.userId, status);
 }

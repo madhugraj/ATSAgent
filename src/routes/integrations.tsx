@@ -31,6 +31,7 @@ import { ensureBoardIntegrations } from "@/lib/boards.functions";
 import {
   getAiSettings,
   removeAiKey,
+  saveAiLimits,
   saveAiSettings,
   testAiModel,
 } from "@/lib/ai-settings.functions";
@@ -1785,7 +1786,106 @@ function AiModelCard() {
       </div>
 
       {s ? <VoiceCredentialBlock voice={s.voice} /> : null}
+      {s ? <AiLimitsBlock limits={s.limits} /> : null}
     </article>
+  );
+}
+
+/**
+ * Spend limits (docs/guardrails.md, P1-2): a monthly token cap across every AI
+ * feature, and a daily cap on automatic CV scorings per role. Blank = no cap.
+ */
+function AiLimitsBlock({
+  limits,
+}: {
+  limits: {
+    monthly_token_cap: number | null;
+    daily_scores_per_requisition: number | null;
+    month_tokens_used: number;
+  };
+}) {
+  const qc = useQueryClient();
+  const save = useServerFn(saveAiLimits);
+  const [cap, setCap] = useState<string | null>(null);
+  const [daily, setDaily] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const capValue = cap ?? limits.monthly_token_cap?.toString() ?? "";
+  const dailyValue = daily ?? limits.daily_scores_per_requisition?.toString() ?? "";
+  const used = limits.month_tokens_used;
+  const pct = limits.monthly_token_cap
+    ? Math.min(100, Math.round((used / limits.monthly_token_cap) * 100))
+    : null;
+
+  async function onSave() {
+    const toNum = (v: string) => (v.trim() ? Number(v.replace(/[,\s_]/g, "")) : null);
+    const monthlyTokenCap = toNum(capValue);
+    const dailyScoresPerRequisition = toNum(dailyValue);
+    if (
+      (monthlyTokenCap !== null && !Number.isInteger(monthlyTokenCap)) ||
+      (dailyScoresPerRequisition !== null && !Number.isInteger(dailyScoresPerRequisition))
+    ) {
+      toast.error("Use whole numbers, or leave a box blank for no limit.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await save({ data: { monthlyTokenCap, dailyScoresPerRequisition } });
+      setCap(null);
+      setDaily(null);
+      toast.success("AI limits saved");
+      qc.invalidateQueries({ queryKey: ["ai_settings"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-5 border-t border-border pt-4">
+      <h4 className="text-sm font-semibold">Spend limits</h4>
+      <p className="mt-1 text-xs text-muted-foreground">
+        A ceiling on AI use, so a flood of documents or a runaway job cannot run up your bill. When
+        the monthly limit is reached, AI steps stop with a clear message until next month or until
+        you raise it. Leave a box blank for no limit.
+      </p>
+      <p className="mt-2 text-xs">
+        This month: <span className="font-medium">{used.toLocaleString()}</span> tokens
+        {limits.monthly_token_cap
+          ? ` of ${limits.monthly_token_cap.toLocaleString()} (${pct}%)`
+          : " (no monthly limit)"}
+        .
+      </p>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label>Monthly AI token limit</Label>
+          <Input
+            inputMode="numeric"
+            value={capValue}
+            onChange={(e) => setCap(e.target.value)}
+            placeholder="No limit"
+          />
+          <p className="text-xs text-muted-foreground">
+            Every AI feature, counted from the tokens your provider reports. Minimum 10,000.
+          </p>
+        </div>
+        <div className="space-y-1.5">
+          <Label>Automatic CV scorings per role per day</Label>
+          <Input
+            inputMode="numeric"
+            value={dailyValue}
+            onChange={(e) => setDaily(e.target.value)}
+            placeholder="No limit"
+          />
+          <p className="text-xs text-muted-foreground">
+            Applications over the limit wait and are scored the next day.
+          </p>
+        </div>
+      </div>
+      <Button size="sm" className="mt-3" onClick={onSave} disabled={busy}>
+        {busy ? <Loader2 className="size-3.5 animate-spin" /> : null} Save limits
+      </Button>
+    </div>
   );
 }
 

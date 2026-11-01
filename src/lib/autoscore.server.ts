@@ -24,7 +24,7 @@ export type AutoScoreOutcome = {
   candidate: string;
   requisition: string;
   score: number | null;
-  status: "scored" | "error";
+  status: "scored" | "error" | "deferred";
   detail: string;
 };
 
@@ -35,7 +35,7 @@ export async function scoreUnscored(opts: {
   orgId: string;
   requisitionId?: string | null;
   limit?: number;
-}): Promise<{ scored: number; errors: number; outcomes: AutoScoreOutcome[] }> {
+}): Promise<{ scored: number; errors: number; deferred?: number; outcomes: AutoScoreOutcome[] }> {
   const limit = Math.min(opts.limit ?? 25, 50);
 
   const where = opts.requisitionId
@@ -69,9 +69,33 @@ export async function scoreUnscored(opts: {
 
   const outcomes: AutoScoreOutcome[] = [];
   let ok = 0;
+  let deferred = 0;
+
+  // Denial-of-wallet guard (migration 0064): at most N automatic scorings per
+  // requisition per day; the rest stay unscored and are picked up tomorrow.
+  const { loadCaps, scoresToday } = await import("../server/ai-spend-cap");
+  const { dailyScoresPerRequisition: dailyCap } = await loadCaps(opts.orgId);
+  const usedToday = new Map<string, number>();
 
   const { withAiSubject } = await import("../server/agents/context");
   for (const app of pending) {
+    if (dailyCap) {
+      const used =
+        usedToday.get(app.requisitionId) ?? (await scoresToday(opts.orgId, app.requisitionId));
+      if (used >= dailyCap) {
+        usedToday.set(app.requisitionId, used);
+        deferred += 1;
+        outcomes.push({
+          candidate: "Candidate",
+          requisition: "requisition",
+          score: null,
+          status: "deferred",
+          detail: `Daily scoring limit (${dailyCap}) reached for this role — scored tomorrow.`,
+        });
+        continue;
+      }
+      usedToday.set(app.requisitionId, used + 1);
+    }
     // Every AI call while scoring this candidate counts towards their cost.
     await withAiSubject(
       { applicationId: app.id, candidateId: app.candidateId, requisitionId: app.requisitionId },
@@ -268,5 +292,5 @@ export async function scoreUnscored(opts: {
     );
   }
 
-  return { scored: ok, errors: outcomes.length - ok, outcomes };
+  return { scored: ok, errors: outcomes.length - ok - deferred, deferred, outcomes };
 }

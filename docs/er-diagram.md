@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-95 tables across 9 domains.
+96 tables across 9 domains.
 
 ## Identity & access
 
@@ -1056,6 +1056,8 @@ erDiagram
     text last_test_status
     text last_test_message "nullable"
     timestamptz last_tested_at "nullable"
+    bigint monthly_token_cap "nullable"
+    integer daily_scores_per_requisition "nullable"
     timestamptz updated_at
   }
   ai_provider_credentials {
@@ -1154,6 +1156,8 @@ erDiagram
 | `ai_interviews` | `application_id` | `applications` | cascade |
 | `ai_interviews` | `org_id` | `organizations` | cascade |
 | `ai_provider_credentials` | `org_id` | `organizations` | cascade |
+| `ai_redteam_checks` | `org_id` | `organizations` | cascade |
+| `ai_redteam_checks` | `run_by` | `users` | no action |
 | `ai_settings` | `org_id` | `organizations` | cascade |
 | `ai_usage_events` | `org_id` | `organizations` | cascade |
 | `ai_usage_events` | `user_id` | `users` | no action |
@@ -1359,7 +1363,8 @@ erDiagram
 | `agent_telemetry_settings` | — | 12 | — |
 | `ai_interviews` | Screening & interviews | 8 | — |
 | `ai_provider_credentials` | Communications & AI settings | 4 | (orgId+provider) |
-| `ai_settings` | Communications & AI settings | 9 | (org_id) |
+| `ai_redteam_checks` | — | 8 | — |
+| `ai_settings` | Communications & AI settings | 11 | (org_id) |
 | `ai_usage_events` | Communications & AI settings | 19 | — |
 | `applications` | Candidates & pipeline | 10 | (requisitionId+candidateId) |
 | `assessment_settings` | — | 8 | — |

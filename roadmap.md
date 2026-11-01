@@ -7,7 +7,8 @@
 - [x] CV scorer: zod `ScoreAiSchema` (conservative fallbacks), `injection_suspected` from the model flag or the tripwire; never "select", held at `ai_screened`, flag saved on the candidate
 - [x] Intake: the tripwire runs on the raw CV text alongside the parser's flag; broader tripwire patterns (top-rating, bypass-evaluation, spaced fence tags)
 - [x] Agent taint: after a tripwire hit in a run, every write / external action waits for a person (card states why); red-team evals incl. a hijacked model that tries to e-mail out (`neverRuns`)
-- [ ] P1: hidden-text stripping in PDF extraction; organisation-wide AI spend cap; two-person rule for org-profile edits; live red-team run before Autonomous; prompt-echo check
+- [x] P1 (migrations 0064, 0065): hidden text removed from PDF and Word CVs (server and browser) with a marker that flags the candidate; the public apply page fenced, validated and flagged; organisation monthly AI token cap (gateway 429) and daily scorings per role (Integrations → AI); two-person rule on the organisation profile and health rule `context.score_drift`; prompt-echo redaction on model JSON; model safety check (six red-team probes against the organisation's own model) required to switch an agent to Autonomous, health rule `harness.autonomous_unverified`; `docs/red-team.md`
+- [ ] Next: multilingual / encoding-aware tripwire; generated cross-tenant sweep; `safeFetch` and bomb-cap tests; scheduled weekly live red-team run
 - [ ] P2: isolated no-network parser job and Cloud Run egress firewall; shared rate limiter; SHA-pinned Actions, Renovate, SBOM/provenance; step-up re-auth for release and bulk rejection
 
 ## Voice screening agent (2026-10-23)

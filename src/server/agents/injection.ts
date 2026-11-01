@@ -17,6 +17,8 @@ const PATTERNS: RegExp[] = [
   /\b(rate|score|mark)\s+(this|me|the)\s+(candidate\s+)?(as\s+)?(10|ten|100|the\s+(highest|best)|a\s+perfect)\b/i,
   /\b(assign|give|award)\s+(this\s+candidate\s+|me\s+|them\s+)?(a\s+|the\s+)?(top|highest|maximum|max|perfect|full)\s+(rating|score|marks)\b/i,
   /\b(bypass|skip|override)\s+(the\s+|all\s+|any\s+)?(standard\s+)?(screening|evaluation|assessment|scoring)\b/i,
+  // The extractor removed text hidden in the document (src/lib/document-hidden-text.ts).
+  /\[hidden text removed from this document/i,
   // The extraction pipeline already flagged this candidate.
   /"injectionFlag"\s*:\s*true/,
 ];

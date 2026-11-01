@@ -230,6 +230,8 @@ export const cancelAgentRun = createServerFn({ method: "POST" })
 export type AgentSettingsView = {
   canEdit: boolean;
   allPaused: boolean;
+  /** Model safety check (red-team probes) that Autonomous requires — docs/red-team.md. */
+  safetyCheck: import("../server/redteam/check.server").SafetyCheckView;
   agents: {
     type: string;
     live: boolean;
@@ -265,10 +267,12 @@ export const agentSettings = createServerFn({ method: "GET" })
       context.orgId,
       AGENT_CATALOG.map((a) => a.type),
     );
+    const { safetyCheckView } = await import("../server/redteam/check.server");
     return {
       canEdit:
         context.isOwner || roles.some((r) => (SETTINGS_ROLES as readonly string[]).includes(r)),
       allPaused: by.get("*")?.enabled === false,
+      safetyCheck: await safetyCheckView(context.orgId),
       agents: AGENT_CATALOG.map((a) => {
         const r = by.get(a.type);
         return {
@@ -305,12 +309,58 @@ const PolicyInput = z.object({
 
 export type AgentPolicyInput = z.infer<typeof PolicyInput>;
 
+/**
+ * Run the model safety check (red-team probes) against the organisation's
+ * saved model now. Settings roles only; audited. docs/red-team.md.
+ */
+export const runModelSafetyCheck = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .handler(async ({ context }) => {
+    const { assertRole } = await import("./auth.middleware");
+    await assertRole(context.userId, context.orgId, [...SETTINGS_ROLES]);
+    const { runSafetyCheck } = await import("../server/redteam/check.server");
+    const { passed, view } = await runSafetyCheck(context.orgId, context.userId);
+    const { writeAudit } = await import("../server/audit");
+    await writeAudit({
+      actor: `user:${context.userId}`,
+      actorUserId: context.userId,
+      orgId: context.orgId,
+      action: "ai.safety_check.run",
+      entityType: "ai_redteam_check",
+      entityId: null,
+      detail: {
+        passed,
+        complied: view.results.filter((r) => r.complied).map((r) => r.probe),
+      },
+    });
+    return view;
+  });
+
 export const saveAgentPolicy = createServerFn({ method: "POST" })
   .middleware([requireOrg])
   .inputValidator((d: unknown) => PolicyInput.parse(d))
   .handler(async ({ data, context }) => {
     const { assertRole } = await import("./auth.middleware");
     await assertRole(context.userId, context.orgId, [...SETTINGS_ROLES]);
+    // Autonomous needs a passed model safety check for the model in use
+    // (docs/red-team.md). Checked when switching to it, never on other edits.
+    if (data.agentType !== "*" && data.autonomy === "autonomous") {
+      const [current] = await db
+        .select({ autonomy: agentPolicies.autonomy })
+        .from(agentPolicies)
+        .where(
+          and(
+            eq(agentPolicies.orgId, context.orgId),
+            eq(agentPolicies.agentType, data.agentType as never),
+          ),
+        )
+        .limit(1);
+      if (current?.autonomy !== "autonomous") {
+        const { hasValidSafetyCheck, AUTONOMY_NEEDS_CHECK } =
+          await import("../server/redteam/check.server");
+        if (!(await hasValidSafetyCheck(context.orgId))) throw new Error(AUTONOMY_NEEDS_CHECK);
+      }
+    }
     const now = new Date();
     const values = {
       enabled: data.enabled,

@@ -83,7 +83,16 @@ We credit reporters in release notes on request.
   A deterministic tripwire checks CV text at intake and scoring alongside the model's own flag; a
   flagged candidate is never recommended "select" and never auto-advances. An agent run whose tool
   output tripped the tripwire is tainted: every later write or outbound action waits for a person,
-  whatever the autonomy level. AI decisions retain evidence and permit audited human override.
+  whatever the autonomy level. Text hidden in a CV (white, tiny, invisible, hidden Word runs)
+  is removed and replaced by a marker that flags the candidate; the public apply page fences and
+  validates the applicant's CV text. Strings in model output that repeat the system prompt's
+  instructions are redacted. The organisation profile has a two-person rule (author ≠ approver,
+  self-approval only when no other approver exists, audited) and a score-drift health rule.
+  Organisations can cap monthly AI tokens and daily automatic scorings per role (gateway-enforced,
+  audited `ai.limits.save`). Switching an agent to Autonomous needs a passed model safety check —
+  red-team probes against the organisation's own model, valid 30 days for that model, audited
+  `ai.safety_check.run` (`docs/red-team.md`). AI decisions retain evidence and permit audited
+  human override.
 - AI usage ledger: every provider request is recorded in `ai_usage_events`
   (organisation, feature, provider, model, token counts, attempt, latency, outcome) directly from
   the gateway. The ledger is read-only to platform super admins via `/platform-ai-usage` and gives

@@ -13,6 +13,7 @@
 import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
+  bigint,
   boolean,
   check,
   date,
@@ -1080,9 +1081,44 @@ export const aiSettings = pgTable(
     lastTestStatus: text("last_test_status").notNull().default("untested"),
     lastTestMessage: text("last_test_message"),
     lastTestedAt: timestamp("last_tested_at", { withTimezone: true }),
+    /**
+     * Denial-of-wallet guard (migration 0064): AI tokens the organisation may
+     * use per calendar month (UTC), across every feature. Null = no cap.
+     */
+    monthlyTokenCap: bigint("monthly_token_cap", { mode: "number" }),
+    /** Automatic CV scorings per requisition per day (UTC); the rest wait. Null = no cap. */
+    dailyScoresPerRequisition: integer("daily_scores_per_requisition"),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("ai_settings_org_key").on(t.orgId)],
+);
+
+/** Red-team probe runs against the organisation's saved model (migration 0065). */
+export type RedteamProbeResult = {
+  probe: string;
+  complied: boolean;
+  flagged: boolean;
+  error?: string;
+};
+
+export const aiRedteamChecks = pgTable(
+  "ai_redteam_checks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    passed: boolean("passed").notNull(),
+    results: jsonb("results")
+      .$type<RedteamProbeResult[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    runBy: uuid("run_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ai_redteam_checks_org_created_idx").on(t.orgId, t.createdAt)],
 );
 
 export const aiProviderCredentials = pgTable(
