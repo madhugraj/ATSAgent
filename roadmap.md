@@ -9,7 +9,8 @@
 - [x] Agent taint: after a tripwire hit in a run, every write / external action waits for a person (card states why); red-team evals incl. a hijacked model that tries to e-mail out (`neverRuns`)
 - [x] P1 (migrations 0064, 0065): hidden text removed from PDF and Word CVs (server and browser) with a marker that flags the candidate; the public apply page fenced, validated and flagged; organisation monthly AI token cap (gateway 429) and daily scorings per role (Integrations → AI); two-person rule on the organisation profile and health rule `context.score_drift`; prompt-echo redaction on model JSON; model safety check (six red-team probes against the organisation's own model) required to switch an agent to Autonomous, health rule `harness.autonomous_unverified`; `docs/red-team.md`
 - [ ] Next: multilingual / encoding-aware tripwire; generated cross-tenant sweep; `safeFetch` and bomb-cap tests; scheduled weekly live red-team run
-- [ ] P2: isolated no-network parser job and Cloud Run egress firewall; shared rate limiter; SHA-pinned Actions, Renovate, SBOM/provenance; step-up re-auth for release and bulk rejection
+- [x] P2 (migration 0066): sandboxed document parser service (no egress, IAM-only, fail closed; `infra/network/parser-sandbox.sh`, `PARSER_ENABLED`); rate limits shared across instances via Postgres (`RATE_LIMIT_STORE=postgres`); Actions pinned by SHA, base images by digest, Dependabot, read-only CI token, SBOM + SLSA provenance on deployed images; step-up password re-entry for offer release and bulk rejection
+- [ ] P2 follow-ups: run `parser-sandbox.sh` and set `PARSER_ENABLED=true` in the GCP project; per-destination egress proxy for the main app
 
 ## Voice screening agent (2026-10-23)
 

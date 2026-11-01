@@ -75,6 +75,13 @@ function readCookie(request: Request, name: string): string | null {
   return null;
 }
 
+/** sha256 of this request's session cookie (the sessions.token_hash key), or null. */
+export async function sessionTokenHash(request: Request): Promise<string | null> {
+  const raw = readCookie(request, SESSION_COOKIE);
+  if (!raw || raw.length < 32) return null;
+  return hashToken(raw);
+}
+
 /** Validate the cookie against the sessions table; returns the user identity. */
 export async function resolveSession(
   request: Request,

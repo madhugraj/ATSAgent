@@ -7,11 +7,31 @@ export function looksLikeCv(filename: string): boolean {
 }
 
 /**
- * Server-side CV text extraction (worker-safe: no pdf.js worker, no mammoth).
- * Hidden text (white on white, tiny, invisible, hidden Word runs) is removed and
- * replaced by one marker line — see src/lib/document-hidden-text.ts.
+ * Server-side CV / document text extraction.
+ *
+ * With PARSER_URL set (production), the bytes are parsed by the sandboxed
+ * parser service (src/server/parser/worker.ts): a separate Cloud Run service
+ * with no network egress, callable only by this app's service account
+ * (docs/guardrails.md P2-1). If it cannot be reached the document yields no
+ * text — parsing never falls back into this process, so a crafted file cannot
+ * reach the app by crashing the sandbox. Without PARSER_URL (local
+ * development) the same code runs in-process.
  */
 export async function attachmentText(filename: string, bytes: Uint8Array): Promise<string> {
+  if (bytes.byteLength > 15_000_000) return "";
+  const url = process.env["PARSER_URL"];
+  if (!url) return extractTextLocal(filename, bytes);
+  const { parseRemote } = await import("../server/parser/client");
+  return parseRemote(url, filename, bytes);
+}
+
+/**
+ * The extraction itself (worker-safe: no pdf.js worker, no mammoth). Runs in
+ * the parser sandbox in production. Hidden text (white on white, tiny,
+ * invisible, hidden Word runs) is removed and replaced by one marker line —
+ * see src/lib/document-hidden-text.ts.
+ */
+export async function extractTextLocal(filename: string, bytes: Uint8Array): Promise<string> {
   const name = filename.toLowerCase();
   const MAX_INPUT_BYTES = 15_000_000;
   if (bytes.byteLength > MAX_INPUT_BYTES) return "";

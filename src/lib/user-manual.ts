@@ -266,6 +266,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
       "Press Validate to accept a document, or Reject with a mandatory note when it does not match. Read again re-runs the extraction; Remove deletes the file and its reading. Every decision is written to the audit log with the actor.",
       "Release stays locked until all four mandatory document types are validated; the Release button explains what is still outstanding.",
       "Release the approved offer, then record accepted, declined, revoked, joined, no-show or deferred outcomes.",
+      "Releasing an offer — and rejecting several candidates at once, or approving an agent's offer release or rejection list — asks for your password first. Once confirmed you are not asked again for 10 minutes in that browser; five wrong passwords pause it for 15 minutes.",
       "Every stage change captures actor, reason and note, so the audit trail is complete.",
     ],
   },

@@ -109,6 +109,48 @@ The container must only be reachable **through** that proxy (no direct-to-node
 traffic): a client that bypasses the LB can send an arbitrary XFF and rotate
 limiter buckets. If you add a second proxy hop, raise the count to 2.
 
+With more than one replica, share the limit across them (docs/guardrails.md P2-2):
+
+```
+RATE_LIMIT_STORE=postgres # one 60/min-per-caller limit across every instance
+```
+
+The counters live in the UNLOGGED table `rate_limit_hits` (migration 0066). If
+the database cannot be reached the limiter falls back to the per-instance
+window rather than blocking traffic.
+
+### Sandboxed document parser (recommended)
+
+CVs and documents arriving by mail, Capture or upload are parsed in a separate
+service with no network egress (docs/guardrails.md P2-1). It is the same image
+with a different command:
+
+```
+node .output/parser-worker/index.mjs   # listens on PORT (8080), POST /parse
+```
+
+Run it with no outbound network (a deny-all egress policy), no secrets except
+`PARSER_TOKEN`, no database access, one request per pod, and reachable only from
+the app. Then set on the app:
+
+```
+PARSER_URL=http://atsiq-parser:8080   # the parser's internal address
+PARSER_TOKEN=…                        # the same random token on both sides
+```
+
+With `PARSER_URL` set, the app never parses in its own process. If the parser
+cannot be reached, the document yields no text (fail closed). On Cloud Run,
+`infra/network/parser-sandbox.sh` and the deploy workflow (`PARSER_ENABLED=true`)
+do all of this, using IAM-only invocation and Direct VPC egress into a network
+with no NAT. On GKE, use a NetworkPolicy that denies all egress for the parser
+pods and allows ingress only from the app pods.
+
+### Supply chain
+
+Base images are pinned by digest and GitHub Actions by commit SHA. Dependabot
+(`.github/dependabot.yml`) proposes updates as PRs. The deploy workflow pushes the
+image with an SBOM and SLSA provenance attached, and deploys it by digest.
+
 ## 5. OAuth redirect URIs to register (per provider console)
 
 All under the new domain:

@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-96 tables across 9 domains.
+97 tables across 9 domains.
 
 ## Identity & access
 
@@ -36,6 +36,7 @@ erDiagram
     timestamptz last_used_at
     text user_agent "nullable"
     text ip "nullable"
+    timestamptz reauthenticated_at "nullable"
   }
   audit_log {
     uuid id PK
@@ -1419,6 +1420,7 @@ erDiagram
 | `phone_screening_settings` | Screening & interviews | 15 | — |
 | `platform_admins` | Identity & access | 6 | (email) |
 | `product_catalogue_commercials` | Organisations & masters | 8 | — |
+| `rate_limit_hits` | — | 3 | — |
 | `requisition_board_postings` | — | 16 | (requisitionId+provider) |
 | `requisitions` | Requisitions & job content | 42 | (orgId+code) |
 | `role_panels` | — | 8 | (requisitionId+level) |
@@ -1429,7 +1431,7 @@ erDiagram
 | `screening_prep_jobs` | Screening & interviews | 10 | (application_id) |
 | `screening_runs` | Screening & interviews | 23 | — |
 | `service_request_minutes` | — | 7 | — |
-| `sessions` | Identity & access | 8 | (token_hash) |
+| `sessions` | Identity & access | 9 | (token_hash) |
 | `skill_edges` | Intelligence | 8 | — |
 | `skill_evidence` | Intelligence | 9 | — |
 | `skill_nodes` | Intelligence | 15 | (orgId+slug) |

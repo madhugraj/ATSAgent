@@ -54,7 +54,7 @@ Last updated 2026-11-01.
                                                                          │
                                   ┌──────────────────────────────────────┼──────────────────┐
                                   ▼                                      ▼                  ▼
-                         [L6 Egress: safeFetch]          [L7 Cost: budgets, limits]   [L8 Audit, health, ledger]
+                         [L6 Egress: safeFetch · parser sandbox]          [L7 Cost: budgets, limits]   [L8 Audit, health, ledger]
 ```
 
 ---
@@ -121,6 +121,16 @@ Where the tripwire runs:
 
 ### L5. Server cores and tenant isolation
 
+- **Step-up re-authentication** (`src/server/step-up.ts`, migration 0066):
+  - These actions need the person to have re-entered their password in this
+    session within 10 minutes: releasing an offer, rejecting several candidates
+    at once, and approving an agent's offer release or rejection batch in the
+    inbox.
+  - The check runs in the server-function handlers. The browser shows a password
+    dialog and retries the action (`withStepUp`).
+  - Confirmations are audited (`auth.step_up`). Wrong passwords are audited
+    (`auth.step_up_failed`), and five within 15 minutes lock step-up.
+
 - Every tenant-scoped server function uses `requireOrg` / `requireRole` /
   `requireOrgOwner` / `requirePlatformAdmin` (`src/lib/auth.middleware.ts`). Every
   query carries `eq(table.orgId, context.orgId)`. There is no row-level security,
@@ -156,6 +166,21 @@ Where the tripwire runs:
   - only allowed methods are used
 - AI provider calls go only through the gateway (`aiJson`, `aiResearchJson`,
   `aiAgentStep`). Nothing calls provider REST endpoints directly.
+- **Sandboxed document parsing** (`src/server/parser/`, `infra/network/parser-sandbox.sh`):
+  - With `PARSER_URL` set (production), every uploaded, mailed or captured document
+    is parsed by the `atsiq-parser` Cloud Run service, never in the app's process.
+  - That service runs from the same image (`.output/parser-worker/index.mjs`), with
+    Direct VPC egress into a network that has **no NAT and a deny-all egress
+    firewall**. It has a service account with no roles and no secrets beyond its
+    token, IAM-only invocation by the app's service account, one document per
+    instance, and a 30 s parse limit (the instance exits on timeout).
+  - If the parser is unreachable, the document yields no text (fail closed).
+  - Text extracted in the applicant's own browser (public apply, bulk upload) is
+    re-checked on the server (L1, L2).
+- **Main app egress** is not allow-listed: the app must reach customer websites
+  and profile links (through `safeFetch`, which blocks private and metadata
+  ranges), AI providers, mail, meeting providers and job boards. A stricter
+  per-destination policy would need an egress proxy (`docs/red-team.md` §7).
 
 ### L7. Cost and denial of wallet
 
@@ -173,8 +198,11 @@ Where the tripwire runs:
     with a vendor-neutral 429 before contacting the provider;
   - a **daily cap on automatic CV scorings per role**. Applications over it wait
     for the next day.
-- **Rate limits:** a 60-requests-per-minute sliding window per caller on public
-  routes and on each server function (`src/server.ts`).
+- **Rate limits** (`src/server/rate-limit.ts`): 60 requests per minute per caller
+  on public routes and on each server function. With `RATE_LIMIT_STORE=postgres`
+  (production) the limit is **shared across every instance** through the UNLOGGED
+  `rate_limit_hits` table (a sliding-window counter, migration 0066). A database
+  error falls back to the per-instance window rather than blocking traffic.
 - **Ledger:** every provider request writes a row to `ai_usage_events` with the
   tokens the provider reported (never estimated), tied to the agent run and the
   candidate or requisition.
@@ -206,6 +234,14 @@ Where the tripwire runs:
   and the scripted red-team evals (`docs/red-team.md`).
 - Agent manifest lock (`bun run agents:lock`): any change to an agent's instructions
   or tools must bump its version.
+- **Pinned and attested:**
+  - Every GitHub Action is pinned by commit SHA, and the base images by digest.
+  - Dependabot (`.github/dependabot.yml`) proposes bun, Actions and Docker
+    updates weekly as PRs that go through full CI.
+  - The CI token is read-only.
+  - The deploy builds with BuildKit and attaches an **SBOM** (SPDX) and **SLSA
+    provenance** (max mode) to the image. It deploys by digest and keeps the SBOM
+    as a 90-day workflow artifact.
 
 ---
 
@@ -214,26 +250,26 @@ Where the tripwire runs:
 Threats are from _ATS Agent System Threat Landscape v2.0_. ✅ = covered,
 ◐ = partly covered (open item in §5).
 
-| #   | Attack vector                                                                    | Status             | How it is handled                                                                                                                                                                                                                                                                                                                                                                                           |
-| --- | -------------------------------------------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **Indirect prompt injection** (hidden "rate me top" text in a CV)                | ✅                 | Hardened fence and `INJECTION_RULES`. Model flag plus tripwire at intake, at scoring and on the public apply page. Hidden PDF and Word text is removed and the candidate flagged. A flagged candidate is never `select` and never auto-advances. Humans make every decision. Red-team probes: `direct_override`, `fence_escape`, `multilingual`, `authority_claim`. **Open:** the tripwire is English-only. |
-| 2   | **Tool abuse and hijacking** (CV makes the agent email data out or purge rivals) | ✅                 | No delete, purge or fetch tools. Gate-verb ban. Tool allow-list per manifest. Recipients looked up by ID. Taint holds every write and external action after a tripwire hit. Every agent write is audited.                                                                                                                                                                                                   |
-| 3   | **Context and memory poisoning** (mid-batch corruption)                          | ✅                 | One CV per AI call. No long-term agent memory. Manifests are version-locked. Within a run, taint contains a poisoned tool result.                                                                                                                                                                                                                                                                           |
-| 4   | **System prompt extraction**                                                     | ✅                 | Prompts stay on the server. Register is governance-only. Outputs are schema-shaped and **echo-redacted** (10+ words of instructions are replaced). Vendor and model names are removed. Voice charter forbids revealing instructions. Tripwire catches "reveal your system prompt". Probe `prompt_extraction`.                                                                                               |
-| 5   | **Multimodal injection** (instructions hidden in images or certificates)         | ✅                 | CVs never go to a vision model. Onboarding and scanned org documents use `INJECTION_RULES`, a schema and the flag, and their result only opens a person's validation. Vision output never feeds scoring.                                                                                                                                                                                                    |
-| 6   | **Supply chain**                                                                 | ◐                  | Frozen lockfile, high-severity audit gate, gitleaks, trusted-only install scripts, no third-party prompt libraries or plugins, scraping only through `safeFetch`. **Open:** Actions pinned by SHA, automated update PRs, SBOM and image provenance (P2-3).                                                                                                                                                  |
-| 7   | **Knowledge-base / RAG poisoning** (an insider rewrites reference files)         | ✅                 | Org profile is versioned, draft → approved. **Two-person rule:** the author cannot approve while another approver exists. Score drift after an approval is flagged. Rule-breaking items are refused. Tripwire flag on every save. Audited. In scoring, the profile is fenced and never replaces stated requirements.                                                                                        |
-| 8   | **Cascading hallucinations** (one agent's error triggers a contract)             | ✅                 | Agents never trust each other for decisions. Offer amounts are band-checked on the server. Approval chains are built on the server with `assertRole`. Release is human only. Approval cards state system-computed facts.                                                                                                                                                                                    |
-| 9   | **Denial of wallet**                                                             | ✅ · ◐ rate limits | BYO key. Input caps. Agent step, token and monthly budgets. **Organisation-wide monthly token cap** in the gateway. **Daily scoring cap per role.** Output caps, timeouts, ledger. **Open:** rate limiting shared across instances (P2-2).                                                                                                                                                                  |
+| #   | Attack vector                                                                    | Status | How it is handled                                                                                                                                                                                                                                                                                                                                                                                           |
+| --- | -------------------------------------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **Indirect prompt injection** (hidden "rate me top" text in a CV)                | ✅     | Hardened fence and `INJECTION_RULES`. Model flag plus tripwire at intake, at scoring and on the public apply page. Hidden PDF and Word text is removed and the candidate flagged. A flagged candidate is never `select` and never auto-advances. Humans make every decision. Red-team probes: `direct_override`, `fence_escape`, `multilingual`, `authority_claim`. **Open:** the tripwire is English-only. |
+| 2   | **Tool abuse and hijacking** (CV makes the agent email data out or purge rivals) | ✅     | No delete, purge or fetch tools. Gate-verb ban. Tool allow-list per manifest. Recipients looked up by ID. Taint holds every write and external action after a tripwire hit. Every agent write is audited.                                                                                                                                                                                                   |
+| 3   | **Context and memory poisoning** (mid-batch corruption)                          | ✅     | One CV per AI call. No long-term agent memory. Manifests are version-locked. Within a run, taint contains a poisoned tool result.                                                                                                                                                                                                                                                                           |
+| 4   | **System prompt extraction**                                                     | ✅     | Prompts stay on the server. Register is governance-only. Outputs are schema-shaped and **echo-redacted** (10+ words of instructions are replaced). Vendor and model names are removed. Voice charter forbids revealing instructions. Tripwire catches "reveal your system prompt". Probe `prompt_extraction`.                                                                                               |
+| 5   | **Multimodal injection** (instructions hidden in images or certificates)         | ✅     | CVs never go to a vision model. Onboarding and scanned org documents use `INJECTION_RULES`, a schema and the flag, and their result only opens a person's validation. Vision output never feeds scoring.                                                                                                                                                                                                    |
+| 6   | **Supply chain**                                                                 | ✅     | Frozen lockfile, high-severity audit gate, gitleaks, trusted-only install scripts. Actions pinned by SHA and base images by digest. Dependabot. Read-only CI token. SBOM and SLSA provenance attached to every deployed image, deployed by digest. No third-party prompt libraries or plugins. Scraping only through `safeFetch`.                                                                           |
+| 7   | **Knowledge-base / RAG poisoning** (an insider rewrites reference files)         | ✅     | Org profile is versioned, draft → approved. **Two-person rule:** the author cannot approve while another approver exists. Score drift after an approval is flagged. Rule-breaking items are refused. Tripwire flag on every save. Audited. In scoring, the profile is fenced and never replaces stated requirements.                                                                                        |
+| 8   | **Cascading hallucinations** (one agent's error triggers a contract)             | ✅     | Agents never trust each other for decisions. Offer amounts are band-checked on the server. Approval chains are built on the server with `assertRole`. Release is human only. Approval cards state system-computed facts.                                                                                                                                                                                    |
+| 9   | **Denial of wallet**                                                             | ✅     | BYO key. Input caps. Agent step, token and monthly budgets. Organisation-wide monthly token cap in the gateway. Daily scoring cap per role. Output caps, timeouts, ledger. **Rate limits shared across instances** (Postgres-backed). A 30 s parse limit in the sandbox.                                                                                                                                    |
 
-| Mitigation (from v2.0)       | Status | Implementation                                                                                                                                                                                   |
-| ---------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Dual-LLM pipeline            | ◐      | The intake parser is a separate structured step. Hidden text is removed before any model sees the CV. The scorer still sees fenced raw visible text.                                             |
-| Principle of least agency    | ✅     | L4 and L5: allow-list, gate-verb ban, acting as the user, no delete or fetch, recipients by ID, taint.                                                                                           |
-| Deterministic sandboxing     | ◐      | No active content is executed (L1). **Open:** parsing in an isolated container with no network (P2-1).                                                                                           |
-| Outbound egress controls     | ◐      | No agent fetch tool, `safeFetch`, recipients by ID. **Open:** firewall on Cloud Run outbound traffic (P2-1).                                                                                     |
-| Human-in-the-loop validation | ✅     | Every gate is human. Taint forces approval. Autonomous needs a passed model safety check. Server-built trails. Step-up re-authentication for offer release and bulk rejection is planned (P2-4). |
-| Rigid schema enforcement     | ✅     | zod on every structured AI output, including the CV scorer.                                                                                                                                      |
+| Mitigation (from v2.0)       | Status     | Implementation                                                                                                                                                                                                                                  |
+| ---------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dual-LLM pipeline            | ◐          | The intake parser is a separate structured step. Hidden text is removed before any model sees the CV. The scorer still sees fenced raw visible text.                                                                                            |
+| Principle of least agency    | ✅         | L4 and L5: allow-list, gate-verb ban, acting as the user, no delete or fetch, recipients by ID, taint.                                                                                                                                          |
+| Deterministic sandboxing     | ✅         | Documents are parsed in the `atsiq-parser` service: no egress, no roles, IAM-only, one document per instance, a time limit, and fail closed (L6). Hidden text is removed there.                                                                 |
+| Outbound egress controls     | ✅ · ◐ app | The processing instance (parser) has no route out. Agents have no fetch tool. Recipients come by ID. `safeFetch` blocks private and metadata ranges. **Open:** a per-destination allow-list for the main app needs an egress proxy.             |
+| Human-in-the-loop validation | ✅         | Every gate is human. Taint forces approval. Autonomous needs a passed model safety check. Server-built trails. **Step-up:** offer release and bulk rejection (by hand or approved from the inbox) need a password re-entered within 10 minutes. |
+| Rigid schema enforcement     | ✅         | zod on every structured AI output, including the CV scorer.                                                                                                                                                                                     |
 
 ---
 
@@ -258,17 +294,15 @@ Threats are from _ATS Agent System Threat Landscape v2.0_. ✅ = covered,
 3. Tests for `safeFetch` (SSRF) and for the document size and bomb caps.
 4. A scheduled weekly live red-team run against the default models.
 
-**P2 — infrastructure**
+**P2 — shipped (2026-11-01)**
 
-1. Parse documents in a separate Cloud Run job with no outbound network. Send Cloud
-   Run outbound traffic through a VPC (private network) with a firewall that allows
-   only the AI provider and mail endpoints.
-2. Shared rate limiting (Redis or Cloud Armor) so limits hold across all server
-   instances.
-3. Pin GitHub Actions by commit SHA, turn on Renovate or Dependabot, and produce an
-   SBOM and image provenance in `deploy.yml`.
-4. Step-up re-authentication (recent sign-in or passkey) for offer release and bulk
-   rejection.
+1. Sandboxed document parser with no egress (L6). Turn it on with
+   `infra/network/parser-sandbox.sh` and `PARSER_ENABLED=true`.
+2. Rate limiting shared across instances through Postgres (L7). Production sets
+   `RATE_LIMIT_STORE=postgres`.
+3. Actions pinned by SHA, base images by digest, Dependabot, a read-only CI
+   token, and SBOM and provenance on every image (L9).
+4. Step-up re-authentication for offer release and bulk rejection (L5).
 
 ---
 
@@ -286,11 +320,14 @@ Threats are from _ATS Agent System Threat Landscape v2.0_. ✅ = covered,
 | `scripts/guardrails-p1.test.ts`                                          | At the monthly cap, JSON and agent calls are refused before any provider request. Test-model calls are not capped. The daily scoring count is per application. The public apply page flags injected and hidden-text CVs.                                                                                         |
 | `scripts/redteam-check.test.ts`                                          | Every probe runs fenced, with `INJECTION_RULES`, on the `redteam_probe` ledger feature. A pass is tied to the model and expires. One complied or failed probe fails the check. Reruns are throttled.                                                                                                             |
 | `scripts/org-profile.test.ts`                                            | Two-person rule, including editors known only from the audit trail, and self-approval in a one-person organisation.                                                                                                                                                                                              |
+| `scripts/rate-limit.test.ts`                                             | The per-instance window. The sliding estimate. Two separate processes sharing one Postgres-backed limit (40 + 20 of 60 allowed). Different callers have separate budgets.                                                                                                                                        |
+| `scripts/step-up.test.ts`                                                | Refused without a recent password. The right password unlocks only that session, for 10 minutes. Another user's session never counts. Wrong passwords are audited and lock after five.                                                                                                                           |
+| `scripts/parser-sandbox.test.ts`                                         | The worker runs as a separate process and the app parses through it, with hidden text removed there. A wrong token or an unreachable parser yields no text, never an in-process fallback. Oversize bodies get 413.                                                                                               |
 
 Run locally against a disposable database:
 
 ```bash
-DATABASE_URL=postgres://…/atsagent_test SESSION_SECRET=… bun test scripts/guardrails.test.ts scripts/hidden-text.test.ts scripts/guardrails-p1.test.ts scripts/redteam-check.test.ts scripts/agent-runtime.test.ts scripts/agent-eval.test.ts
+DATABASE_URL=postgres://…/atsagent_test SESSION_SECRET=… bun test scripts/guardrails.test.ts scripts/hidden-text.test.ts scripts/guardrails-p1.test.ts scripts/redteam-check.test.ts scripts/rate-limit.test.ts scripts/step-up.test.ts scripts/parser-sandbox.test.ts scripts/agent-runtime.test.ts scripts/agent-eval.test.ts
 ```
 
 ---

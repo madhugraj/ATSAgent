@@ -100,23 +100,26 @@ Status: ✅ covered and blocking in CI · ◐ partly covered · ✗ not covered 
 
 ### 3.5 Multimodal and hidden content (threat 5)
 
-| Attack                                                                               | Where it is tested                                    | What must hold                                                                                                 | Status |
-| ------------------------------------------------------------------------------------ | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------ |
-| White-on-white text in a PDF CV                                                      | `hidden-text.test.ts`                                 | Removed, marker added, candidate flagged.                                                                      | ✅     |
-| Near-white, 1-point and invisible-mode text                                          | `hidden-text.test.ts`                                 | Removed and marked.                                                                                            | ✅     |
-| Hidden, white or tiny Word runs                                                      | `hidden-text.test.ts`                                 | Removed and marked.                                                                                            | ✅     |
-| **False positives:** white text on a dark banner; a scanned CV's invisible OCR layer | `hidden-text.test.ts` (mutation-checked)              | Kept, with no marker.                                                                                          | ✅     |
-| Text placed off the page                                                             | pdf.js drops it; the position check is a second guard | Not extracted.                                                                                                 | ✅     |
-| Instructions inside an image (vision models)                                         | none                                                  | Vision is used only for onboarding and scanned org documents, and its result only opens a person's validation. | ✗ (§7) |
+| Attack                                                                               | Where it is tested                                    | What must hold                                                                                                                                                        | Status                                                                                 |
+| ------------------------------------------------------------------------------------ | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| White-on-white text in a PDF CV                                                      | `hidden-text.test.ts`                                 | Removed, marker added, candidate flagged.                                                                                                                             | ✅                                                                                     |
+| Near-white, 1-point and invisible-mode text                                          | `hidden-text.test.ts`                                 | Removed and marked.                                                                                                                                                   | ✅                                                                                     |
+| Hidden, white or tiny Word runs                                                      | `hidden-text.test.ts`                                 | Removed and marked.                                                                                                                                                   | ✅                                                                                     |
+| **False positives:** white text on a dark banner; a scanned CV's invisible OCR layer | `hidden-text.test.ts` (mutation-checked)              | Kept, with no marker.                                                                                                                                                 | ✅                                                                                     |
+| Text placed off the page                                                             | pdf.js drops it; the position check is a second guard | Not extracted.                                                                                                                                                        | ✅                                                                                     |
+| Instructions inside an image (vision models)                                         | none                                                  | Vision is used only for onboarding and scanned org documents, and its result only opens a person's validation.                                                        | ✗ (§7)                                                                                 |
+| A crafted document that exploits the parser                                          | `parser-sandbox.test.ts`                              | Parsing runs in a separate service with no egress and no roles. A wrong token or a dead parser yields no text, never an in-process fallback. Oversize bodies get 413. | ✅ (the network isolation itself is infrastructure: `infra/network/parser-sandbox.sh`) |
 
 ### 3.6 Supply chain (threat 6)
 
-| Check                                   | Where                              | Status   |
-| --------------------------------------- | ---------------------------------- | -------- |
-| Lockfile drift                          | CI `bun install --frozen-lockfile` | ✅       |
-| Known-vulnerable dependencies           | CI `bun audit --audit-level=high`  | ✅       |
-| Committed secrets                       | CI gitleaks                        | ✅       |
-| Actions pinned by SHA, SBOM, provenance | none                               | ✗ (P2-3) |
+| Check                                      | Where                                                                                                                  | Status |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- | ------ |
+| Lockfile drift                             | CI `bun install --frozen-lockfile`                                                                                     | ✅     |
+| Known-vulnerable dependencies              | CI `bun audit --audit-level=high`                                                                                      | ✅     |
+| Committed secrets                          | CI gitleaks                                                                                                            | ✅     |
+| Actions or base images swapped under a tag | Actions pinned by SHA, base images by digest (`ci.yml`, `deploy.yml`, `Dockerfile`); Dependabot PRs go through full CI | ✅     |
+| Unknown contents of the deployed image     | BuildKit SBOM (SPDX) and SLSA provenance attached to the image; deployed by digest; SBOM kept as a workflow artifact   | ✅     |
+| Over-privileged CI token                   | `permissions: contents: read` in `ci.yml`                                                                              | ✅     |
 
 ### 3.7 Knowledge-base / RAG poisoning (threat 7)
 
@@ -138,13 +141,13 @@ Status: ✅ covered and blocking in CI · ◐ partly covered · ✗ not covered 
 
 ### 3.9 Denial of wallet (threat 9)
 
-| Attack                            | Where it is tested                                                          | What must hold                                                                                                                                  | Status                                              |
-| --------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| Monthly AI spend runaway          | `guardrails-p1.test.ts`                                                     | At the cap, JSON calls and agent steps are refused with a vendor-neutral 429, **before** any provider request. Test-model calls are not capped. | ✅                                                  |
-| Flood of applications to one role | `guardrails-p1.test.ts` (daily count is distinct applications, not retries) | Over the daily limit, scoring waits until the next day.                                                                                         | ◐ (the counter is tested; the deferral loop is not) |
-| Agent loops                       | `run-limits.test.ts`; agent-runtime step budget                             | The run stops at its limits.                                                                                                                    | ✅                                                  |
-| Huge or bomb documents            | size, page and zip-bomb caps in `cv-text.server.ts`                         | Return empty text.                                                                                                                              | ◐ (no dedicated test)                               |
-| Request floods                    | rate limiter in `src/server.ts`                                             | 60 requests per minute per caller per function.                                                                                                 | ✗ (not tested; per instance only, P2-2)             |
+| Attack                            | Where it is tested                                                           | What must hold                                                                                                                                  | Status                                              |
+| --------------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| Monthly AI spend runaway          | `guardrails-p1.test.ts`                                                      | At the cap, JSON calls and agent steps are refused with a vendor-neutral 429, **before** any provider request. Test-model calls are not capped. | ✅                                                  |
+| Flood of applications to one role | `guardrails-p1.test.ts` (daily count is distinct applications, not retries)  | Over the daily limit, scoring waits until the next day.                                                                                         | ◐ (the counter is tested; the deferral loop is not) |
+| Agent loops                       | `run-limits.test.ts`; agent-runtime step budget                              | The run stops at its limits.                                                                                                                    | ✅                                                  |
+| Huge or bomb documents            | size, page and zip-bomb caps in `cv-text.server.ts`                          | Return empty text.                                                                                                                              | ◐ (no dedicated test)                               |
+| Request floods, across instances  | `rate-limit.test.ts`: two separate processes share one Postgres-backed limit | 60/min per caller per path holds across instances. A database error falls back to the per-instance limit.                                       | ✅                                                  |
 
 ### 3.10 Tenant isolation (cross-cutting)
 
@@ -157,6 +160,14 @@ Status: ✅ covered and blocking in CI · ◐ partly covered · ✗ not covered 
 | Same e-mail in another organisation                           | `integration.verify.test.ts` | ✅     |
 | Seeing another organisation's profile                         | `org-profile.test.ts`        | ✅     |
 | A systematic sweep of every server function with a foreign ID | none                         | ✗ (§7) |
+
+### 3.11 Stolen or left-open sessions
+
+| Attack                                                                     | Where it is tested | What must hold                                                                                                                                                           | Status |
+| -------------------------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------ |
+| Releasing an offer or rejecting candidates in bulk from a hijacked session | `step-up.test.ts`  | Refused without a password re-entered in **this** session within 10 minutes. Applies to the direct actions and to approving an agent's offer release or rejection batch. | ✅     |
+| Guessing the password at the step-up prompt                                | `step-up.test.ts`  | Each failure is audited, and five in 15 minutes lock step-up.                                                                                                            | ✅     |
+| Re-using another user's fresh session                                      | `step-up.test.ts`  | Only the session that confirmed counts, and only for its own user.                                                                                                       | ✅     |
 
 ---
 
@@ -218,7 +229,7 @@ CI runs layers A and B on every PR (`.github/workflows/ci.yml`). Locally,
 against a disposable database:
 
 ```bash
-DATABASE_URL=postgres://…127.0.0.1…/atsagent_test SESSION_SECRET=… bun test scripts/guardrails.test.ts scripts/hidden-text.test.ts scripts/guardrails-p1.test.ts scripts/redteam-check.test.ts scripts/agent-runtime.test.ts scripts/agent-eval.test.ts
+DATABASE_URL=postgres://…127.0.0.1…/atsagent_test SESSION_SECRET=… bun test scripts/guardrails.test.ts scripts/hidden-text.test.ts scripts/guardrails-p1.test.ts scripts/redteam-check.test.ts scripts/rate-limit.test.ts scripts/step-up.test.ts scripts/parser-sandbox.test.ts scripts/agent-runtime.test.ts scripts/agent-eval.test.ts
 ```
 
 Live agent attack scenarios against a real model (layer B live). Use a test key
@@ -260,13 +271,13 @@ never committed while the repository is public.
 
 ## 7. Not covered yet
 
-| Gap                                                                                | Risk                                                 | Plan                                                                       |
-| ---------------------------------------------------------------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------- |
-| The tripwire is English-only (the multilingual attack is caught only by the model) | A non-English injection is not flagged on the record | Add multilingual patterns, or a small classifier call at intake            |
-| Encoded attacks (base64, homoglyphs, leetspeak)                                    | They get past the tripwire                           | Normalise text (NFKC, confusables) before matching; add cases              |
-| Instructions in images sent to vision models                                       | Onboarding and org-document reads                    | Add image probes; keep vision output to structured fields only             |
-| No systematic cross-tenant sweep                                                   | A new server function forgets an `orgId` predicate   | A generated test that calls every tenant server function with a foreign ID |
-| Rate limiter untested and per instance                                             | Floods across instances                              | P2-2 shared limiter, plus a limiter test                                   |
-| Size and bomb caps untested                                                        | A regression could let a bomb through                | Add fixtures to `hidden-text.test.ts`                                      |
-| Live layer-B runs are manual                                                       | Model updates can regress resistance                 | A scheduled weekly live run against the default models, results tracked    |
-| `safeFetch` has no unit test                                                       | An SSRF regression                                   | Tests for private ranges, redirects and DNS rebinding                      |
+| Gap                                                                                | Risk                                                                                               | Plan                                                                             |
+| ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| The tripwire is English-only (the multilingual attack is caught only by the model) | A non-English injection is not flagged on the record                                               | Add multilingual patterns, or a small classifier call at intake                  |
+| Encoded attacks (base64, homoglyphs, leetspeak)                                    | They get past the tripwire                                                                         | Normalise text (NFKC, confusables) before matching; add cases                    |
+| Instructions in images sent to vision models                                       | Onboarding and org-document reads                                                                  | Add image probes; keep vision output to structured fields only                   |
+| No systematic cross-tenant sweep                                                   | A new server function forgets an `orgId` predicate                                                 | A generated test that calls every tenant server function with a foreign ID       |
+| A per-destination egress allow-list for the main app                               | The app can reach any public host on 80/443 (`safeFetch` still blocks private and metadata ranges) | An egress proxy for user-supplied URLs, then a deny-by-default VPC egress policy |
+| Size and bomb caps untested                                                        | A regression could let a bomb through                                                              | Add fixtures to `hidden-text.test.ts`                                            |
+| Live layer-B runs are manual                                                       | Model updates can regress resistance                                                               | A scheduled weekly live run against the default models, results tracked          |
+| `safeFetch` has no unit test                                                       | An SSRF regression                                                                                 | Tests for private ranges, redirects and DNS rebinding                            |

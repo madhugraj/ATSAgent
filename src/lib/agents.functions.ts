@@ -146,6 +146,22 @@ export const decideAgentTask = createServerFn({ method: "POST" })
     z.object({ taskId: z.string().uuid(), decision: Decision }).parse(d),
   )
   .handler(async ({ data, context }) => {
+    // Approving an agent's offer release or rejection batch is the same
+    // high-impact action as doing it by hand: it needs a fresh password.
+    if (data.decision.status === "approved") {
+      const [task] = await db
+        .select({ proposedAction: agentTasks.proposedAction })
+        .from(agentTasks)
+        .where(and(eq(agentTasks.id, data.taskId), eq(agentTasks.orgId, context.orgId)))
+        .limit(1);
+      const subject = (task?.proposedAction as { args?: { subject?: { type?: string } } } | null)
+        ?.args?.subject?.type;
+      if (subject === "offer_release" || subject === "rejection") {
+        const { assertStepUp } = await import("../server/step-up");
+        const { getRequest } = await import("@tanstack/react-start/server");
+        await assertStepUp(context.userId, getRequest());
+      }
+    }
     const { resolveTask } = await import("../server/agents/runtime.server");
     await resolveTask({
       orgId: context.orgId,

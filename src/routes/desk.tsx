@@ -39,6 +39,7 @@ import { InterviewPlanCard } from "@/components/InterviewPlanCard";
 import { getPanelChoices } from "@/lib/panels.functions";
 import { AGENT_LABEL } from "@/lib/agents.catalog";
 import { decideAgentTask, type AgentDecisionInput } from "@/lib/agents.functions";
+import { withStepUp } from "@/lib/step-up-client";
 import {
   acceptDeskProposal,
   enableDeskAgent,
@@ -962,7 +963,7 @@ function TaskCard({
   async function decide(decision: AgentDecisionInput) {
     setBusy(true);
     try {
-      await decideAgentTask({ data: { taskId, decision } });
+      await withStepUp(() => decideAgentTask({ data: { taskId, decision } }));
       onChanged();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not record the decision");

@@ -57,7 +57,15 @@ We credit reporters in release notes on request.
   and the only contact given is the organisation's mailbox. Each voice agent's dos and don'ts are
   one charter (`src/server/voice/charter.ts`, `docs/voice-agents-charter.md`), printed into every
   call and the source of its must-never list.
-- Rate limiting on all public HTTP routes and server-function RPCs (`src/server.ts`).
+- Rate limiting on all public HTTP routes and server-function RPCs (`src/server.ts`), shared across
+  instances through Postgres when `RATE_LIMIT_STORE=postgres` (production).
+- Step-up re-authentication: releasing an offer and rejecting candidates in bulk (directly, or by
+  approving an agent's offer release or rejection batch) need the password re-entered in that
+  session within 10 minutes; audited `auth.step_up` / `auth.step_up_failed`, locked after five
+  wrong passwords in 15 minutes.
+- Sandboxed document parsing: with `PARSER_URL` set, uploaded and mailed documents are parsed by a
+  separate service with no network egress, no roles and IAM-only invocation, never in the app
+  process; an unreachable parser yields no text (`infra/network/parser-sandbox.sh`).
 - SSRF gate: server-side fetches of user-supplied URLs go through `src/server/safe-fetch.ts`.
 - Auditing: privileged actions append to `audit_log` (`src/server/audit.ts`), including member
   invites (`member.invited`) and interviewer-profile changes (`member.interviewer_profile.set`,
@@ -101,6 +109,8 @@ We credit reporters in release notes on request.
 - Files: CVs and screening recordings remain private in S3-compatible storage and are served through
   authorised application paths rather than public object URLs.
 - CI: typecheck, lint, `bun audit --level high`, gitleaks, integration tests (`.github/workflows/ci.yml`).
+  Actions are pinned by commit SHA and base images by digest; Dependabot proposes updates; the CI
+  token is read-only; deployed images carry an SBOM and SLSA provenance and are deployed by digest.
 
 ## Data and dependency boundaries
 

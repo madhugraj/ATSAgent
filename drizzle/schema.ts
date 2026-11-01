@@ -131,6 +131,8 @@ export const sessions = pgTable(
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }).notNull().defaultNow(),
     userAgent: text("user_agent"),
     ip: text("ip"),
+    /** Last password re-entry in this session (step-up, migration 0066). */
+    reauthenticatedAt: timestamp("reauthenticated_at", { withTimezone: true }),
   },
   (t) => [
     uniqueIndex("sessions_token_hash_key").on(t.tokenHash),
@@ -1091,6 +1093,23 @@ export const aiSettings = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("ai_settings_org_key").on(t.orgId)],
+);
+
+/**
+ * Shared request-limiter counters (migration 0066, UNLOGGED): one row per
+ * caller key per one-minute window. Written by src/server/rate-limit.ts only.
+ */
+export const rateLimitHits = pgTable(
+  "rate_limit_hits",
+  {
+    key: text("key").notNull(),
+    windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
+    hits: integer("hits").notNull().default(0),
+  },
+  (t) => [
+    primaryKey({ columns: [t.key, t.windowStart] }),
+    index("rate_limit_hits_window_idx").on(t.windowStart),
+  ],
 );
 
 /** Red-team probe runs against the organisation's saved model (migration 0065). */
