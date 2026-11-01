@@ -11,7 +11,7 @@
  *    "none of these work" takes the decline path, an opt-out is honoured.
  * Run: DATABASE_URL=postgres://…/atsagent_test SESSION_SECRET=… bun test scripts/scheduling-call.test.ts
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, setSystemTime, test } from "bun:test";
 import { randomBytes } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 
@@ -882,60 +882,81 @@ describe("a whole scheduling call (fake line)", () => {
   });
 
   test("a call-back in ten minutes: saved as the call's next time, once only", async () => {
-    const { call } = await arranged();
-    const seen: { opts?: VoiceOpts; results: unknown[] } = { results: [] };
-    const before = Date.now();
-    const r = await place(
-      call.id,
-      new FakeLine(),
-      scriptedVoice(
-        [
-          { say: "ai", text: DISCLOSE },
-          { say: "caller", text: "Okay, what are the times?" },
-          { tool: "record_permission", args: { granted: true, their_words: "Okay." } },
-          { say: "caller", text: "Call me back in 10 minutes, I need my calendar." },
-          { tool: "call_back_later", args: { minutes: 10, their_words: "in 10 minutes" } },
-          { tool: "end_scheduling_call", args: { reason: "callback" } },
-        ],
-        seen,
-      ),
-    );
-    expect(r).toMatchObject({ status: "callback" });
-    const back = (seen.results as { tool: string; out: Record<string, unknown> }[]).find(
-      (x) => x.tool === "call_back_later",
-    )!.out;
-    expect(back).toMatchObject({ ok: true, back_at: expect.stringMatching(/ at \d\d:\d\d$/) });
-    const [c] = await db.select().from(screeningCalls).where(eq(screeningCalls.id, call.id));
-    expect(c).toMatchObject({ status: "callback", reschedules: 1, bookedByCandidate: true });
-    const due = c!.dueAt!.getTime();
-    expect(due).toBeGreaterThanOrEqual(before + 10 * 60_000 - 1000);
-    expect(due).toBeLessThanOrEqual(Date.now() + 10 * 60_000 + 1000);
-
-    // The call-back itself: it says so, and a second call-back is refused.
-    await db
-      .update(screeningCalls)
-      .set({ status: "dialling" })
-      .where(eq(screeningCalls.id, call.id));
-    const again: { opts?: VoiceOpts; results: unknown[] } = { results: [] };
-    await place(
-      call.id,
-      new FakeLine(),
-      scriptedVoice(
-        [
-          { say: "ai", text: DISCLOSE },
-          { tool: "record_permission", args: { granted: true, their_words: "Yes." } },
-          { tool: "call_back_later", args: { minutes: 10, their_words: "again" } },
-          { tool: "end_scheduling_call", args: { reason: "not_now" } },
-        ],
-        again,
-      ),
-    );
-    expect(again.opts!.system).toContain("You asked me to call back to pick a time");
-    expect(
-      (again.results as { tool: string; out: Record<string, unknown> }[]).find(
+    // Calling hours stop 10 minutes before the window ends (inWindow), and the
+    // window can end no later than midnight. In the last half hour before
+    // midnight (Asia/Kolkata) a 10-minute call-back would fall outside them, so
+    // the test runs on a clock 40 minutes earlier there.
+    const kolkataMinute = (() => {
+      const [h, m] = new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Asia/Kolkata",
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+      })
+        .format(new Date())
+        .split(":")
+        .map(Number);
+      return h! * 60 + m!;
+    })();
+    if (kolkataMinute >= 1440 - 30) setSystemTime(new Date(Date.now() - 40 * 60_000));
+    try {
+      const { call } = await arranged();
+      const seen: { opts?: VoiceOpts; results: unknown[] } = { results: [] };
+      const before = Date.now();
+      const r = await place(
+        call.id,
+        new FakeLine(),
+        scriptedVoice(
+          [
+            { say: "ai", text: DISCLOSE },
+            { say: "caller", text: "Okay, what are the times?" },
+            { tool: "record_permission", args: { granted: true, their_words: "Okay." } },
+            { say: "caller", text: "Call me back in 10 minutes, I need my calendar." },
+            { tool: "call_back_later", args: { minutes: 10, their_words: "in 10 minutes" } },
+            { tool: "end_scheduling_call", args: { reason: "callback" } },
+          ],
+          seen,
+        ),
+      );
+      expect(r).toMatchObject({ status: "callback" });
+      const back = (seen.results as { tool: string; out: Record<string, unknown> }[]).find(
         (x) => x.tool === "call_back_later",
-      )!.out,
-    ).toMatchObject({ ok: false });
+      )!.out;
+      expect(back).toMatchObject({ ok: true, back_at: expect.stringMatching(/ at \d\d:\d\d$/) });
+      const [c] = await db.select().from(screeningCalls).where(eq(screeningCalls.id, call.id));
+      expect(c).toMatchObject({ status: "callback", reschedules: 1, bookedByCandidate: true });
+      const due = c!.dueAt!.getTime();
+      expect(due).toBeGreaterThanOrEqual(before + 10 * 60_000 - 1000);
+      expect(due).toBeLessThanOrEqual(Date.now() + 10 * 60_000 + 1000);
+
+      // The call-back itself: it says so, and a second call-back is refused.
+      await db
+        .update(screeningCalls)
+        .set({ status: "dialling" })
+        .where(eq(screeningCalls.id, call.id));
+      const again: { opts?: VoiceOpts; results: unknown[] } = { results: [] };
+      await place(
+        call.id,
+        new FakeLine(),
+        scriptedVoice(
+          [
+            { say: "ai", text: DISCLOSE },
+            { tool: "record_permission", args: { granted: true, their_words: "Yes." } },
+            { tool: "call_back_later", args: { minutes: 10, their_words: "again" } },
+            { tool: "end_scheduling_call", args: { reason: "not_now" } },
+          ],
+          again,
+        ),
+      );
+      expect(again.opts!.system).toContain("You asked me to call back to pick a time");
+      expect(
+        (again.results as { tool: string; out: Record<string, unknown> }[]).find(
+          (x) => x.tool === "call_back_later",
+        )!.out,
+      ).toMatchObject({ ok: false });
+    } finally {
+      setSystemTime(); // back to the real clock
+    }
   });
 
   test("a 'yes' to who they are is not the go-ahead", async () => {

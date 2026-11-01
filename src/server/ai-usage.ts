@@ -79,6 +79,8 @@ export const AI_FEATURES = [
   // assessment of an interview call, and the panel's factual summary of it.
   "panel_assess",
   "panel_summary",
+  // Model safety check: red-team probes before Autonomous (docs/red-team.md).
+  "redteam_probe",
 ] as const;
 
 export type AiFeature = (typeof AI_FEATURES)[number];

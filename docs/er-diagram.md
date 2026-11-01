@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-98 tables across 9 domains.
+100 tables across 9 domains.
 
 ## Identity & access
 
@@ -36,6 +36,7 @@ erDiagram
     timestamptz last_used_at
     text user_agent "nullable"
     text ip "nullable"
+    timestamptz reauthenticated_at "nullable"
   }
   audit_log {
     uuid id PK
@@ -1067,6 +1068,8 @@ erDiagram
     text last_test_status
     text last_test_message "nullable"
     timestamptz last_tested_at "nullable"
+    bigint monthly_token_cap "nullable"
+    integer daily_scores_per_requisition "nullable"
     timestamptz updated_at
   }
   ai_provider_credentials {
@@ -1165,6 +1168,8 @@ erDiagram
 | `ai_interviews` | `application_id` | `applications` | cascade |
 | `ai_interviews` | `org_id` | `organizations` | cascade |
 | `ai_provider_credentials` | `org_id` | `organizations` | cascade |
+| `ai_redteam_checks` | `org_id` | `organizations` | cascade |
+| `ai_redteam_checks` | `run_by` | `users` | no action |
 | `ai_settings` | `org_id` | `organizations` | cascade |
 | `ai_usage_events` | `org_id` | `organizations` | cascade |
 | `ai_usage_events` | `user_id` | `users` | no action |
@@ -1381,7 +1386,8 @@ erDiagram
 | `agent_telemetry_settings` | — | 12 | — |
 | `ai_interviews` | Screening & interviews | 8 | — |
 | `ai_provider_credentials` | Communications & AI settings | 4 | (orgId+provider) |
-| `ai_settings` | Communications & AI settings | 9 | (org_id) |
+| `ai_redteam_checks` | — | 8 | — |
+| `ai_settings` | Communications & AI settings | 11 | (org_id) |
 | `ai_usage_events` | Communications & AI settings | 19 | — |
 | `applications` | Candidates & pipeline | 10 | (requisitionId+candidateId) |
 | `assessment_settings` | — | 8 | — |
@@ -1439,6 +1445,7 @@ erDiagram
 | `phone_screening_settings` | Screening & interviews | 16 | — |
 | `platform_admins` | Identity & access | 6 | (email) |
 | `product_catalogue_commercials` | Organisations & masters | 8 | — |
+| `rate_limit_hits` | — | 3 | — |
 | `requisition_board_postings` | — | 16 | (requisitionId+provider) |
 | `requisitions` | Requisitions & job content | 43 | (orgId+code) |
 | `role_panels` | — | 8 | (requisitionId+level) |
@@ -1449,7 +1456,7 @@ erDiagram
 | `screening_prep_jobs` | Screening & interviews | 10 | (application_id) |
 | `screening_runs` | Screening & interviews | 23 | — |
 | `service_request_minutes` | — | 7 | — |
-| `sessions` | Identity & access | 8 | (token_hash) |
+| `sessions` | Identity & access | 9 | (token_hash) |
 | `skill_edges` | Intelligence | 8 | — |
 | `skill_evidence` | Intelligence | 9 | — |
 | `skill_nodes` | Intelligence | 15 | (orgId+slug) |

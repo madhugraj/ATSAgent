@@ -13,13 +13,21 @@ const PATTERNS: RegExp[] = [
   /\byou\s+are\s+now\s+(an?\s+|the\s+)?[a-z]/i,
   /\b(reveal|print|show|repeat)\s+(your|the)\s+(system|developer)\s+(prompt|instructions?)/i,
   /\bnew\s+(system\s+)?instructions?\s*:/i,
-  /<\/?\s*untrusted_data/i,
+  /<\s*\/?\s*untrusted[\s_-]*data/i,
   /\b(rate|score|mark)\s+(this|me|the)\s+(candidate\s+)?(as\s+)?(10|ten|100|the\s+(highest|best)|a\s+perfect)\b/i,
+  /\b(assign|give|award)\s+(this\s+candidate\s+|me\s+|them\s+)?(a\s+|the\s+)?(top|highest|maximum|max|perfect|full)\s+(rating|score|marks)\b/i,
+  /\b(bypass|skip|override)\s+(the\s+|all\s+|any\s+)?(standard\s+)?(screening|evaluation|assessment|scoring)\b/i,
+  // The extractor removed text hidden in the document (src/lib/document-hidden-text.ts).
+  /\[hidden text removed from this document/i,
   // The extraction pipeline already flagged this candidate.
   /"injectionFlag"\s*:\s*true/,
 ];
 
+/** Zero-width, soft-hyphen and bidi controls — stripped so they cannot split a keyword. */
+const INVISIBLE_CHARS = /[\u00AD\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g;
+
 export function looksLikeInjection(text: string): boolean {
   if (!text) return false;
-  return PATTERNS.some((p) => p.test(text));
+  const plain = text.replace(INVISIBLE_CHARS, "");
+  return PATTERNS.some((p) => p.test(plain));
 }

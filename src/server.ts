@@ -16,6 +16,7 @@ import {
   statusClass,
 } from "./server/http-metrics";
 import { log } from "./server/log";
+import { allowRequest } from "./server/rate-limit";
 import {
   contextFromHeaders,
   currentRequest,
@@ -81,32 +82,8 @@ function isH3SwallowedErrorBody(body: string): boolean {
 
 /* --------------------------------------------------------------- security */
 
-/**
- * In-memory sliding-window limiter. Per-instance by design: sufficient for the
- * single-container deployments this server entry runs in; a multi-instance
- * deployment must move this behind a shared store.
- */
-const rateBuckets = new Map<string, number[]>();
-const RATE_LIMIT = 60;
-const RATE_WINDOW_MS = 60_000;
-const RATE_MAP_PRUNE_THRESHOLD = 5_000;
-
-function allowRequest(key: string): boolean {
-  const now = Date.now();
-  const recent = (rateBuckets.get(key) ?? []).filter((t) => now - t < RATE_WINDOW_MS);
-  if (recent.length >= RATE_LIMIT) {
-    rateBuckets.set(key, recent);
-    return false;
-  }
-  recent.push(now);
-  rateBuckets.set(key, recent);
-  if (rateBuckets.size > RATE_MAP_PRUNE_THRESHOLD) {
-    for (const [k, stamps] of rateBuckets) {
-      if (stamps.every((t) => now - t >= RATE_WINDOW_MS)) rateBuckets.delete(k);
-    }
-  }
-  return true;
-}
+// Rate limiting: 60/min per caller per path, shared across instances when
+// RATE_LIMIT_STORE=postgres (src/server/rate-limit.ts).
 
 function isPublicApiPath(path: string): boolean {
   return path === "/api/public" || path.startsWith("/api/public/");
@@ -286,7 +263,7 @@ export default {
         request.method !== "OPTIONS" &&
         (isPublicApiPath(url.pathname) || isServerFnPath(url.pathname) || group === "metrics")
       ) {
-        response = allowRequest(`${clientIp(request)}:${url.pathname}`)
+        response = (await allowRequest(`${clientIp(request)}:${url.pathname}`))
           ? await handle(request, url, env, ctx)
           : tooManyRequests();
       } else {

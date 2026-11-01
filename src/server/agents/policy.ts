@@ -49,13 +49,20 @@ export const DEFAULT_POLICY: EffectivePolicy = {
  *               pre-approved, otherwise they go to the approver;
  *             anything else asks.
  * Decisions (gates) are never tools, so no level can make them.
+ *
+ * `tainted`: earlier in this run a tool returned third-party text that tripped
+ * the injection tripwire. From then on the run is treated as possibly
+ * hijacked — every write and external action waits for a person, whatever the
+ * autonomy level or template whitelist. Reads still run.
  */
 export function decideToolCall(
   risk: ToolRisk,
   policy: Pick<EffectivePolicy, "autonomy" | "whitelistedTemplates">,
   templateId?: string | null,
+  opts: { tainted?: boolean } = {},
 ): "run" | "approve" {
   if (risk === "read") return "run";
+  if (opts.tainted) return "approve";
   if (risk === "write") return policy.autonomy === "suggest" ? "approve" : "run";
   if (policy.autonomy === "suggest" || !templateId) return "approve";
   const preApproved = policy.whitelistedTemplates.includes(templateId);

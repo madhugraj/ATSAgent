@@ -42,6 +42,7 @@ import { InterviewPlanCard } from "@/components/InterviewPlanCard";
 import { getPanelChoices } from "@/lib/panels.functions";
 import { AGENT_LABEL } from "@/lib/agents.catalog";
 import { decideAgentTask, type AgentDecisionInput } from "@/lib/agents.functions";
+import { withStepUp } from "@/lib/step-up-client";
 import {
   acceptDeskProposal,
   enableDeskAgent,
@@ -1466,7 +1467,7 @@ function TaskCard({
   async function decide(decision: AgentDecisionInput) {
     setBusy(true);
     try {
-      const res = await decideAgentTask({ data: { taskId, decision } });
+      const res = await withStepUp(() => decideAgentTask({ data: { taskId, decision } }));
       if (res.noLongerRelevant) toast.info(res.noLongerRelevant);
       onChanged();
     } catch (e) {

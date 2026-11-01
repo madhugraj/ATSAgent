@@ -77,7 +77,15 @@ We credit reporters in release notes on request.
   and the only contact given is the organisation's mailbox. Each voice agent's dos and don'ts are
   one charter (`src/server/voice/charter.ts`, `docs/voice-agents-charter.md`), printed into every
   call and the source of its must-never list.
-- Rate limiting on all public HTTP routes and server-function RPCs (`src/server.ts`).
+- Rate limiting on all public HTTP routes and server-function RPCs (`src/server.ts`), shared across
+  instances through Postgres when `RATE_LIMIT_STORE=postgres` (production).
+- Step-up re-authentication: releasing an offer and rejecting candidates in bulk (directly, or by
+  approving an agent's offer release or rejection batch) need the password re-entered in that
+  session within 10 minutes; audited `auth.step_up` / `auth.step_up_failed`, locked after five
+  wrong passwords in 15 minutes.
+- Sandboxed document parsing: with `PARSER_URL` set, uploaded and mailed documents are parsed by a
+  separate service with no network egress, no roles and IAM-only invocation, never in the app
+  process; an unreachable parser yields no text (`infra/network/parser-sandbox.sh`).
 - SSRF gate: server-side fetches of user-supplied URLs go through `src/server/safe-fetch.ts`.
 - Auditing: privileged actions append to `audit_log` (`src/server/audit.ts`), including member
   invites (`member.invited`) and interviewer-profile changes (`member.interviewer_profile.set`,
@@ -96,8 +104,23 @@ We credit reporters in release notes on request.
   The Service health page and its server function are platform-admin only; SLO alert webhooks are
   HMAC-signed and sent through `safeFetch`; SLO alert notifications are audited. Incoming
   `traceparent` headers are validated and only their ids are reused.
-- AI safety: untrusted CV, JD, profile and mail text is delimited before prompting; structured model
-  responses are schema-validated before use. AI decisions retain evidence and permit audited human override.
+- AI safety (full reference: `docs/guardrails.md`): untrusted CV, JD, profile and mail text is
+  fenced with `untrusted()` before prompting, and every fence look-alike (any case, spacing,
+  attributes, full-width brackets, invisible characters) is stripped so the fence cannot be closed
+  early. Structured model responses are schema-validated before use, including the CV scorer.
+  A deterministic tripwire checks CV text at intake and scoring alongside the model's own flag; a
+  flagged candidate is never recommended "select" and never auto-advances. An agent run whose tool
+  output tripped the tripwire is tainted: every later write or outbound action waits for a person,
+  whatever the autonomy level. Text hidden in a CV (white, tiny, invisible, hidden Word runs)
+  is removed and replaced by a marker that flags the candidate; the public apply page fences and
+  validates the applicant's CV text. Strings in model output that repeat the system prompt's
+  instructions are redacted. The organisation profile has a two-person rule (author ≠ approver,
+  self-approval only when no other approver exists, audited) and a score-drift health rule.
+  Organisations can cap monthly AI tokens and daily automatic scorings per role (gateway-enforced,
+  audited `ai.limits.save`). Switching an agent to Autonomous needs a passed model safety check —
+  red-team probes against the organisation's own model, valid 30 days for that model, audited
+  `ai.safety_check.run` (`docs/red-team.md`). AI decisions retain evidence and permit audited
+  human override.
 - AI usage ledger: every provider request is recorded in `ai_usage_events`
   (organisation, feature, provider, model, token counts, attempt, latency, outcome) directly from
   the gateway. The ledger is read-only to platform super admins via `/platform-ai-usage` and gives
@@ -106,6 +129,8 @@ We credit reporters in release notes on request.
 - Files: CVs and screening recordings remain private in S3-compatible storage and are served through
   authorised application paths rather than public object URLs.
 - CI: typecheck, lint, `bun audit --level high`, gitleaks, integration tests (`.github/workflows/ci.yml`).
+  Actions are pinned by commit SHA and base images by digest; Dependabot proposes updates; the CI
+  token is read-only; deployed images carry an SBOM and SLSA provenance and are deployed by digest.
 
 ## Data and dependency boundaries
 

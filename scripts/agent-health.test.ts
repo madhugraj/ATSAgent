@@ -1170,6 +1170,96 @@ describe("organisation context rules", () => {
     });
   });
 
+  test("an Autonomous agent without a passed model safety check is flagged", async () => {
+    const { agentPolicies, aiRedteamChecks, aiSettings } = await import("../drizzle/schema");
+    await db.insert(agentPolicies).values({
+      orgId,
+      agentType: "intake",
+      enabled: true,
+      autonomy: "autonomous",
+    });
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "harness.autonomous_unverified")).toMatchObject({
+      agentType: "intake",
+      element: "harness",
+      severity: "warning",
+    });
+    // A passed check for the model in use clears it.
+    const [cfg] = await db
+      .select({ provider: aiSettings.provider, model: aiSettings.model })
+      .from(aiSettings)
+      .where(eq(aiSettings.orgId, orgId));
+    await db.insert(aiRedteamChecks).values({
+      orgId,
+      provider: cfg?.provider ?? "openai",
+      model: cfg?.model ?? "gpt-5.5",
+      passed: true,
+      results: [],
+    });
+    await evaluate();
+    expect((await open()).filter((i) => i.rule === "harness.autonomous_unverified")).toHaveLength(
+      0,
+    );
+    await db.delete(aiRedteamChecks).where(eq(aiRedteamChecks.orgId, orgId));
+  });
+
+  test("CV scores that jump after a profile approval are flagged; serious when self-approved", async () => {
+    const { applications, candidates, matchScores, requisitions, auditLog } =
+      await import("../drizzle/schema");
+    const versionId = await approvedProfile({ decidedAt: days(10) });
+    const [q] = await db
+      .insert(requisitions)
+      .values({ orgId, code: `REQ-D-${stamp}`, title: "Analyst", status: "approved" } as never)
+      .returning({ id: requisitions.id });
+    const n = HEALTH.scoreDriftMinSamples;
+    const score = async (i: number, overallScore: number, computedAt: Date) => {
+      const [c] = await db
+        .insert(candidates)
+        .values({ orgId, fullName: `D${i}`, email: `drift-${stamp}-${i}@x.local` })
+        .returning({ id: candidates.id });
+      const [a] = await db
+        .insert(applications)
+        .values({ orgId, requisitionId: q!.id, candidateId: c!.id, stage: "ai_screened" })
+        .returning({ id: applications.id });
+      await db
+        .insert(matchScores)
+        .values({ orgId, applicationId: a!.id, overallScore, computedAt });
+    };
+    for (let i = 0; i < n; i++) await score(i, 50, days(15)); // before the approval
+    for (let i = n; i < 2 * n; i++) await score(i, 55, days(5)); // after: +5, under the threshold
+    await evaluate();
+    expect((await open()).filter((i) => i.rule === "context.score_drift")).toHaveLength(0);
+
+    await db
+      .update(matchScores)
+      .set({ overallScore: 50 + HEALTH.scoreDriftPoints + 4 })
+      .where(and(eq(matchScores.orgId, orgId), eq(matchScores.overallScore, 55)));
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "context.score_drift")).toMatchObject({
+      agentType: "org_context",
+      element: "context",
+      severity: "warning",
+      title: expect.stringContaining("rose 14 points"),
+    });
+
+    await db.insert(auditLog).values({
+      orgId,
+      actor: "user:x",
+      action: "org_profile.approved",
+      entityType: "org_profile_version",
+      entityId: versionId,
+      detail: { selfApproved: true },
+    } as never);
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "context.score_drift")).toMatchObject({
+      severity: "serious",
+    });
+    await db.delete(requisitions).where(eq(requisitions.id, q!.id));
+    await db
+      .delete(auditLog)
+      .where(and(eq(auditLog.orgId, orgId), eq(auditLog.entityId, versionId)));
+  });
+
   test("a failed website re-read escalates after two failures in a row", async () => {
     const { orgProfiles } = await import("../drizzle/schema");
     await approvedProfile();
