@@ -12,7 +12,7 @@ COPY . .
 
 RUN bun run build
 
-FROM node:22-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da
+FROM node:26-slim@sha256:e4db4c914bf8ad241bd24804fc25d272d89bad97e68cdc8a1414862790a02c39
 WORKDIR /app
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
