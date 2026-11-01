@@ -17,7 +17,11 @@ defs.registerPhase1Agents();
 defs.registerPhase2Agents();
 defs.registerPhase3Agents();
 
-const CHARTERS = [charter.SCREENING_CALL_CHARTER, charter.SCHEDULING_CALL_CHARTER];
+const CHARTERS = [
+  charter.SCREENING_CALL_CHARTER,
+  charter.SCHEDULING_CALL_CHARTER,
+  charter.NEGOTIATION_CALL_CHARTER,
+];
 
 describe("the voice agents' charter", () => {
   for (const ch of CHARTERS) {
@@ -31,7 +35,7 @@ describe("the voice agents' charter", () => {
     });
   }
 
-  test("staff are confidential in both charters", () => {
+  test("staff are confidential in every charter", () => {
     for (const ch of CHARTERS)
       expect(ch.mustNot.map((r) => r.rule).join(" ")).toMatch(
         /Name or describe any member of staff — the hiring manager, recruiters or the interview panel/,

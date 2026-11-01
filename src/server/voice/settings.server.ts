@@ -31,6 +31,8 @@ export type PhoneScreeningPolicy = {
   schedulingEnabled: boolean;
   /** Hours an e-mailed interview-time offer waits unanswered before that call (2–96). */
   schedulingWaitHours: number;
+  /** Pay negotiation calls: the assistant talks through an approved offer (a person approves each). */
+  negotiationEnabled: boolean;
 };
 
 /** Voices the assistant may use (the voice service's prebuilt voices). */
@@ -58,6 +60,7 @@ export const DEFAULT_PHONE_SCREENING_POLICY: PhoneScreeningPolicy = {
   nextStepsText: null,
   schedulingEnabled: false,
   schedulingWaitHours: 24,
+  negotiationEnabled: false,
 };
 
 export async function phoneScreeningPolicyOf(orgId: string): Promise<PhoneScreeningPolicy> {
@@ -80,6 +83,7 @@ export async function phoneScreeningPolicyOf(orgId: string): Promise<PhoneScreen
     nextStepsText: r.nextStepsText,
     schedulingEnabled: r.schedulingEnabled,
     schedulingWaitHours: r.schedulingWaitHours,
+    negotiationEnabled: r.negotiationEnabled,
   };
 }
 

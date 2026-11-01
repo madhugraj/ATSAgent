@@ -43,6 +43,9 @@ export const OPEN_NEGOTIATION: NegotiationStatus[] = [
   "call_requested",
 ];
 
+/** An AI negotiation call may follow up these (a closed link too: the call reaches a non-responder). */
+export const CALLABLE_NEGOTIATION: NegotiationStatus[] = [...OPEN_NEGOTIATION, "expired"];
+
 type Row = typeof offerNegotiations.$inferSelect;
 const num = (v: string | number | null | undefined) => (v == null ? null : Number(v));
 
@@ -140,9 +143,10 @@ async function audit(
 
 async function raise(
   orgId: string,
-  type: "negotiation.agreed",
+  type: "negotiation.agreed" | "negotiation.needs_call",
   applicationId: string,
   by: string | null,
+  payload: Record<string, unknown> = {},
 ) {
   const { emitAgentEvent } = await import("../server/agents/events");
   await emitAgentEvent({
@@ -151,7 +155,7 @@ async function raise(
     subjectType: "application",
     subjectId: applicationId,
     actorUserId: by,
-    payload: { applicationId },
+    payload: { applicationId, ...payload },
   });
 }
 
@@ -425,6 +429,12 @@ export async function answerNegotiation(
         : `${app.name} asked for a call about the offer. TA: the call brief is on the candidate's page; record the outcome there.`,
   );
   if (status === "agreed") await raise(r.orgId, "negotiation.agreed", r.applicationId, null);
+  // A counter or a call request: the Offer agent may ask for the AI pay call.
+  else
+    await raise(r.orgId, "negotiation.needs_call", r.applicationId, null, {
+      negotiationId: r.id,
+      why: status,
+    });
   return { ok: true };
 }
 
@@ -557,6 +567,10 @@ export async function runNegotiationSweep(orgId?: string, now = new Date()): Pro
       app.requisitionId,
       `${app.name} did not answer the pay message, so its link has closed. Call them (the brief is on the candidate's page), or the HR head decides whether to raise the ceiling or stop.`,
     );
+    await raise(r.orgId, "negotiation.needs_call", r.applicationId, null, {
+      negotiationId: r.id,
+      why: "expired",
+    });
   }
   return rows.length;
 }

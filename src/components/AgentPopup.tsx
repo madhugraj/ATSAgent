@@ -118,6 +118,7 @@ export function AgentPopup() {
         <NegotiationOutcomeDialog
           negotiationId={n.subject.negotiationId}
           ceiling={null}
+          applicationId={n.subject.applicationId}
           onClose={() => setAction(null)}
           onSaved={() => {
             setAction(null);

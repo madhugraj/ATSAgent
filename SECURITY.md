@@ -124,6 +124,15 @@ refuses closed links, and its server functions are rate-limited with all other R
 never sent without a person's approval, whatever the agent's autonomy (the tool has no pre-approvable
 template), and no figure above the approved ceiling can be agreed.
 
+The AI pay call (Negotiation call agent, docs/negotiator-voice-agent.md) never holds the ceiling or
+band: its prompt carries no figure, and no in-call tool takes an amount — `state_offer` hands back the
+words for the approved proposal or the one improved figure (above the proposal, at or under the
+ceiling, checked by the database). An agent's request for the call is never pre-approved (the HR
+head approves every one); TA / HR arranging it need a pay role. The call writes only what it heard
+(`offer_negotiations.call_outcome`); "agreed" is still set only by a person through
+`recordNegotiationOutcome` (role-checked, ceiling-guarded). Audit entries and thread posts carry no
+amounts.
+
 The candidate's interview-time page (`/schedule/<token>`) is public: the token is 64 random hex
 characters, it returns only the round, role, organisation, the interviewer's first name and the
 offered times, it can book one of those times once (the offer is claimed before booking and every

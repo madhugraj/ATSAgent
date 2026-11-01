@@ -25,6 +25,7 @@ import {
 import { env } from "../env";
 import { registerTool, type ToolContext } from "./registry";
 import { registerScreeningCallTools } from "./tools-screening-call";
+import { registerNegotiationCallTools } from "./tools-negotiation-call";
 import { registerSchedulingCallTools } from "./tools-scheduling-call";
 import { taskIsRemindable } from "./task-liveness";
 
@@ -700,4 +701,5 @@ export function registerPhase2Tools(): void {
 
   registerScreeningCallTools();
   registerSchedulingCallTools();
+  registerNegotiationCallTools();
 }

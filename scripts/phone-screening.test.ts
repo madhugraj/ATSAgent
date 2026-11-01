@@ -104,6 +104,7 @@ describe("the organisation's phone screening policy", () => {
       nextStepsText: "  we reply within two working days  ",
       schedulingEnabled: true,
       schedulingWaitHours: 36,
+      negotiationEnabled: true,
     };
     await settings.setPhoneScreeningPolicyCore(orgId, actor(), policy);
     expect(await settings.phoneScreeningPolicyOf(orgId)).toEqual({
