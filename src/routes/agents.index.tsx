@@ -224,10 +224,14 @@ function TaskCard({ task }: { task: AgentTaskView }) {
   async function decide(decision: AgentDecisionInput) {
     setBusy(true);
     try {
-      await decideAgentTask({ data: { taskId: task.id, decision } });
-      toast.success(
-        decision.status === "rejected" ? "Declined — the agent has been told" : "Sent to the agent",
-      );
+      const res = await decideAgentTask({ data: { taskId: task.id, decision } });
+      if (res.noLongerRelevant) toast.info(res.noLongerRelevant);
+      else
+        toast.success(
+          decision.status === "rejected"
+            ? "Declined — the agent has been told"
+            : "Sent to the agent",
+        );
       qc.invalidateQueries({ queryKey: ["agent_tasks"] });
       qc.invalidateQueries({ queryKey: ["agent_runs"] });
       qc.invalidateQueries({ queryKey: ["notifications"] });

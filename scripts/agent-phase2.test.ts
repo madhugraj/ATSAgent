@@ -79,12 +79,15 @@ const {
   userRoles,
   users,
 } = schema;
-const { resetRegistry } = await import("../src/server/agents/registry");
+const { getTool, resetRegistry } = await import("../src/server/agents/registry");
+const { taskIsRemindable } = await import("../src/server/agents/task-liveness");
+const { eraseCandidatesCore } = await import("../src/server/erase.server");
 const { registerPhase1Tools } = await import("../src/server/agents/tools");
 const { registerPhase2Tools } = await import("../src/server/agents/tools-phase2");
 const { registerPhase1Agents, registerPhase2Agents } =
   await import("../src/server/agents/definitions");
-const { resolveTask, runAgentTick, startRun } = await import("../src/server/agents/runtime.server");
+const { afterSubjectsDeleted, resolveTask, runAgentTick, startRun } =
+  await import("../src/server/agents/runtime.server");
 const { processAgentEvents, scheduleSweeps } =
   await import("../src/server/agents/orchestrator.server");
 const { moveStageCore } = await import("../src/lib/pipeline.server");
@@ -678,5 +681,167 @@ describe("follow-up agent", () => {
     const mails = await db.select().from(emailOutbox).where(eq(emailOutbox.orgId, orgId));
     expect(mails).toHaveLength(1);
     expect(mails[0]).toMatchObject({ kind: "member_reminder", toEmail: recruiterEmail });
+  });
+});
+
+describe("requests that outlived their work", () => {
+  const threeDaysAgo = () => new Date(Date.now() - 3 * 864e5);
+  /** A run in `status` with one open request, both three days old. */
+  async function parked(
+    title: string,
+    status: "awaiting_human" | "cancelled" | "failed" | "done",
+    opts: { subject?: { type: string; id: string }; args?: Record<string, unknown> } = {},
+  ) {
+    const [run] = await db
+      .insert(agentRuns)
+      .values({
+        orgId,
+        agentType: "intake",
+        status,
+        principalUserId: recruiter,
+        goal: title,
+        subjectType: opts.subject?.type ?? null,
+        subjectId: opts.subject?.id ?? null,
+        createdAt: threeDaysAgo(),
+      })
+      .returning({ id: agentRuns.id });
+    const [task] = await db
+      .insert(agentTasks)
+      .values({
+        orgId,
+        runId: run!.id,
+        kind: "approval",
+        title,
+        proposedAction: { toolCallId: "x", name: "propose_rejections", args: opts.args ?? {} },
+        assigneeUserId: recruiter,
+        createdAt: threeDaysAgo(),
+      })
+      .returning({ id: agentTasks.id });
+    return { runId: run!.id, taskId: task!.id };
+  }
+  const ctx = (runId: string) => ({
+    orgId,
+    principalUserId: owner,
+    runId,
+    agentType: "followup" as const,
+    actor: `agent:followup:${runId}`,
+  });
+  async function overdueTitles() {
+    const out = (await getTool("list_overdue")!.run(ctx(crypto.randomUUID()), { slaDays: 2 })) as {
+      agentRequests: { title: string }[];
+    };
+    return out.agentRequests.map((t) => t.title).sort();
+  }
+  async function popUpTitles() {
+    const rows = await db
+      .select({ title: agentTasks.title })
+      .from(agentTasks)
+      .innerJoin(agentRuns, eq(agentRuns.id, agentTasks.runId))
+      .where(and(eq(agentTasks.orgId, orgId), eq(agentTasks.status, "open"), taskIsRemindable()));
+    return rows.map((r) => r.title).sort();
+  }
+  const statusOf = async (taskId: string) =>
+    (await db.select().from(agentTasks).where(eq(agentTasks.id, taskId)))[0]!;
+
+  test("the follow-up agent and pop-ups skip requests whose run stopped or subject is gone", async () => {
+    const live = await application("Lia Live", "ai_screened", 50, ["Go"]);
+    const gone = await application("Gil Gone", "ai_screened", 50, ["Go"]);
+    await parked("live", "awaiting_human", {
+      subject: { type: "requisition", id: reqId },
+      args: { applicationId: live },
+    });
+    await parked("cancelled run", "cancelled", { subject: { type: "requisition", id: reqId } });
+    await parked("failed run", "failed");
+    await parked("finished run", "done");
+    await parked("deleted application", "awaiting_human", {
+      subject: { type: "application", id: gone },
+    });
+    await parked("rejection batch, all deleted", "awaiting_human", {
+      args: {
+        subject: {
+          type: "rejection",
+          items: [{ applicationId: gone, reason: "x" }],
+        },
+      },
+    });
+    await parked("rejection batch, one left", "awaiting_human", {
+      args: {
+        subject: {
+          type: "rejection",
+          items: [
+            { applicationId: gone, reason: "x" },
+            { applicationId: live, reason: "x" },
+          ],
+        },
+      },
+    });
+    await db.delete(applications).where(eq(applications.id, gone));
+
+    expect(await overdueTitles()).toEqual(["live", "rejection batch, one left"]);
+    expect(await popUpTitles()).toEqual(["live", "rejection batch, one left"]);
+  });
+
+  test("deleting a requisition closes requests about it and stops its runs", async () => {
+    // As on 2026-10-24: a rejection batch for a role whose requisition and
+    // applications were later deleted.
+    const a = await application("Ana", "ai_screened", 40, ["PHP"]);
+    const b = await application("Bo", "ai_screened", 35, ["PHP"]);
+    const { runId, taskId } = await parked(
+      "Rejection approval for 2 candidates",
+      "awaiting_human",
+      {
+        subject: { type: "requisition", id: reqId },
+        args: {
+          subject: {
+            type: "rejection",
+            items: [
+              { applicationId: a, reason: "x" },
+              { applicationId: b, reason: "x" },
+            ],
+          },
+        },
+      },
+    );
+    await db.delete(requisitions).where(eq(requisitions.id, reqId));
+    await afterSubjectsDeleted(orgId);
+
+    const task = await statusOf(taskId);
+    expect(task.status).toBe("cancelled");
+    expect((task.response as { reason: string }).reason).toContain(
+      "the requisition it was about has been deleted",
+    );
+    const [run] = await db.select().from(agentRuns).where(eq(agentRuns.id, runId));
+    expect(run!.status).toBe("cancelled");
+    expect(await overdueTitles()).toEqual([]);
+  });
+
+  test("erasing a candidate closes requests about their application; the run carries on", async () => {
+    const a = await application("Eve Erased", "ai_screened", 40, ["PHP"]);
+    const { runId, taskId } = await parked("Reject Eve", "awaiting_human", {
+      subject: { type: "requisition", id: reqId },
+      args: { applicationId: a },
+    });
+    await eraseCandidatesCore(orgId, [apps["Eve Erased"]!.candidateId]);
+
+    const task = await statusOf(taskId);
+    expect(task.status).toBe("cancelled");
+    expect((task.response as { reason: string }).reason).toContain(
+      "the candidate's application it was about has been deleted",
+    );
+    // The requisition still exists: the agent is re-queued and told why.
+    const [run] = await db.select().from(agentRuns).where(eq(agentRuns.id, runId));
+    expect(run!.status).toBe("queued");
+  });
+
+  test("the scheduler's sweep catches deletions made outside the app", async () => {
+    const a = await application("Dee Deleted", "ai_screened", 40, ["PHP"]);
+    const { taskId } = await parked("Reject Dee", "awaiting_human", {
+      subject: { type: "requisition", id: reqId },
+      args: { applicationId: a },
+    });
+    await db.delete(applications).where(eq(applications.id, a));
+    expect((await statusOf(taskId)).status).toBe("open");
+    await runAgentTick({ orgId });
+    expect((await statusOf(taskId)).status).toBe("cancelled");
   });
 });
