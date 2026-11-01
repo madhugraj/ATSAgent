@@ -1435,7 +1435,10 @@ export async function onTaskOpened(
                   : (task.proposedAction as { args?: { subject?: { type?: string } } } | null)?.args
                         ?.subject?.type === "expert_brief"
                     ? "The role's expert brief, written from the hiring manager's answers — the hiring manager approves it or says what to change."
-                    : "This needs a decision."
+                    : (task.proposedAction as { args?: { subject?: { type?: string } } } | null)
+                          ?.args?.subject?.type === "panel_review"
+                      ? "The panel and the round's panel agent see this candidate differently — both views are below; the decision is yours."
+                      : "This needs a decision."
           : revision
             ? `Revised as you asked ("${revision.reason}")${
                 revision.changes.length

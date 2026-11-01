@@ -51,6 +51,9 @@ export const AI_FEATURES = [
   "agent_followup",
   "agent_org_context",
   "agent_expert_interview",
+  "agent_panel_l1",
+  "agent_panel_l2",
+  "agent_panel_l3",
   // Organisation context agent (docs/org-context-agent-plan.md): the org desk
   // conversation turns, website-page extraction and document OCR.
   "org_desk",
@@ -72,6 +75,10 @@ export const AI_FEATURES = [
   // judge that scores the flow (reported, never gating).
   "eval_candidate_sim",
   "eval_call_judge",
+  // Silent panel agents (docs/silent-panel-agent-plan.md): the agent's own
+  // assessment of an interview call, and the panel's factual summary of it.
+  "panel_assess",
+  "panel_summary",
 ] as const;
 
 export type AiFeature = (typeof AI_FEATURES)[number];

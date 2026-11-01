@@ -226,6 +226,7 @@ type DocumentValidationSubject = {
 type OrgProfileSubject = { type: "org_profile"; versionId: string; expects?: string };
 type GateSubject =
   | ExpertBriefSubject
+  | import("../panel/review.server").PanelReviewSubject
   | OrgProfileSubject
   | PanelApprovalSubject
   | PanelSubstituteSubject
@@ -379,6 +380,10 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
   if (subject.type === "panel_approval") return panelGateFor(orgId, subject);
   if (subject.type === "expert_brief") return expertBriefGateFor(orgId, subject);
   if (subject.type === "panel_substitute") return substituteGateFor(orgId, subject);
+  if (subject.type === "panel_review") {
+    const { reviewGateFor } = await import("../panel/review.server");
+    return reviewGateFor(orgId, subject);
+  }
   if (subject.type === "offer" || subject.type === "offer_release") {
     const offerId = "offerId" in subject ? subject.offerId : subject.id;
     const [o] = await db
@@ -682,6 +687,10 @@ async function performGate(
   if (subject.type === "panel_approval") return performPanelGate(orgId, userId, subject, decision);
   if (subject.type === "expert_brief")
     return performExpertBriefGate(orgId, userId, subject, decision);
+  if (subject.type === "panel_review") {
+    const { performReviewGate } = await import("../panel/review.server");
+    return performReviewGate(orgId, userId, org.memberEmail, subject, decision);
+  }
   if (subject.type === "panel_substitute")
     return performSubstituteGate(orgId, userId, org.memberEmail, subject, decision);
   if (subject.type === "offer" || subject.type === "offer_release") {
