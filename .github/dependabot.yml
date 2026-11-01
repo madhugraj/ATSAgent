@@ -1,12 +1,22 @@
 # Supply chain (docs/guardrails.md P2-3): reviewed update PRs for every
 # dependency source. Actions and base images are pinned by digest/SHA, so an
 # update only lands through one of these PRs and the full CI run.
+#
+# Routine version updates are minor and patch only — major upgrades (a new
+# TypeScript, ESLint, Node or React-library major) are planned work, done by
+# hand on their own branch. `allow` with update-types only narrows version
+# updates; Dependabot security updates (when switched on in the repository's
+# security settings) still propose whatever version fixes an advisory, major
+# or not. An `ignore` rule would block those too, so it is not used here.
 version: 2
 updates:
   - package-ecosystem: bun
     directory: /
     schedule: { interval: weekly, day: monday }
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 5
+    allow:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
     groups:
       minor-and-patch:
         update-types: [minor, patch]
@@ -15,6 +25,9 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly, day: monday }
+    allow:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
     groups:
       actions:
         patterns: ["*"]
@@ -23,4 +36,7 @@ updates:
   - package-ecosystem: docker
     directory: /
     schedule: { interval: weekly, day: monday }
+    allow:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
     labels: [dependencies, docker]
