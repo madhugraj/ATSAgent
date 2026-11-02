@@ -77,8 +77,17 @@ We credit reporters in release notes on request.
   and the only contact given is the organisation's mailbox. Each voice agent's dos and don'ts are
   one charter (`src/server/voice/charter.ts`, `docs/voice-agents-charter.md`), printed into every
   call and the source of its must-never list.
-- Rate limiting on all public HTTP routes and server-function RPCs (`src/server.ts`), shared across
+- Rate limiting on all public HTTP routes and server-function RPCs (`src/server.ts`), a tighter
+  budget on `/api/auth` mutations (sign-in, registration, password reset), shared across
   instances through Postgres when `RATE_LIMIT_STORE=postgres` (production).
+- CSRF guard on every mutating server-function RPC and `/api/auth` call (Fetch-Metadata
+  `sec-fetch-site` plus an origin allowlist — the session cookie is `SameSite=None` for the
+  browser companion, so the browser alone cannot be the boundary); HSTS on every response and a
+  `default-src 'self'` content-security policy (2026-11 audit N-5).
+- SSRF connect pinning: after `safeFetch` vets a user-supplied host, the connection is pinned to
+  the vetted address with an undici dispatcher, so a DNS rebinding between the check and the
+  connect cannot retarget the socket (2026-11 audit N-2; Bun's fetch ignores dispatchers, where
+  the pre-connect vetting remains the guard).
 - Step-up re-authentication: releasing an offer and rejecting candidates in bulk (directly, or by
   approving an agent's offer release or rejection batch) need the password re-entered in that
   session within 10 minutes; audited `auth.step_up` / `auth.step_up_failed`, locked after five

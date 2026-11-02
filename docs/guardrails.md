@@ -200,7 +200,9 @@ Where the tripwire runs:
   - a **daily cap on automatic CV scorings per role**. Applications over it wait
     for the next day.
 - **Rate limits** (`src/server/rate-limit.ts`): 60 requests per minute per caller
-  on public routes and on each server function. With `RATE_LIMIT_STORE=postgres`
+  on public routes and on each server function, and a tighter **10 per minute on
+  `/api/auth` mutations** (sign-in, registration, password reset) so online
+  password guessing does not get the general budget. With `RATE_LIMIT_STORE=postgres`
   (production) the limit is **shared across every instance** through the UNLOGGED
   `rate_limit_hits` table (a sliding-window counter, migration 0066). A database
   error falls back to the per-instance window rather than blocking traffic.
