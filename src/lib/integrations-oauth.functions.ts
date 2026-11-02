@@ -49,21 +49,21 @@ async function connectUrl(
 
 export const startMicrosoftConnect = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ origin: z.string().url() }).parse(d))
+  .validator((d: unknown) => z.object({ origin: z.string().url() }).parse(d))
   .handler(async ({ data, context }) =>
     connectUrl("microsoft", data.origin, context.orgId, context.userId, context.memberEmail),
   );
 
 export const startGoogleMeetConnect = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ origin: z.string().url() }).parse(d))
+  .validator((d: unknown) => z.object({ origin: z.string().url() }).parse(d))
   .handler(async ({ data, context }) =>
     connectUrl("google", data.origin, context.orgId, context.userId, context.memberEmail),
   );
 
 export const startZoomConnect = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ origin: z.string().url() }).parse(d))
+  .validator((d: unknown) => z.object({ origin: z.string().url() }).parse(d))
   .handler(async ({ data, context }) =>
     connectUrl("zoom", data.origin, context.orgId, context.userId, context.memberEmail),
   );

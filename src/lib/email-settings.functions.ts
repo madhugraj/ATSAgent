@@ -53,7 +53,7 @@ export const getEmailSettings = createServerFn({ method: "POST" })
 
 export const saveEmailSettings = createServerFn({ method: "POST" })
   .middleware([requireRole("hr_head")])
-  .inputValidator((data: unknown) => SaveInput.parse(data))
+  .validator((data: unknown) => SaveInput.parse(data))
   .handler(async ({ data, context }) => {
     const payload = {
       enabled: data.enabled,

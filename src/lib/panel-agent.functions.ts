@@ -30,7 +30,7 @@ export const getPanelAgent = createServerFn({ method: "GET" })
 /** Switch the silent panel agent on or off, and for which rounds — HR head, CBO or owner; audited. */
 export const setPanelAgent = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => Policy.parse(d))
+  .validator((d: unknown) => Policy.parse(d))
   .handler(async ({ data, context }) => {
     await assertRole(
       context.userId,
@@ -50,7 +50,7 @@ export const setPanelAgent = createServerFn({ method: "POST" })
 /** The candidate does not want this round's call transcribed — the hiring team; audited. */
 export const declineRoundTranscription = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z
       .object({
         interviewId: z.string().uuid(),
@@ -77,7 +77,7 @@ export const declineRoundTranscription = createServerFn({ method: "POST" })
 /** Fetch a round's transcript again (e.g. after the permission was granted) — the hiring team; audited. */
 export const retryRoundTranscription = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ interviewId: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ interviewId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     await assertRole(
       context.userId,

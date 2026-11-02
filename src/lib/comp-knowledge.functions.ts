@@ -41,7 +41,7 @@ const SaveInput = z.object({
  */
 export const saveCompFigure = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => SaveInput.parse(data))
+  .validator((data: unknown) => SaveInput.parse(data))
   .handler(async ({ data, context }): Promise<CompKnowledgeEntry[]> => {
     if (data.requisitionId) await assertRequisitionInOrg(data.requisitionId, context.orgId);
 
@@ -91,7 +91,7 @@ const RoleInput = z.object({ title: z.string().min(1).max(160) });
 /** Saved figures for one role. */
 export const listRoleCompKnowledge = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => RoleInput.parse(data))
+  .validator((data: unknown) => RoleInput.parse(data))
   .handler(({ data, context }) => readRoleKnowledge(context.orgId, data.title));
 
 /** Everything the organisation has saved, newest first. */

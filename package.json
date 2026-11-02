@@ -82,6 +82,7 @@
     "nodemailer": "^10.3.1",
     "pdfjs-dist": "^6.4.299",
     "playwright": "1.64.1",
+    "postgres": "^3.4.9",
     "react": "^19.3.1",
     "react-day-picker": "^9.14.0",
     "react-dom": "^19.3.1",

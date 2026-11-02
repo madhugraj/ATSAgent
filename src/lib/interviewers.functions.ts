@@ -24,9 +24,7 @@ export const listInterviewerProfiles = createServerFn({ method: "GET" })
 
 export const setInterviewerProfile = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
-    z.object({ memberId: z.string().uuid(), profile: Profile }).parse(d),
-  )
+  .validator((d: unknown) => z.object({ memberId: z.string().uuid(), profile: Profile }).parse(d))
   .handler(async ({ data, context }) => {
     await assertRole(
       context.userId,

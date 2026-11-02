@@ -205,7 +205,7 @@ function history(snapshots: Array<typeof ontologySnapshots.$inferSelect>) {
 /** Read the stored graph (cheap) — falls back to a fresh in-memory build when empty. */
 export const readTalentBrain = createServerFn({ method: "POST" })
   .middleware([requireIdentity])
-  .inputValidator((input: unknown) =>
+  .validator((input: unknown) =>
     z.object({ scope: z.enum(["org", "platform"]).default("org") }).parse(input ?? {}),
   )
   .handler(async ({ data, context }): Promise<TalentBrain> => {
@@ -243,7 +243,7 @@ export const readTalentBrain = createServerFn({ method: "POST" })
  */
 export const rebuildTalentBrain = createServerFn({ method: "POST" })
   .middleware([requireIdentity])
-  .inputValidator((input: unknown) => z.object({}).parse(input ?? {}))
+  .validator((input: unknown) => z.object({}).parse(input ?? {}))
   .handler(async ({ context }): Promise<TalentBrain> => {
     const email = context.claims?.email ?? null;
     const access = await requireBrainAccess(context.userId, email);

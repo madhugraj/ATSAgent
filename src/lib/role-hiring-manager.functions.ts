@@ -12,7 +12,7 @@ const ReqInput = z.object({ requisitionId: z.string().uuid() });
 
 export const getRoleHiringManager = createServerFn({ method: "GET" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => ReqInput.parse(d))
+  .validator((d: unknown) => ReqInput.parse(d))
   .handler(async ({ data, context }) => {
     const { assertRequisitionInOrg } = await import("../server/guards");
     await assertRequisitionInOrg(data.requisitionId, context.orgId);
@@ -22,7 +22,7 @@ export const getRoleHiringManager = createServerFn({ method: "GET" })
 
 export const setRoleHiringManager = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => ReqInput.extend({ memberId: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => ReqInput.extend({ memberId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const { assertRequisitionInOrg } = await import("../server/guards");
     await assertRequisitionInOrg(data.requisitionId, context.orgId);

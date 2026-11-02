@@ -84,7 +84,7 @@ const HrmsSaveInput = z.object({
 /** Persist non-secret config on the row, secrets in the server-only table. */
 export const saveHrmsIntegration = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => HrmsSaveInput.parse(data))
+  .validator((data: unknown) => HrmsSaveInput.parse(data))
   .handler(async ({ data, context }) => {
     const [row] = await db
       .select({ id: sourceIntegrations.id })
@@ -131,7 +131,7 @@ export const saveHrmsIntegration = createServerFn({ method: "POST" })
 
 export const testHrmsIntegration = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({ integrationId: z.string().uuid(), provider: z.enum(HRMS_PROVIDERS_IDS) })
       .parse(data),
@@ -176,7 +176,7 @@ export const testHrmsIntegration = createServerFn({ method: "POST" })
 
 export const disconnectHrmsIntegration = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ integrationId: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ integrationId: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const [row] = await db
       .select({ id: sourceIntegrations.id, provider: sourceIntegrations.provider })
@@ -226,7 +226,7 @@ export const disconnectHrmsIntegration = createServerFn({ method: "POST" })
 
 export const syncHrmsNow = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ integrationId: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ integrationId: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     return syncHrmsEmployees({
       orgId: context.orgId,

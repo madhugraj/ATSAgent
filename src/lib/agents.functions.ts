@@ -145,9 +145,7 @@ export type AgentDecisionInput = z.infer<typeof Decision>;
 
 export const decideAgentTask = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
-    z.object({ taskId: z.string().uuid(), decision: Decision }).parse(d),
-  )
+  .validator((d: unknown) => z.object({ taskId: z.string().uuid(), decision: Decision }).parse(d))
   .handler(async ({ data, context }) => {
     // Approving an agent's offer release or rejection batch is the same
     // high-impact action as doing it by hand: it needs a fresh password.
@@ -229,7 +227,7 @@ export const listAgentRuns = createServerFn({ method: "GET" })
 
 export const cancelAgentRun = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ runId: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ runId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const { assertRole } = await import("./auth.middleware");
     const [run] = await db
@@ -360,7 +358,7 @@ export const runModelSafetyCheck = createServerFn({ method: "POST" })
 
 export const saveAgentPolicy = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => PolicyInput.parse(d))
+  .validator((d: unknown) => PolicyInput.parse(d))
   .handler(async ({ data, context }) => {
     const { assertRole } = await import("./auth.middleware");
     await assertRole(context.userId, context.orgId, [...SETTINGS_ROLES]);
@@ -462,7 +460,7 @@ export type AgentRunDetail = {
 /** Run inspector: the step trail of one run (redacted summaries, no provider text). */
 export const getAgentRun = createServerFn({ method: "GET" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ runId: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ runId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<AgentRunDetail> => {
     const { agentSteps } = await import("@db/schema");
     const [run] = await db
@@ -559,9 +557,7 @@ export const agentSummary = createServerFn({ method: "GET" })
  */
 export const askAgents = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
-    z.object({ message: z.string().trim().min(5).max(2000) }).parse(d),
-  )
+  .validator((d: unknown) => z.object({ message: z.string().trim().min(5).max(2000) }).parse(d))
   .handler(async ({ data, context }) => {
     const { ensureAgentsRegistered } = await import("../server/agents");
     ensureAgentsRegistered();
@@ -724,7 +720,7 @@ export const agentRegister = createServerFn({ method: "GET" })
  */
 export const exportAgentRun = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ runId: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ runId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<{ fileName: string; json: string }> => {
     const schema = await import("@db/schema");
     const [run] = await db
@@ -827,7 +823,7 @@ export const exportAgentRun = createServerFn({ method: "POST" })
  */
 export const replayAgentRun = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ runId: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ runId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const { assertRole } = await import("./auth.middleware");
     await assertRole(context.userId, context.orgId, [...GOVERNANCE_ROLES]);
@@ -848,7 +844,7 @@ export type AgentRunComparison = import("../server/agents/replay.server").RunCom
 
 export const compareAgentRun = createServerFn({ method: "GET" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ runId: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ runId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<AgentRunComparison> => {
     const { compareRuns } = await import("../server/agents/replay.server");
     return compareRuns(context.orgId, data.runId);
