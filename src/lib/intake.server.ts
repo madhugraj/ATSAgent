@@ -52,7 +52,8 @@ export async function parseCv(
       phone: loose(z.string()),
       location: loose(z.string()),
       experience_years: loose(z.number()),
-      education: loose(z.string()),
+      // Some models list degrees as an array instead of one line — accept both.
+      education: loose(z.union([z.string(), z.array(z.string())])),
       skills: loose(z.array(z.string())),
       linkedin_url: loose(z.string()),
       github_url: loose(z.string()),
@@ -77,7 +78,11 @@ export async function parseCv(
       phone: v.phone ?? null,
       location: v.location ?? null,
       experience_years: v.experience_years ?? null,
-      education: v.education ?? null,
+      education: typeof v.education === "string"
+        ? v.education
+        : Array.isArray(v.education)
+          ? v.education.filter((s) => s.trim()).join("; ")
+          : null,
       skills: v.skills ?? null,
       linkedin_url: v.linkedin_url ?? null,
       github_url: v.github_url ?? null,
@@ -99,6 +104,10 @@ export async function parseCv(
       "\nExtract structured candidate data from a resume. Return ONLY JSON with keys: full_name, email, phone, " +
       "location, experience_years (number), education, skills (string array), linkedin_url, github_url, website_url, " +
       "current_employer, employment_history (array of {company, title, start, end, level_hint}, newest first). " +
+      "education: every degree or diploma the resume states, each with degree, field, institution and year where " +
+      "given, joined into one string with '; '. Read the whole resume before answering — an EDUCATION section is " +
+      "usually near the end. Use null for education ONLY when the resume states no degree, diploma or certification " +
+      "at all. current_employer: the company of the newest employment_history entry. " +
       "Use null when a field is genuinely absent. Never invent values. URLs must be real URLs read from the resume — never fabricate one.",
     prompt: untrusted("resume", resumeText.slice(0, 20000)),
     orgId,
