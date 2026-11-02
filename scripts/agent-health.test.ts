@@ -871,6 +871,56 @@ describe("interview panels", () => {
   });
 });
 
+describe("a request for a new panellist", () => {
+  test("left unanswered past the limit, it names the held-up round", async () => {
+    const { requisitions } = await import("../drizzle/schema");
+    const [req] = await db
+      .insert(requisitions)
+      .values({
+        orgId,
+        code: `H-NP-${stamp}`,
+        title: "New Panellist Test",
+        status: "approved",
+      } as never)
+      .returning({ id: requisitions.id });
+    const id = await run("interview", { status: "awaiting_human" });
+    const subject = {
+      type: "new_panelist",
+      requisitionId: req!.id,
+      level: 2,
+      needed: "Data governance",
+      reason: "Nobody covers it.",
+    };
+    const [task] = await db
+      .insert(agentTasks)
+      .values({
+        orgId,
+        runId: id,
+        kind: "gate",
+        title: "Someone new for the L2 panel?",
+        proposedAction: { name: "request_new_panelist", args: { subject } },
+        createdAt: ago(HEALTH.newPanelistWaitingHours * 60 - 60),
+      } as never)
+      .returning({ id: agentTasks.id });
+    const rule = async () =>
+      (await open()).find((i) => i.rule === "interview.new_panelist_waiting");
+    await evaluate();
+    expect(await rule()).toBeUndefined();
+    await db
+      .update(agentTasks)
+      .set({ createdAt: ago((HEALTH.newPanelistWaitingHours + 2) * 60) })
+      .where(eq(agentTasks.id, task!.id));
+    await evaluate();
+    expect(await rule()).toMatchObject({
+      agentType: "interview",
+      severity: "warning",
+      title: `H-NP-${stamp} L2 has waited ${HEALTH.newPanelistWaitingHours + 2} hours for a new panellist`,
+    });
+    await db.delete(agentTasks).where(eq(agentTasks.id, task!.id));
+    await db.delete(requisitions).where(eq(requisitions.id, req!.id));
+  });
+});
+
 describe("interviewers who can't make it", () => {
   test("a booked interview within a day with an interviewer who can't make it is critical", async () => {
     const { applications, candidates, interviews, requisitions } =

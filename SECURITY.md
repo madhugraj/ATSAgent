@@ -184,6 +184,20 @@ offered times, it can book one of those times once (the offer is claimed before 
 time is re-checked as free), and its server functions are rate-limited with all other RPCs.
 Calendar access for availability is free/busy only — event titles and details are never read.
 
+An external panellist's scorecard page (`/scorecard/<token>`, docs/panel-directory.md) is public in
+the same way, for people on an interview panel who have no account (a client, an advisor). The
+token is 64 hex characters derived with HMAC-SHA-256 from the server secret and the interview,
+panellist and booked time (a resent brief carries the same link; a reschedule replaces it); only
+its SHA-256 is stored (`panelist_scorecard_links.token_hash`). It returns only the round, role,
+candidate name, the panellist's own name and the round's competencies; it accepts one final
+scorecard, only once the interview has started and until seven days after it; an external
+scorecard never moves a candidate into the offer pipeline (that waits for the HR head); its server
+functions are rate-limited with all other RPCs; the submission is audited
+(`scorecard.submitted_by_link`). The external panellist's brief leaves out internal material — match
+score, screening result and the candidate page. Panel directory entries are added by the HR head
+(Team page or the hiring desk card the Interview coordinator raises); typing someone in is
+approving them, recorded as self-approved in `panelist.added`.
+
 Job-board application webhooks (`/api/public/boards/<provider>/<token>`) authenticate on two
 factors: a per-connection delivery token (24 random bytes, stored encrypted with a SHA-256 hash
 lookup — the capture-token precedent) and, where the board's contract defines one, a signature
