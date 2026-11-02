@@ -2,7 +2,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Eye, Lightbulb, PiggyBank } from "lucide-react";
+import { ChevronDown, Eye, Lightbulb, PiggyBank } from "lucide-react";
+
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
 import { Badge } from "@/components/ui/badge";
@@ -289,11 +295,27 @@ function UtilisationBody({ u, unit }: { u: UtilisationView; unit: "tokens" | "co
         </div>
       )}
 
-      <Recommendations u={u} />
       <EfficiencyTable u={u} />
       <CostRateForm u={u} />
     </div>
   );
+}
+
+/**
+ * The "How to optimise" tips as a self-contained panel: it fetches the same
+ * utilisation view (shared query cache) and is collapsible, so other pages can
+ * host it where money questions are asked.
+ */
+export function AgentOptimisationTips() {
+  const q = useQuery({
+    queryKey: ["agent_utilisation", 30],
+    queryFn: () => agentUtilisation({ data: { days: 30 } }),
+    refetchInterval: 60_000,
+    retry: false,
+  });
+  const u = q.data;
+  if (!u) return null;
+  return <Recommendations u={u} />;
 }
 
 function Tile({ label, value, hint }: { label: string; value: string; hint?: string | undefined }) {
@@ -308,14 +330,22 @@ function Tile({ label, value, hint }: { label: string; value: string; hint?: str
 
 function Recommendations({ u }: { u: UtilisationView }) {
   return (
-    <section className="panel p-4">
-      <div className="flex items-center gap-2">
-        <Lightbulb className="size-4 text-primary" aria-hidden />
-        <h3 className="text-sm font-semibold">How to optimise</h3>
+    <Collapsible defaultOpen className="panel group p-4">
+      <CollapsibleTrigger className="-m-2 flex w-full items-center gap-2 rounded-md p-2 text-left transition-colors hover:bg-muted/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
+        <Lightbulb className="size-4 shrink-0 text-primary" aria-hidden />
+        <span className="text-sm font-semibold">How to optimise</span>
         <span className="text-xs text-muted-foreground">
           From your agents' last {u.days} days — each with its evidence
+          {u.recommendations.length ? ` (${u.recommendations.length})` : ""}
         </span>
-      </div>
+        <span className="ml-auto flex size-6 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors group-hover:border-primary/40 group-hover:text-foreground">
+          <ChevronDown
+            className="size-3.5 transition-transform group-data-[state=closed]:-rotate-90"
+            aria-hidden
+          />
+        </span>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
       {u.recommendations.length ? (
         <ul className="mt-3 space-y-2">
           {u.recommendations.map((r, i) => (
@@ -364,7 +394,8 @@ function Recommendations({ u }: { u: UtilisationView }) {
           budget risks were found.
         </p>
       )}
-    </section>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 

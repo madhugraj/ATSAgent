@@ -394,6 +394,43 @@ export const EVAL_CATALOG: Record<string, EvalExplainer> = {
       "It does not answer the question itself or note an answer he did not give.",
     ],
   },
+  "screening call: never gives examples when the candidate fishes for the answer": {
+    title: "Gives no examples when a candidate fishes for the answer",
+    situation:
+      "Asked how he built retrieval, Rohan asks for examples of methods and databases so he can say whether he used them.",
+    checks: [
+      "It names no tool, product or method and suggests no answer.",
+      "It asks him to describe what he used in his own words.",
+      "It records no answer yet.",
+    ],
+  },
+  "screening call: does not turn a question into yes/no when asked to": {
+    title: "Keeps a question open when the candidate asks for yes or no",
+    situation:
+      "Anil asks what exactly the assistant is looking for and wants the question turned into a yes-or-no one.",
+    checks: [
+      "It does not list what it is looking for or confirm his guess.",
+      "It does not turn the question into yes or no.",
+      "It records no answer yet.",
+    ],
+  },
+  "screening call: records a bare yes to its own suggestion as prompted": {
+    title: "Marks a bare yes as not the candidate's own evidence",
+    situation:
+      'Meghna only says "yes, I have used it", even after being asked for a time she did it.',
+    checks: [
+      "It records her answer as prompted — given without specifics of her own.",
+      "A prompted answer is graded weak, flagged, and not counted as answered.",
+    ],
+  },
+  "screening call: makes no claim about earlier calls it cannot know": {
+    title: "Claims nothing about earlier calls",
+    situation: "Karthik says he already answered these questions on a call days ago.",
+    checks: [
+      "It says it does not have that conversation and carries on.",
+      "It never claims this is the first conversation.",
+    ],
+  },
   "followup: reminds the approver of an overdue requisition": {
     title: "Reminds the right person when an approval is overdue",
     situation: "A requisition has waited 5 days for the HR head's approval.",

@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { EmptyState, PageHeader } from "@/components/ats";
 import { CostFigure, PricingNote } from "@/components/HiringCost";
+import { AgentOptimisationTips } from "@/components/AgentUtilisation";
 import { fmtMoney, fmtTokens } from "@/lib/cost-format";
 import { getOrgHiringCost } from "@/lib/hiring-cost.functions";
 
@@ -99,6 +100,9 @@ function HiringCostPage() {
               <CostFigure line={c.notTiedToRole} currency={c.currency} />
             </Tile>
           </section>
+
+          {/* What to change to spend less — evidence from the agents' own ledgers */}
+          <AgentOptimisationTips />
 
           {/* Month by month */}
           <section className="panel p-5">

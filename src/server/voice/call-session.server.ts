@@ -31,6 +31,8 @@ import {
 import { agentRunScope, withAiSubject } from "../agents/context";
 import { db } from "../db";
 import { log } from "../log";
+import type { AudioStats } from "./rtp";
+import { Vad } from "./vad";
 import { type BriefFacts, callSystemPrompt, loadBriefFacts } from "./call-brief.server";
 import {
   applyCallTool,
@@ -55,6 +57,8 @@ export interface PhoneLine {
   play(pcm8k: Int16Array): void;
   clear(): void;
   pendingSeconds(): number;
+  /** How smoothly the assistant's audio went out (the SIP line; fakes may omit it). */
+  audioStats?(): AudioStats | null;
   /** Resolves when the other side hangs up. */
   readonly ended: Promise<void>;
   hangup(): Promise<void>;
@@ -88,6 +92,9 @@ export const GREETING_NUDGE_MS = 6_000;
  * (the voice model waits ~1 s of silence, then thinks; nudging sooner talks over it).
  */
 export const REPLY_NUDGE_MS = 4_000;
+
+/** Cue the screening assistant this long after the candidate's hello if it has not begun. */
+export const SCREENING_REPLY_CUE_MS = 1_200;
 
 /**
  * The candidate speaks first (they say "hello" when they pick up); the
@@ -157,13 +164,9 @@ export {
   type EndReason,
 } from "./call-tools";
 
-/** Above this RMS (int16) a 20 ms frame is speech, not line noise. */
-export const SPEECH_RMS = 600;
-export function rms(pcm: Int16Array): number {
-  let sum = 0;
-  for (let i = 0; i < pcm.length; i++) sum += pcm[i]! * pcm[i]!;
-  return Math.sqrt(sum / Math.max(1, pcm.length));
-}
+// Speech detection lives with the VAD that consumes it; re-exported so the
+// scheduling and negotiation sessions keep importing it from here.
+export { SPEECH_RMS, rms } from "./vad";
 
 const lineFor = (t: ScreeningCallTurn) =>
   `${t.who === "ai" ? "Assistant" : "Candidate"}: ${t.text}`;
@@ -461,14 +464,21 @@ async function placeCall(
 
   const answeredAt = now();
   await setCall(call.id, orgId, { status: "in_progress", startedAt: new Date(answeredAt) });
-  let voicedFrames = 0;
+  // The caller's line through a debounced VAD: a single frame's RMS flickered
+  // with breaths and line noise, and quiet talkers never registered at all.
+  const vad = new Vad();
   line.onAudio((pcm) => {
     // The candidate talking counts as activity even before a transcript line arrives.
-    if (rms(pcm) > SPEECH_RMS) {
+    if (vad.process(pcm) === "start") candidateSpoke = true;
+    if (vad.isActive()) {
       lastHeardAt = Date.now();
       lastActivity = now();
-      if (++voicedFrames >= 10) candidateSpoke = true;
     }
+    // While the assistant's audio is queued or playing, pass upstream only what
+    // the VAD calls speech: a loud speakerphone carried the assistant's own voice
+    // back up the line, the model read it as an interruption and cut itself off
+    // mid-word. Real speech (the caller talking over the reply) still passes.
+    if (line.pendingSeconds() > 0 && !vad.isActive()) return;
     session.sendAudio(up.process(pcm));
   });
   lastActivity = now();
@@ -478,6 +488,10 @@ async function placeCall(
     lastHeard: () => lastHeardAt,
     aiSpoke: () => aiSpoke,
     callerFirstMs: limits.callerFirstMs,
+    // As the scheduling and negotiation calls: two real calls on 2 November waited the
+    // default 4 s after the hello, the candidate said "Hello? Hello?" over the late
+    // greeting, and that cut it off.
+    replyNudgeMs: SCREENING_REPLY_CUE_MS,
     tag: "screening_call",
     callId: call.id,
   });
@@ -500,6 +514,9 @@ async function placeCall(
   if (watchdog) clearInterval(watchdog);
   stopOpening();
   await line.hangup().catch(() => undefined);
+  const audio = line.audioStats?.() ?? null;
+  if (audio) log.info("screening_call.audio", { call_id: call.id, ...audio });
+  log.info("screening_call.vad", { call_id: call.id, segments: vad.segments });
   line.close();
   const summary = await session.close();
 
@@ -628,6 +645,10 @@ export function callCoverage(
   };
 }
 
+/** Marks an answer where the candidate only agreed with what the assistant suggested. */
+export const PROMPTED_MARK =
+  "[Interviewer note: the candidate only agreed with something the interviewer suggested and gave no specifics of their own.]";
+
 /**
  * Grade a phone screen fairly: only the screening questions the candidate
  * answered (never one that was not asked, never pay or logistics), with the
@@ -637,7 +658,7 @@ export function callCoverage(
 export async function gradeCallAnswers(input: {
   orgId: string;
   call: typeof screeningCalls.$inferSelect;
-  answers: { question_id: string; summary: string; declined?: boolean }[];
+  answers: { question_id: string; summary: string; declined?: boolean; prompted?: boolean }[];
   /** The screening part of the call (after the practical details). */
   transcript: ScreeningCallTurn[];
   /** The screening questions the call planned to ask. */
@@ -646,8 +667,11 @@ export async function gradeCallAnswers(input: {
   const { orgId, call } = input;
   const plannedSet = new Set(input.planned);
   const asked = input.answers.filter((a) => plannedSet.has(a.question_id));
-  const answered = asked.filter((a) => !a.declined);
-  if (!answered.length || !call.kitId) return null;
+  // Graded: everything they spoke to. Counted as answered: only what they said in
+  // their own words — agreeing with an example the assistant gave is not evidence.
+  const graded = asked.filter((a) => !a.declined);
+  const ownWords = graded.filter((a) => !a.prompted);
+  if (!graded.length || !call.kitId) return null;
   const [kit] = await db
     .select()
     .from(screeningKits)
@@ -656,22 +680,25 @@ export async function gradeCallAnswers(input: {
   if (!kit) return null;
   try {
     const { gradeScreeningForKit } = await import("@/lib/screening.functions");
-    const graded = await gradeScreeningForKit({
+    const run = await gradeScreeningForKit({
       orgId,
       kit,
-      answers: answered.map((a) => ({ question_id: a.question_id, answer: a.summary })),
+      answers: graded.map((a) => ({
+        question_id: a.question_id,
+        answer: a.prompted ? `${PROMPTED_MARK} ${a.summary}` : a.summary,
+      })),
       transcript: input.transcript.map(lineFor).join("\n") || null,
       inputKind: "phone_ai",
       createdBy: null,
-      onlyQuestionIds: answered.map((a) => a.question_id),
+      onlyQuestionIds: graded.map((a) => a.question_id),
       mode: "spoken",
       coverage: callCoverage(
         input.planned,
         asked.map((a) => a.question_id),
-        answered.length,
+        ownWords.length,
       ),
     });
-    return graded.run.id;
+    return run.run.id;
   } catch (e) {
     log.warn("screening_call.grading_failed", { call_id: call.id, error: e as Error });
     return null;

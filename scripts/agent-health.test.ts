@@ -821,6 +821,36 @@ describe("phone screening health", () => {
     await evaluate();
     expect(await ruleOf("screening_call.short_calls")).toBeUndefined();
   });
+
+  test("a high share of prompted answers (the candidate only agreed) is flagged", async () => {
+    const own = { question_id: "q1", summary: "Runs three EKS clusters." };
+    const prompted = { question_id: "q1", summary: "Yes, EKS.", prompted: true };
+    // Under the threshold (or too few answers): quiet.
+    const few = await calls(2, {
+      status: "completed",
+      attempt: 1,
+      startedAt: ago(30),
+      answers: [own, prompted],
+    });
+    await evaluate();
+    expect(await ruleOf("screening_call.prompted")).toBeUndefined();
+    await clear(few);
+    // HEALTH.callPromptedShare of answers prompted, over HEALTH.minCallAnswers7d of them.
+    const many = await calls(2, {
+      status: "completed",
+      attempt: 1,
+      startedAt: ago(30),
+      answers: [own, own, prompted, prompted, prompted],
+    });
+    await evaluate();
+    expect(await ruleOf("screening_call.prompted")).toMatchObject({
+      agentType: "screening_call",
+      severity: "warning",
+    });
+    await clear(many);
+    await evaluate();
+    expect(await ruleOf("screening_call.prompted")).toBeUndefined();
+  });
 });
 
 describe("interview panels", () => {

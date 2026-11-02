@@ -31,12 +31,11 @@ import {
   DEFAULT_LIMITS,
   openCallRun,
   openingWatch,
-  rms,
   setCall,
-  SPEECH_RMS,
 } from "./call-session.server";
 import { dialNumber } from "./phone";
 import { Resampler } from "./resample";
+import { Vad } from "./vad";
 import { localNow, retryAt } from "./schedule";
 import {
   applySchedulingTool,
@@ -271,13 +270,17 @@ async function place(
 
   const answeredAt = now();
   await setCall(call.id, orgId, { status: "in_progress", startedAt: new Date(answeredAt) });
-  let voicedFrames = 0;
+  // The caller's line through a debounced VAD (see call-session.server.ts).
+  const vad = new Vad();
   line.onAudio((pcm) => {
-    if (rms(pcm) > SPEECH_RMS) {
+    if (vad.process(pcm) === "start") candidateSpoke = true;
+    if (vad.isActive()) {
       lastHeardAt = Date.now();
       lastActivity = now();
-      if (++voicedFrames >= 10) candidateSpoke = true;
     }
+    // While the assistant is playing, upstream gets only real speech — noise and
+    // echo read as an interruption and cut the assistant off mid-word.
+    if (line.pendingSeconds() > 0 && !vad.isActive()) return;
     session.sendAudio(up.process(pcm));
   });
   lastActivity = now();
@@ -312,6 +315,7 @@ async function place(
   if (watchdog) clearInterval(watchdog);
   stopOpening();
   await line.hangup().catch(() => undefined);
+  log.info("scheduling_call.vad", { call_id: call.id, segments: vad.segments });
   line.close();
   const summary = await session.close();
 

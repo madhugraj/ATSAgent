@@ -31,9 +31,19 @@ const PORT = Number(process.env["PORT"] ?? 8080);
 const MAX_BYTES = 15_000_000;
 const PARSE_LIMIT_MS = Number(process.env["PARSE_LIMIT_MS"] ?? 30_000);
 const TOKEN = process.env["PARSER_TOKEN"] ?? "";
+/** True when running as a deployed Cloud Run service (not local dev). */
+const DEPLOYED = Boolean(process.env["K_SERVICE"]);
 
+// A deployed parser without its token would admit any caller that reaches it,
+// with only IAM in front — refuse to serve instead (2026-11 audit N-7).
 function tokenOk(given: string | undefined): boolean {
-  if (!TOKEN) return true;
+  if (!TOKEN) {
+    if (DEPLOYED) {
+      console.error("[parser] PARSER_TOKEN is not set in a deployed service; refusing requests");
+      return false;
+    }
+    return true;
+  }
   const a = Buffer.from(given ?? "");
   const b = Buffer.from(TOKEN);
   return a.length === b.length && timingSafeEqual(a, b);

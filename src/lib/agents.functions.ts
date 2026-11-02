@@ -147,17 +147,28 @@ export const decideAgentTask = createServerFn({ method: "POST" })
   .middleware([requireOrg])
   .validator((d: unknown) => z.object({ taskId: z.string().uuid(), decision: Decision }).parse(d))
   .handler(async ({ data, context }) => {
-    // Approving an agent's offer release or rejection batch is the same
-    // high-impact action as doing it by hand: it needs a fresh password.
-    if (data.decision.status === "approved") {
+    // Approving an agent's offer release or rejection batch, approving a
+    // hiring recommendation of `reject`, and declining a screening decision
+    // with "reject the candidate" all end the same way as doing it by hand:
+    // the candidate or the offer is moved. Each needs a fresh password.
+    if (data.decision.status === "approved" || data.decision.status === "rejected") {
       const [task] = await db
         .select({ proposedAction: agentTasks.proposedAction })
         .from(agentTasks)
         .where(and(eq(agentTasks.id, data.taskId), eq(agentTasks.orgId, context.orgId)))
         .limit(1);
-      const subject = (task?.proposedAction as { args?: { subject?: { type?: string } } } | null)
-        ?.args?.subject?.type;
-      if (subject === "offer_release" || subject === "rejection") {
+      const subject = (
+        task?.proposedAction as {
+          args?: { subject?: { type?: string; recommendation?: string } };
+        } | null
+      )?.args?.subject;
+      const rejectsCandidate =
+        (data.decision.status === "approved" &&
+          (subject?.type === "offer_release" ||
+            subject?.type === "rejection" ||
+            (subject?.type === "hiring_decision" && subject?.recommendation === "reject"))) ||
+        (data.decision.status === "rejected" && data.decision.rejectCandidate === true);
+      if (rejectsCandidate) {
         const { assertStepUp } = await import("../server/step-up");
         const { getRequest } = await import("@tanstack/react-start/server");
         await assertStepUp(context.userId, getRequest());

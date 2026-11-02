@@ -16,7 +16,8 @@ import {
   statusClass,
 } from "./server/http-metrics";
 import { log } from "./server/log";
-import { allowRequest } from "./server/rate-limit";
+import { allowRequest, AUTH_RATE_LIMIT } from "./server/rate-limit";
+import { env } from "./server/env";
 import {
   contextFromHeaders,
   currentRequest,
@@ -99,6 +100,62 @@ function isServerFnPath(path: string): boolean {
   return path === "/_serverFn" || path.startsWith("/_serverFn/");
 }
 
+/**
+ * Unauthenticated credential endpoints (`/api/auth` mutations: sign-in,
+ * registration, password reset) get a tighter budget than the general 60/min:
+ * online password guessing and reset spam must not get the full allowance.
+ * Reads (`session`, `me`) stay on the normal budget — they run on every page
+ * load and are authenticated or harmless.
+ */
+function isAuthMutationPath(path: string): boolean {
+  return (
+    (path === "/api/auth" || path.startsWith("/api/auth/")) &&
+    path !== "/api/auth/session" &&
+    path !== "/api/auth/me"
+  );
+}
+
+const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+/** Origins our own frontend posts from (plus local dev ports). */
+function allowedPostOrigins(): Set<string> {
+  return new Set<string>(
+    [
+      env.PUBLIC_SITE_URL.replace(/\/$/, ""),
+      "http://localhost:3000",
+      "http://localhost:8080",
+      "http://localhost:8081",
+      "http://localhost:9000",
+    ].filter((o): o is string => Boolean(o)),
+  );
+}
+
+/**
+ * Cross-site request forgery guard for the state-changing browser endpoints:
+ * server-function RPCs and `/api/auth` mutations. The session cookie is
+ * `SameSite=None` (preview-iframe requirement), so cross-site requests carry
+ * it — this closes that door for every mutating call (2026-11 audit N-5).
+ * Browsers send Fetch-Metadata on every request; a client without any of
+ * these headers is not a browser and is still authenticated per call anyway.
+ */
+function csrfGuard(request: Request, path: string): Response | null {
+  if (!MUTATING_METHODS.has(request.method)) return null;
+  if (!(path === "/api/auth" || path.startsWith("/api/auth/") || isServerFnPath(path))) return null;
+  const site = request.headers.get("sec-fetch-site");
+  if (site === "same-origin" || site === "none") return null;
+  if (site === "same-site" || site === "cross-site")
+    return forbidden("Cross-site request refused.");
+  const origin = request.headers.get("origin");
+  if (!origin) return null; // not a browser — callers still authenticate per call
+  if (!allowedPostOrigins().has(origin.replace(/\/$/, "")))
+    return forbidden("Cross-site request refused.");
+  return null;
+}
+
+function forbidden(message: string): Response {
+  return new Response(message, { status: 403, headers: { "cache-control": "no-store" } });
+}
+
 /* ------------------------------------------------------------- /metrics */
 
 /**
@@ -156,6 +213,9 @@ function ensureSliFlusher() {
 }
 
 async function applySecurityHeaders(response: Response, request: Request): Promise<Response> {
+  // HSTS on every response: once a browser has seen it over https, plain-http
+  // requests to this host are upgraded before they leave the browser.
+  response.headers.set("strict-transport-security", "max-age=31536000; includeSubDomains");
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.includes("text/html")) return response;
 
@@ -163,11 +223,24 @@ async function applySecurityHeaders(response: Response, request: Request): Promi
 
   // Per-response nonce for inline scripts: stamp every <script> tag in the
   // payload, then allow only self + that nonce. Any injected inline script
-  // (XSS) without the nonce is refused by the browser.
+  // (XSS) without the nonce is refused by the browser. `default-src 'self'`
+  // bounds everything the page may load; the explicit sources re-allow what
+  // the app actually uses (Google Fonts; blob: previews of uploaded files).
   const nonce = generateNonce();
   headers.set(
     "Content-Security-Policy",
-    `frame-ancestors 'self'; object-src 'none'; base-uri 'self'; script-src 'self' 'nonce-${nonce}'`,
+    [
+      "default-src 'self'",
+      `script-src 'self' 'nonce-${nonce}'`,
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "font-src 'self' data: https://fonts.gstatic.com",
+      "img-src 'self' data: blob: https:",
+      "frame-src 'self' blob:",
+      "connect-src 'self'",
+      "frame-ancestors 'self'",
+      "object-src 'none'",
+      "base-uri 'self'",
+    ].join("; "),
   );
   headers.set("X-Frame-Options", "SAMEORIGIN");
 
@@ -199,11 +272,11 @@ async function stampNonces(response: Response, nonce: string, headers: Headers):
       headers,
     });
   } catch {
-    // Transform failure must never blank a page: fall back to the
-    // script-src-free policy rather than breaking rendering.
+    // Transform failure must never blank a page: fall back to a nonce-less
+    // policy that still bounds scripts rather than dropping script-src.
     headers.set(
       "Content-Security-Policy",
-      "frame-ancestors 'self'; object-src 'none'; base-uri 'self'",
+      "default-src 'self'; script-src 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'self'",
     );
     return new Response(response.body, {
       status: response.status,
@@ -259,11 +332,26 @@ export default {
 
     return withRequestContext(trace, async () => {
       let response: Response;
-      if (
+      const csrf = request.method !== "OPTIONS" ? csrfGuard(request, url.pathname) : null;
+      if (csrf) {
+        response = csrf;
+      } else if (
         request.method !== "OPTIONS" &&
         (isPublicApiPath(url.pathname) || isServerFnPath(url.pathname) || group === "metrics")
       ) {
         response = (await allowRequest(`${clientIp(request)}:${url.pathname}`))
+          ? await handle(request, url, env, ctx)
+          : tooManyRequests();
+      } else if (
+        request.method !== "OPTIONS" &&
+        request.method !== "GET" &&
+        isAuthMutationPath(url.pathname)
+      ) {
+        response = (await allowRequest(
+          `${clientIp(request)}:${url.pathname}`,
+          Date.now(),
+          AUTH_RATE_LIMIT,
+        ))
           ? await handle(request, url, env, ctx)
           : tooManyRequests();
       } else {

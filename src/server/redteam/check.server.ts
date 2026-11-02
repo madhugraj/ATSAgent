@@ -12,10 +12,19 @@ import { and, desc, eq } from "drizzle-orm";
 import { db } from "../db";
 import { aiRedteamChecks, type RedteamProbeResult } from "@db/schema";
 import { INJECTION_RULES, aiJson, resolveAiConfig, untrusted } from "@/lib/ai-gateway.server";
-import { PROBES, PROBE_TASK, ProbeReply, WEAK_CV, judge } from "./probes";
+import {
+  FISHING_PROBE,
+  GradeProbeReply,
+  PROBES,
+  PROBE_TASK,
+  ProbeReply,
+  WEAK_CV,
+  judge,
+  judgeFishing,
+} from "./probes";
 
 export const VALID_DAYS = 30;
-/** One run per organisation per this many minutes (each run is six AI calls). */
+/** One run per organisation per this many minutes (each run is seven AI calls). */
 export const RERUN_MINUTES = 10;
 
 export const AUTONOMY_NEEDS_CHECK =
@@ -51,7 +60,10 @@ export async function safetyCheckView(orgId: string, now = new Date()): Promise<
       : validUntil < now
         ? "expired"
         : "passed";
-  const titles = new Map(PROBES.map((p) => [p.id, p.title]));
+  const titles = new Map([
+    ...PROBES.map((p) => [p.id, p.title] as const),
+    [FISHING_PROBE.id, FISHING_PROBE.title] as const,
+  ]);
   return {
     status,
     checkedAt: row.createdAt.toISOString(),
@@ -102,6 +114,7 @@ export async function runSafetyCheck(
       return { probe: p.id, ...judge(p, r.data) };
     }),
   );
+  results.push(await fishingProbe(orgId));
   const passed = results.every((r) => !r.complied && !r.error);
   await db.insert(aiRedteamChecks).values({
     orgId,
@@ -112,6 +125,35 @@ export async function runSafetyCheck(
     runBy: userId,
   });
   return { passed, view: await safetyCheckView(orgId) };
+}
+
+/** The phone-screen grader, with its production prompt, on a fished transcript. */
+async function fishingProbe(orgId: string): Promise<RedteamProbeResult> {
+  const { gradeScreeningPrompt } = await import("@/lib/screening.server");
+  const r = await aiJson({
+    feature: "redteam_probe",
+    orgId,
+    ...gradeScreeningPrompt({
+      orgId,
+      role: "AI Engineer",
+      jdText: "Build RAG pipelines and FastAPI services. Must have: RAG, vector search, FastAPI.",
+      mustHave: ["RAG", "Vector search", "FastAPI"],
+      candidateName: "the candidate",
+      questions: FISHING_PROBE.questions,
+      answers: FISHING_PROBE.answers,
+      transcript: FISHING_PROBE.transcript,
+      mode: "spoken",
+    }),
+    schema: GradeProbeReply,
+  });
+  if (!r.ok)
+    return {
+      probe: FISHING_PROBE.id,
+      complied: true,
+      flagged: false,
+      error: r.message.slice(0, 200),
+    };
+  return { probe: FISHING_PROBE.id, ...judgeFishing(r.data) };
 }
 
 /** Autonomous agents whose organisation has no passed check for its current model. */

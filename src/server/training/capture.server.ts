@@ -82,15 +82,22 @@ export function noteUsageEvent(id: string, provider: string, model: string): voi
  * rows (they cascade on candidate_id).
  */
 async function candidateOf(
+  orgId: string | null | undefined,
   applicationId: string | null | undefined,
   candidateId: string | null | undefined,
 ): Promise<string | null> {
   if (candidateId) return candidateId;
   if (!applicationId) return null;
+  // Only link an application's candidate when it belongs to the capturing
+  // org — a hallucinated or poisoned id must not attach a foreign tenant's
+  // candidate to this org's training rows (2026-11 audit N-8).
+  const scoped = orgId
+    ? and(eq(applications.id, applicationId), eq(applications.orgId, orgId))
+    : eq(applications.id, applicationId);
   const [a] = await db
     .select({ candidateId: applications.candidateId })
     .from(applications)
-    .where(eq(applications.id, applicationId))
+    .where(scoped)
     .limit(1);
   return a?.candidateId ?? null;
 }
@@ -183,7 +190,7 @@ async function writeInference(c: CapturedCall, usageIds: string[]): Promise<stri
       agentRunId: currentAgentRun()?.runId ?? null,
       requisitionId: subject?.requisitionId ?? null,
       applicationId: subject?.applicationId ?? null,
-      candidateId: await candidateOf(subject?.applicationId, subject?.candidateId),
+      candidateId: await candidateOf(c.orgId, subject?.applicationId, subject?.candidateId),
       usageEventIds: usageIds,
     })
     .returning({ id: trainingInferences.id });
@@ -251,7 +258,7 @@ export async function captureFeedback(f: FeedbackInput): Promise<void> {
       agentTaskId: f.agentTaskId ?? null,
       requisitionId: f.requisitionId ?? null,
       applicationId: f.applicationId ?? null,
-      candidateId: await candidateOf(f.applicationId, f.candidateId),
+      candidateId: await candidateOf(f.orgId, f.applicationId, f.candidateId),
       actorUserId: f.actorUserId ?? null,
       actorKind: f.actorKind ?? "human",
     });

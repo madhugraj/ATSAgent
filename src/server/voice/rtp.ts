@@ -6,10 +6,36 @@
 import { randomInt } from "node:crypto";
 import dgram from "node:dgram";
 
+import { voiceDebug } from "./debug";
 import { decodeG711, encodeG711, PCMA, PCMU, type G711 } from "./g711";
 
 export const FRAME_SAMPLES = 160; // 20 ms at 8 kHz
 const FRAME_MS = 20;
+
+/**
+ * Hold this much of the assistant's audio before starting to play it: the model
+ * streams at about real time, so with no buffer any late chunk went out as
+ * silence mid-word ("the voice is breaking", calls on 2 November). Measured on a
+ * real call: chunks arrived up to 610 ms behind real time (pauses of up to 1 s
+ * between them), so 200 ms still broke up; 800 ms covered every turn.
+ */
+export const PLAYOUT_BUFFER_SAMPLES = 6_400; // 800 ms
+/** …but never hold a short reply longer than this. */
+export const PLAYOUT_MAX_WAIT_FRAMES = 40; // 800 ms
+/** The queue ran dry and more speech came within this many frames: a gap, not a pause. */
+const GAP_FRAMES = 25; // 500 ms
+/** A send tick this late is a stall the listener may hear. */
+const LATE_TICK_MS = 40;
+
+export type AudioStats = {
+  /** 20 ms frames sent. */
+  frames: number;
+  /** Times the assistant's speech ran out mid-sentence. */
+  gaps: number;
+  /** Send ticks more than 40 ms late. */
+  lateTicks: number;
+  maxLateMs: number;
+};
 
 export type Endpoint = { address: string; port: number };
 
@@ -42,6 +68,12 @@ export class RtpStream {
   pt: G711 = PCMU;
   port = 0;
   onAudio: (pcm8k: Int16Array) => void = () => {};
+  /** Draining the queue (false while it fills up to the playout buffer). */
+  private playing = false;
+  private waited = 0;
+  /** Frame count when the queue last ran dry while playing, to tell a gap from a pause. */
+  private dryAt: number | null = null;
+  private readonly counts: AudioStats = { frames: 0, gaps: 0, lateTicks: 0, maxLateMs: 0 };
 
   /**
    * @param trusted addresses media may come from (the PBX and the address its
@@ -69,6 +101,9 @@ export class RtpStream {
     this.sock.on("message", (msg, rinfo) => this.receive(msg, rinfo));
     let nextAt = performance.now();
     const tick = () => {
+      const late = performance.now() - nextAt;
+      if (late > LATE_TICK_MS) this.counts.lateTicks++;
+      if (late > this.counts.maxLateMs) this.counts.maxLateMs = Math.round(late);
       this.sendFrame();
       nextAt += FRAME_MS;
       const now = performance.now();
@@ -80,6 +115,10 @@ export class RtpStream {
 
   /** Queue 8 kHz audio to play. */
   play(pcm8k: Int16Array) {
+    // More speech right after the queue ran dry: the listener heard a gap mid-sentence.
+    if (this.outLen === 0 && this.dryAt !== null && this.counts.frames - this.dryAt <= GAP_FRAMES)
+      this.counts.gaps++;
+    this.dryAt = null;
     if (this.outLen + pcm8k.length > this.out.length) {
       const grown = new Int16Array(Math.max(this.out.length * 2, this.outLen + pcm8k.length));
       grown.set(this.out.subarray(0, this.outLen));
@@ -92,10 +131,18 @@ export class RtpStream {
   /** Drop anything still queued (the caller talked over the AI). */
   clear() {
     this.outLen = 0;
+    this.playing = false;
+    this.waited = 0;
+    this.dryAt = null;
   }
 
   pendingSeconds(): number {
     return this.outLen / 8000;
+  }
+
+  /** How smoothly the assistant's audio went out on this call (logged at the end). */
+  audioStats(): AudioStats {
+    return { ...this.counts };
   }
 
   stop() {
@@ -110,11 +157,26 @@ export class RtpStream {
 
   private sendFrame() {
     if (!this.remote) return;
+    this.counts.frames++;
+    // Start an utterance only once the playout buffer has filled (or a short reply
+    // has waited long enough), so a late chunk from the model is absorbed, not heard.
+    if (!this.playing && this.outLen > 0) {
+      this.waited++;
+      if (this.outLen >= PLAYOUT_BUFFER_SAMPLES || this.waited >= PLAYOUT_MAX_WAIT_FRAMES)
+        this.playing = true;
+      voiceDebug({ kind: "play", queued: this.outLen, waited: this.waited });
+    }
     const frame = new Int16Array(FRAME_SAMPLES);
-    const n = Math.min(FRAME_SAMPLES, this.outLen);
+    const n = this.playing ? Math.min(FRAME_SAMPLES, this.outLen) : 0;
     frame.set(this.out.subarray(0, n));
     this.out.copyWithin(0, n, this.outLen);
     this.outLen -= n;
+    if (this.playing && this.outLen === 0) {
+      this.playing = false;
+      this.waited = 0;
+      this.dryAt = this.counts.frames;
+      voiceDebug({ kind: "dry" });
+    }
     const packet = new Uint8Array(12 + FRAME_SAMPLES);
     const view = new DataView(packet.buffer);
     packet[0] = 0x80;

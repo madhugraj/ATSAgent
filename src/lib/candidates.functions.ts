@@ -84,25 +84,28 @@ export const attachApplication = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
+// Bounded like the public apply path (apply.functions.ts): an org member can
+// still persist garbage, but not an unbounded row that later rides into every
+// AI prompt that loads the candidate (2026-11 audit N-6).
 const CreateCandidateInput = z.object({
-  fullName: z.string().min(1),
-  email: z.string().min(1),
-  location: z.string(),
-  experienceYears: z.string(),
-  education: z.string(),
-  skills: z.string(),
-  linkedinUrl: z.string(),
-  githubUrl: z.string(),
-  websiteUrl: z.string(),
-  xUrl: z.string(),
-  source: z.string().min(1),
-  currentEmployer: z.string(),
-  noticePeriodDays: z.string(),
-  currentCtc: z.string(),
-  expectedCtc: z.string(),
-  workAuthorization: z.string(),
+  fullName: z.string().min(1).max(200),
+  email: z.string().min(1).max(320),
+  location: z.string().max(200),
+  experienceYears: z.string().max(20),
+  education: z.string().max(2000),
+  skills: z.string().max(4000),
+  linkedinUrl: z.string().max(500),
+  githubUrl: z.string().max(500),
+  websiteUrl: z.string().max(500),
+  xUrl: z.string().max(500),
+  source: z.string().min(1).max(60),
+  currentEmployer: z.string().max(200),
+  noticePeriodDays: z.string().max(20),
+  currentCtc: z.string().max(50),
+  expectedCtc: z.string().max(50),
+  workAuthorization: z.string().max(100),
   willingToRelocate: z.enum(["yes", "no", "unknown"]),
-  resumeText: z.string(),
+  resumeText: z.string().max(60000),
   requisitionId: z.string().uuid().nullish(),
 });
 

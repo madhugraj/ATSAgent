@@ -21,6 +21,19 @@ export const Route = createFileRoute("/api/public/linkedin/callback")({
         const state = verifyState(url.searchParams.get("state"));
         if (!state) return new Response("Invalid or expired sign-in request.", { status: 400 });
 
+        // Session binding (2026-11 audit): only the signed-in member who
+        // started the flow may complete it. Without this, an attacker can
+        // initiate a connect and have a victim's browser finish it, binding
+        // the attacker's LinkedIn identity to the victim's organisation.
+        const { resolveSession } = await import("../../../../server/identity");
+        const session = await resolveSession(request);
+        if (!session || session.userId !== state.userId)
+          return back(state.origin ?? url.origin, {
+            linkedin: "error",
+            detail:
+              "Sign in as the member who started the LinkedIn connection, then try Connect again.",
+          });
+
         const error = url.searchParams.get("error");
         if (error)
           return back(state.origin, {

@@ -96,6 +96,7 @@
     "three": "^0.186.1",
     "three-spritetext": "^1.10.0",
     "tw-animate-css": "^1.3.4",
+    "undici": "^8.12.3",
     "vaul": "^1.1.2",
     "vite-tsconfig-paths": "^6.0.2",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",

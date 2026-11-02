@@ -100,8 +100,15 @@ mock.module("../src/lib/ai-gateway.server", () => ({
       : { ok: false, status: 500, message: `no fixture for ${opts.feature}` },
 }));
 
-const { registerTool, resetRegistry, isGateToolName, listAgents } =
-  await import("../src/server/agents/registry");
+const {
+  registerTool,
+  resetRegistry,
+  isGateToolName,
+  listAgents,
+  listTools,
+  getTool,
+  SUBMISSION_TOOLS,
+} = await import("../src/server/agents/registry");
 const { registerPhase1Tools } = await import("../src/server/agents/tools");
 const { registerPhase2Tools } = await import("../src/server/agents/tools-phase2");
 const { registerPhase3Tools } = await import("../src/server/agents/tools-phase3");
@@ -220,12 +227,13 @@ describe("governance", () => {
 
   test("tools that would make a human decision cannot be registered", () => {
     resetRegistry();
-    const t = (name: string) => ({
+    const t = (name: string, extra: Record<string, unknown> = {}) => ({
       name,
       description: "x",
       input: z.object({}),
       risk: "write" as const,
       run: async () => null,
+      ...extra,
     });
     for (const name of [
       "approve_offer",
@@ -234,19 +242,36 @@ describe("governance", () => {
       "hire_candidate",
       "revoke_offer",
       "offer_accept",
+      "confirm_hire",
+      "sign_offer",
+      "advance_candidate",
+      "finalize_offer",
+      "complete_onboarding",
     ]) {
       expect(isGateToolName(name)).toBe(true);
       expect(() => registerTool(t(name))).toThrow("human decision");
     }
-    for (const name of [
-      "propose_rejection",
-      "propose_release",
-      "submit_offer",
-      "submit_requisition_for_approval",
-      "send_assessment",
-    ]) {
+    for (const name of ["propose_rejection", "propose_release", "submit_offer_for_approval"]) {
       expect(isGateToolName(name)).toBe(false);
-      expect(() => registerTool(t(name))).not.toThrow();
+      expect(() => registerTool(t(name, { proposes: async () => null }))).not.toThrow();
+    }
+    // A prefixed name without an approval anchor would run the action
+    // directly at any autonomy — the prefix must mean "a person decides".
+    for (const name of ["propose_rejection", "request_release", "submit_offer"]) {
+      expect(() => registerTool(t(name))).toThrow("approval");
+    }
+    expect(() => registerTool(t("send_assessment"))).not.toThrow();
+    expect(() => registerTool(t("submit_offer_for_approval"))).not.toThrow(); // reviewed submission tool
+  });
+
+  test("every live propose_/request_/submit_ tool anchors a human decision", () => {
+    registerReal();
+    const prefixed = listTools().filter((t) => /^(propose|request|submit)_/.test(t.name));
+    expect(prefixed.length).toBeGreaterThan(10);
+    for (const tool of prefixed) {
+      if (SUBMISSION_TOOLS.has(tool.name)) continue;
+      const full = getTool(tool.name)! as Record<string, unknown>;
+      expect(Boolean(full.proposes || full.approverRole || full.templateOf)).toBe(true);
     }
   });
 });

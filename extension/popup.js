@@ -210,15 +210,36 @@ async function activeTab() {
   return tab;
 }
 
+// The distribution endpoint accepts a token derived from the capture key
+// (HMAC-SHA256, message "distribution"), so a key visible to a job-board
+// destination cannot be replayed against candidate capture. ATSIQ accepts the
+// raw key too until every companion has updated — retry with it once if the
+// derived token is not known there yet (server learns it on the next
+// Integrations page load or key rotation).
+async function distributionToken(token) {
+  const enc = new TextEncoder().encode(token);
+  const key = await crypto.subtle.importKey("raw", enc, { name: "HMAC", hash: "SHA-256" }, false, [
+    "sign",
+  ]);
+  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode("distribution"));
+  return Array.from(new Uint8Array(mac))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 async function distribution(body) {
   const { site, token } = settings();
   if (!token) throw new Error("Add your capture key and save settings first.");
-  const res = await fetch(`${site}/api/public/distribution`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ token, ...body }),
-  });
-  const out = await res.json().catch(() => ({}));
+  const post = async (t) => {
+    const res = await fetch(`${site}/api/public/distribution`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: t, ...body }),
+    });
+    return { res, out: await res.json().catch(() => ({})) };
+  };
+  let { res, out } = await post(await distributionToken(token));
+  if (!res.ok && res.status === 401) ({ res, out } = await post(token));
   if (!res.ok || out.status !== "ok") throw new Error(out.detail || "ATSIQ did not accept that.");
   return out;
 }

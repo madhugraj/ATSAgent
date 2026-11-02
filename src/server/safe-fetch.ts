@@ -1,5 +1,6 @@
 import dns from "node:dns/promises";
 import net from "node:net";
+import { Agent, fetch as undiciFetch } from "undici";
 
 /**
  * The only way server code may fetch an external URL. Candidate CVs, profile
@@ -8,11 +9,13 @@ import net from "node:net";
  *   - http/https only
  *   - the hostname is resolved first and every resolved address is checked
  *     against private / loopback / link-local / shared ranges (SSRF + cloud
- *     metadata protection, including DNS-rebinding via the resolved IP pin)
+ *     metadata protection), and the connection dials the vetted address —
+ *     a DNS rebind between the check and the connect cannot smuggle the
+ *     socket to a private address (2026-11 audit N-2)
  *   - redirects are not followed automatically; each hop must be re-validated
  *   - a hard timeout and a response-size cap bound the fetch
  *   - methods are restricted to an allow-list (GET default; POST/PUT/PATCH/
- *     DELETE for API integrations) and the host header stays pinned
+ *     DELETE for API integrations)
  */
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -62,6 +65,40 @@ export type SafeFetchResponse = Response & { __resolvedIp?: string };
 
 const ALLOWED_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE"]);
 
+/**
+ * One dispatcher per vetted address: its lookup ignores the hostname and
+ * returns the address that was checked, so the TLS handshake and Host header
+ * still use the real hostname (certificate validation stays correct) while
+ * the socket can only connect to the address assertPublicHost vetted. Agents
+ * are cached per address — the pin is the address itself, so reuse is safe,
+ * and a later rebind simply vetts into a different (or refused) address.
+ */
+const pinnedAgents = new Map<string, Agent>();
+const MAX_PINNED_AGENTS = 32;
+
+function pinnedAgentFor(ip: string): Agent {
+  let agent = pinnedAgents.get(ip);
+  if (!agent) {
+    agent = new Agent({
+      connect: {
+        lookup: (_hostname, _options, callback) => {
+          callback(null, [{ address: ip, family: net.isIP(ip) as 4 | 6 }]);
+        },
+      },
+    });
+    if (pinnedAgents.size >= MAX_PINNED_AGENTS) {
+      const oldest = pinnedAgents.keys().next().value;
+      if (oldest !== undefined) {
+        const evicted = pinnedAgents.get(oldest);
+        pinnedAgents.delete(oldest);
+        void evicted?.close().catch(() => {});
+      }
+    }
+    pinnedAgents.set(ip, agent);
+  }
+  return agent;
+}
+
 export async function safeFetch(
   rawUrl: string,
   opts?: {
@@ -92,16 +129,21 @@ export async function safeFetch(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    // Pin the resolved, vetted IP for this request: a rebind between the check
-    // and the connection cannot smuggle us to a private address. The host
-    // header stays pinned to the URL even when caller headers are supplied.
-    const res = (await fetch(url, {
+    // Dial the resolved, vetted IP for this request through a dispatcher whose
+    // lookup only ever returns that address: a rebind between the check and
+    // the connection cannot smuggle us to a private address. The URL keeps its
+    // hostname, so the Host header and TLS certificate validation are correct.
+    // The dispatcher is honoured on Node (the production runtime); Bun's fetch
+    // ignores it, so under `bun test`/Bun dev the pre-connect vetting below is
+    // the only guard — production dials the vetted address regardless of DNS.
+    const res = (await undiciFetch(url, {
       method,
-      headers: { ...(opts?.headers ?? {}), host: url.host },
+      headers: opts?.headers ?? {},
       ...(opts?.body !== undefined ? { body: opts.body } : {}),
       redirect: "manual",
       signal: controller.signal,
-    } as RequestInit & { host?: string })) as SafeFetchResponse;
+      dispatcher: pinnedAgentFor(resolvedIp),
+    } as Parameters<typeof undiciFetch>[1])) as unknown as SafeFetchResponse;
     res.__resolvedIp = resolvedIp;
     return res;
   } finally {

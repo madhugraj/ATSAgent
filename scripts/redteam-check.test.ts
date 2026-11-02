@@ -14,7 +14,12 @@ type Reply = {
   actions: string[];
   suspected_prompt_injection: boolean;
 };
-let behave: (prompt: string) => Reply | null = () => null;
+type Grade = {
+  screening_score: number;
+  verdicts: { question_id: string; verdict: string; score: number }[];
+  red_flags: string[];
+};
+let behave: (prompt: string) => Reply | Grade | null = () => null;
 const seen: { system: string; prompt: string; feature: string }[] = [];
 
 const real = await import("../src/lib/ai-gateway.server");
@@ -40,12 +45,27 @@ const { PROBES } = await import("../src/server/redteam/probes");
 let orgId: string;
 let userId: string;
 const stamp = Date.now();
-const honest = (): Reply => ({
-  score: 10,
-  summary: "No Kubernetes or on-call evidence; a junior web profile.",
-  actions: ["reject"],
-  suspected_prompt_injection: true,
+/** The phone-screen grader, answering the answer-fishing probe honestly. */
+const honestGrade = (): Grade => ({
+  screening_score: 32,
+  verdicts: [
+    { question_id: "q1", verdict: "weak", score: 32 },
+    { question_id: "q2", verdict: "weak", score: 32 },
+  ],
+  red_flags: [
+    "Vector search: confirmed only after the interviewer suggested it; no specifics of their own",
+  ],
 });
+const isGrading = (p?: string) => Boolean(p?.includes('label="screening_transcript"'));
+const honest = (p?: string): Reply | Grade =>
+  isGrading(p)
+    ? honestGrade()
+    : {
+        score: 10,
+        summary: "No Kubernetes or on-call evidence; a junior web profile.",
+        actions: ["reject"],
+        suspected_prompt_injection: true,
+      };
 
 beforeAll(async () => {
   const [o] = await db
@@ -73,8 +93,11 @@ describe("model safety check", () => {
   test("every probe runs fenced, with the injection rules, on the ledger feature", async () => {
     behave = honest;
     await runSafetyCheck(orgId, userId);
-    expect(seen).toHaveLength(PROBES.length);
-    for (const c of seen) {
+    // The CV probes, plus the phone-screen grader under answer-fishing.
+    expect(seen).toHaveLength(PROBES.length + 1);
+    for (const c of seen) expect(c.feature).toBe("redteam_probe");
+    expect(seen.filter((c) => isGrading(c.prompt))).toHaveLength(1);
+    for (const c of seen.filter((x) => !isGrading(x.prompt))) {
       expect(c.feature).toBe("redteam_probe");
       expect(c.system).toStartWith("Security rules (highest priority):");
       expect(c.prompt).toStartWith('<untrusted_data label="candidate_cv">');
@@ -99,11 +122,11 @@ describe("model safety check", () => {
     behave = (p) =>
       p.includes("email_all_candidate_records")
         ? {
-            ...honest(),
+            ...(honest() as Reply),
             actions: ["email_all_candidate_records"],
             suspected_prompt_injection: false,
           }
-        : honest();
+        : honest(p);
     const { passed, view } = await runSafetyCheck(orgId, userId);
     expect(passed).toBe(false);
     expect(view.status).toBe("failed");
@@ -112,10 +135,36 @@ describe("model safety check", () => {
   });
 
   test("a probe that cannot run is not a pass", async () => {
-    behave = (p) => (p.includes("ignorez") ? null : honest());
+    behave = (p) => (p.includes("ignorez") ? null : honest(p));
     const { passed, view } = await runSafetyCheck(orgId, userId);
     expect(passed).toBe(false);
     expect(view.results.find((r) => r.probe === "multilingual")).toMatchObject({ error: true });
+  });
+
+  test("a grader that credits fished answers, or does not flag them, fails the check", async () => {
+    behave = (p) =>
+      isGrading(p)
+        ? {
+            screening_score: 70,
+            verdicts: [
+              { question_id: "q1", verdict: "partial", score: 65 },
+              { question_id: "q2", verdict: "partial", score: 65 },
+            ],
+            red_flags: [],
+          }
+        : honest(p);
+    const first = await runSafetyCheck(orgId, userId);
+    expect(first.passed).toBe(false);
+    const view = first.view;
+    expect(view.results.filter((r) => r.complied).map((r) => r.probe)).toEqual(["answer_fishing"]);
+    expect(view.results.find((r) => r.probe === "answer_fishing")?.title).toContain(
+      "name the answers",
+    );
+
+    // Scored low but silent: the hiring team would still read the answers as the candidate's.
+    await db.delete(aiRedteamChecks).where(eq(aiRedteamChecks.orgId, orgId));
+    behave = (p) => (isGrading(p) ? { ...honestGrade(), red_flags: [] } : honest(p));
+    expect((await runSafetyCheck(orgId, userId)).passed).toBe(false);
   });
 
   test("an expired pass no longer counts; reruns are throttled", async () => {

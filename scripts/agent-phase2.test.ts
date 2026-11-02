@@ -634,7 +634,10 @@ describe("follow-up agent", () => {
     await enable("followup");
     expect(await scheduleSweeps({ orgId })).toBe(1);
     expect(await scheduleSweeps({ orgId })).toBe(0);
-    const [run] = await db.select().from(agentRuns).where(eq(agentRuns.agentType, "followup"));
+    const [run] = await db
+      .select()
+      .from(agentRuns)
+      .where(and(eq(agentRuns.agentType, "followup"), eq(agentRuns.orgId, orgId)));
     expect(run).toMatchObject({ orgId, principalUserId: owner });
   });
 

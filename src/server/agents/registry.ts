@@ -122,8 +122,36 @@ const agents = new Map<AgentType, AgentDefinition>();
  * for a human's approval). Enforced at registration so a gate tool can never
  * reach a model.
  */
-const GATE_VERB = /(^|_)(approve|approval|release|reject|hire|revoke|decline|accept)(_|$)/;
+const GATE_VERB =
+  /(^|_)(approve|approval|release|reject|hire|revoke|decline|accept|confirm|sign|advance|finalize|complete)(_|$)/;
 const ALLOWED_PREFIX = /^(propose|request|submit)_/;
+
+/**
+ * Prefixed tools whose `run` only moves work INTO a human chain — a draft
+ * sent for review, a version filed for approval — and never decides an
+ * outcome. Reviewed by name; anything else prefixed must carry an approval
+ * anchor (`proposes` decision card, `approverRole`, or `templateOf`
+ * external-send routing) so the prefix always means "a person decides"
+ * (2026-11 audit N-9).
+ */
+export const SUBMISSION_TOOLS: ReadonlySet<string> = new Set([
+  "submit_requisition_for_approval",
+  "submit_jd_version",
+  "submit_offer_for_approval",
+  "submit_profile_version",
+  "propose_profile_items",
+  // In-call negotiation tool: passes the candidate's spoken yes to the hiring
+  // team, who confirm it with them — it does not agree anything itself.
+  "submit_agreed_terms",
+  // In-call negotiation tool: asks for a person to take the call over.
+  "request_human_call",
+  // Prepares a pay discussion for a person to review; the send itself is
+  // always approved by the HR head (send_negotiation_message).
+  "propose_negotiation",
+  // Marks roles as "waiting to be posted" — the person posts on the portal
+  // themselves (the extension only fills the form they are looking at).
+  "request_hand_posting",
+]);
 
 export function isGateToolName(name: string): boolean {
   return GATE_VERB.test(name) && !ALLOWED_PREFIX.test(name);
@@ -136,6 +164,17 @@ export function registerTool<I>(tool: AgentTool<I>): void {
   if (isGateToolName(tool.name)) {
     throw new Error(
       `Tool ${tool.name} would perform a human decision; expose propose_/request_/submit_ instead.`,
+    );
+  }
+  if (
+    ALLOWED_PREFIX.test(tool.name) &&
+    !tool.proposes &&
+    !tool.approverRole &&
+    !tool.templateOf &&
+    !SUBMISSION_TOOLS.has(tool.name)
+  ) {
+    throw new Error(
+      `Tool ${tool.name} uses a propose_/request_/submit_ prefix but no human approval anchors it (proposes, approverRole or templateOf); add one or review it into SUBMISSION_TOOLS.`,
     );
   }
   tools.set(tool.name, tool as unknown as AgentTool<never>);
@@ -162,6 +201,14 @@ export function resetRegistry(): void {
 /** All registered agents (for the register, CI checks and definition snapshots). */
 export function listAgents(): AgentDefinition[] {
   return [...agents.values()];
+}
+
+/** Every registered tool's name and whether it carries an approval card (CI checks). */
+export function listTools(): { name: string; proposes: boolean }[] {
+  return [...tools.values()].map((t) => ({
+    name: t.name,
+    proposes: Boolean((t as { proposes?: unknown }).proposes),
+  }));
 }
 
 /** Skills an agent exercises: its own model turns plus every AI feature its tools call. */
