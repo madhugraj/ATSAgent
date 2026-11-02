@@ -10,6 +10,7 @@ import {
   evaluations,
   interviews,
   orgMembers,
+  panelists,
   organizations,
   requisitions,
 } from "@db/schema";
@@ -247,7 +248,8 @@ export type ScorecardResult = {
  * round.
  */
 export const submitScorecardCore = createServerOnlyFn(async function submitScorecardCore(
-  ctx: { orgId: string; userId: string; email: string; actor: string; isOwner?: boolean },
+  /** userId is null for an external panelist scoring through their private link. */
+  ctx: { orgId: string; userId: string | null; email: string; actor: string; isOwner?: boolean },
   data: z.infer<typeof ScorecardInput>,
 ): Promise<ScorecardResult> {
   const actor = ctx.actor;
@@ -300,6 +302,7 @@ export const submitScorecardCore = createServerOnlyFn(async function submitScore
     const { emailsOf } = await import("./interview-plan.server");
     const panel = emailsOf(r);
     if (panel.length && !panel.includes(me)) {
+      if (!ctx.userId) throw new Error("Only the interviewers on this round can score it.");
       await assertRole(
         ctx.userId,
         ctx.orgId,
@@ -442,7 +445,11 @@ export const submitScorecardCore = createServerOnlyFn(async function submitScore
     ? `On hold for the HR head: the L${data.level} panel agent's independent view of the call disagrees with the panel.`
     : null;
   const reason = data.reason?.trim() || `L${data.level} verdict: ${verdict}`;
-  if (target && HR_CONTROLLED_TARGETS.has(target)) {
+  // An external panelist's scorecard never moves anyone into the offer pipeline.
+  const external = !ctx.userId && Boolean(target && HR_CONTROLLED_TARGETS.has(target));
+  if (external)
+    blocked = "Waiting for the HR head: an external panelist's verdict cannot open an offer.";
+  if (target && HR_CONTROLLED_TARGETS.has(target) && ctx.userId) {
     await assertRole(
       ctx.userId,
       ctx.orgId,
@@ -450,7 +457,7 @@ export const submitScorecardCore = createServerOnlyFn(async function submitScore
       "Only the HR head or an owner can move a candidate into the offer pipeline.",
     );
   }
-  if (target && from !== target && canMove(from, target)) {
+  if (target && !external && from !== target && canMove(from, target)) {
     await db
       .update(applications)
       .set({
@@ -1139,7 +1146,10 @@ export const saveAiInterview = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
-/** Validate further panel members: active members of the organisation, no repeats. */
+/**
+ * Validate further panel members: active members of the organisation or active
+ * entries of its panel directory (internal or external), no repeats.
+ */
 const panelOf = createServerOnlyFn(async function panelOf(
   orgId: string,
   primary: string | null,
@@ -1159,11 +1169,25 @@ const panelOf = createServerOnlyFn(async function panelOf(
         inArray(sql`lower(${orgMembers.email})`, wanted),
       ),
     );
-  const found = rows.map((r) => ({ name: r.name ?? null, email: r.email.toLowerCase() }));
+  const directory = await db
+    .select({ name: panelists.fullName, email: panelists.email })
+    .from(panelists)
+    .where(
+      and(
+        eq(panelists.orgId, orgId),
+        eq(panelists.active, true),
+        inArray(sql`lower(${panelists.email})`, wanted),
+      ),
+    );
+  const found: { name: string | null; email: string }[] = [];
+  for (const r of [...rows, ...directory]) {
+    const email = r.email.toLowerCase();
+    if (!found.some((f) => f.email === email)) found.push({ name: r.name ?? null, email });
+  }
   const unknown = wanted.filter((e) => !found.some((f) => f.email === e));
   if (unknown.length)
     throw new Error(
-      `Panel members must be active members of the organisation: ${unknown.join(", ")}.`,
+      `Panel members must be active members of the organisation or in its panel directory: ${unknown.join(", ")}.`,
     );
   return found;
 });

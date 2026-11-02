@@ -5,7 +5,8 @@
  * head — approves it or changes the people. The system states the round and
  * why each person fits; nobody outside the eligible list can be proposed.
  */
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { z } from "zod";
 
 import {
   agentTasks,
@@ -13,6 +14,7 @@ import {
   candidates,
   interviews,
   orgMembers,
+  panelists,
   requisitions,
   roundSubstitutes,
 } from "@db/schema";
@@ -84,7 +86,8 @@ export async function panelGateFor(
   const { roundOf } = await import("@/lib/interview-plan");
   const round = roundOf((await planFor(orgId, subject.requisitionId)).plan, subject.level);
   if (!round) return { error: `This role's interview plan has no round L${subject.level}.` };
-  const ids = [...new Set(subject.memberIds)];
+  const { toPanelistIds } = await import("@/lib/panels.server");
+  const ids = [...new Set(await toPanelistIds(orgId, subject.memberIds))];
   if (ids.length > round.panelSize)
     return {
       error: `Round L${subject.level} has a panel of ${round.panelSize}; propose at most ${round.panelSize}.`,
@@ -167,8 +170,10 @@ export async function performPanelGate(
     Array.isArray(changedTo) && changedTo.every((x) => typeof x === "string")
       ? (changedTo as string[])
       : subject.memberIds;
+  const { toPanelistIds } = await import("@/lib/panels.server");
   const changed =
-    [...memberIds].sort().join(",") !== [...new Set(subject.memberIds)].sort().join(",");
+    [...new Set(await toPanelistIds(orgId, memberIds))].sort().join(",") !==
+    [...new Set(await toPanelistIds(orgId, subject.memberIds))].sort().join(",");
   await savePanel(orgId, userId, subject.requisitionId, subject.level, memberIds, changed);
 }
 
@@ -230,7 +235,10 @@ export async function substituteGateFor(
   } catch (e) {
     return { error: e instanceof Error ? e.message : String(e) };
   }
-  const pick = found.options.find((o) => o.memberId === subject.withMemberId);
+  const { toPanelistIds } = await import("@/lib/panels.server");
+  const [withId] = await toPanelistIds(orgId, [subject.withMemberId]);
+  const [replaceId] = await toPanelistIds(orgId, [subject.replaceMemberId]);
+  const pick = found.options.find((o) => o.memberId === withId);
   if (!pick)
     return {
       error: `Only eligible interviewers not already on the panel can stand in: ${
@@ -255,7 +263,7 @@ export async function substituteGateFor(
   if (waiting)
     return { error: "A stand-in for this candidate's round is already waiting for a person." };
   const panel = (await roundPanel(orgId, subject.applicationId, subject.level))!;
-  const out = panel.members.find((m) => m.memberId === subject.replaceMemberId)!;
+  const out = panel.members.find((m) => m.memberId === replaceId)!;
   const { bookedRound } = await import("@/lib/panels.server");
   const booked = await bookedRound(orgId, subject.applicationId, subject.level);
   let when = "Not booked yet: the stand-in is used when times are offered.";
@@ -280,7 +288,12 @@ export async function substituteGateFor(
     ...(assigneeUserId ? { assigneeUserId } : {}),
     status: booked?.id ?? "none",
     detail,
-    subject: { ...subject, expects: booked?.id ?? "none" },
+    subject: {
+      ...subject,
+      replaceMemberId: replaceId!,
+      withMemberId: withId!,
+      expects: booked?.id ?? "none",
+    },
   };
 }
 
@@ -301,40 +314,46 @@ export async function performSubstituteGate(
   const booked = await bookedRound(orgId, subject.applicationId, subject.level);
   if (subject.expects !== undefined && (booked?.id ?? "none") !== subject.expects)
     throw new Error("This candidate's round changed since this was proposed; refresh to see it.");
-  const people = await db
-    .select({
-      id: orgMembers.id,
-      name: sql<string>`coalesce(nullif(${orgMembers.fullName}, ''), ${orgMembers.email})`,
-      email: orgMembers.email,
-    })
-    .from(orgMembers)
-    .where(and(eq(orgMembers.orgId, orgId), eq(orgMembers.status, "active")));
-  const out = people.find((p) => p.id === subject.replaceMemberId);
-  const sub = people.find((p) => p.id === subject.withMemberId);
-  if (!out || !sub) throw new Error("Both people must be active members of your organisation.");
-  await db
-    .insert(roundSubstitutes)
-    .values({
+  const { panelPeople } = await import("@/lib/panels.server");
+  const people = await panelPeople(orgId, [subject.replaceMemberId, subject.withMemberId]);
+  const out = people.find((p) => p.memberId === subject.replaceMemberId);
+  const sub = people.find((p) => p.memberId === subject.withMemberId);
+  if (!out || !sub) throw new Error("Both people must be active entries of your panel directory.");
+  const links = await db
+    .select({ id: panelists.id, memberId: panelists.memberId })
+    .from(panelists)
+    .where(and(eq(panelists.orgId, orgId), inArray(panelists.id, [out.memberId, sub.memberId])));
+  const memberOf = (id: string) => links.find((l) => l.id === id)?.memberId ?? null;
+  const existing = await db
+    .select({ id: roundSubstitutes.id })
+    .from(roundSubstitutes)
+    .where(
+      and(
+        eq(roundSubstitutes.orgId, orgId),
+        eq(roundSubstitutes.applicationId, subject.applicationId),
+        eq(roundSubstitutes.level, subject.level),
+        eq(roundSubstitutes.replacePanelistId, out.memberId),
+      ),
+    )
+    .limit(1);
+  const values = {
+    // The member columns, for code that predates the panel directory.
+    replaceMemberId: memberOf(out.memberId),
+    withMemberId: memberOf(sub.memberId),
+    withPanelistId: sub.memberId,
+    reason: subject.reason,
+    approvedBy: userId,
+    approvedAt: new Date(),
+  };
+  if (existing[0])
+    await db.update(roundSubstitutes).set(values).where(eq(roundSubstitutes.id, existing[0].id));
+  else
+    await db.insert(roundSubstitutes).values({
       orgId,
       applicationId: subject.applicationId,
       level: subject.level,
-      replaceMemberId: out.id,
-      withMemberId: sub.id,
-      reason: subject.reason,
-      approvedBy: userId,
-    })
-    .onConflictDoUpdate({
-      target: [
-        roundSubstitutes.applicationId,
-        roundSubstitutes.level,
-        roundSubstitutes.replaceMemberId,
-      ],
-      set: {
-        withMemberId: sub.id,
-        reason: subject.reason,
-        approvedBy: userId,
-        approvedAt: new Date(),
-      },
+      replacePanelistId: out.memberId,
+      ...values,
     });
   const { writeAudit } = await import("../audit");
   let outcome: "swapped" | "re-offer" | "not booked" = "not booked";
@@ -405,4 +424,107 @@ export async function performSubstituteGate(
     entityId: subject.applicationId,
     detail: { level: subject.level, replaced: out.email, with: sub.email, outcome },
   });
+}
+
+/* ------------------------------------------ someone new for the directory */
+
+export type NewPanelistSubject = {
+  type: "new_panelist";
+  requisitionId: string;
+  level: number;
+  /** What the round needs that nobody in the directory covers, in the agent's words. */
+  needed: string;
+  reason: string;
+};
+
+/** The person HR types on the card (validated again when saved). */
+export const NewPanelistInput = z.object({
+  fullName: z.string().trim().min(2).max(120),
+  email: z.string().trim().toLowerCase().email().max(200),
+  kind: z.enum(["internal", "external"]),
+  title: z.string().trim().max(120).nullish(),
+  company: z.string().trim().max(120).nullish(),
+  areas: z.array(z.string().trim().min(2).max(60)).max(20).default([]),
+  rounds: z.array(z.number().int().min(1).max(3)).min(1).max(3).default([1, 2, 3]),
+});
+
+/** The HR head decides: they type the person in and approve them in one step. */
+export async function newPanelistGateFor(
+  orgId: string,
+  subject: NewPanelistSubject,
+): Promise<PanelGateInfo<NewPanelistSubject> | { error: string }> {
+  const [req] = await db
+    .select({ code: requisitions.code, title: requisitions.title })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, subject.requisitionId), eq(requisitions.orgId, orgId)))
+    .limit(1);
+  if (!req) return { error: "Requisition not found." };
+  const [waiting] = await db
+    .select({ id: agentTasks.id })
+    .from(agentTasks)
+    .where(
+      and(
+        eq(agentTasks.orgId, orgId),
+        eq(agentTasks.status, "open"),
+        eq(agentTasks.kind, "gate"),
+        sql`${agentTasks.proposedAction} -> 'args' -> 'subject' ->> 'type' = 'new_panelist'`,
+        sql`${agentTasks.proposedAction} -> 'args' -> 'subject' ->> 'requisitionId' = ${subject.requisitionId}`,
+        sql`(${agentTasks.proposedAction} -> 'args' -> 'subject' ->> 'level')::int = ${subject.level}`,
+      ),
+    )
+    .limit(1);
+  if (waiting)
+    return {
+      error: `A request for a new L${subject.level} panellist for this role is already waiting for a person.`,
+    };
+  const detail = [
+    `Nobody in the panel directory fits L${subject.level} of ${req.code} ${req.title}.`,
+    `Needed: ${subject.needed}`,
+    subject.reason,
+    "Type the person below — someone in your organisation (internal) or outside it (external, e.g. a client). Approving adds them to the panel directory for future roles too; external panellists score through a private link sent with their brief.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  return { role: "hr_head", status: "open", detail, subject };
+}
+
+/**
+ * Add the person HR typed to the panel directory (they typed and approved it,
+ * so it is recorded as self-approved). An org member's e-mail makes them that
+ * member's internal entry. Audited.
+ */
+export async function performNewPanelistGate(
+  orgId: string,
+  userId: string,
+  subject: NewPanelistSubject,
+  decision: { status: string; args?: unknown },
+): Promise<void> {
+  if (decision.status !== "approved") return;
+  const parsed = NewPanelistInput.safeParse(
+    (decision.args as { panelist?: unknown } | undefined)?.panelist,
+  );
+  if (!parsed.success)
+    throw new Error("Type the person's name, e-mail and whether they are internal or external.");
+  const { addPanelist } = await import("@/lib/panelists.server");
+  await addPanelist(orgId, userId, parsed.data, {
+    via: "agent_request",
+    requisitionId: subject.requisitionId,
+    level: subject.level,
+  });
+}
+
+/** What the agent is told once HR has added someone. */
+export async function newPanelistWords(orgId: string, taskId: string): Promise<string> {
+  const [t] = await db
+    .select({ response: agentTasks.response })
+    .from(agentTasks)
+    .where(and(eq(agentTasks.id, taskId), eq(agentTasks.orgId, orgId)))
+    .limit(1);
+  const p = NewPanelistInput.safeParse(
+    ((t?.response as { args?: { panelist?: unknown } } | null)?.args ?? {}).panelist,
+  );
+  const who = p.success
+    ? `${p.data.fullName} (${p.data.kind}${p.data.company ? `, ${p.data.company}` : ""})`
+    : "the person";
+  return `Added ${who} to the panel directory. Call list_panel_options again and propose the panel from its eligible list.`;
 }

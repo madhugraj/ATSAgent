@@ -313,6 +313,63 @@ export const memberInterviewerProfiles = pgTable(
   ],
 );
 
+/**
+ * The panel directory (docs/panel-directory.md, migration 0068): everyone who may
+ * sit on an interview panel — internal (an org member, or an employee without a
+ * login) or external (a client, an advisor). Added in the hiring desk when the
+ * Interview coordinator asks for someone new; whoever types them in approves them
+ * (self-approval recorded). Every org member is an internal panelist.
+ */
+export const panelists = pgTable(
+  "panelists",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<"internal" | "external">().notNull().default("internal"),
+    /** The org member this panelist is (internal panelists with a login). */
+    memberId: uuid("member_id").references(() => orgMembers.id, { onDelete: "cascade" }),
+    fullName: text("full_name").notNull(),
+    email: text("email").notNull(),
+    title: text("title"),
+    /** For external panelists: their organisation. */
+    company: text("company"),
+    areas: text("areas")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    rounds: integer("rounds")
+      .array()
+      .notNull()
+      .default(sql`'{1,2,3}'::integer[]`),
+    weeklyCap: integer("weekly_cap").notNull().default(4),
+    active: boolean("active").notNull().default(true),
+    addedBy: uuid("added_by").references(() => users.id, { onDelete: "set null" }),
+    approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    /** The person who typed them in also approved them. */
+    selfApproved: boolean("self_approved").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("panelists_org_email_key").on(t.orgId, sql`lower(${t.email})`),
+    uniqueIndex("panelists_member_key")
+      .on(t.memberId)
+      .where(sql`${t.memberId} is not null`),
+    index("panelists_org_idx").on(t.orgId, t.active),
+    check("panelists_kind_check", sql`${t.kind} in ('internal', 'external')`),
+    check("panelists_external_member_check", sql`${t.kind} = 'internal' or ${t.memberId} is null`),
+    check(
+      "panelists_rounds_check",
+      sql`${t.rounds} <@ array[1,2,3] and cardinality(${t.rounds}) >= 1`,
+    ),
+    check("panelists_weekly_cap_check", sql`${t.weeklyCap} between 1 and 20`),
+    check("panelists_areas_check", sql`cardinality(${t.areas}) <= 20`),
+  ],
+);
+
 export const userRoles = pgTable(
   "user_roles",
   {
@@ -473,7 +530,13 @@ export const rolePanels = pgTable(
       .notNull()
       .references(() => requisitions.id, { onDelete: "cascade" }),
     level: integer("level").notNull(),
-    memberIds: uuid("member_ids").array().notNull(),
+    /** Superseded by panelistIds (migration 0068); kept for code that predates it. */
+    memberIds: uuid("member_ids")
+      .array()
+      .notNull()
+      .default(sql`'{}'::uuid[]`),
+    /** The panel, in order: panel directory ids (panelists.id). */
+    panelistIds: uuid("panelist_ids").array(),
     approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
     approvedAt: timestamp("approved_at", { withTimezone: true }).notNull().defaultNow(),
     version: integer("version").notNull().default(1),
@@ -482,7 +545,10 @@ export const rolePanels = pgTable(
     uniqueIndex("role_panels_requisition_level_key").on(t.requisitionId, t.level),
     index("role_panels_org_idx").on(t.orgId),
     check("role_panels_level_check", sql`${t.level} between 1 and 3`),
-    check("role_panels_members_check", sql`cardinality(${t.memberIds}) between 1 and 3`),
+    check(
+      "role_panels_panelists_check",
+      sql`${t.panelistIds} is null or cardinality(${t.panelistIds}) between 1 and 3`,
+    ),
   ],
 );
 
@@ -854,12 +920,17 @@ export const roundSubstitutes = pgTable(
       .notNull()
       .references(() => applications.id, { onDelete: "cascade" }),
     level: integer("level").notNull(),
-    replaceMemberId: uuid("replace_member_id")
-      .notNull()
-      .references(() => orgMembers.id, { onDelete: "cascade" }),
-    withMemberId: uuid("with_member_id")
-      .notNull()
-      .references(() => orgMembers.id, { onDelete: "cascade" }),
+    /** Superseded by the panelist columns (migration 0068). */
+    replaceMemberId: uuid("replace_member_id").references(() => orgMembers.id, {
+      onDelete: "cascade",
+    }),
+    withMemberId: uuid("with_member_id").references(() => orgMembers.id, { onDelete: "cascade" }),
+    replacePanelistId: uuid("replace_panelist_id").references(() => panelists.id, {
+      onDelete: "cascade",
+    }),
+    withPanelistId: uuid("with_panelist_id").references(() => panelists.id, {
+      onDelete: "cascade",
+    }),
     reason: text("reason"),
     approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
     approvedAt: timestamp("approved_at", { withTimezone: true }).notNull().defaultNow(),
@@ -872,7 +943,43 @@ export const roundSubstitutes = pgTable(
     ),
     index("round_substitutes_org_idx").on(t.orgId),
     check("round_substitutes_level_check", sql`${t.level} between 1 and 3`),
-    check("round_substitutes_distinct_check", sql`${t.replaceMemberId} <> ${t.withMemberId}`),
+    uniqueIndex("round_substitutes_round_panelist_key")
+      .on(t.applicationId, t.level, t.replacePanelistId)
+      .where(sql`${t.replacePanelistId} is not null`),
+    check(
+      "round_substitutes_panelist_distinct_check",
+      sql`${t.replacePanelistId} is null or ${t.replacePanelistId} <> ${t.withPanelistId}`,
+    ),
+  ],
+);
+
+/**
+ * An external panelist's private scorecard link for one interview (migration
+ * 0068): /scorecard/<token>, expiring, one per panelist per round. Only the
+ * SHA-256 of the token is stored.
+ */
+export const panelistScorecardLinks = pgTable(
+  "panelist_scorecard_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    interviewId: uuid("interview_id")
+      .notNull()
+      .references(() => interviews.id, { onDelete: "cascade" }),
+    panelistId: uuid("panelist_id")
+      .notNull()
+      .references(() => panelists.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("panelist_scorecard_links_token_key").on(t.tokenHash),
+    uniqueIndex("panelist_scorecard_links_round_key").on(t.interviewId, t.panelistId),
+    index("panelist_scorecard_links_org_idx").on(t.orgId),
   ],
 );
 

@@ -1,5 +1,6 @@
 // Routes that must render for signed-out visitors. The password-reset link,
-// legal pages and candidate-facing apply/assess/pay/schedule links arrive with no session —
+// legal pages, candidate-facing apply/assess/pay/schedule links and an external
+// panelist's scorecard link arrive with no session —
 // gating them behind the sign-in screen made them unreachable. Consumed by
 // every gate in __root.tsx (AuthGate, OrgGate), not just the first one.
 const PUBLIC_PATHS = new Set(["/auth/reset", "/privacy", "/terms", "/dpa", "/cookies"]);
@@ -12,6 +13,7 @@ export function isPublicPath(pathname: string): boolean {
     pathname.startsWith("/pay/") ||
     pathname.startsWith("/negotiate/") ||
     pathname.startsWith("/schedule/") ||
-    pathname.startsWith("/offer/")
+    pathname.startsWith("/offer/") ||
+    pathname.startsWith("/scorecard/")
   );
 }

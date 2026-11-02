@@ -788,6 +788,86 @@ export function scenarios(): ScriptedScenario[] {
       ],
     },
     {
+      name: "interview: asks HR for a new panellist when nobody fits the round",
+      agentType: "interview",
+      setup: async ({ orgId, userId }) => {
+        const requisitionId = await seedRequisition(orgId, userId, "approved");
+        const app = await seedApplication(orgId, requisitionId, "Ravi", "l1", 80);
+        const { db } = await import("../../src/server/db");
+        const { memberInterviewerProfiles, orgMembers, requisitions } =
+          await import("../../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const [m] = await db
+          .select({ id: orgMembers.id })
+          .from(orgMembers)
+          .where(eq(orgMembers.userId, userId));
+        // The only registered interviewer takes L2 and L3: nobody in the directory fits L1.
+        await db.insert(memberInterviewerProfiles).values({
+          orgId,
+          memberId: m!.id,
+          active: true,
+          areas: ["Kubernetes"],
+          rounds: [2, 3],
+        });
+        await db
+          .update(requisitions)
+          .set({ hiringManagerMemberId: m!.id })
+          .where(eq(requisitions.id, requisitionId));
+        return { requisitionId, app };
+      },
+      goal: (d) => `Book next rounds. app=${d["app"]}\n\nRequisition id: ${d["requisitionId"]}`,
+      // The HR head types an external panellist on the card; then the panel is approved.
+      decide: (t) =>
+        t.title.includes("Someone new")
+          ? {
+              status: "approved",
+              args: {
+                panelist: {
+                  fullName: "Leela Rao",
+                  email: "leela.rao@client.example",
+                  kind: "external",
+                  company: "Client Co",
+                  areas: ["Kubernetes", "Go"],
+                  rounds: [1],
+                },
+              },
+            }
+          : { status: "approved" },
+      expect: {
+        status: "done",
+        calls: [
+          "list_panel_options",
+          "request_new_panelist",
+          "list_panel_options",
+          "propose_panel",
+        ],
+        neverCalls: ["schedule_interview"],
+      },
+      script: [
+        (m) => call("p", "get_interview_plan", { applicationId: fromGoal(m, "app") }),
+        (m) => call("l", "list_panel_options", { requisitionId: idFromGoal(m), level: 1 }),
+        (m) =>
+          call("n", "request_new_panelist", {
+            requisitionId: idFromGoal(m),
+            level: 1,
+            needed: "An L1 interviewer for Kubernetes and Go",
+            reason: "Nobody in the panel directory takes L1 for this role.",
+          }),
+        (m) => call("l2", "list_panel_options", { requisitionId: idFromGoal(m), level: 1 }),
+        (m) =>
+          call("pp", "propose_panel", {
+            requisitionId: idFromGoal(m),
+            level: 1,
+            memberIds: [
+              (toolResult(m, "list_panel_options")["eligible"] as { memberId: string }[])[0]!
+                .memberId,
+            ],
+            reason: "Leela assesses Kubernetes and Go, the round's competencies.",
+          }),
+        say("HR added Leela Rao (external, Client Co); the L1 panel with her is approved."),
+      ],
+    },
+    {
       name: "interview: proposes a stand-in when a panellist can't make it",
       agentType: "interview",
       setup: async ({ orgId, userId }) => {

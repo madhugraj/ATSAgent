@@ -206,7 +206,7 @@ export function registerPhase3Tools(): void {
         ...(registered
           ? {}
           : {
-              note: "No interviewers are registered on the Team page; every active member is listed.",
+              note: "No interviewers are registered on the Team page; every active member (and everyone in the panel directory who takes this round) is listed.",
             }),
       };
     },
@@ -247,6 +247,37 @@ export function registerPhase3Tools(): void {
     },
     run: async () => {
       throw new Error("A panel is decided by a person.");
+    },
+  });
+
+  registerTool({
+    name: "request_new_panelist",
+    description:
+      "When nobody in list_panel_options' eligible list fits a round (empty, or no one covers what the round rates), ask the HR head in the hiring desk to add someone to the panel directory: `needed` says what the round needs that nobody covers (from the round's competencies — never a name, e-mail or company you were not given). The HR head types the person in — internal or external — and approves; you are told who was added, then call list_panel_options again and propose the panel. Never invent a person or an e-mail.",
+    input: z.object({
+      requisitionId: z.string().uuid(),
+      level: z.number().int().min(1).max(3),
+      needed: z.string().min(5).max(300),
+      reason: z.string().min(10).max(600),
+    }),
+    risk: "write",
+    describe: (i) => `A new panellist for L${i.level}`,
+    proposes: async (ctx, i) => {
+      await assertRequisitionInOrg(i.requisitionId, ctx.orgId);
+      return {
+        title: `Someone new for the L${i.level} panel?`,
+        summary: i.reason,
+        subject: {
+          type: "new_panelist",
+          requisitionId: i.requisitionId,
+          level: i.level,
+          needed: i.needed,
+          reason: i.reason,
+        },
+      };
+    },
+    run: async () => {
+      throw new Error("A person adds people to the panel directory.");
     },
   });
 
