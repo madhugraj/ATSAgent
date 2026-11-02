@@ -22,6 +22,43 @@ import {
   parseSipMessage,
   uriOf,
 } from "../src/server/voice/sip";
+import { Vad, VAD_HANGOVER_FRAMES } from "../src/server/voice/vad";
+
+describe("VAD", () => {
+  test("speech starts after 60 ms and holds through a short pause", () => {
+    const vad = new Vad();
+    const silence = new Int16Array(160);
+    const speech = new Int16Array(160).fill(2000);
+    for (let i = 0; i < 10; i++) expect(vad.process(silence)).toBeNull();
+    expect(vad.isActive()).toBe(false);
+    expect(vad.process(speech)).toBeNull(); // two frames are not yet speech…
+    expect(vad.process(speech)).toBeNull();
+    expect(vad.process(speech)).toBe("start"); // …60 ms of it is
+    // A pause within the hangover does not close the segment.
+    for (let i = 1; i < VAD_HANGOVER_FRAMES; i++) expect(vad.process(silence)).toBeNull();
+    expect(vad.isActive()).toBe(true);
+    expect(vad.process(silence)).toBe("end"); // 300 ms of silence does
+  });
+
+  test("speech after the segment closed opens a new one; reset clears everything", () => {
+    const vad = new Vad();
+    const silence = new Int16Array(160);
+    const speech = new Int16Array(160).fill(2000);
+    for (let i = 0; i < 3; i++) vad.process(speech);
+    for (let i = 0; i < VAD_HANGOVER_FRAMES; i++) vad.process(silence);
+    for (let i = 0; i < 3; i++) vad.process(speech);
+    expect(vad.isActive()).toBe(true);
+    expect(vad.segments).toBe(2);
+    vad.reset();
+    expect(vad.isActive()).toBe(false);
+    expect(vad.segments).toBe(2); // segments counts what happened, reset only the state
+    // After a reset, speech must warm up again.
+    expect(vad.process(speech)).toBeNull();
+    expect(vad.process(speech)).toBeNull();
+    expect(vad.process(speech)).toBe("start");
+    expect(vad.segments).toBe(3);
+  });
+});
 
 describe("G.711", () => {
   test("known code points", () => {

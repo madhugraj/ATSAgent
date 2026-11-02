@@ -32,6 +32,7 @@ import { agentRunScope, withAiSubject } from "../agents/context";
 import { db } from "../db";
 import { log } from "../log";
 import type { AudioStats } from "./rtp";
+import { Vad } from "./vad";
 import { type BriefFacts, callSystemPrompt, loadBriefFacts } from "./call-brief.server";
 import {
   applyCallTool,
@@ -160,13 +161,9 @@ export {
   type EndReason,
 } from "./call-tools";
 
-/** Above this RMS (int16) a 20 ms frame is speech, not line noise. */
-export const SPEECH_RMS = 600;
-export function rms(pcm: Int16Array): number {
-  let sum = 0;
-  for (let i = 0; i < pcm.length; i++) sum += pcm[i]! * pcm[i]!;
-  return Math.sqrt(sum / Math.max(1, pcm.length));
-}
+// Speech detection lives with the VAD that consumes it; re-exported so the
+// scheduling and negotiation sessions keep importing it from here.
+export { SPEECH_RMS, rms } from "./vad";
 
 const lineFor = (t: ScreeningCallTurn) =>
   `${t.who === "ai" ? "Assistant" : "Candidate"}: ${t.text}`;
@@ -464,14 +461,21 @@ async function placeCall(
 
   const answeredAt = now();
   await setCall(call.id, orgId, { status: "in_progress", startedAt: new Date(answeredAt) });
-  let voicedFrames = 0;
+  // The caller's line through a debounced VAD: a single frame's RMS flickered
+  // with breaths and line noise, and quiet talkers never registered at all.
+  const vad = new Vad();
   line.onAudio((pcm) => {
     // The candidate talking counts as activity even before a transcript line arrives.
-    if (rms(pcm) > SPEECH_RMS) {
+    if (vad.process(pcm) === "start") candidateSpoke = true;
+    if (vad.isActive()) {
       lastHeardAt = Date.now();
       lastActivity = now();
-      if (++voicedFrames >= 10) candidateSpoke = true;
     }
+    // While the assistant's audio is queued or playing, pass upstream only what
+    // the VAD calls speech: a loud speakerphone carried the assistant's own voice
+    // back up the line, the model read it as an interruption and cut itself off
+    // mid-word. Real speech (the caller talking over the reply) still passes.
+    if (line.pendingSeconds() > 0 && !vad.isActive()) return;
     session.sendAudio(up.process(pcm));
   });
   lastActivity = now();
@@ -505,6 +509,7 @@ async function placeCall(
   await line.hangup().catch(() => undefined);
   const audio = line.audioStats?.() ?? null;
   if (audio) log.info("screening_call.audio", { call_id: call.id, ...audio });
+  log.info("screening_call.vad", { call_id: call.id, segments: vad.segments });
   line.close();
   const summary = await session.close();
 
