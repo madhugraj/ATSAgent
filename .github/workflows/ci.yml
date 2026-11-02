@@ -89,6 +89,9 @@ jobs:
       - name: Phase 4 agents (offer, pre-onboarding, release)
         run: bun test scripts/agent-phase4.test.ts
 
+      - name: Agent-to-agent handoffs (every edge, each agent switched off, manual completion)
+        run: bun test scripts/agent-handoff.test.ts
+
       - name: Agent governance (change control, traceability, budget, audit)
         run: bun test scripts/agent-governance.test.ts
 
