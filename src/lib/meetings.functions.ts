@@ -1,5 +1,5 @@
 import { and, asc, eq } from "drizzle-orm";
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { db } from "../server/db";
@@ -57,7 +57,10 @@ const CreateInput = z.object({
 
 /** Create a real meeting with the HR user's own provider credentials. */
 /** Shared by the Interviews page and the Interview coordinator agent. */
-export async function createMeetingLinkCore(orgId: string, data: z.infer<typeof CreateInput>) {
+export const createMeetingLinkCore = createServerOnlyFn(async function createMeetingLinkCore(
+  orgId: string,
+  data: z.infer<typeof CreateInput>,
+) {
   const [row] = await db
     .select({
       id: sourceIntegrations.id,
@@ -84,7 +87,7 @@ export async function createMeetingLinkCore(orgId: string, data: z.infer<typeof 
     attendees: data.attendees,
     agenda: data.agenda ?? null,
   });
-}
+});
 
 export const createMeetingLink = createServerFn({ method: "POST" })
   .middleware([requireOrg])

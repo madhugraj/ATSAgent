@@ -1,4 +1,4 @@
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { and, eq, gte } from "drizzle-orm";
 import { z } from "zod";
 
@@ -20,7 +20,9 @@ import {
   stageEvents,
 } from "@db/schema";
 
-async function loadScheme(orgId: string): Promise<IncentiveScheme> {
+const loadScheme = createServerOnlyFn(async function loadScheme(
+  orgId: string,
+): Promise<IncentiveScheme> {
   const [row] = await db
     .select()
     .from(hrIncentiveSchemes)
@@ -37,7 +39,7 @@ async function loadScheme(orgId: string): Promise<IncentiveScheme> {
     monthly_cap: row.monthlyCap === null ? null : Number(row.monthlyCap),
     notes: row.notes ?? null,
   };
-}
+});
 
 /** Recruiter-by-recruiter delivery, quality and incentive workings for the CHRO. */
 export const getHrPerformance = createServerFn({ method: "POST" })

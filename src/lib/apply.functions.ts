@@ -15,7 +15,7 @@
  * attaches to the requisition.
  */
 import { and, eq } from "drizzle-orm";
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { db } from "../server/db";
@@ -121,7 +121,7 @@ export const submitApplication = createServerFn({ method: "POST" })
   .handler(async ({ data }) => submitApplicationImpl(data));
 
 /** Handler body, exported for integration tests of the C2 overwrite-protection fix. */
-export async function submitApplicationImpl(
+export const submitApplicationImpl = createServerOnlyFn(async function submitApplicationImpl(
   data: z.infer<typeof SubmitInput>,
 ): Promise<{ ok: true; alreadyApplied: boolean; merged: boolean; name: string }> {
   {
@@ -260,4 +260,4 @@ export async function submitApplicationImpl(
       name: fullName,
     };
   }
-}
+});

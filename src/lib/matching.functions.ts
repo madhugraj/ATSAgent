@@ -1,5 +1,5 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { db } from "../server/db";
@@ -78,7 +78,7 @@ export type GeneratedJd = {
 };
 
 /** Draft a JD with the org's template; shared by the server fn and the JD agent. */
-export async function generateJdCore(
+export const generateJdCore = createServerOnlyFn(async function generateJdCore(
   orgId: string,
   data: z.infer<typeof JdInput>,
 ): Promise<GeneratedJd> {
@@ -101,7 +101,7 @@ export async function generateJdCore(
   });
   if (!result.ok) throw new Error(result.message);
   return stripAll(result.data);
-}
+});
 
 export const generateJd = createServerFn({ method: "POST" })
   .middleware([requireOrg])
@@ -170,7 +170,7 @@ export type WeightAdvice = {
  * for THIS job, then hard-normalise server-side so the total is always exactly 100.
  */
 /** Distribute the 100 scoring points for one JD; shared by the server fn and agents. */
-export async function suggestWeightsCore(
+export const suggestWeightsCore = createServerOnlyFn(async function suggestWeightsCore(
   orgId: string,
   data: z.infer<typeof WeightAdviceInput>,
 ): Promise<WeightAdvice> {
@@ -214,7 +214,7 @@ export async function suggestWeightsCore(
     rationale: result.data.rationale ?? "",
     notes: result.data.notes ?? [],
   };
-}
+});
 
 export const suggestWeights = createServerFn({ method: "POST" })
   .middleware([requireOrg])
@@ -255,7 +255,7 @@ export type SocialJobPost = {
 
 /** Draft a ready-to-publish LinkedIn job post from the approved requisition + JD. */
 /** Draft a LinkedIn job post; shared by the server fn and the Publishing agent. */
-export async function draftLinkedinPostCore(
+export const draftLinkedinPostCore = createServerOnlyFn(async function draftLinkedinPostCore(
   orgId: string,
   data: z.infer<typeof PostInput>,
 ): Promise<SocialJobPost> {
@@ -278,7 +278,7 @@ export async function draftLinkedinPostCore(
     hashtags: (result.data.hashtags ?? []).map((h) => stripUnreplacedPlaceholders(h)),
     call_to_action: stripUnreplacedPlaceholders(result.data.call_to_action ?? ""),
   };
-}
+});
 
 export const draftLinkedinPost = createServerFn({ method: "POST" })
   .middleware([requireOrg])

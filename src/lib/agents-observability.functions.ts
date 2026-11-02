@@ -6,7 +6,7 @@
  * model-neutral (AI is reported by feature slug).
  */
 import { CEILING_MESSAGE, LEG_LIMIT_MESSAGE } from "../server/agents/run-messages";
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { and, eq, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 
@@ -139,7 +139,9 @@ export const agentObservability = createServerFn({ method: "GET" })
     }
   });
 
-async function buildObservability(orgId: string): Promise<ObservabilityView> {
+const buildObservability = createServerOnlyFn(async function buildObservability(
+  orgId: string,
+): Promise<ObservabilityView> {
   {
     const { ensureAgentsRegistered } = await import("../server/agents");
     ensureAgentsRegistered();
@@ -429,7 +431,7 @@ async function buildObservability(orgId: string): Promise<ObservabilityView> {
       })),
     };
   }
-}
+});
 
 /** Acknowledge an issue: it stays visible and still auto-resolves, but stops notifying. */
 export const acknowledgeAgentIssue = createServerFn({ method: "POST" })
@@ -610,7 +612,10 @@ export const agentObservabilityDetail = createServerFn({ method: "GET" })
     }
   });
 
-async function buildDetail(org: string, agentType: string): Promise<AgentDetail> {
+const buildDetail = createServerOnlyFn(async function buildDetail(
+  org: string,
+  agentType: string,
+): Promise<AgentDetail> {
   const { ensureAgentsRegistered } = await import("../server/agents");
   ensureAgentsRegistered();
   const { getAgent, getTool, skillsOf } = await import("../server/agents/registry");
@@ -878,7 +883,7 @@ async function buildDetail(org: string, agentType: string): Promise<AgentDetail>
         })),
     },
   };
-}
+});
 
 /* ------------------------------------------------ utilisation & efficiency */
 

@@ -1,4 +1,4 @@
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -59,7 +59,7 @@ export const clearCopilot = createServerFn({ method: "POST" })
   });
 
 /** Live, org-scoped facts handed to the model so answers are grounded in real data. */
-async function snapshot(orgId: string) {
+const snapshot = createServerOnlyFn(async function snapshot(orgId: string) {
   // Column aliases keep the snake_case snapshot payload the prompt has always used.
   const [reqs, cands, apps, ivs, offerRows, depts] = await Promise.all([
     db
@@ -143,7 +143,7 @@ async function snapshot(orgId: string) {
     interviews: ivs,
     offers: offerRows,
   };
-}
+});
 
 const SYSTEM = `You are the HR copilot inside a talent-acquisition system (ATS).
 You help recruiters, HR heads and the CHRO understand their own live hiring data and

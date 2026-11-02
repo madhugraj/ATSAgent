@@ -1,5 +1,5 @@
 import { and, eq, ilike, isNull, sql } from "drizzle-orm";
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { requireIdentity } from "@/lib/auth.middleware";
@@ -72,7 +72,7 @@ const ROLE_LABELS: Record<AppRole, string> = {
  * Tell an invited colleague they now have access. Best-effort: the roster entry
  * is already saved, so a mail failure must never fail the invitation.
  */
-async function notifyInvitedMember(args: {
+const notifyInvitedMember = createServerOnlyFn(async function notifyInvitedMember(args: {
   email: string;
   orgName: string;
   role: AppRole;
@@ -98,7 +98,7 @@ async function notifyInvitedMember(args: {
     const { redactEmail } = await import("../server/audit");
     console.error("invitation email failed", redactEmail(args.email), e);
   }
-}
+});
 
 function slugify(name: string) {
   const base = name
@@ -397,7 +397,7 @@ export const createOrganization = createServerFn({ method: "POST" })
     return { ok: true, orgId: org.id };
   });
 
-async function assertOwner(userId: string) {
+const assertOwner = createServerOnlyFn(async function assertOwner(userId: string) {
   const [membership] = await db
     .select({ orgId: orgMembers.orgId, isOwner: orgMembers.isOwner })
     .from(orgMembers)
@@ -406,14 +406,14 @@ async function assertOwner(userId: string) {
   if (!membership) throw new Error("You do not belong to an organisation yet.");
   if (!membership.isOwner) throw new Error("Only an organisation owner can do this.");
   return membership.orgId;
-}
+});
 
 /**
  * User administration is not owner-only: the organisation owner and anyone
  * holding the President/CBO (CHRO admin) role can invite colleagues and
  * grant or revoke approval roles.
  */
-async function assertAdmin(userId: string) {
+const assertAdmin = createServerOnlyFn(async function assertAdmin(userId: string) {
   const [membership] = await db
     .select({ orgId: orgMembers.orgId, isOwner: orgMembers.isOwner })
     .from(orgMembers)
@@ -437,9 +437,9 @@ async function assertAdmin(userId: string) {
       "Only the organisation owner or a President/CBO admin can manage users and roles.",
     );
   return membership.orgId;
-}
+});
 
-async function orgOf(userId: string) {
+const orgOf = createServerOnlyFn(async function orgOf(userId: string) {
   const [membership] = await db
     .select({ orgId: orgMembers.orgId })
     .from(orgMembers)
@@ -447,7 +447,7 @@ async function orgOf(userId: string) {
     .limit(1);
   if (!membership) throw new Error("You do not belong to an organisation yet.");
   return membership.orgId;
-}
+});
 
 export const updateOrganization = createServerFn({ method: "POST" })
   .middleware([requireIdentity])
@@ -550,7 +550,7 @@ export const inviteMember = createServerFn({ method: "POST" })
  * checked the inviter is an admin). Company-domain gate as before; audited
  * `member.invited` — an invite is a role grant.
  */
-export async function inviteMemberCore(
+export const inviteMemberCore = createServerOnlyFn(async function inviteMemberCore(
   orgId: string,
   inviterUserId: string,
   data: { email: string; role: AppRole; title: string; fullName: string },
@@ -630,7 +630,7 @@ export async function inviteMemberCore(
     detail: { email, role: data.role },
   });
   return { ok: true, notified: true };
-}
+});
 
 export const setMemberRole = createServerFn({ method: "POST" })
   .middleware([requireIdentity])

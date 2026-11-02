@@ -4,7 +4,7 @@
  * and can delete what was kept; reviewers can annotate model calls. Every
  * change is audited. Org-scoped; no vendor or model names leave the server.
  */
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { and, eq, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 
@@ -22,7 +22,9 @@ export type TrainingStatus = {
   oldest: string | null;
 };
 
-export async function trainingStatusOf(orgId: string): Promise<TrainingStatus> {
+export const trainingStatusOf = createServerOnlyFn(async function trainingStatusOf(
+  orgId: string,
+): Promise<TrainingStatus> {
   const [s] = await db
     .select()
     .from(trainingSettings)
@@ -48,14 +50,14 @@ export async function trainingStatusOf(orgId: string): Promise<TrainingStatus> {
     feedback: fb,
     oldest: inf?.oldest ? new Date(inf.oldest).toISOString() : null,
   };
-}
+});
 
 export const getTrainingStatus = createServerFn({ method: "GET" })
   .middleware([requireOrg])
   .handler(async ({ context }) => trainingStatusOf(context.orgId));
 
 /** Switch capture on or off and set retention — owners only, audited. */
-export async function setTrainingConsentCore(
+export const setTrainingConsentCore = createServerOnlyFn(async function setTrainingConsentCore(
   actor: { orgId: string; userId: string; memberEmail: string },
   input: { enabled: boolean; retentionDays: number },
 ): Promise<TrainingStatus> {
@@ -95,7 +97,7 @@ export async function setTrainingConsentCore(
     detail: { retentionDays: input.retentionDays },
   });
   return trainingStatusOf(actor.orgId);
-}
+});
 
 export const setTrainingConsent = createServerFn({ method: "POST" })
   .middleware([requireOrgOwner])
@@ -110,30 +112,32 @@ export const setTrainingConsent = createServerFn({ method: "POST" })
   );
 
 /** Delete everything kept for training (e.g. after withdrawing consent) — owners only, audited. */
-export async function deleteTrainingDataCore(actor: {
-  orgId: string;
-  userId: string;
-  memberEmail: string;
-}): Promise<{ inferences: number; feedback: number }> {
-  const fb = await db
-    .delete(trainingFeedback)
-    .where(eq(trainingFeedback.orgId, actor.orgId))
-    .returning({ id: trainingFeedback.id });
-  const inf = await db
-    .delete(trainingInferences)
-    .where(eq(trainingInferences.orgId, actor.orgId))
-    .returning({ id: trainingInferences.id });
-  await writeAudit({
-    actor: actor.memberEmail,
-    actorUserId: actor.userId,
-    orgId: actor.orgId,
-    action: "training.data_deleted",
-    entityType: "training_settings",
-    entityId: actor.orgId,
-    detail: { inferences: inf.length, feedback: fb.length },
-  });
-  return { inferences: inf.length, feedback: fb.length };
-}
+export const deleteTrainingDataCore = createServerOnlyFn(
+  async function deleteTrainingDataCore(actor: {
+    orgId: string;
+    userId: string;
+    memberEmail: string;
+  }): Promise<{ inferences: number; feedback: number }> {
+    const fb = await db
+      .delete(trainingFeedback)
+      .where(eq(trainingFeedback.orgId, actor.orgId))
+      .returning({ id: trainingFeedback.id });
+    const inf = await db
+      .delete(trainingInferences)
+      .where(eq(trainingInferences.orgId, actor.orgId))
+      .returning({ id: trainingInferences.id });
+    await writeAudit({
+      actor: actor.memberEmail,
+      actorUserId: actor.userId,
+      orgId: actor.orgId,
+      action: "training.data_deleted",
+      entityType: "training_settings",
+      entityId: actor.orgId,
+      detail: { inferences: inf.length, feedback: fb.length },
+    });
+    return { inferences: inf.length, feedback: fb.length };
+  },
+);
 
 export const deleteTrainingData = createServerFn({ method: "POST" })
   .middleware([requireOrgOwner])
@@ -146,7 +150,9 @@ export const deleteTrainingData = createServerFn({ method: "POST" })
   );
 
 /** Delete rows older than each organisation's retention (daily sweep). */
-export async function applyTrainingRetention(orgId?: string): Promise<number> {
+export const applyTrainingRetention = createServerOnlyFn(async function applyTrainingRetention(
+  orgId?: string,
+): Promise<number> {
   const settings = await db
     .select({ orgId: trainingSettings.orgId, days: trainingSettings.retentionDays })
     .from(trainingSettings)
@@ -168,13 +174,13 @@ export async function applyTrainingRetention(orgId?: string): Promise<number> {
     ).length;
   }
   return removed;
-}
+});
 
 /**
  * A reviewer's annotation on one model call: a rating, a label, and the
  * output it should have produced — gold data for fine-tuning.
  */
-export async function annotateInferenceCore(
+export const annotateInferenceCore = createServerOnlyFn(async function annotateInferenceCore(
   actor: { orgId: string; userId: string },
   input: {
     inferenceId: string;
@@ -222,7 +228,7 @@ export async function annotateInferenceCore(
     actorUserId: actor.userId,
   });
   return { ok: true };
-}
+});
 
 export const annotateInference = createServerFn({ method: "POST" })
   .middleware([requireOrg])

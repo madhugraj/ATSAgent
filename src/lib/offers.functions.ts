@@ -4,7 +4,7 @@
  * Every read/write is predicated on the caller's verified organisation.
  */
 import { and, eq } from "drizzle-orm";
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { db } from "../server/db";
@@ -49,7 +49,7 @@ const OFFER_TRANSITIONS: Partial<
  * legacy client ignored failures of that stage bump, so it stays best-effort.
  */
 /** Shared by the server function and the agents (acting member in `actor`). */
-export async function createOfferCore(
+export const createOfferCore = createServerOnlyFn(async function createOfferCore(
   actor: { orgId: string; userId: string; memberEmail: string },
   data: { applicationId: string; offeredCtc: string; joiningDate?: string | null | undefined },
   /** Agents start at "draft" so the letter is generated before approval. */
@@ -92,7 +92,7 @@ export async function createOfferCore(
     /* stage bump is best-effort, exactly as before */
   }
   return { ok: true as const, id: created!.id };
-}
+});
 
 export const createOffer = createServerFn({ method: "POST" })
   .middleware([requireOrg])
@@ -126,7 +126,7 @@ export const createOffer = createServerFn({ method: "POST" })
  * link to answer it (one email per revision). Never throws — a failure is
  * logged, and the release itself stands.
  */
-export async function emailReleasedOffer(
+export const emailReleasedOffer = createServerOnlyFn(async function emailReleasedOffer(
   orgId: string,
   offerId: string,
   responseToken: string,
@@ -188,10 +188,10 @@ export async function emailReleasedOffer(
     });
     return false;
   }
-}
+});
 
 /** Shared by the server function and the agents (acting member in `actor`). */
-export async function advanceOfferCore(
+export const advanceOfferCore = createServerOnlyFn(async function advanceOfferCore(
   actor: { orgId: string; userId: string; memberEmail: string; via?: "agent" },
   data: {
     id: string;
@@ -342,7 +342,7 @@ export async function advanceOfferCore(
     }
   }
   return { ok: true as const };
-}
+});
 
 export const advanceOffer = createServerFn({ method: "POST" })
   .middleware([requireOrg])
@@ -388,7 +388,7 @@ const SEND_BACK_ROLE: Record<string, AppRole> = {
  * offer.status_changed (to "draft", sentBack) has the Offer agent revise it
  * inside the band or ask a person.
  */
-export async function sendBackOfferCore(
+export const sendBackOfferCore = createServerOnlyFn(async function sendBackOfferCore(
   actor: { orgId: string; userId: string; memberEmail: string; via?: "agent" },
   input: { id: string; reason: string },
 ): Promise<{ ok: true }> {
@@ -499,7 +499,7 @@ export async function sendBackOfferCore(
     /* the trail and audit are the record */
   }
   return { ok: true };
-}
+});
 
 export const sendBackOffer = createServerFn({ method: "POST" })
   .middleware([requireOrg])
@@ -725,7 +725,7 @@ export const deleteOfferLetter = createServerFn({ method: "POST" })
  * offer advances to the next approval level.
  */
 /** Shared by the server function and the agents (acting member in `actor`). */
-export async function generateOfferLetterCore(
+export const generateOfferLetterCore = createServerOnlyFn(async function generateOfferLetterCore(
   actor: { orgId: string; userId: string; memberEmail: string },
   data: { offerId: string; templateId?: string | null | undefined },
 ): Promise<OfferLetterPayload> {
@@ -886,7 +886,7 @@ export async function generateOfferLetterCore(
     .where(and(eq(offers.id, data.offerId), eq(offers.orgId, actor.orgId)));
 
   return payload;
-}
+});
 
 export const generateOfferLetter = createServerFn({ method: "POST" })
   .middleware([requireOrg])
@@ -910,7 +910,7 @@ export const generateOfferLetter = createServerFn({ method: "POST" })
  * and joining date and the reasoning on the trail; the letter is cleared so it
  * is generated again, and the revision goes through approval again.
  */
-export async function reviseOfferCore(
+export const reviseOfferCore = createServerOnlyFn(async function reviseOfferCore(
   actor: { orgId: string; userId: string; memberEmail: string; via?: string | undefined },
   input: { offerId: string; offeredCtc: number; joiningDate: string | null; rationale: string },
 ): Promise<{ revision: number }> {
@@ -969,4 +969,4 @@ export async function reviseOfferCore(
     detail: { revision, from: Number(o.offeredCtc), to: input.offeredCtc },
   });
   return { revision };
-}
+});

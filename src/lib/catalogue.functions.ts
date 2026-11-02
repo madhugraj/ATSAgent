@@ -1,4 +1,4 @@
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { ilike } from "drizzle-orm";
 import { z } from "zod";
 
@@ -13,7 +13,9 @@ import { CATALOGUE_MODULES, type CatalogueModule } from "@/lib/product-catalogue
  * layer (tier, list price, unit, notes) is editable and stored in the database.
  */
 
-async function requireSuperUser(context: { claims?: Record<string, unknown> | null }) {
+const requireSuperUser = createServerOnlyFn(async function requireSuperUser(context: {
+  claims?: Record<string, unknown> | null;
+}) {
   const raw = (context.claims?.["email"] as string | undefined) ?? null;
   const email = raw ? raw.toLowerCase() : null;
   if (!email) throw new Error("Your account has no email address.");
@@ -24,7 +26,7 @@ async function requireSuperUser(context: { claims?: Record<string, unknown> | nu
     .limit(1);
   if (!row) throw new Error("Super-user access only.");
   return email;
-}
+});
 
 export type CatalogueCommercials = {
   moduleId: string;

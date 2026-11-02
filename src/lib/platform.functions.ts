@@ -1,5 +1,5 @@
 import { and, eq, ilike, inArray, sql } from "drizzle-orm";
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { db } from "../server/db";
@@ -340,7 +340,9 @@ export const deleteOrganizationAsSuperUser = createServerFn({ method: "POST" })
  * Deletes login accounts that no longer belong to any organisation. Platform super users
  * and anyone still holding an active membership elsewhere are always preserved.
  */
-async function purgeOrphanAccounts(userIds: string[]) {
+const purgeOrphanAccounts = createServerOnlyFn(async function purgeOrphanAccounts(
+  userIds: string[],
+) {
   if (userIds.length === 0) return 0;
 
   const stillMembers = await db
@@ -371,7 +373,7 @@ async function purgeOrphanAccounts(userIds: string[]) {
     removed += 1;
   }
   return removed;
-}
+});
 
 /** Super users can correct any tenant's profile fields. */
 export const updateOrganizationAsSuperUser = createServerFn({ method: "POST" })

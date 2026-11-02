@@ -1,5 +1,5 @@
 import { and, desc, eq } from "drizzle-orm";
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { db } from "../server/db";
@@ -38,7 +38,7 @@ const QuestionSchema = z.object({
  * requisition and the application must all belong to the caller's org.
  * Exported for the background prep worker (screening-prep.server.ts).
  */
-export async function loadPairing(
+export const loadPairing = createServerOnlyFn(async function loadPairing(
   orgId: string,
   candidateId: string,
   requisitionId: string | null,
@@ -131,7 +131,7 @@ export async function loadPairing(
   }
 
   return { candidate, requisition, application, jdText, match };
-}
+});
 
 /* --------------------------------------------------------------- build kit */
 
@@ -143,7 +143,11 @@ export async function loadPairing(
  * orgId (loadPairing re-checks every lookup).
  */
 /** The candidate's completed written assessment for this role, for the call kit to build on. */
-async function writtenAssessmentFor(orgId: string, candidateId: string, requisitionId: string) {
+const writtenAssessmentFor = createServerOnlyFn(async function writtenAssessmentFor(
+  orgId: string,
+  candidateId: string,
+  requisitionId: string,
+) {
   const { candidateAssessments } = await import("@db/schema");
   const [a] = await db
     .select({
@@ -175,69 +179,71 @@ async function writtenAssessmentFor(orgId: string, candidateId: string, requisit
     strengths: a.strengths ?? [],
     redFlags: a.redFlags ?? [],
   };
-}
+});
 
-export async function prepareScreeningKitForPairing(input: {
-  orgId: string;
-  candidateId: string;
-  requisitionId: string;
-  /** Null for background prep — no signed-in user. */
-  createdBy: string | null;
-}): Promise<{ kitId: string; questions: ScreeningQuestion[]; focus_summary: string }> {
-  const { candidate, requisition, application, jdText, match } = await loadPairing(
-    input.orgId,
-    input.candidateId,
-    input.requisitionId,
-  );
-  if (!requisition) throw new Error("Pick the role this screening call is for.");
-  if (!jdText.trim()) throw new Error("This role has no job description text yet.");
+export const prepareScreeningKitForPairing = createServerOnlyFn(
+  async function prepareScreeningKitForPairing(input: {
+    orgId: string;
+    candidateId: string;
+    requisitionId: string;
+    /** Null for background prep — no signed-in user. */
+    createdBy: string | null;
+  }): Promise<{ kitId: string; questions: ScreeningQuestion[]; focus_summary: string }> {
+    const { candidate, requisition, application, jdText, match } = await loadPairing(
+      input.orgId,
+      input.candidateId,
+      input.requisitionId,
+    );
+    if (!requisition) throw new Error("Pick the role this screening call is for.");
+    if (!jdText.trim()) throw new Error("This role has no job description text yet.");
 
-  const kit = await buildScreeningKit({
-    orgId: input.orgId,
-    role: requisition.title,
-    jdText,
-    mustHave: requisition.mustHaveSkills ?? [],
-    goodToHave: requisition.goodToHaveSkills ?? [],
-    experienceMin: requisition.experienceMin ?? 0,
-    experienceMax: requisition.experienceMax ?? 0,
-    budgetCtc: requisition.budgetCtc != null ? Number(requisition.budgetCtc) : null,
-    currency: "INR",
-    candidateName: candidate.fullName,
-    resumeText: candidate.resumeText,
-    candidateSkills: candidate.skills ?? [],
-    experienceYears: Number(candidate.experienceYears) || 0,
-    currentEmployer: candidate.currentEmployer,
-    employmentHistory: candidate.employmentHistory,
-    education: candidate.education,
-    currentCtc: candidate.currentCtc != null ? Number(candidate.currentCtc) : null,
-    expectedCtc: candidate.expectedCtc != null ? Number(candidate.expectedCtc) : null,
-    noticePeriodDays: candidate.noticePeriodDays,
-    location: candidate.location,
-    matchRationale: match?.rationale ?? null,
-    missingSkills: match?.missingSkills ?? [],
-    riskFlags: match?.riskFlags ?? [],
-    writtenAssessment: await writtenAssessmentFor(input.orgId, candidate.id, requisition.id),
-    expertBrief: requisition.expertBrief ?? null,
-  });
-
-  const [row] = await db
-    .insert(screeningKits)
-    .values({
+    const kit = await buildScreeningKit({
       orgId: input.orgId,
-      candidateId: candidate.id,
-      requisitionId: requisition.id,
-      applicationId: application?.id ?? null,
-      questions: kit.questions as never,
-      focusSummary: kit.focus_summary,
-      engine: kit.engine as never,
-      createdBy: input.createdBy,
-    })
-    .returning({ id: screeningKits.id });
-  if (!row) throw new Error("Could not save the screening kit");
+      role: requisition.title,
+      jdText,
+      mustHave: requisition.mustHaveSkills ?? [],
+      goodToHave: requisition.goodToHaveSkills ?? [],
+      experienceMin: requisition.experienceMin ?? 0,
+      experienceMax: requisition.experienceMax ?? 0,
+      budgetCtc: requisition.budgetCtc != null ? Number(requisition.budgetCtc) : null,
+      currency: "INR",
+      candidateName: candidate.fullName,
+      resumeText: candidate.resumeText,
+      candidateSkills: candidate.skills ?? [],
+      experienceYears: Number(candidate.experienceYears) || 0,
+      currentEmployer: candidate.currentEmployer,
+      employmentHistory: candidate.employmentHistory,
+      education: candidate.education,
+      currentCtc: candidate.currentCtc != null ? Number(candidate.currentCtc) : null,
+      expectedCtc: candidate.expectedCtc != null ? Number(candidate.expectedCtc) : null,
+      noticePeriodDays: candidate.noticePeriodDays,
+      location: candidate.location,
+      matchRationale: match?.rationale ?? null,
+      missingSkills: match?.missingSkills ?? [],
+      riskFlags: match?.riskFlags ?? [],
+      writtenAssessment: await writtenAssessmentFor(input.orgId, candidate.id, requisition.id),
+      expertBrief: requisition.expertBrief ?? null,
+    });
 
-  // `engine` stays server-internal (persisted above, logged in ai_usage_events).
-  return { kitId: row.id, questions: kit.questions, focus_summary: kit.focus_summary };
-}
+    const [row] = await db
+      .insert(screeningKits)
+      .values({
+        orgId: input.orgId,
+        candidateId: candidate.id,
+        requisitionId: requisition.id,
+        applicationId: application?.id ?? null,
+        questions: kit.questions as never,
+        focusSummary: kit.focus_summary,
+        engine: kit.engine as never,
+        createdBy: input.createdBy,
+      })
+      .returning({ id: screeningKits.id });
+    if (!row) throw new Error("Could not save the screening kit");
+
+    // `engine` stays server-internal (persisted above, logged in ai_usage_events).
+    return { kitId: row.id, questions: kit.questions, focus_summary: kit.focus_summary };
+  },
+);
 
 /** Replace the candidate's name (full and each part) with "the candidate" (pure; unit-tested). */
 export function blindName(text: string, fullName: string | null | undefined): string {
@@ -258,7 +264,7 @@ export function blindName(text: string, fullName: string | null | undefined): st
  * notes or a transcript. No request context: the screening-call worker uses it
  * as well as the form (`createdBy` null for the AI call). Callers check access.
  */
-export async function gradeScreeningForKit(input: {
+export const gradeScreeningForKit = createServerOnlyFn(async function gradeScreeningForKit(input: {
   orgId: string;
   kit: typeof screeningKits.$inferSelect;
   answers: { question_id: string; answer: string }[];
@@ -337,7 +343,7 @@ export async function gradeScreeningForKit(input: {
     .returning({ id: screeningRuns.id });
   if (!run) throw new Error("Could not save the screening run");
   return { run, grade, matchScore, combined };
-}
+});
 
 export const createScreeningKit = createServerFn({ method: "POST" })
   .middleware([requireOrg])

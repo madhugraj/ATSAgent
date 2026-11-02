@@ -4,7 +4,7 @@
  * and the decision after a completed assessment). Every action is org-scoped,
  * role-checked and audited by the core it calls.
  */
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
@@ -13,7 +13,7 @@ import { applications, candidateAssessments, notificationStates } from "@db/sche
 import { assertRole, requireIdentity, requireOrg } from "./auth.middleware";
 
 /** Snooze (hide for a while) or dismiss a pop-up; the notification itself stays live. */
-export async function setNotificationStateCore(
+export const setNotificationStateCore = createServerOnlyFn(async function setNotificationStateCore(
   userId: string,
   data: { id: string; state: "seen" | "snooze" | "dismiss"; hours: number },
 ): Promise<{ ok: true }> {
@@ -32,7 +32,7 @@ export async function setNotificationStateCore(
       set: { ...patch, updatedAt: now },
     });
   return { ok: true };
-}
+});
 
 export const setNotificationState = createServerFn({ method: "POST" })
   .middleware([requireIdentity])
@@ -97,51 +97,54 @@ export const assessmentAction = createServerFn({ method: "POST" })
   });
 
 /** The decision after a completed (or waived) assessment: interview, hold, or not taken further. */
-export async function decideAfterAssessmentCore(
-  actor: { orgId: string; userId: string; memberEmail: string },
-  data: { applicationId: string; decision: "move_l1" | "hold" | "reject"; note: string },
-): Promise<{ ok: true }> {
-  await assertRole(
-    actor.userId,
-    actor.orgId,
-    [...DECIDERS],
-    "Only TA or HR can decide who moves on.",
-  );
-  const note = data.note.replace(/\s+/g, " ").trim();
-  if (data.decision !== "move_l1" && note.length < 3)
-    throw new Error("Say why — it goes on the candidate's record.");
-  const [app] = await db
-    .select({ id: applications.id, stage: applications.stage })
-    .from(applications)
-    .where(and(eq(applications.id, data.applicationId), eq(applications.orgId, actor.orgId)))
-    .limit(1);
-  if (!app) throw new Error("Application not found.");
-  if (app.stage !== "shortlisted")
-    throw new Error(`This candidate has already moved on (${app.stage.replace(/_/g, " ")}).`);
-  // The assessment behind the decision, for the record.
-  const [a] = await db
-    .select({ score: candidateAssessments.mindsetScore, status: candidateAssessments.status })
-    .from(candidateAssessments)
-    .where(
-      and(
-        eq(candidateAssessments.orgId, actor.orgId),
-        eq(candidateAssessments.applicationId, app.id),
-      ),
-    )
-    .orderBy(sql`${candidateAssessments.createdAt} desc`)
-    .limit(1);
-  const basis =
-    a?.status === "completed"
-      ? `Written assessment ${a.score != null ? `${a.score}/100` : "completed"}`
-      : "Decided without the written assessment";
-  const { moveStageCore } = await import("./pipeline.server");
-  await moveStageCore(actor, {
-    applicationId: app.id,
-    toStage: data.decision === "move_l1" ? "l1" : data.decision === "hold" ? "on_hold" : "rejected",
-    reason: note ? `${basis}. ${note}` : basis,
-  });
-  return { ok: true };
-}
+export const decideAfterAssessmentCore = createServerOnlyFn(
+  async function decideAfterAssessmentCore(
+    actor: { orgId: string; userId: string; memberEmail: string },
+    data: { applicationId: string; decision: "move_l1" | "hold" | "reject"; note: string },
+  ): Promise<{ ok: true }> {
+    await assertRole(
+      actor.userId,
+      actor.orgId,
+      [...DECIDERS],
+      "Only TA or HR can decide who moves on.",
+    );
+    const note = data.note.replace(/\s+/g, " ").trim();
+    if (data.decision !== "move_l1" && note.length < 3)
+      throw new Error("Say why — it goes on the candidate's record.");
+    const [app] = await db
+      .select({ id: applications.id, stage: applications.stage })
+      .from(applications)
+      .where(and(eq(applications.id, data.applicationId), eq(applications.orgId, actor.orgId)))
+      .limit(1);
+    if (!app) throw new Error("Application not found.");
+    if (app.stage !== "shortlisted")
+      throw new Error(`This candidate has already moved on (${app.stage.replace(/_/g, " ")}).`);
+    // The assessment behind the decision, for the record.
+    const [a] = await db
+      .select({ score: candidateAssessments.mindsetScore, status: candidateAssessments.status })
+      .from(candidateAssessments)
+      .where(
+        and(
+          eq(candidateAssessments.orgId, actor.orgId),
+          eq(candidateAssessments.applicationId, app.id),
+        ),
+      )
+      .orderBy(sql`${candidateAssessments.createdAt} desc`)
+      .limit(1);
+    const basis =
+      a?.status === "completed"
+        ? `Written assessment ${a.score != null ? `${a.score}/100` : "completed"}`
+        : "Decided without the written assessment";
+    const { moveStageCore } = await import("./pipeline.server");
+    await moveStageCore(actor, {
+      applicationId: app.id,
+      toStage:
+        data.decision === "move_l1" ? "l1" : data.decision === "hold" ? "on_hold" : "rejected",
+      reason: note ? `${basis}. ${note}` : basis,
+    });
+    return { ok: true };
+  },
+);
 
 export const decideAfterAssessment = createServerFn({ method: "POST" })
   .middleware([requireOrg])

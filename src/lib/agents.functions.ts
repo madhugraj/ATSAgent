@@ -6,7 +6,7 @@
  */
 import { CEILING_MESSAGE, LEG_LIMIT_MESSAGE } from "../server/agents/run-messages";
 import { taskIsLive } from "../server/agents/task-liveness";
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { and, desc, eq, inArray, or } from "drizzle-orm";
 import { z } from "zod";
 
@@ -39,14 +39,14 @@ const GENERIC_RUN_ERROR = "The agent could not complete this step.";
 
 const clip = (s: string | null, n: number) => (s && s.length > n ? `${s.slice(0, n)}…` : s);
 
-async function rolesOf(userId: string, orgId: string) {
+const rolesOf = createServerOnlyFn(async function rolesOf(userId: string, orgId: string) {
   return (
     await db
       .select({ role: userRoles.role })
       .from(userRoles)
       .where(and(eq(userRoles.userId, userId), eq(userRoles.orgId, orgId)))
   ).map((r) => r.role);
-}
+});
 
 /* --------------------------------------------------------- decisions inbox */
 

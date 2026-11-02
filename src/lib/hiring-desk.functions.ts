@@ -3,7 +3,7 @@
  * visible to the person who started it and to HR leadership (HR head, CBO,
  * owner); every query is predicated on the organisation.
  */
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 
@@ -19,7 +19,11 @@ import { requireOrg } from "./auth.middleware";
 
 const LEADERSHIP = ["hr_head", "president_cbo"] as const;
 
-async function isLeadership(userId: string, orgId: string, isOwner: boolean) {
+const isLeadership = createServerOnlyFn(async function isLeadership(
+  userId: string,
+  orgId: string,
+  isOwner: boolean,
+) {
   if (isOwner) return true;
   const rows = await db
     .select({ role: userRoles.role })
@@ -33,45 +37,54 @@ async function isLeadership(userId: string, orgId: string, isOwner: boolean) {
     )
     .limit(1);
   return rows.length > 0;
-}
+});
 
-async function accessible(ctx: { orgId: string; userId: string; isOwner: boolean }, id: string) {
+const accessible = createServerOnlyFn(async function accessible(
+  ctx: { orgId: string; userId: string; isOwner: boolean },
+  id: string,
+) {
   const { loadConversation } = await import("../server/desk/desk.server");
   const conv = await loadConversation(ctx.orgId, id);
   if (conv.createdBy !== ctx.userId && !(await isLeadership(ctx.userId, ctx.orgId, ctx.isOwner)))
     throw new Error("Conversation not found.");
   return conv;
-}
+});
 
 /**
  * A button pressed in the thread, shown as the person's message — so the chat
  * reads as what they asked for, not as the desk acting on its own.
  */
-async function echoClick(conv: { id: string; orgId: string }, text: string) {
+const echoClick = createServerOnlyFn(async function echoClick(
+  conv: { id: string; orgId: string },
+  text: string,
+) {
   const { postMessage } = await import("../server/desk/desk.server");
   await postMessage(conv, { role: "user", body: text });
-}
+});
 
-async function codeOf(orgId: string, requisitionId: string): Promise<string> {
+const codeOf = createServerOnlyFn(async function codeOf(
+  orgId: string,
+  requisitionId: string,
+): Promise<string> {
   const [r] = await db
     .select({ code: requisitions.code })
     .from(requisitions)
     .where(and(eq(requisitions.id, requisitionId), eq(requisitions.orgId, orgId)))
     .limit(1);
   return r?.code ?? "that role";
-}
+});
 
-async function needsAiKey(orgId: string) {
+const needsAiKey = createServerOnlyFn(async function needsAiKey(orgId: string) {
   const { resolveAiConfig } = await import("./ai-gateway.server");
   const cfg = await resolveAiConfig(orgId);
   if (!cfg.apiKey)
     throw new Error("Add your organisation's AI model key on the Integrations page first.");
-}
+});
 
-async function registered() {
+const registered = createServerOnlyFn(async function registered() {
   const { ensureAgentsRegistered } = await import("../server/agents");
   ensureAgentsRegistered();
-}
+});
 
 export type DeskConversationSummary = {
   id: string;
@@ -207,7 +220,7 @@ export const getDeskThreads = createServerFn({ method: "GET" })
     ),
   );
 
-async function deskConversationView(
+const deskConversationView = createServerOnlyFn(async function deskConversationView(
   context: { orgId: string; userId: string; isOwner: boolean },
   id: string,
 ): Promise<DeskConversationView> {
@@ -339,7 +352,7 @@ async function deskConversationView(
       return [self, ...sibs.map((s) => ({ ...s, self: false }))];
     })(),
   };
-}
+});
 
 const Text = z.string().trim().min(1).max(2000);
 
@@ -735,7 +748,10 @@ export const startDeskDistribution = createServerFn({ method: "POST" })
     return { runId: await startDistribution(conv, context.userId) };
   });
 
-async function liveStages(orgId: string, ids: string[]): Promise<Record<string, string>> {
+const liveStages = createServerOnlyFn(async function liveStages(
+  orgId: string,
+  ids: string[],
+): Promise<Record<string, string>> {
   if (!ids.length) return {};
   const { applications } = await import("@db/schema");
   const rows = await db
@@ -743,7 +759,7 @@ async function liveStages(orgId: string, ids: string[]): Promise<Record<string, 
     .from(applications)
     .where(and(eq(applications.orgId, orgId), inArray(applications.id, ids)));
   return Object.fromEntries(rows.map((r) => [r.id, r.stage]));
-}
+});
 
 /** Delete a chat still gathering details (or with its unused draft) — restorable for 30 days. */
 export const deleteDeskConversation = createServerFn({ method: "POST" })

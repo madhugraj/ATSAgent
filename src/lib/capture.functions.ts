@@ -3,7 +3,7 @@
  * signs with, and a short history of what it has brought in.
  */
 import { desc, eq } from "drizzle-orm";
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 
 import { db } from "../server/db";
 import { env } from "../server/env";
@@ -26,11 +26,13 @@ export type CaptureSetup = {
   events: CaptureEvent[];
 };
 
-function endpointBase(): string {
+const endpointBase = createServerOnlyFn(function endpointBase(): string {
   return env.PUBLIC_SITE_URL;
-}
+});
 
-async function loadSetup(orgId: string): Promise<CaptureSetup> {
+const loadSetup = createServerOnlyFn(async function loadSetup(
+  orgId: string,
+): Promise<CaptureSetup> {
   const { decryptSecret } = await import("../server/crypto");
   const [org] = await db
     .select({ captureToken: organizations.captureToken })
@@ -64,7 +66,7 @@ async function loadSetup(orgId: string): Promise<CaptureSetup> {
       createdAt: e.createdAt.toISOString(),
     })),
   };
-}
+});
 
 export const captureSetup = createServerFn({ method: "POST" })
   .middleware([requireOrg])

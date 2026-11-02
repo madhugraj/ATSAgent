@@ -7,7 +7,7 @@
  * organisation is strong or exposed. The product super admin may point the
  * same lens at any organisation.
  */
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { and, eq, ilike, inArray } from "drizzle-orm";
 import { z } from "zod";
 
@@ -41,7 +41,11 @@ export type RoiView = RoiReport & {
 };
 
 /** The RoI lens is leadership-grade: CHRO, HR head, owner or the product super admin. */
-async function requireRoiAccess(userId: string, email: string | null, wantedOrgId?: string) {
+const requireRoiAccess = createServerOnlyFn(async function requireRoiAccess(
+  userId: string,
+  email: string | null,
+  wantedOrgId?: string,
+) {
   const [member] = await db
     .select({
       orgId: orgMembers.orgId,
@@ -124,7 +128,7 @@ async function requireRoiAccess(userId: string, email: string | null, wantedOrgI
     currency: member.currency ?? "INR",
     superUser: false,
   };
-}
+});
 
 // Realised value (joined/hired) plus value already committed through an offer —
 // a CHRO needs both, labelled apart.
@@ -137,7 +141,9 @@ const HIRED_STAGES = [
   "joined",
 ] as const;
 
-async function loadCapabilities(orgId: string): Promise<{ nodes: OntologyNode[]; open: number }> {
+const loadCapabilities = createServerOnlyFn(async function loadCapabilities(
+  orgId: string,
+): Promise<{ nodes: OntologyNode[]; open: number }> {
   const stored = await db.select().from(skillNodes).where(eq(skillNodes.orgId, orgId)).limit(4000);
 
   const reqRows = await db
@@ -225,7 +231,7 @@ async function loadCapabilities(orgId: string): Promise<{ nodes: OntologyNode[];
     previous: [],
   });
   return { nodes: build.nodes, open: openCount };
-}
+});
 
 /** The CHRO's answer to "what return on individual have we got?" */
 export const readReturnOnIndividual = createServerFn({ method: "POST" })
