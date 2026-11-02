@@ -35,7 +35,7 @@ export const myOrgAgreements = createServerFn({ method: "GET" })
  */
 export const acceptOrgAgreements = createServerFn({ method: "POST" })
   .middleware([requireOrgOwner])
-  .inputValidator((data: unknown) => AgreementAcceptanceInput.parse(data))
+  .validator((data: unknown) => AgreementAcceptanceInput.parse(data))
   .handler(async ({ data, context }) => {
     const { getRequest } = await import("@tanstack/react-start/server");
     const { clientIp } = await import("../server/client-ip");

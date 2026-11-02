@@ -99,7 +99,7 @@ export async function setTrainingConsentCore(
 
 export const setTrainingConsent = createServerFn({ method: "POST" })
   .middleware([requireOrgOwner])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z.object({ enabled: z.boolean(), retentionDays: z.number().int().min(30).max(3650) }).parse(d),
   )
   .handler(async ({ data, context }) =>
@@ -226,7 +226,7 @@ export async function annotateInferenceCore(
 
 export const annotateInference = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z
       .object({
         inferenceId: z.string().uuid(),

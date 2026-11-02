@@ -9,7 +9,7 @@ import { z } from "zod";
 const Token = z.string().regex(/^[a-f0-9]{64}$/, "This link is not valid.");
 
 export const getOfferForResponse = createServerFn({ method: "GET" })
-  .inputValidator((d: unknown) => z.object({ token: Token }).parse(d))
+  .validator((d: unknown) => z.object({ token: Token }).parse(d))
   .handler(async ({ data }) => {
     const { publicOfferView } = await import("./offer-response.server");
     const v = await publicOfferView(data.token);
@@ -32,7 +32,7 @@ const Answer = z.discriminatedUnion("action", [
 ]);
 
 export const respondToOfferLink = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => z.object({ token: Token, answer: Answer }).parse(d))
+  .validator((d: unknown) => z.object({ token: Token, answer: Answer }).parse(d))
   .handler(async ({ data }) => {
     const { respondToOffer } = await import("./offer-response.server");
     return respondToOffer(data.token, data.answer);

@@ -36,7 +36,7 @@ export async function setNotificationStateCore(
 
 export const setNotificationState = createServerFn({ method: "POST" })
   .middleware([requireIdentity])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z
       .object({
         id: z.string().min(3).max(200),
@@ -52,7 +52,7 @@ const DECIDERS = ["recruiter", "hr_head", "president_cbo"] as const;
 /** Act on an open assessment from the pop-up. */
 export const assessmentAction = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z
       .discriminatedUnion("action", [
         z.object({
@@ -145,7 +145,7 @@ export async function decideAfterAssessmentCore(
 
 export const decideAfterAssessment = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z
       .object({
         applicationId: z.string().uuid(),
@@ -173,7 +173,7 @@ export const getAssessmentPolicy = createServerFn({ method: "GET" })
 /** Change the organisation's assessment timeline — HR head or owner, audited. */
 export const setAssessmentPolicy = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z
       .object({
         dueWorkingDays: z.number().int().min(1).max(15),

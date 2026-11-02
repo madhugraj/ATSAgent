@@ -10,7 +10,7 @@ import { requireOrg } from "./auth.middleware";
 
 export const getRoleCost = createServerFn({ method: "GET" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ requisitionId: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ requisitionId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const { assertRequisitionInOrg } = await import("../server/guards");
     await assertRequisitionInOrg(data.requisitionId, context.orgId);
@@ -20,7 +20,7 @@ export const getRoleCost = createServerFn({ method: "GET" })
 
 export const getCandidateCost = createServerFn({ method: "GET" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ applicationId: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ applicationId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const { candidateCost } = await import("../server/agents/hiring-cost.server");
     return candidateCost(context.orgId, data.applicationId);
@@ -29,7 +29,7 @@ export const getCandidateCost = createServerFn({ method: "GET" })
 /** Hiring cost across every role, month by month — HR head, CBO or owner. */
 export const getOrgHiringCost = createServerFn({ method: "GET" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z.object({ months: z.number().int().min(1).max(24).default(6) }).parse(d ?? {}),
   )
   .handler(async ({ data, context }) => {

@@ -42,7 +42,7 @@ async function loadScheme(orgId: string): Promise<IncentiveScheme> {
 /** Recruiter-by-recruiter delivery, quality and incentive workings for the CHRO. */
 export const getHrPerformance = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((input: unknown) =>
+  .validator((input: unknown) =>
     z.object({ days: z.number().int().min(7).max(730).default(90) }).parse(input ?? {}),
   )
   .handler(async ({ data, context }) => {
@@ -155,7 +155,7 @@ export const getHrPerformance = createServerFn({ method: "POST" })
 /** Save the incentive scheme the payouts above are calculated from. */
 export const saveIncentiveScheme = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((input: unknown) =>
+  .validator((input: unknown) =>
     z
       .object({
         currency: z.string().min(1).max(8),

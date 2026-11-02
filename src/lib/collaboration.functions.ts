@@ -80,7 +80,7 @@ export const poolTeam = createServerFn({ method: "GET" })
 /** Assign, hand over or release ownership of candidates, with an audit trail. */
 export const setCandidateOwner = createServerFn({ method: "POST" })
   .middleware([requireIdentity])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         candidateIds: z.array(z.string().uuid()).min(1).max(500),
@@ -133,7 +133,7 @@ export const setCandidateOwner = createServerFn({ method: "POST" })
 /** Send a candidate to a colleague, optionally against one of their roles. */
 export const referCandidate = createServerFn({ method: "POST" })
   .middleware([requireIdentity])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         candidateId: z.string().uuid(),
@@ -199,7 +199,7 @@ export const referCandidate = createServerFn({ method: "POST" })
  */
 export const respondReferral = createServerFn({ method: "POST" })
   .middleware([requireIdentity])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         referralId: z.string().uuid(),
@@ -282,7 +282,7 @@ export const respondReferral = createServerFn({ method: "POST" })
 /** Leave a note on a candidate and optionally pull colleagues in by mention. */
 export const addCandidateNote = createServerFn({ method: "POST" })
   .middleware([requireIdentity])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         candidateId: z.string().uuid(),
@@ -330,7 +330,7 @@ export const addCandidateNote = createServerFn({ method: "POST" })
 /** Ask the rest of the team for people matching a skill or role. */
 export const createTalentRequest = createServerFn({ method: "POST" })
   .middleware([requireIdentity])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         title: z.string().trim().min(2).max(160),
@@ -360,7 +360,7 @@ export const createTalentRequest = createServerFn({ method: "POST" })
 /** Suggest one of your candidates against a colleague's request. */
 export const suggestToRequest = createServerFn({ method: "POST" })
   .middleware([requireIdentity])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         requestId: z.string().uuid(),
@@ -406,7 +406,7 @@ export const suggestToRequest = createServerFn({ method: "POST" })
 /** Close your own request once you have what you need. */
 export const closeTalentRequest = createServerFn({ method: "POST" })
   .middleware([requireIdentity])
-  .inputValidator((data: unknown) => z.object({ requestId: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ requestId: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const me = await membership(context.userId);
     const [req] = await db
@@ -488,7 +488,7 @@ export const listPoolShares = createServerFn({ method: "GET" })
  */
 export const offerPoolShare = createServerFn({ method: "POST" })
   .middleware([requireIdentity])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         partnerName: z.string().trim().min(2).max(160),
@@ -531,7 +531,7 @@ export const offerPoolShare = createServerFn({ method: "POST" })
 /** Accept, decline or revoke a sharing agreement. */
 export const respondPoolShare = createServerFn({ method: "POST" })
   .middleware([requireIdentity])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({ shareId: z.string().uuid(), action: z.enum(["accept", "decline", "revoke"]) })
       .parse(data),

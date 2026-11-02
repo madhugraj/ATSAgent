@@ -122,7 +122,7 @@ export async function createAssessmentCore(orgId: string, data: z.infer<typeof C
 
 export const createAssessment = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => CreateInput.parse(data))
+  .validator((data: unknown) => CreateInput.parse(data))
   .handler(async ({ data, context }) => createAssessmentCore(context.orgId, data));
 
 /* ------------------------------------------------------------ candidate side */
@@ -131,7 +131,7 @@ const TokenInput = z.object({ token: z.string().min(16) });
 
 /** Public: load the questionnaire behind a private token (no answers exposed). */
 export const getAssessment = createServerFn({ method: "GET" })
-  .inputValidator((data: unknown) => TokenInput.parse(data))
+  .validator((data: unknown) => TokenInput.parse(data))
   .handler(async ({ data }) => {
     const [row] = await db
       .select({
@@ -264,5 +264,5 @@ export async function submitAssessmentCore(
 
 /** Public: submit answers once, score them, and lock the assessment. */
 export const submitAssessment = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) => SubmitInput.parse(data))
+  .validator((data: unknown) => SubmitInput.parse(data))
   .handler(async ({ data }) => submitAssessmentCore(data));

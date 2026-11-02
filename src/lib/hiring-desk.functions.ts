@@ -180,7 +180,7 @@ export type DeskConversationView = {
 
 export const getDeskConversation = createServerFn({ method: "GET" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(({ data, context }) => deskConversationView(context, data.id));
 
 /**
@@ -192,9 +192,7 @@ export const getDeskConversation = createServerFn({ method: "GET" })
  */
 export const getDeskThreads = createServerFn({ method: "GET" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
-    z.object({ ids: z.array(z.string().uuid()).min(1).max(3) }).parse(d),
-  )
+  .validator((d: unknown) => z.object({ ids: z.array(z.string().uuid()).min(1).max(3) }).parse(d))
   .handler(async ({ data, context }) =>
     Promise.all(
       data.ids.map(async (id) => {
@@ -347,7 +345,7 @@ const Text = z.string().trim().min(1).max(2000);
 
 export const startDeskConversation = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ message: Text }).parse(d))
+  .validator((d: unknown) => z.object({ message: Text }).parse(d))
   .handler(async ({ data, context }) => {
     await needsAiKey(context.orgId);
     await registered();
@@ -362,7 +360,7 @@ export const startDeskConversation = createServerFn({ method: "POST" })
 
 export const sendDeskMessage = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ id: z.string().uuid(), message: Text }).parse(d))
+  .validator((d: unknown) => z.object({ id: z.string().uuid(), message: Text }).parse(d))
   .handler(async ({ data, context }) => {
     const conv = await accessible(context, data.id);
     await needsAiKey(context.orgId);
@@ -379,7 +377,7 @@ const Choice = z.discriminatedUnion("kind", [
 
 export const chooseDeskRole = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ id: z.string().uuid(), choice: Choice }).parse(d))
+  .validator((d: unknown) => z.object({ id: z.string().uuid(), choice: Choice }).parse(d))
   .handler(async ({ data, context }) => {
     const conv = await accessible(context, data.id);
     // A thread still in gathering with all required details present is
@@ -421,7 +419,7 @@ export const chooseDeskRole = createServerFn({ method: "POST" })
  */
 export const chooseHiringManagerOption = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z.object({ id: z.string().uuid(), memberId: z.string().uuid() }).parse(d),
   )
   .handler(async ({ data, context }) => {
@@ -474,7 +472,7 @@ export const chooseHiringManagerOption = createServerFn({ method: "POST" })
 
 export const screenDeskCandidates = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z
       .object({
         id: z.string().uuid(),
@@ -492,7 +490,7 @@ export const screenDeskCandidates = createServerFn({ method: "POST" })
 
 export const closeDeskConversation = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const conv = await accessible(context, data.id);
     await db
@@ -507,9 +505,7 @@ export const closeDeskConversation = createServerFn({ method: "POST" })
 /** Run a stopped agent of this thread again (same goal and role). */
 export const retryDeskRun = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
-    z.object({ id: z.string().uuid(), runId: z.string().uuid() }).parse(d),
-  )
+  .validator((d: unknown) => z.object({ id: z.string().uuid(), runId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const conv = await accessible(context, data.id);
     await registered();
@@ -520,7 +516,7 @@ export const retryDeskRun = createServerFn({ method: "POST" })
 /** Start the agent for the thread's current step (when it is on and idle). */
 export const startDeskStage = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const conv = await accessible(context, data.id);
     await registered();
@@ -533,7 +529,7 @@ export const startDeskStage = createServerFn({ method: "POST" })
 /** Score the role's new applications (e.g. CVs just uploaded here) and post the ranked list. */
 export const scoreDeskCandidates = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const conv = await accessible(context, data.id);
     await needsAiKey(context.orgId);
@@ -544,7 +540,7 @@ export const scoreDeskCandidates = createServerFn({ method: "POST" })
 /** Ask the Publishing agent to post the thread's role. */
 export const publishDeskRole = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const conv = await accessible(context, data.id);
     await registered();
@@ -555,7 +551,7 @@ export const publishDeskRole = createServerFn({ method: "POST" })
 /** Close / reject / delete the thread's role from the chat (role-checked by the lifecycle). */
 export const closeDeskRole = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z.object({ id: z.string().uuid(), reason: z.string().trim().min(3).max(500) }).parse(d),
   )
   .handler(async ({ data, context }) => {
@@ -567,7 +563,7 @@ export const closeDeskRole = createServerFn({ method: "POST" })
 /** Accept the desk's latest researched proposal (skills / experience / budget). */
 export const acceptDeskProposal = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const conv = await accessible(context, data.id);
     await needsAiKey(context.orgId);
@@ -580,7 +576,7 @@ export const acceptDeskProposal = createServerFn({ method: "POST" })
 /** Ask the role's hiring manager what the role really needs (Role expert interview agent). */
 export const startDeskExpertInterview = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const conv = await accessible(context, data.id);
     await needsAiKey(context.orgId);
@@ -593,7 +589,7 @@ export const startDeskExpertInterview = createServerFn({ method: "POST" })
 /** Ask the desk to research details from the market instead of typing them. */
 export const researchDeskRole = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z
       .object({
         id: z.string().uuid(),
@@ -635,7 +631,7 @@ async function canEditAgents(userId: string, orgId: string): Promise<boolean> {
  */
 export const raiseDeskAgentBudget = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const conv = await accessible(context, data.id);
     const { assertRole } = await import("./auth.middleware");
@@ -684,7 +680,7 @@ export const raiseDeskAgentBudget = createServerFn({ method: "POST" })
  */
 export const enableDeskAgent = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z
       .object({
         id: z.string().uuid(),
@@ -709,7 +705,7 @@ export const enableDeskAgent = createServerFn({ method: "POST" })
 /** Re-score the role's active candidates against its current (approved) JD. */
 export const rescoreDeskCandidates = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const conv = await accessible(context, data.id);
     await needsAiKey(context.orgId);
@@ -720,7 +716,7 @@ export const rescoreDeskCandidates = createServerFn({ method: "POST" })
 /** Ask the Sourcing agent to check this role's supply and find more candidates. */
 export const startDeskSourcing = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const conv = await accessible(context, data.id);
     await registered();
@@ -731,7 +727,7 @@ export const startDeskSourcing = createServerFn({ method: "POST" })
 /** Ask the Distribution agent to advertise this role across the job portals. */
 export const startDeskDistribution = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const conv = await accessible(context, data.id);
     await registered();
@@ -752,7 +748,7 @@ async function liveStages(orgId: string, ids: string[]): Promise<Record<string, 
 /** Delete a chat still gathering details (or with its unused draft) — restorable for 30 days. */
 export const deleteDeskConversation = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z
       .object({
         id: z.string().uuid(),
@@ -792,7 +788,7 @@ export const listDeletedDeskConversations = createServerFn({ method: "GET" })
 
 export const restoreDeskConversation = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const { restoreThread } = await import("../server/desk/desk.server");
     return restoreThread(context.orgId, context.userId, data.id);

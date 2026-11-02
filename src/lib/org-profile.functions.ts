@@ -133,7 +133,7 @@ const Item = z.object({
 
 export const saveOrgProfileDraft = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z
       .object({
         versionId: z.string().uuid(),
@@ -160,7 +160,7 @@ const VersionInput = z.object({ versionId: z.string().uuid() });
 
 export const submitOrgProfileDraft = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => VersionInput.parse(d))
+  .validator((d: unknown) => VersionInput.parse(d))
   .handler(async ({ data, context }) => {
     const { submitDraftCore } = await import("./org-profile.server");
     await submitDraftCore({ orgId: context.orgId, userId: context.userId }, data);
@@ -169,7 +169,7 @@ export const submitOrgProfileDraft = createServerFn({ method: "POST" })
 
 export const discardOrgProfileDraft = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => VersionInput.parse(d))
+  .validator((d: unknown) => VersionInput.parse(d))
   .handler(async ({ data, context }) => {
     const { discardDraftCore } = await import("./org-profile.server");
     await discardDraftCore({ orgId: context.orgId, userId: context.userId }, data);
@@ -178,7 +178,7 @@ export const discardOrgProfileDraft = createServerFn({ method: "POST" })
 
 export const decideOrgProfileVersion = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z
       .object({
         versionId: z.string().uuid(),
@@ -207,7 +207,7 @@ export const decideOrgProfileVersion = createServerFn({ method: "POST" })
 
 export const setOrgProfileRequired = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ required: z.boolean() }).parse(d))
+  .validator((d: unknown) => z.object({ required: z.boolean() }).parse(d))
   .handler(async ({ data, context }) => {
     const { setRequireProfileCore } = await import("./org-profile.server");
     await setRequireProfileCore({ orgId: context.orgId, userId: context.userId }, data);

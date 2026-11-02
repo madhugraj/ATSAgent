@@ -96,7 +96,7 @@ export async function createOfferCore(
 
 export const createOffer = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         applicationId: z.string().uuid(),
@@ -346,7 +346,7 @@ export async function advanceOfferCore(
 
 export const advanceOffer = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         id: z.string().uuid(),
@@ -503,7 +503,7 @@ export async function sendBackOfferCore(
 
 export const sendBackOffer = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z.object({ id: z.string().uuid(), reason: z.string().min(3).max(1000) }).parse(data),
   )
   .handler(async ({ data, context }) =>
@@ -608,7 +608,7 @@ export type EditableOfferLetter = z.infer<typeof EditableOfferLetter>;
  */
 export const updateOfferLetter = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z.object({ offerId: z.string().uuid(), letter: EditableOfferLetter }).parse(data),
   )
   .handler(async ({ data, context }): Promise<OfferLetterPayload> => {
@@ -684,7 +684,7 @@ const LETTER_LOCKED_STATUSES = new Set(["released", "accepted", "declined", "rev
  */
 export const deleteOfferLetter = createServerFn({ method: "POST" })
   .middleware([requireRole("hr_head")])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z.object({ offerId: z.string().uuid(), reason: z.string().trim().min(8).max(400) }).parse(data),
   )
   .handler(async ({ data, context }) => {
@@ -890,7 +890,7 @@ export async function generateOfferLetterCore(
 
 export const generateOfferLetter = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         offerId: z.string().uuid(),
