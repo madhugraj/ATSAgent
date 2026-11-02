@@ -2,7 +2,7 @@
  * Pay discussions: the candidate's private answer page and TA / HR's view of a
  * discussion (the call brief) and its outcome. Rules: src/lib/negotiation.server.ts.
  */
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { assertRole, requireOrg } from "./auth.middleware";
@@ -78,7 +78,10 @@ export const getNegotiation = createServerFn({ method: "GET" })
   });
 
 /** The latest AI pay call for a discussion, and why another cannot be arranged (or null). */
-async function aiCallState(orgId: string, negotiationId: string) {
+const aiCallState = createServerOnlyFn(async function aiCallState(
+  orgId: string,
+  negotiationId: string,
+) {
   const { db } = await import("../server/db");
   const { screeningCalls } = await import("@db/schema");
   const { and, desc, eq } = await import("drizzle-orm");
@@ -106,7 +109,7 @@ async function aiCallState(orgId: string, negotiationId: string) {
       : null,
     aiCallBlocked: check.ok ? null : check.reason,
   };
-}
+});
 
 /** TA / HR arrange an AI pay call, with at most one improved figure (≤ the ceiling). */
 export const arrangeNegotiationCall = createServerFn({ method: "POST" })

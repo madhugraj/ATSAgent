@@ -1,4 +1,4 @@
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { and, desc, eq, ilike, inArray } from "drizzle-orm";
 import { z } from "zod";
 
@@ -41,7 +41,10 @@ export type TalentBrain = OntologyBuild & {
 };
 
 /** The Talent Brain is a governance view: CHRO, HR head, owner or the product super admin. */
-async function requireBrainAccess(userId: string, email: string | null) {
+const requireBrainAccess = createServerOnlyFn(async function requireBrainAccess(
+  userId: string,
+  email: string | null,
+) {
   const [member] = await db
     .select({
       orgId: orgMembers.orgId,
@@ -82,9 +85,9 @@ async function requireBrainAccess(userId: string, email: string | null) {
     throw new Error("The Talent Brain is available to the CHRO, HR Head and the account owner.");
   }
   return { orgId: member.orgId as string, orgName: member.orgName ?? null, superUser: false };
-}
+});
 
-async function loadSources(orgId: string | null) {
+const loadSources = createServerOnlyFn(async function loadSources(orgId: string | null) {
   const cand = await db
     .select({
       id: candidates.id,
@@ -185,7 +188,7 @@ async function loadSources(orgId: string | null) {
   }
 
   return { candidates: candidatesOut, demand, previous, curated, snapshots: snaps };
-}
+});
 
 function history(snapshots: Array<typeof ontologySnapshots.$inferSelect>) {
   return snapshots

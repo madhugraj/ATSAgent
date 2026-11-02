@@ -4,7 +4,7 @@
  * head's or owner's decision. Roles are checked again in the cores
  * (src/lib/org-profile.server.ts); every query is scoped to the caller's org.
  */
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -50,7 +50,9 @@ export type OrgProfileView = {
 
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
 
-async function nameOf(userId: string | null): Promise<string | null> {
+const nameOf = createServerOnlyFn(async function nameOf(
+  userId: string | null,
+): Promise<string | null> {
   if (!userId) return null;
   const [u] = await db
     .select({ name: users.fullName, email: users.email })
@@ -58,7 +60,7 @@ async function nameOf(userId: string | null): Promise<string | null> {
     .where(eq(users.id, userId))
     .limit(1);
   return u ? (u.name ?? u.email) : null;
-}
+});
 
 async function view(
   v: Awaited<ReturnType<typeof import("./org-profile.server").profileState>>["approved"],

@@ -4,7 +4,7 @@
  * org-scoped and limited to TA, the HR head, the CBO and owners
  * (src/lib/compensation.server.ts holds the rules).
  */
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -37,7 +37,10 @@ export const submitCompensationForm = createServerFn({ method: "POST" })
 
 /* ------------------------------------------------------------ TA / HR */
 
-async function payAccess(userId: string, orgId: string): Promise<boolean> {
+const payAccess = createServerOnlyFn(async function payAccess(
+  userId: string,
+  orgId: string,
+): Promise<boolean> {
   const { PAY_ROLES } = await import("./compensation.server");
   try {
     await assertRole(userId, orgId, [...PAY_ROLES]);
@@ -45,7 +48,7 @@ async function payAccess(userId: string, orgId: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
+});
 
 /** The candidate's pay per application — or `allowed: false` for anyone outside TA / HR. */
 export const getCandidateCompensation = createServerFn({ method: "GET" })
