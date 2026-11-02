@@ -1,4 +1,4 @@
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -17,7 +17,7 @@ const CreateInput = z.object({
   applicationId: z.string().uuid().optional().nullable(),
 });
 
-async function applicationFor(
+const applicationFor = createServerOnlyFn(async function applicationFor(
   orgId: string,
   candidateId: string,
   requisitionId: string | null | undefined,
@@ -35,11 +35,14 @@ async function applicationFor(
     )
     .limit(1);
   return a?.id ?? null;
-}
+});
 
 /** Build a role-specific questionnaire and issue a private candidate link. */
 /** Shared by the candidate page and the Screening agent. */
-export async function createAssessmentCore(orgId: string, data: z.infer<typeof CreateInput>) {
+export const createAssessmentCore = createServerOnlyFn(async function createAssessmentCore(
+  orgId: string,
+  data: z.infer<typeof CreateInput>,
+) {
   const [candidate] = await db
     .select({
       id: candidates.id,
@@ -118,7 +121,7 @@ export async function createAssessmentCore(orgId: string, data: z.infer<typeof C
     closesAt: timeline.closesAt,
     timeZone,
   };
-}
+});
 
 export const createAssessment = createServerFn({ method: "POST" })
   .middleware([requireOrg])
@@ -176,7 +179,7 @@ const SubmitInput = z.object({
  * Submit answers once, grade them, lock the assessment, and start what comes
  * next. `grade` is the AI grader (injectable for tests).
  */
-export async function submitAssessmentCore(
+export const submitAssessmentCore = createServerOnlyFn(async function submitAssessmentCore(
   data: z.infer<typeof SubmitInput>,
   grade: typeof scoreAnswers = scoreAnswers,
 ): Promise<{ ok: true }> {
@@ -260,7 +263,7 @@ export async function submitAssessmentCore(
   });
 
   return { ok: true as const };
-}
+});
 
 /** Public: submit answers once, score them, and lock the assessment. */
 export const submitAssessment = createServerFn({ method: "POST" })

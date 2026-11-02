@@ -1,4 +1,4 @@
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { requireOrg } from "./auth.middleware";
@@ -17,7 +17,7 @@ import { assertAllowedOrigin, signOAuthState } from "./oauth-state";
  * public callback exchanges the code and stores tokens org-scoped.
  */
 
-async function connectUrl(
+const connectUrl = createServerOnlyFn(async function connectUrl(
   provider: MeetingOAuthProvider,
   origin: string,
   orgId: string,
@@ -45,7 +45,7 @@ async function connectUrl(
   const { panelAgentPolicyOf } = await import("../server/panel/transcripts.server");
   const transcripts = (await panelAgentPolicyOf(orgId)).enabled;
   return { url: buildAuthorizeUrl(provider, state, safeOrigin, { transcripts }) };
-}
+});
 
 export const startMicrosoftConnect = createServerFn({ method: "POST" })
   .middleware([requireOrg])

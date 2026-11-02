@@ -1,5 +1,5 @@
 import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { db } from "../server/db";
@@ -246,7 +246,7 @@ export type ScorecardResult = {
  * the plan says "immediate". The Evaluation agent hears about each completed
  * round.
  */
-export async function submitScorecardCore(
+export const submitScorecardCore = createServerOnlyFn(async function submitScorecardCore(
   ctx: { orgId: string; userId: string; email: string; actor: string; isOwner?: boolean },
   data: z.infer<typeof ScorecardInput>,
 ): Promise<ScorecardResult> {
@@ -541,7 +541,7 @@ export async function submitScorecardCore(
         }
       : {}),
   };
-}
+});
 
 export const submitScorecard = createServerFn({ method: "POST" })
   .middleware([requireOrg])
@@ -572,7 +572,7 @@ const OutcomeInput = z.object({
  * nothing moves the candidate. The hiring desk thread is told, and the
  * Interview coordinator offers new times (event interview.missed).
  */
-export async function markInterviewOutcomeCore(
+export const markInterviewOutcomeCore = createServerOnlyFn(async function markInterviewOutcomeCore(
   ctx: { orgId: string; userId: string; email: string },
   data: z.infer<typeof OutcomeInput>,
 ): Promise<{ ok: true }> {
@@ -647,7 +647,7 @@ export async function markInterviewOutcomeCore(
     /* the thread is a courtesy; the audit trail has the record */
   }
   return { ok: true };
-}
+});
 
 export const markInterviewOutcome = createServerFn({ method: "POST" })
   .middleware([requireOrg])
@@ -672,98 +672,101 @@ const UnavailableInput = z.object({
  * candidate is not disturbed; the hiring desk thread is told, and the
  * Interview coordinator proposes a stand-in for a person to approve.
  */
-export async function interviewerUnavailableCore(
-  ctx: { orgId: string; userId: string; email: string },
-  data: z.infer<typeof UnavailableInput>,
-): Promise<{ ok: true }> {
-  const me = ctx.email.trim().toLowerCase();
-  const [r] = await db
-    .select({
-      id: interviews.id,
-      status: interviews.status,
-      level: interviews.level,
-      scheduledAt: interviews.scheduledAt,
-      applicationId: interviews.applicationId,
-      interviewerEmail: interviews.interviewerEmail,
-      panel: interviews.panel,
-      unavailable: interviews.unavailable,
-      requisitionId: applications.requisitionId,
-      candidateName: candidates.fullName,
-    })
-    .from(interviews)
-    .innerJoin(applications, eq(applications.id, interviews.applicationId))
-    .innerJoin(candidates, eq(candidates.id, applications.candidateId))
-    .where(and(eq(interviews.orgId, ctx.orgId), eq(interviews.id, data.interviewId)))
-    .limit(1);
-  if (!r) throw new Error("Interview round not found.");
-  const { emailsOf } = await import("./interview-plan.server");
-  if (!emailsOf(r).includes(me)) throw new Error("Only an interviewer on this round can say this.");
-  if (!["scheduled", "rescheduled"].includes(r.status) || !r.scheduledAt)
-    throw new Error("Only a booked round can be changed.");
-  if (r.scheduledAt.getTime() <= Date.now())
-    throw new Error('This interview has already started — use "Didn\'t happen?" instead.');
-  if ((r.unavailable ?? []).some((u) => u.email === me))
-    throw new Error("You have already said you cannot make it; a stand-in is being arranged.");
-  const [member] = await db
-    .select({
-      id: orgMembers.id,
-      name: sql<string>`coalesce(nullif(${orgMembers.fullName}, ''), ${orgMembers.email})`,
-    })
-    .from(orgMembers)
-    .where(and(eq(orgMembers.orgId, ctx.orgId), sql`lower(${orgMembers.email}) = ${me}`))
-    .limit(1);
-  await db
-    .update(interviews)
-    .set({
-      unavailable: [
-        ...(r.unavailable ?? []),
-        { email: me, note: data.note || null, at: new Date().toISOString() },
-      ],
-    })
-    .where(and(eq(interviews.orgId, ctx.orgId), eq(interviews.id, r.id)));
-  const { writeAudit } = await import("../server/audit");
-  await writeAudit({
-    actor: ctx.email,
-    actorUserId: ctx.userId,
-    orgId: ctx.orgId,
-    action: "interview.interviewer_unavailable",
-    entityType: "interview",
-    entityId: r.id,
-    detail: { level: r.level, note: data.note || null },
-  });
-  const { getOrgEmailSettings } = await import("./email-outbox.server");
-  const { localWhen } = await import("./local-time");
-  const when = localWhen(r.scheduledAt, (await getOrgEmailSettings(ctx.orgId)).timezone);
-  const name = member?.name ?? ctx.email;
-  const { emitAgentEvent } = await import("../server/agents/events");
-  await emitAgentEvent({
-    orgId: ctx.orgId,
-    type: "interview.panellist_unavailable",
-    subjectType: "application",
-    subjectId: r.applicationId,
-    actorUserId: ctx.userId,
-    payload: {
-      requisitionId: r.requisitionId,
-      level: r.level,
-      interviewId: r.id,
-      memberId: member?.id ?? null,
-      name,
-      when,
-    },
-  });
-  try {
-    const desk = await import("../server/desk/desk.server");
-    const conv = await desk.conversationForRequisition(ctx.orgId, r.requisitionId);
-    if (conv)
-      await desk.postMessage(conv, {
-        role: "desk",
-        body: `${name} cannot make ${r.candidateName}'s L${r.level} interview on ${when}${data.note ? ` ("${data.note}")` : ""}. The booking stands for now; the Interview coordinator proposes a stand-in for you to approve.`,
-      });
-  } catch {
-    /* the thread is a courtesy; the audit trail has the record */
-  }
-  return { ok: true };
-}
+export const interviewerUnavailableCore = createServerOnlyFn(
+  async function interviewerUnavailableCore(
+    ctx: { orgId: string; userId: string; email: string },
+    data: z.infer<typeof UnavailableInput>,
+  ): Promise<{ ok: true }> {
+    const me = ctx.email.trim().toLowerCase();
+    const [r] = await db
+      .select({
+        id: interviews.id,
+        status: interviews.status,
+        level: interviews.level,
+        scheduledAt: interviews.scheduledAt,
+        applicationId: interviews.applicationId,
+        interviewerEmail: interviews.interviewerEmail,
+        panel: interviews.panel,
+        unavailable: interviews.unavailable,
+        requisitionId: applications.requisitionId,
+        candidateName: candidates.fullName,
+      })
+      .from(interviews)
+      .innerJoin(applications, eq(applications.id, interviews.applicationId))
+      .innerJoin(candidates, eq(candidates.id, applications.candidateId))
+      .where(and(eq(interviews.orgId, ctx.orgId), eq(interviews.id, data.interviewId)))
+      .limit(1);
+    if (!r) throw new Error("Interview round not found.");
+    const { emailsOf } = await import("./interview-plan.server");
+    if (!emailsOf(r).includes(me))
+      throw new Error("Only an interviewer on this round can say this.");
+    if (!["scheduled", "rescheduled"].includes(r.status) || !r.scheduledAt)
+      throw new Error("Only a booked round can be changed.");
+    if (r.scheduledAt.getTime() <= Date.now())
+      throw new Error('This interview has already started — use "Didn\'t happen?" instead.');
+    if ((r.unavailable ?? []).some((u) => u.email === me))
+      throw new Error("You have already said you cannot make it; a stand-in is being arranged.");
+    const [member] = await db
+      .select({
+        id: orgMembers.id,
+        name: sql<string>`coalesce(nullif(${orgMembers.fullName}, ''), ${orgMembers.email})`,
+      })
+      .from(orgMembers)
+      .where(and(eq(orgMembers.orgId, ctx.orgId), sql`lower(${orgMembers.email}) = ${me}`))
+      .limit(1);
+    await db
+      .update(interviews)
+      .set({
+        unavailable: [
+          ...(r.unavailable ?? []),
+          { email: me, note: data.note || null, at: new Date().toISOString() },
+        ],
+      })
+      .where(and(eq(interviews.orgId, ctx.orgId), eq(interviews.id, r.id)));
+    const { writeAudit } = await import("../server/audit");
+    await writeAudit({
+      actor: ctx.email,
+      actorUserId: ctx.userId,
+      orgId: ctx.orgId,
+      action: "interview.interviewer_unavailable",
+      entityType: "interview",
+      entityId: r.id,
+      detail: { level: r.level, note: data.note || null },
+    });
+    const { getOrgEmailSettings } = await import("./email-outbox.server");
+    const { localWhen } = await import("./local-time");
+    const when = localWhen(r.scheduledAt, (await getOrgEmailSettings(ctx.orgId)).timezone);
+    const name = member?.name ?? ctx.email;
+    const { emitAgentEvent } = await import("../server/agents/events");
+    await emitAgentEvent({
+      orgId: ctx.orgId,
+      type: "interview.panellist_unavailable",
+      subjectType: "application",
+      subjectId: r.applicationId,
+      actorUserId: ctx.userId,
+      payload: {
+        requisitionId: r.requisitionId,
+        level: r.level,
+        interviewId: r.id,
+        memberId: member?.id ?? null,
+        name,
+        when,
+      },
+    });
+    try {
+      const desk = await import("../server/desk/desk.server");
+      const conv = await desk.conversationForRequisition(ctx.orgId, r.requisitionId);
+      if (conv)
+        await desk.postMessage(conv, {
+          role: "desk",
+          body: `${name} cannot make ${r.candidateName}'s L${r.level} interview on ${when}${data.note ? ` ("${data.note}")` : ""}. The booking stands for now; the Interview coordinator proposes a stand-in for you to approve.`,
+        });
+    } catch {
+      /* the thread is a courtesy; the audit trail has the record */
+    }
+    return { ok: true };
+  },
+);
 
 export const interviewerUnavailable = createServerFn({ method: "POST" })
   .middleware([requireOrg])
@@ -809,7 +812,7 @@ export type ScheduleData = Omit<z.infer<typeof ScheduleInput>, "panel"> & {
   panel?: { name?: string | null | undefined; email: string }[];
 };
 
-export async function scheduleInterviewCore(
+export const scheduleInterviewCore = createServerOnlyFn(async function scheduleInterviewCore(
   ctx: { orgId: string; actor: string },
   data: ScheduleData,
 ) {
@@ -1067,7 +1070,7 @@ export async function scheduleInterviewCore(
   }
 
   return { ok: true as const, rescheduled, candidateEmail, interviewId };
-}
+});
 
 export const scheduleInterview = createServerFn({ method: "POST" })
   .middleware([requireOrg])
@@ -1137,7 +1140,7 @@ export const saveAiInterview = createServerFn({ method: "POST" })
   });
 
 /** Validate further panel members: active members of the organisation, no repeats. */
-async function panelOf(
+const panelOf = createServerOnlyFn(async function panelOf(
   orgId: string,
   primary: string | null,
   panel: { name?: string | null | undefined; email: string }[],
@@ -1163,4 +1166,4 @@ async function panelOf(
       `Panel members must be active members of the organisation: ${unknown.join(", ")}.`,
     );
   return found;
-}
+});

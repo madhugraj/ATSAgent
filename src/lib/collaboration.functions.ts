@@ -1,4 +1,4 @@
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { and, desc, eq, ilike, inArray, isNotNull, or } from "drizzle-orm";
 import { z } from "zod";
 
@@ -25,7 +25,7 @@ import {
  */
 
 /** The signed-in user's active organisation, and whether they own it. */
-async function membership(userId: string) {
+const membership = createServerOnlyFn(async function membership(userId: string) {
   const [row] = await db
     .select({
       orgId: orgMembers.orgId,
@@ -39,7 +39,7 @@ async function membership(userId: string) {
     .limit(1);
   if (!row) throw new Error("You are not a member of an organisation yet.");
   return row;
-}
+});
 
 export type PoolTeammate = {
   userId: string;

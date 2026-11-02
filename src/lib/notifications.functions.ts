@@ -1,5 +1,5 @@
 import { and, asc, eq, ilike, inArray, isNotNull, lte, or, sql } from "drizzle-orm";
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 
 import { requireIdentity, type AppRole } from "./auth.middleware";
 import { db } from "../server/db";
@@ -477,7 +477,9 @@ export const myNotifications = createServerFn({ method: "GET" })
  * Assessment nudges, derived live (they disappear once acted on). IDs change
  * as an item escalates, so snoozing "waiting" never hides "overdue".
  */
-export async function assessmentNudges(orgId: string): Promise<Notification[]> {
+export const assessmentNudges = createServerOnlyFn(async function assessmentNudges(
+  orgId: string,
+): Promise<Notification[]> {
   const { candidateAssessments, candidates, applications } = await import("@db/schema");
   const tl = await import("./assessment-timeline.server");
   const { getOrgEmailSettings } = await import("./email-outbox.server");
@@ -585,13 +587,16 @@ export async function assessmentNudges(orgId: string): Promise<Notification[]> {
     }
   }
   return out;
-}
+});
 
 /**
  * Pay & availability forms past due, or a reminder waiting for a person
  * (TA / HR only — the caller checks). No amounts appear in a nudge.
  */
-export async function payNudges(orgId: string, now = new Date()): Promise<Notification[]> {
+export const payNudges = createServerOnlyFn(async function payNudges(
+  orgId: string,
+  now = new Date(),
+): Promise<Notification[]> {
   const comp = await import("./compensation.server");
   const tl = await import("./assessment-timeline.server");
   const { getOrgEmailSettings } = await import("./email-outbox.server");
@@ -654,14 +659,17 @@ export async function payNudges(orgId: string, now = new Date()): Promise<Notifi
     }
   }
   return out;
-}
+});
 
 /**
  * Pay discussions that need a person (TA / HR only — the caller checks):
  * prepared (call, or approve the message), a suggested figure, a call asked
  * for, no answer past the due date, or a closed link. No amounts in a nudge.
  */
-export async function negotiationNudges(orgId: string, now = new Date()): Promise<Notification[]> {
+export const negotiationNudges = createServerOnlyFn(async function negotiationNudges(
+  orgId: string,
+  now = new Date(),
+): Promise<Notification[]> {
   const { offerNegotiations, candidates } = await import("@db/schema");
   const { negotiationOverdue } = await import("./negotiation.server");
   const rows = await db
@@ -751,4 +759,4 @@ export async function negotiationNudges(orgId: string, now = new Date()): Promis
       });
   }
   return out;
-}
+});

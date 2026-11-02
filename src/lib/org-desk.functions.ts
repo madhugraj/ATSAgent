@@ -4,7 +4,7 @@
  * profile. There is one thread per organisation (kind = 'org_profile'); it
  * never appears in the hiring desk and hiring threads never appear here.
  */
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
@@ -15,7 +15,7 @@ import { agentTasks, hiringConversations, hiringMessages } from "@db/schema";
 import { requireOrg } from "./auth.middleware";
 import { EDITORS } from "./org-profile.server";
 
-async function actorCtx(context: {
+const actorCtx = createServerOnlyFn(async function actorCtx(context: {
   orgId: string;
   userId: string;
   isOwner: boolean;
@@ -29,19 +29,19 @@ async function actorCtx(context: {
     "Only the HR head, the CBO or the organisation owner can use the organisation desk.",
   );
   return context;
-}
+});
 
-async function needsAiKey(orgId: string) {
+const needsAiKey = createServerOnlyFn(async function needsAiKey(orgId: string) {
   const { resolveAiConfig } = await import("./ai-gateway.server");
   const cfg = await resolveAiConfig(orgId);
   if (!cfg.apiKey)
     throw new Error("Add your organisation's AI model key on the Integrations page first.");
-}
+});
 
-async function registered() {
+const registered = createServerOnlyFn(async function registered() {
   const { ensureAgentsRegistered } = await import("../server/agents");
   ensureAgentsRegistered();
-}
+});
 
 export const startOrgDeskThread = createServerFn({ method: "POST" })
   .middleware([requireOrg])
@@ -236,7 +236,10 @@ export const getOrgDeskThread = createServerFn({ method: "GET" })
     };
   });
 
-async function taskAnswersFor(orgId: string, ids: string[]): Promise<Record<string, string>> {
+const taskAnswersFor = createServerOnlyFn(async function taskAnswersFor(
+  orgId: string,
+  ids: string[],
+): Promise<Record<string, string>> {
   if (!ids.length) return {};
   const rows = await db
     .select({ id: agentTasks.id, response: agentTasks.response })
@@ -254,16 +257,19 @@ async function taskAnswersFor(orgId: string, ids: string[]): Promise<Record<stri
       return typeof a === "string" && a.trim() ? [[r.id, a]] : [];
     }),
   );
-}
+});
 
-async function taskStatusesFor(orgId: string, ids: string[]): Promise<Record<string, string>> {
+const taskStatusesFor = createServerOnlyFn(async function taskStatusesFor(
+  orgId: string,
+  ids: string[],
+): Promise<Record<string, string>> {
   if (!ids.length) return {};
   const rows = await db
     .select({ id: agentTasks.id, status: agentTasks.status })
     .from(agentTasks)
     .where(and(eq(agentTasks.orgId, orgId), inArray(agentTasks.id, ids)));
   return Object.fromEntries(rows.map((r) => [r.id, r.status]));
-}
+});
 
 const Text = z.string().trim().min(1).max(2000);
 

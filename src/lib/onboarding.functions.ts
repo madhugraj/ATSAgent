@@ -7,7 +7,7 @@
  * document is verified (enforced in offers.functions.ts).
  */
 import { and, desc, eq, inArray } from "drizzle-orm";
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { db } from "../server/db";
@@ -62,7 +62,9 @@ export const listDocTypes = createServerFn({ method: "GET" })
   .middleware([requireOrg])
   .handler(async () => DOC_TYPES);
 
-function toWire(row: typeof onboardingDocuments.$inferSelect): OnboardingDocWire {
+const toWire = createServerOnlyFn(function toWire(
+  row: typeof onboardingDocuments.$inferSelect,
+): OnboardingDocWire {
   return {
     id: row.id,
     application_id: row.applicationId,
@@ -83,7 +85,7 @@ function toWire(row: typeof onboardingDocuments.$inferSelect): OnboardingDocWire
     reviewed_at: row.reviewedAt ? row.reviewedAt.toISOString() : null,
     created_at: row.createdAt.toISOString(),
   };
-}
+});
 
 function base64ToBytes(data: string): Uint8Array {
   const b64 = data
@@ -284,7 +286,7 @@ export const reextractOnboardingDoc = createServerFn({ method: "POST" })
  * the decision, the reviewer and the note are recorded and audited.
  */
 /** Shared by the server function and the agents (acting member in `actor`). */
-export async function reviewOnboardingDocCore(
+export const reviewOnboardingDocCore = createServerOnlyFn(async function reviewOnboardingDocCore(
   actor: { orgId: string; userId: string; memberEmail: string },
   data: {
     id: string;
@@ -369,7 +371,7 @@ export async function reviewOnboardingDocCore(
     });
   }
   return { ok: true as const };
-}
+});
 
 export const reviewOnboardingDoc = createServerFn({ method: "POST" })
   .middleware([requireOrg])

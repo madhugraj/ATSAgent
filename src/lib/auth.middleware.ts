@@ -8,7 +8,7 @@
  * explicit `org_id` predicate. `requireIdentity` reads the
  * database-backed session cookie.
  */
-import { createMiddleware } from "@tanstack/react-start";
+import { createMiddleware, createServerOnlyFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
 import { and, eq, inArray } from "drizzle-orm";
 
@@ -34,7 +34,9 @@ export type OrgContext = {
 };
 
 /** Resolve the caller's active organisation. First membership wins, matching the legacy `current_org_id()`. */
-export async function activeOrgOf(userId: string): Promise<OrgContext | null> {
+export const activeOrgOf = createServerOnlyFn(async function activeOrgOf(
+  userId: string,
+): Promise<OrgContext | null> {
   const [membership] = await db
     .select({ orgId: orgMembers.orgId, isOwner: orgMembers.isOwner, email: orgMembers.email })
     .from(orgMembers)
@@ -47,10 +49,10 @@ export async function activeOrgOf(userId: string): Promise<OrgContext | null> {
     isOwner: membership.isOwner,
     memberEmail: membership.email,
   };
-}
+});
 
 /** Imperative role assertion for use inside handlers (input-dependent checks). */
-export async function assertRole(
+export const assertRole = createServerOnlyFn(async function assertRole(
   userId: string,
   orgId: string,
   role: AppRole | AppRole[],
@@ -72,7 +74,7 @@ export async function assertRole(
     )
     .limit(1);
   if (!row) throw new Error(message);
-}
+});
 
 /** Authn only: the atsiq_session httpOnly cookie.
  *  The definition lives in this client-reached module; the server-only

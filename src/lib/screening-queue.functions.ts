@@ -10,7 +10,7 @@
  * no engine/model fields, no prep-job internals beyond the coarse status.
  */
 import { and, desc, eq } from "drizzle-orm";
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 
@@ -246,7 +246,7 @@ export type ScreeningQueueCounts = {
 /** The bucket aggregate over the SAME cte stack the rows use — counts can never
  * diverge from what the queue page shows. Dashboard strip calls this with no
  * filters; the queue page passes its own requisition/term filters. */
-async function bucketCounts(
+const bucketCounts = createServerOnlyFn(async function bucketCounts(
   orgId: string,
   requisitionId: string | null,
   termPattern: string,
@@ -263,7 +263,7 @@ async function bucketCounts(
     graded: byBucket.get("graded") ?? 0,
     all: countRows.reduce((acc, c) => acc + c.n, 0),
   };
-}
+});
 
 /** Dashboard "Needs you today": bucket counts only — no rows shipped. */
 export const screeningQueueCounts = createServerFn({ method: "POST" })
