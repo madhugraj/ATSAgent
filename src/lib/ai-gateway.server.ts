@@ -17,6 +17,7 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../server/db";
+import { voiceDebug } from "../server/voice/debug";
 import { aiProviderCredentials, aiSettings } from "@db/schema";
 
 const OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions";
@@ -1923,7 +1924,17 @@ export async function openVoiceSession(opts: {
           heard += sc.inputTranscription.text;
         }
         for (const part of sc.modelTurn?.parts ?? [])
-          if (part.inlineData?.data) opts.events.onAudio?.(base64ToPcm16(part.inlineData.data));
+          if (part.inlineData?.data) {
+            const pcm = base64ToPcm16(part.inlineData.data);
+            voiceDebug({
+              kind: "audio",
+              samples: pcm.length,
+              mime: part.inlineData.mimeType ?? null,
+            });
+            opts.events.onAudio?.(pcm);
+          }
+        if (sc.turnComplete) voiceDebug({ kind: "turn_complete" });
+        if (sc.interrupted) voiceDebug({ kind: "interrupted" });
         if (sc.outputTranscription?.text) {
           flush("caller");
           if (!said) saidSince = Date.now();

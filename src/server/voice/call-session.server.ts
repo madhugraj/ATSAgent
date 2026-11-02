@@ -31,6 +31,7 @@ import {
 import { agentRunScope, withAiSubject } from "../agents/context";
 import { db } from "../db";
 import { log } from "../log";
+import type { AudioStats } from "./rtp";
 import { type BriefFacts, callSystemPrompt, loadBriefFacts } from "./call-brief.server";
 import {
   applyCallTool,
@@ -55,6 +56,8 @@ export interface PhoneLine {
   play(pcm8k: Int16Array): void;
   clear(): void;
   pendingSeconds(): number;
+  /** How smoothly the assistant's audio went out (the SIP line; fakes may omit it). */
+  audioStats?(): AudioStats | null;
   /** Resolves when the other side hangs up. */
   readonly ended: Promise<void>;
   hangup(): Promise<void>;
@@ -500,6 +503,8 @@ async function placeCall(
   if (watchdog) clearInterval(watchdog);
   stopOpening();
   await line.hangup().catch(() => undefined);
+  const audio = line.audioStats?.() ?? null;
+  if (audio) log.info("screening_call.audio", { call_id: call.id, ...audio });
   line.close();
   const summary = await session.close();
 

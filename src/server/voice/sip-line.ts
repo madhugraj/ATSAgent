@@ -28,6 +28,7 @@ export function sipLine(): PhoneLine {
     play: (pcm) => call.rtp?.play(pcm),
     clear: () => call.rtp?.clear(),
     pendingSeconds: () => call.rtp?.pendingSeconds() ?? 0,
+    audioStats: () => call.rtp?.audioStats() ?? null,
     ended: call.ended,
     hangup: () => call.hangup(),
     close: () => call.close(),

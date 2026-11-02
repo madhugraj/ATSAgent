@@ -9,7 +9,12 @@ import { describe, expect, test } from "bun:test";
 import { sumVoiceUsage, voiceSetupMessage } from "../src/lib/ai-gateway.server";
 import { decodeG711, encodeG711, PCMA, PCMU } from "../src/server/voice/g711";
 import { Resampler, bytesFromPcm, pcmFromBytes } from "../src/server/voice/resample";
-import { parseRtp } from "../src/server/voice/rtp";
+import {
+  parseRtp,
+  PLAYOUT_BUFFER_SAMPLES,
+  PLAYOUT_MAX_WAIT_FRAMES,
+  RtpStream,
+} from "../src/server/voice/rtp";
 import {
   CallFailed,
   digestAuthorization,
@@ -111,6 +116,38 @@ describe("RTP", () => {
     expect(parseRtp(Uint8Array.from([...header(0x80, 101), 1]))).toBeNull();
     expect(parseRtp(Uint8Array.from([...header(0x40, 0), 1]))).toBeNull();
     expect(parseRtp(Uint8Array.from([0x80, 0]))).toBeNull();
+  });
+
+  test("the assistant's speech waits for the playout buffer, and gaps are counted", () => {
+    const rtp = new RtpStream();
+    rtp.remote = { address: "127.0.0.1", port: 9 };
+    // Each frame drains 160 queued samples once playing; the queue tells what was sent.
+    const send = () => (rtp as unknown as { sendFrame(): void }).sendFrame();
+    const tone = (n: number) => new Int16Array(n).fill(1000);
+
+    // A long utterance starts at once.
+    rtp.play(tone(PLAYOUT_BUFFER_SAMPLES));
+    send();
+    expect(rtp.pendingSeconds() * 8000).toBe(PLAYOUT_BUFFER_SAMPLES - 160);
+    rtp.clear();
+
+    // A short reply is held until the wait runs out, then played.
+    rtp.play(tone(480));
+    for (let i = 1; i < PLAYOUT_MAX_WAIT_FRAMES; i++) send();
+    expect(rtp.pendingSeconds() * 8000).toBe(480);
+    send();
+    expect(rtp.pendingSeconds() * 8000).toBe(320);
+    send();
+    send();
+    expect(rtp.pendingSeconds()).toBe(0);
+    // More speech right after running dry was a gap mid-sentence; after a long pause it is not.
+    rtp.play(tone(160));
+    expect(rtp.audioStats().gaps).toBe(1);
+    rtp.clear();
+    for (let i = 0; i < 40; i++) send();
+    rtp.play(tone(160));
+    expect(rtp.audioStats().gaps).toBe(1);
+    rtp.stop();
   });
 });
 
