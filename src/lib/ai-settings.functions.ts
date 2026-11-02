@@ -78,7 +78,7 @@ export const getAiSettings = createServerFn({ method: "POST" })
 
 export const saveAiSettings = createServerFn({ method: "POST" })
   .middleware([requireRole("hr_head")])
-  .inputValidator((data: unknown) => SaveInput.parse(data))
+  .validator((data: unknown) => SaveInput.parse(data))
   .handler(async ({ data, context }) => {
     const { writeProviderKey } = await import("./ai-gateway.server");
     if (data.apiKey.trim()) await writeProviderKey(context.orgId, data.provider, data.apiKey);
@@ -119,7 +119,7 @@ const LimitsInput = z.object({
 /** Set the organisation's AI spend limits (docs/guardrails.md, P1-2). HR head; audited. */
 export const saveAiLimits = createServerFn({ method: "POST" })
   .middleware([requireRole("hr_head")])
-  .inputValidator((data: unknown) => LimitsInput.parse(data))
+  .validator((data: unknown) => LimitsInput.parse(data))
   .handler(async ({ data, context }) => {
     const [existing] = await db
       .select({
@@ -165,7 +165,7 @@ export const saveAiLimits = createServerFn({ method: "POST" })
 
 export const removeAiKey = createServerFn({ method: "POST" })
   .middleware([requireRole("hr_head")])
-  .inputValidator((data: unknown) => z.object({ provider: Provider }).parse(data))
+  .validator((data: unknown) => z.object({ provider: Provider }).parse(data))
   .handler(async ({ data, context }) => {
     const { clearProviderKey } = await import("./ai-gateway.server");
     await clearProviderKey(context.orgId, data.provider);
@@ -193,7 +193,7 @@ const TestInput = z
 /** Fire a tiny real completion at the chosen (or saved) provider/model and record the outcome. */
 export const testAiModel = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => TestInput.parse(data))
+  .validator((data: unknown) => TestInput.parse(data))
   .handler(async ({ context, data }) => {
     const { aiJson, resolveAiConfig, readProviderKey, DEFAULT_MODEL } =
       await import("./ai-gateway.server");

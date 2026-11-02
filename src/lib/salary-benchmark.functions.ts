@@ -57,7 +57,7 @@ const BenchmarkInputs = z.object({
  */
 export const runSalaryBenchmark = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => BenchmarkInputs.parse(data))
+  .validator((data: unknown) => BenchmarkInputs.parse(data))
   .handler(async ({ data, context }) => {
     const input = {
       title: data.title,
@@ -125,7 +125,7 @@ const LookupInputs = z.object({
 /** Latest run for these role inputs, plus whether it is past its 30-day window. */
 export const getLatestBenchmark = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => LookupInputs.parse(data))
+  .validator((data: unknown) => LookupInputs.parse(data))
   .handler(async ({ data, context }) => {
     const inputKey = benchmarkInputKey({
       title: data.title,

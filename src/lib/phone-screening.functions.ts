@@ -50,7 +50,7 @@ export const getPhoneScreening = createServerFn({ method: "GET" })
 /** Change the phone screening policy — HR head, CBO or owner; audited. */
 export const setPhoneScreening = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => Policy.parse(d))
+  .validator((d: unknown) => Policy.parse(d))
   .handler(async ({ data, context }) => {
     await assertRole(
       context.userId,
@@ -70,7 +70,7 @@ export const setPhoneScreening = createServerFn({ method: "POST" })
 /** Store the organisation's service-account key for the AI voice — HR head; audited. */
 export const saveVoiceServiceAccount = createServerFn({ method: "POST" })
   .middleware([requireRole("hr_head")])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z
       .object({
         json: z.string().min(50).max(20_000),

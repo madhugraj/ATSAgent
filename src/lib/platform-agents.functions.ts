@@ -11,7 +11,7 @@ export type { PlatformAgentConsole } from "../server/agents/platform.server";
 
 export const platformAgentConsole = createServerFn({ method: "POST" })
   .middleware([requirePlatformAdmin])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z
       .object({ days: z.union([z.literal(1), z.literal(7), z.literal(30)]).default(7) })
       .parse(d ?? {}),

@@ -76,7 +76,7 @@ export const readCatalogue = createServerFn({ method: "GET" })
 
 /** Save the commercial terms for one module. */
 export const saveCatalogueCommercials = createServerFn({ method: "POST" })
-  .inputValidator((d) =>
+  .validator((d) =>
     z
       .object({
         moduleId: z.string().min(1),

@@ -35,7 +35,7 @@ export type CollectSummary = {
 
 export const collectApplicants = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => Input.parse(data ?? {}))
+  .validator((data: unknown) => Input.parse(data ?? {}))
   .handler(async ({ data, context }): Promise<CollectSummary> => {
     const orgId = context.orgId;
 

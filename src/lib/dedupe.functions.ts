@@ -70,7 +70,7 @@ function mergeCandidateFields(survivor: CandRow, dupes: CandRow[]): CandInsert {
  */
 export const mergeCandidatesFn = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         survivorId: z.string().uuid(),

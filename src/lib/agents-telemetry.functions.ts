@@ -91,7 +91,7 @@ export type AgentTelemetryInput = z.infer<typeof TelemetryInput>;
 
 export const saveAgentTelemetry = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => TelemetryInput.parse(d))
+  .validator((d: unknown) => TelemetryInput.parse(d))
   .handler(async ({ data, context }) => {
     const { assertRole } = await import("./auth.middleware");
     await assertRole(context.userId, context.orgId, [...SETTINGS_ROLES]);
@@ -152,9 +152,7 @@ export const saveAgentTelemetry = createServerFn({ method: "POST" })
 /** Send one synthetic trace or alert to the saved destination. */
 export const testAgentTelemetry = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
-    z.object({ target: z.enum(["otlp", "webhook", "email"]) }).parse(d),
-  )
+  .validator((d: unknown) => z.object({ target: z.enum(["otlp", "webhook", "email"]) }).parse(d))
   .handler(async ({ data, context }): Promise<{ ok: boolean; message: string }> => {
     const { assertRole } = await import("./auth.middleware");
     await assertRole(context.userId, context.orgId, [...SETTINGS_ROLES]);

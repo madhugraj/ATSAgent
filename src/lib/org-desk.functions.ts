@@ -269,7 +269,7 @@ const Text = z.string().trim().min(1).max(2000);
 
 export const sendOrgDeskMessage = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ id: z.string().uuid(), message: Text }).parse(d))
+  .validator((d: unknown) => z.object({ id: z.string().uuid(), message: Text }).parse(d))
   .handler(async ({ data, context }) => {
     await actorCtx(context);
     await needsAiKey(context.orgId);
@@ -285,7 +285,7 @@ export const sendOrgDeskMessage = createServerFn({ method: "POST" })
 /** An owner confirms a website outside the registered e-mail domain, from its card. */
 export const confirmWebsiteFromDesk = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z.object({ id: z.string().uuid(), url: z.string().url().max(400) }).parse(d),
   )
   .handler(async ({ data, context }) => {
@@ -302,7 +302,7 @@ export const confirmWebsiteFromDesk = createServerFn({ method: "POST" })
 /** "Read the website now" from the thread. */
 export const readWebsiteFromDesk = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     await actorCtx(context);
     await registered();
@@ -318,7 +318,7 @@ export const readWebsiteFromDesk = createServerFn({ method: "POST" })
 /** "Build the draft" — records, website, documents, then submit for approval. */
 export const buildFromDesk = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     await actorCtx(context);
     await registered();
@@ -334,9 +334,7 @@ export const buildFromDesk = createServerFn({ method: "POST" })
 /** Run the thread's stopped agent run again (same goal, same person). */
 export const retryOrgDeskRun = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
-    z.object({ id: z.string().uuid(), runId: z.string().uuid() }).parse(d),
-  )
+  .validator((d: unknown) => z.object({ id: z.string().uuid(), runId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     await actorCtx(context);
     await registered();
@@ -354,7 +352,7 @@ export const retryOrgDeskRun = createServerFn({ method: "POST" })
  */
 export const clearOrgDeskChat = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     await actorCtx(context);
     await registered();

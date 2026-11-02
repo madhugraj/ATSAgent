@@ -28,7 +28,7 @@ const SaveCvInput = z.object({
 
 export const saveCv = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => SaveCvInput.parse(data))
+  .validator((data: unknown) => SaveCvInput.parse(data))
   .handler(async ({ data, context }) => {
     // Parse here (with the caller's org for AI routing) rather than inside
     // ingestCandidate so a failed parse surfaces as a clear error, exactly as

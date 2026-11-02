@@ -127,7 +127,7 @@ export const listPlatformAdmins = createServerFn({ method: "GET" })
 
 export const addPlatformAdmin = createServerFn({ method: "POST" })
   .middleware([requirePlatformAdmin])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z.object({ email: z.string().email(), note: z.string().max(160).default("") }).parse(data),
   )
   .handler(async ({ data, context }) => {
@@ -155,7 +155,7 @@ export const addPlatformAdmin = createServerFn({ method: "POST" })
 
 export const removePlatformAdmin = createServerFn({ method: "POST" })
   .middleware([requirePlatformAdmin])
-  .inputValidator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const [row] = await db
       .select({ id: platformAdmins.id, email: platformAdmins.email })
@@ -243,7 +243,7 @@ export const listAllOrganizations = createServerFn({ method: "GET" })
 /** Archive or restore a tenant. Archiving locks members out but keeps every record. */
 export const setOrganizationStatus = createServerFn({ method: "POST" })
   .middleware([requirePlatformAdmin])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         orgId: z.string().uuid(),
@@ -280,7 +280,7 @@ export const setOrganizationStatus = createServerFn({ method: "POST" })
  */
 export const deleteOrganizationAsSuperUser = createServerFn({ method: "POST" })
   .middleware([requirePlatformAdmin])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z.object({ orgId: z.string().uuid(), confirmName: z.string().min(1) }).parse(data),
   )
   .handler(async ({ data, context }) => {
@@ -376,7 +376,7 @@ async function purgeOrphanAccounts(userIds: string[]) {
 /** Super users can correct any tenant's profile fields. */
 export const updateOrganizationAsSuperUser = createServerFn({ method: "POST" })
   .middleware([requirePlatformAdmin])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         orgId: z.string().uuid(),
@@ -413,7 +413,7 @@ export const listOrgAgreementsAsSuperUser = createServerFn({ method: "GET" })
 /** Roster of one tenant, so a super user can fix or remove a user in any organisation. */
 export const listOrgUsersAsSuperUser = createServerFn({ method: "GET" })
   .middleware([requirePlatformAdmin])
-  .inputValidator((data: unknown) => z.object({ orgId: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ orgId: z.string().uuid() }).parse(data))
   .handler(async ({ data }) => {
     const rows = await db
       .select({
@@ -444,7 +444,7 @@ export const listOrgUsersAsSuperUser = createServerFn({ method: "GET" })
 /** Hard-delete a membership from any organisation (super user override, owners included). */
 export const deleteOrgUserAsSuperUser = createServerFn({ method: "POST" })
   .middleware([requirePlatformAdmin])
-  .inputValidator((data: unknown) => z.object({ memberId: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ memberId: z.string().uuid() }).parse(data))
   .handler(async ({ data }) => {
     const [member] = await db
       .select({ id: orgMembers.id, orgId: orgMembers.orgId, userId: orgMembers.userId })
@@ -468,7 +468,7 @@ export const deleteOrgUserAsSuperUser = createServerFn({ method: "POST" })
  */
 export const reviewOrganization = createServerFn({ method: "POST" })
   .middleware([requirePlatformAdmin])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         orgId: z.string().uuid(),

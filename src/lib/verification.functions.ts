@@ -18,7 +18,7 @@ const Input = z.object({
  */
 export const verifyCandidate = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => Input.parse(data))
+  .validator((data: unknown) => Input.parse(data))
   .handler(async ({ data, context }) => {
     const [candidate] = await db
       .select({
@@ -72,7 +72,7 @@ export const verifyCandidate = createServerFn({ method: "POST" })
 /** Bulk re-verification from the talent pool table. */
 export const verifyCandidates = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z.object({ candidateIds: z.array(z.string().uuid()).min(1).max(50) }).parse(data),
   )
   .handler(async ({ data, context }) => {

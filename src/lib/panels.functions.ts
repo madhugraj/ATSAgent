@@ -13,7 +13,7 @@ import { requireOrg } from "./auth.middleware";
 
 export const getPanelChoices = createServerFn({ method: "GET" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z.object({ requisitionId: z.string().uuid(), level: z.number().int().min(1).max(3) }).parse(d),
   )
   .handler(async ({ data, context }) => {

@@ -13,7 +13,7 @@ import { getObject, isStorageConfigured } from "../server/storage";
 
 export const getResumeDownloadUrl = createServerFn({ method: "GET" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ candidateId: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ candidateId: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const [candidate] = await db
       .select({

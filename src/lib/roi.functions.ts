@@ -230,7 +230,7 @@ async function loadCapabilities(orgId: string): Promise<{ nodes: OntologyNode[];
 /** The CHRO's answer to "what return on individual have we got?" */
 export const readReturnOnIndividual = createServerFn({ method: "POST" })
   .middleware([requireIdentity])
-  .inputValidator((input: unknown) =>
+  .validator((input: unknown) =>
     z.object({ orgId: z.string().uuid().optional() }).parse(input ?? {}),
   )
   .handler(async ({ data, context }): Promise<RoiView> => {

@@ -545,7 +545,7 @@ export async function submitScorecardCore(
 
 export const submitScorecard = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => ScorecardInput.parse(data))
+  .validator((data: unknown) => ScorecardInput.parse(data))
   .handler(async ({ data, context }): Promise<ScorecardResult> =>
     submitScorecardCore(
       {
@@ -651,7 +651,7 @@ export async function markInterviewOutcomeCore(
 
 export const markInterviewOutcome = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => OutcomeInput.parse(data))
+  .validator((data: unknown) => OutcomeInput.parse(data))
   .handler(async ({ data, context }) =>
     markInterviewOutcomeCore(
       { orgId: context.orgId, userId: context.userId, email: actorOf(context) },
@@ -767,7 +767,7 @@ export async function interviewerUnavailableCore(
 
 export const interviewerUnavailable = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => UnavailableInput.parse(data))
+  .validator((data: unknown) => UnavailableInput.parse(data))
   .handler(async ({ data, context }) =>
     interviewerUnavailableCore(
       { orgId: context.orgId, userId: context.userId, email: actorOf(context) },
@@ -1071,7 +1071,7 @@ export async function scheduleInterviewCore(
 
 export const scheduleInterview = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => ScheduleInput.parse(data))
+  .validator((data: unknown) => ScheduleInput.parse(data))
   .handler(async ({ data, context }) =>
     scheduleInterviewCore({ orgId: context.orgId, actor: actorOf(context) }, data),
   );
@@ -1093,7 +1093,7 @@ const AiScreenSaveInput = z.object({
  */
 export const saveAiInterview = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => AiScreenSaveInput.parse(data))
+  .validator((data: unknown) => AiScreenSaveInput.parse(data))
   .handler(async ({ data, context }) => {
     const [application] = await db
       .select({ id: applications.id, stage: applications.stage })

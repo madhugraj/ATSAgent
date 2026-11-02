@@ -8,7 +8,7 @@ import { requireOrg } from "./auth.middleware";
 
 export const addMasterItem = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         kind: z.enum([
@@ -48,7 +48,7 @@ export const addMasterItem = createServerFn({ method: "POST" })
 
 export const deleteMasterItem = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     await db
       .delete(masterItems)

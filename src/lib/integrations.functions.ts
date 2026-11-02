@@ -74,7 +74,7 @@ const SaveInput = z.object({
  */
 export const saveIntegration = createServerFn({ method: "POST" })
   .middleware([requireRole("hr_head")])
-  .inputValidator((data: unknown) => SaveInput.parse(data))
+  .validator((data: unknown) => SaveInput.parse(data))
   .handler(async ({ data, context }) => {
     const [row] = await db
       .select({ id: sourceIntegrations.id, label: sourceIntegrations.label })
@@ -118,7 +118,7 @@ export const saveIntegration = createServerFn({ method: "POST" })
 
 export const testIntegration = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z.object({ integrationId: z.string().uuid(), provider: z.enum(PROVIDERS) }).parse(data),
   )
   .handler(async ({ data, context }) => {
@@ -161,7 +161,7 @@ export const testIntegration = createServerFn({ method: "POST" })
 /** Forget a connection's credentials. Privileged (credential change) + audited. */
 export const disconnectIntegration = createServerFn({ method: "POST" })
   .middleware([requireRole("hr_head")])
-  .inputValidator((data: unknown) => z.object({ integrationId: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ integrationId: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const [row] = await db
       .select({
@@ -223,7 +223,7 @@ export const disconnectIntegration = createServerFn({ method: "POST" })
 /** Search a configured board and upsert the results into the talent pool. */
 export const importCandidates = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         provider: z.enum(PROVIDERS),

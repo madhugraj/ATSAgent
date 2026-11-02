@@ -11,7 +11,7 @@ import { requireOrg } from "./auth.middleware";
  */
 export const confirmPassword = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ password: z.string().min(1).max(128) }).parse(d))
+  .validator((d: unknown) => z.object({ password: z.string().min(1).max(128) }).parse(d))
   .handler(async ({ data, context }) => {
     const { confirmStepUp } = await import("../server/step-up");
     await confirmStepUp({

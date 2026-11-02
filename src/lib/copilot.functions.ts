@@ -179,7 +179,7 @@ ${MANUAL_TEXT}`;
 
 export const askCopilot = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ message: z.string().min(1).max(2000) }).parse(data))
+  .validator((data: unknown) => z.object({ message: z.string().min(1).max(2000) }).parse(data))
   .handler(async ({ data, context }): Promise<{ answer: string }> => {
     const { aiJson } = await import("@/lib/ai-gateway.server");
 

@@ -86,7 +86,7 @@ const AnalyzeInput = z
  */
 export const analyzeTemplateFile = createServerFn({ method: "POST" })
   .middleware([requireRole("hr_head")])
-  .inputValidator((data: unknown) => AnalyzeInput.parse(data))
+  .validator((data: unknown) => AnalyzeInput.parse(data))
   .handler(async ({ data, context }) => {
     const cfg = await resolveAiConfig(context.orgId);
     let images: AiImage[] | undefined;
@@ -176,7 +176,7 @@ export const analyzeTemplateFile = createServerFn({ method: "POST" })
  */
 export const validateJobCard = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         templateId: z.string().uuid(),
@@ -257,7 +257,7 @@ const MAX_SOURCE_BASE64 = 14_000_000; // ≈10 MB decoded
 /** Keep the original company file alongside the template it produced. */
 export const uploadTemplateSource = createServerFn({ method: "POST" })
   .middleware([requireRole("hr_head")])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         templateId: z.string().uuid(),
@@ -321,7 +321,7 @@ const SaveInput = z.object({
 /** Create or update a template. Uniqueness trips the org+kind+name index. */
 export const saveTemplate = createServerFn({ method: "POST" })
   .middleware([requireRole("hr_head")])
-  .inputValidator((data: unknown) => SaveInput.parse(data))
+  .validator((data: unknown) => SaveInput.parse(data))
   .handler(async ({ data, context }) => {
     const payload = {
       kind: data.kind,
@@ -349,7 +349,7 @@ export const saveTemplate = createServerFn({ method: "POST" })
 
 export const deleteTemplate = createServerFn({ method: "POST" })
   .middleware([requireRole("hr_head")])
-  .inputValidator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const [row] = await db
       .delete(contentTemplates)
@@ -371,7 +371,7 @@ export const deleteTemplate = createServerFn({ method: "POST" })
  */
 export const setTemplateDefault = createServerFn({ method: "POST" })
   .middleware([requireRole("hr_head")])
-  .inputValidator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     await db.transaction(async (tx) => {
       const [row] = await tx
@@ -404,7 +404,7 @@ const MAX_LOGO_BASE64 = 1_400_000; // ≈1 MB decoded
 
 export const uploadTemplateLogo = createServerFn({ method: "POST" })
   .middleware([requireRole("hr_head")])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         templateId: z.string().uuid(),
@@ -443,7 +443,7 @@ const MAX_BACKGROUND_BASE64 = 14_000_000; // ≈10 MB decoded — full-bleed art
 /** Store the job-card background artwork (replaces any previous one). */
 export const uploadTemplateBackground = createServerFn({ method: "POST" })
   .middleware([requireRole("hr_head")])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         templateId: z.string().uuid(),
@@ -480,7 +480,7 @@ export const uploadTemplateBackground = createServerFn({ method: "POST" })
 /** Authenticated background delivery for the canvas preview. */
 export const getTemplateBackground = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ templateId: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ templateId: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const [row] = await db
       .select({
@@ -512,7 +512,7 @@ export const getTemplateBackground = createServerFn({ method: "POST" })
 /** Authenticated logo delivery for the canvas preview — bytes never leave ATSIQ. */
 export const getTemplateLogo = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ templateId: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ templateId: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const [row] = await db
       .select({

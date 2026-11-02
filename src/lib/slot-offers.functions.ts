@@ -10,7 +10,7 @@ import { z } from "zod";
 const Token = z.string().regex(/^[a-f0-9]{64}$/, "This link is not valid.");
 
 export const getSlotOffer = createServerFn({ method: "GET" })
-  .inputValidator((d: unknown) => z.object({ token: Token }).parse(d))
+  .validator((d: unknown) => z.object({ token: Token }).parse(d))
   .handler(async ({ data }) => {
     const { publicOffer } = await import("./slot-offers.server");
     const offer = await publicOffer(data.token);
@@ -19,14 +19,14 @@ export const getSlotOffer = createServerFn({ method: "GET" })
   });
 
 export const chooseSlotOffer = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => z.object({ token: Token, slot: z.string().datetime() }).parse(d))
+  .validator((d: unknown) => z.object({ token: Token, slot: z.string().datetime() }).parse(d))
   .handler(async ({ data }) => {
     const { chooseSlot } = await import("./slot-offers.server");
     return chooseSlot(data.token, data.slot);
   });
 
 export const declineSlotOffer = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z.object({ token: Token, note: z.string().max(500).default("") }).parse(d),
   )
   .handler(async ({ data }) => {

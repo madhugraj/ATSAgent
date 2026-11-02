@@ -34,7 +34,7 @@ const MoveInput = z.object({
  */
 export const moveStage = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => MoveInput.parse(data))
+  .validator((data: unknown) => MoveInput.parse(data))
   .handler(async ({ data, context }) => {
     const { moveStageCore } = await import("./pipeline.server");
     const r = await moveStageCore(
@@ -52,7 +52,7 @@ export const moveStage = createServerFn({ method: "POST" })
 /** Same validation, applied to a selection from the talent pool table. */
 export const moveStages = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         applicationIds: z.array(z.string().uuid()).min(1).max(200),

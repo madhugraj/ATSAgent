@@ -47,7 +47,7 @@ export type AiUsageOverview = Awaited<ReturnType<typeof aiUsageOverview>>;
 
 export const aiUsageOverview = createServerFn({ method: "POST" })
   .middleware([requirePlatformAdmin])
-  .inputValidator((data: unknown) => RangeInput.parse(data ?? {}))
+  .validator((data: unknown) => RangeInput.parse(data ?? {}))
   .handler(async ({ data }) => {
     const where = rangeWhere(data);
 
@@ -210,7 +210,7 @@ const eventSelection = {
 /** Filterable event log for the platform console (newest first). */
 export const aiUsageEventsList = createServerFn({ method: "POST" })
   .middleware([requirePlatformAdmin])
-  .inputValidator((data: unknown) => EventsInput.parse(data ?? {}))
+  .validator((data: unknown) => EventsInput.parse(data ?? {}))
   .handler(async ({ data }): Promise<{ rows: AiUsageEventRow[]; total: number }> => {
     const where = rangeWhere(data);
     const rows = await db
@@ -234,7 +234,7 @@ export const aiUsageEventsList = createServerFn({ method: "POST" })
 /** Bulk dump for the CSV download (flat, newest first, hard-capped). */
 export const aiUsageExport = createServerFn({ method: "POST" })
   .middleware([requirePlatformAdmin])
-  .inputValidator((data: unknown) => RangeInput.parse(data ?? {}))
+  .validator((data: unknown) => RangeInput.parse(data ?? {}))
   .handler(async ({ data }): Promise<{ rows: AiUsageEventRow[] }> => {
     const where = rangeWhere(data);
     const rows = await db

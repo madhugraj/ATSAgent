@@ -99,7 +99,7 @@ function base64ToBytes(data: string): Uint8Array {
 /** Every document filed against one application, newest first, with readiness. */
 export const listOnboardingDocs = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ applicationId: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ applicationId: z.string().uuid() }).parse(data))
   .handler(
     async ({ data, context }): Promise<{ docs: OnboardingDocWire[]; readiness: Readiness }> => {
       const rows = await db
@@ -164,7 +164,7 @@ export const listOnboardingReadiness = createServerFn({ method: "GET" })
 /** Upload one document and read it with the organisation's own AI key. */
 export const uploadOnboardingDoc = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         applicationId: z.string().uuid(),
@@ -242,7 +242,7 @@ export const uploadOnboardingDoc = createServerFn({ method: "POST" })
 /** Re-run the extraction agent on a stored document (after a clearer copy, or a key change). */
 export const reextractOnboardingDoc = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const [row] = await db
       .select()
@@ -373,7 +373,7 @@ export async function reviewOnboardingDocCore(
 
 export const reviewOnboardingDoc = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         id: z.string().uuid(),
@@ -392,7 +392,7 @@ export const reviewOnboardingDoc = createServerFn({ method: "POST" })
 /** Delete a wrongly filed document and its stored file. */
 export const deleteOnboardingDoc = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     await assertRole(
       context.userId,
@@ -434,7 +434,7 @@ export const deleteOnboardingDoc = createServerFn({ method: "POST" })
  */
 export const getOnboardingDocFile = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const [row] = await db
       .select({
@@ -494,7 +494,7 @@ export const listPreOnboardingQueue = createServerFn({ method: "GET" })
  */
 export const getCompensationReading = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ applicationId: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ applicationId: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }): Promise<CompensationReading> => {
     return compensationReading(context.orgId, data.applicationId);
   });

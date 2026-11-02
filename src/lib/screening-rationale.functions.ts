@@ -60,7 +60,7 @@ const LABEL: Record<string, string> = {
 
 export const getScreeningRationale = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z
       .object({ runId: z.string().uuid().optional(), applicationId: z.string().uuid().optional() })
       .refine((v) => v.runId || v.applicationId, "runId or applicationId")

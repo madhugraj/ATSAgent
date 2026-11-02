@@ -341,7 +341,7 @@ export async function gradeScreeningForKit(input: {
 
 export const createScreeningKit = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         candidateId: z.string().uuid(),
@@ -362,7 +362,7 @@ export const createScreeningKit = createServerFn({ method: "POST" })
 
 export const saveScreeningKit = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         kitId: z.string().uuid(),
@@ -384,7 +384,7 @@ export const saveScreeningKit = createServerFn({ method: "POST" })
 
 export const gradeScreeningAnswers = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         kitId: z.string().uuid(),
@@ -478,7 +478,7 @@ export const gradeScreeningAnswers = createServerFn({ method: "POST" })
  */
 export const getScreeningAudioUrl = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ runId: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ runId: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const [run] = await db
       .select({ audioPath: screeningRuns.audioPath })

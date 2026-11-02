@@ -67,7 +67,7 @@ export const linkedinStatus = createServerFn({ method: "GET" })
 /** Start the one-time sign-in: returns the LinkedIn URL to open. */
 export const startLinkedInConnect = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ origin: z.string().url() }).parse(data))
+  .validator((data: unknown) => z.object({ origin: z.string().url() }).parse(data))
   .handler(async ({ data, context }) => {
     if (!linkedinEnvConfigured())
       throw new Error(
@@ -108,7 +108,7 @@ const PublishInput = z.object({
 /** Publish the designed post text to the organisation's own LinkedIn account. */
 export const publishToLinkedIn = createServerFn({ method: "POST" })
   .middleware([requireRole("hr_head")])
-  .inputValidator((data: unknown) => PublishInput.parse(data))
+  .validator((data: unknown) => PublishInput.parse(data))
   .handler(async ({ data, context }) => {
     const [requisition] = await db
       .select({ id: requisitions.id })

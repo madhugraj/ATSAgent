@@ -17,14 +17,14 @@ const Token = z.object({ token: z.string().regex(/^[a-f0-9]{32,64}$/) });
 /* ------------------------------------------------------------ candidate (public) */
 
 export const getCompensationForm = createServerFn({ method: "GET" })
-  .inputValidator((d: unknown) => Token.parse(d))
+  .validator((d: unknown) => Token.parse(d))
   .handler(async ({ data }) => {
     const { publicCompensationView } = await import("./compensation.server");
     return publicCompensationView(data.token);
   });
 
 export const submitCompensationForm = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => Token.extend({ answers: z.unknown() }).parse(d))
+  .validator((d: unknown) => Token.extend({ answers: z.unknown() }).parse(d))
   .handler(async ({ data }) => {
     const { submitCompensation, CandidateCompensationForm } = await import("./compensation.server");
     const parsed = CandidateCompensationForm.safeParse(data.answers);
@@ -50,7 +50,7 @@ async function payAccess(userId: string, orgId: string): Promise<boolean> {
 /** The candidate's pay per application — or `allowed: false` for anyone outside TA / HR. */
 export const getCandidateCompensation = createServerFn({ method: "GET" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ candidateId: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ candidateId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     if (!(await payAccess(context.userId, context.orgId)))
       return { allowed: false as const, applications: [] };
@@ -95,7 +95,7 @@ export const getCandidateCompensation = createServerFn({ method: "GET" })
 
 export const recordCandidateCompensation = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z
       .object({
         applicationId: z.string().uuid(),
@@ -120,7 +120,7 @@ export const recordCandidateCompensation = createServerFn({ method: "POST" })
 /** Send (or remind about) the form by hand. */
 export const sendCandidateCompensationForm = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z
       .discriminatedUnion("action", [
         z.object({ action: z.literal("send"), applicationId: z.string().uuid() }),

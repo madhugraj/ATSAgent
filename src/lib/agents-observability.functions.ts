@@ -434,7 +434,7 @@ async function buildObservability(orgId: string): Promise<ObservabilityView> {
 /** Acknowledge an issue: it stays visible and still auto-resolves, but stops notifying. */
 export const acknowledgeAgentIssue = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ issueId: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ issueId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const { assertRole } = await import("./auth.middleware");
     await assertRole(context.userId, context.orgId, [...GOVERNANCE_ROLES]);
@@ -589,7 +589,7 @@ const SAFE_ERRORS = new Set([
 /** Everything about one agent for the observability drawer (loaded on click). */
 export const agentObservabilityDetail = createServerFn({ method: "GET" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ agentType: z.string().min(2).max(40) }).parse(d))
+  .validator((d: unknown) => z.object({ agentType: z.string().min(2).max(40) }).parse(d))
   .handler(async ({ data, context }): Promise<AgentDetail> => {
     const { assertRole } = await import("./auth.middleware");
     await assertRole(context.userId, context.orgId, [...GOVERNANCE_ROLES]);
@@ -887,7 +887,7 @@ export type UtilisationView = import("../server/agents/utilisation.server").Util
 /** Day-wise tokens / cost / time, per-agent efficiency and recommendations. Governance roles. */
 export const agentUtilisation = createServerFn({ method: "GET" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z.object({ days: z.union([z.literal(14), z.literal(30)]).default(30) }).parse(d ?? {}),
   )
   .handler(async ({ data, context }): Promise<UtilisationView> => {
@@ -906,7 +906,7 @@ export const agentUtilisation = createServerFn({ method: "GET" })
 /** Save or clear the organisation's AI token prices (for cost estimates). Governance roles. */
 export const saveAgentCostRate = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z
       .object({
         rate: z

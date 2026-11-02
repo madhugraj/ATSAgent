@@ -27,7 +27,7 @@ const ReqStatus = z.enum([
 /** Approve/advance a requisition: role-checked status bump, trail rebuilt server-side. */
 export const advanceRequisition = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         id: z.string().uuid(),
@@ -53,7 +53,7 @@ export const advanceRequisition = createServerFn({ method: "POST" })
  */
 export const deleteRequisition = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         id: z.string().uuid(),
@@ -111,7 +111,7 @@ export const deleteRequisition = createServerFn({ method: "POST" })
 /** Publish / unpublish an approved requisition on the internal job board. */
 export const setRequisitionIjp = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z.object({ id: z.string().uuid(), enabled: z.boolean() }).parse(data),
   )
   .handler(async ({ data, context }) => {
@@ -127,7 +127,7 @@ export const setRequisitionIjp = createServerFn({ method: "POST" })
 /** Employee-facing note shown on the internal job board. */
 export const setRequisitionIjpNotes = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z.object({ id: z.string().uuid(), notes: z.string().nullish() }).parse(data),
   )
   .handler(async ({ data, context }) => {
@@ -141,7 +141,7 @@ export const setRequisitionIjpNotes = createServerFn({ method: "POST" })
 /** Persist the six match weights configured for this requisition. */
 export const saveRequisitionWeights = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         id: z.string().uuid(),
@@ -169,7 +169,7 @@ export const saveRequisitionWeights = createServerFn({ method: "POST" })
 /** Write budget CTC + band (e.g. chosen from a market benchmark) and the ladder level they came from. */
 export const updateRequisitionCompensation = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         id: z.string().uuid(),
@@ -215,7 +215,7 @@ const JdVersion = z.object({
  */
 export const saveJobDescription = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         requisitionId: z.string().uuid(),
@@ -243,7 +243,7 @@ export const saveJobDescription = createServerFn({ method: "POST" })
 /** Approve a JD version — a department-head-and-above decision. */
 export const approveJobDescription = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z.object({ id: z.string().uuid(), fullText: z.string().nullish() }).parse(data),
   )
   .handler(async ({ data, context }) => {
@@ -258,7 +258,7 @@ export const approveJobDescription = createServerFn({ method: "POST" })
 /** Send a JD version back with the reviewer's comment — department head and above. */
 export const requestJdChanges = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z.object({ id: z.string().uuid(), comment: z.string().min(1).max(4000) }).parse(data),
   )
   .handler(async ({ data, context }) => {
@@ -277,7 +277,7 @@ export const requestJdChanges = createServerFn({ method: "POST" })
  */
 export const syncRequisitionFromJd = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         id: z.string().uuid(),
@@ -313,7 +313,7 @@ export const syncRequisitionFromJd = createServerFn({ method: "POST" })
  */
 export const addApplicationsToRequisition = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         requisitionId: z.string().uuid(),
@@ -341,7 +341,7 @@ export const addApplicationsToRequisition = createServerFn({ method: "POST" })
  */
 export const createRequisition = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         title: z.string().min(1),
@@ -423,7 +423,7 @@ const JobCardZoneInput = z.object({
  */
 export const saveJobCardOverrides = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         id: z.string().uuid(),
@@ -472,7 +472,7 @@ export const saveJobCardOverrides = createServerFn({ method: "POST" })
 /** Quick-add a department straight from the requisition form; returns its id. */
 export const createDepartment = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ name: z.string().min(1) }).parse(data))
+  .validator((data: unknown) => z.object({ name: z.string().min(1) }).parse(data))
   .handler(async ({ data, context }) => {
     const [row] = await db
       .insert(departments)
@@ -489,7 +489,7 @@ export const createDepartment = createServerFn({ method: "POST" })
 /** Add a department to the workforce plan from the budgets panel. */
 export const addDepartment = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         name: z.string().min(1),
@@ -522,7 +522,7 @@ export const addDepartment = createServerFn({ method: "POST" })
  */
 export const applyInternally = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         requisitionId: z.string().uuid(),
