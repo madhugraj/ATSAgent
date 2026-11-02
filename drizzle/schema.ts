@@ -192,11 +192,18 @@ export const organizations = pgTable(
     captureToken: text("capture_token"),
     /** SHA-256 of the capture token — lookup key so the token itself can be encrypted. */
     captureTokenHash: text("capture_token_hash"),
+    /**
+     * SHA-256 of the capture key's distribution-surface token (HMAC of the key,
+     * computed by the extension) — a leak from a job-board destination cannot be
+     * replayed against candidate capture (2026-11 audit N-15).
+     */
+    distributionTokenHash: text("distribution_token_hash"),
   },
   (t) => [
     uniqueIndex("organizations_slug_key").on(t.slug),
     uniqueIndex("organizations_capture_token_key").on(t.captureToken),
     uniqueIndex("organizations_capture_token_hash_key").on(t.captureTokenHash),
+    uniqueIndex("organizations_distribution_token_hash_key").on(t.distributionTokenHash),
     uniqueIndex("organizations_inbox_slug_key")
       .on(sql`lower(${t.inboxSlug})`)
       .where(sql`${t.inboxSlug} is not null`),

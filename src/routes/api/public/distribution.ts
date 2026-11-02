@@ -60,8 +60,8 @@ async function handle(request: Request) {
       { status: 400, headers: cors },
     );
   }
-  const { orgForCaptureToken } = await import("@/lib/capture.server");
-  const org = await orgForCaptureToken(body.token);
+  const { orgForDistributionToken } = await import("@/lib/capture.server");
+  const org = await orgForDistributionToken(body.token);
   // Deliberately generic: no signal which part failed.
   if (!org)
     return Response.json(

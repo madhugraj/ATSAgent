@@ -103,6 +103,7 @@ erDiagram
     text rejection_reason "nullable"
     text capture_token UK "nullable"
     text capture_token_hash UK "nullable"
+    text distribution_token_hash UK "nullable"
   }
   org_members {
     uuid id PK
@@ -1439,7 +1440,7 @@ erDiagram
 | `org_pool_shares` | Organisations & masters | 10 | (ownerOrg+partnerOrg) |
 | `org_profile_versions` | Organisations & masters | 16 | (orgId+version) |
 | `org_profiles` | Organisations & masters | 12 | — |
-| `organizations` | Organisations & masters | 26 | (slug), (capture_token), (capture_token_hash) |
+| `organizations` | Organisations & masters | 27 | (slug), (capture_token), (capture_token_hash), (distribution_token_hash) |
 | `panel_agent_settings` | — | 5 | — |
 | `panel_assessments` | — | 23 | (interview_id) |
 | `phone_screening_settings` | Screening & interviews | 16 | — |
