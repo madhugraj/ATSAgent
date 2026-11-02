@@ -3271,6 +3271,8 @@ export type ScreeningCallAnswer = {
   at: string;
   /** The candidate chose not to answer (asked, never graded). */
   declined?: boolean;
+  /** They only agreed with something the assistant said: graded as such, never counted as answered. */
+  prompted?: boolean;
 };
 
 /**

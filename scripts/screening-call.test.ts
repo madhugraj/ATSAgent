@@ -492,6 +492,12 @@ describe("the call brief", () => {
     expect(brief.callSystemPrompt(facts({ appliedVia: null, appliedOn: null }))).toContain(
       "We came across your profile",
     );
+    // A referred person did not apply: the opening says so, and never names the referrer.
+    expect(brief.appliedVia("referral")).toBe("a referral");
+    const referred = brief.callSystemPrompt(facts({ appliedVia: "a referral" }));
+    expect(referred).toContain("Your details came to us through a referral");
+    expect(referred).toContain("Never name or guess who referred them");
+    expect(referred).not.toContain("you applied through a referral");
     expect(brief.callingHours(WIN)).toBe("Monday to Saturday, 10:00 to 19:00");
   });
 });

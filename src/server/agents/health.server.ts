@@ -109,6 +109,10 @@ export const HEALTH = {
   callAnswerShare: 0.4,
   /** …and of the answered calls, a decline share at or above this. */
   callDeclineShare: 0.5,
+  /** With at least this many recorded screening answers in 7 days, a prompted-answer… */
+  minCallAnswers7d: 10,
+  /** …share at or above this means the assistant is leading the witness. */
+  callPromptedShare: 0.3,
   /** …answered calls that ended before any question was answered, in 7 days. */
   shortCalls7d: 3,
   /** Re-evaluate at most this often (minutes). */
@@ -951,6 +955,31 @@ export const RULES: Rule[] = [
         {
           agentType: "screening_call",
           title: `${x.declined} of ${x.answered} candidates declined the AI screening call in 7 days`,
+          detail: x,
+        },
+      ];
+    },
+  },
+  {
+    id: "screening_call.prompted",
+    element: "skills",
+    severity: "warning",
+    description: `${Math.round(HEALTH.callPromptedShare * 100)}% or more of the answers recorded in phone screening calls in 7 days were the candidate agreeing with something the assistant said first (with at least ${HEALTH.minCallAnswers7d} answers). The assistant may be leading the witness — naming tools or examples, or reframing into yes/no — which the grading discounts. Check the call prompt's never-hand-over-the-answer rules.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ total: number; prompted: number }>(sql`
+        select count(*)::int total,
+          count(*) filter (where coalesce((a ->> 'prompted')::boolean, false))::int prompted
+        from screening_calls c
+        join lateral jsonb_array_elements(c.answers) a on true
+        where c.org_id = ${orgId} and c.purpose = 'screening'
+          and c.updated_at >= now() - interval '7 days'`);
+      const x = r[0];
+      if (!x || x.total < HEALTH.minCallAnswers7d || x.prompted / x.total < HEALTH.callPromptedShare)
+        return [];
+      return [
+        {
+          agentType: "screening_call",
+          title: `${x.prompted} of ${x.total} screening answers in 7 days only agreed with what the assistant suggested`,
           detail: x,
         },
       ];

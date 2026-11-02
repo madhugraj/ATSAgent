@@ -405,7 +405,27 @@ export function registerPhase2Agents(): void {
     // asked how it was known, from another application).
     // 1.1.10: merged with zod 4 (tool contracts) and the shared harness changes; no behaviour change.
     // 1.1.11: the request_approval subject gained the organisation profile; no behaviour change for this agent.
-    version: "1.1.11",
+    // 1.1.12 (a real call on 2 November): waits after "is now a good time?" and after
+    // each "is that fair?" read-back (it talked over the candidate); asks for a rough
+    // joining date in plain words, never "in a YYYY-MM-DD format"; "Your CV mentions …"
+    // for CV facts and a varied lead-in; records a pay refusal in pay_note and a
+    // condition on relocating in candidate_note; never skips "Do you have any questions?".
+    // 1.1.13 (a second real call, a fresher): skips notice period and current pay for
+    // someone not working and notes where they differ from the CV; asks every planned
+    // question (adapting one that does not fit, never dropping it) before their
+    // questions; reads back every answer; credits the CV and the candidate correctly.
+    // 1.1.14 (a third real call): "I haven't used it" is an answer, not a decline (the
+    // record said 1 of 4 answered); the read-back is a statement, not "is that fair?"
+    // (it kept starting the next question over "That's correct"); a month ("by March")
+    // is followed up for a date; record_answer's contract says the same. A referred
+    // person hears "your details came to us through a referral", never "you applied".
+    // 1.1.15: keeps one voice for the whole call (candidates heard it change between a
+    // woman's and a man's); the line now buffers 200 ms of speech so it no longer breaks up.
+    // 1.1.16 (a red-team call fished every answer): never gives examples, options, tool
+    // names or definitions; rephrases once and never as yes/no; a bare "yes" to its own
+    // suggestion is recorded as prompted (not counted as answered, graded weak and
+    // flagged); claims nothing about earlier calls. record_answer gained `prompted`.
+    version: "1.1.16",
     owner: "hr_head",
     responsibility:
       "Holds one AI screening phone call with a shortlisted candidate the way an HR recruiter does: says who it is and why it is calling, asks consent, explains the role and why it called them, records their practical details (including the pay they state, for HR only) and their answers to the role's screening questions, or agrees a better time — nothing else.",
@@ -433,6 +453,10 @@ export function registerPhase2Agents(): void {
       "screening call: agrees a later time when now is not good",
       "screening call: records the practical details without commenting on pay",
       "screening call: rephrases a question the candidate repeats instead of answering it",
+      "screening call: never gives examples when the candidate fishes for the answer",
+      "screening call: does not turn a question into yes/no when asked to",
+      "screening call: records a bare yes to its own suggestion as prompted",
+      "screening call: makes no claim about earlier calls it cannot know",
     ],
     feature: "agent_screening_call",
     maxSteps: 30,

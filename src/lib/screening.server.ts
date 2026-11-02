@@ -260,9 +260,12 @@ Spoken-answer rubric (this is a short phone screen with an AI assistant, not a w
 - not_answered (0): nothing relevant was said. Never use it for a question that was answered briefly.
 - If an answer is promising but brief, say "probe in interview: <what>" in its rationale instead of lowering the score further.
 - recommendation is 'advance' or 'hold' only — never 'reject'. Use 'hold' when the evidence is thin, and say what to probe.
+- Evidence is only what the candidate said in their own words. Lines starting "Assistant:" are the interviewer: a tool, method or detail the interviewer named first, which the candidate then only agreed with or repeated ("yes", "I have used it", "sounds familiar"), is not evidence. Quote the candidate's own line, never the interviewer's, and never a summary.
+- An answer marked "[Interviewer note: the candidate only agreed with …]", or one that only agrees with what the interviewer suggested, is at most weak (30-40). Add one red flag naming each such must-have plainly: "<skill>: confirmed only after the interviewer suggested it; no specifics of their own". This is about the evidence, not about the candidate asking questions.
 `;
 
-export async function gradeScreening(input: {
+/** The grader's system prompt and fenced input (pure): shared by grading and the red-team check. */
+export function gradeScreeningPrompt(input: {
   /** Owning organisation — its own AI key pays for this call. */
   orgId: string;
   role: string;
@@ -280,16 +283,9 @@ export async function gradeScreening(input: {
    * advance or hold only (never reject: people decide).
    */
   mode?: "written" | "spoken";
-}): Promise<ScreeningGrade> {
+}): { system: string; prompt: string } {
   const spoken = input.mode === "spoken";
-  const result = await aiJson<{
-    screening_score: number;
-    verdicts: ScreeningVerdict[];
-    rationale: string;
-    red_flags: string[];
-    recommendation: string;
-    recommendation_reason: string;
-  }>({
+  return {
     system:
       INJECTION_RULES +
       (spoken ? SPOKEN_RUBRIC : "") +
@@ -330,6 +326,38 @@ export async function gradeScreening(input: {
         transcript: (input.transcript ?? "").slice(0, 20000),
       }),
     ),
+  };
+}
+
+export async function gradeScreening(input: {
+  /** Owning organisation — its own AI key pays for this call. */
+  orgId: string;
+  role: string;
+  jdText: string;
+  mustHave: string[];
+  candidateName: string;
+  questions: ScreeningQuestion[];
+  /** Per-question answers HR typed in, keyed by question id. */
+  answers: { question_id: string; answer: string }[];
+  /** Whole-call notes or an audio transcript, used when answers are unsplit. */
+  transcript: string | null;
+  /**
+   * "spoken": an AI phone screen — answers are short and conversational, so the
+   * rubric looks for substance, not exhaustiveness, and the recommendation is
+   * advance or hold only (never reject: people decide).
+   */
+  mode?: "written" | "spoken";
+}): Promise<ScreeningGrade> {
+  const spoken = input.mode === "spoken";
+  const result = await aiJson<{
+    screening_score: number;
+    verdicts: ScreeningVerdict[];
+    rationale: string;
+    red_flags: string[];
+    recommendation: string;
+    recommendation_reason: string;
+  }>({
+    ...gradeScreeningPrompt(input),
     orgId: input.orgId,
     feature: "screening_grade",
   });
@@ -384,12 +412,11 @@ export async function gradeScreening(input: {
 
 /* ----------------------------------------------------------- transcribe */
 
-const OPENAI_TRANSCRIBE = "https://api.openai.com/v1/audio/transcriptions";
-
 /**
- * Transcribe a screening recording with the organisation's own provider when it
- * can hear audio, so a bring-your-own key is used for this step too. Anthropic
- * has no transcription endpoint — that is reported, not silently re-routed.
+ * Transcribe a screening recording with the organisation's own provider — via
+ * the AI gateway, so the monthly spend cap is checked before the provider
+ * request and the transcription is captured behind the organisation's
+ * training consent like every other model call (2026-11 audit N-3).
  */
 export async function transcribeScreeningAudio(input: {
   orgId?: string | null;
@@ -397,135 +424,14 @@ export async function transcribeScreeningAudio(input: {
   filename: string;
   contentType: string;
 }): Promise<{ transcript: string; engine: string }> {
-  const cfg = await resolveAiConfig(input.orgId);
-  if (cfg.provider === "anthropic") {
-    throw new Error(
-      "The configured AI model cannot transcribe audio. Type the answers in, or switch the AI provider on Integrations.",
-    );
-  }
-  if (!cfg.apiKey) {
-    // Vendor-neutral on purpose — provider names never leave the server
-    // outside the Integrations → AI model settings page.
-    throw new Error("No AI model key saved. Add one on the Integrations page.");
-  }
-
-  // Google's own API has no OpenAI-style transcription route, so a BYO Gemini
-  // key transcribes through its chat endpoint with inline audio instead.
-  const gemini = cfg.provider === "google";
-  const endpoint = OPENAI_TRANSCRIBE;
-  const model = gemini ? "gemini-2.5-flash" : "gpt-4o-mini-transcribe";
-  const startedAt = Date.now();
-  const { recordAiUsage } = await import("../server/ai-usage");
-  const log = (status: "ok" | "error", usage: AiUsage | null, message?: string) =>
-    recordAiUsage({
-      orgId: input.orgId ?? null,
-      feature: "audio_transcribe",
-      provider: cfg.provider,
-      model,
-      status,
-      promptTokens: usage?.promptTokens ?? 0,
-      completionTokens: usage?.completionTokens ?? 0,
-      totalTokens: usage?.totalTokens ?? 0,
-      durationMs: Date.now() - startedAt,
-      errorMessage: message ?? null,
-    }).catch(() => undefined);
-
-  if (gemini) {
-    const base64 = Buffer.from(input.bytes).toString("base64");
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": cfg.apiKey },
-        body: JSON.stringify({
-          contents: [
-            {
-              role: "user",
-              parts: [
-                {
-                  text: "Transcribe this screening call verbatim. Label each speaker as Recruiter: or Candidate: when you can tell them apart. Return the transcript only.",
-                },
-                { inlineData: { mimeType: input.contentType, data: base64 } },
-              ],
-            },
-          ],
-        }),
-      },
-    );
-    if (!res.ok) {
-      const raw = await res.text().catch(() => "");
-      await log("error", null, `Gemini transcription failed (${res.status}): ${raw.slice(0, 300)}`);
-      throw new Error(`Gemini transcription failed (${res.status}): ${raw.slice(0, 300)}`);
-    }
-    const json = (await res.json()) as {
-      candidates?: { content?: { parts?: { text?: string }[] } }[];
-      usageMetadata?: { promptTokenCount?: number; totalTokenCount?: number };
-    };
-    const usage: AiUsage | null = json.usageMetadata
-      ? {
-          promptTokens: json.usageMetadata.promptTokenCount ?? 0,
-          completionTokens: 0,
-          totalTokens:
-            json.usageMetadata.totalTokenCount ?? json.usageMetadata.promptTokenCount ?? 0,
-        }
-      : null;
-    if (usage) usage.completionTokens = Math.max(0, usage.totalTokens - usage.promptTokens);
-    const transcript = (json.candidates?.[0]?.content?.parts ?? [])
-      .map((p) => p.text ?? "")
-      .join("")
-      .trim();
-    if (!transcript) {
-      await log("error", usage, "The recording produced no transcript.");
-      throw new Error("The recording produced no transcript.");
-    }
-    await log("ok", usage);
-    return { transcript, engine: `gemini · ${model}` };
-  }
-
-  const form = new FormData();
-  form.append("model", model);
-  form.append(
-    "file",
-    new Blob([Uint8Array.from(input.bytes)], { type: input.contentType }),
-    input.filename,
-  );
-  const res = await fetch(endpoint, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${cfg.apiKey}` },
-    body: form,
+  const { aiTranscribe } = await import("./ai-gateway.server");
+  const r = await aiTranscribe({
+    orgId: input.orgId,
+    feature: "audio_transcribe",
+    bytes: input.bytes,
+    filename: input.filename,
+    contentType: input.contentType,
   });
-  if (!res.ok) {
-    const raw = await res.text().catch(() => "");
-    let message = raw.slice(0, 400) || `Transcription failed (${res.status}).`;
-    try {
-      const parsed = JSON.parse(raw);
-      message = parsed?.error?.message ?? parsed?.message ?? message;
-    } catch {
-      /* plain text */
-    }
-    if (res.status === 402)
-      message = `${message} — check this organisation's provider billing and API-key quota.`;
-    await log("error", null, `${cfg.provider}: ${message}`);
-    throw new Error(message);
-  }
-  const json = (await res.json()) as {
-    text?: string;
-    usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
-  };
-  const usage: AiUsage | null = json.usage
-    ? {
-        promptTokens: json.usage.input_tokens ?? 0,
-        completionTokens: json.usage.output_tokens ?? 0,
-        totalTokens:
-          json.usage.total_tokens ??
-          (json.usage.input_tokens ?? 0) + (json.usage.output_tokens ?? 0),
-      }
-    : null;
-  const transcript = (json.text ?? "").trim();
-  if (!transcript) {
-    await log("error", usage, "The recording produced no transcript.");
-    throw new Error("The recording produced no transcript.");
-  }
-  await log("ok", usage);
-  return { transcript, engine: `${cfg.provider} · ${model}` };
+  if (!r.ok) throw new Error(r.message);
+  return { transcript: r.transcript, engine: r.engine };
 }
