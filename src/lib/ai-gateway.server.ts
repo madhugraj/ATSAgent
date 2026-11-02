@@ -2116,6 +2116,203 @@ export async function aiVoiceSession(opts: {
   });
 }
 
+/* ------------------------------------------------- transcribe (audio in) */
+
+const OPENAI_TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe";
+const GEMINI_TRANSCRIBE_MODEL = "gemini-2.5-flash";
+
+export type AiTranscribeResult =
+  | { ok: true; transcript: string; engine: string; model: string; usage: AiUsage | null }
+  | { ok: false; status: number; message: string };
+
+/**
+ * Transcribe a recording (screening-call answers) with the organisation's own
+ * key — through the gateway so the spend cap applies before the provider
+ * request and the transcription is captured behind the organisation's
+ * training consent, like every other model call (2026-11 audit N-3).
+ * Anthropic has no transcription endpoint — that is reported, not re-routed.
+ * Error copy is vendor-neutral on purpose.
+ */
+export async function aiTranscribe(opts: {
+  orgId?: string | null | undefined;
+  feature: string;
+  bytes: Uint8Array;
+  filename: string;
+  contentType: string;
+}): Promise<AiTranscribeResult> {
+  const cfg = await resolveAiConfig(opts.orgId);
+  if (cfg.provider === "anthropic")
+    return {
+      ok: false,
+      status: 400,
+      message:
+        "The configured AI model cannot transcribe audio. Type the answers in, or switch the AI provider on Integrations.",
+    };
+  if (!cfg.apiKey)
+    return {
+      ok: false,
+      status: 400,
+      message: "No AI model key saved. Add one on the Integrations page.",
+    };
+  const capped = await capRefusal({ orgId: opts.orgId });
+  if (capped) return { ok: false, status: capped.status, message: capped.message };
+
+  const { withInferenceCapture } = await capture();
+  const call = withInferenceCapture(
+    () => transcribeCall(cfg, opts),
+    (r, latencyMs) => ({
+      orgId: opts.orgId,
+      callKind: "audio",
+      feature: opts.feature,
+      provider: cfg.provider,
+      model: r.ok ? r.model : null,
+      // The audio itself stays in storage; capture records what it was.
+      request: {
+        system: null,
+        prompt: "Transcribe this screening call verbatim; label Recruiter: / Candidate:.",
+        audio: {
+          filename: opts.filename,
+          bytes: opts.bytes.byteLength,
+          contentType: opts.contentType,
+        },
+      },
+      response: r.ok ? { data: { transcript: r.transcript } } : null,
+      status: r.ok ? "ok" : "error",
+      errorMessage: r.ok ? null : r.message,
+      promptTokens: r.ok ? (r.usage?.promptTokens ?? null) : null,
+      completionTokens: r.ok ? (r.usage?.completionTokens ?? null) : null,
+      latencyMs,
+    }),
+  );
+  return call;
+}
+
+async function transcribeCall(
+  cfg: AiConfig,
+  opts: {
+    orgId?: string | null | undefined;
+    bytes: Uint8Array;
+    filename: string;
+    contentType: string;
+  },
+): Promise<AiTranscribeResult> {
+  const startedAt = Date.now();
+  const log = (status: "ok" | "error", usage: AiUsage | null, model: string, message?: string) =>
+    import("../server/ai-usage").then(({ recordAiUsage }) =>
+      recordAiUsage({
+        orgId: opts.orgId ?? null,
+        feature: "audio_transcribe",
+        provider: cfg.provider,
+        model,
+        status,
+        promptTokens: usage?.promptTokens ?? 0,
+        completionTokens: usage?.completionTokens ?? 0,
+        totalTokens: usage?.totalTokens ?? 0,
+        durationMs: Date.now() - startedAt,
+        errorMessage: message ?? null,
+      }).catch(() => undefined),
+    );
+
+  // Google's own API has no OpenAI-style transcription route, so a BYO Gemini
+  // key transcribes through its chat endpoint with inline audio instead.
+  const model = cfg.provider === "google" ? GEMINI_TRANSCRIBE_MODEL : OPENAI_TRANSCRIBE_MODEL;
+
+  const fail = async (
+    message: string,
+    usage: AiUsage | null = null,
+  ): Promise<AiTranscribeResult> => {
+    await log("error", usage, model, message);
+    return { ok: false, status: 502, message };
+  };
+
+  try {
+    let usage: AiUsage | null = null;
+    let transcript = "";
+    if (cfg.provider === "google") {
+      const base64 = Buffer.from(opts.bytes).toString("base64");
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-goog-api-key": cfg.apiKey! },
+          body: JSON.stringify({
+            contents: [
+              {
+                role: "user",
+                parts: [
+                  {
+                    text: "Transcribe this screening call verbatim. Label each speaker as Recruiter: or Candidate: when you can tell them apart. Return the transcript only.",
+                  },
+                  { inlineData: { mimeType: opts.contentType, data: base64 } },
+                ],
+              },
+            ],
+          }),
+        },
+      );
+      if (!res.ok) {
+        const raw = await res.text().catch(() => "");
+        return fail(`Transcription failed (${res.status}): ${raw.slice(0, 300)}`);
+      }
+      const json = (await res.json()) as {
+        candidates?: { content?: { parts?: { text?: string }[] } }[];
+        usageMetadata?: { promptTokenCount?: number; totalTokenCount?: number };
+      };
+      usage = json.usageMetadata
+        ? {
+            promptTokens: json.usageMetadata.promptTokenCount ?? 0,
+            completionTokens: 0,
+            totalTokens:
+              json.usageMetadata.totalTokenCount ?? json.usageMetadata.promptTokenCount ?? 0,
+          }
+        : null;
+      if (usage) usage.completionTokens = Math.max(0, usage.totalTokens - usage.promptTokens);
+      transcript = (json.candidates?.[0]?.content?.parts ?? [])
+        .map((p) => p.text ?? "")
+        .join("")
+        .trim();
+    } else {
+      const form = new FormData();
+      form.append("model", model);
+      form.append(
+        "file",
+        new Blob([Uint8Array.from(opts.bytes)], { type: opts.contentType }),
+        opts.filename,
+      );
+      const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${cfg.apiKey}` },
+        body: form,
+      });
+      if (!res.ok) {
+        const raw = await res.text().catch(() => "");
+        let message = raw.slice(0, 400) || `Transcription failed (${res.status}).`;
+        try {
+          const parsed = JSON.parse(raw) as { error?: { message?: string } };
+          if (parsed.error?.message) message = parsed.error.message.slice(0, 300);
+        } catch {
+          // keep the raw slice
+        }
+        return fail(`Transcription failed (${res.status}): ${message}`);
+      }
+      const json = (await res.json()) as { text?: string; usage?: AiUsage };
+      usage = json.usage ?? null;
+      transcript = (json.text ?? "").trim();
+    }
+    if (!transcript) return fail("The recording produced no transcript.", usage);
+    await log("ok", usage, model);
+    return {
+      ok: true,
+      transcript,
+      engine: `${cfg.provider} · ${model}`,
+      model,
+      usage,
+    };
+  } catch (e) {
+    return fail(`Transcription failed: ${(e as Error).message.slice(0, 200)}`);
+  }
+}
+
 /* ---------------------------------------------- voice credentials (BYO) */
 
 // The organisation's own credential for the live voice model: its Google API
