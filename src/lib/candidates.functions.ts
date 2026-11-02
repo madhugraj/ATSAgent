@@ -15,7 +15,7 @@ import { assertRole, requireOrg } from "./auth.middleware";
  */
 export const deleteCandidates = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data) =>
+  .validator((data) =>
     z.object({ candidateIds: z.array(z.string().uuid()).min(1).max(100) }).parse(data),
   )
   .handler(async ({ data, context }) => {
@@ -43,7 +43,7 @@ export const deleteCandidates = createServerFn({ method: "POST" })
  */
 export const attachApplication = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         requisitionId: z.string().uuid(),
@@ -114,7 +114,7 @@ const CreateCandidateInput = z.object({
  */
 export const createCandidate = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => CreateCandidateInput.parse(data))
+  .validator((data: unknown) => CreateCandidateInput.parse(data))
   .handler(async ({ data, context }) => {
     const [row] = await db
       .insert(candidates)

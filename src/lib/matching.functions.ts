@@ -105,7 +105,7 @@ export async function generateJdCore(
 
 export const generateJd = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => JdInput.parse(data))
+  .validator((data: unknown) => JdInput.parse(data))
   .handler(async ({ data, context }) => generateJdCore(context.orgId, data));
 
 /* ------------------------------------------------- Existing JD import */
@@ -121,7 +121,7 @@ const JdImportInput = z.object({
  */
 export const importJd = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => JdImportInput.parse(data))
+  .validator((data: unknown) => JdImportInput.parse(data))
   .handler(async ({ data, context }) => {
     const result = await aiJson<
       GeneratedJd & { experience_min: number; experience_max: number; detected_title: string }
@@ -218,7 +218,7 @@ export async function suggestWeightsCore(
 
 export const suggestWeights = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => WeightAdviceInput.parse(data))
+  .validator((data: unknown) => WeightAdviceInput.parse(data))
   .handler(async ({ data, context }): Promise<WeightAdvice> =>
     suggestWeightsCore(context.orgId, data),
   );
@@ -282,7 +282,7 @@ export async function draftLinkedinPostCore(
 
 export const draftLinkedinPost = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => PostInput.parse(data))
+  .validator((data: unknown) => PostInput.parse(data))
   .handler(async ({ data, context }) => draftLinkedinPostCore(context.orgId, data));
 
 /* -------------------------------------------------------------- JD vs CV */
@@ -342,7 +342,7 @@ const MatchInput = z.object({
 
 export const matchJdToCv = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => MatchInput.parse(data))
+  .validator((data: unknown) => MatchInput.parse(data))
   .handler(async ({ data, context }) => {
     const { model: _model, ...wire } = await scoreCandidate({
       orgId: context.orgId,
@@ -384,7 +384,7 @@ export type PipelineRowResult =
  */
 export const matchPipeline = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => PipelineInput.parse(data))
+  .validator((data: unknown) => PipelineInput.parse(data))
   .handler(async ({ data, context }): Promise<PipelineRowResult[]> =>
     mapWithConcurrency(data.rows, data.concurrency, async (row) => {
       try {
@@ -412,7 +412,7 @@ const ParseInput = z.object({ resumeText: z.string().min(20) });
 
 export const parseResume = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => ParseInput.parse(data))
+  .validator((data: unknown) => ParseInput.parse(data))
   .handler(async ({ data, context }) => {
     const result = await aiJson<{
       full_name: string;
@@ -450,7 +450,7 @@ const AiInterviewInput = z.object({
 
 export const runAiScreening = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => AiInterviewInput.parse(data))
+  .validator((data: unknown) => AiInterviewInput.parse(data))
   .handler(async ({ data, context }) => {
     const result = await aiJson<{
       jd_match_score: number;
@@ -542,7 +542,7 @@ const PersistInput = z.object({
  */
 export const persistMatchResult = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => PersistInput.parse(data))
+  .validator((data: unknown) => PersistInput.parse(data))
   .handler(async ({ data, context }) => {
     const [application] = await db
       .select({
@@ -643,7 +643,7 @@ export const persistMatchResult = createServerFn({ method: "POST" })
 /** Record the recruiter's verdict over the AI recommendation, with a reason. */
 export const saveRecruiterOverride = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         id: z.string().uuid(),

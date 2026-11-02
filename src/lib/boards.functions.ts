@@ -59,7 +59,7 @@ type BoardProviderStatus = {
 /** Posting + per-provider readiness for one requisition's "Job boards" panel. */
 export const boardPostingStatus = createServerFn({ method: "GET" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ requisitionId: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ requisitionId: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const [requisition] = await db
       .select({ status: requisitions.status })
@@ -165,7 +165,7 @@ const PublishInput = z.object({
 /** Publish this requisition on one board (capability-gated, audited). */
 export const publishToBoard = createServerFn({ method: "POST" })
   .middleware([requireRole("hr_head")])
-  .inputValidator((data: unknown) => PublishInput.parse(data))
+  .validator((data: unknown) => PublishInput.parse(data))
   .handler(async ({ data, context }) => {
     const { publishToBoardImpl } = await import("../server/boards/publish.server");
     return publishToBoardImpl({
@@ -186,7 +186,7 @@ const CloseInput = z.object({
 /** Close / mark filled a board posting (audited; vendor call is best-effort). */
 export const closeBoardPosting = createServerFn({ method: "POST" })
   .middleware([requireRole("hr_head")])
-  .inputValidator((data: unknown) => CloseInput.parse(data))
+  .validator((data: unknown) => CloseInput.parse(data))
   .handler(async ({ data, context }) => {
     const { closeBoardPostingImpl } = await import("../server/boards/publish.server");
     await closeBoardPostingImpl({
@@ -211,7 +211,7 @@ const PROVIDER_LABEL: Record<(typeof PROVIDERS)[number], string> = {
  */
 export const boardWebhookSetup = createServerFn({ method: "POST" })
   .middleware([requireRole("hr_head")])
-  .inputValidator((data: unknown) => z.object({ provider: ProviderEnum }).parse(data))
+  .validator((data: unknown) => z.object({ provider: ProviderEnum }).parse(data))
   .handler(async ({ data, context }) => {
     const [row] = await db
       .select({ id: sourceIntegrations.id })
@@ -303,7 +303,7 @@ export const boardIntegrationSummary = createServerFn({ method: "GET" })
  */
 export const boardConnectionStatus = createServerFn({ method: "GET" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ provider: ProviderEnum }).parse(data))
+  .validator((data: unknown) => z.object({ provider: ProviderEnum }).parse(data))
   .handler(async ({ data, context }): Promise<BoardConnectStatus> => {
     const [row] = await db
       .select({
@@ -363,7 +363,7 @@ export const boardConnectionStatus = createServerFn({ method: "GET" })
  */
 export const boardWebhookUrl = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ provider: ProviderEnum }).parse(data))
+  .validator((data: unknown) => z.object({ provider: ProviderEnum }).parse(data))
   .handler(async ({ data, context }) => {
     const [row] = await db
       .select({

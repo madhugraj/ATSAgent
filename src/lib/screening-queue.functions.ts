@@ -169,7 +169,7 @@ type QueueSqlRow = Omit<ScreeningQueueRow, "applied_at" | "red_flag_count"> & {
 
 export const listScreeningQueue = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         requisitionId: z.string().uuid().nullable().optional(),
@@ -276,7 +276,7 @@ export const screeningQueueCounts = createServerFn({ method: "POST" })
 
 export const getScreeningCandidate = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z.object({ candidateId: z.string().uuid(), applicationId: z.string().uuid() }).parse(data),
   )
   .handler(async ({ data, context }) => {

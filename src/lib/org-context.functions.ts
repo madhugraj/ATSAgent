@@ -81,7 +81,7 @@ export const getOrgContextAdmin = createServerFn({ method: "GET" })
 
 export const setOrgWebsite = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z.object({ url: z.string().max(400), confirm: z.boolean().optional() }).parse(d),
   )
   .handler(async ({ data, context }) => {
@@ -91,7 +91,7 @@ export const setOrgWebsite = createServerFn({ method: "POST" })
 
 export const readOrgWebsiteNow = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z.object({ pages: z.array(z.string().max(2000)).max(20).optional() }).parse(d),
   )
   .handler(async ({ data, context }) => {
@@ -101,7 +101,7 @@ export const readOrgWebsiteNow = createServerFn({ method: "POST" })
 
 export const uploadOrgDocument = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z
       .object({ fileName: z.string().min(1).max(300), dataBase64: z.string().max(15_000_000) })
       .parse(d),
@@ -122,7 +122,7 @@ export const uploadOrgDocument = createServerFn({ method: "POST" })
 
 export const deleteOrgDocument = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ sourceId: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ sourceId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const { deleteOrgDocumentCore } = await import("./org-context.server");
     await deleteOrgDocumentCore({ orgId: context.orgId, userId: context.userId }, data);
@@ -132,7 +132,7 @@ export const deleteOrgDocument = createServerFn({ method: "POST" })
 /** A person has read the held-back page and says it is fine — extract it now. */
 export const acceptOrgSource = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ sourceId: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ sourceId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const { acceptSourceCore } = await import("./org-context.server");
     await acceptSourceCore({ orgId: context.orgId, userId: context.userId }, data);
@@ -168,7 +168,7 @@ export const startOrgContextBuild = createServerFn({ method: "POST" })
  */
 export const resetOrgProfile = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ reason: z.string().trim().min(3).max(500) }).parse(d))
+  .validator((d: unknown) => z.object({ reason: z.string().trim().min(3).max(500) }).parse(d))
   .handler(async ({ data, context }) => {
     const { assertRole } = await import("./auth.middleware");
     await assertRole(

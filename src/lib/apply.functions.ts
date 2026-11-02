@@ -46,7 +46,7 @@ export type PublicJob = {
 
 /** Job summary an applicant is allowed to see. Nothing commercial is exposed. */
 export const publicJob = createServerFn({ method: "GET" })
-  .inputValidator((data: unknown) => IdInput.parse(data))
+  .validator((data: unknown) => IdInput.parse(data))
   .handler(async ({ data }): Promise<PublicJob | null> => {
     const [r] = await db
       .select({
@@ -117,7 +117,7 @@ const SubmitInput = z.object({
  * by this unauthenticated endpoint.
  */
 export const submitApplication = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) => SubmitInput.parse(data))
+  .validator((data: unknown) => SubmitInput.parse(data))
   .handler(async ({ data }) => submitApplicationImpl(data));
 
 /** Handler body, exported for integration tests of the C2 overwrite-protection fix. */

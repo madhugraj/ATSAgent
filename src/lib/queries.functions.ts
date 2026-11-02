@@ -100,7 +100,7 @@ export const listRequisitions = createServerFn({ method: "POST" })
 
 export const getRequisition = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const [row] = await db
       .select()
@@ -112,7 +112,7 @@ export const getRequisition = createServerFn({ method: "POST" })
 
 export const listJobDescriptions = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ requisitionId: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ requisitionId: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const rows = await db
       .select()
@@ -244,7 +244,7 @@ export type GlobalSearchResult = {
  */
 export const globalSearch = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ term: z.string().max(80) }).parse(data))
+  .validator((data: unknown) => z.object({ term: z.string().max(80) }).parse(data))
   .handler(async ({ data, context }): Promise<GlobalSearchResult> => {
     const clean = data.term
       .trim()
@@ -348,7 +348,7 @@ export const globalSearch = createServerFn({ method: "POST" })
 
 export const getCandidate = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const [row] = await db
       .select()
@@ -428,7 +428,7 @@ export const listAiInterviews = createServerFn({ method: "POST" })
 
 export const listStageEvents = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z.object({ applicationIds: z.array(z.string().uuid()) }).parse(data),
   )
   .handler(async ({ data, context }) => {
@@ -459,7 +459,7 @@ export const listVerifications = createServerFn({ method: "POST" })
 
 export const listCandidateVerifications = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ candidateId: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ candidateId: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const rows = await db
       .select()
@@ -476,7 +476,7 @@ export const listCandidateVerifications = createServerFn({ method: "POST" })
 
 export const listCandidateAssessments = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ candidateId: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ candidateId: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const rows = await db
       .select()
@@ -540,7 +540,7 @@ export const listTalentRequestSuggestions = createServerFn({ method: "POST" })
 
 export const listCandidateNotes = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ candidateId: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ candidateId: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const rows = await db
       .select()
@@ -557,7 +557,7 @@ export const listCandidateNotes = createServerFn({ method: "POST" })
 
 export const listCandidateScreeningKits = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ candidateId: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ candidateId: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const rows = await db
       .select()
@@ -574,7 +574,7 @@ export const listCandidateScreeningKits = createServerFn({ method: "POST" })
 
 export const listCandidateScreeningRuns = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ candidateId: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ candidateId: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const rows = await db
       .select()
@@ -591,7 +591,7 @@ export const listCandidateScreeningRuns = createServerFn({ method: "POST" })
 
 export const listOwnershipEvents = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ candidateId: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ candidateId: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const rows = await db
       .select()

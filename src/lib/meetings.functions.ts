@@ -88,5 +88,5 @@ export async function createMeetingLinkCore(orgId: string, data: z.infer<typeof 
 
 export const createMeetingLink = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => CreateInput.parse(data))
+  .validator((data: unknown) => CreateInput.parse(data))
   .handler(async ({ data, context }) => createMeetingLinkCore(context.orgId, data));

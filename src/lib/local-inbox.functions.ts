@@ -80,7 +80,7 @@ export const orgInbox = createServerFn({ method: "GET" })
 
 export const retryInboxMessage = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ messageId: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ messageId: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const { retryMessage } = await import("./local-inbox.server");
     return retryMessage(context.orgId, data.messageId);
@@ -88,7 +88,7 @@ export const retryInboxMessage = createServerFn({ method: "POST" })
 
 export const removeInboxMessage = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ messageId: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ messageId: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     await db
       .delete(inboxMessages)
@@ -104,7 +104,7 @@ export const removeInboxMessage = createServerFn({ method: "POST" })
  */
 export const saveCareersEmail = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => z.object({ email: z.string().max(320).nullish() }).parse(data))
+  .validator((data: unknown) => z.object({ email: z.string().max(320).nullish() }).parse(data))
   .handler(async ({ data, context }) => {
     const email = (data.email ?? "").trim().toLowerCase();
     if (!email) {

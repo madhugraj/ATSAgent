@@ -24,14 +24,14 @@ const CallBriefInput = z.object({
 const Token = z.object({ token: z.string().regex(/^[a-f0-9]{64}$/) });
 
 export const getNegotiationPage = createServerFn({ method: "GET" })
-  .inputValidator((d: unknown) => Token.parse(d))
+  .validator((d: unknown) => Token.parse(d))
   .handler(async ({ data }) => {
     const { publicNegotiationView } = await import("./negotiation.server");
     return publicNegotiationView(data.token);
   });
 
 export const answerNegotiationPage = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => Token.extend({ answer: z.unknown() }).parse(d))
+  .validator((d: unknown) => Token.extend({ answer: z.unknown() }).parse(d))
   .handler(async ({ data }) => {
     const { answerNegotiation, AnswerInput } = await import("./negotiation.server");
     const parsed = AnswerInput.safeParse(data.answer);
@@ -43,7 +43,7 @@ export const answerNegotiationPage = createServerFn({ method: "POST" })
 /** One discussion with its brief, for TA / HR / CBO / owners only. */
 export const getNegotiation = createServerFn({ method: "GET" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) => z.object({ applicationId: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ applicationId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const { PAY_ROLES } = await import("./compensation.server");
     await assertRole(
@@ -111,7 +111,7 @@ async function aiCallState(orgId: string, negotiationId: string) {
 /** TA / HR arrange an AI pay call, with at most one improved figure (≤ the ceiling). */
 export const arrangeNegotiationCall = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z
       .object({
         negotiationId: z.string().uuid(),
@@ -144,7 +144,7 @@ export const arrangeNegotiationCall = createServerFn({ method: "POST" })
 
 export const recordNegotiationCall = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z.object({ negotiationId: z.string().uuid(), outcome: z.unknown() }).parse(d),
   )
   .handler(async ({ data, context }) => {

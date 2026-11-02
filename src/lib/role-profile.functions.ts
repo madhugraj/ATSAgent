@@ -18,7 +18,7 @@ const Input = z.object({
 /** Draft skills, qualifications and responsibilities for a role title. */
 export const suggestRoleProfile = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .inputValidator((data: unknown) => Input.parse(data))
+  .validator((data: unknown) => Input.parse(data))
   .handler(async ({ data, context }): Promise<RoleProfile> =>
     draftRoleProfile({ ...data, orgId: context.orgId }),
   );
