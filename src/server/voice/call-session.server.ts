@@ -645,6 +645,10 @@ export function callCoverage(
   };
 }
 
+/** Marks an answer where the candidate only agreed with what the assistant suggested. */
+export const PROMPTED_MARK =
+  "[Interviewer note: the candidate only agreed with something the interviewer suggested and gave no specifics of their own.]";
+
 /**
  * Grade a phone screen fairly: only the screening questions the candidate
  * answered (never one that was not asked, never pay or logistics), with the
@@ -654,7 +658,7 @@ export function callCoverage(
 export async function gradeCallAnswers(input: {
   orgId: string;
   call: typeof screeningCalls.$inferSelect;
-  answers: { question_id: string; summary: string; declined?: boolean }[];
+  answers: { question_id: string; summary: string; declined?: boolean; prompted?: boolean }[];
   /** The screening part of the call (after the practical details). */
   transcript: ScreeningCallTurn[];
   /** The screening questions the call planned to ask. */
@@ -663,8 +667,11 @@ export async function gradeCallAnswers(input: {
   const { orgId, call } = input;
   const plannedSet = new Set(input.planned);
   const asked = input.answers.filter((a) => plannedSet.has(a.question_id));
-  const answered = asked.filter((a) => !a.declined);
-  if (!answered.length || !call.kitId) return null;
+  // Graded: everything they spoke to. Counted as answered: only what they said in
+  // their own words — agreeing with an example the assistant gave is not evidence.
+  const graded = asked.filter((a) => !a.declined);
+  const ownWords = graded.filter((a) => !a.prompted);
+  if (!graded.length || !call.kitId) return null;
   const [kit] = await db
     .select()
     .from(screeningKits)
@@ -673,22 +680,25 @@ export async function gradeCallAnswers(input: {
   if (!kit) return null;
   try {
     const { gradeScreeningForKit } = await import("@/lib/screening.functions");
-    const graded = await gradeScreeningForKit({
+    const run = await gradeScreeningForKit({
       orgId,
       kit,
-      answers: answered.map((a) => ({ question_id: a.question_id, answer: a.summary })),
+      answers: graded.map((a) => ({
+        question_id: a.question_id,
+        answer: a.prompted ? `${PROMPTED_MARK} ${a.summary}` : a.summary,
+      })),
       transcript: input.transcript.map(lineFor).join("\n") || null,
       inputKind: "phone_ai",
       createdBy: null,
-      onlyQuestionIds: answered.map((a) => a.question_id),
+      onlyQuestionIds: graded.map((a) => a.question_id),
       mode: "spoken",
       coverage: callCoverage(
         input.planned,
         asked.map((a) => a.question_id),
-        answered.length,
+        ownWords.length,
       ),
     });
-    return graded.run.id;
+    return run.run.id;
   } catch (e) {
     log.warn("screening_call.grading_failed", { call_id: call.id, error: e as Error });
     return null;
