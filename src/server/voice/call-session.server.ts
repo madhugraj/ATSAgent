@@ -93,6 +93,9 @@ export const GREETING_NUDGE_MS = 6_000;
  */
 export const REPLY_NUDGE_MS = 4_000;
 
+/** Cue the screening assistant this long after the candidate's hello if it has not begun. */
+export const SCREENING_REPLY_CUE_MS = 1_200;
+
 /**
  * The candidate speaks first (they say "hello" when they pick up); the
  * assistant answers them. If they say nothing for `callerFirstMs`, the
@@ -485,6 +488,10 @@ async function placeCall(
     lastHeard: () => lastHeardAt,
     aiSpoke: () => aiSpoke,
     callerFirstMs: limits.callerFirstMs,
+    // As the scheduling and negotiation calls: two real calls on 2 November waited the
+    // default 4 s after the hello, the candidate said "Hello? Hello?" over the late
+    // greeting, and that cut it off.
+    replyNudgeMs: SCREENING_REPLY_CUE_MS,
     tag: "screening_call",
     callId: call.id,
   });
