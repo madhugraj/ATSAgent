@@ -107,7 +107,10 @@ export async function parseCv(
       "education: every degree or diploma the resume states, each with degree, field, institution and year where " +
       "given, joined into one string with '; '. Read the whole resume before answering — an EDUCATION section is " +
       "usually near the end. Use null for education ONLY when the resume states no degree, diploma or certification " +
-      "at all. current_employer: the company of the newest employment_history entry. " +
+      "at all. location: the city (with state or country) the candidate is based in, kept short — never a full " +
+      "street address. Prefer an explicit address or contact-city line; otherwise use the city of the newest " +
+      "employer or, failing that, of their most recent institution. Return null only when the resume names no city " +
+      "anywhere. current_employer: the company of the newest employment_history entry. " +
       "Use null when a field is genuinely absent. Never invent values. URLs must be real URLs read from the resume — never fabricate one.",
     prompt: untrusted("resume", resumeText.slice(0, 20000)),
     orgId,
