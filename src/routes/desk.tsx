@@ -21,6 +21,10 @@ import {
   Trash2,
   UserRound,
   X,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
 } from "lucide-react";
 
 import { EmptyState, PageHeader } from "@/components/ats";
@@ -97,6 +101,28 @@ const EXAMPLES = [
   "A data analyst in Pune, SQL and Power BI, immediate joiner",
 ];
 
+/** A panel's open/closed state, kept in this browser between visits. */
+function usePersistedFlag(key: string, initial: boolean): [boolean, (v: boolean) => void] {
+  const [value, setValue] = useState(initial);
+  useEffect(() => {
+    try {
+      const v = window.localStorage.getItem(key);
+      if (v !== null) setValue(v === "1");
+    } catch {
+      /* storage off: keep the default */
+    }
+  }, [key]);
+  const set = (v: boolean) => {
+    setValue(v);
+    try {
+      window.localStorage.setItem(key, v ? "1" : "0");
+    } catch {
+      /* storage off: this visit only */
+    }
+  };
+  return [value, set];
+}
+
 function DeskPage() {
   const { c, split } = Route.useSearch();
   const navigate = useNavigate({ from: "/desk" });
@@ -110,27 +136,43 @@ function DeskPage() {
     refetchInterval: 15_000,
   });
   const select = (id: string | undefined) => navigate({ search: id ? { c: id } : {} });
+  // The conversation list folds away for more room to work with the agents.
+  const [listOpen, setListOpen] = usePersistedFlag("desk.listOpen", true);
 
   return (
     <>
       <PageHeader
         eyebrow="Agents"
         title="Hiring desk"
-        description="Tell the desk who you need. It asks what it needs to know, checks for similar roles, gets the job description approved, ranks the best candidates and lines up screening — you decide at each checkpoint."
         actions={
-          <Button size="sm" variant="outline" onClick={() => select(undefined)}>
-            <MessageSquarePlus className="size-4" /> New hiring need
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              title={listOpen ? "Hide the conversations" : "Show the conversations"}
+              onClick={() => setListOpen(!listOpen)}
+            >
+              {listOpen ? (
+                <PanelLeftClose className="size-4" />
+              ) : (
+                <PanelLeftOpen className="size-4" />
+              )}
+              {listOpen ? "Hide conversations" : "Conversations"}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => select(undefined)}>
+              <MessageSquarePlus className="size-4" /> New hiring need
+            </Button>
+          </div>
         }
       />
-      <div className="mt-4">
-        <OrgProfileNotice />
-      </div>
+      <OrgProfileNotice />
       {splitIds.length >= 2 ? (
         <SplitDesk ids={splitIds} />
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
-          <aside className="panel h-fit max-h-[70vh] overflow-y-auto p-2">
+        <div className={`grid gap-4 ${listOpen ? "lg:grid-cols-[260px_1fr]" : ""}`}>
+          <aside
+            className={`panel h-fit max-h-[70vh] overflow-y-auto p-2 ${listOpen ? "" : "hidden"}`}
+          >
             {list.isLoading ? (
               <p className="p-3 text-sm text-muted-foreground">Loading…</p>
             ) : !list.data?.length ? (
@@ -793,6 +835,7 @@ function Thread({
     refetchInterval: compact ? false : 4_000,
     staleTime: compact ? 60_000 : 0,
   });
+  const [journeyOpen, setJourneyOpen] = usePersistedFlag("desk.journeyOpen", true);
   const [text, setText] = useState("");
   const [pending, setPending] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
@@ -892,10 +935,11 @@ function Thread({
   const last = d.messages.at(-1);
   const deskWorking =
     !pending && last?.role === "user" && Date.now() - new Date(last.at).getTime() < 3 * 60_000;
+  const sideJourney = !compact && journeyOpen;
   return (
-    <div className={compact ? "" : "grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]"}>
-      {/* The journey: first on small screens, a sticky column on wide ones. */}
-      {!compact ? (
+    <div className={sideJourney ? "grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]" : ""}>
+      {/* The journey: first on small screens, a sticky column on wide ones — folds away. */}
+      {sideJourney ? (
         <div className="xl:order-2">
           <JourneyPanel conv={d} onChanged={refresh} />
         </div>
@@ -903,7 +947,7 @@ function Thread({
       {/* The conversation: fixed height, scrolls inside, composer always visible. */}
       <section
         className={`panel flex ${
-          compact ? "h-[calc(100vh-7.5rem)]" : "h-[calc(100vh-13rem)]"
+          compact ? "h-[calc(100vh-7.5rem)]" : "h-[calc(100vh-9.5rem)]"
         } min-h-[460px] flex-col xl:order-1`}
       >
         <header className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
@@ -925,6 +969,21 @@ function Thread({
             />
           ) : null}
           <DeleteThreadButton conv={d} onDeleted={onDeleted} />
+          {!compact ? (
+            <button
+              type="button"
+              aria-label={journeyOpen ? "Hide the hiring journey" : "Show the hiring journey"}
+              title={journeyOpen ? "Hide the hiring journey" : "Show the hiring journey"}
+              className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={() => setJourneyOpen(!journeyOpen)}
+            >
+              {journeyOpen ? (
+                <PanelRightClose className="size-4" />
+              ) : (
+                <PanelRightOpen className="size-4" />
+              )}
+            </button>
+          ) : null}
           {onFocus ? (
             <button
               type="button"
