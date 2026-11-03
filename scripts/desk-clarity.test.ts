@@ -245,6 +245,18 @@ describe("overtaken action cards", () => {
     expect(s.get("1")).toMatch(/candidates have arrived/);
   });
 
+  test("one live hiring plan card: an earlier one folds to a pointer", () => {
+    const s = view.supersededMessages({
+      messages: [m("1", "interview_plan"), m("2", "task"), m("3", "interview_plan")],
+      stages: {},
+    });
+    expect(s.get("1")).toMatch(/current card is further down/);
+    expect(s.has("3")).toBe(false);
+    expect(view.supersededMessages({ messages: [m("1", "interview_plan")], stages: {} }).size).toBe(
+      0,
+    );
+  });
+
   test("with an offer in play every bring-candidates card folds", () => {
     const s = view.supersededMessages({
       messages: [m("1", "bring_candidates")],

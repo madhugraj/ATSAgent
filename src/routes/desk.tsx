@@ -2999,6 +2999,9 @@ function InterviewPlanThreadCard({
   const [busy, setBusy] = useState(false);
   // A desk-raised draft waits for this before the Requisition agent sends it for approval.
   const confirmable = !conv.slots.planConfirmed && conv.requisition?.status === "draft";
+  // Once confirmed (or on its way through approval) the rounds are not edited in the chat.
+  const locked =
+    Boolean(conv.slots.planConfirmed) || (conv.requisition?.status ?? "draft") !== "draft";
   // The plan as this card shows it: confirming an older view is refused.
   const planQ = useQuery({
     queryKey: ["interview_plan", requisitionId],
@@ -3040,7 +3043,13 @@ function InterviewPlanThreadCard({
         <HiringManagerPicker requisitionId={requisitionId} />
       </div>
       <ExpertInterviewAction conv={conv} onChanged={onChanged} />
-      <InterviewPlanCard requisitionId={requisitionId} />
+      <InterviewPlanCard requisitionId={requisitionId} readOnly={locked} />
+      {locked ? (
+        <p className="text-xs text-muted-foreground">
+          The rounds are confirmed. Panels can still be chosen in the full editor; to change the
+          rounds, open the requisition.
+        </p>
+      ) : null}
       {confirmable ? (
         <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
           <Button size="sm" disabled={busy} onClick={confirm}>
@@ -3067,7 +3076,7 @@ function InterviewPlanThreadCard({
             </div>
             <section className="space-y-2">
               <h3 className="font-medium">Rounds</h3>
-              <InterviewPlanCard requisitionId={requisitionId} />
+              <InterviewPlanCard requisitionId={requisitionId} readOnly={locked} />
             </section>
             <section className="space-y-2">
               <h3 className="font-medium">Panels</h3>

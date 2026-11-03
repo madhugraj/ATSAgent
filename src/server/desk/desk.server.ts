@@ -4030,6 +4030,18 @@ async function jdTemplateFacts(orgId: string, requisitionId: string | null): Pro
  * The role's interview plan and hiring manager, posted into the thread as a
  * card the person edits in place (docs/interview-panel-plan.md, P1).
  */
+/**
+ * Tell the thread the hiring plan changed without posting another card: the one
+ * plan card (where the role was raised) always shows the current plan, so the
+ * thread keeps its order — plan, confirmation, approvals.
+ */
+export async function notePlanChanged(conv: Conversation, what: string): Promise<void> {
+  await postMessage(conv, {
+    role: "desk",
+    body: `${what} The hiring plan card above shows the current plan.`,
+  });
+}
+
 export async function showInterviewPlan(conv: Conversation, justCreated = false): Promise<void> {
   if (!conv.requisitionId) {
     await postMessage(conv, {

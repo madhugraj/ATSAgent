@@ -209,8 +209,9 @@ test("the rounds and panel the hiring manager named reach the plan; others are f
   expect(told).toMatch(/plan now has 1 round/);
   expect(told).toMatch(/L1 panel set to Leela Rao/);
   expect(told).toMatch(/Not in the panel directory yet: madhanagopal\.p@yavar\.ai \(L1\)/);
-  // The updated plan comes back for the person to confirm.
+  // No second plan card (the thread keeps its order): a note points to the live card.
   expect(msgs.some((m) => (m.card as { type?: string } | null)?.type === "interview_plan")).toBe(
-    true,
+    false,
   );
+  expect(told).toMatch(/hiring plan card above shows the current plan/);
 });
