@@ -145,3 +145,72 @@ test("declining stores nothing", async () => {
     .where(eq(requisitions.id, reqId));
   expect(after!.brief?.niceToHaves).toEqual(["Terraform"]);
 });
+
+test("the rounds and panel the hiring manager named reach the plan; others are flagged on the desk", async () => {
+  const { hiringConversations, hiringMessages, rolePanels } = await import("../drizzle/schema");
+  const { addPanelist } = await import("../src/lib/panelists.server");
+  // The desk thread for this role, and someone already in the panel directory.
+  const [conv] = await db
+    .insert(hiringConversations)
+    .values({
+      orgId,
+      createdBy: hmUser,
+      title: "t",
+      status: "active",
+      requisitionId: reqId,
+      slots: {},
+    } as never)
+    .returning({ id: hiringConversations.id });
+  await addPanelist(
+    orgId,
+    hmUser,
+    {
+      fullName: "Leela Rao",
+      email: `leela-${stamp}@client.example`,
+      kind: "external",
+      company: "Client Co",
+      areas: [],
+      rounds: [1],
+    },
+    { via: "team_page" },
+  );
+  const [cur] = await db
+    .select({ brief: requisitions.expertBrief })
+    .from(requisitions)
+    .where(eq(requisitions.id, reqId));
+  await gate.performExpertBriefGate(
+    orgId,
+    hmUser,
+    {
+      type: "expert_brief",
+      requisitionId: reqId,
+      brief: {
+        ...brief,
+        roundCount: 1,
+        panel: [{ level: 1, people: [`LEELA-${stamp}@client.example`, "madhanagopal.p@yavar.ai"] }],
+      },
+      expects: cur!.brief!.approvedAt,
+    },
+    { status: "approved" },
+  );
+  const [r] = await db
+    .select({ plan: requisitions.interviewPlan })
+    .from(requisitions)
+    .where(eq(requisitions.id, reqId));
+  expect(r!.plan?.rounds).toHaveLength(1);
+  const [p] = await db.select().from(rolePanels).where(eq(rolePanels.requisitionId, reqId));
+  expect(p?.level).toBe(1);
+  expect(p?.panelistIds).toHaveLength(1);
+  const msgs = await db
+    .select({ body: hiringMessages.body, card: hiringMessages.card })
+    .from(hiringMessages)
+    .where(eq(hiringMessages.conversationId, conv!.id));
+  const told = msgs.map((m) => m.body).join("\n");
+  expect(told).toMatch(/plan now has 1 round/);
+  expect(told).toMatch(/L1 panel set to Leela Rao/);
+  expect(told).toMatch(/Not in the panel directory yet: madhanagopal\.p@yavar\.ai \(L1\)/);
+  // The updated plan comes back for the person to confirm.
+  expect(msgs.some((m) => (m.card as { type?: string } | null)?.type === "interview_plan")).toBe(
+    true,
+  );
+});

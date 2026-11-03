@@ -51,6 +51,12 @@ export function expertBriefDetail(
       .map((q) => `- ${q.question}\n  Strong: ${q.strongAnswer}\n  Weak: ${q.weakAnswer}`)
       .join("\n")}`,
     rounds ? `Interview plan changes on approval:\n${rounds}` : "",
+    brief.roundCount && brief.roundCount < plan.length
+      ? `Rounds: ${brief.roundCount} (the plan has ${plan.length} — the later rounds are removed on approval).`
+      : "",
+    brief.panel.length
+      ? `Panels named:\n${brief.panel.map((p) => `- L${p.level}: ${p.people.join(", ")}`).join("\n")}\nPeople in the panel directory are set as the round's panel on approval; anyone else is flagged for HR to add.`
+      : "",
     "Approve if this is what the role needs: screening kits ask these questions and the interview rounds rate these areas. Send back with what to change, or decline.",
   ]
     .filter(Boolean)
@@ -138,11 +144,21 @@ export async function performExpertBriefGate(
     throw new Error("This role's expert brief changed since this was proposed; refresh to see it.");
   const { planFor, savePlan } = await import("@/lib/interview-plan.server");
   const { plan } = await planFor(orgId, subject.requisitionId);
-  const rounds = plan.rounds.map((r) => {
+  let rounds = plan.rounds.map((r) => {
     const b = brief.rounds.find((x) => x.level === r.level);
     return b ? { ...r, focus: b.focus || r.focus, competencies: b.competencies } : r;
   });
-  if (brief.rounds.length) await savePlan(orgId, subject.requisitionId, { ...plan, rounds });
+  // The number of rounds the expert asked for (a round already in use is kept).
+  let roundsKept: string | null = null;
+  if (brief.roundCount && brief.roundCount < rounds.length) {
+    const { roundsInUse } = await import("@/lib/interview-plan.server");
+    const inUse = await roundsInUse(orgId, subject.requisitionId);
+    const keep = Math.max(brief.roundCount, inUse);
+    if (keep > brief.roundCount) roundsKept = `L${keep} is already in use, so ${keep} rounds stay.`;
+    rounds = rounds.slice(0, keep);
+  }
+  if (brief.rounds.length || rounds.length !== plan.rounds.length)
+    await savePlan(orgId, subject.requisitionId, { ...plan, rounds });
   await db
     .update(requisitions)
     .set({
@@ -154,6 +170,9 @@ export async function performExpertBriefGate(
       },
     })
     .where(and(eq(requisitions.id, subject.requisitionId), eq(requisitions.orgId, orgId)));
+  // Panels the expert named: people in the directory become the round's panel (the
+  // hiring manager approving the brief is the panel's decider); others are flagged.
+  const panels = await applyNamedPanels(orgId, userId, subject.requisitionId, brief, rounds.length);
   const { activeOrgOf } = await import("@/lib/auth.middleware");
   const org = await activeOrgOf(userId);
   await writeAudit({
@@ -167,7 +186,83 @@ export async function performExpertBriefGate(
       mustHaves: brief.mustHaves.length,
       screeningQuestions: brief.screeningQuestions.length,
       roundsChanged: brief.rounds.map((r) => r.level),
+      roundCount: rounds.length,
+      panelsSet: panels.set.map((p) => p.level),
+      notInDirectory: panels.missing.map((m) => m.who),
       replaced: Boolean(req.brief),
     },
   });
+  await tellDesk(orgId, subject.requisitionId, rounds.length, roundsKept, panels);
+}
+
+/** Match each named person to the panel directory by e-mail, else by name (exact, any case). */
+async function applyNamedPanels(
+  orgId: string,
+  userId: string,
+  requisitionId: string,
+  brief: ExpertBriefContent,
+  roundCount: number,
+): Promise<{
+  set: { level: number; names: string[] }[];
+  missing: { level: number; who: string }[];
+}> {
+  const set: { level: number; names: string[] }[] = [];
+  const missing: { level: number; who: string }[] = [];
+  if (!brief.panel.length) return { set, missing };
+  const { panelists } = await import("@db/schema");
+  const { syncMemberPanelists, savePanel } = await import("@/lib/panels.server");
+  await syncMemberPanelists(orgId);
+  const directory = await db
+    .select({ id: panelists.id, name: panelists.fullName, email: panelists.email })
+    .from(panelists)
+    .where(and(eq(panelists.orgId, orgId), eq(panelists.active, true)));
+  for (const p of brief.panel) {
+    if (p.level > roundCount) continue;
+    const ids: string[] = [];
+    const names: string[] = [];
+    for (const who of p.people) {
+      const w = who.trim().toLowerCase();
+      const hit =
+        directory.find((d) => d.email.toLowerCase() === w) ??
+        directory.find((d) => d.name.trim().toLowerCase() === w);
+      if (hit) {
+        ids.push(hit.id);
+        names.push(hit.name);
+      } else missing.push({ level: p.level, who: who.trim() });
+    }
+    if (!ids.length) continue;
+    try {
+      await savePanel(orgId, userId, requisitionId, p.level, ids.slice(0, 3), true);
+      set.push({ level: p.level, names });
+    } catch {
+      for (const n of names) missing.push({ level: p.level, who: n });
+    }
+  }
+  return { set, missing };
+}
+
+/** On the role's hiring-desk thread: what changed, who to add, and to confirm the plan. */
+async function tellDesk(
+  orgId: string,
+  requisitionId: string,
+  roundCount: number,
+  roundsKept: string | null,
+  panels: { set: { level: number; names: string[] }[]; missing: { level: number; who: string }[] },
+): Promise<void> {
+  const desk = await import("../desk/desk.server");
+  const convId = await desk.conversationForSubject(orgId, "requisition", requisitionId);
+  if (!convId) return;
+  const conv = await desk.loadConversation(orgId, convId);
+  if (!conv) return;
+  const lines = [
+    `The hiring manager's brief is approved and applied: the plan now has ${roundCount} round${roundCount === 1 ? "" : "s"}.${roundsKept ? ` ${roundsKept}` : ""}`,
+    ...panels.set.map((p) => `L${p.level} panel set to ${p.names.join(", ")}.`),
+    ...(panels.missing.length
+      ? [
+          `Not in the panel directory yet: ${panels.missing.map((m) => `${m.who} (L${m.level})`).join(", ")}. Add them in the hiring plan's full editor (Panels → Add someone new) — the HR head or an owner.`,
+        ]
+      : []),
+  ];
+  await desk.postMessage(conv, { role: "desk", body: lines.join(" ") });
+  await desk.showInterviewPlan(conv);
 }

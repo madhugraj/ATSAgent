@@ -38,6 +38,22 @@ export const ExpertBriefContent = z.object({
     )
     .max(3)
     .default([]),
+  /** How many interview rounds the expert wants (1–3); null when they did not say. */
+  roundCount: z.number().int().min(1).max(3).nullish(),
+  /**
+   * Who the expert named for each round's panel, as they said it (a name or an
+   * e-mail). On approval, people in the panel directory are set as that round's
+   * panel; anyone else is flagged on the hiring desk for HR to add. Never invented.
+   */
+  panel: z
+    .array(
+      z.object({
+        level: z.number().int().min(1).max(3),
+        people: z.array(line(200)).min(1).max(3),
+      }),
+    )
+    .max(3)
+    .default([]),
 });
 export type ExpertBriefContent = z.infer<typeof ExpertBriefContent>;
 

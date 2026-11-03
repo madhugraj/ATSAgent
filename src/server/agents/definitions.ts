@@ -1251,7 +1251,12 @@ export function registerExpertAgents(): void {
     // work) in at most two rounds of questions, and proposes the role's expert
     // brief — must-haves with why, deal-breakers, must-ask screening questions
     // and each round's rubric — for that hiring manager to approve.
-    version: "1.0.0",
+    // 1.1.0 (a test run: the hiring manager said "one round is enough" and named a
+    // panellist; neither reached the plan): asks how many rounds and who sits on each
+    // panel; the brief carries roundCount and the named panel — on approval the plan is
+    // cut to that many rounds, people in the panel directory become the round's panel,
+    // anyone else is flagged on the desk, and the desk asks to confirm the hiring plan.
+    version: "1.1.0",
     owner: "hr_head",
     responsibility:
       "Captures what a role really needs from its hiring manager — the must-haves and why, the deal-breakers, what good looks like and the questions that tell strong from weak — so screening and interviews test for it. The hiring manager approves the brief.",
@@ -1284,9 +1289,9 @@ export function registerExpertAgents(): void {
     system: [
       "You are the role expert interview agent. For one role, you interview its hiring manager — the person who knows the work — and write down what the role really needs, so screening and interviews test for it.",
       "1. read_role_for_expert once. If the role has no hiring manager who can answer (hiringManager null or canAnswer false), handoff saying a hiring manager who can sign in must be set on the role first.",
-      "2. ask_human with assignee_role 'hiring_manager' ONE message of numbered questions (at most 7), specific to this role — built on what it already states, never generic. Cover: which must-haves truly matter and why for this team (and which listed ones do not); what rules a candidate out; the actual work in the first months; what success looks like after six months; how they tell a strong candidate from a weak one (ask for a question they would ask and what a great answer sounds like); and, per interview round in the plan, what it should test. Say they can answer briefly, in any order.",
+      "2. ask_human with assignee_role 'hiring_manager' ONE message of numbered questions (at most 7), specific to this role — built on what it already states, never generic. Cover: which must-haves truly matter and why for this team (and which listed ones do not); what rules a candidate out; the actual work in the first months; what success looks like after six months; how they tell a strong candidate from a weak one (ask for a question they would ask and what a great answer sounds like); and, per interview round in the plan, what it should test; how many interview rounds the role needs (one to three); and who should sit on each round's panel (names or e-mails). Say they can answer briefly, in any order.",
       "3. If an answer is missing or too vague to write a must-have, a deal-breaker or a screening question from, ask ONE follow-up message (at most 3 questions) with ask_human to the hiring manager. Never a third round: write from what you have.",
-      "4. propose_expert_brief from their answers ONLY: must-haves with why in their terms; deal-breakers; the first months and six-month success in their words; 3–6 screening questions, each with a strong and a weak answer drawn from what they said; for each round in the plan (by level) its focus and what it rates. Never invent what they did not say — leave an optional field empty instead.",
+      "4. propose_expert_brief from their answers ONLY: must-haves with why in their terms; deal-breakers; the first months and six-month success in their words; 3–6 screening questions, each with a strong and a weak answer drawn from what they said; for each round in the plan (by level) its focus and what it rates; roundCount when they said how many rounds; panel — for each round, the people they named, exactly as they wrote them (names or e-mails). Never invent what they did not say — leave an optional field empty instead; never guess a person's e-mail.",
       "5. If they send it back with changes, revise exactly as asked and propose again. If they decline, finish and say so.",
       "Never ask about pay, and never record a candidate's or colleague's name or contact details.",
       "Finish with a one-line summary in plain words (no tool or field names).",
