@@ -798,7 +798,8 @@ function requisitionGoal(code: string, s: DeskSlots, reuseCode: string | null): 
 export async function confirmHiringPlan(
   conv: Conversation,
   userId: string,
-): Promise<{ runId: string | null }> {
+  seenRev?: string,
+): Promise<{ runId: string | null; alreadyConfirmed?: boolean }> {
   const requisitionId = conv.requisitionId;
   if (!requisitionId) throw new Error("This thread has no requisition yet.");
   const [req] = await db
@@ -808,9 +809,15 @@ export async function confirmHiringPlan(
     .limit(1);
   if (!req) throw new Error("Requisition not found.");
   const s = conv.slots as DeskSlots;
-  if (s.planConfirmed) return { runId: null };
+  // Pressed again (an older card): nothing changes, and the person is told so.
+  if (s.planConfirmed) return { runId: null, alreadyConfirmed: true };
   const { planFor, savePlan } = await import("@/lib/interview-plan.server");
   const current = await planFor(conv.orgId, requisitionId);
+  if (seenRev !== undefined && seenRev !== current.rev)
+    throw new Error(
+      "The hiring plan changed since this card loaded — review the latest plan, then confirm.",
+    );
+  await postMessage(conv, { role: "user", body: "Confirm the hiring plan" });
   if (!current.saved) await savePlan(conv.orgId, requisitionId, current.plan);
   const slots: DeskSlots = { ...s, planConfirmed: true };
   await db

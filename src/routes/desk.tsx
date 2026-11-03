@@ -43,6 +43,7 @@ import {
 } from "@/components/ui/dialog";
 import { HiringManagerPicker } from "@/components/HiringManagerPicker";
 import { InterviewPlanCard } from "@/components/InterviewPlanCard";
+import { getInterviewPlan } from "@/lib/interview-plan.functions";
 import { RolePanelsEditor } from "@/components/RolePanelsEditor";
 import { getPanelChoices } from "@/lib/panels.functions";
 import { AGENT_LABEL } from "@/lib/agents.catalog";
@@ -2998,10 +2999,18 @@ function InterviewPlanThreadCard({
   const [busy, setBusy] = useState(false);
   // A desk-raised draft waits for this before the Requisition agent sends it for approval.
   const confirmable = !conv.slots.planConfirmed && conv.requisition?.status === "draft";
+  // The plan as this card shows it: confirming an older view is refused.
+  const planQ = useQuery({
+    queryKey: ["interview_plan", requisitionId],
+    queryFn: () => getInterviewPlan({ data: { requisitionId } }),
+  });
   async function confirm() {
     setBusy(true);
     try {
-      await confirmDeskHiringPlan({ data: { id: conv.id } });
+      const r = await confirmDeskHiringPlan({
+        data: { id: conv.id, ...(planQ.data ? { rev: planQ.data.rev } : {}) },
+      });
+      if (r.alreadyConfirmed) toast.info("This hiring plan was already confirmed.");
       setFull(false);
       onChanged();
     } catch (e) {
