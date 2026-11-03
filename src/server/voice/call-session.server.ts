@@ -179,6 +179,19 @@ export type CallResult = {
   screeningRunId: string | null;
 };
 
+/** Log and keep how smoothly the assistant's voice went out on this call (best-effort). */
+export async function recordAudioStats(
+  line: PhoneLine,
+  orgId: string,
+  callId: string,
+  tag: string,
+): Promise<void> {
+  const audio = line.audioStats?.() ?? null;
+  if (!audio) return;
+  log.info(`${tag}.audio`, { call_id: callId, ...audio });
+  await setCall(callId, orgId, { audioStats: audio }).catch(() => undefined);
+}
+
 export async function setCall(
   id: string,
   orgId: string,
@@ -514,8 +527,7 @@ async function placeCall(
   if (watchdog) clearInterval(watchdog);
   stopOpening();
   await line.hangup().catch(() => undefined);
-  const audio = line.audioStats?.() ?? null;
-  if (audio) log.info("screening_call.audio", { call_id: call.id, ...audio });
+  await recordAudioStats(line, orgId, call.id, "screening_call");
   log.info("screening_call.vad", { call_id: call.id, segments: vad.segments });
   line.close();
   const summary = await session.close();

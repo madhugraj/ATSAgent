@@ -11,6 +11,7 @@ import { and, eq, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../server/db";
+import { LIVE_VOICE_SQL_LIST } from "../server/ai-usage";
 import { agentIssues } from "@db/schema";
 import { requireOrg } from "./auth.middleware";
 
@@ -203,7 +204,8 @@ const buildObservability = createServerOnlyFn(async function buildObservability(
       select r.agent_type, u.feature, count(*)::int requests,
         count(*) filter (where u.status = 'error')::int errors,
         coalesce(sum(u.total_tokens), 0)::bigint tokens,
-        percentile_cont(0.95) within group (order by u.duration_ms)::int p95
+        percentile_cont(0.95) within group (order by u.duration_ms)
+          filter (where u.feature not in ${sql.raw(LIVE_VOICE_SQL_LIST)})::int p95
       from ai_usage_events u join agent_runs r on r.id = u.agent_run_id
       where r.org_id = ${org} and u.created_at >= now() - interval '7 days'
       group by r.agent_type, u.feature`);
@@ -211,6 +213,8 @@ const buildObservability = createServerOnlyFn(async function buildObservability(
       select r.agent_type, percentile_cont(0.95) within group (order by u.duration_ms)::int p95
       from ai_usage_events u join agent_runs r on r.id = u.agent_run_id
       where r.org_id = ${org} and u.created_at >= now() - interval '7 days'
+        -- A live call is one row lasting the whole call, not a slow request.
+        and u.feature not in ${sql.raw(LIVE_VOICE_SQL_LIST)}
       group by r.agent_type`);
     const hitlStats = await q(sql`
       select r.agent_type,
@@ -265,7 +269,8 @@ const buildObservability = createServerOnlyFn(async function buildObservability(
       u as (
         select (u.created_at at time zone 'utc')::date as day,
           coalesce(sum(u.total_tokens), 0)::bigint tokens,
-          percentile_cont(0.95) within group (order by u.duration_ms) p95
+          percentile_cont(0.95) within group (order by u.duration_ms)
+            filter (where u.feature not in ${sql.raw(LIVE_VOICE_SQL_LIST)}) p95
         from ai_usage_events u join agent_runs ar on ar.id = u.agent_run_id
         where ar.org_id = ${org} and u.created_at >= current_date - 13
         group by 1

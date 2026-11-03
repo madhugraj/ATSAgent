@@ -3341,6 +3341,16 @@ export const screeningCalls = pgTable(
       .$type<ScreeningCallDetails>()
       .notNull()
       .default(sql`'{}'::jsonb`),
+    /**
+     * How smoothly the assistant's voice went out (migration 0069): frames sent, gaps
+     * mid-sentence, late send ticks — written when the call ends. Never audio.
+     */
+    audioStats: jsonb("audio_stats").$type<{
+      frames: number;
+      gaps: number;
+      lateTicks: number;
+      maxLateMs: number;
+    }>(),
     screeningRunId: uuid("screening_run_id").references(() => screeningRuns.id, {
       onDelete: "set null",
     }),

@@ -362,6 +362,38 @@ describe("rules", () => {
     expect((await open()).map((i) => i.rule)).toContain("skills.ai_errors");
   });
 
+  test("AI latency leaves out live phone calls: a call is not a slow request", async () => {
+    const id = await run("screening_call", { status: "done" });
+    const row = (feature: string, durationMs: number) => ({
+      orgId,
+      agentRunId: id,
+      feature,
+      provider: "x",
+      model: "x",
+      status: "ok" as never,
+      durationMs,
+    });
+    // Seven-minute call sessions, and quick requests from the same run.
+    await db
+      .insert(aiUsageEvents)
+      .values([
+        ...Array.from({ length: HEALTH.minAiRequests }, () => row("screening_call", 420_000)),
+        ...Array.from({ length: HEALTH.minAiRequests }, () => row("screening_grade", 6_000)),
+      ]);
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "skills.latency")).toBeUndefined();
+    // A genuinely slow request still trips it.
+    await db
+      .insert(aiUsageEvents)
+      .values(
+        Array.from({ length: HEALTH.minAiRequests * 2 }, () => row("screening_grade", 95_000)),
+      );
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "skills.latency")).toMatchObject({
+      agentType: "screening_call",
+    });
+  });
+
   test("audit gap: a completed write tool call without its audit entry is critical", async () => {
     const [def] = await db
       .insert(agentDefinitions)
@@ -454,6 +486,39 @@ describe("rules", () => {
     await db.update(agentRuns).set({ status: "failed" }).where(eq(agentRuns.id, id));
     await evaluate();
     expect(await open()).toHaveLength(0);
+  });
+});
+
+describe("voice quality on live calls", () => {
+  test("calls where the assistant's voice broke up are flagged for that voice agent", async () => {
+    const { candidates, screeningCalls } = await import("../drizzle/schema");
+    const [cand] = await db
+      .insert(candidates)
+      .values({ orgId, fullName: "Vani", email: `vani-${Date.now()}@h.local` } as never)
+      .returning({ id: candidates.id });
+    const call = (gaps: number) => ({
+      orgId,
+      candidateId: cand!.id,
+      purpose: "screening" as const,
+      status: "completed" as const,
+      durationS: 300,
+      audioStats: { frames: 15_000, gaps, lateTicks: 0, maxLateMs: 20 },
+    });
+    const rule = async () => (await open()).find((i) => i.rule === "voice.audio_breaking");
+    // Five minutes with 5 gaps (1 a minute): fine.
+    await db.insert(screeningCalls).values(call(5));
+    await evaluate();
+    expect(await rule()).toBeUndefined();
+    // Five minutes with 25 gaps (5 a minute): broke up.
+    await db.insert(screeningCalls).values(call(25));
+    await evaluate();
+    expect(await rule()).toMatchObject({
+      agentType: "screening_call",
+      severity: "warning",
+      title: "1 of 2 calls in 24 h had the assistant's voice breaking up",
+    });
+    await db.delete(screeningCalls).where(eq(screeningCalls.candidateId, cand!.id));
+    await db.delete(candidates).where(eq(candidates.id, cand!.id));
   });
 });
 

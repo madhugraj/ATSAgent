@@ -83,6 +83,21 @@ export const AI_FEATURES = [
   "redteam_probe",
 ] as const;
 
+/**
+ * Live phone calls: one ledger row is a whole call session (minutes long), not a
+ * request and response. Counted for tokens and cost; left out of AI latency
+ * (observability, health) — calls have their own view (Agent observability →
+ * Voice agents).
+ */
+export const LIVE_VOICE_FEATURES = [
+  "screening_call",
+  "scheduling_call",
+  "negotiation_call",
+] as const;
+
+/** `('screening_call', …)` for `feature [not] in …` in SQL (the slugs are constants). */
+export const LIVE_VOICE_SQL_LIST = `(${LIVE_VOICE_FEATURES.map((f) => `'${f}'`).join(", ")})`;
+
 export type AiFeature = (typeof AI_FEATURES)[number];
 
 /**
