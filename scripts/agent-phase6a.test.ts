@@ -408,6 +408,24 @@ describe("choosing the role", () => {
     expect(runs[0]!.goal).toMatch(/chose to open this new requisition — complete it/);
   });
 
+  test("typing 'ask the hiring manager what this role needs' goes through the live agent check", async () => {
+    const conv = await confirming();
+    await desk.createNewRole(conv, recruiter);
+    // The model's reply claims it is off; the system checks and answers for itself.
+    deskScript.push({
+      command: { type: "interview_hiring_manager" },
+      reply: "The Role expert interview agent is switched off.",
+    });
+    await desk.handleUserMessage(
+      await reload(conv.id),
+      recruiter,
+      "Ask the hiring manager what this role needs",
+    );
+    const last = (await messages(conv.id)).at(-1)!.body;
+    // The system's own message (the agent is not on in this organisation), not the model's.
+    expect(last).toMatch(/Role expert interview agent is switched off, so I can't continue/);
+  });
+
   test("a switched-off agent is reported in the thread, not silently queued", async () => {
     await db
       .update(agentPolicies)

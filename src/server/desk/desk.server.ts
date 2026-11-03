@@ -339,6 +339,8 @@ const Command = z.discriminatedUnion("type", [
   z.object({ type: z.literal("show_jd") }),
   /** "Show the interview plan / rounds / panel size": post the role's plan, editable in place. */
   z.object({ type: z.literal("show_interview_plan") }),
+  /** "Ask the hiring manager what this role needs": start the Role expert interview agent. */
+  z.object({ type: z.literal("interview_hiring_manager") }),
   /** The person delegated details to market research ("as per market", "you decide"). */
   z.object({
     type: z.literal("research"),
@@ -396,6 +398,8 @@ const SYSTEM = [
   '- "command" also: "close / cancel / delete / withdraw this role" → {"type":"close_role"}.',
   '- When the person delegates a detail to you or to the market ("as per market needs", "you decide", "what does the market say?", "pick it up from research") → {"type":"research","fields":[...]} with the fields they delegated: "skills", "experience" and/or "budget". (JD details are not a research command — for those set researchRole true as above.) When OPEN PROPOSAL is yes and they agree ("ok", "yes", "use these", "go ahead") → {"type":"accept"}.',
   '- "show / see / open / read the JD (job description)" → {"type":"show_jd"}; the system posts the full text. Never summarise the JD instead or send the person elsewhere to read it.',
+  '- "ask / interview the hiring manager what this role needs", "get the hiring manager\'s input on the role" → {"type":"interview_hiring_manager"}; the system starts the Role expert interview agent (or says why it cannot).',
+  '- Whether an agent is switched on is checked by the system when it acts — never say an agent is on or off, or repeat an earlier "switched off" message: issue the command and let the system report.',
   '- "show / change the interview plan, the rounds, the panel size, what a round rates, or who the hiring manager is" → {"type":"show_interview_plan"}; the system posts the plan, which the person edits right in the card. Never describe or change the plan yourself.',
   '- Templates: whenever the person names or asks about a template ("use the Yavar template", "which template did you use?"), return {"type":"feedback","text":"<their words>","template":"<the name as they said it>"} — even when no request is open. The system checks the templates (by name and by content) and answers. Never state from memory or from earlier messages which templates exist; FACTS lists them.',
   '- When OPEN REQUESTS lists a request and the person comments on it, objects to it or asks for a change ("give more weight to experience", "budget is too high", "use Pune instead") — or answers an agent\'s question — → {"type":"feedback","text":"<what they want, faithfully, in their words>"}. The system sends it to the agent, which revises and asks again. This includes a job description waiting for approval: "use the X template", "make it shorter", "add a section on Y" are feedback (changes to the JD), not an approval decision; when they name a template add "template":"<the name as they said it>".',
@@ -1263,6 +1267,10 @@ async function handleUserMessageInner(
   }
   if (cmd.type === "show_interview_plan") {
     await showInterviewPlan(conv);
+    return;
+  }
+  if (cmd.type === "interview_hiring_manager") {
+    await startExpertInterview(conv, userId);
     return;
   }
   if (cmd.type === "close_role") {
