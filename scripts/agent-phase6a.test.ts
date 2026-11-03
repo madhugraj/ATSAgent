@@ -1031,6 +1031,36 @@ describe("delegating to the market, and showing the desk's thinking", () => {
     expect(card.next).toMatch(/experience/);
   });
 
+  test("an estimate without live sources cites nothing; research shows no empty 'how I read that'", async () => {
+    // Reasoning text is stripped of links, bare URLs and markdown citations.
+    expect(
+      desk.withoutLinks(
+        "Openings ask for Java.\n\n* [Jobs - Cutshort](https://cutshort.io/x)\nSee https://x.y/z and [Naukri](https://naukri.com) data.",
+      ),
+    ).toBe("Openings ask for Java.\n\nSee and Naukri data.");
+    const conv = await newConversation();
+    await db
+      .update(hiringConversations)
+      .set({ slots: { roleTitle: "Backend Engineer", location: "Chennai" } as never })
+      .where(eq(hiringConversations.id, conv.id));
+    researchResult = {
+      ok: true,
+      data: {
+        ...proposal,
+        reasoning: "Market wants Java.\n* [Indeed](https://www.indeed.com/)",
+      },
+      grounded: false,
+      usage: null,
+    };
+    await desk.researchRole(await reload(conv.id), ["skills"]);
+    const card = (await messages(conv.id)).at(-1)!.card as Record<string, unknown>;
+    const p = card["proposal"] as typeof proposal;
+    expect(card["grounded"]).toBe(false);
+    expect(p.sources).toEqual([]);
+    expect(p.reasoning).toBe("Market wants Java.");
+    expect(card["why"]).toBeUndefined();
+  });
+
   test("'as per market' researches; 'ok' applies the proposal and moves on", async () => {
     const conv = await newConversation();
     await db
