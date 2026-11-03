@@ -586,6 +586,20 @@ export const acceptDeskProposal = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
+/**
+ * The person confirms the role's hiring plan: only now does the Requisition agent
+ * complete the draft and send it for approval. Audited.
+ */
+export const confirmDeskHiringPlan = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    await echoClick(conv, "Confirm the hiring plan");
+    const { confirmHiringPlan } = await import("../server/desk/desk.server");
+    return confirmHiringPlan(conv, context.userId);
+  });
+
 /** Ask the role's hiring manager what the role really needs (Role expert interview agent). */
 export const startDeskExpertInterview = createServerFn({ method: "POST" })
   .middleware([requireOrg])

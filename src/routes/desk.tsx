@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/dialog";
 import { HiringManagerPicker } from "@/components/HiringManagerPicker";
 import { InterviewPlanCard } from "@/components/InterviewPlanCard";
+import { RolePanelsEditor } from "@/components/RolePanelsEditor";
 import { getPanelChoices } from "@/lib/panels.functions";
 import { AGENT_LABEL } from "@/lib/agents.catalog";
 import { decideAgentTask, type AgentDecisionInput } from "@/lib/agents.functions";
@@ -72,6 +73,7 @@ import {
   type DeskConversationSummary,
   type DeskConversationView,
   type DeskMessageView,
+  confirmDeskHiringPlan,
 } from "@/lib/hiring-desk.functions";
 
 export const Route = createFileRoute("/desk")({
@@ -2936,14 +2938,34 @@ function InterviewPlanThreadCard({
   conv: DeskConversationView;
   onChanged: () => void;
 }) {
+  const [full, setFull] = useState(false);
+  const [busy, setBusy] = useState(false);
+  // A desk-raised draft waits for this before the Requisition agent sends it for approval.
+  const confirmable = !conv.slots.planConfirmed && conv.requisition?.status === "draft";
+  async function confirm() {
+    setBusy(true);
+    try {
+      await confirmDeskHiringPlan({ data: { id: conv.id } });
+      setFull(false);
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not confirm the hiring plan.");
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <div className="space-y-3 rounded-lg border border-border p-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
-        <p className="font-medium">Interview plan</p>
+        <p className="font-medium">Hiring plan</p>
+        {conv.slots.planConfirmed ? <Badge variant="secondary">Confirmed</Badge> : null}
+        <Button size="sm" variant="outline" className="ml-auto" onClick={() => setFull(true)}>
+          <Maximize2 className="size-4" /> Open the full editor
+        </Button>
         <Link
           to="/requisitions/$id"
           params={{ id: requisitionId }}
-          className="ml-auto text-xs text-primary hover:underline"
+          className="text-xs text-primary hover:underline"
         >
           Open the requisition
         </Link>
@@ -2954,6 +2976,51 @@ function InterviewPlanThreadCard({
       </div>
       <ExpertInterviewAction conv={conv} onChanged={onChanged} />
       <InterviewPlanCard requisitionId={requisitionId} />
+      {confirmable ? (
+        <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+          <Button size="sm" disabled={busy} onClick={confirm}>
+            Confirm the hiring plan
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            The requisition is completed and sent for approval only after you confirm.
+          </span>
+        </div>
+      ) : null}
+      <Dialog open={full} onOpenChange={setFull}>
+        <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Hiring plan · {conv.requisition?.code ?? ""}</DialogTitle>
+            <DialogDescription>
+              The interview rounds, what each one rates, who sits on each panel and the hiring
+              manager.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-5 text-sm">
+            <div className="max-w-sm space-y-1">
+              <p className="text-xs text-muted-foreground">Hiring manager</p>
+              <HiringManagerPicker requisitionId={requisitionId} />
+            </div>
+            <section className="space-y-2">
+              <h3 className="font-medium">Rounds</h3>
+              <InterviewPlanCard requisitionId={requisitionId} />
+            </section>
+            <section className="space-y-2">
+              <h3 className="font-medium">Panels</h3>
+              <RolePanelsEditor requisitionId={requisitionId} />
+            </section>
+          </div>
+          <DialogFooter>
+            {confirmable ? (
+              <Button disabled={busy} onClick={confirm}>
+                Confirm the hiring plan
+              </Button>
+            ) : null}
+            <Button variant="outline" onClick={() => setFull(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

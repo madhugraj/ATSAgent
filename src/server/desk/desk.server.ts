@@ -75,6 +75,11 @@ export const DeskSlots = z.object({
   hiringManager: z.string().trim().min(2).max(120).optional(),
   /** Set by the system only: the registered member that name resolved to. */
   hiringManagerMemberId: z.string().uuid().optional(),
+  /**
+   * Set by the system only, when a person confirms the hiring plan on its card: the
+   * Requisition agent completes the draft and sends it for approval only after this.
+   */
+  planConfirmed: z.boolean().optional(),
 });
 export type DeskSlots = z.infer<typeof DeskSlots>;
 
@@ -759,26 +764,84 @@ export async function createNewRole(
     body: `Created draft ${created.code} for ${describeNeed(s)}.${reuse ? ` Once it is approved, the approved job description of ${reuse.code} will be reused — no new JD approval needed.` : ""}`,
     card: { type: "requisition", requisitionId: created.id, code: created.code },
   });
+  // The Requisition agent waits until the person confirms the hiring plan
+  // (confirmHiringPlan): rounds, what each rates, the panels and the hiring manager.
   await showInterviewPlan(conv, true);
-  await startForThread(
+  return { requisitionId: created.id, code: created.code };
+}
+
+/** What the Requisition agent is asked to do for a desk-raised draft. */
+function requisitionGoal(code: string, s: DeskSlots, reuseCode: string | null): string {
+  return [
+    `Complete draft requisition ${code} "${s.roleTitle}" (${s.location}) raised from the hiring desk: ${describeNeed(s)}.`,
+    // The desk showed the person any similar roles first; this is their choice.
+    "The person reviewed the similar roles on the hiring desk and chose to open this new requisition — complete it; do not hand it off as a duplicate.",
+    "The person has confirmed the role's hiring plan (interview rounds, panels and hiring manager).",
+    "Find the department, research the market pay band for this role and location (keep any budget or band the person gave), set the scoring weights, then submit it for approval and prepare the approval brief.",
+    reuseCode
+      ? `Mention in the approval brief that the approved job description of ${reuseCode} will be reused for this role.`
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+/**
+ * The person confirms the role's hiring plan on its card. The plan as it stands is
+ * saved (the default becomes the role's own), the confirmation is audited, and
+ * only now does the Requisition agent complete the draft and send it for approval.
+ */
+export async function confirmHiringPlan(
+  conv: Conversation,
+  userId: string,
+): Promise<{ runId: string | null }> {
+  const requisitionId = conv.requisitionId;
+  if (!requisitionId) throw new Error("This thread has no requisition yet.");
+  const [req] = await db
+    .select({ code: requisitions.code, status: requisitions.status })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, requisitionId), eq(requisitions.orgId, conv.orgId)))
+    .limit(1);
+  if (!req) throw new Error("Requisition not found.");
+  const s = conv.slots as DeskSlots;
+  if (s.planConfirmed) return { runId: null };
+  const { planFor, savePlan } = await import("@/lib/interview-plan.server");
+  const current = await planFor(conv.orgId, requisitionId);
+  if (!current.saved) await savePlan(conv.orgId, requisitionId, current.plan);
+  const slots: DeskSlots = { ...s, planConfirmed: true };
+  await db
+    .update(hiringConversations)
+    .set({ slots })
+    .where(and(eq(hiringConversations.id, conv.id), eq(hiringConversations.orgId, conv.orgId)));
+  conv = { ...conv, slots };
+  await writeAudit({
+    actor: `user:${userId}`,
+    actorUserId: userId,
+    orgId: conv.orgId,
+    action: "desk.hiring_plan_confirmed",
+    entityType: "requisition",
+    entityId: requisitionId,
+    detail: { code: req.code, rounds: current.plan.rounds.length },
+  });
+  if (req.status !== "draft") return { runId: null };
+  let reuseCode: string | null = null;
+  if (conv.reuseJdFrom) {
+    const [src] = await db
+      .select({ code: requisitions.code })
+      .from(requisitions)
+      .where(and(eq(requisitions.id, conv.reuseJdFrom), eq(requisitions.orgId, conv.orgId)))
+      .limit(1);
+    reuseCode = src?.code ?? null;
+  }
+  const runId = await startForThread(
     conv,
     "requisition",
     userId,
-    [
-      `Complete draft requisition ${created.code} "${s.roleTitle}" (${s.location}) raised from the hiring desk: ${describeNeed(s)}.`,
-      // The desk showed the person any similar roles first; this is their choice.
-      "The person reviewed the similar roles on the hiring desk and chose to open this new requisition — complete it; do not hand it off as a duplicate.",
-      "Find the department, research the market pay band for this role and location (keep any budget or band the person gave), set the scoring weights, then submit it for approval and prepare the approval brief.",
-      reuse
-        ? `Mention in the approval brief that the approved job description of ${reuse.code} will be reused for this role.`
-        : "",
-    ]
-      .filter(Boolean)
-      .join(" "),
-    created.id,
-    "I've asked the Requisition agent to add the pay band and scoring weights and send it for approval. Approval requests will show up here.",
+    requisitionGoal(req.code, s, reuseCode),
+    requisitionId,
+    "Hiring plan confirmed. I've asked the Requisition agent to add the pay band and scoring weights and send it for approval. Approval requests will show up here.",
   );
-  return { requisitionId: created.id, code: created.code };
+  return { runId };
 }
 
 async function latestApprovedJd(orgId: string, requisitionId: string) {
@@ -1116,6 +1179,7 @@ async function handleUserMessageInner(
   const { turn } = res;
   const before = conv.slots as DeskSlots;
   delete turn.slots.hiringManagerMemberId; // set only by the system, below
+  delete turn.slots.planConfirmed; // set only when a person confirms the hiring plan
   let slots = mergeSlots(before, turn.slots);
   // The hiring manager must be a registered member: resolve the name they gave.
   let hiringManagerNote: string | null = null;
@@ -2495,6 +2559,8 @@ export async function startStage(
   if (!req) return null;
   if (next.stage === "requisition") {
     if (req.status !== "draft") return null; // waiting for an approver, not for the agent
+    // A desk-raised role goes for approval only once its hiring plan is confirmed.
+    if (!(conv.slots as DeskSlots).planConfirmed) return null;
     if (opts.dryRun) return "requisition";
     return startForThread(
       conv,
@@ -3951,7 +4017,7 @@ export async function showInterviewPlan(conv: Conversation, justCreated = false)
   await postMessage(conv, {
     role: "desk",
     body: justCreated
-      ? `The interview plan for this role, from its must-haves: ${rounds}. Change the rounds, what each one rates or the panel size here before interviews start; the hiring manager approves each round's panel.`
+      ? `The hiring plan for this role, from its must-haves: ${rounds}. Review it — the rounds, what each one rates, who sits on each panel and the hiring manager (Open the full editor for more room), then press Confirm the hiring plan. The requisition is completed and sent for approval only after that.`
       : `The interview plan for this role${saved ? "" : " (the default from its must-haves)"}: ${rounds}. Edit it here.`,
     card: { type: "interview_plan", requisitionId: conv.requisitionId },
   });

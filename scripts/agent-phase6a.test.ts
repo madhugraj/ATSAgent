@@ -356,9 +356,23 @@ describe("choosing the role", () => {
     expect(runs[0]!.subjectId).toBe(existingReq);
   });
 
-  test("a new role is drafted as the person and handed to the Requisition agent", async () => {
+  test("a new role is drafted as the person; the Requisition agent waits for the confirmed hiring plan", async () => {
     const conv = await confirming();
     const { requisitionId } = await desk.createNewRole(conv, recruiter);
+    // Nothing goes for approval while the person is still editing the hiring plan.
+    expect(await runsOf(conv.id)).toHaveLength(0);
+    expect(await desk.startStage(await reload(conv.id), recruiter)).toBeNull();
+    expect(await runsOf(conv.id)).toHaveLength(0);
+    // Confirming saves the plan as the role's own, is audited, and starts the agent once.
+    await desk.confirmHiringPlan(await reload(conv.id), recruiter);
+    const [{ planFor }] = [await import("../src/lib/interview-plan.server")];
+    expect((await planFor(orgId, requisitionId)).saved).toBe(true);
+    const [confirmed] = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.orgId, orgId), eq(auditLog.action, "desk.hiring_plan_confirmed")));
+    expect(confirmed?.entityId).toBe(requisitionId);
+    await desk.confirmHiringPlan(await reload(conv.id), recruiter);
     const [req] = await db.select().from(requisitions).where(eq(requisitions.id, requisitionId));
     expect(req).toMatchObject({
       status: "draft",
@@ -383,6 +397,7 @@ describe("choosing the role", () => {
       .set({ slots: { ...complete, budgetLpaMax: 85, bandLpaMin: 70, bandLpaMax: 105 } as never })
       .where(eq(hiringConversations.id, conv.id));
     const { requisitionId } = await desk.createNewRole(await reload(conv.id), recruiter);
+    await desk.confirmHiringPlan(await reload(conv.id), recruiter);
     const [req] = await db.select().from(requisitions).where(eq(requisitions.id, requisitionId));
     expect(Number(req!.budgetCtc)).toBe(8_500_000);
     expect(Number(req!.ctcBandMin)).toBe(7_000_000);
@@ -400,6 +415,7 @@ describe("choosing the role", () => {
       .where(and(eq(agentPolicies.orgId, orgId), eq(agentPolicies.agentType, "requisition")));
     const conv = await confirming();
     await desk.createNewRole(conv, recruiter);
+    await desk.confirmHiringPlan(await reload(conv.id), recruiter);
     expect(await runsOf(conv.id)).toHaveLength(0);
     expect((await messages(conv.id)).at(-1)!.body).toMatch(/switched off/);
   });
