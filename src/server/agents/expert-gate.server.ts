@@ -263,6 +263,6 @@ async function tellDesk(
         ]
       : []),
   ];
-  await desk.postMessage(conv, { role: "desk", body: lines.join(" ") });
-  await desk.showInterviewPlan(conv);
+  // One note; the thread's hiring plan card (live) shows the change in place.
+  await desk.notePlanChanged(conv, lines.join(" "));
 }

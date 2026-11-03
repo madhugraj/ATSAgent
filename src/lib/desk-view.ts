@@ -32,6 +32,12 @@ export function supersededMessages(d: {
   const type = (m: Msg) => (m.card as { type?: string } | null)?.type;
   d.messages.forEach((m, i) => {
     const t = type(m);
+    // One live hiring plan card: an earlier one folds to a pointer.
+    if (t === "interview_plan") {
+      if (d.messages.slice(i + 1).some((x) => type(x) === "interview_plan"))
+        out.set(m.id, "The hiring plan — the current card is further down.");
+      return;
+    }
     if (t !== "bring_candidates" && t !== "ranked_candidates") return;
     const later = d.messages.slice(i + 1).map(type);
     if (t === "ranked_candidates" && later.includes("ranked_candidates"))

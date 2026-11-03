@@ -11,7 +11,14 @@ import { getInterviewPlan, saveInterviewPlan } from "@/lib/interview-plan.functi
 import type { InterviewPlan } from "@/lib/interview-plan";
 
 /** The role's interview rounds, rubric, panel size and verdict policy — view and edit. */
-export function InterviewPlanCard({ requisitionId }: { requisitionId: string }) {
+export function InterviewPlanCard({
+  requisitionId,
+  readOnly = false,
+}: {
+  requisitionId: string;
+  /** Confirmed (or sent for approval): shown, not edited here. */
+  readOnly?: boolean;
+}) {
   const qc = useQueryClient();
   const q = useQuery({
     queryKey: ["interview_plan", requisitionId],
@@ -193,7 +200,7 @@ export function InterviewPlanCard({ requisitionId }: { requisitionId: string }) 
             </Button>
           </div>
         </div>
-      ) : (
+      ) : readOnly ? null : (
         <div className="flex gap-2">
           <Button size="sm" variant="outline" onClick={() => setDraft(plan)}>
             Edit plan
