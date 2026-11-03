@@ -14,6 +14,8 @@ import { sourceLabel } from "@/lib/job-channels";
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
 
 import { db } from "../db";
+import { LIVE_VOICE_SQL_LIST } from "../ai-usage";
+import { CHOPPY_GAPS_PER_MINUTE } from "@/lib/voice-quality";
 import {
   agentIssues,
   agentRuntimeHeartbeat,
@@ -123,6 +125,8 @@ export const HEALTH = {
   reviewWaitingDays: 7,
   /** A request for a new panellist left this long holds the round up. */
   newPanelistWaitingHours: 24,
+  /** More gaps a minute than this in the assistant's speech: the call broke up. */
+  choppyGapsPerMinute: CHOPPY_GAPS_PER_MINUTE,
   /** Website re-read failures before the warning becomes serious. */
   rereadSeriousFailures: 2,
   /** Profile items refused from sources in 7 days before it is flagged. */
@@ -388,13 +392,15 @@ export const RULES: Rule[] = [
     id: "skills.latency",
     element: "skills",
     severity: "warning",
-    description: `AI requests inside an agent's runs are slow: 95th percentile above ${HEALTH.aiP95Ms / 1000} s over 24 hours.`,
+    description: `AI requests inside an agent's runs are slow: 95th percentile above ${HEALTH.aiP95Ms / 1000} s over 24 hours (live phone calls excluded — a call is not a request).`,
     evaluate: async (orgId) => {
       const r = await rows<{ agent_type: string; p95: number }>(sql`
         select r.agent_type, percentile_cont(0.95) within group (order by u.duration_ms)::int p95
         from ai_usage_events u join agent_runs r on r.id = u.agent_run_id
         where r.org_id = ${orgId} and u.created_at >= now() - interval '24 hours'
           and u.duration_ms is not null
+          -- A live call is one row lasting the whole call, not a slow request.
+          and u.feature not in ${sql.raw(LIVE_VOICE_SQL_LIST)}
         group by r.agent_type having count(*) >= ${HEALTH.minAiRequests}`);
       return r
         .filter((x) => x.p95 > HEALTH.aiP95Ms)
@@ -976,7 +982,11 @@ export const RULES: Rule[] = [
         where c.org_id = ${orgId} and c.purpose = 'screening'
           and c.updated_at >= now() - interval '7 days'`);
       const x = r[0];
-      if (!x || x.total < HEALTH.minCallAnswers7d || x.prompted / x.total < HEALTH.callPromptedShare)
+      if (
+        !x ||
+        x.total < HEALTH.minCallAnswers7d ||
+        x.prompted / x.total < HEALTH.callPromptedShare
+      )
         return [];
       return [
         {
@@ -1415,6 +1425,34 @@ export const RULES: Rule[] = [
         title: `${x.code} L${x.level} has waited ${x.hours} hours for a new panellist`,
         detail: { requisition: x.code, level: x.level, hours: x.hours },
       }));
+    },
+  },
+  {
+    id: "voice.audio_breaking",
+    element: "tools",
+    severity: "warning",
+    description: `On live phone calls in the last 24 hours, the assistant's voice broke up — more than ${HEALTH.choppyGapsPerMinute} gaps a minute where its speech ran out mid-sentence. Usually the voice service streaming slowly or the worker's network; see Agent observability → Voice agents.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ purpose: string; calls: number; choppy: number }>(sql`
+        select purpose, count(*)::int calls,
+          count(*) filter (where (audio_stats ->> 'gaps')::numeric / greatest(duration_s, 1) * 60
+            > ${HEALTH.choppyGapsPerMinute})::int choppy
+        from screening_calls
+        where org_id = ${orgId} and audio_stats is not null and duration_s > 0
+          and updated_at >= now() - interval '24 hours'
+        group by purpose`);
+      const agentOf: Record<string, string> = {
+        screening: "screening_call",
+        scheduling: "scheduling_call",
+        negotiation: "negotiation_call",
+      };
+      return r
+        .filter((x) => x.choppy > 0 && agentOf[x.purpose])
+        .map((x) => ({
+          agentType: agentOf[x.purpose]!,
+          title: `${x.choppy} of ${x.calls} calls in 24 h had the assistant's voice breaking up`,
+          detail: { calls: x.calls, choppy: x.choppy },
+        }));
     },
   },
   {

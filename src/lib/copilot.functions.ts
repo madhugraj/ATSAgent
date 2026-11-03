@@ -1,5 +1,5 @@
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../server/db";
@@ -145,6 +145,47 @@ const snapshot = createServerOnlyFn(async function snapshot(orgId: string) {
   };
 });
 
+/**
+ * How the organisation's agents are doing (Agent observability), so "why is X slow /
+ * failing" is answered from the same numbers the page shows: AI latency by feature
+ * (live phone calls left out — a call is not a request), live calls by voice agent,
+ * and open health issues. No vendor or model names.
+ */
+const agentHealth = createServerOnlyFn(async function agentHealth(orgId: string) {
+  const { LIVE_VOICE_SQL_LIST } = await import("../server/ai-usage");
+  const q = async (s: ReturnType<typeof sql>) =>
+    (await db.execute(s)) as unknown as Record<string, unknown>[];
+  const [latency, calls, issues] = await Promise.all([
+    q(sql`
+      select u.feature, (u.created_at at time zone 'utc')::date::text as day, count(*)::int requests,
+        round((percentile_cont(0.95) within group (order by u.duration_ms) / 1000)::numeric) p95_s
+      from ai_usage_events u join agent_runs r on r.id = u.agent_run_id
+      where r.org_id = ${orgId} and u.created_at >= now() - interval '7 days'
+        and u.duration_ms is not null and u.feature not in ${sql.raw(LIVE_VOICE_SQL_LIST)}
+      group by 1, 2 order by p95_s desc limit 20`),
+    q(sql`
+      select purpose, (created_at at time zone 'utc')::date::text as day, count(*)::int calls,
+        count(*) filter (where started_at is not null)::int answered,
+        round(avg(duration_s) filter (where duration_s > 0) / 60.0, 1) avg_minutes,
+        round(avg((audio_stats ->> 'gaps')::numeric / greatest(duration_s, 1) * 60)
+          filter (where audio_stats is not null and duration_s > 0), 1) gaps_per_minute
+      from screening_calls
+      where org_id = ${orgId} and created_at >= now() - interval '14 days'
+      group by 1, 2 order by 2 desc limit 30`),
+    q(sql`
+      select agent_type, rule, severity, title
+      from agent_issues where org_id = ${orgId} and status = 'open'
+      order by case severity when 'critical' then 0 when 'serious' then 1 else 2 end
+      limit 12`),
+  ]);
+  return {
+    note: "AI latency on Agent observability is the 95th percentile of AI requests inside agent runs, live phone calls excluded (a call session lasts minutes and is not a slow request). Health threshold: 60 s. Live calls are shown under Voice agents.",
+    aiLatencyByFeatureAndDay7d: latency,
+    liveCallsByDay14d: calls,
+    openHealthIssues: issues,
+  };
+});
+
 const SYSTEM = `You are the HR copilot inside a talent-acquisition system (ATS).
 You help recruiters, HR heads and the CHRO understand their own live hiring data and
 advise on process: requisition approvals, JD quality, JD↔CV matching weights,
@@ -160,8 +201,14 @@ Rules:
   Matching engine (/matching), Interviews (/interviews), My interviews (/interviews/mine),
   Offers (/offers), IJP (/ijp), Reports (/reports), Users & roles (/team),
   Integrations (/integrations), Master data (/masters), Organisation (/organisation),
-  Organisation profile (/org-profile),
+  Organisation profile (/org-profile), Hiring desk (/desk), Agent decisions (/agents),
+  Agent observability (/agents/observability), Agent settings (/agents/settings),
+  Agent register (/agents/register), Hiring cost (/hiring-cost),
   Platform console (/platform, product-owner super users only).
+- Questions about agents — speed, AI latency, failures, phone calls, health warnings —
+  answer from AGENT HEALTH in the snapshot: name the feature or voice agent and the day
+  behind a change, and quote the numbers. Live phone calls never count as AI latency.
+  If AGENT HEALTH has nothing on it, say so and point to Agent observability.
 - User administration lives on Users & roles (/team): the organisation owner can invite
   people, grant or revoke roles, pause (disable) access, and permanently delete a member
   from the row action menu. Deleting removes their membership and roles; pausing keeps
@@ -204,13 +251,16 @@ export const askCopilot = createServerFn({ method: "POST" })
       .map((m) => `${m.role === "user" ? "HR" : "Copilot"}: ${m.content}`)
       .join("\n");
 
-    const facts = await snapshot(context.orgId);
+    const [facts, health] = await Promise.all([
+      snapshot(context.orgId),
+      agentHealth(context.orgId).catch(() => null),
+    ]);
 
     const result = await aiJson<{ answer?: string }>({
       orgId: context.orgId,
       feature: "copilot",
       system: SYSTEM,
-      prompt: `DATA SNAPSHOT (live, this organisation only):\n${JSON.stringify(facts).slice(0, 24000)}\n\nCONVERSATION SO FAR:\n${transcript}\n\nAnswer the latest HR message.`,
+      prompt: `DATA SNAPSHOT (live, this organisation only):\n${JSON.stringify(facts).slice(0, 20000)}\n\nAGENT HEALTH (live, this organisation only):\n${JSON.stringify(health).slice(0, 6000)}\n\nCONVERSATION SO FAR:\n${transcript}\n\nAnswer the latest HR message.`,
     });
 
     const answer = result.ok

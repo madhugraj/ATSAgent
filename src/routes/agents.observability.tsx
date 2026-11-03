@@ -46,6 +46,7 @@ import {
 import { AGENT_CATALOG, AGENT_LABEL, AUTONOMY_OPTIONS } from "@/lib/agents.catalog";
 import { AgentDetailDrawer, type DrawerTab } from "@/components/AgentDetailDrawer";
 import { AgentUtilisation } from "@/components/AgentUtilisation";
+import { VoiceObservability } from "@/components/VoiceObservability";
 
 const DRAWER_TABS = [
   "identity",
@@ -258,6 +259,7 @@ function ObservabilityPage() {
           <HealthSummary d={d} />
           <KpiRow d={d} />
           <Trends d={d} />
+          <VoiceObservability />
           <AgentUtilisation />
           <IssuesPanel
             issues={[...d.orgIssues, ...d.agents.flatMap((a) => a.issues)]}
@@ -705,8 +707,8 @@ function Trends({ d }: { d: ObservabilityView }) {
           title="AI latency"
           subtitle={
             maxLatency >= 30
-              ? "p95 seconds of AI requests inside agent runs · dashed line: 60 s health threshold"
-              : "p95 seconds of AI requests inside agent runs · well under the 60 s health threshold"
+              ? "p95 seconds of AI requests inside agent runs (live calls excluded) · dashed line: 60 s health threshold"
+              : "p95 seconds of AI requests inside agent runs (live calls excluded) · well under the 60 s health threshold"
           }
           empty={
             !data.some((x) => x.latencySeconds != null) && "No AI requests in the last 14 days"

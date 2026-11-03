@@ -385,6 +385,8 @@ async function place(
   stopOpening();
   await line.hangup().catch(() => undefined);
   log.info("negotiation_call.vad", { call_id: call.id, segments: vad.segments });
+  const { recordAudioStats } = await import("./call-session.server");
+  await recordAudioStats(line, orgId, call.id, "negotiation_call");
   line.close();
   const summary = await session.close();
 

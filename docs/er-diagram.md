@@ -758,6 +758,7 @@ erDiagram
     jsonb transcript
     jsonb answers
     jsonb details
+    jsonb audio_stats "nullable"
     uuid screening_run_id FK
     text purpose
     uuid slot_offer_id FK
@@ -1463,7 +1464,7 @@ erDiagram
 | `role_panels` | — | 9 | (requisitionId+level) |
 | `round_substitutes` | — | 11 | — |
 | `salary_benchmarks` | Intelligence | 15 | — |
-| `screening_calls` | Screening & interviews | 34 | — |
+| `screening_calls` | Screening & interviews | 35 | — |
 | `screening_kits` | Screening & interviews | 11 | — |
 | `screening_prep_jobs` | Screening & interviews | 10 | (application_id) |
 | `screening_runs` | Screening & interviews | 23 | — |
