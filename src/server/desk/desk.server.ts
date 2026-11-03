@@ -3297,6 +3297,17 @@ export type RoleProposal = z.infer<typeof Proposal>;
  * when the organisation's AI model supports it, else the model's knowledge —
  * labelled as such) and post a proposal they can accept or change.
  */
+/** Reasoning text with any links, bare URLs or markdown citations taken out (pure). */
+export function withoutLinks(text: string): string {
+  return text
+    .replace(/^\s*[*-]\s*\[[^\]]*\]\([^)]*\)\s*$/gm, "")
+    .replace(/\[([^\]]+)\]\((?:https?:)?[^)]*\)/g, "$1")
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export async function researchRole(
   conv: Conversation,
   fields: ("skills" | "experience" | "budget")[],
@@ -3319,6 +3330,8 @@ export async function researchRole(
       "Use live web sources when available (job postings, salary surveys, skills reports) and cite them. Be concrete and current: " +
       "skills as short names (tools, frameworks, methods), experience as a year range, budget as annual CTC in lakhs (LPA) for the location. " +
       "Only fill the fields asked for; leave the others empty / null. " +
+      "Cite only pages you actually read, in `sources`; never put links, URLs or source names in `reasoning`. " +
+      "If you have no live sources, leave `sources` empty and say in `reasoning` that it is an estimate. " +
       'Return ONLY JSON: {"mustHaveSkills":[],"goodToHaveSkills":[],"experienceMin":null,"experienceMax":null,' +
       '"budgetLpaMin":null,"budgetLpaMax":null,"reasoning":"2-4 sentences: why these, what the market shows","sources":[{"title","url"}]}',
     prompt: JSON.stringify({
@@ -3350,8 +3363,10 @@ export async function researchRole(
     return;
   }
   const p = parsed.data;
-  // Keep only http(s) links; never render anything else as a link.
-  p.sources = p.sources.filter((x) => /^https?:\/\//i.test(x.url));
+  // Keep only http(s) links; never render anything else as a link. An estimate made
+  // without live sources cites nothing — a link there would be invented.
+  p.sources = res.grounded ? p.sources.filter((x) => /^https?:\/\//i.test(x.url)) : [];
+  p.reasoning = withoutLinks(p.reasoning);
   await postMessage(conv, {
     role: "desk",
     body: `Here is what the market expects for a ${s.roleTitle}${s.location ? ` (${s.location})` : ""}. Use these, or tell me what to change.`,
@@ -3361,13 +3376,10 @@ export async function researchRole(
       proposal: p as never,
       grounded: res.grounded,
       accepted: false,
-      why: {
-        understood,
-        missing: missingSlots(s).map((m) => REQUIRED_LABEL[m]),
-        next: res.grounded
-          ? `Researched ${fields.join(", ")} from live web sources (${p.sources.length}).`
-          : `Estimated ${fields.join(", ")} from the AI model's knowledge — no live web sources were available.`,
-      },
+      // No "How I read that" here: the person pressed a button, there is no message to read.
+      ...(understood.length
+        ? { why: { understood, missing: missingSlots(s).map((m) => REQUIRED_LABEL[m]) } }
+        : {}),
     },
   });
 }

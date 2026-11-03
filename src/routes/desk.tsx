@@ -2496,11 +2496,50 @@ type Why = {
  * live details, not the card's snapshot. Before the role is known ("which
  * of the two roles first?") it can only answer "which role should I research?".
  */
-function researchable(conv: DeskConversationView): boolean {
-  const s = conv.slots as { roleTitle?: string; mustHaveSkills?: string[]; experienceMin?: number };
-  return (
-    Boolean(s.roleTitle) && (!(s.mustHaveSkills ?? []).length || s.experienceMin === undefined)
-  );
+/**
+ * What the market can tell us for the question the desk is asking now — only the
+ * role's skills and experience. Work mode, location, openings and the hiring manager
+ * are the organisation's own decisions: never offered as research.
+ */
+const ASK_ORDER = [
+  "roleTitle",
+  "location",
+  "workMode",
+  "experience",
+  "openings",
+  "mustHaveSkills",
+  "hiringManager",
+] as const;
+function researchTarget(
+  conv: DeskConversationView,
+): { fields: ("skills" | "experience")[]; label: string } | null {
+  const s = conv.slots as {
+    roleTitle?: string;
+    location?: string;
+    workMode?: string;
+    experienceMin?: number;
+    openings?: number;
+    mustHaveSkills?: string[];
+    hiringManagerMemberId?: string;
+  };
+  if (!s.roleTitle) return null;
+  const missing = (k: (typeof ASK_ORDER)[number]) =>
+    k === "experience"
+      ? s.experienceMin === undefined
+      : k === "mustHaveSkills"
+        ? !(s.mustHaveSkills ?? []).length
+        : k === "hiringManager"
+          ? !s.hiringManagerMemberId
+          : !s[k];
+  const next = ASK_ORDER.find(missing);
+  if (next === "experience")
+    return {
+      fields: (s.mustHaveSkills ?? []).length ? ["experience"] : ["experience", "skills"],
+      label: "Research the experience from the market",
+    };
+  if (next === "mustHaveSkills")
+    return { fields: ["skills"], label: "Research the skills from the market" };
+  return null;
 }
 
 /** "How I read that": what the desk understood, what is missing, what it does next. */
@@ -2516,17 +2555,12 @@ function Thinking({
   const [busy, setBusy] = useState(false);
   const understood = why.understood ?? [];
   const missing = why.missing ?? [];
-  const canResearch = conv?.status === "gathering" && researchable(conv);
+  const target = conv?.status === "gathering" ? researchTarget(conv) : null;
   async function research() {
-    if (!conv) return;
+    if (!conv || !target) return;
     setBusy(true);
     try {
-      await researchDeskRole({
-        data: {
-          id: conv.id,
-          fields: missing.includes("experience") ? ["skills", "experience"] : ["skills"],
-        },
-      });
+      await researchDeskRole({ data: { id: conv.id, fields: target.fields } });
       onChanged?.();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not research this");
@@ -2546,11 +2580,10 @@ function Thinking({
       setBusy(false);
     }
   }
+  // Nothing read and nothing to offer: no box (it only repeated "nothing new").
+  if (!understood.length && !target && !why.jdResearch) return null;
   return (
-    <details
-      className="group rounded-md border border-dashed border-border bg-muted/30 px-3 py-2 text-xs"
-      open
-    >
+    <details className="group rounded-md border border-dashed border-border bg-muted/30 px-3 py-2 text-xs">
       <summary className="cursor-pointer select-none font-medium text-muted-foreground">
         How I read that
       </summary>
@@ -2570,10 +2603,10 @@ function Thinking({
           </>
         ) : null}
       </dl>
-      {canResearch ? (
+      {target ? (
         <Button size="sm" variant="outline" className="mt-2" disabled={busy} onClick={research}>
           {busy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-          Research it from the market
+          {target.label}
         </Button>
       ) : null}
       {why.jdResearch && conv ? (
@@ -2607,27 +2640,6 @@ function HiringManagerOptionsCard({
   const options =
     (card["options"] as unknown as { memberId: string; name: string; email: string }[]) ?? [];
   const open = conv.status === "gathering";
-  // Skills / experience can still be researched even while the hiring
-  // manager is the question on the card — research stays available for as
-  // long as those details are missing, not only on the turn that asked.
-  const missing = why.missing ?? [];
-  const canResearch = open && researchable(conv);
-  async function research() {
-    setBusy(true);
-    try {
-      await researchDeskRole({
-        data: {
-          id: conv.id,
-          fields: missing.includes("experience") ? ["skills", "experience"] : ["skills"],
-        },
-      });
-      onChanged();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not research this");
-    } finally {
-      setBusy(false);
-    }
-  }
   async function pick(memberId: string) {
     setBusy(true);
     try {
@@ -2642,10 +2654,7 @@ function HiringManagerOptionsCard({
   const understood = why.understood ?? [];
   return (
     <div className="space-y-2 rounded-lg border border-border p-3">
-      <details
-        className="group rounded-md border border-dashed border-border bg-muted/30 px-3 py-2 text-xs"
-        open
-      >
+      <details className="group rounded-md border border-dashed border-border bg-muted/30 px-3 py-2 text-xs">
         <summary className="cursor-pointer select-none font-medium text-muted-foreground">
           How I read that
         </summary>
@@ -2690,18 +2699,6 @@ function HiringManagerOptionsCard({
           No active team members found — the admin adds people on the Team page.
         </p>
       )}
-      {canResearch ? (
-        <Button
-          size="sm"
-          variant="outline"
-          className="gap-1"
-          disabled={busy}
-          onClick={() => void research()}
-        >
-          {busy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-          Research it from the market
-        </Button>
-      ) : null}
     </div>
   );
 }
