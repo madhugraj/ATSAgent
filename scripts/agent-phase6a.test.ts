@@ -408,6 +408,29 @@ describe("choosing the role", () => {
     expect(runs[0]!.goal).toMatch(/chose to open this new requisition — complete it/);
   });
 
+  test("confirming an out-of-date view of the plan is refused; pressing again changes nothing", async () => {
+    const conv = await confirming();
+    const { requisitionId } = await desk.createNewRole(conv, recruiter);
+    const { planFor, savePlan } = await import("../src/lib/interview-plan.server");
+    const seen = await planFor(orgId, requisitionId);
+    // Someone saves a one-round plan in another window after this card loaded.
+    await savePlan(orgId, requisitionId, { ...seen.plan, rounds: seen.plan.rounds.slice(0, 1) });
+    await expect(
+      desk.confirmHiringPlan(await reload(conv.id), recruiter, seen.rev),
+    ).rejects.toThrow(/changed since this card loaded/);
+    expect(await runsOf(conv.id)).toHaveLength(0);
+    const latest = await planFor(orgId, requisitionId);
+    expect(latest.rev).not.toBe(seen.rev);
+    await desk.confirmHiringPlan(await reload(conv.id), recruiter, latest.rev);
+    expect(await runsOf(conv.id)).toHaveLength(1);
+    // A second press (an older card) is a no-op and says so; the plan is untouched.
+    expect(await desk.confirmHiringPlan(await reload(conv.id), recruiter, seen.rev)).toMatchObject({
+      alreadyConfirmed: true,
+    });
+    expect((await planFor(orgId, requisitionId)).plan.rounds).toHaveLength(1);
+    expect(await runsOf(conv.id)).toHaveLength(1);
+  });
+
   test("typing 'ask the hiring manager what this role needs' goes through the live agent check", async () => {
     const conv = await confirming();
     await desk.createNewRole(conv, recruiter);

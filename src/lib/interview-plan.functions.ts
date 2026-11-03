@@ -26,7 +26,13 @@ export const getInterviewPlan = createServerFn({ method: "GET" })
 
 export const saveInterviewPlan = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .validator((d: unknown) => ReqInput.extend({ plan: z.unknown().nullable() }).parse(d))
+  .validator((d: unknown) =>
+    ReqInput.extend({
+      plan: z.unknown().nullable(),
+      /** The plan's stamp when this editor loaded it: a newer saved plan is not overwritten. */
+      basedOn: z.string().max(64).optional(),
+    }).parse(d),
+  )
   .handler(async ({ data, context }) => {
     const { assertRequisitionInOrg } = await import("../server/guards");
     await assertRequisitionInOrg(data.requisitionId, context.orgId);
@@ -38,6 +44,13 @@ export const saveInterviewPlan = createServerFn({ method: "POST" })
       "Only the hiring team can change the interview plan.",
     );
     const { savePlan, planFor } = await import("./interview-plan.server");
+    if (data.basedOn !== undefined) {
+      const now = await planFor(context.orgId, data.requisitionId);
+      if (now.rev !== data.basedOn)
+        throw new Error(
+          "The interview plan changed since you opened it (saved from another window or card) — showing the latest now. Make your change again on it.",
+        );
+    }
     if (data.plan === null) {
       await db
         .update(requisitions)

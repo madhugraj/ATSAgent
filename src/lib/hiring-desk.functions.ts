@@ -592,12 +592,20 @@ export const acceptDeskProposal = createServerFn({ method: "POST" })
  */
 export const confirmDeskHiringPlan = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        /** The plan's stamp as the person saw it: an older view is not confirmed. */
+        rev: z.string().max(64).optional(),
+      })
+      .parse(d),
+  )
   .handler(async ({ data, context }) => {
     const conv = await accessible(context, data.id);
-    await echoClick(conv, "Confirm the hiring plan");
     const { confirmHiringPlan } = await import("../server/desk/desk.server");
-    return confirmHiringPlan(conv, context.userId);
+    const out = await confirmHiringPlan(conv, context.userId, data.rev);
+    return out;
   });
 
 /** Ask the role's hiring manager what the role really needs (Role expert interview agent). */

@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 
@@ -17,8 +17,25 @@ export function InterviewPlanCard({ requisitionId }: { requisitionId: string }) 
     queryKey: ["interview_plan", requisitionId],
     queryFn: () => getInterviewPlan({ data: { requisitionId } }),
   });
-  const [draft, setDraft] = useState<InterviewPlan | null>(null);
+  const [draft, setDraftState] = useState<InterviewPlan | null>(null);
+  // The saved plan's stamp when editing began: a save from an older copy is refused.
+  const [base, setBase] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const rev = q.data?.rev;
+  // The plan was saved elsewhere (another card, the full editor, an agent): an open
+  // draft of the older plan is dropped, so every card shows the same plan.
+  useEffect(() => {
+    if (draft && base && rev && rev !== base) {
+      setDraftState(null);
+      setBase(null);
+      toast.info("The interview plan was changed elsewhere — showing the latest.");
+    }
+  }, [rev, base, draft]);
+  const setDraft = (next: InterviewPlan | null) => {
+    if (next && !draft) setBase(rev ?? null);
+    if (!next) setBase(null);
+    setDraftState(next);
+  };
   if (q.isLoading || !q.data)
     return <p className="text-xs text-muted-foreground">Loading the interview plan…</p>;
   const plan = draft ?? q.data.plan;
@@ -27,12 +44,18 @@ export function InterviewPlanCard({ requisitionId }: { requisitionId: string }) 
   async function save(next: InterviewPlan | null) {
     setBusy(true);
     try {
-      await saveInterviewPlan({ data: { requisitionId, plan: next } });
+      await saveInterviewPlan({
+        data: { requisitionId, plan: next, ...(base ? { basedOn: base } : { basedOn: rev }) },
+      });
       toast.success(next ? "Interview plan saved" : "Back to the plan from the must-haves");
       setDraft(null);
       await qc.invalidateQueries({ queryKey: ["interview_plan", requisitionId] });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not save the plan");
+      if (e instanceof Error && /changed since you opened it/.test(e.message)) {
+        setDraft(null);
+        await qc.invalidateQueries({ queryKey: ["interview_plan", requisitionId] });
+      }
     } finally {
       setBusy(false);
     }

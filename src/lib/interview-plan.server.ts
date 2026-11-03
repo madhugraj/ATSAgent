@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 /**
  * Interview plans and round progress, server side. A role's plan is its saved
  * one, else the default built from its must-haves (src/lib/interview-plan.ts).
@@ -17,10 +18,21 @@ import {
   type Verdict,
 } from "./interview-plan";
 
+/**
+ * A stamp of the plan as stored (pure): changes whenever the saved plan changes,
+ * so an editor holding an older copy cannot overwrite a newer one.
+ */
+export function planRev(plan: InterviewPlan | null): string {
+  return createHash("sha256")
+    .update(JSON.stringify(plan ?? null))
+    .digest("hex")
+    .slice(0, 16);
+}
+
 export async function planFor(
   orgId: string,
   requisitionId: string,
-): Promise<{ plan: InterviewPlan; saved: boolean }> {
+): Promise<{ plan: InterviewPlan; saved: boolean; rev: string }> {
   const [r] = await db
     .select({ plan: requisitions.interviewPlan, mustHave: requisitions.mustHaveSkills })
     .from(requisitions)
@@ -29,9 +41,9 @@ export async function planFor(
   if (!r) throw new Error("Requisition not found.");
   if (r.plan) {
     const parsed = InterviewPlanSchema.safeParse(r.plan);
-    if (parsed.success) return { plan: parsed.data, saved: true };
+    if (parsed.success) return { plan: parsed.data, saved: true, rev: planRev(parsed.data) };
   }
-  return { plan: defaultPlan(r.mustHave), saved: false };
+  return { plan: defaultPlan(r.mustHave), saved: false, rev: planRev(null) };
 }
 
 export async function savePlan(
