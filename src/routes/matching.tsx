@@ -345,7 +345,7 @@ function Matching() {
       await persistMatchResult({
         data: {
           applicationId,
-          autoShortlist: result.overall_score >= 75 && row.app.stage === "applied",
+          autoShortlist: result.recommendation === "select" && row.app.stage === "applied",
           socialSignals: socialInput(result),
           score: scoreInput(result),
         },
@@ -408,7 +408,7 @@ function Matching() {
     await persistMatchResult({
       data: {
         applicationId,
-        autoShortlist: result.overall_score >= 75 && stage === "applied",
+        autoShortlist: result.recommendation === "select" && stage === "applied",
         socialSignals: result.social.cached ? undefined : socialInput(result),
         score: scoreInput(result),
       },

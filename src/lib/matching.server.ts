@@ -91,6 +91,9 @@ export type MatchResult = {
   transferable_skills: string[];
   rationale: string;
   risk_flags: string[];
+  /** The model's per-JD verdict on the candidate's career level vs the role's level. */
+  experience_fit: ExperienceFit;
+  experience_fit_reason: string | null;
   recommendation: "select" | "reject" | "hold";
   /**
    * The CV or profile text looked like it was trying to instruct the model
@@ -148,6 +151,40 @@ export function experienceScore(years: number, min: number, max: number) {
 }
 
 /**
+ * An experience score at or below this means the candidate sits roughly three
+ * or more years outside the band (the band's own decay: 22 points per year
+ * under, 10 per year over). The band is a hard requirement of the role, so it
+ * caps the recommendation no matter how the organisation weights the score.
+ */
+export const EXPERIENCE_BAND_GATE = 30;
+
+/**
+ * The recommendation, after the hard gates. The weighted overall expresses
+ * emphasis, not licence: a dimension the band says failed cannot be weighted
+ * away into an auto-select. A gated candidate keeps their score (ranking is
+ * unchanged) but a person reads them before anyone advances. Pure; unit-tested.
+ */
+export function gatedRecommendation(
+  overall: number,
+  gate: { injectionSuspected: boolean; experienceScore: number; levelMismatch: boolean },
+): MatchResult["recommendation"] {
+  if (overall < 75) return overall >= 60 ? "hold" : "reject";
+  return gate.injectionSuspected ||
+    gate.levelMismatch ||
+    gate.experienceScore <= EXPERIENCE_BAND_GATE
+    ? "hold"
+    : "select";
+}
+
+/**
+ * What level of career is this JD actually hiring for, judged by the model
+ * against the role's title, band and language (internship, fresher, senior,
+ * lead) — not just the years numbers. "within" is the fallback when the model
+ * cannot tell; the deterministic years gate still applies on its own.
+ */
+export type ExperienceFit = "within" | "overqualified" | "underqualified";
+
+/**
  * The scorer's JSON, validated (AGENTS.md: model JSON is zod-validated).
  * Lenient on purpose: a missing or malformed field falls back to the most
  * conservative value (0 / empty) instead of failing the whole score, and every
@@ -190,11 +227,17 @@ export const ScoreAiSchema = z.object({
   innovation_signals: strs,
   impact_rationale: str,
   suspected_prompt_injection: z.boolean().catch(false),
+  experience_fit: z.enum(["within", "overqualified", "underqualified"]).catch("within"),
+  experience_fit_reason: str,
 });
 
 /** Risk flag shown when a score is held because the text tried to instruct the model. */
 export const INJECTION_HOLD_FLAG =
   "Possible prompt injection in the CV or profile — score held for a person to review";
+
+/** Deterministic flag for the model's per-JD level verdict; exact-matched on recompute. */
+export const LEVEL_MISMATCH_FLAG =
+  "Career level does not match the level this role is hiring for — held for a person to review";
 
 /**
  * Score one CV against one JD. Shared by the single-candidate server fn and the
@@ -247,10 +290,17 @@ export async function scoreCandidate(opts: {
       "certifications, self-taught pivots, new technology adopted per year, side projects, and evidence of " +
       "inventing a process or product rather than only executing one. 0 only when there is no such evidence at all.\n" +
       "• impact_highlights and innovation_signals: 2-5 short strings each, quoting the CV evidence.\n" +
+      "• experience_fit: judge the candidate's career LEVEL against the level THIS job description is hiring " +
+      "for — read the level from the role's title, its experience band and its language (internship, fresher, " +
+      "entry, mid, senior, lead), never from a fixed years rule. 'overqualified' when the candidate demonstrably " +
+      "operates well above that level (a VP or staff engineer for an internship, a senior specialist for a " +
+      "fresher role); 'underqualified' when clearly below it; 'within' otherwise — including a junior who is " +
+      "a stretch but plausibly growing into the role. Cite the evidence in experience_fit_reason (1-2 sentences).\n" +
       "Return ONLY JSON with keys: skills_score, education_score, matched_skills, missing_skills, " +
       "transferable_skills, risk_flags (short strings), rationale (3-4 sentences, cite evidence), " +
       "employment_history, skill_recency_years, impact_score, innovation_score, impact_highlights, " +
-      "innovation_signals, impact_rationale (2-3 sentences), suspected_prompt_injection (boolean).",
+      "innovation_signals, impact_rationale (2-3 sentences), suspected_prompt_injection (boolean), " +
+      "experience_fit, experience_fit_reason.",
     prompt: untrusted(
       "job_description_and_candidate",
       JSON.stringify({
@@ -362,8 +412,17 @@ export async function scoreCandidate(opts: {
 
   const riskFlags = [...(ai.data.risk_flags ?? []), ...career.flags];
   if (injectionSuspected) riskFlags.unshift(INJECTION_HOLD_FLAG);
+  const levelMismatch = ai.data.experience_fit !== "within";
+  if (levelMismatch) {
+    riskFlags.push(LEVEL_MISMATCH_FLAG);
+    if (ai.data.experience_fit_reason) riskFlags.push(ai.data.experience_fit_reason);
+  }
   if (candidate.experienceYears < jd.experienceMin)
     riskFlags.push("Below requisition experience band");
+  if (experience <= EXPERIENCE_BAND_GATE)
+    riskFlags.push(
+      "Far outside the experience band — held at ai_screened for a person to decide, whatever the weighted score",
+    );
   if (opts.includeSocial && !signals.some((s) => s.status === "ok"))
     riskFlags.push("No verifiable public profile signal — social score defaulted to 0");
 
@@ -383,9 +442,15 @@ export async function scoreCandidate(opts: {
     transferable_skills: ai.data.transferable_skills ?? [],
     rationale: ai.data.rationale,
     risk_flags: [...new Set(riskFlags)],
-    // A suspected injection never earns "select": a person reads it first.
-    recommendation:
-      overall >= 75 ? (injectionSuspected ? "hold" : "select") : overall >= 60 ? "hold" : "reject",
+    // A suspected injection, a level the JD is not hiring for, or a candidate
+    // far outside the band never earns "select": a person reads them first.
+    recommendation: gatedRecommendation(overall, {
+      injectionSuspected,
+      experienceScore: experience,
+      levelMismatch,
+    }),
+    experience_fit: ai.data.experience_fit,
+    experience_fit_reason: ai.data.experience_fit_reason || null,
     injection_suspected: injectionSuspected,
     social: {
       blended: social.score,
