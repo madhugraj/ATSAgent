@@ -109,7 +109,7 @@ export function assertReusable(
 export async function addApplicationsCore(
   actor: LifecycleActor,
   input: { requisitionId: string; candidateIds: string[]; source: string },
-): Promise<{ added: number }> {
+): Promise<{ added: number; alreadyInPipeline?: string[] }> {
   const [requisition] = await db
     .select({ id: requisitions.id })
     .from(requisitions)
@@ -129,15 +129,23 @@ export async function addApplicationsCore(
     throw new Error("Some candidates are not in this organisation's talent pool.");
   }
   assertReusable(owned);
-  await db.insert(applications).values(
-    input.candidateIds.map((candidateId) => ({
-      requisitionId: input.requisitionId,
-      candidateId,
-      orgId: actor.orgId,
-      source: input.source,
-    })),
-  );
-  return { added: input.candidateIds.length };
+  // Someone already in the role (another agent or a person added them) is not an
+  // error: skipped, and reported back by name.
+  const inserted = await db
+    .insert(applications)
+    .values(
+      input.candidateIds.map((candidateId) => ({
+        requisitionId: input.requisitionId,
+        candidateId,
+        orgId: actor.orgId,
+        source: input.source,
+      })),
+    )
+    .onConflictDoNothing({ target: [applications.requisitionId, applications.candidateId] })
+    .returning({ candidateId: applications.candidateId });
+  const addedIds = new Set(inserted.map((r) => r.candidateId));
+  const alreadyIn = owned.filter((o) => !addedIds.has(o.id)).map((o) => o.name);
+  return { added: inserted.length, ...(alreadyIn.length ? { alreadyInPipeline: alreadyIn } : {}) };
 }
 
 export async function addCandidateNoteCore(

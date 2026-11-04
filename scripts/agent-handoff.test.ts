@@ -313,9 +313,18 @@ describe("A. orchestrator handoffs (every agent on)", () => {
       edge: "H3a",
       from: "jd (DH approval)",
     });
-    expectRun(out, "distribution", R(), ["job portals"], {
+    // Distribution waits for Publishing to finish, so the thread reads publish, then advertise.
+    expect(out.runs.filter((r) => r.agentType === "distribution")).toHaveLength(0);
+    const published = await handoff({
+      orgId,
+      type: "role.published",
+      subjectType: "requisition",
+      subjectId: reqId,
+      actorUserId: hmId,
+    });
+    expectRun(published, "distribution", R(), ["job portals"], {
       edge: "H3b",
-      from: "jd (DH approval)",
+      from: "publishing (role published)",
     });
     // The hiring desk thread on the role also asks Intake & matching to rank the pool.
     const [intake] = await db
@@ -789,11 +798,21 @@ describe("B. handoffs started by an agent, a person or the scheduler", () => {
     await application("applied", { source: "careers_page", appliedAt: new Date() });
     await scheduleSweeps({ orgId });
     const runs = await runsSince(since);
-    // The role has an approved JD and almost no applicants: it is starving.
-    const sourcing = runs.find((r) => r.agentType === "sourcing");
+    const intake = runs.find((r) => r.agentType === "intake");
+    // Intake brings the pool in first: the role is not "starving" while it works.
+    expect(runs.some((r) => r.agentType === "sourcing")).toBe(false);
+    // A day after Intake's pass, with still almost no applicants, it is starving.
+    await db.execute(
+      sql`update agent_runs set status = 'done', created_at = now() - interval '25 hours' where org_id = ${orgId} and agent_type = 'intake'`,
+    );
+    await db.execute(
+      sql`update applications set applied_at = now() - interval '25 hours' where org_id = ${orgId} and requisition_id = ${reqId}`,
+    );
+    const later = new Date(Date.now() - 5);
+    await scheduleSweeps({ orgId });
+    const sourcing = (await runsSince(later)).find((r) => r.agentType === "sourcing");
     expect(sourcing?.subjectId).toBe(reqId);
     expect(sourcing?.goal).toContain("needs more candidates");
-    const intake = runs.find((r) => r.agentType === "intake");
     expect(intake?.subjectId).toBe(reqId);
     expect(intake?.goal).toContain("new application(s) arrived");
     expect(intake?.goal).toContain("careers_page");

@@ -29,7 +29,9 @@ export type AgentEventType =
   | "compensation.submitted"
   | "negotiation.agreed"
   | "negotiation.needs_call"
-  | "screening_call.ended";
+  | "screening_call.ended"
+  /** The Publishing agent finished publishing a role: advertising it can start. */
+  | "role.published";
 
 export async function emitAgentEvent(e: {
   orgId: string;

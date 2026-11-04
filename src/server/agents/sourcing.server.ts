@@ -28,6 +28,8 @@ import { trackedApplyUrl } from "@/lib/job-channels";
 
 /** Explicit thresholds, so every "starving" verdict is explainable. */
 export const SOURCING = {
+  /** Hours after an Intake run before the role can count as starving. */
+  intakeGraceHours: 24,
   /** A role live this many days… */
   minDaysLive: 3,
   /** …with fewer applicants than this in the last 7 days is starving. */
@@ -373,6 +375,15 @@ export async function starvingRoles(
           select 1 from agent_runs r where r.org_id = ${orgId} and r.agent_type = 'sourcing'
             and r.subject_id = ${requisitions.id} and r.mode = 'live'
             and (r.status in ('queued','running','awaiting_human') or r.created_at >= now() - make_interval(hours => ${SOURCING.cooldownHours}))
+        )`,
+        // Intake brings the talent pool in first: a role is not "starving" while its
+        // Intake run is working, or within a day of its first pass (it raced Intake once,
+        // read zero applicants and tried to add people Intake had just added).
+        sql`not exists (
+          select 1 from agent_runs r where r.org_id = ${orgId} and r.agent_type = 'intake'
+            and r.subject_id = ${requisitions.id} and r.mode = 'live'
+            and (r.status in ('queued','running','awaiting_human')
+              or r.created_at >= now() - make_interval(hours => ${SOURCING.intakeGraceHours}))
         )`,
       ),
     )
