@@ -328,7 +328,7 @@ export const addApplicationsToRequisition = createServerFn({ method: "POST" })
       { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
       { requisitionId: data.requisitionId, candidateIds: data.candidateIds, source: data.source },
     );
-    return { ok: true as const, added: r.added };
+    return { ok: true as const, added: r.added, skipped: r.skipped.length };
   });
 
 /* -------------------------------------------------------- create requisition */
