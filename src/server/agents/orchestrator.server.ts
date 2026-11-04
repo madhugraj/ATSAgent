@@ -572,9 +572,12 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
         `Requisition ${req.code} "${req.title}" and its job description are approved. Publish it internally and prepare the external posts.`,
       );
     }
-    // The Distribution agent advertises it across the portals — only where the
-    // organisation switched it on (no "agent is off" note for an optional agent).
+    // Already published (or Publishing is off): advertise now; otherwise the
+    // Distribution agent starts when Publishing finishes (role.published).
+    const publishingOn =
+      getAgent("publishing") && (await loadPolicy(e.orgId, "publishing")).enabled;
     if (
+      (published || !publishingOn) &&
       getAgent("distribution") &&
       (await loadPolicy(e.orgId, "distribution")).enabled &&
       !(await recentRun(e.orgId, "distribution", 24 * 30, req.id))
@@ -584,6 +587,20 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
         `Requisition ${req.code} "${req.title}" and its job description are approved. Advertise it on the right job portals and make sure the CVs they send back reach it.`,
       );
     }
+  }
+  // Published: the Distribution agent advertises it across the portals — only where
+  // the organisation switched it on (no "agent is off" note for an optional agent).
+  if (
+    e.type === "role.published" &&
+    req.status === "approved" &&
+    getAgent("distribution") &&
+    (await loadPolicy(e.orgId, "distribution")).enabled &&
+    !(await recentRun(e.orgId, "distribution", 24 * 30, req.id))
+  ) {
+    await dispatch(
+      "distribution",
+      `Requisition ${req.code} "${req.title}" is published. Advertise it on the right job portals and make sure the CVs they send back reach it.`,
+    );
   }
   return { started, synced };
 }

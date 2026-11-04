@@ -467,6 +467,25 @@ describe("intake & matching agent", () => {
     expect(inReq.find((r) => r.c === foreign)).toBeUndefined();
   });
 
+  test("adding someone already in the role is reported by name, not an error", async () => {
+    const { addApplicationsCore } = await import("../src/lib/pipeline.server");
+    const already = await candidate("Already In", ["Kubernetes"]);
+    const fresh = await candidate("Fresh One", ["Kubernetes"]);
+    const actor = { orgId, userId: recruiter, memberEmail: "r@x" };
+    await addApplicationsCore(actor, {
+      requisitionId: reqId,
+      candidateIds: [already],
+      source: "agent_talent_pool",
+    });
+    // Another agent raced and adds the same person again, with someone new.
+    const out = await addApplicationsCore(actor, {
+      requisitionId: reqId,
+      candidateIds: [already, fresh],
+      source: "agent_talent_pool",
+    });
+    expect(out).toEqual({ added: 1, alreadyInPipeline: ["Already In"] });
+  });
+
   test("the intake sweep starts once per requisition and respects the cooldown and opt-in", async () => {
     await application("Held", "ai_screened", 50, []);
     expect(await scheduleSweeps({ orgId })).toBe(0); // intake switched off

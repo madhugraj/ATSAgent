@@ -2422,6 +2422,23 @@ async function finish(
       error: error ? error.slice(0, 300) : null,
     },
   });
+  // Publishing done: the Distribution agent advertises the role next (in that order,
+  // so the thread reads publish, then advertise).
+  if (status === "done" && run.agentType === "publishing" && run.subjectId && run.mode === "live") {
+    try {
+      const { emitAgentEvent } = await import("./events");
+      await emitAgentEvent({
+        orgId: run.orgId,
+        type: "role.published",
+        subjectType: "requisition",
+        subjectId: run.subjectId,
+        actorUserId: run.principalUserId,
+        payload: { runId: run.id },
+      });
+    } catch (e) {
+      log.warn("agent.role_published_event_failed", { run_id: run.id, error: e as Error });
+    }
+  }
   if (run.conversationId) {
     try {
       const { onRunFinished } = await import("../desk/desk.server");
