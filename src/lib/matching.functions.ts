@@ -20,6 +20,7 @@ import {
   type MatchResult,
   type MatchWire,
 } from "./matching.server";
+import { CTC_CEILING_BLOCKER } from "./logistics";
 import { type SocialSignal } from "./social.server";
 
 export type { MatchWire };
@@ -569,6 +570,7 @@ export const persistMatchResult = createServerFn({ method: "POST" })
       injectionSuspected: s.riskFlags.includes(INJECTION_HOLD_FLAG),
       experienceScore: s.experienceScore,
       levelMismatch: s.riskFlags.includes(LEVEL_MISMATCH_FLAG),
+      ctcOverBand: s.logisticsFlags.includes(CTC_CEILING_BLOCKER),
     });
     await db.insert(matchScores).values({
       applicationId: application.id,

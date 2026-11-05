@@ -22,11 +22,13 @@ describe("gatedRecommendation", () => {
       injectionSuspected?: boolean;
       experienceScore?: number;
       levelMismatch?: boolean;
+      ctcOverBand?: boolean;
     } = {},
   ) => ({
     injectionSuspected: false,
     experienceScore: 100,
     levelMismatch: false,
+    ctcOverBand: false,
     ...over,
   });
 
@@ -54,6 +56,22 @@ describe("gatedRecommendation", () => {
     // a staff engineer's: the scorer's structured verdict holds it.
     expect(gatedRecommendation(90, gate({ levelMismatch: true }))).toBe("hold");
     // And "within" never gates by itself.
+    expect(gatedRecommendation(90, gate())).toBe("select");
+  });
+
+  test("the band decays symmetrically: years over cost what years under cost", () => {
+    // The Madhana Gopal case (REQ-2026-001, band 2–4): 1.3 years over used to
+    // cost 13 (10/yr); now, like the under side, it costs 22/yr.
+    expect(experienceScore(5.3, 2, 4)).toBe(71);
+    expect(experienceScore(4.2, 2, 4)).toBe(96); // a slight overshoot still fits
+    // Experience and pay move together: two years over costs what two under do.
+    expect(experienceScore(6, 2, 4)).toBe(experienceScore(0, 2, 4));
+  });
+
+  test("an ask above the approved band gates; a missing ask never gates", () => {
+    // Auto-shortlisting someone the band cannot pay sets up an offer exception;
+    // a person decides first.
+    expect(gatedRecommendation(90, gate({ ctcOverBand: true }))).toBe("hold");
     expect(gatedRecommendation(90, gate())).toBe("select");
   });
 

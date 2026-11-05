@@ -9,7 +9,12 @@ import {
   type CareerMetrics,
   type EmploymentRow,
 } from "./career";
-import { logisticsCheck, type LogisticsCheck, type LogisticsRequisition } from "./logistics";
+import {
+  CTC_CEILING_BLOCKER,
+  logisticsCheck,
+  type LogisticsCheck,
+  type LogisticsRequisition,
+} from "./logistics";
 import {
   blendSocial,
   fetchGithubSignal,
@@ -143,34 +148,47 @@ export function harvestProfileLinks(resumeText: string | null | undefined) {
   };
 }
 
-/** Deterministic experience band score — auditable, never AI-guessed. */
+/**
+ * Deterministic experience band score — auditable, never AI-guessed. The decay
+ * is symmetric (22 points per year outside, either side): experience and
+ * compensation move together, so a candidate years above the band is as much
+ * a hiring risk as one years below — they cost more than the band budgeted.
+ */
 export function experienceScore(years: number, min: number, max: number) {
   if (years >= min && years <= max) return 100;
   if (years < min) return clamp(100 - (min - years) * 22);
-  return clamp(100 - (years - max) * 10);
+  return clamp(100 - (years - max) * 22);
 }
 
 /**
  * An experience score at or below this means the candidate sits roughly three
- * or more years outside the band (the band's own decay: 22 points per year
- * under, 10 per year over). The band is a hard requirement of the role, so it
- * caps the recommendation no matter how the organisation weights the score.
+ * or more years outside the band (the band's own decay: 22 points per year,
+ * either side). The band is a hard requirement of the role, so it caps the
+ * recommendation no matter how the organisation weights the score.
  */
 export const EXPERIENCE_BAND_GATE = 30;
 
 /**
  * The recommendation, after the hard gates. The weighted overall expresses
- * emphasis, not licence: a dimension the band says failed cannot be weighted
- * away into an auto-select. A gated candidate keeps their score (ranking is
- * unchanged) but a person reads them before anyone advances. Pure; unit-tested.
+ * emphasis, not licence: a dimension the band says failed — or an ask the
+ * approved compensation band cannot pay — cannot be weighted away into an
+ * auto-select. A gated candidate keeps their score (ranking is unchanged) but
+ * a person reads them before anyone advances. Pure; unit-tested.
  */
 export function gatedRecommendation(
   overall: number,
-  gate: { injectionSuspected: boolean; experienceScore: number; levelMismatch: boolean },
+  gate: {
+    injectionSuspected: boolean;
+    experienceScore: number;
+    levelMismatch: boolean;
+    /** Expected CTC materially above the approved band (logistics blocker). */
+    ctcOverBand: boolean;
+  },
 ): MatchResult["recommendation"] {
   if (overall < 75) return overall >= 60 ? "hold" : "reject";
   return gate.injectionSuspected ||
     gate.levelMismatch ||
+    gate.ctcOverBand ||
     gate.experienceScore <= EXPERIENCE_BAND_GATE
     ? "hold"
     : "select";
@@ -423,6 +441,14 @@ export async function scoreCandidate(opts: {
     riskFlags.push(
       "Far outside the experience band — held at ai_screened for a person to decide, whatever the weighted score",
     );
+  // Experience and compensation move together: an ask the approved band cannot
+  // pay is a cost decision, so it holds the candidate for a person to decide
+  // (an offer above the band needs an exception anyway). Missing CTC never gates.
+  const ctcOverBand = logistics?.blockers.includes(CTC_CEILING_BLOCKER) ?? false;
+  if (ctcOverBand)
+    riskFlags.push(
+      "Expected CTC above the approved band — held at ai_screened; a person decides before any advance",
+    );
   if (opts.includeSocial && !signals.some((s) => s.status === "ok"))
     riskFlags.push("No verifiable public profile signal — social score defaulted to 0");
 
@@ -442,12 +468,14 @@ export async function scoreCandidate(opts: {
     transferable_skills: ai.data.transferable_skills ?? [],
     rationale: ai.data.rationale,
     risk_flags: [...new Set(riskFlags)],
-    // A suspected injection, a level the JD is not hiring for, or a candidate
-    // far outside the band never earns "select": a person reads them first.
+    // A suspected injection, a level the JD is not hiring for, an ask above the
+    // approved band, or a candidate far outside the band never earns "select":
+    // a person reads them first.
     recommendation: gatedRecommendation(overall, {
       injectionSuspected,
       experienceScore: experience,
       levelMismatch,
+      ctcOverBand,
     }),
     experience_fit: ai.data.experience_fit,
     experience_fit_reason: ai.data.experience_fit_reason || null,
