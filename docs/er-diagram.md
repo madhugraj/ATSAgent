@@ -294,6 +294,7 @@ erDiagram
     integer weight_impact
     integer weight_education
     integer weight_social
+    jsonb custom_weights
     jsonb approval_trail
     uuid created_by FK
     timestamptz opened_at
@@ -447,6 +448,7 @@ erDiagram
     integer social_score
     integer overall_score
     jsonb weights
+    jsonb custom_scores
     text matched_skills
     text missing_skills
     text rationale "nullable"
@@ -1425,7 +1427,7 @@ erDiagram
 | `job_descriptions` | Requisitions & job content | 17 | — |
 | `job_index_notifications` | — | 10 | — |
 | `master_items` | Organisations & masters | 8 | — |
-| `match_scores` | Candidates & pipeline | 26 | — |
+| `match_scores` | Candidates & pipeline | 27 | — |
 | `member_interviewer_profiles` | — | 9 | (member_id) |
 | `notification_states` | — | 7 | — |
 | `offer_negotiations` | — | 24 | — |
@@ -1448,7 +1450,7 @@ erDiagram
 | `product_catalogue_commercials` | Organisations & masters | 8 | — |
 | `rate_limit_hits` | — | 3 | — |
 | `requisition_board_postings` | — | 16 | (requisitionId+provider) |
-| `requisitions` | Requisitions & job content | 43 | (orgId+code) |
+| `requisitions` | Requisitions & job content | 44 | (orgId+code) |
 | `role_panels` | — | 8 | (requisitionId+level) |
 | `round_substitutes` | — | 9 | — |
 | `salary_benchmarks` | Intelligence | 15 | — |

@@ -15,6 +15,17 @@ import {
   type ExperienceFit,
 } from "../src/lib/matching.server";
 import { rankPool } from "../src/server/agents/talent-search.server";
+import { weightsProblem } from "../src/lib/requisitions.server";
+
+const DEFAULT_W = {
+  skills: 40,
+  experience: 15,
+  career: 10,
+  impact: 10,
+  education: 10,
+  social: 15,
+};
+type CustomWeight = { key: string; label: string; hint: string; weight: number };
 
 describe("gatedRecommendation", () => {
   const gate = (
@@ -59,6 +70,11 @@ describe("gatedRecommendation", () => {
     expect(gatedRecommendation(90, gate({ levelMismatch: true }))).toBe("hold");
     // And "within" never gates by itself.
     expect(gatedRecommendation(90, gate())).toBe("select");
+  });
+
+  test("a broken (NaN) score never selects — a person reads it", () => {
+    expect(gatedRecommendation(Number.NaN, gate())).toBe("hold");
+    expect(gatedRecommendation(Number.NaN, gate({ experienceScore: 0 }))).not.toBe("select");
   });
 
   test("the career-direction verdict gates on its own", () => {
@@ -171,5 +187,47 @@ describe("rankPool experience band", () => {
     expect(byName.get("Junior")!.inBand).toBe(true); // within the one-year grace under
     expect(byName.get("Senior")!.inBand).toBe(false);
     expect(ranked[0]!.name).toBe("Fit");
+  });
+});
+
+describe("custom scoring dimensions", () => {
+  const dim = (over: Partial<CustomWeight> = {}): CustomWeight => ({
+    key: "open_source",
+    label: "Open-source contributions",
+    hint: "Maintains or contributes to open-source packages, with commits and releases",
+    weight: 10,
+    ...over,
+  });
+
+  test("custom weights join the total-100 rule and are capped at four", () => {
+    // 90 built-in + 10 custom = 100: fine.
+    expect(weightsProblem({ ...DEFAULT_W, skills: 30 }, [dim()])).toBeNull();
+    // The same weights with no custom dimension no longer total 100.
+    expect(weightsProblem({ ...DEFAULT_W, skills: 30 })).toMatch(/must total 100/);
+    expect(weightsProblem({ ...DEFAULT_W, skills: 20 }, [dim(), dim({ key: "d2" })])).toBeNull();
+    expect(
+      weightsProblem({ ...DEFAULT_W, skills: 10 }, [
+        dim(),
+        dim({ key: "d2" }),
+        dim({ key: "d3" }),
+        dim({ key: "d4" }),
+        dim({ key: "d5" }),
+      ]),
+    ).toMatch(/At most 4/);
+  });
+
+  test("keys are slugs, labels are required, hints are real instructions", () => {
+    expect(weightsProblem({ ...DEFAULT_W, skills: 30 }, [dim({ key: "Bad Key" })])).toMatch(
+      /lowercase/,
+    );
+    expect(
+      weightsProblem({ ...DEFAULT_W, skills: 30 }, [dim({ key: "oss", label: "  " })]),
+    ).toMatch(/label/);
+    expect(weightsProblem({ ...DEFAULT_W, skills: 30 }, [dim({ hint: "short" })])).toMatch(
+      /scoring hint/,
+    );
+    expect(
+      weightsProblem({ ...DEFAULT_W, skills: 30 }, [dim(), dim({ key: "open_source" })]),
+    ).toMatch(/duplicated/);
   });
 });

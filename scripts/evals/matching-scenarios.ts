@@ -39,6 +39,10 @@ export type MatchingScenario = {
     expectedCtc?: number | null;
     location?: string | null;
   };
+  /** The organisation's own dimensions to score alongside the built-ins. */
+  customDimensions?: { key: string; label: string; hint: string; weight: number }[];
+  /** Override the default weights when custom dimensions share the 100 points. */
+  weights?: Record<string, number>;
   /** Assertions on the scored result; each failure string names the measurement. */
   expect: (r: MatchResult) => string[];
 };
@@ -418,6 +422,55 @@ course in 2024).`,
             ]
           : []),
       ],
+    },
+    {
+      name: "matching: the organisation's own dimension is scored with evidence",
+      jd: seniorBackendJd,
+      customDimensions: [
+        {
+          key: "open_source",
+          label: "Open-source contributions",
+          hint: "Maintains or contributes to open-source packages — commits, patches, issues, releases, conference talks",
+        },
+      ],
+      weights: { skills: 30, experience: 15, career: 10, impact: 10, education: 10, social: 15 },
+      candidate: {
+        name: "Priya Lakshmi",
+        experienceYears: 6,
+        education: "B.Tech CSE",
+        skills: ["TypeScript", "Node.js", "PostgreSQL", "REST APIs", "Docker", "System design"],
+        resumeText: `PRIYA LAKSHMI — Backend Engineer, 6 years of experience.
+EXPERIENCE
+Senior Backend Engineer (2022–Present) — owns a payments service on Node.js/TypeScript
+and PostgreSQL; led system design reviews; cut p99 latency 40%.
+OPEN SOURCE
+Maintainer of "pg-query-plan" (an npm query-planning helper): 1.2k GitHub stars, 30+
+merged PRs from the community, releases every quarter; 4 patches merged into upstream
+node-postgres; spoke at NodeConf EU 2025 on connection pooling.
+SKILLS: TypeScript, Node.js, PostgreSQL, REST APIs, Docker, system design.`,
+        location: "Chennai",
+      },
+      expect: (r) => {
+        const oss = r.custom_scores.find((c) => c.key === "open_source");
+        return [
+          ...(r.custom_scores.length !== 1
+            ? [
+                `custom_scores: got ${r.custom_scores.length} entries, want exactly 1 (the open_source dimension)`,
+              ]
+            : []),
+          ...(oss && oss.score < 60
+            ? [
+                `custom_scores.open_source: got ${oss.score}, want ≥ 60 — the CV evidence is substantial (maintainer, 1.2k stars, upstream patches, a talk)`,
+              ]
+            : []),
+          ...(oss && !oss.evidence.trim()
+            ? [`custom_scores.open_source: evidence is empty — the scorer must cite what it read`]
+            : []),
+          ...(!r.contributions.some((c) => c.label === "Open-source contributions")
+            ? [`contributions: the custom dimension is missing from the weighted roll-up`]
+            : []),
+        ];
+      },
     },
   ];
 }

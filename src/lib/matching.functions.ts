@@ -526,6 +526,9 @@ const PersistInput = z.object({
     socialScore: z.number(),
     overallScore: z.number(),
     weights: z.record(z.string(), z.number()),
+    customScores: z
+      .array(z.object({ key: z.string(), score: z.number(), evidence: z.string() }))
+      .nullish(),
     matchedSkills: z.array(z.string()),
     missingSkills: z.array(z.string()),
     rationale: z.string().nullish(),
@@ -591,6 +594,7 @@ export const persistMatchResult = createServerFn({ method: "POST" })
       socialScore: s.socialScore,
       overallScore: s.overallScore,
       weights: s.weights,
+      customScores: s.customScores ?? [],
       matchedSkills: s.matchedSkills,
       missingSkills: s.missingSkills,
       rationale: s.rationale ?? null,

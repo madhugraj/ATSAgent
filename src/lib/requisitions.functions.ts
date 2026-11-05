@@ -153,6 +153,17 @@ export const saveRequisitionWeights = createServerFn({ method: "POST" })
           education: z.number().int(),
           social: z.number().int(),
         }),
+        custom: z
+          .array(
+            z.object({
+              key: z.string().regex(/^[a-z0-9_]{1,40}$/),
+              label: z.string().min(1).max(60),
+              hint: z.string().min(10).max(300),
+              weight: z.number().int().min(0).max(100),
+            }),
+          )
+          .max(4)
+          .default([]),
       })
       .parse(data),
   )
@@ -162,6 +173,7 @@ export const saveRequisitionWeights = createServerFn({ method: "POST" })
       { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
       data.id,
       data.weights,
+      data.custom,
     );
     return { ok: true as const, ...out };
   });

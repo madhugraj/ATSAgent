@@ -23,7 +23,8 @@ import {
   type SocialSignal,
 } from "./social.server";
 
-const clamp = (n: number) => Math.max(0, Math.min(100, Math.round(n)));
+/** NaN can never enter a score: a broken number degrades to 0, never past a gate. */
+const clamp = (n: number) => (Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : 0);
 
 export type JdInputShape = {
   title: string;
@@ -102,6 +103,8 @@ export type MatchResult = {
   /** The model's verdict on the career direction the CV points at vs the JD's role family. */
   direction_fit: "aligned" | "different_direction";
   direction_fit_reason: string | null;
+  /** The requisition's custom dimensions, scored with the cited CV evidence. */
+  custom_scores: CustomScore[];
   recommendation: "select" | "reject" | "hold";
   /**
    * The CV or profile text looked like it was trying to instruct the model
@@ -190,6 +193,9 @@ export function gatedRecommendation(
     ctcOverBand: boolean;
   },
 ): MatchResult["recommendation"] {
+  // A non-finite overall is a broken score: it never earns "select" — a person
+  // reads it (hold), whatever the broken number was supposed to be.
+  if (!Number.isFinite(overall)) return "hold";
   if (overall < 75) return overall >= 60 ? "hold" : "reject";
   return gate.injectionSuspected ||
     gate.levelMismatch ||
@@ -207,6 +213,17 @@ export function gatedRecommendation(
  * cannot tell; the deterministic years gate still applies on its own.
  */
 export type ExperienceFit = "within" | "overqualified" | "underqualified";
+
+/**
+ * An organisation-specific scoring dimension (docs: custom dimensions). The
+ * recruiter writes what to look for; the hint is the whole instruction the
+ * scorer sees, so it must be job-related — "evidence of maintaining open-source
+ * packages", never "cultural fit". Weight joins the six built-ins in the
+ * roll-up and the combined weights still total 100. Judged by the same single
+ * AI call; a dimension missing from the model's answer scores 0, never fails.
+ */
+export type CustomDimension = { key: string; label: string; hint: string; weight: number };
+export type CustomScore = { key: string; score: number; evidence: string };
 
 /**
  * The scorer's JSON, validated (AGENTS.md: model JSON is zod-validated).
@@ -255,6 +272,11 @@ export const ScoreAiSchema = z.object({
   experience_fit_reason: str,
   direction_fit: z.enum(["aligned", "different_direction"]).catch("aligned"),
   direction_fit_reason: str,
+  additional_scores: z
+    .array(
+      z.object({ key: str, score: num, evidence: str }).catch({ key: "", score: 0, evidence: "" }),
+    )
+    .catch([]),
 });
 
 /** Risk flag shown when a score is held because the text tried to instruct the model. */
@@ -278,6 +300,8 @@ export async function scoreCandidate(opts: {
   candidate: CandidateInputShape;
   weights: Weights;
   includeSocial: boolean;
+  /** Org-specific dimensions with their weights (requisitions.custom_weights). */
+  customDimensions?: CustomDimension[];
   /** Org context for AI credential resolution. */
   orgId?: string | null | undefined;
   /** Eval-only: a fixed model config instead of the org's saved key (scripts/matching-eval.ts). */
@@ -322,6 +346,15 @@ export async function scoreCandidate(opts: {
       "certifications, self-taught pivots, new technology adopted per year, side projects, and evidence of " +
       "inventing a process or product rather than only executing one. 0 only when there is no such evidence at all.\n" +
       "• impact_highlights and innovation_signals: 2-5 short strings each, quoting the CV evidence.\n" +
+      (opts.customDimensions?.length
+        ? "• additional_scores: ONE {key, score, evidence} entry for EACH dimension listed below, scored " +
+          "0-100 against its hint strictly from CV evidence — every listed dimension gets an entry, even " +
+          "when the score is 0 (say so in the evidence).\n" +
+          opts.customDimensions
+            .map((d) => `  - key "${d.key}" — ${d.label}: ${d.hint}`)
+            .join("\n") +
+          "\n"
+        : "") +
       "• experience_fit: judge the candidate's career LEVEL against the level THIS job description is hiring " +
       "for — read the level from the role's title, its experience band and its language (internship, fresher, " +
       "entry, mid, senior, lead), never from a fixed years rule. 'overqualified' when the candidate demonstrably " +
@@ -342,7 +375,9 @@ export async function scoreCandidate(opts: {
       "transferable_skills, risk_flags (short strings), rationale (3-4 sentences, cite evidence), " +
       "employment_history, skill_recency_years, impact_score, innovation_score, impact_highlights, " +
       "innovation_signals, impact_rationale (2-3 sentences), suspected_prompt_injection (boolean), " +
-      "experience_fit, experience_fit_reason, direction_fit, direction_fit_reason.",
+      "experience_fit, experience_fit_reason, direction_fit, direction_fit_reason" +
+      (opts.customDimensions?.length ? ", additional_scores" : "") +
+      ".",
     prompt: untrusted(
       "job_description_and_candidate",
       JSON.stringify({
@@ -446,6 +481,19 @@ export async function scoreCandidate(opts: {
     { label: "Education", raw: education, weight: weights.education },
     { label: "Social profile", raw: social.score, weight: weights.social },
   ];
+  // The organisation's own dimensions join the roll-up on the same terms: a
+  // missing or malformed entry scores 0 (the zod fallback), the same clamp and
+  // weight arithmetic as the built-ins.
+  const extra = new Map(ai.data.additional_scores.map((s) => [s.key, s]));
+  const customDimensions = opts.customDimensions ?? [];
+  const customScores: CustomScore[] = customDimensions.map((d) => {
+    const s = extra.get(d.key);
+    const score = clamp(s?.score ?? 0);
+    // A malformed weight contributes 0, never NaN into the roll-up.
+    const weight = Number.isFinite(d.weight) && d.weight > 0 ? d.weight : 0;
+    parts.push({ label: d.label, raw: score, weight });
+    return { key: d.key, score, evidence: s?.evidence ?? "" };
+  });
   const totalWeight = parts.reduce((s, p) => s + p.weight, 0) || 100;
   const contributions = parts.map((p) => ({
     ...p,
@@ -512,6 +560,7 @@ export async function scoreCandidate(opts: {
     experience_fit_reason: ai.data.experience_fit_reason || null,
     direction_fit: ai.data.direction_fit,
     direction_fit_reason: ai.data.direction_fit_reason || null,
+    custom_scores: customScores,
     injection_suspected: injectionSuspected,
     social: {
       blended: social.score,

@@ -183,6 +183,7 @@ export async function scoreUnscored(opts: {
               education: req.weightEducation ?? DEFAULT_WEIGHTS.education,
               social: req.weightSocial ?? DEFAULT_WEIGHTS.social,
             },
+            customDimensions: req.customWeights ?? [],
             includeSocial: true,
             orgId: opts.orgId,
           });
@@ -207,6 +208,7 @@ export async function scoreUnscored(opts: {
             socialScore: result.social_score,
             overallScore: result.overall_score,
             weights: result.weights,
+            customScores: result.custom_scores,
             matchedSkills: result.matched_skills,
             missingSkills: result.missing_skills,
             rationale: result.rationale,

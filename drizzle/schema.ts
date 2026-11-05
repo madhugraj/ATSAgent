@@ -419,6 +419,11 @@ export const requisitions = pgTable(
     weightImpact: integer("weight_impact").notNull().default(10),
     weightEducation: integer("weight_education").notNull().default(10),
     weightSocial: integer("weight_social").notNull().default(15),
+    /** Organisation-specific scoring dimensions (label + scoring hint + weight). */
+    customWeights: jsonb("custom_weights")
+      .$type<{ key: string; label: string; hint: string; weight: number }[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     approvalTrail: jsonb("approval_trail")
       .notNull()
       .default(sql`'[]'::jsonb`),
@@ -688,6 +693,11 @@ export const matchScores = pgTable(
     weights: jsonb("weights")
       .notNull()
       .default(sql`'{"skills":50,"experience":25,"education":10,"social":15}'::jsonb`),
+    /** Scores for the requisition's custom dimensions, with the cited CV evidence. */
+    customScores: jsonb("custom_scores")
+      .$type<{ key: string; score: number; evidence: string }[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     matchedSkills: text("matched_skills")
       .array()
       .notNull()

@@ -65,12 +65,17 @@ for (const s of scenarios) {
         expectedCtc: s.candidate.expectedCtc ?? null,
         location: s.candidate.location ?? null,
       },
-      weights: DEFAULT_WEIGHTS,
+      weights: (s.weights ?? DEFAULT_WEIGHTS) as typeof DEFAULT_WEIGHTS,
+      customDimensions: s.customDimensions,
       includeSocial: false,
       orgId: org!.id,
       aiConfig: { provider, model, apiKey },
     });
     const failures = s.expect(result);
+    if (!Number.isFinite(result.overall_score))
+      failures.unshift(
+        `overall_score is ${result.overall_score} — a score must always be a finite number`,
+      );
     if (failures.length) failed++;
     console.log(
       `${failures.length ? "FAIL" : "PASS"}  ${s.name}\n      ` +

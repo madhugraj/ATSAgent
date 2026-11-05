@@ -113,6 +113,7 @@ function scoreInput(result: MatchWire) {
     missingSkills: result.missing_skills,
     rationale: result.rationale,
     riskFlags: result.risk_flags,
+    customScores: result.custom_scores,
     recommendation: result.recommendation,
     careerMetrics: result.career.metrics,
     careerFlags: result.career.assessment.flags,
@@ -190,10 +191,16 @@ function Matching() {
     education: requisition?.weight_education ?? 10,
     social: requisition?.weight_social ?? 15,
   };
-  const weightTotal = (Object.keys(effWeights) as (keyof Weights)[]).reduce(
-    (s, k) => s + effWeights[k],
-    0,
-  );
+  /** The requisition's own dimensions, defined with the weights on its page. */
+  const customDimensions =
+    (
+      requisition as {
+        custom_weights?: { key: string; label: string; hint: string; weight: number }[];
+      }
+    )?.custom_weights ?? [];
+  const weightTotal =
+    (Object.keys(effWeights) as (keyof Weights)[]).reduce((s, k) => s + effWeights[k], 0) +
+    customDimensions.reduce((s, d) => s + d.weight, 0);
 
   /** Set one weight and spread the remaining points across the others, keeping the total at 100. */
   function setWeight(key: keyof Weights, raw: number) {
@@ -335,6 +342,7 @@ function Matching() {
             workAuthorization: row.candidate.work_authorization,
           },
           weights: effWeights,
+          customDimensions,
           includeSocial,
         },
       });
@@ -460,6 +468,7 @@ function Matching() {
             },
           },
           weights: effWeights,
+          customDimensions,
           includeSocial,
           concurrency: 3,
           rows: targets.map((r) => ({
