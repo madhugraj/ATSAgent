@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { looksLikeInjection } from "../server/agents/injection";
-import { aiJson, INJECTION_RULES, untrusted } from "./ai-gateway.server";
+import { aiJson, INJECTION_RULES, untrusted, type AiConfig } from "./ai-gateway.server";
 import {
   careerScore,
   computeCareerMetrics,
@@ -268,6 +268,8 @@ export async function scoreCandidate(opts: {
   includeSocial: boolean;
   /** Org context for AI credential resolution. */
   orgId?: string | null | undefined;
+  /** Eval-only: a fixed model config instead of the org's saved key (scripts/matching-eval.ts). */
+  aiConfig?: AiConfig;
 }): Promise<MatchResult> {
   const { jd, candidate, weights } = opts;
 
@@ -328,6 +330,7 @@ export async function scoreCandidate(opts: {
       }),
     ),
     orgId: opts.orgId,
+    ...(opts.aiConfig ? { config: opts.aiConfig } : {}),
     schema: ScoreAiSchema,
   });
   if (!ai.ok) throw new Error(ai.message);

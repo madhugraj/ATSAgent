@@ -1,0 +1,229 @@
+/**
+ * Matching-eval scenarios (docs/agentic-plan.md §11, the scorer's counterpart
+ * to the agent scenarios in scenarios.ts). Each runs scoreCandidate against a
+ * live model via scripts/matching-eval.ts and asserts on the structured
+ * verdicts and the gates — the measurements behind auto-advancement:
+ *   - the per-JD experience_fit verdict (level is read from the JD, not a
+ *     fixed years rule — the "why did a VP top an internship" regression)
+ *   - the symmetric experience band (over costs what under costs)
+ *   - the hard gates: band, level, expected CTC above the approved band.
+ * Deterministic pieces are additionally unit-tested in
+ * scripts/matching-gates.test.ts; these scenarios judge the model.
+ */
+import type { MatchResult } from "../../src/lib/matching.server";
+
+export type MatchingScenario = {
+  name: string;
+  jd: {
+    title: string;
+    mustHave: string[];
+    goodToHave?: string[];
+    education?: string | null;
+    experienceMin: number;
+    experienceMax: number;
+    jdText: string;
+    constraints?: {
+      locations?: string[] | null;
+      ctcBandMin?: number | null;
+      ctcBandMax?: number | null;
+      maxNoticePeriodDays?: number | null;
+      workAuthorizationRequired?: string | null;
+    };
+  };
+  candidate: {
+    name: string;
+    experienceYears: number;
+    education?: string | null;
+    skills: string[];
+    resumeText: string;
+    expectedCtc?: number | null;
+    location?: string | null;
+  };
+  /** Assertions on the scored result; each failure string names the measurement. */
+  expect: (r: MatchResult) => string[];
+};
+
+const internJd = {
+  title: "AI Intern",
+  mustHave: ["Python", "Machine Learning", "Statistics", "Pandas", "NumPy", "Scikit-learn"],
+  education: "Master's degree in Data Science or equivalent",
+  experienceMin: 0,
+  experienceMax: 0,
+  jdText:
+    "AI Intern — entry-level internship for freshers. Stipend band ₹1.8L–₹3.6L. " +
+    "You will assist the data science team on model training and evaluation. " +
+    "Requirements: Master's degree in Data Science (or pursuing), Python, machine learning " +
+    "fundamentals, statistics, Pandas/NumPy/Scikit-learn. 0 years of experience required.",
+  constraints: { locations: ["Chennai"], ctcBandMin: 180_000, ctcBandMax: 360_000 },
+};
+
+const vpCv = `VELMURUGAN K — Vice President, AI Research
+19 years of experience. PhD in Computer Science.
+EXPERIENCE
+VP, AI Research (2021–Present) — Yavar Techworks. Lead a 40-person research division;
+shipped multi-agent platforms serving 12 enterprise clients; 3 patents in retrieval.
+Senior AI Architect (2015–2021) — built recommendation and NLP platforms at scale.
+Principal Engineer (2008–2015) — search and ML infrastructure.
+SKILLS: LLMs, RAG, multi-agent orchestration, Python, PyTorch, MLOps, Kubernetes, evaluation.
+OBJECTIVE: Seeking research leadership roles.
+EXPECTED CTC: ₹58,00,000 per annum.`;
+
+const fresherCv = `ANITHA R — M.Sc. Data Science student (2024–2026), Anna University.
+B.Sc. Computer Science (2021–2024).
+PROJECTS
+• House-price regression with Pandas, NumPy and Scikit-learn — feature engineering,
+  cross-validation, RMSE reported on a held-out set.
+• Sentiment classifier (logistic regression, TF-IDF) — accuracy 0.87 on a public corpus.
+• Statistics coursework: hypothesis testing, regression, probability.
+SKILLS: Python, Pandas, NumPy, Scikit-learn, Matplotlib, SQL basics, statistics.
+OBJECTIVE: Seeking an internship to start a data science career.`;
+
+const seniorBackendJd = {
+  title: "Senior Backend Engineer",
+  mustHave: ["TypeScript", "Node.js", "PostgreSQL", "REST APIs", "Docker", "System design"],
+  education: null,
+  experienceMin: 5,
+  experienceMax: 8,
+  jdText:
+    "Senior Backend Engineer (5–8 years). You will own service architecture and mentor " +
+    "mid-level engineers. Must-haves: TypeScript, Node.js, PostgreSQL, REST API design, " +
+    "Docker, distributed systems and system design.",
+  constraints: { locations: ["Chennai"], ctcBandMin: 2_000_000, ctcBandMax: 2_600_000 },
+};
+
+const juniorCv = `KARTHIK SUBRAMANIAM — Backend Developer, 3 years of experience.
+B.E. Computer Science (2023).
+EXPERIENCE
+Backend Developer (2023–Present) — Coimbatore. Built REST APIs in Node.js and TypeScript
+on PostgreSQL; Dockerised services; wrote integration tests; on-call rotations.
+SKILLS: TypeScript, Node.js, Express, PostgreSQL, Docker, REST APIs, Git.
+OBJECTIVE: Growing into a senior engineering role.`;
+
+const strongBackendCv = `PRIYA LAKSHMI — Backend Engineer, 6 years of experience.
+B.Tech CSE (2020).
+EXPERIENCE
+Senior Backend Engineer (2022–Present) — owned a payments service on Node.js/TypeScript
+and PostgreSQL (12k req/s), led system design reviews, cut p99 latency 40%.
+Backend Engineer (2020–2022) — REST APIs, Docker, CI/CD, Postgres schema design.
+SKILLS: TypeScript, Node.js, PostgreSQL, REST APIs, Docker, Kubernetes, Kafka, system design.
+EXPECTED CTC: ₹48,00,000 per annum.`;
+
+export function matchingScenarios(): MatchingScenario[] {
+  return [
+    {
+      name: "matching: a research VP is overqualified for the internship and never auto-selects",
+      jd: internJd,
+      candidate: {
+        name: "Velmurugan K",
+        experienceYears: 19,
+        education: "PhD in Computer Science",
+        skills: ["LLMs", "RAG", "Python", "PyTorch", "MLOps", "Statistics"],
+        resumeText: vpCv,
+        expectedCtc: 5_800_000,
+        location: "Chennai",
+      },
+      expect: (r) => [
+        ...(r.experience_fit !== "overqualified"
+          ? [
+              `experience_fit: got ${r.experience_fit}, want overqualified — the JD is an internship and the CV is a 19-year VP`,
+            ]
+          : []),
+        ...(r.recommendation === "select"
+          ? [
+              `recommendation: got select, want hold — a VP must never auto-advance into an internship`,
+            ]
+          : []),
+        ...(r.experience_score > 30
+          ? [`experience_score: got ${r.experience_score}, want ≤ 30 — 19 years against a 0–0 band`]
+          : []),
+      ],
+    },
+    {
+      name: "matching: the fresher the internship wants is judged within",
+      jd: internJd,
+      candidate: {
+        name: "Anitha R",
+        experienceYears: 0,
+        education: "M.Sc. Data Science (pursuing), B.Sc. Computer Science",
+        skills: ["Python", "Pandas", "NumPy", "Scikit-learn", "Statistics"],
+        resumeText: fresherCv,
+        location: "Chennai",
+      },
+      expect: (r) => [
+        ...(r.experience_fit !== "within"
+          ? [
+              `experience_fit: got ${r.experience_fit}, want within — a final-year M.Sc. student is exactly the intern profile`,
+            ]
+          : []),
+        ...(r.experience_score < 90
+          ? [`experience_score: got ${r.experience_score}, want ≥ 90 — 0 years in a 0–0 band`]
+          : []),
+        ...(r.recommendation === "reject"
+          ? [
+              `recommendation: got reject — the JD's own profile must not be auto-rejected; a person reads a hold`,
+            ]
+          : []),
+      ],
+    },
+    {
+      name: "matching: a 3-year developer reads as underqualified for a senior 5–8 band",
+      jd: seniorBackendJd,
+      candidate: {
+        name: "Karthik Subramaniam",
+        experienceYears: 3,
+        education: "B.E. Computer Science",
+        skills: ["TypeScript", "Node.js", "PostgreSQL", "REST APIs", "Docker"],
+        resumeText: juniorCv,
+        location: "Coimbatore",
+      },
+      expect: (r) => [
+        ...(r.experience_fit !== "underqualified"
+          ? [
+              `experience_fit: got ${r.experience_fit}, want underqualified — the JD says senior, 5–8 years, and the CV has 3`,
+            ]
+          : []),
+        ...(r.experience_score > 60
+          ? [
+              `experience_score: got ${r.experience_score}, want ≤ 60 — 2 years under the band decays 22/yr`,
+            ]
+          : []),
+        ...(r.recommendation === "select"
+          ? [
+              `recommendation: got select, want hold — two-plus years under the band cannot be weighted away`,
+            ]
+          : []),
+      ],
+    },
+    {
+      name: "matching: an in-band candidate whose ask breaks the band ceiling holds",
+      jd: seniorBackendJd,
+      candidate: {
+        name: "Priya Lakshmi",
+        experienceYears: 6,
+        education: "B.Tech CSE",
+        skills: [
+          "TypeScript",
+          "Node.js",
+          "PostgreSQL",
+          "REST APIs",
+          "Docker",
+          "System design",
+          "Kafka",
+        ],
+        resumeText: strongBackendCv,
+        expectedCtc: 4_800_000,
+        location: "Chennai",
+      },
+      expect: (r) => [
+        ...(r.experience_score < 90
+          ? [`experience_score: got ${r.experience_score}, want ≥ 90 — 6 years inside a 5–8 band`]
+          : []),
+        ...(r.recommendation === "select"
+          ? [
+              `recommendation: got select, want hold — the ₹48L ask is far above the band, an offer would need an exception`,
+            ]
+          : []),
+      ],
+    },
+  ];
+}
