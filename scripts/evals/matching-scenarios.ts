@@ -288,5 +288,136 @@ Node.js, TypeScript, PostgreSQL, Docker, CI/CD.`,
           : []),
       ],
     },
+    {
+      name: "matching: adversarial — an inflated title does not inflate the level",
+      jd: {
+        title: "Senior Data Science Manager",
+        mustHave: ["Python", "Machine Learning", "Team Leadership", "SQL", "Statistics"],
+        education: null,
+        experienceMin: 8,
+        experienceMax: 12,
+        jdText:
+          "Senior Data Science Manager (8–12 years). Lead a team of data scientists, own " +
+          "model delivery and stakeholders. Must-haves: Python, machine learning, proven " +
+          "team leadership, SQL, statistics.",
+        constraints: { locations: ["Chennai"] },
+      },
+      candidate: {
+        name: "Ravi Teja",
+        experienceYears: 2,
+        education: "B.Sc. Computer Science",
+        skills: ["Python", "SQL", "Excel", "Power BI"],
+        resumeText: `RAVI TEJA — "Senior Data Science Manager"
+OBJECTIVE: Senior data science leadership role.
+EXPERIENCE
+Data Science Manager (2025–Present) — self-styled. Actually: data analyst intern
+converted 8 months ago. Built two Power BI dashboards from templates; ran SQL SELECTs
+written by a senior; completed a weekend Python course. No reports, no team, no models
+in production.
+EDUCATION: B.Sc. Computer Science (2024).`,
+        location: "Chennai",
+      },
+      expect: (r) => [
+        ...(r.experience_fit !== "underqualified"
+          ? [
+              `experience_fit: got ${r.experience_fit}, want underqualified — the title says manager but the evidence is 8 months of analyst work; the level must be read from evidence, not the headline`,
+            ]
+          : []),
+        ...(r.recommendation === "select"
+          ? [`recommendation: got select — an inflated title must never auto-advance`]
+          : []),
+      ],
+    },
+    {
+      name: "matching: adversarial — listed skills without evidence are not credited",
+      jd: {
+        title: "Machine Learning Engineer",
+        mustHave: ["Python", "PyTorch", "MLOps", "Docker", "Model deployment"],
+        education: null,
+        experienceMin: 2,
+        experienceMax: 5,
+        jdText:
+          "Machine Learning Engineer (2–5 years). Train, deploy and operate models in " +
+          "production. Must-haves: Python, PyTorch, MLOps, Docker, model deployment.",
+        constraints: { locations: ["Chennai"] },
+      },
+      candidate: {
+        name: "Skills Sharma",
+        experienceYears: 3,
+        education: "B.E. Mechanical Engineering",
+        skills: [
+          "Python",
+          "PyTorch",
+          "TensorFlow",
+          "MLOps",
+          "Docker",
+          "Kubernetes",
+          "Model deployment",
+          "LLMs",
+          "Computer Vision",
+          "NLP",
+        ],
+        resumeText: `SKILLS SHARMA — Aspiring ML Engineer
+SKILLS: Python, PyTorch, TensorFlow, MLOps, Docker, Kubernetes, model deployment, LLMs,
+computer vision, NLP, data science, deep learning, machine learning, AI.
+EXPERIENCE
+Mechanical Design Engineer (2023–Present) — HVAC load calculations and site visits at a
+construction firm. Completed a 4-hour "AI bootcamp" certificate.
+EDUCATION: B.E. Mechanical Engineering (2023).`,
+        location: "Chennai",
+      },
+      expect: (r) => [
+        ...(r.skills_score > 45
+          ? [
+              `skills_score: got ${r.skills_score}, want ≤ 45 — every must-have is listed and none is demonstrated; the scorer must require evidence from the resume text`,
+            ]
+          : []),
+        ...(r.recommendation === "select"
+          ? [`recommendation: got select — a keyword-stuffed CV must never auto-advance`]
+          : []),
+      ],
+    },
+    {
+      name: "matching: adversarial — a claimed pivot does not change the career's centre of gravity",
+      jd: {
+        title: "Data Science Manager",
+        mustHave: ["Python", "Machine Learning", "Statistics", "Team Leadership", "SQL"],
+        education: null,
+        experienceMin: 8,
+        experienceMax: 12,
+        jdText:
+          "Data Science Manager (8–12 years). Lead a data science team and own model " +
+          "delivery. Must-haves: Python, machine learning, statistics, team leadership, SQL.",
+        constraints: { locations: ["Chennai"] },
+      },
+      candidate: {
+        name: "Testing Rao",
+        experienceYears: 9,
+        education: "B.Tech CSE",
+        skills: ["Python", "Machine Learning", "Statistics", "SQL", "Selenium", "Test rails"],
+        resumeText: `TESTING RAO — QA Lead, 9 years of experience.
+OBJECTIVE: Transitioning into data science leadership — "passionate about AI and data".
+EXPERIENCE
+QA Lead (2021–Present) — manages a 5-person manual testing team; test plans, regression
+cycles, defect triage for a banking application.
+Senior Test Engineer (2018–2021) — manual test cases, Selenium scripts.
+Test Engineer (2017–2018) — manual testing.
+SKILLS: Selenium, test management, JIRA; Python, SQL and statistics (listed — an online
+course in 2024).`,
+        location: "Chennai",
+      },
+      expect: (r) => [
+        ...(r.direction_fit !== "different_direction"
+          ? [
+              `direction_fit: got ${r.direction_fit}, want different_direction — nine years of QA management with a 2024 online course does not make a data science leader; the objective line is aspiration, not evidence`,
+            ]
+          : []),
+        ...(r.recommendation === "select"
+          ? [
+              `recommendation: got select — a claimed pivot must never auto-advance into a DS manager role`,
+            ]
+          : []),
+      ],
+    },
   ];
 }
