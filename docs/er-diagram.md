@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-100 tables across 9 domains.
+102 tables across 9 domains.
 
 ## Identity & access
 
@@ -1294,6 +1294,13 @@ erDiagram
 | `panel_assessments` | `interview_id` | `interviews` | cascade |
 | `panel_assessments` | `org_id` | `organizations` | cascade |
 | `panel_assessments` | `reviewed_by` | `users` | no action |
+| `panelist_scorecard_links` | `interview_id` | `interviews` | cascade |
+| `panelist_scorecard_links` | `org_id` | `organizations` | cascade |
+| `panelist_scorecard_links` | `panelist_id` | `panelists` | cascade |
+| `panelists` | `added_by` | `users` | no action |
+| `panelists` | `approved_by` | `users` | no action |
+| `panelists` | `member_id` | `org_members` | cascade |
+| `panelists` | `org_id` | `organizations` | cascade |
 | `phone_screening_settings` | `org_id` | `organizations` | cascade |
 | `phone_screening_settings` | `updated_by` | `users` | no action |
 | `requisition_board_postings` | `org_id` | `organizations` | cascade |
@@ -1309,7 +1316,9 @@ erDiagram
 | `round_substitutes` | `approved_by` | `users` | no action |
 | `round_substitutes` | `org_id` | `organizations` | cascade |
 | `round_substitutes` | `replace_member_id` | `org_members` | cascade |
+| `round_substitutes` | `replace_panelist_id` | `panelists` | cascade |
 | `round_substitutes` | `with_member_id` | `org_members` | cascade |
+| `round_substitutes` | `with_panelist_id` | `panelists` | cascade |
 | `salary_benchmarks` | `org_id` | `organizations` | cascade |
 | `salary_benchmarks` | `requisition_id` | `requisitions` | no action |
 | `screening_calls` | `agent_run_id` | `agent_runs` | no action |
@@ -1443,14 +1452,16 @@ erDiagram
 | `organizations` | Organisations & masters | 27 | (slug), (capture_token), (capture_token_hash), (distribution_token_hash) |
 | `panel_agent_settings` | — | 5 | — |
 | `panel_assessments` | — | 23 | (interview_id) |
+| `panelist_scorecard_links` | — | 8 | (interviewId+panelistId), (token_hash) |
+| `panelists` | — | 18 | — |
 | `phone_screening_settings` | Screening & interviews | 16 | — |
 | `platform_admins` | Identity & access | 6 | (email) |
 | `product_catalogue_commercials` | Organisations & masters | 8 | — |
 | `rate_limit_hits` | — | 3 | — |
 | `requisition_board_postings` | — | 16 | (requisitionId+provider) |
 | `requisitions` | Requisitions & job content | 43 | (orgId+code) |
-| `role_panels` | — | 8 | (requisitionId+level) |
-| `round_substitutes` | — | 9 | — |
+| `role_panels` | — | 9 | (requisitionId+level) |
+| `round_substitutes` | — | 11 | — |
 | `salary_benchmarks` | Intelligence | 15 | — |
 | `screening_calls` | Screening & interviews | 34 | — |
 | `screening_kits` | Screening & interviews | 11 | — |

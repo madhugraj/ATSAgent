@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { InterviewerProfileCell } from "@/components/InterviewerProfileCell";
+import { PanelDirectory } from "@/components/PanelDirectory";
 import { listInterviewerProfiles } from "@/lib/interviewers.functions";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -802,6 +803,8 @@ function Team() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <PanelDirectory canEdit={isOwner || myRoles.includes("hr_head")} />
     </>
   );
 }

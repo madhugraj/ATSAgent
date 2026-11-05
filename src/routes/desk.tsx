@@ -1455,6 +1455,8 @@ function TaskCard({
   const proceed = card["recommendation"] === "proceed";
   // A panel proposal: approve it, or change the people (the decider's choice).
   const panel = kind === "gate" && card["subjectType"] === "panel_approval";
+  // Someone new for the panel directory: HR types them in and approves in one step.
+  const newPanelist = kind === "gate" && card["subjectType"] === "new_panelist";
   const [changing, setChanging] = useState(false);
   const status = conv.tasks[taskId] ?? "open";
   const details =
@@ -1640,6 +1642,14 @@ function TaskCard({
               </div>
             )}
           </div>
+        ) : newPanelist ? (
+          <NewPanelistForm
+            level={Number(card["level"])}
+            needed={String(card["needed"] ?? "")}
+            busy={busy}
+            onSave={(panelist) => decide({ status: "approved", args: { panelist } })}
+            onDecline={() => setDeclining(true)}
+          />
         ) : changing ? (
           <PanelChange
             requisitionId={String(card["requisitionId"])}
@@ -1692,6 +1702,139 @@ function TaskCard({
   );
 }
 
+/** Type the person who should sit on the panel — saved to the panel directory on approval. */
+function NewPanelistForm(props: {
+  level: number;
+  needed: string;
+  busy: boolean;
+  onSave: (p: {
+    fullName: string;
+    email: string;
+    kind: "internal" | "external";
+    title: string | null;
+    company: string | null;
+    areas: string[];
+    rounds: number[];
+  }) => void;
+  onDecline: () => void;
+}) {
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [kind, setKind] = useState<"internal" | "external">("internal");
+  const [title, setTitle] = useState("");
+  const [company, setCompany] = useState("");
+  const [areas, setAreas] = useState("");
+  const [rounds, setRounds] = useState<number[]>([props.level]);
+  const ok =
+    fullName.trim().length >= 2 &&
+    /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim()) &&
+    rounds.length > 0 &&
+    (kind === "internal" || company.trim().length > 0);
+  const input = "w-full rounded-md border border-border bg-background px-2 py-1 text-xs";
+  return (
+    <div className="mt-2 space-y-2 rounded-md border border-border p-2">
+      {props.needed ? (
+        <p className="text-xs text-muted-foreground">
+          Needed for L{props.level}: {props.needed}
+        </p>
+      ) : null}
+      <div className="flex gap-3 text-xs">
+        {(["internal", "external"] as const).map((k) => (
+          <label key={k} className="flex items-center gap-1">
+            <input type="radio" checked={kind === k} onChange={() => setKind(k)} />
+            {k === "internal" ? "In our organisation" : "External (e.g. a client)"}
+          </label>
+        ))}
+      </div>
+      <input
+        className={input}
+        placeholder="Full name"
+        value={fullName}
+        maxLength={120}
+        onChange={(e) => setFullName(e.target.value)}
+      />
+      <input
+        className={input}
+        placeholder="E-mail"
+        type="email"
+        value={email}
+        maxLength={200}
+        onChange={(e) => setEmail(e.target.value)}
+      />
+      <input
+        className={input}
+        placeholder="Job title (optional)"
+        value={title}
+        maxLength={120}
+        onChange={(e) => setTitle(e.target.value)}
+      />
+      {kind === "external" ? (
+        <input
+          className={input}
+          placeholder="Their organisation"
+          value={company}
+          maxLength={120}
+          onChange={(e) => setCompany(e.target.value)}
+        />
+      ) : null}
+      <input
+        className={input}
+        placeholder="What they assess, comma-separated (e.g. Spark, Data governance)"
+        value={areas}
+        onChange={(e) => setAreas(e.target.value)}
+      />
+      <div className="flex items-center gap-3 text-xs">
+        <span>Rounds:</span>
+        {[1, 2, 3].map((r) => (
+          <label key={r} className="flex items-center gap-1">
+            <input
+              type="checkbox"
+              checked={rounds.includes(r)}
+              onChange={() =>
+                setRounds((x) => (x.includes(r) ? x.filter((y) => y !== r) : [...x, r].sort()))
+              }
+            />
+            L{r}
+          </label>
+        ))}
+      </div>
+      <p className="text-[11px] text-muted-foreground">
+        You add and approve them in one step (recorded as self-approved). They stay in the panel
+        directory for future roles.
+        {kind === "external"
+          ? " External panellists score through a private link sent with their brief."
+          : ""}
+      </p>
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          disabled={props.busy || !ok}
+          onClick={() =>
+            props.onSave({
+              fullName: fullName.trim(),
+              email: email.trim().toLowerCase(),
+              kind,
+              title: title.trim() || null,
+              company: kind === "external" ? company.trim() : null,
+              areas: areas
+                .split(",")
+                .map((a) => a.trim())
+                .filter((a) => a.length >= 2)
+                .slice(0, 20),
+              rounds,
+            })
+          }
+        >
+          Add to the panel and approve
+        </Button>
+        <Button size="sm" variant="outline" disabled={props.busy} onClick={props.onDecline}>
+          Decline
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 /** Pick the panel yourself: eligible interviewers first, then any active member. */
 function PanelChange(props: {
   requisitionId: string;
@@ -1735,7 +1878,7 @@ function PanelChange(props: {
       {q.data.others.length ? (
         <details className="text-xs">
           <summary className="cursor-pointer text-muted-foreground">
-            Other members (not registered for this round)
+            Others in the panel directory (not registered for this round)
           </summary>
           <div className="mt-1 space-y-1">{q.data.others.map(row)}</div>
         </details>
