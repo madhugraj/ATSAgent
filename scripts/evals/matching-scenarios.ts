@@ -225,5 +225,68 @@ export function matchingScenarios(): MatchingScenario[] {
           : []),
       ],
     },
+    {
+      name: "matching: an AI-focused career against a backend JD reads as different_direction",
+      jd: {
+        title: "Backend Engineer",
+        mustHave: ["Node.js", "TypeScript", "PostgreSQL", "REST APIs", "Docker"],
+        education: null,
+        experienceMin: 2,
+        experienceMax: 4,
+        jdText:
+          "Backend Engineer (2–4 years). Build and operate API services in TypeScript on " +
+          "Node.js and PostgreSQL. Must-haves: Node.js, TypeScript, PostgreSQL, REST API " +
+          "design, Docker, CI/CD. This is a pure backend services role — no AI/ML work.",
+        constraints: { locations: ["Chennai"] },
+      },
+      candidate: {
+        name: "Sairam B",
+        experienceYears: 4.2,
+        education: "B.Tech Information Technology",
+        skills: [
+          "Multi-Agent Systems",
+          "Agentic RAG",
+          "LangGraph",
+          "LangChain",
+          "Voice AI",
+          "vLLM",
+          "Python",
+          "Node.js",
+          "TypeScript",
+          "PostgreSQL",
+          "Docker",
+          "REST APIs",
+        ],
+        resumeText: `SAIRAM B — AI Engineer & Architect, 4 years of experience.
+PROFESSIONAL SUMMARY: AI Engineer and Architect designing production Generative AI
+systems. Specialise in multi-agent orchestration, Agentic RAG, and real-time streaming
+Voice AI. Seeking a senior AI engineering role at a top-tier AI or Voice AI company.
+EXPERIENCE
+AI Engineer (2025–Present) — re-architected a legacy system into a multi-agent
+architecture; built Agentic RAG with hybrid retrieval and a local re-ranker; built a
+retrieval evaluation harness (Recall@k, MRR); cut voice-inference cost 90%.
+Backend support stack: Node.js, NestJS, TypeScript, PostgreSQL, Docker, AWS.
+SKILLS: LangGraph, LangChain, LiveKit RTC, vLLM, embeddings, hybrid retrieval, Python,
+Node.js, TypeScript, PostgreSQL, Docker, CI/CD.`,
+        location: "Chennai",
+      },
+      expect: (r) => [
+        ...(r.direction_fit !== "different_direction"
+          ? [
+              `direction_fit: got ${r.direction_fit}, want different_direction — the CV's centre of gravity is AI/voice and the stated objective is an AI role; the backend stack is supporting`,
+            ]
+          : []),
+        ...(r.skills_score < 60
+          ? [
+              `skills_score: got ${r.skills_score}, want ≥ 60 — the must-have evidence is real; the direction verdict, not a low skills score, is what holds this candidate`,
+            ]
+          : []),
+        ...(r.recommendation === "select"
+          ? [
+              `recommendation: got select, want hold — strong evidence in another direction must not auto-advance into a pure backend role`,
+            ]
+          : []),
+      ],
+    },
   ];
 }

@@ -271,11 +271,13 @@ export async function scoreUnscored(opts: {
             const gatedWhy = !injection
               ? result.experience_fit !== "within"
                 ? " — career level does not match the role, held at ai_screened"
-                : result.logistics?.blockers.includes(CTC_CEILING_BLOCKER)
-                  ? " — expected CTC above the approved band, held at ai_screened"
-                  : result.experience_score <= EXPERIENCE_BAND_GATE
-                    ? " — far outside the experience band, held at ai_screened"
-                    : ""
+                : result.direction_fit !== "aligned"
+                  ? " — the CV points at a different kind of role, held at ai_screened"
+                  : result.logistics?.blockers.includes(CTC_CEILING_BLOCKER)
+                    ? " — expected CTC above the approved band, held at ai_screened"
+                    : result.experience_score <= EXPERIENCE_BAND_GATE
+                      ? " — far outside the experience band, held at ai_screened"
+                      : ""
               : injection
                 ? " — prompt-injection flag held at ai_screened"
                 : "";

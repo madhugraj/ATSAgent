@@ -22,12 +22,14 @@ describe("gatedRecommendation", () => {
       injectionSuspected?: boolean;
       experienceScore?: number;
       levelMismatch?: boolean;
+      directionMismatch?: boolean;
       ctcOverBand?: boolean;
     } = {},
   ) => ({
     injectionSuspected: false,
     experienceScore: 100,
     levelMismatch: false,
+    directionMismatch: false,
     ctcOverBand: false,
     ...over,
   });
@@ -57,6 +59,13 @@ describe("gatedRecommendation", () => {
     expect(gatedRecommendation(90, gate({ levelMismatch: true }))).toBe("hold");
     // And "within" never gates by itself.
     expect(gatedRecommendation(90, gate())).toBe("select");
+  });
+
+  test("the career-direction verdict gates on its own", () => {
+    // The Sairam case: an AI/voice engineer with real Node.js depth against a
+    // backend JD — the skills score credits the evidence, the direction verdict
+    // keeps a person in the loop.
+    expect(gatedRecommendation(92, gate({ directionMismatch: true }))).toBe("hold");
   });
 
   test("the band decays symmetrically: years over cost what years under cost", () => {
@@ -93,8 +102,8 @@ describe("gatedRecommendation", () => {
   });
 });
 
-describe("the scorer's experience_fit verdict is shaped for every JD", () => {
-  test("the schema accepts each verdict and falls back to within", async () => {
+describe("the scorer's verdicts are shaped for every JD", () => {
+  test("experience_fit accepts each verdict and falls back to within", async () => {
     const { ScoreAiSchema } = await import("../src/lib/matching.server");
     const fits: ExperienceFit[] = ["within", "overqualified", "underqualified"];
     for (const experience_fit of fits)
@@ -102,6 +111,17 @@ describe("the scorer's experience_fit verdict is shaped for every JD", () => {
     // A missing or nonsensical verdict never gates by itself.
     expect(ScoreAiSchema.parse({}).experience_fit).toBe("within");
     expect(ScoreAiSchema.parse({ experience_fit: "intern" }).experience_fit).toBe("within");
+  });
+
+  test("direction_fit accepts both verdicts and falls back to aligned", async () => {
+    const { ScoreAiSchema } = await import("../src/lib/matching.server");
+    expect(ScoreAiSchema.parse({ direction_fit: "aligned" }).direction_fit).toBe("aligned");
+    expect(ScoreAiSchema.parse({ direction_fit: "different_direction" }).direction_fit).toBe(
+      "different_direction",
+    );
+    // Missing or garbage never gates by itself.
+    expect(ScoreAiSchema.parse({}).direction_fit).toBe("aligned");
+    expect(ScoreAiSchema.parse({ direction_fit: "backend" }).direction_fit).toBe("aligned");
   });
 });
 

@@ -12,6 +12,7 @@ import {
   stripUnreplacedPlaceholders,
 } from "./templates.server";
 import {
+  DIRECTION_MISMATCH_FLAG,
   gatedRecommendation,
   INJECTION_HOLD_FLAG,
   LEVEL_MISMATCH_FLAG,
@@ -570,6 +571,7 @@ export const persistMatchResult = createServerFn({ method: "POST" })
       injectionSuspected: s.riskFlags.includes(INJECTION_HOLD_FLAG),
       experienceScore: s.experienceScore,
       levelMismatch: s.riskFlags.includes(LEVEL_MISMATCH_FLAG),
+      directionMismatch: s.riskFlags.includes(DIRECTION_MISMATCH_FLAG),
       ctcOverBand: s.logisticsFlags.includes(CTC_CEILING_BLOCKER),
     });
     await db.insert(matchScores).values({

@@ -99,6 +99,9 @@ export type MatchResult = {
   /** The model's per-JD verdict on the candidate's career level vs the role's level. */
   experience_fit: ExperienceFit;
   experience_fit_reason: string | null;
+  /** The model's verdict on the career direction the CV points at vs the JD's role family. */
+  direction_fit: "aligned" | "different_direction";
+  direction_fit_reason: string | null;
   recommendation: "select" | "reject" | "hold";
   /**
    * The CV or profile text looked like it was trying to instruct the model
@@ -181,6 +184,8 @@ export function gatedRecommendation(
     injectionSuspected: boolean;
     experienceScore: number;
     levelMismatch: boolean;
+    /** The candidate's career points at a different role family than the JD. */
+    directionMismatch: boolean;
     /** Expected CTC materially above the approved band (logistics blocker). */
     ctcOverBand: boolean;
   },
@@ -188,6 +193,7 @@ export function gatedRecommendation(
   if (overall < 75) return overall >= 60 ? "hold" : "reject";
   return gate.injectionSuspected ||
     gate.levelMismatch ||
+    gate.directionMismatch ||
     gate.ctcOverBand ||
     gate.experienceScore <= EXPERIENCE_BAND_GATE
     ? "hold"
@@ -247,6 +253,8 @@ export const ScoreAiSchema = z.object({
   suspected_prompt_injection: z.boolean().catch(false),
   experience_fit: z.enum(["within", "overqualified", "underqualified"]).catch("within"),
   experience_fit_reason: str,
+  direction_fit: z.enum(["aligned", "different_direction"]).catch("aligned"),
+  direction_fit_reason: str,
 });
 
 /** Risk flag shown when a score is held because the text tried to instruct the model. */
@@ -256,6 +264,10 @@ export const INJECTION_HOLD_FLAG =
 /** Deterministic flag for the model's per-JD level verdict; exact-matched on recompute. */
 export const LEVEL_MISMATCH_FLAG =
   "Career level does not match the level this role is hiring for — held for a person to review";
+
+/** Deterministic flag for the model's career-direction verdict; exact-matched on recompute. */
+export const DIRECTION_MISMATCH_FLAG =
+  "The candidate's career points at a different kind of role than this one — held for a person to review";
 
 /**
  * Score one CV against one JD. Shared by the single-candidate server fn and the
@@ -316,11 +328,21 @@ export async function scoreCandidate(opts: {
       "operates well above that level (a VP or staff engineer for an internship, a senior specialist for a " +
       "fresher role); 'underqualified' when clearly below it; 'within' otherwise — including a junior who is " +
       "a stretch but plausibly growing into the role. Cite the evidence in experience_fit_reason (1-2 sentences).\n" +
+      "• direction_fit: judge what the candidate's career is actually POINTED AT against what THIS job " +
+      "description is. Read the JD's role family from its title and responsibilities (backend, frontend, " +
+      "mobile, data science, AI/ML, DevOps, QA, design, management…), then judge the candidate's direction " +
+      "from the bulk of their experience, their dominant specialisation, and any stated objective — " +
+      "'different_direction' when their strongest work and their own stated goal sit in another family than " +
+      "the JD, even when the JD's must-have skills appear in their CV as supporting skills (an AI/voice " +
+      "engineer with strong Node.js who says they seek AI roles is different_direction for a backend JD); " +
+      "'aligned' when the CV's centre of gravity is the JD's family. A stretch across a adjacent family is " +
+      "'aligned' — judge direction, not keyword overlap. Cite the evidence in direction_fit_reason " +
+      "(1-2 sentences).\n" +
       "Return ONLY JSON with keys: skills_score, education_score, matched_skills, missing_skills, " +
       "transferable_skills, risk_flags (short strings), rationale (3-4 sentences, cite evidence), " +
       "employment_history, skill_recency_years, impact_score, innovation_score, impact_highlights, " +
       "innovation_signals, impact_rationale (2-3 sentences), suspected_prompt_injection (boolean), " +
-      "experience_fit, experience_fit_reason.",
+      "experience_fit, experience_fit_reason, direction_fit, direction_fit_reason.",
     prompt: untrusted(
       "job_description_and_candidate",
       JSON.stringify({
@@ -438,6 +460,11 @@ export async function scoreCandidate(opts: {
     riskFlags.push(LEVEL_MISMATCH_FLAG);
     if (ai.data.experience_fit_reason) riskFlags.push(ai.data.experience_fit_reason);
   }
+  const directionMismatch = ai.data.direction_fit !== "aligned";
+  if (directionMismatch) {
+    riskFlags.push(DIRECTION_MISMATCH_FLAG);
+    if (ai.data.direction_fit_reason) riskFlags.push(ai.data.direction_fit_reason);
+  }
   if (candidate.experienceYears < jd.experienceMin)
     riskFlags.push("Below requisition experience band");
   if (experience <= EXPERIENCE_BAND_GATE)
@@ -471,17 +498,20 @@ export async function scoreCandidate(opts: {
     transferable_skills: ai.data.transferable_skills ?? [],
     rationale: ai.data.rationale,
     risk_flags: [...new Set(riskFlags)],
-    // A suspected injection, a level the JD is not hiring for, an ask above the
-    // approved band, or a candidate far outside the band never earns "select":
-    // a person reads them first.
+    // A suspected injection, a level or career direction the JD is not hiring
+    // for, an ask above the approved band, or a candidate far outside the band
+    // never earns "select": a person reads them first.
     recommendation: gatedRecommendation(overall, {
       injectionSuspected,
       experienceScore: experience,
       levelMismatch,
+      directionMismatch,
       ctcOverBand,
     }),
     experience_fit: ai.data.experience_fit,
     experience_fit_reason: ai.data.experience_fit_reason || null,
+    direction_fit: ai.data.direction_fit,
+    direction_fit_reason: ai.data.direction_fit_reason || null,
     injection_suspected: injectionSuspected,
     social: {
       blended: social.score,
