@@ -380,6 +380,17 @@ export const MANUAL_SECTIONS: ManualSection[] = [
     ],
   },
   {
+    id: "agent-intelligence",
+    title: "Agent intelligence (Agent administration)",
+    summary:
+      "The knowledge-graph view of the hiring fleet: agents, person gates, decision chains and the skill vocabulary, with a prescriptive system read.",
+    steps: [
+      "Agent administration → Agent intelligence is the knowledge-graph view of your hiring fleet, computed live from this organisation's telemetry. Governance roles (HR head, CBO).",
+      "Three tabs, each answering what exists, what happened and what to do next: Agent behavior (agents, person gates and failure clusters with candidates folded into edge counts, plus a priority-sorted action plan for every registered agent), Governance (every person decision chained to the gate it acted under, overturn chains, and an autonomy check on who moves candidates between stages), and Vocabulary (skills and role families, built live by the matching engine's own ontology builder — the same nodes Phase 1 will persist).",
+      "The System read panel on top lists only what needs attention, each with its cause, effect and next best action — every number is a live query over your runs, steps, tasks and stage transitions. Nothing here calls a model; it is deterministic and auditable. Auto-refreshes every minute, or use Refresh.",
+    ],
+  },
+  {
     id: "roles",
     title: "19. Permission guide",
     summary:

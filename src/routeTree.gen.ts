@@ -39,6 +39,7 @@ import { Route as TeamRouteImport } from './routes/team'
 import { Route as TemplatesRouteImport } from './routes/templates'
 import { Route as TermsRouteImport } from './routes/terms'
 import { Route as AgentsIndexRouteImport } from './routes/agents.index'
+import { Route as AgentsIntelligenceRouteImport } from './routes/agents.intelligence'
 import { Route as AgentsObservabilityRouteImport } from './routes/agents.observability'
 import { Route as AgentsRegisterRouteImport } from './routes/agents.register'
 import { Route as AgentsSettingsRouteImport } from './routes/agents.settings'
@@ -228,6 +229,11 @@ const TermsRoute = TermsRouteImport.update({
 const AgentsIndexRoute = AgentsIndexRouteImport.update({
   id: '/agents/',
   path: '/agents/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentsIntelligenceRoute = AgentsIntelligenceRouteImport.update({
+  id: '/agents/intelligence',
+  path: '/agents/intelligence',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgentsObservabilityRoute = AgentsObservabilityRouteImport.update({
@@ -468,6 +474,7 @@ export interface FileRoutesByFullPath {
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
   '/terms': typeof TermsRoute
+  '/agents/intelligence': typeof AgentsIntelligenceRoute
   '/agents/observability': typeof AgentsObservabilityRoute
   '/agents/register': typeof AgentsRegisterRoute
   '/agents/settings': typeof AgentsSettingsRoute
@@ -540,6 +547,7 @@ export interface FileRoutesByTo {
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
   '/terms': typeof TermsRoute
+  '/agents/intelligence': typeof AgentsIntelligenceRoute
   '/agents/observability': typeof AgentsObservabilityRoute
   '/agents/register': typeof AgentsRegisterRoute
   '/agents/settings': typeof AgentsSettingsRoute
@@ -613,6 +621,7 @@ export interface FileRoutesById {
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
   '/terms': typeof TermsRoute
+  '/agents/intelligence': typeof AgentsIntelligenceRoute
   '/agents/observability': typeof AgentsObservabilityRoute
   '/agents/register': typeof AgentsRegisterRoute
   '/agents/settings': typeof AgentsSettingsRoute
@@ -687,6 +696,7 @@ export interface FileRouteTypes {
     | '/team'
     | '/templates'
     | '/terms'
+    | '/agents/intelligence'
     | '/agents/observability'
     | '/agents/register'
     | '/agents/settings'
@@ -759,6 +769,7 @@ export interface FileRouteTypes {
     | '/team'
     | '/templates'
     | '/terms'
+    | '/agents/intelligence'
     | '/agents/observability'
     | '/agents/register'
     | '/agents/settings'
@@ -831,6 +842,7 @@ export interface FileRouteTypes {
     | '/team'
     | '/templates'
     | '/terms'
+    | '/agents/intelligence'
     | '/agents/observability'
     | '/agents/register'
     | '/agents/settings'
@@ -904,6 +916,7 @@ export interface RootRouteChildren {
   TeamRoute: typeof TeamRoute
   TemplatesRoute: typeof TemplatesRoute
   TermsRoute: typeof TermsRoute
+  AgentsIntelligenceRoute: typeof AgentsIntelligenceRoute
   AgentsObservabilityRoute: typeof AgentsObservabilityRoute
   AgentsRegisterRoute: typeof AgentsRegisterRoute
   AgentsSettingsRoute: typeof AgentsSettingsRoute
@@ -1157,6 +1170,13 @@ declare module '@tanstack/react-router' {
       path: '/agents'
       fullPath: '/agents/'
       preLoaderRoute: typeof AgentsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agents/intelligence': {
+      id: '/agents/intelligence'
+      path: '/agents/intelligence'
+      fullPath: '/agents/intelligence'
+      preLoaderRoute: typeof AgentsIntelligenceRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/agents/observability': {
@@ -1472,6 +1492,7 @@ const rootRouteChildren: RootRouteChildren = {
   TeamRoute: TeamRoute,
   TemplatesRoute: TemplatesRoute,
   TermsRoute: TermsRoute,
+  AgentsIntelligenceRoute: AgentsIntelligenceRoute,
   AgentsObservabilityRoute: AgentsObservabilityRoute,
   AgentsRegisterRoute: AgentsRegisterRoute,
   AgentsSettingsRoute: AgentsSettingsRoute,
