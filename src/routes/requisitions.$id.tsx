@@ -265,7 +265,11 @@ function RequisitionDetail() {
     education: r.weight_education,
     social: r.weight_social,
   };
-  const weightTotal = Object.values(weights).reduce((a, b) => a + b, 0);
+  const customWeights =
+    (r as { custom_weights?: CustomWeight[] } | undefined)?.custom_weights ?? [];
+  const weightTotal =
+    Object.values(weights).reduce((a, b) => a + b, 0) +
+    customWeights.reduce((s, d) => s + d.weight, 0);
   const step = APPROVALS[r.status];
   const allowed = step ? canApprove(r.status) : false;
   // Revocation: a wrong requisition in the approval chain can be rejected by
@@ -484,9 +488,12 @@ function RequisitionDetail() {
     qc.invalidateQueries({ queryKey: ["jd_statuses"] });
   }
 
-  async function saveWeights(next: typeof weights): Promise<boolean> {
+  async function saveWeights(
+    next: typeof weights,
+    custom: CustomWeight[] = customWeights,
+  ): Promise<boolean> {
     try {
-      const out = await saveRequisitionWeights({ data: { id: r!.id, weights: next } });
+      const out = await saveRequisitionWeights({ data: { id: r!.id, weights: next, custom } });
       toast.success(
         out.status === "approved" && out.changed
           ? "Weights saved. Re-score this role's candidates so the ranking uses them."
@@ -1623,6 +1630,7 @@ function RequisitionDetail() {
               requisitionId={r.id}
               status={r.status}
               saved={weights}
+              savedCustom={customWeights}
               save={saveWeights}
               advising={advising}
               onAdvise={adviseWeights}
@@ -1756,6 +1764,9 @@ type Weights = {
   social: number;
 };
 
+/** An organisation-specific scoring dimension (drizzle: requisitions.custom_weights). */
+type CustomWeight = { key: string; label: string; hint: string; weight: number };
+
 const WEIGHT_LABELS = [
   ["skills", "Skills fit"],
   ["experience", "Experience"],
@@ -1774,6 +1785,7 @@ function WeightsPanel({
   requisitionId,
   status,
   saved,
+  savedCustom,
   save,
   advising,
   onAdvise,
@@ -1783,31 +1795,38 @@ function WeightsPanel({
   requisitionId: string;
   status: string;
   saved: Weights;
-  save: (w: Weights) => Promise<boolean>;
+  savedCustom: CustomWeight[];
+  save: (w: Weights, custom: CustomWeight[]) => Promise<boolean>;
   advising: boolean;
   onAdvise: () => void;
   advice: (Weights & { rationale: string; notes: string[] }) | null;
   onDismissAdvice: () => void;
 }) {
   const [draft, setDraft] = useState<Weights>(saved);
+  const [draftCustom, setDraftCustom] = useState<CustomWeight[]>(savedCustom);
   const [busy, setBusy] = useState(false);
-  const key = JSON.stringify(saved);
+  const key = JSON.stringify([saved, savedCustom]);
   const [lastKey, setLastKey] = useState(key);
   if (key !== lastKey) {
     // The saved weights changed (saved here or elsewhere): start from them.
     setLastKey(key);
     setDraft(saved);
+    setDraftCustom(savedCustom);
   }
   const locked = ["pending_dh", "pending_hr", "pending_cbo", "closed"].includes(status);
-  const total = Object.values(draft).reduce((a, b) => a + b, 0);
-  const dirty = JSON.stringify(draft) !== key;
-  async function commit(w: Weights) {
+  const total =
+    Object.values(draft).reduce((a, b) => a + b, 0) + draftCustom.reduce((s, d) => s + d.weight, 0);
+  const dirty = JSON.stringify([draft, draftCustom]) !== key;
+  async function commit(w: Weights, custom: CustomWeight[]) {
     setBusy(true);
     try {
-      await save(w);
+      await save(w, custom);
     } finally {
       setBusy(false);
     }
+  }
+  function setCustomWeight(i: number, weight: number) {
+    setDraftCustom((ds) => ds.map((d, idx) => (idx === i ? { ...d, weight } : d)));
   }
   return (
     <>
@@ -1844,6 +1863,82 @@ function WeightsPanel({
             />
           </div>
         ))}
+        {!locked ? (
+          <div className="border-t border-border pt-3">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium">Custom dimensions</p>
+              {draftCustom.length < 4 ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    setDraftCustom((ds) => [
+                      ...ds,
+                      {
+                        key: `custom_${Date.now().toString(36)}`,
+                        label: "",
+                        hint: "",
+                        weight: 5,
+                      },
+                    ])
+                  }
+                >
+                  Add dimension
+                </Button>
+              ) : null}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Your organisation's own scoring parameters for this role. The hint is the instruction
+              the scorer reads — keep it job-related (evidence to look for), never personal
+              characteristics.
+            </p>
+            {draftCustom.map((d, i) => (
+              <div key={d.key} className="mt-3 space-y-2 rounded-md border border-border p-3">
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={d.label}
+                    placeholder="e.g. Open-source contributions"
+                    disabled={busy}
+                    onChange={(e) =>
+                      setDraftCustom((ds) =>
+                        ds.map((x, idx) => (idx === i ? { ...x, label: e.target.value } : x)),
+                      )
+                    }
+                  />
+                  <span className="num w-8 text-right text-sm font-semibold">{d.weight}</span>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    aria-label={`Remove ${d.label || "dimension"}`}
+                    disabled={busy}
+                    onClick={() => setDraftCustom((ds) => ds.filter((_, idx) => idx !== i))}
+                  >
+                    ×
+                  </Button>
+                </div>
+                <Textarea
+                  rows={2}
+                  value={d.hint}
+                  placeholder="What evidence in the CV earns a high score?"
+                  disabled={busy}
+                  onChange={(e) =>
+                    setDraftCustom((ds) =>
+                      ds.map((x, idx) => (idx === i ? { ...x, hint: e.target.value } : x)),
+                    )
+                  }
+                />
+                <Slider
+                  value={[d.weight]}
+                  min={0}
+                  max={40}
+                  step={5}
+                  disabled={busy}
+                  onValueChange={([v]) => setCustomWeight(i, v ?? d.weight)}
+                />
+              </div>
+            ))}
+          </div>
+        ) : null}
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
           <p
             className={
@@ -1853,20 +1948,32 @@ function WeightsPanel({
             Total {total} / 100{total !== 100 ? " — rebalance to save" : ""}
           </p>
           <div className="flex gap-2">
-            {total !== 100 && !locked ? (
+            {total !== 100 && !locked && draftCustom.length === 0 ? (
               <Button size="sm" variant="outline" onClick={() => setDraft(balanceWeights(draft))}>
                 Balance to 100
               </Button>
             ) : null}
             {dirty && !locked ? (
               <>
-                <Button size="sm" variant="ghost" disabled={busy} onClick={() => setDraft(saved)}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => {
+                    setDraft(saved);
+                    setDraftCustom(savedCustom);
+                  }}
+                >
                   Undo
                 </Button>
                 <Button
                   size="sm"
-                  disabled={busy || total !== 100}
-                  onClick={() => void commit(draft)}
+                  disabled={
+                    busy ||
+                    total !== 100 ||
+                    !draftCustom.every((d) => d.label.trim() && d.hint.trim().length >= 10)
+                  }
+                  onClick={() => void commit(draft, draftCustom)}
                 >
                   Save weights
                 </Button>

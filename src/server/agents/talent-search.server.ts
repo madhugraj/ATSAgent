@@ -26,6 +26,8 @@ export type PoolMatch = {
   textHits: string[];
   score: number;
   why: string;
+  /** True when the candidate's experience sits inside (or within the grace of) the band. */
+  inBand: boolean;
 };
 
 const Expansion = z.object({
@@ -98,44 +100,52 @@ export function rankPool(
     .split(/[,/·]|\band\b/)
     .map((w) => w.trim())
     .filter((w) => w.length >= 3);
-  return pool
-    .map((c) => {
-      const skillsText = c.skills.join(" · ");
-      const cv = `${c.resumeText ?? ""}\n${c.currentEmployer ?? ""}`;
-      const skillHits: string[] = [];
-      const textHits: string[] = [];
-      for (const g of groups) {
-        if (g.terms.some((t) => mentions(skillsText, t))) skillHits.push(g.skill);
-        else if (g.terms.some((t) => mentions(cv, t))) textHits.push(g.skill);
-      }
-      const exp = c.experienceYears;
-      const inBand =
-        req.experienceMin <= 0 ||
-        (exp >= req.experienceMin - 1 && (req.experienceMax <= 0 || exp <= req.experienceMax + 3));
-      const nearLoc = !!c.location && locWords.some((w) => c.location!.toLowerCase().includes(w));
-      const score =
-        skillHits.length * 3 + textHits.length * 2 + (inBand ? 1 : 0) + (nearLoc ? 1 : 0);
-      const why = [
-        skillHits.length ? `skills: ${skillHits.join(", ")}` : "",
-        textHits.length ? `in CV: ${textHits.join(", ")}` : "",
-        `${exp} yrs${inBand ? "" : " (outside the band)"}`,
-        nearLoc ? `in ${c.location}` : "",
-      ]
-        .filter(Boolean)
-        .join(" · ");
-      return {
-        candidateId: c.candidateId,
-        name: c.name,
-        experienceYears: exp,
-        location: c.location,
-        skillHits,
-        textHits,
-        score,
-        why,
-      };
-    })
-    .filter((m) => m.skillHits.length + m.textHits.length > 0)
-    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+  return (
+    pool
+      .map((c) => {
+        const skillsText = c.skills.join(" · ");
+        const cv = `${c.resumeText ?? ""}\n${c.currentEmployer ?? ""}`;
+        const skillHits: string[] = [];
+        const textHits: string[] = [];
+        for (const g of groups) {
+          if (g.terms.some((t) => mentions(skillsText, t))) skillHits.push(g.skill);
+          else if (g.terms.some((t) => mentions(cv, t))) textHits.push(g.skill);
+        }
+        const exp = c.experienceYears;
+        // The band is literal: a max of 0 is a fresher-only role (3-year grace on
+        // both edges), never "no limit" — the requisition form is a plain number.
+        const inBand = exp >= req.experienceMin - 1 && exp <= req.experienceMax + 3;
+        const nearLoc = !!c.location && locWords.some((w) => c.location!.toLowerCase().includes(w));
+        const score =
+          skillHits.length * 3 + textHits.length * 2 + (inBand ? 1 : 0) + (nearLoc ? 1 : 0);
+        const why = [
+          skillHits.length ? `skills: ${skillHits.join(", ")}` : "",
+          textHits.length ? `in CV: ${textHits.join(", ")}` : "",
+          `${exp} yrs${inBand ? "" : " (outside the band)"}`,
+          nearLoc ? `in ${c.location}` : "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        return {
+          candidateId: c.candidateId,
+          name: c.name,
+          experienceYears: exp,
+          location: c.location,
+          skillHits,
+          textHits,
+          score,
+          why,
+          inBand,
+        };
+      })
+      .filter((m) => m.skillHits.length + m.textHits.length > 0)
+      // The band comes before evidence: a fresher band is not topped up by a
+      // 19-year VP whose CV happens to hit every must-have.
+      .sort(
+        (a, b) =>
+          Number(b.inBand) - Number(a.inBand) || b.score - a.score || a.name.localeCompare(b.name),
+      )
+  );
 }
 
 /** People in the org's pool, not yet in this requisition's pipeline, worth scoring. */

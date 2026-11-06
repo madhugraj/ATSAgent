@@ -146,7 +146,7 @@ export async function matchNewCvsToRoles(orgId: string): Promise<PoolMatchResult
         .filter(
           (m) =>
             (m.skillHits.length + m.textHits.length) / groups.length >= POOL_MATCH.minCoverage &&
-            !m.why.includes("outside the band"),
+            m.inBand,
         )
         .slice(0, POOL_MATCH.maxPerRole);
       if (!strong.length) continue;

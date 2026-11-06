@@ -1,0 +1,1154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ontology — mock (Acme Technologies)</title>
+<style>
+  :root { color-scheme: light; }
+  .viz-root {
+    /* light tokens */
+    --page:          #f9f9f7;
+    --surface-1:     #fcfcfb;
+    --text-primary:  #0b0b0b;
+    --text-secondary:#52514e;
+    --text-muted:    #898781;
+    --grid:          #e1e0d9;
+    --baseline:      #c3c2b7;
+    --ring:          rgba(11,11,11,0.10);
+    --series-role:   #2a78d6;  /* categorical slot 1 */
+    --series-skill:  #1baf7a;  /* categorical slot 3 */
+    --series-cand:   #eb6834;  /* categorical slot 2 */
+    --status-good:     #0ca30c;
+    --status-warning:  #fab219;
+    --status-critical: #d03b3b;
+    --good-text:     #006300;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .viz-root {
+      color-scheme: dark;
+      --page:          #0d0d0d;
+      --surface-1:     #1a1a19;
+      --text-primary:  #f0efec;
+      --text-secondary:#c3c2b7;
+      --grid:          #2c2c2a;
+      --baseline:      #383835;
+      --ring:          rgba(255,255,255,0.10);
+      --series-role:   #3987e5;
+      --series-skill:  #199e70;
+      --series-cand:   #d95926;
+      --good-text:     #0ca30c;
+    }
+  }
+  :root[data-theme="dark"] .viz-root {
+    color-scheme: dark;
+    --page:          #0d0d0d;
+    --surface-1:     #1a1a19;
+    --text-primary:  #f0efec;
+    --text-secondary:#c3c2b7;
+    --grid:          #2c2c2a;
+    --baseline:      #383835;
+    --ring:          rgba(255,255,255,0.10);
+    --series-role:   #3987e5;
+    --series-skill:  #199e70;
+    --series-cand:   #d95926;
+    --good-text:     #0ca30c;
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) body { background: #0d0d0d; }
+  }
+  :root[data-theme="dark"] body { background: #0d0d0d; }
+  .viz-root { color: var(--text-primary); min-height: 100vh; padding: 24px; }
+  .wrap { max-width: 1200px; margin: 0 auto; }
+
+  header.bar { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  h1 { font-size: 18px; margin: 0; font-weight: 650; }
+  .org { color: var(--text-secondary); font-size: 13px; }
+  .snapshot { color: var(--text-muted); font-size: 12px; margin-left: auto; }
+
+  .tabs { display: inline-flex; border: 1px solid var(--grid); border-radius: 8px; overflow: hidden; margin: 14px 0 0; }
+  .tabs button { border: 0; background: var(--surface-1); color: var(--text-secondary); font-size: 13px; padding: 7px 16px; cursor: pointer; }
+  .tabs button[aria-selected="true"] { background: color-mix(in srgb, var(--series-role) 12%, var(--surface-1)); color: var(--text-primary); font-weight: 650; }
+
+  .tiles { display: flex; gap: 10px; margin: 14px 0; flex-wrap: wrap; }
+  .tile { background: var(--surface-1); border: 1px solid var(--ring); border-radius: 8px; padding: 8px 14px; min-width: 110px; }
+  .tile .k { font-size: 11px; color: var(--text-muted); }
+  .tile .v { font-size: 20px; font-weight: 650; margin-top: 2px; }
+  .tile .s { font-size: 11px; color: var(--text-secondary); }
+
+  .filters { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 6px 0 12px; font-size: 12px; min-height: 28px; }
+  .filters label { display: inline-flex; gap: 5px; align-items: center; color: var(--text-secondary); cursor: pointer; }
+  .filters input[type=checkbox] { accent-color: var(--series-role); }
+  .filters .swatch { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .filters input[type=text] { background: var(--surface-1); border: 1px solid var(--grid); border-radius: 6px; color: var(--text-primary); padding: 5px 9px; font-size: 12px; width: 180px; }
+  .filters button { background: var(--surface-1); border: 1px solid var(--grid); border-radius: 6px; color: var(--text-secondary); font-size: 12px; padding: 5px 10px; cursor: pointer; }
+  .filters button:hover { color: var(--text-primary); }
+
+  .main { display: grid; grid-template-columns: 1fr 300px; gap: 14px; align-items: start; }
+  @media (max-width: 900px) { .main { grid-template-columns: 1fr; } }
+
+  .card { background: var(--surface-1); border: 1px solid var(--ring); border-radius: 10px; overflow: hidden; }
+  .card .cardhead { padding: 10px 14px; font-size: 12px; color: var(--text-muted); border-bottom: 1px solid var(--grid); display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  #stage { width: 100%; height: 600px; display: block; }
+  #stage text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; padding: 10px 14px; border-top: 1px solid var(--grid); font-size: 11.5px; color: var(--text-secondary); align-items: center; }
+  .legend .swatch { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 5px; vertical-align: -1px; }
+  .legend .line-demo { display: inline-block; width: 22px; vertical-align: 2px; margin-right: 5px; }
+
+  .inspector { background: var(--surface-1); border: 1px solid var(--ring); border-radius: 10px; padding: 14px; font-size: 12.5px; min-height: 300px; }
+  .inspector h2 { font-size: 14px; margin: 0 0 2px; }
+  .inspector .kind { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .inspector dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 12px 0; }
+  .inspector dt { color: var(--text-muted); }
+  .inspector dd { margin: 0; color: var(--text-primary); }
+  .inspector .hint { color: var(--text-muted); line-height: 1.5; }
+  .inspector ul { margin: 8px 0; padding-left: 18px; color: var(--text-secondary); }
+  .inspector li { margin: 3px 0; }
+  .badge { display: inline-flex; gap: 5px; align-items: center; border-radius: 5px; padding: 2px 8px; font-size: 11.5px; font-weight: 600; margin: 2px 4px 2px 0; }
+  .badge::before { content: attr(data-icon); }
+  .badge.good     { color: var(--status-good);     background: color-mix(in srgb, var(--status-good) 12%, transparent); }
+  .badge.warning  { color: var(--status-warning);  background: color-mix(in srgb, var(--status-warning) 14%, transparent); }
+  .badge.critical { color: var(--status-critical); background: color-mix(in srgb, var(--status-critical) 10%, transparent); }
+  .badge.muted    { color: var(--text-secondary);  background: color-mix(in srgb, var(--text-secondary) 10%, transparent); }
+
+  .interp { border-left: 3px solid var(--grid); padding: 7px 10px; margin: 8px 0; border-radius: 4px; background: color-mix(in srgb, var(--text-secondary) 5%, transparent); }
+  .interp .ilabel { font-weight: 650; font-size: 10.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-muted); display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+  .interp .ilabel::before { content: attr(data-icon); font-size: 12px; }
+  .interp.cause  { border-left-color: var(--series-role); }
+  .interp.effect { border-left-color: var(--status-warning); }
+  .interp.action { border-left-color: var(--status-good); }
+  .interp.action .ilabel { color: var(--good-text); }
+  .interp.effect .ilabel { color: var(--status-warning); }
+  .interp p { margin: 0; color: var(--text-primary); line-height: 1.45; }
+  .insight { border: 1px solid var(--grid); border-radius: 7px; padding: 8px 10px; margin: 8px 0; }
+  .chipmini { display:flex; gap:7px; align-items:center; border:1px solid var(--grid); border-radius:7px; padding:6px 9px; margin:6px 0; cursor:pointer; font-size:12px; }
+  .chipmini:hover { background: color-mix(in srgb, var(--text-secondary) 5%, transparent); }
+  .chipmini .ct { font-weight:650; font-size:12px; }
+  .backlink { color:var(--text-secondary); font-size:11.5px; cursor:pointer; text-decoration:underline; margin-bottom:8px; display:inline-block; }
+  .insight h3 { font-size: 12px; margin: 0 0 4px; font-weight: 650; }
+  .insight .interp { margin: 5px 0 0; padding: 5px 8px; }
+
+  #tableview { display: none; padding: 0; }
+  #tableview table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+  #tableview th { text-align: left; color: var(--text-muted); font-weight: 500; padding: 8px 14px; border-bottom: 1px solid var(--grid); font-size: 11px; }
+  #tableview td { padding: 7px 14px; border-bottom: 1px solid var(--grid); color: var(--text-primary); }
+  #tableview td.dim { color: var(--text-secondary); }
+
+  #tooltip { position: fixed; pointer-events: none; background: var(--surface-1); border: 1px solid var(--ring); border-radius: 7px; padding: 7px 10px; font-size: 12px; display: none; z-index: 5; box-shadow: 0 4px 14px rgba(0,0,0,0.12); max-width: 300px; }
+  #tooltip .t1 { font-weight: 650; }
+  #tooltip .t2 { color: var(--text-secondary); margin-top: 2px; }
+</style>
+</head>
+<body>
+<div class="viz-root"><div class="wrap">
+
+  <header class="bar">
+    <h1>Ontology</h1>
+    <span class="org">Acme Technologies · Organisation setting</span>
+    <span class="snapshot" id="snapshot"></span>
+  </header>
+
+  <div class="tabs" role="tablist">
+    <button id="tab-vocab" role="tab" aria-selected="true">Vocabulary</button>
+    <button id="tab-gov" role="tab" aria-selected="false">Governance</button>
+    <button id="tab-agentb" role="tab" aria-selected="false">Agent behavior</button>
+  </div>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="filters" id="filters"></div>
+
+  <div class="main">
+    <div class="card">
+      <div class="cardhead"><span id="cardtitle"></span><span>drag nodes · click to inspect</span></div>
+      <svg id="stage" role="img" aria-label="Ontology graph"></svg>
+      <div class="legend" id="legend"></div>
+    </div>
+    <aside class="inspector" id="inspector"></aside>
+  </div>
+
+  <div class="card" id="tableview" style="display:none">
+    <div class="cardhead"><span id="tabletitle"></span></div>
+    <div id="tablecontent"></div>
+  </div>
+
+</div></div>
+<div id="tooltip" role="status"></div>
+
+<script>
+"use strict";
+
+const SVGNS = "http://www.w3.org/2000/svg";
+const el = (tag, attrs) => { const n = document.createElementNS(SVGNS, tag); for (const k in attrs) n.setAttribute(k, attrs[k]); return n; };
+
+/* ================= dataset 1 — VOCABULARY (skills, role families, candidates) ================= */
+
+const VOCAB = (() => {
+  const nodes = [
+    { id:"fam-backend",  type:"role", name:"Backend",       cat:"engineering" },
+    { id:"fam-data",     type:"role", name:"Data Platform", cat:"engineering" },
+    { id:"fam-frontend", type:"role", name:"Frontend",      cat:"engineering" },
+    { id:"fam-ai",       type:"role", name:"AI / ML",       cat:"engineering" },
+    { id:"fam-aieng",    type:"role", name:"AI Engineer",   cat:"engineering", note:"composite — declared after Divya's overturn · ontology v13" },
+    { id:"fam-devops",   type:"role", name:"DevOps & Cloud",cat:"engineering" },
+    { id:"sk-go",   type:"skill", name:"Go",          cat:"backend",      aliases:"golang",  supply:14, demand:6,  ev:23 },
+    { id:"sk-java", type:"skill", name:"Java",        cat:"backend",      aliases:"jdk",     supply:22, demand:3,  ev:11 },
+    { id:"sk-pg",   type:"skill", name:"PostgreSQL",  cat:"data platform",aliases:"postgres, psql", supply:19, demand:7, ev:31 },
+    { id:"sk-redis",type:"skill", name:"Redis",       cat:"data platform",aliases:"",        supply:12, demand:4,  ev:14 },
+    { id:"sk-kafka",type:"skill", name:"Kafka",       cat:"data platform",aliases:"",        supply:9,  demand:8,  ev:18 },
+    { id:"sk-k8s",  type:"skill", name:"Kubernetes",  cat:"cloud & devops",aliases:"k8s",    supply:11, demand:9,  ev:26 },
+    { id:"sk-docker",type:"skill",name:"Docker",      cat:"cloud & devops",aliases:"",       supply:24, demand:5,  ev:20 },
+    { id:"sk-tf",   type:"skill", name:"Terraform",   cat:"cloud & devops",aliases:"",      supply:8,  demand:5,  ev:9  },
+    { id:"sk-react",type:"skill", name:"React",       cat:"frontend",     aliases:"reactjs, react.js", supply:26, demand:11, ev:34 },
+    { id:"sk-next", type:"skill", name:"Next.js",     cat:"frontend",     aliases:"nextjs",  supply:13, demand:6,  ev:12 },
+    { id:"sk-ts",   type:"skill", name:"TypeScript",  cat:"frontend",     aliases:"ts",      supply:21, demand:8,  ev:25 },
+    { id:"sk-node", type:"skill", name:"Node.js",     cat:"backend",      aliases:"nodejs",  supply:17, demand:6,  ev:16 },
+    { id:"sk-py",   type:"skill", name:"Python",      cat:"data platform",aliases:"",        supply:30, demand:10, ev:38 },
+    { id:"sk-torch",type:"skill", name:"PyTorch",     cat:"ai",           aliases:"",        supply:6,  demand:7,  ev:10 },
+    { id:"sk-llm",  type:"skill", name:"LLMs",        cat:"ai",           aliases:"llm, genai", supply:7, demand:9, ev:15 },
+    { id:"sk-rust", type:"skill", name:"Rust",        cat:"backend",      aliases:"",        supply:4,  demand:2,  ev:3  },
+    { id:"sk-ruby", type:"skill", name:"Ruby",        cat:"backend",      aliases:"",        supply:2,  demand:0,  ev:2, dormant:true },
+    { id:"c-aarav", type:"candidate", name:"Aarav Mehta",  exp:6, direction:"Frontend → AI Engineer, no bridge edge yet" },
+    { id:"c-divya", type:"candidate", name:"Divya Nair",   exp:5, direction:"AI/ML → AI Engineer · aligned via builds_on" },
+    { id:"c-rohan", type:"candidate", name:"Rohan Gupta",  exp:8, direction:"Data Platform → Data Platform" },
+    { id:"c-sara",  type:"candidate", name:"Sara Khan",    exp:4, direction:"AI/ML → AI Engineer" },
+  ];
+  const edges = [
+    { s:"fam-aieng", t:"sk-llm",  k:"requires" },
+    { s:"fam-aieng", t:"sk-torch",k:"requires" },
+    { s:"fam-aieng", t:"sk-node", k:"requires" },
+    { s:"fam-aieng", t:"sk-pg",   k:"requires" },
+    { s:"fam-aieng", t:"fam-ai",  k:"builds_on" },
+    { s:"fam-aieng", t:"fam-backend", k:"builds_on" },
+    { s:"fam-backend", t:"sk-go",   k:"requires" },
+    { s:"fam-backend", t:"sk-pg",   k:"requires" },
+    { s:"fam-backend", t:"sk-node", k:"requires" },
+    { s:"fam-data",    t:"sk-kafka",k:"requires" },
+    { s:"fam-data",    t:"sk-py",   k:"requires" },
+    { s:"fam-data",    t:"sk-pg",   k:"requires" },
+    { s:"fam-frontend",t:"sk-react",k:"requires" },
+    { s:"fam-frontend",t:"sk-ts",   k:"requires" },
+    { s:"fam-ai",      t:"sk-torch",k:"requires" },
+    { s:"fam-ai",      t:"sk-llm",  k:"requires" },
+    { s:"fam-ai",      t:"sk-py",   k:"requires" },
+    { s:"fam-devops",  t:"sk-k8s",  k:"requires" },
+    { s:"fam-devops",  t:"sk-tf",   k:"requires" },
+    { s:"fam-devops",  t:"sk-docker",k:"requires" },
+    { s:"sk-next", t:"sk-react", k:"alternative_to" },
+    { s:"sk-node", t:"sk-java",  k:"alternative_to" },
+    { s:"sk-go",   t:"sk-k8s", k:"cooccurs", w:0.8 },
+    { s:"sk-py",   t:"sk-kafka", k:"cooccurs", w:0.6 },
+    { s:"sk-react",t:"sk-ts",  k:"cooccurs", w:0.9 },
+    { s:"sk-pg",   t:"sk-redis", k:"cooccurs", w:0.5 },
+    { s:"sk-torch",t:"sk-llm", k:"cooccurs", w:0.7 },
+    { s:"sk-go",   t:"sk-pg",  k:"cooccurs", w:0.5 },
+    { s:"sk-k8s",  t:"sk-docker", k:"cooccurs", w:0.6 },
+    { s:"sk-ts",   t:"sk-node", k:"cooccurs", w:0.5 },
+    { s:"sk-llm",  t:"sk-py",  k:"cooccurs", w:0.6 },
+    { s:"sk-llm",  t:"sk-node", k:"cooccurs", w:0.4 },
+    { s:"c-aarav", t:"fam-backend", k:"applies", verdict:"hold",  why:"overqualified for band (6y vs 2–4)" },
+    { s:"c-divya", t:"fam-aieng",   k:"applies", verdict:"aligned", why:"AI/ML → AI Engineer is one builds_on hop — re-classified after the family was declared" },
+    { s:"c-rohan", t:"fam-data",    k:"applies", verdict:"shortlisted", why:"aligned direction, 8y in band" },
+    { s:"c-sara",  t:"fam-aieng",   k:"applies", verdict:"select", why:"aligned direction, PyTorch + LLM evidence" },
+    { s:"c-aarav", t:"fam-frontend", k:"flag", label:"moved from frontend", note:"career history edge — AI Engineer family has no builds_on to Frontend yet" },
+    { s:"sk-go", t:"sk-rust", k:"proposed", label:"proposed", note:"propose_skill_edge · evidence 3 · awaiting confirmation" },
+  ];
+  return {
+    key: "vocab",
+    nodes, edges,
+    title: "Knowledge graph — every agent queries this; every verdict cites it",
+    snapshot: "Snapshot #13 — AI Engineer family declared · 3 added · 1 grown · 2 dormant",
+    typeStyles: {
+      role:      { color: "var(--series-role)",  r: 15, label: "Role family" },
+      skill:     { color: "var(--series-skill)", r: 8,  label: "Skill" },
+      candidate: { color: "var(--series-cand)",  r: 12, label: "Candidate" },
+    },
+    edgeStyles: {
+      requires:      { stroke: "var(--baseline)", width: 1.6, dash: "" },
+      builds_on:     { stroke: "var(--baseline)", width: 1.6, dash: "" },
+      applies:       { stroke: "var(--baseline)", width: 1.6, dash: "" },
+      alternative_to:{ stroke: "var(--baseline)", width: 1.4, dash: "2 3" },
+      cooccurs:      { stroke: "var(--baseline)", width: 1.1, dash: "2 3", opacity: 0.8 },
+      flag:          { stroke: "var(--status-critical)", width: 1.8, dash: "6 4" },
+      proposed:      { stroke: "var(--status-warning)",  width: 1.8, dash: "3 3" },
+    },
+    edgeLabels: { requires:"requires", builds_on:"builds on", alternative_to:"alt", cooccurs:"co-occurs", applies:"applies", flag:"flag", proposed:"proposed" },
+    legendExtra: [
+      `<span><span class="swatch" style="background:var(--text-muted); opacity:.45"></span>dormant (snapshot diff)</span>`,
+    ],
+    tiles: [
+      ["Nodes", "27", "6 role families · 17 skills · 4 candidates"],
+      ["Typed edges", "39", "requires · builds_on · alt · co-occurs"],
+      ["Evidence links", "412", "candidates × skills this quarter"],
+      ["Auto-resolved", "97%", "aliases folded without code"],
+    ],
+    tableHead: ["Node","Type","Category","Aliases","Supply","Demand","Evidence","Status"],
+    tableRow(n) {
+      return [n.name, this.typeStyles[n.type].label,
+        n.type === "candidate" ? "candidate" : n.cat,
+        n.aliases || "—", n.supply ?? "—", n.demand ?? "—", n.ev ?? "—",
+        n.dormant ? "dormant" : "active"];
+    },
+    spring: { requires: 145, builds_on: 120, applies: 175, flag: 195, alternative_to: 90, cooccurs: 110, proposed: 130 },
+    inspect(n, ctx) {
+      const S = this;
+      ctx.badges = [];
+      const res = { interp: [] };
+      const dl = [];
+      const add = (k, v) => dl.push([k, v]);
+      if (n.type === "skill") {
+        add("slug", n.slugLabel || n.name.toLowerCase());
+        add("category", n.cat);
+        add("aliases", n.aliases || "—");
+        add("supply / demand", `${n.supply} / ${n.demand} (org candidates)`);
+        add("evidence", `${n.ev} links · last 90d`);
+        add("status", n.dormant ? "dormant — flagged in snapshot #13" : "active");
+        if (n.id === "sk-rust") ctx.badges.push(["warning", "⚠", "proposed edge: co-occurs with Go"]);
+      } else if (n.type === "role") {
+        add("family", n.cat);
+        const reqs = ctx.linksOf(n, "requires").map(x => x.other.name);
+        add("requires", reqs.join(", ") || "—");
+        const builds = ctx.linksOf(n, "builds_on").map(x => x.other.name);
+        if (builds.length) add("builds on", builds.join(", "));
+        if (n.note) add("note", n.note);
+        add("open requisitions", n.id === "fam-backend" || n.id === "fam-aieng" ? "2" : "1");
+        if (n.id === "fam-aieng") res.interp.push(
+          ["cause", "3 reqs in Q3 kept asking for PyTorch *and* Go — a role the graph had no node for. Declared Oct 29 after Priya's overturn."],
+          ["effect", "AI/ML and Backend candidates now match it in one builds_on hop; bands and must-haves inherit from both sides."],
+          ["action", "Nothing pending. Eval 'direction-via-bridge' guards it on every manifest change."]);
+      } else {
+        add("experience", `${n.exp} yrs`);
+        add("career direction", n.direction);
+        const appLink = ctx.linkOf(n, "applies");
+        const app = appLink ? appLink.edge : null;
+        if (app) {
+          const map = { select:["good","✓","verdict: select"], aligned:["good","✓","verdict: aligned"],
+            shortlisted:["good","✓","verdict: shortlisted"], hold:["warning","!","verdict: hold"] };
+          ctx.badges.push(map[app.verdict]);
+          if (app.verdict === "hold") ctx.badges.push(["muted","×","waiting for a person"]);
+          add("why", app.why);
+          if (n.id === "c-divya") res.interp.push(
+            ["cause", "Her AI/ML history reaches AI Engineer in one builds_on hop — aligned since the family was declared Oct 29."],
+            ["effect", "Auto-advanced past the direction gate; screening kit now targets PyTorch + Node/PG evidence."],
+            ["action", "Next best: schedule L1 — the interview coordinator will propose slots."]);
+          if (n.id === "c-aarav") res.interp.push(
+            ["cause", "6y vs band 2–4 → overqualified; and Frontend has no builds_on edge to AI Engineer yet, so his pivot reads as a dead end."],
+            ["effect", "Held 12 days and counting — and every similar frontend candidate will hold the same way on reqs #204/#207."],
+            ["action", "Decide: confirm the hold, or if the req accepts the pivot, add builds_on Frontend → AI Engineer — it unblocks him and every candidate like him."]);
+        }
+      }
+      if (n.id === "sk-rust") res.interp.push(
+        ["cause", "3 evidence links co-occurring with Go — below the auto-confirm threshold (5)."],
+        ["effect", "Unconfirmed: queries ignore it today, so Rust-skilled candidates resolve to nothing."],
+        ["action", "One click: confirm the edge (or decline). Sourcing agent asked; a person decides."]);
+      return { dl, badges: ctx.badges, interp: res.interp };
+    },
+  };
+})();
+
+/* ================= dataset 2 — GOVERNANCE (decisions, norms, violations, changes) ================= */
+
+const GOV = (() => {
+  const nodes = [
+    // decisions (actor in tooltip/inspector)
+    { id:"d1", type:"decision", name:"Hold: Divya N.",       actor:"intake agent v1.5.0",     principal:"agent",  outcome:"hold",     when:"Oct 28", gates:["direction_gate"],
+      cause:"direction_gate v1 found no evidence path AI/ML → Backend. The graph had no way to say 'backend-adjacent AI role'.",
+      effect:"One candidate held. Every future AI/ML candidate on a backend-adjacent req would mis-hold the same way.",
+      action:"Correct per v1 — superseded next day by Priya's overturn. Nothing pending." },
+    { id:"d2", type:"decision", name:"Overturn + declare AI Engineer", actor:"HR Head · Priya S.", principal:"person", outcome:"overturned", when:"Oct 29", gates:["direction_gate"],
+      cause:"The dossier showed skills bridging both families; the gate lacked the role node to express that.",
+      effect:"AI Engineer family declared · direction_gate → v2 · eval added · Divya unblocked.",
+      action:"Shipped. Watch eval 'direction-via-bridge' on the next manifest change." },
+    { id:"d3", type:"decision", name:"Release offer: Rohan G.", actor:"offer agent → CBO Mehul", principal:"person-approved", outcome:"released", when:"Oct 30", gates:["two_person_rule","band_ceiling"],
+      cause:"In-band offer, second approver present.",
+      effect:"Offer released and accepted Oct 31.",
+      action:"None — clean decision, kept as the reference pattern." },
+    { id:"d4", type:"decision", name:"Auto-notify 14 candidates", actor:"distribution agent v1.1.3", principal:"agent", outcome:"blocked", when:"Nov 01", gates:["never_notify_without_person"],
+      cause:"The send attempted outbound e-mail outside the person flow — registry refused it at the tool boundary.",
+      effect:"14 candidates uncontacted; run frozen by taint — every later write waits for a person.",
+      action:"HR head: review the draft copy, then re-release as a person-approved notification." },
+    { id:"d5", type:"decision", name:"Bulk reminder ×48",    actor:"follow-up agent v1.5.0",  principal:"agent",  outcome:"partial",  when:"Nov 02", gates:["run_limits"],
+      cause:"run_limits ceiling hit at 12 sends per stretch.",
+      effect:"36 overdue reminders unsent — scorecard SLA at risk on 3 requisitions.",
+      action:"Choose: split into two runs, or raise the follow-up agent's ceiling (HR head, audited)." },
+    { id:"d6", type:"decision", name:"Tighten taint rule",   actor:"Platform admin (you)",    principal:"person", outcome:"changed",  when:"Nov 03", gates:["taint v2"],
+      cause:"Breach v1 showed taint froze runs only *after* the first violation.",
+      effect:"taint v2: any notification-shaped tool call from an unverified agent requires pre-confirmation.",
+      action:"Shipped + 6 red-team evals. Re-run live verification to restore autonomy." },
+    // norms
+    { id:"n1", type:"norm", name:"direction_gate",   version:"v2", what:"no evidence path history→target ⇒ hold for a person", violations:"1 · now aligned via builds_on" },
+    { id:"n2", type:"norm", name:"two_person_rule",  version:"v1", what:"offer release needs a second approver",              violations:"1 blocked" },
+    { id:"n3", type:"norm", name:"never_notify_without_person", version:"v1", what:"agents must never e-mail a candidate unprompted", violations:"1 caught" },
+    { id:"n4", type:"norm", name:"run_limits",       version:"v1", what:"four-stretch ceiling per run",                        violations:"1 clipped" },
+    { id:"n5", type:"norm", name:"band_ceiling",     version:"v1", what:"offers above band hold for CBO",                      violations:"0" },
+    // violations (events)
+    { id:"v1", type:"violation", name:"Hijacked model tried to e-mail out", when:"Nov 01 · red-team + live", consequence:"run frozen (taint), tool refused by registry",
+      cause:"Hijack-shaped input in a live run; agent called record_notify outside the person flow.",
+      effect:"Caught at the registry — no candidate contact happened. Run frozen; autonomy suspended for that agent.",
+      action:"Already converted: taint v2 + red-team eval suite (c2). Re-verify the agent to restore autonomy." },
+    { id:"v2", type:"violation", name:"Offer release w/o second approver", when:"Nov 01", consequence:"blocked at gate, card raised",
+      cause:"one_person release attempted while HR approval was still pending.",
+      effect:"Blocked — the norm worked; offer sits in pending_hr.",
+      action:"CBO: approve or send back — it's in your decisions inbox." },
+    // changes
+    { id:"c1", type:"change", name:"Declare 'AI Engineer' family", status:"shipped", when:"Oct 29", supersedes:"direction_gate v1 → v2", evals:"direction-via-bridge",
+      cause:"Priya's overturn exposed a missing role node, not a wrong agent.",
+      effect:"direction_gate v2: a path via builds_on counts as aligned. Future AI/ML ↔ backend-adjacent candidates classify correctly.",
+      action:"Shipped — 1 eval guards it." },
+    { id:"c2", type:"change", name:"Taint rule tightened (v2)", status:"shipped", when:"Nov 03", supersedes:"taint v1 → v2", evals:"never_notify red-team ×6",
+      cause:"Breach v1: the freeze came one tool call too late.",
+      effect:"Notification-shaped calls now need pre-confirmation for unverified agents.",
+      action:"Shipped — 6 evals guard it. One agent awaits re-verification." },
+    { id:"c3", type:"change", name:"Band ceiling +₹2L", status:"proposed", when:"Nov 04", supersedes:"band_ceiling v1 → v2 (pending CBO)", evals:"—",
+      cause:"3 overturns against band_ceiling this quarter — bands were set at requisition approval; the market moved under them.",
+      effect:"If declined: expect the same overturns to continue in hot skill families (Data Platform, AI).",
+      action:"CBO decision, due Nov 15: approve or decline the +₹2L ceiling." },
+    // artifacts
+    { id:"a1", type:"artifact", name:"Eval: direction-via-bridge", kind:"eval scenario", note:"guards the norm that re-classified Divya" },
+    { id:"a2", type:"artifact", name:"Eval: never_notify red-team ×6", kind:"eval suite", note:"runs on every manifest change of e-mail-capable agents" },
+    { id:"a3", type:"artifact", name:"No path AI/ML → Backend", kind:"evidence", note:"the graph fact Divya's hold cited" },
+    { id:"a4", type:"artifact", name:"3 holds overturned in Q3", kind:"pattern", note:"overturn pattern that proposed the band change",
+      cause:"Pattern detector: same norm, 3 overturns, one quarter.",
+      effect:"Change proposal c3 opened automatically — the system diagnosed its own miscalibrated norm.",
+      action:"The decision belongs to the CBO — that's deliberate: norms change only through people." },
+  ];
+  const edges = [
+    { s:"d1", t:"n1", k:"restricted_by" },
+    { s:"d1", t:"a3", k:"cites" },
+    { s:"d2", t:"d1", k:"overturned" },
+    { s:"d2", t:"c1", k:"led_to" },
+    { s:"c1", t:"n1", k:"supersedes" },
+    { s:"c1", t:"a1", k:"led_to" },
+    { s:"v1", t:"n3", k:"violated" },
+    { s:"v1", t:"d6", k:"led_to" },
+    { s:"d6", t:"c2", k:"led_to" },
+    { s:"c2", t:"n3", k:"supersedes" },
+    { s:"c2", t:"a2", k:"led_to" },
+    { s:"d4", t:"v1", k:"triggered" },
+    { s:"d4", t:"v2", k:"triggered" },
+    { s:"v2", t:"n2", k:"violated" },
+    { s:"d3", t:"n2", k:"restricted_by" },
+    { s:"d3", t:"n5", k:"restricted_by" },
+    { s:"d5", t:"n4", k:"restricted_by" },
+    { s:"a4", t:"c3", k:"led_to" },
+    { s:"c3", t:"n5", k:"supersedes", proposed:true, label:"pending CBO" },
+  ];
+  return {
+    key: "gov",
+    nodes, edges,
+    title: "Governance graph — decisions taken, norms that shaped them, what changed because of them",
+    snapshot: "Q4 — 312 decisions · 18 norms · 27 violations blocked · 2 breaches caught · 6 changes",
+    typeStyles: {
+      decision:  { color: "var(--series-role)",   r: 13, label: "Decision" },
+      norm:      { color: "var(--series-cand)",   r: 14, label: "Norm" },
+      violation: { color: "var(--status-critical)", r: 11, label: "Violation", icon: "⚠ " },
+      change:    { color: "var(--series-skill)",  r: 12, label: "Change" },
+      artifact:  { color: "var(--text-muted)",    r: 7,  label: "Evidence / eval / pattern" },
+    },
+    edgeStyles: {
+      restricted_by:{ stroke: "var(--baseline)", width: 1.3, dash: "2 3" },
+      cites:        { stroke: "var(--baseline)", width: 1.0, dash: "1 3", opacity: 0.7 },
+      triggered:    { stroke: "var(--baseline)", width: 1.3, dash: "2 3" },
+      violated:     { stroke: "var(--status-critical)", width: 1.8, dash: "6 4" },
+      overturned:   { stroke: "var(--status-critical)", width: 1.8, dash: "6 4" },
+      led_to:       { stroke: "var(--baseline)", width: 1.6, dash: "" },
+      supersedes:   { stroke: "var(--baseline)", width: 1.6, dash: "" },
+    },
+    edgeLabels: { restricted_by:"restricted by", cites:"cites", triggered:"triggered", violated:"violated", overturned:"overturned", led_to:"led to", supersedes:"supersedes" },
+    legendExtra: [
+      `<span><svg class="line-demo" width="22" height="8"><circle cx="11" cy="4" r="4" fill="none" stroke="var(--status-warning)" stroke-width="1.5" stroke-dasharray="2 2"/></svg>proposed change (amber ring)</span>`,
+    ],
+    tiles: [
+      ["Decisions this quarter", "312", "214 agent-proposed · 98 person"],
+      ["Norms enforced", "18", "gates · invariants · run limits"],
+      ["Violations", "2", "27 blocked at gates · 2 breaches caught"],
+      ["Overturn rate", "4%", "of agent holds — 3 against band_ceiling"],
+    ],
+    tableHead: ["When","Decision","Actor","Principal","Outcome","Norms engaged"],
+    tableRow(n) {
+      if (n.type !== "decision") return null;
+      return [n.when, n.name, n.actor, n.principal, n.outcome,
+        (n.gates || []).join(", ") || "—"];
+    },
+    spring: { restricted_by: 150, cites: 120, triggered: 130, violated: 160, overturned: 170, led_to: 165, supersedes: 140 },
+    inspect(n, ctx) {
+      const badges = [], dl = [], interp = [];
+      const add = (k, v) => dl.push([k, v]);
+      if (n.type === "decision") {
+        add("actor", n.actor);
+        add("principal", n.principal);
+        add("when", n.when);
+        const om = { hold:["warning","!","hold"], overturned:["good","✓","overturned by a person"],
+          released:["good","✓","released"], blocked:["critical","×","blocked at gate"],
+          partial:["warning","!","clipped by run limit"], changed:["good","✓","change shipped"] };
+        badges.push(om[n.outcome]);
+      } else if (n.type === "norm") {
+        add("version", n.version);
+        add("what it restricts", n.what);
+        add("violations", n.violations);
+        const sup = ctx.linksOf(n, "supersedes").filter(l => l.edge.t === n || l.edge.s === n)
+          .map(l => l.other.name);
+        if (sup.length) add("amended by", sup.join(", "));
+      } else if (n.type === "violation") {
+        badges.push(["critical", "⚠", n.id === "v1" ? "breach — caught" : "blocked"]);
+        add("when", n.when);
+        add("consequence", n.consequence);
+      } else if (n.type === "change") {
+        badges.push(n.status === "shipped" ? ["good","✓","change shipped"] : ["warning","⚠","proposed — awaiting CBO"]);
+        add("when", n.when);
+        add("supersedes", n.supersedes);
+        add("evals added", n.evals);
+      } else {
+        add("kind", n.kind);
+        add("note", n.note);
+      }
+      if (n.cause) interp.push(["cause", n.cause]);
+      if (n.effect) interp.push(["effect", n.effect]);
+      if (n.action) interp.push(["action", n.action]);
+      return { dl, badges, interp };
+    },
+    systemRead: [
+      { title:"⚠ 2 offers stuck — both breach-shaped, both waiting on you", short:"2 offers stuck — both breach-shaped",
+        cause:"v2: one-person release attempted; v1: outbound e-mail outside the person flow. Same shape: an agent reaching for an outward-facing action.",
+        effect:"One offer in pending_hr since Nov 01; 14 candidates uncontacted since the taint freeze.",
+        action:"Two cards in your decisions inbox: approve/send back the offer (CBO), review the notification draft (HR head)." },
+      { title:"⚠ Band ceiling is overturning 3× a quarter — proposal open", short:"band_ceiling overturning 3× a quarter",
+        cause:"Bands freeze at requisition approval; market moves under them. The norm isn't wrong, it's stale.",
+        effect:"Every overturned hold costs days in exactly the families you hire most (Data Platform, AI).",
+        action:"CBO: approve or decline 'Band ceiling +₹2L' by Nov 15 — decline and the overturns keep coming." },
+      { title:"✓ Two fixes shipped this quarter closed their own loops", short:"two shipped fixes closed their loops",
+        cause:"AI Engineer family (from Divya's overturn) and taint v2 (from the e-mail breach) — both person-approved, both versioned.",
+        effect:"Both norms re-classified correctly since; eval suites added automatically (1 + 6 scenarios).",
+        action:"One item left: re-run live verification to restore autonomy for the distribution agent." },
+      { title:"✓ Divya's pipeline is clean — nothing pending", short:"Divya clean — nothing pending",
+        cause:"direction_gate v2 sees the builds_on path; verdict aligned.",
+        effect:"Screening kit generated; L1 slot proposals ready.",
+        action:"Interview coordinator will surface slot options today — nothing for you." },
+    ],
+  };
+})();
+
+/* ================= dataset 3 — AGENT BEHAVIOR (candidates folded into edge counts) ================= */
+
+const AGENTB = (() => {
+  const nodes = [
+    // agents
+    { id:"ag-copilot", type:"agent", name:"Copilot", ver:"v1.2.5", decisions:312, stops:0, overturned:0, autonomy:"autonomous",
+      cause:"Routes every request to a specialist after confirmation.",
+      effect:"312 handoffs this quarter; zero gate stops — routing is clean.",
+      action:"None. Reference pattern." },
+    { id:"ag-intake", type:"agent", name:"Intake", ver:"v1.5.0", decisions:214, stops:214, overturned:3, autonomy:"autonomous",
+      cause:"Scores every application; direction_gate v2 holds where no path exists.",
+      effect:"214 holds, 1.4% overturned (healthy < 5%). Since v2 shipped, zero mis-holds of AI/ML-adjacent candidates.",
+      action:"None — verdict quality is stable. Watch if the overturn rate crosses 5%." },
+    { id:"ag-offer", type:"agent", name:"Offer", ver:"v1.6.4", decisions:59, stops:59, overturned:3, autonomy:"gated",
+      cause:"band_ceiling stopped 18 offers; 3 overturns cluster in Data Platform + AI reqs of one client.",
+      effect:"5.1% overturn rate — double the portfolio norm, concentrated on one stale norm.",
+      action:"The fix is the band proposal (c3 in Governance), not this agent. If declined, consider per-client band overlays instead." },
+    { id:"ag-distribution", type:"agent", name:"Distribution", ver:"v1.1.3", decisions:27, stops:3, overturned:0, autonomy:"suspended",
+      cause:"All 3 of its outbound-notify attempts were blocked by never_notify — the capability it needs is person-gated.",
+      effect:"Each block strands ~14 uncontacted candidates and costs a manual retry; autonomy suspended pending re-verification.",
+      action:"Decide the pattern: approve the pre-approved-template flow (proposed fix below), or remove record_notify from its manifest entirely." },
+    { id:"ag-followup", type:"agent", name:"Follow-up", ver:"v1.5.0", decisions:48, stops:1, overturned:0, autonomy:"autonomous",
+      cause:"run_limits clipped its batch at 12 of 48.",
+      effect:"36 reminders unsent; SLA risk on 3 reqs — recurring, not one-off (it batches weekly).",
+      action:"Split the batch in its runbook, or raise its ceiling — it's the only agent that legitimately needs volume." },
+    { id:"ag-panel2", type:"agent", name:"Panel L2", ver:"v1.1.0", decisions:89, stops:6, overturned:2, autonomy:"on",
+      cause:"Disagreement-holds rising: 6 this quarter vs 2 last (panel_review gate).",
+      effect:"2 rounds stalled waiting for HR review; average stall 1.8 days.",
+      action:"Calibration review: are L2 scorecards drifting stricter, or is the gate too sensitive? Compare AI vs human scorecards in the eval run." },
+    { id:"ag-sourcing", type:"agent", name:"Sourcing", ver:"v1.0.5", decisions:12, stops:2, overturned:0, autonomy:"autonomous",
+      cause:"Top-up agent; every run reads the vocabulary and proposes what it couldn't resolve.",
+      effect:"2 proposals open: MLOps family (4 reqs demand it), Rust skill edge (3 evidence).",
+      action:"Both need a person — confirm or decline below. Acceptance rate of its proposals is the trust metric to watch." },
+    // norms
+    { id:"n-direction", type:"norm", name:"direction_gate", version:"v2", stops:214, overturned:3,
+      what:"no evidence path history→target ⇒ hold",
+      cause:"Overhauled Oct 29 after Divya's overturn; now counts builds_on hops.",
+      effect:"Mis-holds went to zero; 214 stops still routed correctly.",
+      action:"Healthy. Revisit only if a composite family ships without a builds_on." },
+    { id:"n-twoperson", type:"norm", name:"two_person_rule", version:"v1", stops:41, overturned:0,
+      what:"offer release needs a second approver",
+      cause:"Platform norm, applied to every client.",
+      effect:"41 stops, zero overturns — perfectly calibrated.",
+      action:"None. This is what a correct norm looks like." },
+    { id:"n-band", type:"norm", name:"band_ceiling", version:"v1", stops:18, overturned:3,
+      what:"offers above band hold for CBO",
+      cause:"Bands freeze at requisition approval; the market moved under them.",
+      effect:"The only norm with overturns — 3 this quarter, one client cluster.",
+      action:"The +₹2L proposal (Governance tab) or per-client band overlays. Decide by Nov 15." },
+    { id:"n-notify", type:"norm", name:"never_notify", version:"v1", stops:3, overturned:0,
+      what:"agents must never e-mail a candidate unprompted",
+      cause:"Platform must-never, enforced at the registry boundary.",
+      effect:"3/3 attempts blocked, one hijack caught — but every block strands work.",
+      action:"The norm is right; the workflow around it isn't. Pre-approved template flow or drop the tool (see Distribution)." },
+    { id:"n-runlim", type:"norm", name:"run_limits", version:"v1", stops:1, overturned:0,
+      what:"four-stretch ceiling per run",
+      cause:"One size fits all agents.",
+      effect:"Only Follow-up clips — volume batching is legitimate for it alone.",
+      action:"Per-agent ceilings instead of a global one." },
+    { id:"n-panelrev", type:"norm", name:"panel_review", version:"v1", stops:6, overturned:2,
+      what:"panel disagreement holds the round for HR",
+      cause:"Disagreement-holds tripled QoQ.",
+      effect:"2 stalls, 1.8 days average.",
+      action:"Calibration review before touching the threshold." },
+    // families (vocabulary the agents act on / project)
+    { id:"f-aieng", type:"family", name:"AI Engineer", demand:"2 open reqs · 4 aligned candidates",
+      cause:"Declared from Divya's overturn + 3 reqs of combined demand.",
+      effect:"Intake verdicts on AI/ML-adjacent candidates now correct without exceptions.",
+      action:"Shipped. Eval guards it." },
+    { id:"f-data", type:"family", name:"Data Platform", demand:"3 open reqs · band overturn cluster",
+      cause:"Established family.",
+      effect:"Where the band overturns concentrate.",
+      action:"Watch after the band decision lands." },
+    { id:"f-backend", type:"family", name:"Backend", demand:"2 open reqs",
+      cause:"Established family.",
+      effect:"—", action:"—" },
+    { id:"f-mlops", type:"family", name:"MLOps", proposed:true, demand:"4 reqs demand it · 0 nodes exist",
+      cause:"Sourcing agent found 4 reqs whose skills span AI/ML + DevOps with no home family.",
+      effect:"Today those reqs inherit mismatched families — screening kits and bands are approximate.",
+      action:"Confirm the family (one click) — it becomes first-class, inherits both bands, and an eval is generated." },
+    // fixes (changes)
+    { id:"x-taint", type:"fix", name:"taint v2", status:"shipped", when:"Nov 03", supersedes:"never_notify workflow", evals:"6 red-team evals",
+      cause:"Breach showed the freeze landed one tool call late.",
+      effect:"Notification-shaped calls pre-confirm for unverified agents.",
+      action:"Shipped. One agent awaits re-verification." },
+    { id:"x-aieng", type:"fix", name:"AI Engineer declared", status:"shipped", when:"Oct 29", supersedes:"direction_gate v1 → v2", evals:"direction-via-bridge",
+      cause:"Overturn exposed the missing role node.",
+      effect:"Zero mis-holds since.",
+      action:"Shipped." },
+    { id:"x-flow", type:"fix", name:"pre-approved notify flow", status:"proposed", when:"Nov 04", supersedes:"never_notify workflow exception", evals:"—",
+      cause:"Distribution blocked 3/3 — the capability is needed but must stay person-shaped.",
+      effect:"If approved: templates pre-cleared by HR head, agent fills candidates, person sends. If declined: drop the tool from the manifest.",
+      action:"Platform decision — pick one; both close the loop." },
+    // breach
+    { id:"b-mail", type:"breach", name:"e-mail hijack", when:"Nov 01", consequence:"caught at registry · run frozen · no candidate contacted",
+      cause:"Hijack-shaped input; agent reached for an outward action.",
+      effect:"Became taint v2 + 6 evals — the tightening already measured: zero recurrence in 6 red-team runs.",
+      action:"Closed. The eval suite carries it forward." },
+  ];
+  const edges = [
+    { s:"ag-copilot", t:"ag-intake",   k:"handoff", label:"×186" },
+    { s:"ag-copilot", t:"ag-offer",    k:"handoff", label:"×52" },
+    { s:"ag-copilot", t:"ag-followup", k:"handoff", label:"×74" },
+    { s:"ag-intake",  t:"n-direction", k:"gated" },
+    { s:"ag-offer",   t:"n-twoperson", k:"gated" },
+    { s:"ag-offer",   t:"n-band",      k:"gated", label:"×18, 3 ovrt" },
+    { s:"ag-distribution", t:"n-notify", k:"gated", label:"blocked ×3" },
+    { s:"ag-followup",t:"n-runlim",    k:"gated", label:"clipped ×36" },
+    { s:"ag-panel2",  t:"n-panelrev",  k:"gated", label:"holds ×6 ↑" },
+    { s:"ag-sourcing",t:"f-mlops",     k:"proposes" },
+    { s:"ag-sourcing",t:"f-backend",   k:"proposes", label:"skill edge ×3" },
+    { s:"b-mail",     t:"n-notify",    k:"violated" },
+    { s:"x-taint",    t:"n-notify",    k:"supersedes" },
+    { s:"x-aieng",    t:"n-direction", k:"supersedes" },
+    { s:"x-aieng",    t:"f-aieng",     k:"added" },
+    { s:"x-flow",     t:"n-notify",    k:"proposes", proposed:true },
+  ];
+  return {
+    key: "agentb",
+    nodes, edges,
+    title: "Agent behavior — candidates folded into edge counts; the fleet and its governance as one shape",
+    snapshot: "Q4 · ~31k decisions folded into 16 edges · 20 agents · 6 norms · 2 vocabulary proposals open",
+    typeStyles: {
+      agent:  { color: "var(--series-role)",        r: 14, label: "Agent" },
+      norm:   { color: "var(--series-cand)",        r: 13, label: "Norm" },
+      family: { color: "var(--series-skill)",       r: 12, label: "Role family" },
+      fix:    { color: "var(--status-good)",        r: 11, label: "Change", icon: "✓ " },
+      breach: { color: "var(--status-critical)",    r: 10, label: "Breach", icon: "⚠ " },
+    },
+    edgeStyles: {
+      handoff:   { stroke: "var(--baseline)", width: 1.3, dash: "2 3", opacity: 0.9 },
+      gated:     { stroke: "var(--baseline)", width: 1.8, dash: "" },
+      violated:  { stroke: "var(--status-critical)", width: 1.8, dash: "6 4" },
+      supersedes:{ stroke: "var(--baseline)", width: 1.6, dash: "" },
+      added:     { stroke: "var(--baseline)", width: 1.6, dash: "" },
+      proposes:  { stroke: "var(--status-warning)",  width: 1.8, dash: "3 3" },
+    },
+    edgeLabels: { handoff:"hands off to", gated:"gated by", violated:"violated", supersedes:"supersedes", added:"created", proposes:"proposes" },
+    legendExtra: [
+      `<span><span class="swatch" style="background:var(--text-muted); opacity:.45"></span>edge labels show folded candidate counts</span>`,
+      `<span><svg class="line-demo" width="22" height="8"><circle cx="11" cy="4" r="4" fill="none" stroke="var(--status-warning)" stroke-width="1.5" stroke-dasharray="2 2"/></svg>proposed (amber ring)</span>`,
+    ],
+    tiles: [
+      ["Agents", "20", "7 with traffic this quarter"],
+      ["Gate stops", "283", "folded from ~31k decisions"],
+      ["Overturn rate", "4.2%", "healthy < 5% · all 3 on band_ceiling"],
+      ["Vocabulary pending", "2", "1 family + 1 skill edge proposed"],
+    ],
+    tableTitle: "agent fleet — gate stops and overturns per agent (candidates folded)",
+    tableHead: ["Agent","Version","Decisions","Gate stops","Overturned","Autonomy"],
+    tableRow(n) {
+      if (n.type !== "agent") return null;
+      return [n.name, n.ver, n.decisions, n.stops, n.overturned, n.autonomy];
+    },
+    spring: { handoff: 150, gated: 175, violated: 185, supersedes: 150, added: 140, proposes: 195 },
+    inspect(n, ctx) {
+      const badges = [], dl = [], interp = [];
+      const add = (k, v) => dl.push([k, v]);
+      if (n.type === "agent") {
+        add("version", n.ver); add("decisions (Q)", n.decisions); add("gate stops", n.stops);
+        add("overturned", n.overturned);
+        const om = { autonomous:["good","✓","autonomous"], gated:["warning","!","gated"], suspended:["critical","×","suspended"], on:["good","✓","on"] };
+        badges.push(om[n.autonomy] || ["muted","·", n.autonomy]);
+      } else if (n.type === "norm") {
+        add("version", n.version);
+        add("what it restricts", n.what);
+        add("stops (Q)", n.stops);
+        add("overturned", n.overturned);
+      } else if (n.type === "family") {
+        add("demand", n.demand);
+        if (n.proposed) badges.push(["warning","⚠","proposed — awaiting confirmation"]);
+      } else if (n.type === "fix") {
+        badges.push(n.status === "shipped" ? ["good","✓","change shipped"] : ["warning","⚠","proposed — awaiting decision"]);
+        add("when", n.when); add("supersedes", n.supersedes); add("evals", n.evals);
+      } else {
+        badges.push(["critical","⚠","breach — closed"]);
+        add("when", n.when); add("consequence", n.consequence);
+      }
+      if (n.cause) interp.push(["cause", n.cause]);
+      if (n.effect) interp.push(["effect", n.effect]);
+      if (n.action) interp.push(["action", n.action]);
+      return { dl, badges, interp };
+    },
+    systemRead: [
+      { title:"⚠ Distribution: a capability that keeps knocking on a locked door", short:"distribution blocked 3/3 — decide the pattern",
+        cause:"3/3 outbound-notify attempts blocked by never_notify. The norm is correct; the workflow around it doesn't exist.",
+        effect:"~42 candidates stranded across 3 runs; the agent sits suspended; every retry costs a person.",
+        action:"Platform decision: approve the pre-approved-template flow, or drop record_notify from its manifest. Both close the loop — ambiguity is the only bad outcome." },
+      { title:"⚠ band_ceiling is the only norm producing overturns — and they cluster", short:"band_ceiling: the only overturn source",
+        cause:"3 overturns, one client, Data Platform + AI reqs. Not agent error — a stale norm.",
+        effect:"Offer agent's overturn rate is double the portfolio norm; days-to-offer rising in exactly the hottest families.",
+        action:"The +₹2L proposal or per-client band overlays — CBO decides Nov 15. Watch Data Platform after it lands." },
+      { title:"◈ Vocabulary projection: 4 reqs are asking for a role that doesn't exist", short:"MLOps family demanded by 4 reqs",
+        cause:"Sourcing found MLOps-shaped demand spanning AI/ML + DevOps — same signal that produced AI Engineer.",
+        effect:"Those reqs run on approximate families: screening kits and bands inherit wrong neighbors.",
+        action:"Confirm MLOps (one click) — it becomes first-class with an eval, and the 4 reqs re-classify automatically." },
+      { title:"✓ The fleet is mostly boring — protect that", short:"intake/copilot healthy — keep thresholds",
+        cause:"Intake: 214 holds at 1.4% overturn. Copilot: 312 handoffs, zero stops. two_person_rule: 41 stops, zero overturns.",
+        effect:"Verdict quality stable; the post-v2 direction_gate has produced no mis-holds.",
+        action:"No action — but keep the overturn-rate health rule at 5% so drift shows before clients feel it." },
+    ],
+  };
+})();
+
+/* ================= generic graph view (shared by all tabs) ================= */
+
+const stage = document.getElementById("stage");
+const tip = document.getElementById("tooltip");
+const insp = document.getElementById("inspector");
+const W = () => stage.clientWidth, H = 600;
+
+let DS = null;               // current dataset
+let nodes = [], links = [];
+let alpha = 1, rendered = false;
+let gEdges, gNodes, gLabels;
+let searchQ = "";
+
+const REPULSION = 3400, FRICTION = 0.86, CENTER = 0.012;
+function tick() {
+  for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
+    const a = nodes[i], b = nodes[j];
+    let dx = b.x - a.x, dy = b.y - a.y, d2 = dx * dx + dy * dy || 1;
+    if (d2 > 300 * 300) continue;
+    const f = REPULSION / d2, d = Math.sqrt(d2);
+    a.vx -= (dx / d) * f; a.vy -= (dy / d) * f;
+    b.vx += (dx / d) * f; b.vy += (dy / d) * f;
+    // label-width collision: keep nodes far enough apart for their text
+    const minD = Math.min(46 + Math.max(a.name.length, b.name.length) * 3.1, 130);
+    if (d < minD) {
+      const push = (minD - d) * 0.09;
+      a.vx -= (dx / d) * push; a.vy -= (dy / d) * push;
+      b.vx += (dx / d) * push; b.vy += (dy / d) * push;
+    }
+  }
+  for (const l of links) {
+    if (l.hidden) continue;
+    const dx = l.b.x - l.a.x, dy = l.b.y - l.a.y, d = Math.hypot(dx, dy) || 1;
+    const f = (d - (DS.spring[l.k] || 110)) * 0.012;
+    l.a.vx += (dx / d) * f; l.a.vy += (dy / d) * f;
+    l.b.vx -= (dx / d) * f; l.b.vy -= (dy / d) * f;
+  }
+  for (const n of nodes) {
+    if (n.fixed) { n.vx = 0; n.vy = 0; continue; }
+    n.vx += ((stage.clientWidth || 860) / 2 - n.x) * CENTER;
+    n.vy += (H / 2 - n.y) * CENTER;
+    n.vx *= FRICTION; n.vy *= FRICTION;
+    n.x += n.vx; n.y += n.vy;
+    n.x = Math.max(50, Math.min((stage.clientWidth || 860) - 50, n.x));
+    n.y = Math.max(30, Math.min(H - 30, n.y));
+  }
+}
+function draw() {
+  for (const l of links) {
+    if (l.hidden) { l.line.setAttribute("visibility", "hidden"); if (l.tag) l.tag.setAttribute("visibility", "hidden"); continue; }
+    l.line.setAttribute("visibility", "visible");
+    l.line.setAttribute("x1", l.a.x); l.line.setAttribute("y1", l.a.y);
+    l.line.setAttribute("x2", l.b.x); l.line.setAttribute("y2", l.b.y);
+    if (l.tag) {
+      l.tag.setAttribute("visibility", "visible");
+      const mx = (l.a.x + l.b.x) / 2, my = (l.a.y + l.b.y) / 2;
+      const dx = l.b.x - l.a.x, dy = l.b.y - l.a.y, d = Math.hypot(dx, dy) || 1;
+      l.tag.setAttribute("x", mx - (dy / d) * l.tagOffset);
+      l.tag.setAttribute("y", my + (dx / d) * l.tagOffset + 3);
+    }
+  }
+  for (const n of nodes) {
+    n.group.setAttribute("transform", `translate(${n.x},${n.y})`);
+    n.label.setAttribute("x", n.x);
+    n.label.setAttribute("y", n.y + nodeRadius(n) + 13);
+  }
+}
+function loop() {
+  if (rendered && alpha > 0.005) { for (let i = 0; i < 4; i++) tick(); alpha *= 0.994; }
+  if (rendered) draw();
+  requestAnimationFrame(loop);
+}
+
+function nodeRadius(n) {
+  const base = DS.typeStyles[n.type].r;
+  if (DS.key === "vocab" && n.type === "skill") return Math.min(14, 6 + Math.sqrt(n.ev || 4) * 1.3);
+  return base;
+}
+
+function syncEdge(l) { l.hidden = l.userHidden || l.searchHidden; }
+
+function mountView(ds) {
+  DS = ds; rendered = false;
+  stage.replaceChildren();
+  gEdges = el("g", {}); gNodes = el("g", {}); gLabels = el("g", {});
+  stage.append(gEdges, gNodes, gLabels);
+  stage.setAttribute("viewBox", `0 0 ${stage.clientWidth || 860} ${H}`);
+
+  nodes = ds.nodes.map(n => ({ ...n, x: 0, y: 0, vx: 0, vy: 0 }));
+  const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+  links = ds.edges.map(e => ({ ...e, a: byId[e.s], b: byId[e.t] }));
+  nodes.forEach((n, i) => {
+    const ang = (i / nodes.length) * Math.PI * 2;
+    const rad = ds.key === "vocab" ? (n.type === "role" ? 90 : n.type === "candidate" ? 160 : 260)
+                                   : ds.key === "agentb" ? (n.type === "agent" ? 100 : n.type === "norm" || n.type === "family" ? 180 : 250)
+                                   : (n.type === "decision" ? 130 : n.type === "norm" ? 170 : 230);
+    n.x = (stage.clientWidth || 860) / 2 + Math.cos(ang) * rad;
+    n.y = H / 2 + Math.sin(ang) * rad * 0.9;
+  });
+
+  // edges
+  let tagCount = 0;
+  for (const l of links) {
+    const st = ds.edgeStyles[l.k];
+    l.line = el("line", { stroke: l.proposed ? "var(--status-warning)" : st.stroke,
+      "stroke-width": st.width, opacity: l.proposed ? 1 : (st.opacity || 1) });
+    if (l.proposed) l.line.setAttribute("stroke-dasharray", "3 3");
+    else if (st.dash) l.line.setAttribute("stroke-dasharray", st.dash);
+    gEdges.appendChild(l.line);
+    const wantTag = l.label || (["violated", "overturned", "proposes"].includes(l.k) && !l.label ? true : l.k === "proposed");
+    if (wantTag) {
+      const st2 = l.proposed ? { stroke: "var(--status-warning)" } : st;
+      l.tag = el("text", { "font-size": 10, fill: st2.stroke, "text-anchor": "middle",
+        "paint-order": "stroke", stroke: "var(--surface-1)", "stroke-width": 3, "font-weight": 600 });
+      const txt = l.k === "violated" || l.k === "overturned" ? `⚠ ${ds.edgeLabels[l.k]}` : (l.label || ds.edgeLabels[l.k]);
+      l.tag.textContent = txt;
+      l.tagOffset = [30, -30, 48, -48, 64][tagCount++ % 5];
+      gEdges.appendChild(l.tag);
+    }
+  }
+
+  // nodes
+  for (const n of nodes) {
+    n.group = el("g", { tabindex: 0, role: "button", "aria-label": `${n.name}, ${ds.typeStyles[n.type].label}` });
+    const r = nodeRadius(n);
+    n.circle = el("circle", {
+      r, fill: ds.typeStyles[n.type].color,
+      stroke: n.proposed ? "var(--status-warning)" : "var(--surface-1)",
+      "stroke-width": n.proposed ? 2.5 : 2,
+      "stroke-dasharray": n.proposed ? "3 2" : "",
+      opacity: n.dormant ? 0.4 : 1, cursor: "grab",
+    });
+    n.group.appendChild(n.circle);
+    gNodes.appendChild(n.group);
+    n.label = el("text", { "font-size": 11, fill: "var(--text-primary)", "text-anchor": "middle",
+      "paint-order": "stroke", stroke: "var(--surface-1)", "stroke-width": 3 });
+    n.label.textContent = (ds.typeStyles[n.type].icon || "") + n.name;
+    gLabels.appendChild(n.label);
+
+    let drag = null;
+    n.group.addEventListener("pointerdown", ev => {
+      drag = { id: ev.pointerId };
+      n.fixed = true; alpha = 1; n.circle.setAttribute("cursor", "grabbing");
+      n.group.setPointerCapture(ev.pointerId);
+    });
+    n.group.addEventListener("pointermove", ev => {
+      if (!drag) return;
+      const rect = stage.getBoundingClientRect();
+      n.x = (ev.clientX - rect.left) * (stage.clientWidth / rect.width);
+      n.y = (ev.clientY - rect.top) * (H / rect.height);
+      alpha = 1;
+    });
+    n.group.addEventListener("pointerup", () => { if (drag) { n.fixed = false; drag = null; n.circle.setAttribute("cursor", "grab"); } });
+    n.group.addEventListener("click", () => inspect(n));
+    n.group.addEventListener("focus", () => inspect(n));
+    n.group.addEventListener("pointerenter", ev => showTip(ev, n));
+    n.group.addEventListener("pointermove", ev => { if (!drag) moveTip(ev); });
+    n.group.addEventListener("pointerleave", hideTip);
+  }
+
+  buildChrome(ds);
+  showDefaultInspector();
+  for (let i = 0; i < 900; i++) tick();
+  alpha = 0.2; rendered = true;
+  draw();
+}
+
+/* ---------- chrome: tiles, filters, legend, card title, table ---------- */
+const filtersEl = document.getElementById("filters");
+const searchInput = document.createElement("input");
+searchInput.type = "text"; searchInput.placeholder = "Search nodes…";
+searchInput.style.cssText = "margin-left:auto";
+searchInput.addEventListener("input", applySearch);
+
+function buildChrome(ds) {
+  document.getElementById("snapshot").textContent = ds.snapshot;
+  document.getElementById("cardtitle").textContent = ds.title;
+  document.getElementById("tiles").innerHTML = ds.tiles.map(([k, v, s]) =>
+    `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`).join("");
+
+  // filters
+  filtersEl.replaceChildren();
+  for (const [type, st] of Object.entries(ds.typeStyles)) {
+    const lab = document.createElement("label");
+    const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = true; cb.dataset.type = type;
+    cb.addEventListener("change", () => {
+      for (const n of nodes) if (n.type === type) {
+        n.userHidden = !cb.checked;
+        n.group.style.display = cb.checked ? "" : "none";
+        n.label.style.display = cb.checked ? "" : "none";
+      }
+      for (const l of links) {
+        if (l.a.type === type || l.b.type === type) { l.userHidden = !cb.checked; syncEdge(l); }
+      }
+    });
+    const sw = document.createElement("span"); sw.className = "swatch"; sw.style.background = st.color;
+    lab.append(cb, sw, document.createTextNode(" " + st.label + "s"));
+    filtersEl.appendChild(lab);
+  }
+  const edgeKeys = Object.keys(ds.edgeStyles);
+  if (edgeKeys.length <= 7) {
+    const sep = document.createElement("span"); sep.style.color = "var(--text-muted)"; sep.textContent = "edges:";
+    filtersEl.appendChild(sep);
+    for (const k of edgeKeys) {
+      const lab = document.createElement("label");
+      const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = true; cb.dataset.edge = k;
+      cb.addEventListener("change", () => { for (const l of links) if (l.k === k) { l.userHidden = !cb.checked; syncEdge(l); } });
+      lab.append(cb, document.createTextNode(" " + (ds.edgeLabels[k] || k)));
+      filtersEl.appendChild(lab);
+    }
+  }
+  filtersEl.appendChild(searchInput);
+  searchInput.value = searchQ;
+  filtersEl.appendChild(viewBtn);
+  filtersEl.appendChild(themeBtn);
+
+  // legend
+  const legend = document.getElementById("legend");
+  legend.replaceChildren();
+  const parts = [];
+  for (const [t, st] of Object.entries(ds.typeStyles)) {
+    parts.push(`<span><span class="swatch" style="background:${st.color}"></span>${st.label}${t === "skill" ? " (size = evidence)" : ""}</span>`);
+  }
+  for (const [k, st] of Object.entries(ds.edgeStyles)) {
+    parts.push(`<span><svg class="line-demo" width="22" height="8"><line x1="0" y1="4" x2="22" y2="4" stroke="${st.stroke}" stroke-width="${Math.max(1.2, st.width)}" ${st.dash ? `stroke-dasharray="${st.dash}"` : ""}/></svg>${ds.edgeLabels[k] || k}</span>`);
+  }
+  parts.push(...ds.legendExtra);
+  // dedupe legend entries (critical dashed appears in both edgeStyles and extra)
+  legend.innerHTML = parts.join("");
+
+  // table
+  const tb = document.getElementById("tablecontent");
+  tb.replaceChildren();
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  thead.innerHTML = `<tr>${ds.tableHead.map(h => `<th>${h}</th>`).join("")}</tr>`;
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  for (const n of nodes) {
+    const row = ds.tableRow(n);
+    if (!row) continue;
+    const tr = document.createElement("tr");
+    row.forEach((c, i) => { const td = document.createElement("td"); td.textContent = c; if (i > 0) td.className = "dim"; tr.appendChild(td); });
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody); tb.appendChild(table);
+  document.getElementById("tabletitle").textContent = ds.tableTitle ||
+    (ds.key === "vocab" ? "skill_nodes — same data, reachable without hover" : "decision log — every row is a node in the graph above");
+}
+
+function applySearch() {
+  searchQ = searchInput.value.trim().toLowerCase();
+  for (const n of nodes) {
+    n.searchHidden = searchQ && !n.name.toLowerCase().includes(searchQ) && !(n.aliases || "").toLowerCase().includes(searchQ) && !(n.actor || "").toLowerCase().includes(searchQ) && !n.cat?.toLowerCase().includes(searchQ);
+    n.group.style.opacity = n.searchHidden ? 0.12 : 1;
+    n.label.style.opacity = n.searchHidden ? 0.12 : 1;
+  }
+  for (const l of links) { l.searchHidden = l.a.searchHidden || l.b.searchHidden; syncEdge(l); }
+}
+
+/* ---------- tooltip ---------- */
+function showTip(ev, n) {
+  tip.replaceChildren();
+  const t1 = document.createElement("div"); t1.className = "t1";
+  t1.textContent = (DS.typeStyles[n.type].icon || "") + n.name;
+  const t2 = document.createElement("div"); t2.className = "t2";
+  t2.textContent =
+    DS.key === "vocab"
+      ? (n.type === "skill" ? `skill · ${n.cat} · evidence ${n.ev}`
+        : n.type === "role" ? "role family" : `${n.exp} yrs · ${n.direction}`)
+      : DS.key === "agentb"
+      ? (n.type === "agent" ? `${n.ver} · ${n.decisions} decisions · ${n.autonomy}`
+        : n.type === "norm" ? `${n.version} · ${n.stops} stops · ${n.overturned} overturned`
+        : n.type === "family" ? n.demand
+        : n.type === "fix" ? `${n.status} · ${n.when}`
+        : n.when)
+      : (n.type === "decision" ? `${n.actor} · ${n.when}`
+        : n.type === "norm" ? `norm ${n.version} · ${n.what}`
+        : n.type === "violation" ? n.when
+        : n.type === "change" ? `${n.status} · ${n.when}`
+        : n.kind);
+  tip.append(t1, t2);
+  tip.style.display = "block"; moveTip(ev);
+  n.circle.setAttribute("stroke", "var(--text-secondary)");
+}
+function moveTip(ev) { tip.style.left = (ev.clientX + 14) + "px"; tip.style.top = (ev.clientY + 12) + "px"; }
+function hideTip(ev) {
+  tip.style.display = "none";
+  const c = ev.currentTarget.querySelector("circle");
+  const n = nodes.find(x => x.circle === c);
+  if (n) { c.setAttribute("stroke", n.proposed ? "var(--status-warning)" : "var(--surface-1)"); c.setAttribute("stroke-width", n.proposed ? 2.5 : 2); }
+}
+
+/* ---------- inspector ---------- */
+function badgeEl(cls, icon, text) { const b = document.createElement("span"); b.className = "badge " + cls; b.dataset.icon = icon; b.textContent = text; return b; }
+function interpEl(kind, text) {
+  const d = document.createElement("div");
+  d.className = "interp " + kind;
+  const lab = document.createElement("div"); lab.className = "ilabel"; lab.dataset.icon = kind === "cause" ? "◈" : kind === "effect" ? "⚠" : "→";
+  lab.appendChild(document.createTextNode(kind === "cause" ? "cause" : kind === "effect" ? "effect" : "next best action"));
+  const p = document.createElement("p"); p.textContent = text;
+  d.append(lab, p);
+  return d;
+}
+function renderFinding(s) {
+  insp.replaceChildren();
+  const back = document.createElement("span"); back.className = "backlink"; back.textContent = "← all findings";
+  back.addEventListener("click", showDefaultInspector);
+  const kind = document.createElement("span"); kind.className = "kind"; kind.textContent = "system read";
+  const h = document.createElement("h2"); h.textContent = s.title.replace(/^[⚠✓◈]\s*/, "");
+  insp.append(back, kind, h);
+  insp.appendChild(interpEl("cause", s.cause));
+  insp.appendChild(interpEl("effect", s.effect));
+  insp.appendChild(interpEl("action", s.action));
+}
+function showDefaultInspector() {
+  insp.replaceChildren();
+  if (DS.systemRead) {
+    const kind = document.createElement("span"); kind.className = "kind"; kind.textContent = "system read";
+    const h = document.createElement("h2"); h.textContent = "What needs you today";
+    insp.append(kind, h);
+    for (const s of DS.systemRead) {
+      const chip = document.createElement("div"); chip.className = "chipmini"; chip.tabIndex = 0;
+      const b = document.createElement("span");
+      const cls = s.title.startsWith("⚠") ? ["critical", "high", "⚠"] : s.title.startsWith("◈") ? ["warning", "plan", "◈"] : ["good", "ok", "✓"];
+      b.className = "badge " + cls[0]; b.dataset.icon = cls[2]; b.textContent = cls[1];
+      const t = document.createElement("span"); t.className = "ct"; t.textContent = s.short;
+      chip.append(b, t);
+      const open = () => renderFinding(s);
+      chip.addEventListener("click", open);
+      chip.addEventListener("keydown", ev => { if (ev.key === "Enter") open(); });
+      insp.appendChild(chip);
+    }
+    const hint = document.createElement("p"); hint.className = "hint";
+    hint.textContent = "One line per open chain — click for its cause → effect → action. Click any graph node for the node-level view.";
+    insp.appendChild(hint);
+  } else {
+    const kind = document.createElement("span"); kind.className = "kind"; kind.textContent = "inspector";
+    const h = document.createElement("h2"); h.textContent = "Nothing selected";
+    const hint = document.createElement("p"); hint.className = "hint";
+    hint.textContent = "Click any node to see what the agents see: canonical entity, aliases, evidence counts, typed edges — and for anything that needs judgment, the cause, what it affects, and the next best action. This panel is the deterministic query layer — read-only, org-scoped, no model in the path.";
+    insp.append(kind, h, hint);
+  }
+}
+function linksOf(n, kind) {
+  return links.filter(l => l.k === kind && (l.a === n || l.b === n))
+    .map(l => ({ edge: l, other: l.a === n ? l.b : l.a }));
+}
+function inspect(n) {
+  const res = DS.inspect(n, { linksOf, linkOf: (n2, k) => linksOf(n2, k)[0] });
+  insp.replaceChildren();
+  const kind = document.createElement("span"); kind.className = "kind";
+  kind.textContent = DS.typeStyles[n.type].label;
+  const h = document.createElement("h2"); h.textContent = n.name;
+  insp.append(kind, h);
+  for (const [cls, icon, text] of res.badges || []) insp.appendChild(badgeEl(cls, icon, text));
+  const dl = document.createElement("dl");
+  for (const [k, v] of res.dl) {
+    const dt = document.createElement("dt"); dt.textContent = k;
+    const dd = document.createElement("dd"); dd.textContent = v;
+    dl.append(dt, dd);
+  }
+  insp.appendChild(dl);
+  // cause / effect / next best action
+  for (const [kind, text] of res.interp || []) insp.appendChild(interpEl(kind, text));
+  const rel = links.filter(l => l.a === n || l.b === n);
+  if (rel.length) {
+    const t = document.createElement("div"); t.className = "kind"; t.style.marginTop = "10px"; t.textContent = "edges";
+    const ul = document.createElement("ul");
+    for (const l of rel.slice(0, 10)) {
+      const other = l.a === n ? l.b : l.a;
+      const li = document.createElement("li");
+      li.textContent = `${DS.edgeLabels[l.k] || l.k} ${other.name}${l.label ? ` — ${l.label}` : ""}${l.note && (l.k === "violated" || l.k === "overturned") ? ` — ${l.note}` : ""}`;
+      ul.appendChild(li);
+    }
+    insp.append(t, ul);
+  }
+}
+
+/* ---------- tabs, table toggle, theme ---------- */
+const tableview = document.getElementById("tableview");
+const mainGrid = document.querySelector(".main");
+const viewBtn = document.createElement("button");
+viewBtn.textContent = "Table view"; viewBtn.setAttribute("aria-pressed", "false");
+viewBtn.addEventListener("click", () => {
+  const on = tableview.style.display === "block";
+  tableview.style.display = on ? "none" : "block";
+  mainGrid.style.display = on ? "" : "none";
+  viewBtn.setAttribute("aria-pressed", String(!on));
+  viewBtn.textContent = on ? "Table view" : "Graph view";
+});
+
+function selectTab(which) {
+  document.getElementById("tab-vocab").setAttribute("aria-selected", String(which === "vocab"));
+  document.getElementById("tab-gov").setAttribute("aria-selected", String(which === "gov"));
+  document.getElementById("tab-agentb").setAttribute("aria-selected", String(which === "agentb"));
+  mountView(which === "vocab" ? VOCAB : which === "gov" ? GOV : AGENTB);
+}
+document.getElementById("tab-vocab").addEventListener("click", () => selectTab("vocab"));
+document.getElementById("tab-gov").addEventListener("click", () => selectTab("gov"));
+document.getElementById("tab-agentb").addEventListener("click", () => selectTab("agentb"));
+
+const themeBtn = document.createElement("button");
+themeBtn.textContent = "Dark";
+themeBtn.addEventListener("click", () => {
+  const root = document.documentElement;
+  const dark = root.dataset.theme === "dark";
+  root.dataset.theme = dark ? "light" : "dark";
+  themeBtn.textContent = dark ? "Dark" : "Light";
+});
+
+mountView(VOCAB);
+loop();
+</script>
+</body>
+</html>

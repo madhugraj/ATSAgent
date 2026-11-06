@@ -1,5 +1,10 @@
 # Roadmap
 
+## Agent intelligence (2026-11-06)
+
+- [x] `/agents/intelligence` (governance roles): the knowledge-graph view of the hiring fleet, computed live from this organisation's telemetry — three views, each with descriptive and prescriptive layers: agent behavior (agents × person gates × failure clusters, candidates folded into edge counts, per-agent action plan), governance (every person decision chained to the norm it acted under, overturn chains, autonomy check over `stage_events` actor attribution), and vocabulary (skills/role families seeded in-memory by the production `buildOntology()` + `deriveInsights()` — prescriptive sourcing/coverage insights, nothing persisted until Phase 1)
+- [x] System read: threshold-gated prescriptive chips per view (overturn clusters, open cards, definition churn vs eval coverage, alias-fold report card, idle/trace-gap coverage) with cause → effect → next best action; auto-refresh 60s; deterministic — no model calls, vendor- and model-neutral
+
 ## Prompt-injection guardrails — P0 (2026-11-01)
 
 - [x] `docs/guardrails.md`: every security control by layer, the v2.0 threat landscape mapped attack by attack, open items, how it is verified

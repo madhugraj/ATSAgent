@@ -405,10 +405,25 @@ export type ScoringWeights = {
 };
 
 /** Weights are whole percentages that add up to 100 (pure; unit-tested). */
-export function weightsProblem(w: ScoringWeights): string | null {
-  const vals = Object.values(w);
+export function weightsProblem(
+  w: ScoringWeights,
+  custom: { key: string; label: string; hint: string; weight: number }[] = [],
+): string | null {
+  const vals = [...Object.values(w), ...custom.map((d) => d.weight)];
   if (vals.some((v) => !Number.isInteger(v) || v < 0 || v > 100))
     return "Each weight is a whole percentage between 0 and 100.";
+  if (custom.length > 4) return "At most 4 custom dimensions.";
+  const keys = new Set<string>();
+  for (const d of custom) {
+    if (!/^[a-z0-9_]{1,40}$/.test(d.key))
+      return `Custom dimension key "${d.key}" must be lowercase letters, digits and underscores.`;
+    if (keys.has(d.key)) return `Custom dimension key "${d.key}" is duplicated.`;
+    keys.add(d.key);
+    if (!d.label.trim() || d.label.length > 60)
+      return "Each custom dimension needs a label (up to 60 characters).";
+    if (d.hint.trim().length < 10 || d.hint.length > 300)
+      return `Custom dimension "${d.label}" needs a scoring hint of 10–300 characters — it is the instruction the scorer reads.`;
+  }
   const total = vals.reduce((a, b) => a + b, 0);
   return total === 100 ? null : `The weights add up to ${total}%; they must total 100%.`;
 }
@@ -424,8 +439,9 @@ export async function saveRequisitionWeightsCore(
   actor: LifecycleActor,
   id: string,
   w: ScoringWeights,
+  custom: { key: string; label: string; hint: string; weight: number }[] = [],
 ): Promise<{ status: ReqStatus; changed: boolean }> {
-  const problem = weightsProblem(w);
+  const problem = weightsProblem(w, custom);
   if (problem) throw new Error(problem);
   const [req] = await db
     .select({
@@ -438,6 +454,7 @@ export async function saveRequisitionWeightsCore(
       impact: requisitions.weightImpact,
       education: requisitions.weightEducation,
       social: requisitions.weightSocial,
+      customWeights: requisitions.customWeights,
     })
     .from(requisitions)
     .where(and(eq(requisitions.id, id), eq(requisitions.orgId, actor.orgId)))
@@ -472,8 +489,18 @@ export async function saveRequisitionWeightsCore(
     impact: req.impact,
     education: req.education,
     social: req.social,
+    custom: req.customWeights ?? [],
   };
-  const changed = (Object.keys(w) as (keyof ScoringWeights)[]).some((k) => before[k] !== w[k]);
+  const after = {
+    skills: w.skills,
+    experience: w.experience,
+    career: w.career,
+    impact: w.impact,
+    education: w.education,
+    social: w.social,
+    custom,
+  };
+  const changed = JSON.stringify(before) !== JSON.stringify(after);
   if (!changed) return { status, changed: false };
   await db
     .update(requisitions)
@@ -484,6 +511,7 @@ export async function saveRequisitionWeightsCore(
       weightImpact: w.impact,
       weightEducation: w.education,
       weightSocial: w.social,
+      customWeights: custom,
     })
     .where(and(eq(requisitions.id, id), eq(requisitions.orgId, actor.orgId)));
   const { writeAudit } = await import("../server/audit");
@@ -494,7 +522,7 @@ export async function saveRequisitionWeightsCore(
     action: "requisition.weights_changed",
     entityType: "requisition",
     entityId: id,
-    detail: { code: req.code, status, before, after: w, ...(actor.via ? { via: actor.via } : {}) },
+    detail: { code: req.code, status, before, after, ...(actor.via ? { via: actor.via } : {}) },
   });
   return { status, changed: true };
 }

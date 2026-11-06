@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent telemetry — real graphs (2026-11-06)</title>
+<style>
+  :root { color-scheme: light; }
+  .viz-root {
+    --page:#f9f9f7; --surface-1:#fcfcfb; --text-primary:#0b0b0b; --text-secondary:#52514e;
+    --text-muted:#898781; --grid:#e1e0d9; --baseline:#c3c2b7; --ring:rgba(11,11,11,0.10);
+    --series-role:#2a78d6; --series-skill:#1baf7a; --series-cand:#eb6834;
+    --status-good:#0ca30c; --status-warning:#fab219; --status-critical:#d03b3b; --good-text:#006300;
+  }
+  :root[data-theme="dark"] .viz-root {
+    --page:#0d0d0d; --surface-1:#1a1a19; --text-primary:#f0efec; --text-secondary:#c3c2b7;
+    --grid:#2c2c2a; --baseline:#383835; --ring:rgba(255,255,255,0.10);
+    --series-role:#3987e5; --series-skill:#199e70; --series-cand:#d95926; --good-text:#0ca30c;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--page); font-family:system-ui,-apple-system,"Segoe UI",sans-serif; }
+  :root[data-theme="dark"] body { background:#0d0d0d; }
+  .viz-root { color:var(--text-primary); min-height:100vh; padding:24px; }
+  .wrap { max-width:1200px; margin:0 auto; }
+  header.bar { display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; }
+  h1 { font-size:18px; margin:0; font-weight:650; }
+  .org { color:var(--text-secondary); font-size:13px; }
+  .snapshot { color:var(--text-muted); font-size:12px; margin-left:auto; }
+  .tabs { display:inline-flex; border:1px solid var(--grid); border-radius:8px; overflow:hidden; margin:12px 0 0; }
+  .tabs button { border:0; background:var(--surface-1); color:var(--text-secondary); font-size:13px; padding:7px 16px; cursor:pointer; }
+  .tabs button[aria-selected="true"] { background:color-mix(in srgb,var(--series-role) 12%,var(--surface-1)); color:var(--text-primary); font-weight:650; }
+  .tiles { display:flex; gap:10px; margin:14px 0; flex-wrap:wrap; }
+  .tile { background:var(--surface-1); border:1px solid var(--ring); border-radius:8px; padding:8px 14px; min-width:110px; }
+  .tile .k { font-size:11px; color:var(--text-muted); }
+  .tile .v { font-size:20px; font-weight:650; margin-top:2px; }
+  .tile .s { font-size:11px; color:var(--text-secondary); }
+  .filters { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:6px 0 12px; font-size:12px; min-height:28px; }
+  .filters label { display:inline-flex; gap:5px; align-items:center; color:var(--text-secondary); cursor:pointer; }
+  .filters input[type=checkbox] { accent-color:var(--series-role); }
+  .filters .swatch { width:10px; height:10px; border-radius:50%; display:inline-block; }
+  .filters input[type=text] { background:var(--surface-1); border:1px solid var(--grid); border-radius:6px; color:var(--text-primary); padding:5px 9px; font-size:12px; width:180px; }
+  .filters button { background:var(--surface-1); border:1px solid var(--grid); border-radius:6px; color:var(--text-secondary); font-size:12px; padding:5px 10px; cursor:pointer; }
+  .main { display:grid; grid-template-columns:1fr 320px; gap:14px; align-items:start; }
+  @media (max-width:900px) { .main { grid-template-columns:1fr; } }
+  .card { background:var(--surface-1); border:1px solid var(--ring); border-radius:10px; overflow:hidden; }
+  .cardhead { padding:10px 14px; font-size:12px; color:var(--text-muted); border-bottom:1px solid var(--grid); display:flex; justify-content:space-between; gap:10px; }
+  #stage { width:100%; height:600px; display:block; }
+  #stage text { font-family:system-ui,-apple-system,"Segoe UI",sans-serif; }
+  .legend { display:flex; gap:16px; flex-wrap:wrap; padding:10px 14px; border-top:1px solid var(--grid); font-size:11.5px; color:var(--text-secondary); }
+  .legend .swatch { width:10px; height:10px; border-radius:50%; display:inline-block; margin-right:5px; vertical-align:-1px; }
+  .legend .line-demo { display:inline-block; width:22px; vertical-align:2px; margin-right:5px; }
+  .inspector { background:var(--surface-1); border:1px solid var(--ring); border-radius:10px; padding:14px; font-size:12.5px; min-height:300px; max-height:652px; overflow-y:auto; }
+  .inspector h2 { font-size:14px; margin:0 0 2px; }
+  .inspector .kind { color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:0.06em; }
+  .inspector dl { display:grid; grid-template-columns:auto 1fr; gap:4px 12px; margin:12px 0; }
+  .inspector dt { color:var(--text-muted); }
+  .inspector dd { margin:0; }
+  .inspector .hint { color:var(--text-muted); line-height:1.5; }
+  .inspector ul { margin:8px 0; padding-left:18px; color:var(--text-secondary); }
+  .badge { display:inline-flex; gap:5px; align-items:center; border-radius:5px; padding:2px 8px; font-size:11.5px; font-weight:600; margin:2px 4px 2px 0; }
+  .badge::before { content:attr(data-icon); }
+  .badge.good { color:var(--status-good); background:color-mix(in srgb,var(--status-good) 12%,transparent); }
+  .badge.warning { color:var(--status-warning); background:color-mix(in srgb,var(--status-warning) 14%,transparent); }
+  .badge.critical { color:var(--status-critical); background:color-mix(in srgb,var(--status-critical) 10%,transparent); }
+  .badge.muted { color:var(--text-secondary); background:color-mix(in srgb,var(--text-secondary) 10%,transparent); }
+  .interp { border-left:3px solid var(--grid); padding:7px 10px; margin:8px 0; border-radius:4px; background:color-mix(in srgb,var(--text-secondary) 5%,transparent); }
+  .interp .ilabel { font-weight:650; font-size:10.5px; letter-spacing:0.05em; text-transform:uppercase; color:var(--text-muted); display:flex; align-items:center; gap:6px; margin-bottom:2px; }
+  .interp .ilabel::before { content:attr(data-icon); font-size:12px; }
+  .interp.cause { border-left-color:var(--series-role); }
+  .interp.effect { border-left-color:var(--status-warning); }
+  .interp.action { border-left-color:var(--status-good); }
+  .interp.action .ilabel { color:var(--good-text); }
+  .interp.effect .ilabel { color:var(--status-warning); }
+  .interp p { margin:0; line-height:1.45; }
+  .chips { display:grid; grid-template-columns:repeat(auto-fill,minmax(270px,1fr)); gap:8px; padding:10px 14px; }
+  .chip { border:1px solid var(--grid); border-radius:7px; padding:7px 9px; cursor:pointer; }
+  .chip:hover { background:color-mix(in srgb,var(--text-secondary) 5%,transparent); }
+  .chip.sel { border-color:var(--series-role); background:color-mix(in srgb,var(--series-role) 7%,transparent); }
+  .chip .c1 { display:flex; gap:7px; align-items:center; min-width:0; }
+  .chip .ct { font-weight:650; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .chip .ca { color:var(--text-secondary); font-size:11.5px; margin-top:4px; line-height:1.35;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .insight { border:1px solid var(--grid); border-radius:7px; padding:8px 10px; margin:8px 0; }
+  .backlink { color:var(--text-secondary); font-size:11.5px; cursor:pointer; text-decoration:underline; margin-bottom:8px; display:inline-block; }
+  .cardtable { display:none; padding:0; }
+  .cardtable table { width:100%; border-collapse:collapse; font-size:12px; font-variant-numeric:tabular-nums; }
+  .cardtable th { text-align:left; color:var(--text-muted); font-weight:500; padding:8px 14px; border-bottom:1px solid var(--grid); font-size:11px; }
+  .cardtable td { padding:7px 14px; border-bottom:1px solid var(--grid); }
+  .cardtable td.dim { color:var(--text-secondary); }
+  #tooltip { position:fixed; pointer-events:none; background:var(--surface-1); border:1px solid var(--ring); border-radius:7px; padding:7px 10px; font-size:12px; display:none; z-index:5; box-shadow:0 4px 14px rgba(0,0,0,0.12); max-width:300px; }
+  #tooltip .t1 { font-weight:650; } #tooltip .t2 { color:var(--text-secondary); margin-top:2px; }
+</style>
+</head>
+<body>
+<div class="viz-root"><div class="wrap">
+  <header class="bar">
+    <h1>Agent telemetry</h1>
+    <span class="org">Real data · 2 orgs · generated 2026-11-06 10:28</span>
+    <span class="snapshot" id="snapshot"></span>
+  </header>
+  <div class="tabs" role="tablist">
+    <button id="tab-agentb" aria-selected="true">Agent behavior</button>
+    <button id="tab-gov" aria-selected="false">Governance</button>
+    <button id="tab-vocab" aria-selected="false">Vocabulary</button>
+  </div>
+  <div class="tiles" id="tiles"></div>
+  <div class="card" id="sysread" style="margin:0 0 12px">
+    <div class="cardhead"><span>System read — <b id="sysreadsummary"></b></span><span>threshold-gated rules over live SQL · click a chip for the full cause → effect → action</span></div>
+    <div class="chips" id="sysreadrows"></div>
+  </div>
+  <div class="filters" id="filters"></div>
+  <div class="main">
+    <div class="card">
+      <div class="cardhead"><span id="cardtitle"></span><span>drag · click to inspect</span></div>
+      <svg id="stage" role="img" aria-label="Real telemetry graph"></svg>
+      <div class="legend" id="legend"></div>
+    </div>
+    <aside class="inspector" id="inspector"></aside>
+  </div>
+  <div class="card cardtable" id="tableview">
+    <div class="cardhead"><span>rejected proposals — every overturn the fleet produced</span></div>
+    <div id="tablecontent"></div>
+  </div>
+  <div class="card cardtable" id="planview">
+    <div class="cardhead"><span>Action plan — all registered agents, priority-sorted</span></div>
+    <div id="plancontent"></div>
+  </div>
+</div></div>
+<div id="tooltip" role="status"></div>
+<script>
+"use strict";
+const DATA = {"generatedAt":"2026-11-06T10:28:27.645Z","orgs":2,"views":{"agentb":{"key":"agentb","label":"Agent behavior","title":"agent_runs · agent_steps · agent_tasks — the fleet and its governance from live data","snapshot":"every count is a live SQL aggregate — candidates folded into edge weights","tiles":[["Runs","173","2 orgs · 7 failed · 33 cancelled"],["Agent steps","1471","13/21 registered agents active"],["Person touchpoints","92","8 declined by a person"],["Skill graph","0 nodes","39 match scores await normalization"]],"nodes":[{"id":"ag-copilot","type":"agent","name":"copilot","ver":"1.2.5","runs":0,"steps":0,"avg":0,"awaiting":0,"idle":true,"cause":"Registered in the manifest (v1.2.5) with zero runs this period.","effect":"The capability exists but nobody invokes it — dead weight in governance, evals and cost accounting, or an unadopted feature.","action":"Decide: enable it (a tick, a copilot route, a client feature flag) or park it. An agent that never runs should not silently keep its manifest."},{"id":"ag-distribution","type":"agent","name":"distribution","ver":"1.1.3","runs":14,"steps":83,"awaiting":1,"cause":"6 person touchpoints (6 approvals, 0 gates, 0 clarifications); 1 declined.","effect":"Overturn rate 17% — inside the healthy band (< 10%).","action":"None — keep the 10% health threshold so drift surfaces on its own."},{"id":"ag-evaluation","type":"agent","name":"evaluation","ver":"1.2.4","runs":1,"steps":0,"awaiting":0,"cause":"1 person touchpoints (0 approvals, 1 gates, 0 clarifications); 0 declined.","effect":"Overturn rate 0% — inside the healthy band (< 10%).","action":"None — keep the 10% health threshold so drift surfaces on its own."},{"id":"ag-expert_interview","type":"agent","name":"expert_interview","ver":"1.0.0","runs":1,"steps":12,"awaiting":0,"cause":"3 person touchpoints (0 approvals, 1 gates, 2 clarifications); 0 declined.","effect":"Overturn rate 0% — inside the healthy band (< 10%).","action":"None — keep the 10% health threshold so drift surfaces on its own."},{"id":"ag-followup","type":"agent","name":"followup","ver":"1.5.0","runs":10,"steps":68,"awaiting":0,"cause":"10 runs · 68 steps, all autonomous (no person touchpoints).","effect":"2 tool errors — the failure cluster.","action":"None."},{"id":"ag-intake","type":"agent","name":"intake","ver":"1.5.0","runs":35,"steps":222,"awaiting":2,"cause":"Persons rejected 3 of 22 approval proposals (14%) — mostly \"Shortlist the top-scored applicants\".","effect":"The agent's judgment of \"who to advance\" is out of sync with the people reviewing it.","action":"Read the rejection reasons in the decisions inbox; either the scorer's threshold or the proposal wording needs to change — not the reviewer. Top failure: add_to_pipeline ×7."},{"id":"ag-interview","type":"agent","name":"interview","ver":"2.1.2","runs":0,"steps":0,"avg":0,"awaiting":0,"idle":true,"cause":"Registered in the manifest (v2.1.2) with zero runs this period.","effect":"The capability exists but nobody invokes it — dead weight in governance, evals and cost accounting, or an unadopted feature.","action":"Decide: enable it (a tick, a copilot route, a client feature flag) or park it. An agent that never runs should not silently keep its manifest."},{"id":"ag-jd","type":"agent","name":"jd","ver":"1.4.1","runs":5,"steps":39,"awaiting":0,"cause":"4 person touchpoints (0 approvals, 4 gates, 0 clarifications); 0 declined.","effect":"Overturn rate 0% — inside the healthy band (< 10%).","action":"None — keep the 10% health threshold so drift surfaces on its own."},{"id":"ag-negotiation_call","type":"agent","name":"negotiation_call","ver":"0.7.1","runs":0,"steps":0,"avg":0,"awaiting":0,"idle":true,"cause":"Registered in the manifest (v0.7.1) with zero runs this period.","effect":"The capability exists but nobody invokes it — dead weight in governance, evals and cost accounting, or an unadopted feature.","action":"Decide: enable it (a tick, a copilot route, a client feature flag) or park it. An agent that never runs should not silently keep its manifest."},{"id":"ag-offer","type":"agent","name":"offer","ver":"1.6.4","runs":0,"steps":0,"avg":0,"awaiting":0,"idle":true,"cause":"Registered in the manifest (v1.6.4) with zero runs this period.","effect":"The capability exists but nobody invokes it — dead weight in governance, evals and cost accounting, or an unadopted feature.","action":"Decide: enable it (a tick, a copilot route, a client feature flag) or park it. An agent that never runs should not silently keep its manifest."},{"id":"ag-onboarding","type":"agent","name":"onboarding","ver":"1.3.3","runs":0,"steps":0,"avg":0,"awaiting":0,"idle":true,"cause":"Registered in the manifest (v1.3.3) with zero runs this period.","effect":"The capability exists but nobody invokes it — dead weight in governance, evals and cost accounting, or an unadopted feature.","action":"Decide: enable it (a tick, a copilot route, a client feature flag) or park it. An agent that never runs should not silently keep its manifest."},{"id":"ag-org_context","type":"agent","name":"org_context","ver":"1.1.0","runs":24,"steps":318,"awaiting":1,"cause":"24 person touchpoints (3 approvals, 7 gates, 14 clarifications); 3 declined.","effect":"Overturn rate 30% — inside the healthy band (< 10%).","action":"Investigate top failure read_org_website ×21."},{"id":"ag-panel_l1","type":"agent","name":"panel_l1","ver":"1.1.0","runs":1,"steps":0,"awaiting":0,"cause":"1 person touchpoints (0 approvals, 1 gates, 0 clarifications); 1 declined.","effect":"Overturn rate 100% — inside the healthy band (< 10%).","action":"None — keep the 10% health threshold so drift surfaces on its own."},{"id":"ag-panel_l2","type":"agent","name":"panel_l2","ver":"1.1.0","runs":0,"steps":0,"avg":0,"awaiting":0,"idle":true,"cause":"Registered in the manifest (v1.1.0) with zero runs this period.","effect":"The capability exists but nobody invokes it — dead weight in governance, evals and cost accounting, or an unadopted feature.","action":"Decide: enable it (a tick, a copilot route, a client feature flag) or park it. An agent that never runs should not silently keep its manifest."},{"id":"ag-panel_l3","type":"agent","name":"panel_l3","ver":"1.1.0","runs":0,"steps":0,"avg":0,"awaiting":0,"idle":true,"cause":"Registered in the manifest (v1.1.0) with zero runs this period.","effect":"The capability exists but nobody invokes it — dead weight in governance, evals and cost accounting, or an unadopted feature.","action":"Decide: enable it (a tick, a copilot route, a client feature flag) or park it. An agent that never runs should not silently keep its manifest."},{"id":"ag-publishing","type":"agent","name":"publishing","ver":"1.4.4","runs":4,"steps":32,"awaiting":0,"cause":"4 runs · 32 steps, all autonomous (no person touchpoints).","effect":"Clean: no errors, no interventions.","action":"None."},{"id":"ag-requisition","type":"agent","name":"requisition","ver":"1.5.0","runs":9,"steps":213,"awaiting":1,"cause":"18 person touchpoints (0 approvals, 17 gates, 1 clarifications); 0 declined.","effect":"Overturn rate 0% — inside the healthy band (< 10%).","action":"None — keep the 10% health threshold so drift surfaces on its own."},{"id":"ag-scheduling_call","type":"agent","name":"scheduling_call","ver":"1.7.2","runs":0,"steps":0,"avg":0,"awaiting":0,"idle":true,"cause":"Registered in the manifest (v1.7.2) with zero runs this period.","effect":"The capability exists but nobody invokes it — dead weight in governance, evals and cost accounting, or an unadopted feature.","action":"Decide: enable it (a tick, a copilot route, a client feature flag) or park it. An agent that never runs should not silently keep its manifest."},{"id":"ag-screening","type":"agent","name":"screening","ver":"1.9.1","runs":30,"steps":384,"awaiting":1,"cause":"8 person touchpoints (1 approvals, 7 gates, 0 clarifications); 0 declined.","effect":"Overturn rate 0% — inside the healthy band (< 10%).","action":"Investigate top failure prepare_screening_kit ×5."},{"id":"ag-screening_call","type":"agent","name":"screening_call","ver":"1.1.5","runs":32,"steps":0,"awaiting":0,"cause":"32 runs with no agent steps (voice/panel sessions — captured outside agent_steps).","effect":"Behavior lives in call transcripts, not the step trace — these agents are invisible to every step-based governance rule.","action":"Add session-shaped telemetry (turns, consent, tool calls) so voice/panel behavior joins the graph and its health rules."},{"id":"ag-sourcing","type":"agent","name":"sourcing","ver":"1.0.5","runs":7,"steps":100,"awaiting":0,"cause":"7 runs · 100 steps, all autonomous (no person touchpoints).","effect":"9 tool errors — the failure cluster.","action":"Investigate the failing tool before trusting the output. Top failure: add_to_pipeline ×9."},{"id":"hub-idle","type":"hub","name":"no traffic (8)","members":["copilot","interview","negotiation_call","offer","onboarding","panel_l2","panel_l3","scheduling_call"],"cause":"8 of 21 registered agents ran zero times: copilot, interview, negotiation_call, offer, onboarding, panel_l2, panel_l3, scheduling_call.","effect":"Copilot — the routing front door — is among them: requests reach specialists directly, so routing and its guardrails are untested.","action":"Per agent: enable (tick, copilot route, feature flag) or park. An idle manifest should be a decision, not an accident."},{"id":"hub-gap","type":"hub","name":"step-trace gap (1)","members":["screening_call"],"cause":"screening_call ran with zero rows in agent_steps — voice/panel sessions are captured out-of-band.","effect":"These agents bypass every step-based rule: error clusters, run limits on tools, and this graph.","action":"Emit session turns as steps (consent, tool calls, outcomes) — until then, treat their transcripts as unaudited."},{"id":"n-hitl","name":"hitl_cards","what":"proposed actions wait for a person (shortlist, feed listing…)","stops":32,"rejected":4,"type":"norm","cause":"proposed actions wait for a person (shortlist, feed listing…). 32 stops folded from 173 runs.","effect":"4 overturned by a person (13%) — the miscalibration signal.","action":"This norm (or the proposals under it) needs review — see the agent cards."},{"id":"n-gates","name":"approval_gates","what":"requisition/org-profile/jd approvals before any publish","stops":43,"rejected":4,"type":"norm","cause":"requisition/org-profile/jd approvals before any publish. 43 stops folded from 173 runs.","effect":"4 overturned by a person (9%) — the miscalibration signal.","action":"This norm (or the proposals under it) needs review — see the agent cards."},{"id":"n-clarify","name":"clarification","what":"agent asks, a person answers (ask_human)","stops":17,"rejected":0,"type":"norm","cause":"agent asks, a person answers (ask_human). 17 stops folded from 173 runs.","effect":"Zero overturns — calibrated.","action":"None."},{"id":"fail-read_org_website","type":"failure","name":"read_org_website","tool":"read_org_website","cause":"21 errors inside agent runs — org_context 21.","effect":"Failure rate this high on the tool the org profile is built from — network egress or parser sandbox, not the model.","action":"Check egress rules / parser sandbox health; this is infrastructure, not intelligence."},{"id":"fail-add_to_pipeline","type":"failure","name":"add_to_pipeline","tool":"add_to_pipeline","cause":"16 errors inside agent runs — sourcing 9 + intake 7.","effect":"Duplicate-pipeline skips — the recent fix (agents skipping candidates already in the pipeline) should retire most of these; verify on the next run.","action":"Re-run an intake stretch and confirm the error count drops."},{"id":"fail-shortlist","type":"failure","name":"shortlist","tool":"shortlist","cause":"5 errors inside agent runs — intake 5.","effect":"Repeated tool failure — flaky dependency or bad input shape.","action":"Inspect last_error on the steps."},{"id":"fail-prepare_screening_kit","type":"failure","name":"prepare_screening_kit","tool":"prepare_screening_kit","cause":"5 errors inside agent runs — screening 5.","effect":"Repeated tool failure — flaky dependency or bad input shape.","action":"Inspect last_error on the steps."},{"id":"fail-request_approval","type":"failure","name":"request_approval","tool":"request_approval","cause":"4 errors inside agent runs — screening 4.","effect":"Repeated tool failure — flaky dependency or bad input shape.","action":"Inspect last_error on the steps."},{"id":"fail-(model step)","type":"failure","name":"(model step)","tool":"(model step)","cause":"4 errors inside agent runs — screening 4.","effect":"Repeated tool failure — flaky dependency or bad input shape.","action":"Inspect last_error on the steps."},{"id":"fail-list_applications","type":"failure","name":"list_applications","tool":"list_applications","cause":"3 errors inside agent runs — intake 3.","effect":"Repeated tool failure — flaky dependency or bad input shape.","action":"Inspect last_error on the steps."},{"id":"vocab-seed","type":"vocab","name":"skill graph","cause":"skill_nodes is empty — the ontology hasn't been built, yet 39 match scores and 47 candidates already carry raw text[] skills.","effect":"Every matching verdict normalizes with a hardcoded alias list; cross-run vocabulary learning is impossible until nodes exist.","action":"Build Phase 1 (definitions + normalization) — the seed evidence is already in the tables."}],"edges":[{"s":"ag-copilot","t":"hub-idle","k":"idle","label":"0 runs"},{"s":"ag-distribution","t":"n-hitl","k":"gated","label":"×6, 1 rejected"},{"s":"ag-evaluation","t":"n-gates","k":"gated"},{"s":"ag-expert_interview","t":"n-gates","k":"gated"},{"s":"ag-expert_interview","t":"n-clarify","k":"gated","label":"×2"},{"s":"ag-intake","t":"n-hitl","k":"gated","label":"×22, 3 rejected"},{"s":"ag-intake","t":"n-gates","k":"gated"},{"s":"ag-intake","t":"fail-add_to_pipeline","k":"errored","label":"×7"},{"s":"ag-intake","t":"fail-shortlist","k":"errored","label":"×5"},{"s":"ag-intake","t":"fail-list_applications","k":"errored","label":"×3"},{"s":"ag-intake","t":"vocab-seed","k":"awaits","label":"×39 scores"},{"s":"ag-interview","t":"hub-idle","k":"idle","label":"0 runs"},{"s":"ag-jd","t":"n-gates","k":"gated"},{"s":"ag-negotiation_call","t":"hub-idle","k":"idle","label":"0 runs"},{"s":"ag-offer","t":"hub-idle","k":"idle","label":"0 runs"},{"s":"ag-onboarding","t":"hub-idle","k":"idle","label":"0 runs"},{"s":"ag-org_context","t":"n-hitl","k":"gated"},{"s":"ag-org_context","t":"n-gates","k":"gated","label":"×7, 3 rejected"},{"s":"ag-org_context","t":"n-clarify","k":"gated","label":"×14"},{"s":"ag-org_context","t":"fail-read_org_website","k":"errored","label":"×21"},{"s":"ag-panel_l1","t":"n-gates","k":"gated","label":"×1, 1 rejected"},{"s":"ag-panel_l2","t":"hub-idle","k":"idle","label":"0 runs"},{"s":"ag-panel_l3","t":"hub-idle","k":"idle","label":"0 runs"},{"s":"ag-requisition","t":"n-gates","k":"gated"},{"s":"ag-requisition","t":"n-clarify","k":"gated","label":"×1"},{"s":"ag-scheduling_call","t":"hub-idle","k":"idle","label":"0 runs"},{"s":"ag-screening","t":"n-hitl","k":"gated"},{"s":"ag-screening","t":"n-gates","k":"gated"},{"s":"ag-screening","t":"fail-prepare_screening_kit","k":"errored","label":"×5"},{"s":"ag-screening","t":"fail-request_approval","k":"errored","label":"×4"},{"s":"ag-screening","t":"fail-(model step)","k":"errored","label":"×4"},{"s":"ag-screening_call","t":"hub-gap","k":"gap","label":"×32 runs, 0 steps"},{"s":"ag-sourcing","t":"fail-add_to_pipeline","k":"errored","label":"×9"},{"s":"ag-followup","t":"n-gates","k":"gated","label":"ran ungated"},{"s":"ag-publishing","t":"n-gates","k":"gated","label":"ran ungated"}],"systemRead":[{"title":"⚠ org-site reads fail at scale (21 errors)","short":"org-site reads failing ×21","cause":"21 of org_context's website reads errored — that is most of its read attempts, and it is the tool the org profile is built from.","effect":"Org profiles may be silently thinner than they look; every downstream agent consumes them.","action":"Check egress/parser-sandbox health first (infrastructure, not model). Then re-run an org_context stretch and compare profile depth.","pri":"high"},{"title":"⚠ add_to_pipeline errors (9 across agents)","short":"pipeline dup errors ×9","cause":"Duplicate-pipeline rejections across sourcing (9) and intake (18).","effect":"Retries waste run budget; after the skip-already-in-pipeline fix these should collapse.","action":"Re-run an intake stretch and verify the count drops; if it doesn't, the fix regressed.","pri":"high"},{"title":"⚠ Persons are rejecting agent proposals (4 overturns)","short":"4 proposal overturns (13% rate)","cause":"Intake's \"Shortlist the top-scored applicants\" was declined 3× — the same proposal, repeatedly.","effect":"Overturn rate on HITL cards: 13%. This is the graph telling you the agent's judgment and the reviewer's disagree.","action":"Read the rejection reasons. If the wording is the problem, change the proposal copy; if the candidates are, change the scorer threshold. Don't touch the reviewer.","pri":"high"},{"title":"⚠ The front door never opened — copilot has 0 runs","short":"copilot never invoked — routing untested","cause":"All 173 runs reached specialists directly (manual starts, scheduler ticks, events); the routing layer and its confirmations were never exercised.","effect":"The one agent designed to gate which specialist acts is the least-tested one — routing bugs will only surface in production.","action":"Drive one stretch of work through the copilot deliberately, or accept direct routing as the real UX and re-scope the copilot.","pri":"high"},{"title":"◈ screening_call run out-of-band — invisible to the step trace","short":"screening_call: runs with 0 steps","cause":"Voice/panel sessions are captured in transcripts, not agent_steps.","effect":"These agents bypass every step-based rule and this graph.","action":"Emit session turns as steps so governance covers them.","pri":"medium"},{"title":"✓ The fleet is quiet — 6 runs await a person, 7 failed","short":"fleet quiet — 6 awaiting, 7 failed","cause":"173 runs · 1471 steps; 95% of steps succeeded.","effect":"Gate stops (75) behaved as designed; run limits and taint produced no breaches.","action":"Cancelled runs (33) are stale ticks — harmless, but a liveness rule could reap them sooner.","pri":"ok"},{"title":"◈ Fleet coverage: 13/21 agents active, 8 idle","short":"coverage 13/21 active · 8 idle","cause":"8 agents have manifests but no runs.","effect":"Governance coverage is 57% of the fleet.","action":"The Action plan table has the per-agent decision; make idle a decision, and pull voice sessions into the trace.","pri":"medium"},{"title":"◈ Vocabulary: 0 nodes exist — no vocabulary layer yet","short":"skill graph: 0 nodes — layer missing","cause":"39 match scores and 47 candidates carry raw skills; normalization is still the hardcoded alias list.","effect":"The Vocabulary domain cannot be plotted from real data yet — there is nothing to plot.","action":"Phase 1 (definitions + normalization) — the seed evidence is already in the tables.","pri":"medium"}],"sysreadSummary":"4 need action · 3 to plan · 1 healthy","rejects":[{"agent_type":"intake","kind":"approval","title":"Shortlist the top-scored applicants","tool":"shortlist"},{"agent_type":"intake","kind":"approval","title":"Shortlist the top-scored applicants","tool":"shortlist"},{"agent_type":"intake","kind":"approval","title":"Shortlist the top-scored applicants","tool":"shortlist"},{"agent_type":"org_context","kind":"gate","title":"Organisation Profile Approval - Version 1","tool":"request_approval"},{"agent_type":"org_context","kind":"gate","title":"Approval Request: Initial Organisation Profile for Yavar","tool":"request_approval"},{"agent_type":"panel_l1","kind":"gate","title":"Panel review: L1 interview","tool":"request_panel_review"},{"agent_type":"org_context","kind":"gate","title":"Organisation Profile Approval: Yavar","tool":"request_approval"},{"agent_type":"distribution","kind":"approval","title":"List the role on the Jooble job feed","tool":"request_feed_listing"}],"plan":[{"name":"org_context","ver":"1.1.0","state":"out of sync","pri":"high","runs":24,"stops":24,"overturned":3,"errors":24,"awaiting":1,"action":"Persons declined 3 of 24 proposals — read the rejection reasons; fix proposal copy or scorer threshold, not the reviewer."},{"name":"intake","ver":"1.5.0","state":"out of sync","pri":"high","runs":35,"stops":27,"overturned":3,"errors":18,"awaiting":2,"action":"Persons declined 3 of 27 proposals — read the rejection reasons; fix proposal copy or scorer threshold, not the reviewer."},{"name":"screening","ver":"1.9.1","state":"infra","pri":"high","runs":30,"stops":8,"overturned":0,"errors":14,"awaiting":1,"action":"Top failure is infrastructure-shaped — fix egress/parser first, then re-run a stretch."},{"name":"sourcing","ver":"1.0.5","state":"flaky","pri":"medium","runs":7,"stops":0,"overturned":0,"errors":9,"awaiting":0,"action":"9 tool errors — re-run a stretch after the relevant fix and verify the count drops."},{"name":"distribution","ver":"1.1.3","state":"waiting","pri":"medium","runs":14,"stops":6,"overturned":1,"errors":2,"awaiting":1,"action":"1 run(s) parked awaiting a person — clear the decisions inbox."},{"name":"evaluation","ver":"1.2.4","state":"no trace","pri":"medium","runs":1,"stops":1,"overturned":0,"errors":0,"awaiting":0,"action":"Add session-shaped telemetry so voice/panel behavior joins governance and this graph."},{"name":"panel_l1","ver":"1.1.0","state":"no trace","pri":"medium","runs":1,"stops":1,"overturned":1,"errors":0,"awaiting":0,"action":"Add session-shaped telemetry so voice/panel behavior joins governance and this graph."},{"name":"requisition","ver":"1.5.0","state":"waiting","pri":"medium","runs":9,"stops":18,"overturned":0,"errors":0,"awaiting":1,"action":"1 run(s) parked awaiting a person — clear the decisions inbox."},{"name":"screening_call","ver":"1.1.5","state":"no trace","pri":"medium","runs":32,"stops":0,"overturned":0,"errors":0,"awaiting":0,"action":"Add session-shaped telemetry so voice/panel behavior joins governance and this graph."},{"name":"followup","ver":"1.5.0","state":"clean","pri":"ok","runs":10,"stops":0,"overturned":0,"errors":2,"awaiting":0,"action":"None — autonomous, no errors, no interventions."},{"name":"jd","ver":"1.4.1","state":"healthy","pri":"ok","runs":5,"stops":4,"overturned":0,"errors":1,"awaiting":0,"action":"None — 4 touchpoints, overturn rate inside band. Keep the 10% threshold watching."},{"name":"copilot","ver":"1.2.5","state":"idle","pri":"ok","runs":0,"stops":0,"overturned":0,"errors":0,"awaiting":0,"action":"Enable (tick / copilot route / feature flag) or park — an idle manifest should be a decision."},{"name":"expert_interview","ver":"1.0.0","state":"healthy","pri":"ok","runs":1,"stops":3,"overturned":0,"errors":0,"awaiting":0,"action":"None — 3 touchpoints, overturn rate inside band. Keep the 10% threshold watching."},{"name":"interview","ver":"2.1.2","state":"idle","pri":"ok","runs":0,"stops":0,"overturned":0,"errors":0,"awaiting":0,"action":"Enable (tick / copilot route / feature flag) or park — an idle manifest should be a decision."},{"name":"negotiation_call","ver":"0.7.1","state":"idle","pri":"ok","runs":0,"stops":0,"overturned":0,"errors":0,"awaiting":0,"action":"Enable (tick / copilot route / feature flag) or park — an idle manifest should be a decision."},{"name":"offer","ver":"1.6.4","state":"idle","pri":"ok","runs":0,"stops":0,"overturned":0,"errors":0,"awaiting":0,"action":"Enable (tick / copilot route / feature flag) or park — an idle manifest should be a decision."},{"name":"onboarding","ver":"1.3.3","state":"idle","pri":"ok","runs":0,"stops":0,"overturned":0,"errors":0,"awaiting":0,"action":"Enable (tick / copilot route / feature flag) or park — an idle manifest should be a decision."},{"name":"panel_l2","ver":"1.1.0","state":"idle","pri":"ok","runs":0,"stops":0,"overturned":0,"errors":0,"awaiting":0,"action":"Enable (tick / copilot route / feature flag) or park — an idle manifest should be a decision."},{"name":"panel_l3","ver":"1.1.0","state":"idle","pri":"ok","runs":0,"stops":0,"overturned":0,"errors":0,"awaiting":0,"action":"Enable (tick / copilot route / feature flag) or park — an idle manifest should be a decision."},{"name":"publishing","ver":"1.4.4","state":"clean","pri":"ok","runs":4,"stops":0,"overturned":0,"errors":0,"awaiting":0,"action":"None — autonomous, no errors, no interventions."},{"name":"scheduling_call","ver":"1.7.2","state":"idle","pri":"ok","runs":0,"stops":0,"overturned":0,"errors":0,"awaiting":0,"action":"Enable (tick / copilot route / feature flag) or park — an idle manifest should be a decision."}],"fleet":{"registered":21,"idle":8,"gap":1},"typeStyles":{"agent":{"color":"var(--series-role)","r":15,"label":"Agent","plural":"Agents"},"norm":{"color":"var(--series-cand)","r":14,"label":"Person gate","plural":"Person gates"},"failure":{"color":"var(--text-muted)","r":9,"label":"Failure cluster","plural":"Failure clusters"},"vocab":{"color":"var(--series-skill)","r":11,"label":"Vocabulary","plural":"Vocabulary"},"hub":{"color":"var(--text-muted)","r":13,"label":"Diagnosis hub","plural":"Diagnosis hubs"}},"edgeStyles":{"gated":{"stroke":"var(--baseline)","width":1.8,"dash":""},"errored":{"stroke":"var(--status-critical)","width":1.6,"dash":"6 4"},"awaits":{"stroke":"var(--status-warning)","width":1.6,"dash":"3 3"},"idle":{"stroke":"var(--baseline)","width":1.2,"dash":"2 3","opacity":0.7},"gap":{"stroke":"var(--status-warning)","width":1.6,"dash":"3 3"}},"elabels":{"gated":"gated by","errored":"errors in","awaits":"awaits","idle":"idle —","gap":"trace gap:"},"spring":{"gated":185,"errored":150,"awaits":190,"idle":140,"gap":170}},"gov":{"key":"gov","label":"Governance","title":"agent_tasks decisions — every person verdict, the norm it acted under, and what it means","snapshot":"stage_events: ai moves 39/43 pipeline transitions · 123 definition versions shipped","tiles":[["Person decisions","51","40 approved · 8 declined · 3 answered"],["Open cards","7","distribution ×2, intake ×2, org_context ×1"],["Cancelled cards","34","stale — reap with a liveness rule"],["Stage moves","43","91% ai · 4 person (via agent)"]],"nodes":[{"id":"gv-ok-intake-approval","type":"dOk","name":"✓ cards · intake","agent":"intake","kind":"approval","count":19,"cause":"19 proposals approved by a person (cards on intake runs).","effect":"Human-in-the-loop working as designed on this proposal type.","action":"None — approved decisions are the calibration baseline."},{"id":"gv-rej-intake-approval","type":"dBad","name":"✗ cards · intake","agent":"intake","kind":"approval","count":3,"members":["Shortlist the top-scored applicants (shortlist)","Shortlist the top-scored applicants (shortlist)","Shortlist the top-scored applicants (shortlist)"],"cause":"3 proposal(s) declined by a person: Shortlist the top-scored applicants (shortlist); Shortlist the top-scored applicants (shortlist); Shortlist the top-scored applicants (shortlist).","effect":"The same proposal type keeps getting declined — the agent's judgment or its wording is out of sync with reviewers.","action":"Read the rejection reasons; fix proposal copy or scorer threshold, not the reviewer."},{"id":"gv-ok-org_context-clarification","type":"dOk","name":"✓ asks · org_context","agent":"org_context","kind":"clarification","count":1,"cause":"1 proposals approved by a person (asks on org_context runs).","effect":"Human-in-the-loop working as designed on this proposal type.","action":"None — approved decisions are the calibration baseline."},{"id":"gv-ok-org_context-gate","type":"dOk","name":"✓ gates · org_context","agent":"org_context","kind":"gate","count":2,"cause":"2 proposals approved by a person (gates on org_context runs).","effect":"Human-in-the-loop working as designed on this proposal type.","action":"None — approved decisions are the calibration baseline."},{"id":"gv-rej-org_context-gate","type":"dBad","name":"✗ gates · org_context","agent":"org_context","kind":"gate","count":3,"members":["Organisation Profile Approval - Version 1 (request_approval)","Approval Request: Initial Organisation Profile for Yavar (request_approval)","Organisation Profile Approval: Yavar (request_approval)"],"cause":"3 proposal(s) declined by a person: Organisation Profile Approval - Version 1 (request_approval); Approval Request: Initial Organisation Profile for Yavar (request_approval); Organisation Profile Approval: Yavar (request_approval).","effect":"The same proposal type keeps getting declined — the agent's judgment or its wording is out of sync with reviewers.","action":"Read the rejection reasons; fix proposal copy or scorer threshold, not the reviewer."},{"id":"gv-ok-jd-gate","type":"dOk","name":"✓ gates · jd","agent":"jd","kind":"gate","count":4,"cause":"4 proposals approved by a person (gates on jd runs).","effect":"Human-in-the-loop working as designed on this proposal type.","action":"None — approved decisions are the calibration baseline."},{"id":"gv-rej-panel_l1-gate","type":"dBad","name":"✗ gates · panel_l1","agent":"panel_l1","kind":"gate","count":1,"members":["Panel review: L1 interview (request_panel_review)"],"cause":"1 proposal(s) declined by a person: Panel review: L1 interview (request_panel_review).","effect":"A single rejection is normal human disagreement — it becomes a pattern at 2.","action":"No action yet."},{"id":"gv-ok-expert_interview-gate","type":"dOk","name":"✓ gates · expert_interview","agent":"expert_interview","kind":"gate","count":1,"cause":"1 proposals approved by a person (gates on expert_interview runs).","effect":"Human-in-the-loop working as designed on this proposal type.","action":"None — approved decisions are the calibration baseline."},{"id":"gv-ok-expert_interview-clarification","type":"dOk","name":"✓ asks · expert_interview","agent":"expert_interview","kind":"clarification","count":2,"cause":"2 proposals approved by a person (asks on expert_interview runs).","effect":"Human-in-the-loop working as designed on this proposal type.","action":"None — approved decisions are the calibration baseline."},{"id":"gv-ok-distribution-approval","type":"dOk","name":"✓ cards · distribution","agent":"distribution","kind":"approval","count":1,"cause":"1 proposals approved by a person (cards on distribution runs).","effect":"Human-in-the-loop working as designed on this proposal type.","action":"None — approved decisions are the calibration baseline."},{"id":"gv-rej-distribution-approval","type":"dBad","name":"✗ cards · distribution","agent":"distribution","kind":"approval","count":1,"members":["List the role on the Jooble job feed (request_feed_listing)"],"cause":"1 proposal(s) declined by a person: List the role on the Jooble job feed (request_feed_listing).","effect":"A single rejection is normal human disagreement — it becomes a pattern at 2.","action":"No action yet."},{"id":"gv-ok-requisition-gate","type":"dOk","name":"✓ gates · requisition","agent":"requisition","kind":"gate","count":13,"cause":"13 proposals approved by a person (gates on requisition runs).","effect":"Human-in-the-loop working as designed on this proposal type.","action":"None — approved decisions are the calibration baseline."},{"id":"n-hitl","name":"hitl_cards","what":"proposed actions wait for a person (shortlist, feed listing…)","stops":32,"rejected":4,"type":"norm","cause":"proposed actions wait for a person (shortlist, feed listing…).","effect":"4 overturns against 32 stops.","action":"Review the proposals under this norm — see the rejected chains."},{"id":"n-gates","name":"approval_gates","what":"requisition/org-profile/jd approvals before any publish","stops":43,"rejected":4,"type":"norm","cause":"requisition/org-profile/jd approvals before any publish.","effect":"4 overturns against 43 stops.","action":"Review the proposals under this norm — see the rejected chains."},{"id":"n-clarify","name":"clarification","what":"agent asks, a person answers (ask_human)","stops":17,"rejected":0,"type":"norm","cause":"agent asks, a person answers (ask_human).","effect":"17 stops, zero overturns — calibrated.","action":"None."},{"id":"gv-open","type":"dOpen","name":"open cards ×7","members":["distribution","intake","org_context","requisition","screening"],"cause":"7 cards still awaiting a person: distribution ×2, intake ×2, org_context ×1, requisition ×1, screening ×1.","effect":"Proposals (and the runs behind them) are parked mid-flight; 6 runs sit in awaiting_human.","action":"Clear the decisions inbox — oldest cards first."},{"id":"gv-cancel","type":"dMut","name":"cancelled ×34","cause":"34 cards were cancelled — mostly stale ticks reaped when their run ended.","effect":"Harmless, but they bury the live signals in the decisions inbox.","action":"A liveness rule should cancel stale cards sooner and mark them, so open ≠ stale."}],"edges":[{"s":"gv-ok-intake-approval","t":"n-hitl","k":"decided"},{"s":"gv-rej-intake-approval","t":"n-hitl","k":"decided"},{"s":"gv-ok-org_context-clarification","t":"n-clarify","k":"decided"},{"s":"gv-ok-org_context-gate","t":"n-gates","k":"decided"},{"s":"gv-rej-org_context-gate","t":"n-gates","k":"decided"},{"s":"gv-ok-jd-gate","t":"n-gates","k":"decided"},{"s":"gv-rej-panel_l1-gate","t":"n-gates","k":"decided"},{"s":"gv-ok-expert_interview-gate","t":"n-gates","k":"decided"},{"s":"gv-ok-expert_interview-clarification","t":"n-clarify","k":"decided"},{"s":"gv-ok-distribution-approval","t":"n-hitl","k":"decided"},{"s":"gv-rej-distribution-approval","t":"n-hitl","k":"decided"},{"s":"gv-ok-requisition-gate","t":"n-gates","k":"decided"}],"systemRead":[{"title":"⚠ Repeated overturns: intake cards declined ×3","short":"intake approval declined ×3","cause":"Shortlist the top-scored applicants (shortlist); Shortlist the top-scored applicants (shortlist); Shortlist the top-scored applicants (shortlist)","effect":"The chain intake → approval → person keeps ending in \"no\" — a calibration defect, not a disagreement.","action":"Read the rejection reasons; fix the proposal copy or the threshold. The reviewer is the ground truth here.","pri":"high"},{"title":"◈ Autonomy check: ai moves 91% of pipeline transitions (39/43)","short":"ai moves 91% of stage transitions","cause":"stage_events actor field: ai ×39; person-via-agent ×4.","effect":"The autonomy dial may say one thing while the pipeline says another — candidate progression is almost entirely model-driven.","action":"Decide per transition whether ai-driven is intended (ai_screened: probably yes; shortlisted: maybe not) — encode it in the autonomy dial, not in convention.","pri":"medium"},{"title":"⚠ 7 decision cards open — work is parked","short":"7 cards open — clear the inbox","cause":"Open proposals: distribution ×2, intake ×2, org_context ×1, requisition ×1, screening ×1.","effect":"Each open card holds its run in awaiting_human; candidates behind them age in place.","action":"Clear the inbox oldest-first; then add a health rule for card age (e.g. >48h → escalation).","pri":"high"},{"title":"◈ 34 cancelled cards bury the live ones","short":"34 cancelled cards — reap stale","cause":"Cancelled cards are mostly stale ticks whose runs ended.","effect":"They add noise to every decisions inbox and to this graph's denominators.","action":"Liveness rule: cancel + mark stale cards early instead of at run end.","pri":"medium"},{"title":"◈ Definition churn: 123 manifest versions shipped — top requisition ×15, screening ×13, screening_call ×12","short":"123 definition versions — eval coverage per bump?","cause":"Rapid iteration (Oct 12 → now): requisition ×15, screening ×13, screening_call ×12 lead the fleet.","effect":"Every version bump changes behavior; without an eval per version, regressions ship silently.","action":"Keep agents.lock + the eval gate strict: no version without an eval — the lock file is the enforcement point.","pri":"medium"},{"title":"✓ Calibration baseline: 43 approved vs 8 declined","short":"43✓ / 8✗ — baseline recorded","cause":"Every terminal person decision is on the governance graph with its norm.","effect":"Overturn rate 17% — this ratio is the fleet's calibration curve over time.","action":"Track it per week; a rising curve is the earliest signal that agents and reviewers are drifting apart.","pri":"ok"}],"sysreadSummary":"2 need action · 3 to plan · 1 healthy","typeStyles":{"norm":{"color":"var(--series-cand)","r":14,"label":"Person gate","plural":"Person gates"},"dOk":{"color":"var(--status-good)","r":11,"label":"Approved","plural":"Approved decisions"},"dBad":{"color":"var(--status-critical)","r":12,"label":"Overturned","plural":"Overturned decisions"},"dOpen":{"color":"var(--status-warning)","r":10,"label":"Open card","plural":"Open cards"},"dMut":{"color":"var(--text-muted)","r":9,"label":"Cancelled","plural":"Cancelled cards"}},"edgeStyles":{"decided":{"stroke":"var(--baseline)","width":1.7,"dash":""}},"elabels":{"decided":"decided under"},"spring":{"decided":175}},"vocab":{"key":"vocab","label":"Vocabulary","title":"skills · role-family proxies · co-occurrence — built by the production buildOntology() from raw skills","snapshot":"seed view — in-memory only · 658 nodes · 600 edges · 1 scarce · 1 dormant · 50% coverage","tiles":[["Skill nodes","658","60 shown · 508 low-evidence folded"],["Co-occurrence edges","600","22 shown (top by count)"],["Insights","5","2 high severity — prescriptive, from deriveInsights"],["Persisted","0 rows","skill_nodes empty — Phase 1 persists these"]],"nodes":[{"id":"sk-data-science","type":"skill","name":"Data Science","slug":"data-science","cat":"ai","aliases":"Data Science","supply":0,"demand":4,"ev":0,"dormant":true,"cause":"0 evidence links · supply 0 / demand 4 · ai · aliases folded: Data Science.","effect":"Demanded with zero pool supply — every open req on this skill depends on sourcing.","action":"Open a sourcing campaign or demote it to good-to-have."},{"id":"sk-python","type":"skill","name":"Python","slug":"python","cat":"backend","aliases":"Python","supply":17,"demand":2,"ev":17,"dormant":false,"cause":"17 evidence links · supply 17 / demand 2 · backend · aliases folded: Python.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-postgresql","type":"skill","name":"PostgreSQL","slug":"postgresql","cat":"data platform","aliases":"PostgreSQL, Postgres","supply":10,"demand":2,"ev":10,"dormant":false,"cause":"10 evidence links · supply 10 / demand 2 · data platform · aliases folded: PostgreSQL, Postgres.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-node","type":"skill","name":"Node.js","slug":"node","cat":"backend","aliases":"NodeJS, Node.js, NodeJs","supply":5,"demand":2,"ev":5,"dormant":false,"cause":"5 evidence links · supply 5 / demand 2 · backend · aliases folded: NodeJS, Node.js, NodeJs.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-docker","type":"skill","name":"Docker","slug":"docker","cat":"cloud & devops","aliases":"Docker","supply":10,"demand":1,"ev":10,"dormant":false,"cause":"10 evidence links · supply 10 / demand 1 · cloud & devops · aliases folded: Docker.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-git","type":"skill","name":"Git","slug":"git","cat":"general","aliases":"Git, GIT","supply":10,"demand":1,"ev":10,"dormant":false,"cause":"10 evidence links · supply 10 / demand 1 · general · aliases folded: Git, GIT.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-amazon-web-services","type":"skill","name":"AWS","slug":"amazon-web-services","cat":"general","aliases":"AWS (EC2, S3), AWS (basics - EC2, S3, IAM fundamentals), AWS, AWS (EC2, S3, ECR), AWS (S3, EC2, Lambda)","supply":7,"demand":1,"ev":7,"dormant":false,"cause":"7 evidence links · supply 7 / demand 1 · general · aliases folded: AWS (EC2, S3), AWS (basics - EC2, S3, IAM fundamentals), AWS, AWS (EC2, S3, ECR), AWS (S3, EC2, Lambda).","effect":"Active node, normal flow.","action":"None."},{"id":"sk-rest-apis","type":"skill","name":"REST APIs","slug":"rest-apis","cat":"general","aliases":"REST APIs","supply":3,"demand":1,"ev":3,"dormant":false,"cause":"3 evidence links · supply 3 / demand 1 · general · aliases folded: REST APIs.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-redis","type":"skill","name":"Redis","slug":"redis","cat":"data platform","aliases":"Redis","supply":2,"demand":1,"ev":2,"dormant":false,"cause":"2 evidence links · supply 2 / demand 1 · data platform · aliases folded: Redis.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-microservices","type":"skill","name":"Microservices","slug":"microservices","cat":"general","aliases":"Microservices","supply":2,"demand":1,"ev":2,"dormant":false,"cause":"2 evidence links · supply 2 / demand 1 · general · aliases folded: Microservices.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-javascript","type":"skill","name":"JavaScript","slug":"javascript","cat":"backend","aliases":"JavaScript, Javascript","supply":11,"demand":0,"ev":11,"dormant":false,"cause":"11 evidence links · supply 11 / demand 0 · backend · aliases folded: JavaScript, Javascript.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-react","type":"skill","name":"React.js","slug":"react","cat":"frontend","aliases":"React.js, React, ReactJs, React.JS, React JS, ReactJS","supply":11,"demand":0,"ev":11,"dormant":false,"cause":"11 evidence links · supply 11 / demand 0 · frontend · aliases folded: React.js, React, ReactJs, React.JS, React JS, ReactJS.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-html","type":"skill","name":"HTML","slug":"html","cat":"frontend","aliases":"HTML","supply":11,"demand":0,"ev":11,"dormant":false,"cause":"11 evidence links · supply 11 / demand 0 · frontend · aliases folded: HTML.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-css","type":"skill","name":"CSS","slug":"css","cat":"frontend","aliases":"CSS","supply":11,"demand":0,"ev":11,"dormant":false,"cause":"11 evidence links · supply 11 / demand 0 · frontend · aliases folded: CSS.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-figma","type":"skill","name":"Figma","slug":"figma","cat":"general","aliases":"Figma, Figma (AI features)","supply":11,"demand":0,"ev":11,"dormant":false,"cause":"11 evidence links · supply 11 / demand 0 · general · aliases folded: Figma, Figma (AI features).","effect":"Active node, normal flow.","action":"None."},{"id":"sk-mysql","type":"skill","name":"MySQL","slug":"mysql","cat":"data platform","aliases":"MySQL, MYSQL","supply":8,"demand":0,"ev":8,"dormant":false,"cause":"8 evidence links · supply 8 / demand 0 · data platform · aliases folded: MySQL, MYSQL.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-fastapi","type":"skill","name":"FastAPI","slug":"fastapi","cat":"general","aliases":"FastAPI","supply":7,"demand":0,"ev":7,"dormant":false,"cause":"7 evidence links · supply 7 / demand 0 · general · aliases folded: FastAPI.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-redux","type":"skill","name":"Redux","slug":"redux","cat":"general","aliases":"Redux","supply":6,"demand":0,"ev":6,"dormant":false,"cause":"6 evidence links · supply 6 / demand 0 · general · aliases folded: Redux.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-sql","type":"skill","name":"SQL","slug":"sql","cat":"data platform","aliases":"SQL","supply":6,"demand":0,"ev":6,"dormant":false,"cause":"6 evidence links · supply 6 / demand 0 · data platform · aliases folded: SQL.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-typescript","type":"skill","name":"TypeScript","slug":"typescript","cat":"general","aliases":"TypeScript, Typescript","supply":6,"demand":0,"ev":6,"dormant":false,"cause":"6 evidence links · supply 6 / demand 0 · general · aliases folded: TypeScript, Typescript.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-information-architecture","type":"skill","name":"Information Architecture","slug":"information-architecture","cat":"general","aliases":"Information Architecture","supply":6,"demand":0,"ev":6,"dormant":false,"cause":"6 evidence links · supply 6 / demand 0 · general · aliases folded: Information Architecture.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-kubernetes","type":"skill","name":"Kubernetes","slug":"kubernetes","cat":"cloud & devops","aliases":"Kubernetes","supply":5,"demand":0,"ev":5,"dormant":false,"cause":"5 evidence links · supply 5 / demand 0 · cloud & devops · aliases folded: Kubernetes.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-flask","type":"skill","name":"Flask","slug":"flask","cat":"general","aliases":"Flask","supply":5,"demand":0,"ev":5,"dormant":false,"cause":"5 evidence links · supply 5 / demand 0 · general · aliases folded: Flask.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-bootstrap","type":"skill","name":"Bootstrap","slug":"bootstrap","cat":"general","aliases":"Bootstrap","supply":5,"demand":0,"ev":5,"dormant":false,"cause":"5 evidence links · supply 5 / demand 0 · general · aliases folded: Bootstrap.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-mongodb","type":"skill","name":"MongoDB","slug":"mongodb","cat":"data platform","aliases":"MongoDB","supply":5,"demand":0,"ev":5,"dormant":false,"cause":"5 evidence links · supply 5 / demand 0 · data platform · aliases folded: MongoDB.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-angular","type":"skill","name":"Angular","slug":"angular","cat":"frontend","aliases":"Angular","supply":5,"demand":0,"ev":5,"dormant":false,"cause":"5 evidence links · supply 5 / demand 0 · frontend · aliases folded: Angular.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-github","type":"skill","name":"GitHub","slug":"github","cat":"general","aliases":"GitHub, Github","supply":5,"demand":0,"ev":5,"dormant":false,"cause":"5 evidence links · supply 5 / demand 0 · general · aliases folded: GitHub, Github.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-jira","type":"skill","name":"JIRA","slug":"jira","cat":"general","aliases":"JIRA, Jira","supply":5,"demand":0,"ev":5,"dormant":false,"cause":"5 evidence links · supply 5 / demand 0 · general · aliases folded: JIRA, Jira.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-natural-language-processing","type":"skill","name":"NLP","slug":"natural-language-processing","cat":"general","aliases":"NLP, Natural Language Processing","supply":5,"demand":0,"ev":5,"dormant":false,"cause":"5 evidence links · supply 5 / demand 0 · general · aliases folded: NLP, Natural Language Processing.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-interaction-design","type":"skill","name":"Interaction Design","slug":"interaction-design","cat":"general","aliases":"Interaction Design","supply":5,"demand":0,"ev":5,"dormant":false,"cause":"5 evidence links · supply 5 / demand 0 · general · aliases folded: Interaction Design.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-notion","type":"skill","name":"Notion","slug":"notion","cat":"general","aliases":"Notion","supply":5,"demand":0,"ev":5,"dormant":false,"cause":"5 evidence links · supply 5 / demand 0 · general · aliases folded: Notion.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-design-systems","type":"skill","name":"Design Systems","slug":"design-systems","cat":"general","aliases":"Design Systems, Design Systems (Basic)","supply":5,"demand":0,"ev":5,"dormant":false,"cause":"5 evidence links · supply 5 / demand 0 · general · aliases folded: Design Systems, Design Systems (Basic).","effect":"Active node, normal flow.","action":"None."},{"id":"sk-wireframing","type":"skill","name":"Wireframing","slug":"wireframing","cat":"general","aliases":"Wireframing, Wireframing (Low & High Fidelity)","supply":5,"demand":0,"ev":5,"dormant":false,"cause":"5 evidence links · supply 5 / demand 0 · general · aliases folded: Wireframing, Wireframing (Low & High Fidelity).","effect":"Active node, normal flow.","action":"None."},{"id":"sk-prototyping","type":"skill","name":"Prototyping","slug":"prototyping","cat":"general","aliases":"Prototyping","supply":5,"demand":0,"ev":5,"dormant":false,"cause":"5 evidence links · supply 5 / demand 0 · general · aliases folded: Prototyping.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-tailwind-css","type":"skill","name":"Tailwind CSS","slug":"tailwind-css","cat":"frontend","aliases":"Tailwind CSS","supply":4,"demand":0,"ev":4,"dormant":false,"cause":"4 evidence links · supply 4 / demand 0 · frontend · aliases folded: Tailwind CSS.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-firebase","type":"skill","name":"Firebase","slug":"firebase","cat":"general","aliases":"Firebase","supply":4,"demand":0,"ev":4,"dormant":false,"cause":"4 evidence links · supply 4 / demand 0 · general · aliases folded: Firebase.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-agile","type":"skill","name":"Agile","slug":"agile","cat":"general","aliases":"Agile","supply":4,"demand":0,"ev":4,"dormant":false,"cause":"4 evidence links · supply 4 / demand 0 · general · aliases folded: Agile.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-rag","type":"skill","name":"RAG","slug":"rag","cat":"general","aliases":"RAG","supply":4,"demand":0,"ev":4,"dormant":false,"cause":"4 evidence links · supply 4 / demand 0 · general · aliases folded: RAG.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-langchain","type":"skill","name":"LangChain","slug":"langchain","cat":"general","aliases":"LangChain","supply":4,"demand":0,"ev":4,"dormant":false,"cause":"4 evidence links · supply 4 / demand 0 · general · aliases folded: LangChain.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-machine-learning","type":"skill","name":"Machine Learning","slug":"machine-learning","cat":"ai","aliases":"Machine Learning (MLOps), Machine Learning","supply":4,"demand":0,"ev":4,"dormant":false,"cause":"4 evidence links · supply 4 / demand 0 · ai · aliases folded: Machine Learning (MLOps), Machine Learning.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-gemini","type":"skill","name":"Gemini","slug":"gemini","cat":"general","aliases":"Gemini","supply":4,"demand":0,"ev":4,"dormant":false,"cause":"4 evidence links · supply 4 / demand 0 · general · aliases folded: Gemini.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-adobe-xd","type":"skill","name":"Adobe XD","slug":"adobe-xd","cat":"general","aliases":"Adobe XD","supply":4,"demand":0,"ev":4,"dormant":false,"cause":"4 evidence links · supply 4 / demand 0 · general · aliases folded: Adobe XD.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-product-design","type":"skill","name":"Product Design","slug":"product-design","cat":"general","aliases":"Product Design","supply":4,"demand":0,"ev":4,"dormant":false,"cause":"4 evidence links · supply 4 / demand 0 · general · aliases folded: Product Design.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-excel","type":"skill","name":"Excel","slug":"excel","cat":"general","aliases":"Excel","supply":3,"demand":0,"ev":3,"dormant":false,"cause":"3 evidence links · supply 3 / demand 0 · general · aliases folded: Excel.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-nginx","type":"skill","name":"Nginx","slug":"nginx","cat":"general","aliases":"Nginx, NGINX","supply":3,"demand":0,"ev":3,"dormant":false,"cause":"3 evidence links · supply 3 / demand 0 · general · aliases folded: Nginx, NGINX.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-websockets","type":"skill","name":"WebSockets","slug":"websockets","cat":"general","aliases":"WebSockets","supply":3,"demand":0,"ev":3,"dormant":false,"cause":"3 evidence links · supply 3 / demand 0 · general · aliases folded: WebSockets.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-java","type":"skill","name":"Java","slug":"java","cat":"backend","aliases":"Java, JAVA, java","supply":3,"demand":0,"ev":3,"dormant":false,"cause":"3 evidence links · supply 3 / demand 0 · backend · aliases folded: Java, JAVA, java.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-ci-cd","type":"skill","name":"CI/CD","slug":"ci-cd","cat":"general","aliases":"CI/CD","supply":3,"demand":0,"ev":3,"dormant":false,"cause":"3 evidence links · supply 3 / demand 0 · general · aliases folded: CI/CD.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-powerbi","type":"skill","name":"Power BI","slug":"powerbi","cat":"general","aliases":"Power BI","supply":3,"demand":0,"ev":3,"dormant":false,"cause":"3 evidence links · supply 3 / demand 0 · general · aliases folded: Power BI.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-stakeholder-management","type":"skill","name":"Stakeholder Management","slug":"stakeholder-management","cat":"behavioural","aliases":"Stakeholder Management","supply":3,"demand":0,"ev":3,"dormant":false,"cause":"3 evidence links · supply 3 / demand 0 · behavioural · aliases folded: Stakeholder Management.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-prompt-engineering","type":"skill","name":"Prompt engineering","slug":"prompt-engineering","cat":"general","aliases":"prompt engineering, Prompt engineering","supply":3,"demand":0,"ev":3,"dormant":false,"cause":"3 evidence links · supply 3 / demand 0 · general · aliases folded: prompt engineering, Prompt engineering.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-websocket","type":"skill","name":"WebSocket","slug":"websocket","cat":"general","aliases":"WebSocket, Websocket","supply":3,"demand":0,"ev":3,"dormant":false,"cause":"3 evidence links · supply 3 / demand 0 · general · aliases folded: WebSocket, Websocket.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-pandas","type":"skill","name":"Pandas","slug":"pandas","cat":"general","aliases":"Pandas","supply":3,"demand":0,"ev":3,"dormant":false,"cause":"3 evidence links · supply 3 / demand 0 · general · aliases folded: Pandas.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-numpy","type":"skill","name":"NumPy","slug":"numpy","cat":"general","aliases":"NumPy","supply":3,"demand":0,"ev":3,"dormant":false,"cause":"3 evidence links · supply 3 / demand 0 · general · aliases folded: NumPy.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-azure","type":"skill","name":"Azure","slug":"azure","cat":"cloud & devops","aliases":"Azure","supply":3,"demand":0,"ev":3,"dormant":false,"cause":"3 evidence links · supply 3 / demand 0 · cloud & devops · aliases folded: Azure.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-computer-vision","type":"skill","name":"Computer Vision","slug":"computer-vision","cat":"general","aliases":"Computer Vision","supply":3,"demand":0,"ev":3,"dormant":false,"cause":"3 evidence links · supply 3 / demand 0 · general · aliases folded: Computer Vision.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-pytorch","type":"skill","name":"PyTorch","slug":"pytorch","cat":"ai","aliases":"PyTorch","supply":3,"demand":0,"ev":3,"dormant":false,"cause":"3 evidence links · supply 3 / demand 0 · ai · aliases folded: PyTorch.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-git-github","type":"skill","name":"Git & Github","slug":"git-github","cat":"general","aliases":"Git & Github, Git/GitHub","supply":3,"demand":0,"ev":3,"dormant":false,"cause":"3 evidence links · supply 3 / demand 0 · general · aliases folded: Git & Github, Git/GitHub.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-postman","type":"skill","name":"Postman","slug":"postman","cat":"general","aliases":"Postman","supply":3,"demand":0,"ev":3,"dormant":false,"cause":"3 evidence links · supply 3 / demand 0 · general · aliases folded: Postman.","effect":"Active node, normal flow.","action":"None."},{"id":"sk-agile-scrum","type":"skill","name":"Agile/Scrum","slug":"agile-scrum","cat":"general","aliases":"Agile/Scrum, Agile & Scrum, Agile / Scrum","supply":3,"demand":0,"ev":3,"dormant":false,"cause":"3 evidence links · supply 3 / demand 0 · general · aliases folded: Agile/Scrum, Agile & Scrum, Agile / Scrum.","effect":"Active node, normal flow.","action":"None."}],"edges":[{"s":"sk-css","t":"sk-html","k":"cooccurs","label":"×11"},{"s":"sk-postgresql","t":"sk-python","k":"cooccurs","label":"×9"},{"s":"sk-docker","t":"sk-python","k":"cooccurs","label":"×8"},{"s":"sk-docker","t":"sk-react","k":"cooccurs","label":"×8"},{"s":"sk-git","t":"sk-python","k":"cooccurs","label":"×8"},{"s":"sk-javascript","t":"sk-react","k":"cooccurs","label":"×8"},{"s":"sk-postgresql","t":"sk-react","k":"cooccurs","label":"×8"},{"s":"sk-python","t":"sk-react","k":"cooccurs","label":"×8"},{"s":"sk-css","t":"sk-javascript","k":"cooccurs","label":"×7"},{"s":"sk-docker","t":"sk-git","k":"cooccurs","label":"×7"},{"s":"sk-docker","t":"sk-postgresql","k":"cooccurs","label":"×7"},{"s":"sk-git","t":"sk-postgresql","k":"cooccurs","label":"×7"},{"s":"sk-git","t":"sk-react","k":"cooccurs","label":"×7"},{"s":"sk-html","t":"sk-javascript","k":"cooccurs","label":"×7"},{"s":"sk-javascript","t":"sk-python","k":"cooccurs","label":"×7"},{"s":"sk-docker","t":"sk-fastapi","k":"cooccurs","label":"×7"},{"s":"sk-amazon-web-services","t":"sk-python","k":"cooccurs","label":"×6"},{"s":"sk-docker","t":"sk-javascript","k":"cooccurs","label":"×6"},{"s":"sk-git","t":"sk-javascript","k":"cooccurs","label":"×6"},{"s":"sk-javascript","t":"sk-postgresql","k":"cooccurs","label":"×6"},{"s":"sk-javascript","t":"sk-redux","k":"cooccurs","label":"×6"},{"s":"sk-mysql","t":"sk-python","k":"cooccurs","label":"×6"}],"systemRead":[{"title":"⚠ scarcity: Skills your hiring plan cannot cover","short":"Skills your hiring plan cannot cover","cause":"deriveInsights over 46 candidates / 2 requisitions · skills: data-science","effect":"Data Science (0 in pool for 4 weighted openings). Open a sourcing campaign or relax these to good-to-have.","action":"Open matching — route /matching","pri":"high"},{"title":"⚠ coverage: Open roles with an empty pool on a must-have","short":"Open roles with an empty pool on a must-have","cause":"deriveInsights over 46 candidates / 2 requisitions · skills: data-science","effect":"AI Intern — no evidence for Data Science","action":"Open requisitions — route /requisitions","pri":"high"},{"title":"◈ emerging: Skills entering your organisation","short":"Skills entering your organisation","cause":"deriveInsights over 46 candidates / 2 requisitions · skills: python, javascript, react, html, css, figma","effect":"Python, JavaScript, React.js, HTML, CSS, Figma appeared in the last four months. Add them to job architecture and interview kits.","action":"Update job architecture — route /masters","pri":"medium"},{"title":"◈ Alias fold: 684 raw skill forms resolve to 658 nodes","short":"684 raw forms → 658 nodes","cause":"Every variant fold comes from the hardcoded alias table in ontology.server.ts — it learned nothing by itself.","effect":"A form the table misses becomes a spurious node; this count is the alias table's report card.","action":"Phase 1 replaces the hardcoded table with evidence-folded aliases (skillEvidence → alias learning).","pri":"medium"},{"title":"◈ skill_nodes is still empty — this view is computed in-memory, not persisted","short":"seed only — nothing persisted yet","cause":"The exact nodes and edges on this graph were built by the production buildOntology() from raw text[] columns.","effect":"Nothing is stored, so no agent can query this vocabulary yet — the graph exists only when this script runs.","action":"Phase 1 persists these same nodes into skill_nodes/skill_edges — after that, agents query them through the deterministic layer.","pri":"medium"},{"title":"◈ bench: Deep bench nobody is hiring for","short":"Deep bench nobody is hiring for","cause":"deriveInsights over 46 candidates / 2 requisitions · skills: javascript, react, html, css, figma, mysql","effect":"JavaScript (11), React.js (11), HTML (11), CSS (11), Figma (11), MySQL (8) sit unused. Redeploy through internal postings before sourcing outside.","action":"Redeploy via internal postings — route /ijp","pri":"ok"},{"title":"◈ fading: Skills going dormant","short":"Skills going dormant","cause":"deriveInsights over 46 candidates / 2 requisitions · skills: data-science","effect":"Data Science have had no fresh evidence for over a year. They are still searchable but will retire from the graph if nothing new arrives.","action":"Search the pool — route /candidates","pri":"ok"},{"title":"◈ 508 low-evidence skills folded out of the graph","short":"508 single-evidence skills hidden","cause":"Skills with one evidence link, no demand and no aliases are real but insignificant — drawing them makes the seed view unreadable.","effect":"They still count in node totals and will surface as evidence accumulates.","action":"Thresholds stay: demand > 0 or evidence ≥ 2 puts a skill on the graph. Persistence (Phase 1) makes the cut queryable instead of invisible.","pri":"ok"}],"sysreadSummary":"2 need action · 3 to plan · 3 healthy","typeStyles":{"family":{"color":"var(--series-role)","r":14,"label":"Role family (dept proxy)","plural":"Role families"},"skill":{"color":"var(--series-skill)","r":9,"label":"Skill (size = evidence)","plural":"Skills"}},"edgeStyles":{"asks_for":{"stroke":"var(--baseline)","width":1.8,"dash":""},"cooccurs":{"stroke":"var(--baseline)","width":1.4,"dash":"2 3","opacity":0.85}},"elabels":{"asks_for":"asks for","cooccurs":"co-occurs"},"spring":{"asks_for":165,"cooccurs":120}}}};
+
+const SVGNS = "http://www.w3.org/2000/svg";
+const el = (t, a) => { const n = document.createElementNS(SVGNS, t); for (const k in a) n.setAttribute(k, a[k]); return n; };
+const REPULSION = 3800, FRICTION = 0.86, CENTER = 0.012, H = 600;
+
+const stage = document.getElementById("stage");
+const tip = document.getElementById("tooltip");
+const insp = document.getElementById("inspector");
+let V = null, nodes = [], links = [], alpha = 1;
+let gE, gN, gL, selChip = null;
+
+function tick() {
+  for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
+    const a = nodes[i], b = nodes[j];
+    const dx = b.x - a.x, dy = b.y - a.y, d2 = dx*dx + dy*dy || 1;
+    if (d2 > 300*300) continue;
+    const f = REPULSION / d2, d = Math.sqrt(d2);
+    a.vx -= dx/d*f; a.vy -= dy/d*f; b.vx += dx/d*f; b.vy += dy/d*f;
+    const minD = Math.min(50 + Math.max(a.name.length, b.name.length)*3.1, 140);
+    if (d < minD) { const p = (minD-d)*0.09; a.vx -= dx/d*p; a.vy -= dy/d*p; b.vx += dx/d*p; b.vy += dy/d*p; }
+  }
+  for (const l of links) {
+    if (l.hidden) continue;
+    const dx = l.b.x-l.a.x, dy = l.b.y-l.a.y, d = Math.hypot(dx,dy) || 1;
+    const f = (d - (V.spring[l.k] || 150)) * 0.012;
+    l.a.vx += dx/d*f; l.a.vy += dy/d*f; l.b.vx -= dx/d*f; l.b.vy -= dy/d*f;
+  }
+  for (const n of nodes) {
+    if (n.fixed) { n.vx = 0; n.vy = 0; continue; }
+    n.vx += ((stage.clientWidth || 860)/2 - n.x) * CENTER;
+    n.vy += (H/2 - n.y) * CENTER;
+    n.vx *= FRICTION; n.vy *= FRICTION;
+    n.x = Math.max(50, Math.min((stage.clientWidth || 860)-50, n.x + n.vx));
+    n.y = Math.max(30, Math.min(H-30, n.y + n.vy));
+  }
+}
+function draw() {
+  for (const l of links) {
+    if (l.hidden) continue;
+    l.line.setAttribute("x1", l.a.x); l.line.setAttribute("y1", l.a.y);
+    l.line.setAttribute("x2", l.b.x); l.line.setAttribute("y2", l.b.y);
+    if (l.tag) {
+      const mx = (l.a.x+l.b.x)/2, my = (l.a.y+l.b.y)/2;
+      const dx = l.b.x-l.a.x, dy = l.b.y-l.a.y, d = Math.hypot(dx,dy) || 1;
+      l.tag.setAttribute("x", mx - (dy/d)*l.off);
+      l.tag.setAttribute("y", my + (dx/d)*l.off + 3);
+    }
+  }
+  for (const n of nodes) {
+    n.group.setAttribute("transform", "translate(" + n.x + "," + n.y + ")");
+    n.label.setAttribute("x", n.x);
+    n.label.setAttribute("y", n.y + rOf(n) + 13);
+  }
+}
+function loop() {
+  if (alpha > 0.005) { for (let i = 0; i < 4; i++) tick(); alpha *= 0.994; }
+  draw();
+  requestAnimationFrame(loop);
+}
+const rOf = n => n._r || 10;
+
+function mount(key) {
+  V = DATA.views[key]; alpha = 1; selChip = null;
+  document.getElementById("tab-agentb").setAttribute("aria-selected", String(key === "agentb"));
+  document.getElementById("tab-gov").setAttribute("aria-selected", String(key === "gov"));
+  document.getElementById("tab-vocab").setAttribute("aria-selected", String(key === "vocab"));
+  document.getElementById("snapshot").textContent = V.snapshot;
+  document.getElementById("cardtitle").textContent = V.title;
+  document.getElementById("tableview").style.display = key === "agentb" ? "none" : "none";
+  document.getElementById("planview").style.display = "none";
+  stage.replaceChildren();
+  gE = el("g",{}); gN = el("g",{}); gL = el("g",{});
+  stage.append(gE, gN, gL);
+  stage.setAttribute("viewBox", "0 0 " + (stage.clientWidth || 860) + " " + H);
+
+  nodes = V.nodes.map(n => ({ ...n, x:0, y:0, vx:0, vy:0 }));
+  const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+  links = V.edges.map(e => ({ ...e, a: byId[e.s], b: byId[e.t] })).filter(l => l.a && l.b);
+  nodes.forEach((n, i) => {
+    const ang = (i / nodes.length) * Math.PI * 2;
+    const rad = key === "agentb" ? (n.type === "agent" ? 110 : 230) : key === "vocab" ? (n.type === "family" ? 110 : 240) : 200;
+    n.x = (stage.clientWidth || 860) / 2 + Math.cos(ang) * rad;
+    n.y = H / 2 + Math.sin(ang) * rad * 0.9;
+  });
+
+  let tagCount = 0;
+  for (const l of links) {
+    const st = V.edgeStyles[l.k];
+    l.line = el("line", { stroke: st.stroke, "stroke-width": st.width, opacity: st.opacity || 1 });
+    if (st.dash) l.line.setAttribute("stroke-dasharray", st.dash);
+    gE.appendChild(l.line);
+    if (l.label) {
+      l.tag = el("text", { "font-size":10, fill: st.stroke, "text-anchor":"middle",
+        "paint-order":"stroke", stroke:"var(--surface-1)", "stroke-width":3, "font-weight":600 });
+      l.tag.textContent = l.label;
+      l.off = [30,-30,48,-48,64][tagCount++ % 5];
+      gE.appendChild(l.tag);
+    }
+  }
+  for (const n of nodes) {
+    const ts = V.typeStyles[n.type];
+    n._r = n.idle ? 9 : ts.r;
+    if (V.key === "vocab" && n.type === "skill") n._r = Math.min(14, 6 + Math.sqrt(n.ev || 4) * 1.3);
+    n.group = el("g", { tabindex:0, role:"button", "aria-label": n.name + ", " + ts.label });
+    n.circle = el("circle", {
+      r: n._r, fill: ts.color,
+      stroke: n.type === "hub" ? "var(--status-warning)" : "var(--surface-1)",
+      "stroke-width": 2, "stroke-dasharray": n.type === "hub" ? "3 2" : "",
+      opacity: n.idle ? 0.45 : n.dormant ? 0.4 : 1, cursor: "grab",
+    });
+    n.group.appendChild(n.circle); gN.appendChild(n.group);
+    n.label = el("text", { "font-size": n.idle ? 10 : 11, fill:"var(--text-primary)", "text-anchor":"middle",
+      "paint-order":"stroke", stroke:"var(--surface-1)", "stroke-width":3, opacity: n.idle ? 0.7 : n.dormant ? 0.5 : 1 });
+    n.label.textContent = n.name + (n.type === "agent" && !n.idle ? " ×" + n.runs : n.idle ? " (idle)" : "");
+    gL.appendChild(n.label);
+    let drag = null;
+    n.group.addEventListener("pointerdown", ev => { drag = { id: ev.pointerId }; n.fixed = true; alpha = 1; n.group.setPointerCapture(ev.pointerId); });
+    n.group.addEventListener("pointermove", ev => {
+      if (!drag) return;
+      const rect = stage.getBoundingClientRect();
+      n.x = (ev.clientX - rect.left) * (stage.clientWidth / rect.width);
+      n.y = (ev.clientY - rect.top) * (H / rect.height);
+      alpha = 1;
+    });
+    n.group.addEventListener("pointerup", () => { drag = null; n.fixed = false; });
+    n.group.addEventListener("click", () => inspect(n));
+    n.group.addEventListener("focus", () => inspect(n));
+    n.group.addEventListener("pointerenter", ev => showTip(ev, n));
+    n.group.addEventListener("pointermove", ev => { if (!drag) moveTip(ev); });
+    n.group.addEventListener("pointerleave", () => { tip.style.display = "none"; n.circle.setAttribute("stroke", n.type === "hub" ? "var(--status-warning)" : "var(--surface-1)"); });
+  }
+  for (let i = 0; i < 900; i++) tick();
+  alpha = 0.25;
+  buildChrome();
+  showDefault();
+  draw();
+}
+
+function buildChrome() {
+  document.getElementById("tiles").innerHTML = V.tiles.map(([k,v,s]) =>
+    '<div class="tile"><div class="k">'+k+'</div><div class="v">'+v+'</div><div class="s">'+s+'</div></div>').join("");
+  // legend
+  const legend = document.getElementById("legend");
+  legend.innerHTML =
+    Object.entries(V.typeStyles).map(([t, st]) => '<span><span class="swatch" style="background:' + st.color + '"></span>' + st.label + '</span>').join("") +
+    (V.key === "agentb" ? '<span><span class="swatch" style="background:var(--series-role); opacity:.45"></span>faded = idle agent</span>' : "") +
+    Object.entries(V.edgeStyles).map(([k, st]) =>
+      '<span><svg class="line-demo" width="22" height="8"><line x1="0" y1="4" x2="22" y2="4" stroke="' + st.stroke + '" stroke-width="' + Math.max(1.2, st.width) + '" ' + (st.dash ? 'stroke-dasharray="' + st.dash + '"' : "") + '/></svg>' + (V.elabels[k] || k) + '</span>').join("") +
+    '<span>edge labels = folded real counts</span>';
+  // filters
+  const filtersEl = document.getElementById("filters");
+  filtersEl.replaceChildren();
+  for (const [t, st] of Object.entries(V.typeStyles)) {
+    const lab = document.createElement("label");
+    const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = true; cb.dataset.type = t;
+    cb.addEventListener("change", () => {
+      for (const n of nodes) if (n.type === t) { n.group.style.display = cb.checked ? "" : "none"; n.label.style.display = cb.checked ? "" : "none"; }
+      for (const l of links) if (l.a.type === t || l.b.type === t) { l.hidden = !cb.checked; l.line.style.display = l.hidden ? "none" : ""; if (l.tag) l.tag.style.display = l.hidden ? "none" : ""; }
+    });
+    const sw = document.createElement("span"); sw.className = "swatch"; sw.style.background = st.color;
+    lab.append(cb, sw, document.createTextNode(" " + (st.plural || st.label)));
+    filtersEl.appendChild(lab);
+  }
+  const search = document.createElement("input"); search.type = "text"; search.placeholder = "Search nodes…"; search.style.marginLeft = "auto";
+  search.addEventListener("input", () => {
+    const q = search.value.trim().toLowerCase();
+    for (const n of nodes) {
+      const hide = q && !n.name.toLowerCase().includes(q);
+      n.group.style.opacity = hide ? 0.12 : 1; n.label.style.opacity = hide ? 0.12 : 1;
+    }
+  });
+  filtersEl.appendChild(search);
+  if (V.key === "agentb") {
+    const viewBtn = document.createElement("button"); viewBtn.textContent = "Rejected proposals";
+    viewBtn.addEventListener("click", () => {
+      const tv = document.getElementById("tableview");
+      const on = tv.style.display === "block";
+      tv.style.display = on ? "none" : "block";
+      viewBtn.textContent = on ? "Rejected proposals" : "Hide table";
+    });
+    filtersEl.appendChild(viewBtn);
+    const planBtn = document.createElement("button"); planBtn.textContent = "Action plan";
+    planBtn.addEventListener("click", () => {
+      const pv = document.getElementById("planview");
+      const on = pv.style.display === "block";
+      pv.style.display = on ? "none" : "block";
+      planBtn.textContent = on ? "Action plan" : "Hide plan";
+    });
+    filtersEl.appendChild(planBtn);
+  }
+  const themeBtn = document.createElement("button"); themeBtn.textContent = "Dark";
+  themeBtn.addEventListener("click", () => {
+    const root = document.documentElement;
+    root.dataset.theme = root.dataset.theme === "dark" ? "light" : "dark";
+    themeBtn.textContent = root.dataset.theme === "dark" ? "Light" : "Dark";
+  });
+  filtersEl.appendChild(themeBtn);
+  // system read chips
+  document.getElementById("sysreadsummary").textContent = V.sysreadSummary;
+  const rowsEl = document.getElementById("sysreadrows");
+  rowsEl.replaceChildren();
+  for (const s of V.systemRead) {
+    const chip = document.createElement("div"); chip.className = "chip"; chip.tabIndex = 0;
+    const l1 = document.createElement("div"); l1.className = "c1";
+    const badge = document.createElement("span");
+    badge.className = "badge " + (s.pri === "high" ? "critical" : s.pri === "medium" ? "warning" : "good");
+    badge.dataset.icon = s.pri === "high" ? "⚠" : s.pri === "medium" ? "◈" : "✓";
+    badge.textContent = s.pri;
+    const t = document.createElement("span"); t.className = "ct"; t.textContent = s.short;
+    t.title = s.title.replace(/^[⚠✓◈]\s*/, "");
+    l1.append(badge, t);
+    const a = document.createElement("div"); a.className = "ca"; a.textContent = s.action;
+    chip.append(l1, a);
+    const open = () => showFinding(s, chip);
+    chip.addEventListener("click", open);
+    chip.addEventListener("keydown", ev => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); open(); } });
+    rowsEl.appendChild(chip);
+  }
+}
+
+function showFinding(s, chip) {
+  if (selChip) selChip.classList.remove("sel");
+  if (selChip === chip) { selChip = null; showDefault(); return; }
+  selChip = chip; chip.classList.add("sel");
+  insp.replaceChildren();
+  const kind = document.createElement("span"); kind.className = "kind"; kind.textContent = "system read · " + s.pri;
+  const h = document.createElement("h2"); h.textContent = s.title.replace(/^[⚠✓◈]\s*/, "");
+  insp.append(kind, h);
+  insp.appendChild(interpEl("cause", s.cause));
+  insp.appendChild(interpEl("effect", s.effect));
+  insp.appendChild(interpEl("action", s.action));
+}
+function showDefault() {
+  insp.replaceChildren();
+  const kind = document.createElement("span"); kind.className = "kind"; kind.textContent = "inspector";
+  const h = document.createElement("h2"); h.textContent = "Nothing selected";
+  const hint = document.createElement("p"); hint.className = "hint";
+  hint.textContent = "Click any node for its numbers and its cause → effect → next best action. The fleet-wide summary lives in the System read panel above.";
+  insp.append(kind, h, hint);
+}
+function interpEl(kind2, text) {
+  const d = document.createElement("div"); d.className = "interp " + kind2;
+  const lab = document.createElement("div"); lab.className = "ilabel";
+  lab.dataset.icon = kind2 === "cause" ? "◈" : kind2 === "effect" ? "⚠" : "→";
+  lab.appendChild(document.createTextNode(kind2 === "cause" ? "cause" : kind2 === "effect" ? "effect" : "next best action"));
+  const p = document.createElement("p"); p.textContent = text;
+  d.append(lab, p);
+  return d;
+}
+function badgeEl(cls, icon, text) { const b = document.createElement("span"); b.className = "badge " + cls; b.dataset.icon = icon; b.textContent = text; return b; }
+function showTip(ev, n) {
+  tip.replaceChildren();
+  const t1 = document.createElement("div"); t1.className = "t1"; t1.textContent = n.name;
+  const t2 = document.createElement("div"); t2.className = "t2";
+  t2.textContent =
+    n.type === "agent" ? (n.idle ? "idle · v" + n.ver + " · 0 runs" : n.runs + " runs · " + n.steps + " steps · avg " + n.avg)
+    : n.type === "norm" ? (n.stops + " stops · " + n.rejected + " overturned")
+    : n.type === "hub" ? ((n.members || []).length + " members — click for the list")
+    : n.type === "failure" ? (n.tool || "")
+    : (n.count != null ? n.count + " decision(s)" : (n.cause || "").slice(0, 80));
+  tip.append(t1, t2);
+  tip.style.display = "block"; moveTip(ev);
+  n.circle.setAttribute("stroke", "var(--text-secondary)");
+}
+function moveTip(ev) { tip.style.left = (ev.clientX + 14) + "px"; tip.style.top = (ev.clientY + 12) + "px"; }
+function inspect(n) {
+  insp.replaceChildren();
+  const kind = document.createElement("span"); kind.className = "kind"; kind.textContent = V.typeStyles[n.type].label;
+  const h = document.createElement("h2"); h.textContent = n.name;
+  insp.append(kind, h);
+  const dl = document.createElement("dl");
+  const add = (k, v) => { const dt = document.createElement("dt"); dt.textContent = k; const dd = document.createElement("dd"); dd.textContent = v; dl.append(dt, dd); };
+  if (n.type === "agent") {
+    if (n.ver) add("version", n.ver);
+    add("runs", n.runs); add("steps", n.steps);
+    if (!n.idle) add("avg steps/run", n.avg);
+    if (n.awaiting) add("runs awaiting a person", n.awaiting);
+    const rej = (V.rejects || []).filter(r => r.agent_type === n.name);
+    if (rej.length) { const t = document.createElement("div"); t.className = "kind"; t.style.marginTop = "8px"; t.textContent = "overturned proposals"; insp.appendChild(t);
+      const ul = document.createElement("ul");
+      for (const r of rej) { const li = document.createElement("li"); li.textContent = r.title + " (" + (r.tool || r.kind) + ")"; ul.appendChild(li); }
+      insp.appendChild(ul); }
+  } else if (n.type === "norm") {
+    add("what it is", n.what); add("stops (folded)", n.stops); add("overturned", n.rejected);
+  } else if (n.type === "failure") {
+    add("tool", n.tool);
+  } else if (n.type === "skill") {
+    add("slug", n.slug); add("category", n.cat);
+    add("aliases folded", n.aliases || "—");
+    add("supply / demand", n.supply + " / " + n.demand);
+    add("evidence", n.ev);
+    add("status", n.dormant ? "dormant" : "active");
+  } else if (n.type === "hub") {
+    const t = document.createElement("div"); t.className = "kind"; t.textContent = "members";
+    insp.appendChild(t);
+    const ul = document.createElement("ul");
+    for (const m of n.members || []) { const li = document.createElement("li"); li.textContent = m; ul.appendChild(li); }
+    insp.appendChild(ul);
+  } else {
+    if (n.agent) add("on agent", n.agent);
+    if (n.kind) add("proposal kind", n.kind);
+    if (n.count != null) add("decisions", n.count);
+  }
+  insp.appendChild(dl);
+  if (n.cause) insp.appendChild(interpEl("cause", n.cause));
+  if (n.effect) insp.appendChild(interpEl("effect", n.effect));
+  if (n.action) insp.appendChild(interpEl("action", n.action));
+  const rel = links.filter(l => l.a === n || l.b === n);
+  if (rel.length) {
+    const t = document.createElement("div"); t.className = "kind"; t.style.marginTop = "10px"; t.textContent = "edges";
+    const ul = document.createElement("ul");
+    for (const l of rel.slice(0, 10)) {
+      const other = l.a === n ? l.b : l.a;
+      const li = document.createElement("li");
+      li.textContent = (V.elabels[l.k] || l.k) + " " + other.name + (l.label ? " — " + l.label : "");
+      ul.appendChild(li);
+    }
+    insp.append(t, ul);
+  }
+}
+
+// tables (agent view only)
+(function buildTables() {
+  const tb = document.getElementById("tablecontent");
+  const table = document.createElement("table");
+  table.innerHTML = "<thead><tr><th>Agent</th><th>Kind</th><th>Rejected proposal</th><th>Tool</th></tr></thead>";
+  const tbody = document.createElement("tbody");
+  for (const r of DATA.views.agentb.rejects) {
+    const tr = document.createElement("tr");
+    [r.agent_type, r.kind, r.title, r.tool || "—"].forEach((c, i) => {
+      const td = document.createElement("td"); td.textContent = c; if (i > 0) td.className = "dim"; tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody); tb.appendChild(table);
+  const pc = document.getElementById("plancontent");
+  const ptable = document.createElement("table");
+  ptable.innerHTML = "<thead><tr><th>Pri</th><th>Agent</th><th>Ver</th><th>State</th><th>Runs</th><th>Stops</th><th>Overturned</th><th>Errors</th><th>Next best action</th></tr></thead>";
+  const pbody = document.createElement("tbody");
+  for (const p of DATA.views.agentb.plan) {
+    const tr = document.createElement("tr");
+    const priTd = document.createElement("td");
+    const badge = document.createElement("span"); badge.className = "badge " + (p.pri === "high" ? "critical" : p.pri === "medium" ? "warning" : "good");
+    badge.dataset.icon = p.pri === "high" ? "⚠" : p.pri === "medium" ? "!" : "✓";
+    badge.textContent = p.pri;
+    priTd.appendChild(badge); tr.appendChild(priTd);
+    [p.name, p.ver, p.state, p.runs, p.stops, p.overturned, p.errors, p.action].forEach((c, i) => {
+      const td = document.createElement("td"); td.textContent = c; if (i > 0) td.className = "dim"; tr.appendChild(td);
+    });
+    pbody.appendChild(tr);
+  }
+  ptable.appendChild(pbody); pc.appendChild(ptable);
+})();
+
+document.getElementById("tab-agentb").addEventListener("click", () => mount("agentb"));
+document.getElementById("tab-gov").addEventListener("click", () => mount("gov"));
+document.getElementById("tab-vocab").addEventListener("click", () => mount("vocab"));
+mount("agentb");
+loop();
+</script>
+</body>
+</html>

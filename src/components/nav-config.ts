@@ -25,6 +25,7 @@ import {
   ShieldCheck,
   Target,
   Users,
+  Waypoints,
 } from "lucide-react";
 
 import type { NavCtx } from "@/hooks/useNavCtx";
@@ -96,6 +97,13 @@ export const NAV_GROUPS: NavGroup[] = [
         to: "/agents/observability",
         label: "Agent observability",
         icon: Activity,
+        show: (c) => c.governance,
+        mode: "agent",
+      },
+      {
+        to: "/agents/intelligence",
+        label: "Agent intelligence",
+        icon: Waypoints,
         show: (c) => c.governance,
         mode: "agent",
       },
