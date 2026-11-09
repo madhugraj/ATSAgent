@@ -217,12 +217,6 @@ export const NAV_GROUPS: NavGroup[] = [
         mode: "manual",
       },
       {
-        to: "/skill-ontology",
-        label: "Skill ontology",
-        icon: Waypoints,
-        show: (c) => c.governance,
-      },
-      {
         to: "/hiring-cost",
         label: "Hiring cost",
         icon: Coins,
@@ -239,8 +233,8 @@ export const NAV_GROUPS: NavGroup[] = [
         to: "/brain",
         label: "Talent Brain",
         icon: Brain,
-        show: (c) => c.leadership,
-        mode: "manual",
+        // the organisation's skill and role ontology, in either way of working
+        show: (c) => c.leadership || c.governance,
       },
     ],
   },
