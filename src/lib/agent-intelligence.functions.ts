@@ -8,7 +8,7 @@
  * names anywhere in the payload.
  */
 import { createServerFn } from "@tanstack/react-start";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, gte, lte } from "drizzle-orm";
 
 import { db } from "../server/db";
 import {
@@ -21,6 +21,7 @@ import {
   stageEvents,
 } from "@db/schema";
 import { assertRole, requireOrg } from "./auth.middleware";
+import { reportWindowSchema, resolveWindow } from "./report-window";
 
 const GOVERNANCE_ROLES = ["hr_head", "president_cbo"] as const;
 
@@ -108,6 +109,7 @@ export type RejectRow = {
 
 export type AgentIntelligence = {
   generatedAt: string;
+  window: { from: string; to: string; agent: string | null };
   views: {
     behavior: {
       tiles: [string, string, string][];
@@ -134,11 +136,20 @@ const priOf = (t: string): Pri =>
 const summarize = (chips: Chip[]) =>
   `${chips.filter((c) => c.pri === "high").length} need action · ${chips.filter((c) => c.pri === "medium").length} to plan · ${chips.filter((c) => c.pri === "ok").length} healthy`;
 
-export const agentIntelligence = createServerFn({ method: "GET" })
+export const agentIntelligence = createServerFn({ method: "POST" })
   .middleware([requireOrg])
-  .handler(async ({ context }): Promise<AgentIntelligence> => {
+  .validator((input: unknown) => reportWindowSchema.parse(input ?? {}))
+  .handler(async ({ context, data }): Promise<AgentIntelligence> => {
     const org = context.orgId;
     await assertRole(context.userId, org, [...GOVERNANCE_ROLES]);
+    const win = resolveWindow(data);
+    // every run-derived row is limited to runs started in the window (and to one agent when filtered)
+    const inRun = and(
+      eq(agentRuns.orgId, org),
+      gte(agentRuns.createdAt, win.from),
+      lte(agentRuns.createdAt, win.to),
+      ...(win.agent ? [eq(agentRuns.agentType, win.agent as never)] : []),
+    );
 
     const [
       runsByAgent,
@@ -163,11 +174,8 @@ export const agentIntelligence = createServerFn({ method: "GET" })
         })
         .from(agentRuns)
         .leftJoin(agentSteps, eq(agentSteps.runId, agentRuns.id))
-        .where(eq(agentRuns.orgId, org)),
-      db
-        .select({ status: agentRuns.status, n: agentRuns.id })
-        .from(agentRuns)
-        .where(eq(agentRuns.orgId, org)),
+        .where(inRun),
+      db.select({ status: agentRuns.status, n: agentRuns.id }).from(agentRuns).where(inRun),
       db
         .select({
           agentType: agentRuns.agentType,
@@ -177,7 +185,7 @@ export const agentIntelligence = createServerFn({ method: "GET" })
         })
         .from(agentTasks)
         .innerJoin(agentRuns, eq(agentRuns.id, agentTasks.runId))
-        .where(eq(agentTasks.orgId, org)),
+        .where(and(eq(agentTasks.orgId, org), inRun)),
       db
         .select({
           agentType: agentRuns.agentType,
@@ -187,16 +195,16 @@ export const agentIntelligence = createServerFn({ method: "GET" })
         })
         .from(agentTasks)
         .innerJoin(agentRuns, eq(agentRuns.id, agentTasks.runId))
-        .where(and(eq(agentTasks.orgId, org), eq(agentTasks.status, "rejected"))),
+        .where(and(eq(agentTasks.orgId, org), eq(agentTasks.status, "rejected"), inRun)),
       db
         .select({ agentType: agentRuns.agentType, tool: agentSteps.toolName, n: agentSteps.id })
         .from(agentSteps)
         .innerJoin(agentRuns, eq(agentRuns.id, agentSteps.runId))
-        .where(and(eq(agentSteps.orgId, org), eq(agentSteps.status, "error"))),
+        .where(and(eq(agentSteps.orgId, org), eq(agentSteps.status, "error"), inRun)),
       db
         .select({ agentType: agentRuns.agentType, n: agentRuns.id })
         .from(agentRuns)
-        .where(and(eq(agentRuns.orgId, org), eq(agentRuns.status, "awaiting_human"))),
+        .where(and(inRun, eq(agentRuns.status, "awaiting_human"))),
       db
         .select({ agentType: agentDefinitions.agentType, version: agentDefinitions.version })
         .from(agentDefinitions)
@@ -208,16 +216,23 @@ export const agentIntelligence = createServerFn({ method: "GET" })
         .select({ agentType: agentRuns.agentType, n: agentTasks.id })
         .from(agentTasks)
         .innerJoin(agentRuns, eq(agentRuns.id, agentTasks.runId))
-        .where(and(eq(agentTasks.orgId, org), eq(agentTasks.status, "open"))),
+        .where(and(eq(agentTasks.orgId, org), eq(agentTasks.status, "open"), inRun)),
       db
         .select({ status: agentTasks.status, n: agentTasks.id })
         .from(agentTasks)
-        .where(eq(agentTasks.orgId, org)),
+        .innerJoin(agentRuns, eq(agentRuns.id, agentTasks.runId))
+        .where(and(eq(agentTasks.orgId, org), inRun)),
       db
         .select({ actor: stageEvents.actor, n: stageEvents.id })
         .from(stageEvents)
-        .where(eq(stageEvents.orgId, org)),
-      db.select({ n: agentRuns.id }).from(agentRuns).where(eq(agentRuns.orgId, org)),
+        .where(
+          and(
+            eq(stageEvents.orgId, org),
+            gte(stageEvents.createdAt, win.from),
+            lte(stageEvents.createdAt, win.to),
+          ),
+        ),
+      db.select({ n: agentRuns.id }).from(agentRuns).where(inRun),
       db
         .select({ n: matchScores.id })
         .from(matchScores)
@@ -296,7 +311,9 @@ export const agentIntelligence = createServerFn({ method: "GET" })
       if (cur === undefined || (isPrerelease(cur) && !isPrerelease(r.version)))
         defVersions.set(r.agentType, r.version);
     }
-    const registered = [...new Set(definitions.map((d) => d.agentType))].sort();
+    const registered = [...new Set(definitions.map((d) => d.agentType))]
+      .filter((a) => !win.agent || a === win.agent)
+      .sort();
     const taskStatus = { cancelled: 0, answered: 0, open: 0 };
     for (const r of taskTotals)
       if (r.status in taskStatus) taskStatus[r.status as keyof typeof taskStatus] += 1;
@@ -681,6 +698,7 @@ export const agentIntelligence = createServerFn({ method: "GET" })
 
     return {
       generatedAt: new Date().toISOString(),
+      window: { from: win.from.toISOString(), to: win.to.toISOString(), agent: win.agent },
       views: {
         behavior: {
           tiles: [

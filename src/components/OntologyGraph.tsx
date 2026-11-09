@@ -117,7 +117,7 @@ export function OntologyGraph({
       cursorX += box.side + gap;
     }
 
-    const contentHeight = Math.max(360, cursorY + rowH + gap);
+    const contentHeight = Math.max(200, cursorY + rowH + gap);
     return { width, height: contentHeight, placed, links, clusters };
   }, [nodes, edges, limit]);
 
@@ -155,7 +155,7 @@ export function OntologyGraph({
         <div className="graph-bloom pointer-events-none absolute inset-0" />
         <svg
           viewBox={`0 0 ${layout.width} ${layout.height}`}
-          className="relative h-[560px] min-w-[760px] w-full"
+          className="relative h-auto min-w-[760px] w-full"
           role="img"
           aria-label="Organisational skill ontology graph"
         >
@@ -247,57 +247,59 @@ export function OntologyGraph({
                 n.r >= 11 || focus === n.slug || (focus ? connected.has(n.slug) : false);
               const tone = fill(n);
               return (
-                <g
-                  key={n.slug}
-                  transform={`translate(${n.x},${n.y})`}
-                  opacity={dim ? 0.22 : 1}
-                  onMouseEnter={() => setHover(n.slug)}
-                  onMouseLeave={() => setHover(null)}
-                  onClick={() => onSelect(n.slug)}
-                  className="graph-node cursor-pointer"
-                  style={{
-                    transition: "opacity 220ms ease",
-                    animationDelay: `${(index % 14) * -170}ms`,
-                  }}
-                >
-                  <title>{`${n.name} — ${n.supply} in pool, ${n.demand} weighted demand`}</title>
-                  {selected === n.slug ? (
+                // Position on an outer group: the breathing animation sets a CSS
+                // transform on .graph-node, which would replace a translate here.
+                <g key={n.slug} transform={`translate(${n.x},${n.y})`}>
+                  <g
+                    opacity={dim ? 0.22 : 1}
+                    onMouseEnter={() => setHover(n.slug)}
+                    onMouseLeave={() => setHover(null)}
+                    onClick={() => onSelect(n.slug)}
+                    className="graph-node cursor-pointer"
+                    style={{
+                      transition: "opacity 220ms ease",
+                      animationDelay: `${(index % 14) * -170}ms`,
+                    }}
+                  >
+                    <title>{`${n.name} — ${n.supply} in pool, ${n.demand} weighted demand`}</title>
+                    {selected === n.slug ? (
+                      <circle
+                        className="graph-ring"
+                        r={n.r + 7}
+                        fill="none"
+                        stroke={tone}
+                        strokeWidth="1.2"
+                      />
+                    ) : null}
+                    <circle r={n.r + 5} fill={tone} opacity={isFocus ? 0.2 : 0.11} />
                     <circle
-                      className="graph-ring"
-                      r={n.r + 7}
-                      fill="none"
-                      stroke={tone}
-                      strokeWidth="1.2"
+                      r={n.r}
+                      fill={tone}
+                      stroke="var(--card)"
+                      strokeWidth={selected === n.slug ? 2.4 : 1.6}
+                      filter="url(#og-lift)"
+                      style={{ transition: "r 200ms ease" }}
                     />
-                  ) : null}
-                  <circle r={n.r + 5} fill={tone} opacity={isFocus ? 0.2 : 0.11} />
-                  <circle
-                    r={n.r}
-                    fill={tone}
-                    stroke="var(--card)"
-                    strokeWidth={selected === n.slug ? 2.4 : 1.6}
-                    filter="url(#og-lift)"
-                    style={{ transition: "r 200ms ease" }}
-                  />
-                  <circle r={Math.max(1.6, n.r * 0.32)} fill="var(--card)" opacity={0.55} />
-                  {label ? (
-                    <text
-                      y={n.r + 12}
-                      textAnchor="middle"
-                      className="fill-foreground"
-                      style={{
-                        fontSize: 9.5,
-                        pointerEvents: "none",
-                        paintOrder: "stroke",
-                        stroke: "var(--card)",
-                        strokeWidth: 3,
-                        strokeLinejoin: "round",
-                        fontWeight: isFocus ? 600 : 500,
-                      }}
-                    >
-                      {n.name.length > 18 ? `${n.name.slice(0, 17)}…` : n.name}
-                    </text>
-                  ) : null}
+                    <circle r={Math.max(1.6, n.r * 0.32)} fill="var(--card)" opacity={0.55} />
+                    {label ? (
+                      <text
+                        y={n.r + 12}
+                        textAnchor="middle"
+                        className="fill-foreground"
+                        style={{
+                          fontSize: 9.5,
+                          pointerEvents: "none",
+                          paintOrder: "stroke",
+                          stroke: "var(--card)",
+                          strokeWidth: 3,
+                          strokeLinejoin: "round",
+                          fontWeight: isFocus ? 600 : 500,
+                        }}
+                      >
+                        {n.name.length > 18 ? `${n.name.slice(0, 17)}…` : n.name}
+                      </text>
+                    ) : null}
+                  </g>
                 </g>
               );
             })}

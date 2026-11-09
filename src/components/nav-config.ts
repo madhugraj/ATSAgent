@@ -217,9 +217,9 @@ export const NAV_GROUPS: NavGroup[] = [
         mode: "manual",
       },
       {
-        to: "/skill-supply",
-        label: "Skill supply vs demand",
-        icon: Target,
+        to: "/skill-ontology",
+        label: "Skill ontology",
+        icon: Waypoints,
         show: (c) => c.governance,
       },
       {

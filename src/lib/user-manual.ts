@@ -382,14 +382,15 @@ export const MANUAL_SECTIONS: ManualSection[] = [
   },
   {
     id: "agent-intelligence",
-    title: "Agent intelligence, Agent governance and Skill supply",
+    title: "Agent intelligence, Agent governance and Skill ontology",
     summary:
       "Three read-only pages, one layout: a verdict, a fix list of only what needs action, one main picture and a per-item table.",
     steps: [
       "Every page opens with a verdict (\u201c3 things need you\u201d) and one-word status pills — click a pill to filter the fix list. The fix list shows only what needs action, most severe first, each with a next-step link; everything that passes collapses into one line. Governance roles (HR head, CBO). Nothing here calls a model; it is deterministic and refreshes every minute.",
       "Agent administration → Agent intelligence: how the agents behave — which agents ran, where your people declined their proposals, which tools fail, and runs that are not step-traced. The map shows each agent between the tools it failed on and the person checkpoints it passed; the table lists each agent's runs, checks, declines and failed calls.",
       "Agent administration → Agent governance: whether the harness around the agents is holding — limits (refused calls, injection flags), autonomy against risk tier (including changes made with no approval card), definitions (runs on the approved, tested rulebook), hand-offs and budget. The hand-off map shows who published each event, the event, and the agent it started, with direct agent-to-agent delegation dashed; under it, chains, loops and lost events. The agents table shows each agent against the five checks — click a row for detail.",
-      "Intelligence → Skill supply vs demand: the skills your requisitions ask for against the skills your candidate pool holds, biggest gaps first, with sourcing gaps and thin cover in the fix list.",
+      "Intelligence → Skill ontology: your organisation's skill graph — capability families, the skills in them and the skills that appear together, coloured by pressure (comfortable, tightening, scarce, dormant). Click a skill for its pool supply, demand, scarcity, aliases and neighbours; the fix list shows sourcing gaps, scarce skills and emerging skills, and the period shows what changed. Open in 3D goes to the Talent Brain.",
+      "Reports: every page has a period (last 7, 30 or 90 days, this month, all time or custom dates) and, on the agent pages, an agent. The page follows that choice, and PDF and Excel download the same window — a summary, the fix list and every table, plus day-by-day activity, every run (what started it, outcome, steps, tokens, failed calls, approvals) and, for governance, every event and who published it. Excel has one sheet per section.",
     ],
   },
   {
