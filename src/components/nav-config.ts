@@ -245,7 +245,7 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    heading: "Administration",
+    heading: "Organisation",
     items: [
       { to: "/team", label: "Users & roles", icon: ShieldCheck, show: (c) => c.governance },
       { to: "/organisation", label: "Organisation", icon: Building2, show: (c) => c.isOwner },
@@ -263,6 +263,11 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: LayoutTemplate,
         show: (c) => c.governance,
       },
+    ],
+  },
+  {
+    heading: "Platform",
+    items: [
       {
         to: "/platform",
         label: "Platform console",

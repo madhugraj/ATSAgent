@@ -84,7 +84,7 @@ function OrgProfilePage() {
   return (
     <>
       <PageHeader
-        eyebrow="Administration"
+        eyebrow="Organisation"
         title="Organisation profile"
         description="The context every hiring agent works from — written by the Organisation context agent from your website, your documents and what you tell it, and approved by the HR head or an owner."
       />

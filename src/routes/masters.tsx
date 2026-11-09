@@ -98,7 +98,7 @@ function Masters() {
   return (
     <>
       <PageHeader
-        eyebrow="Administration"
+        eyebrow="Organisation"
         title="Master data library"
         description="Your organisation's shared lists — every requisition, JD and match score reads from them. Add your own entries any time; recruiters can also add on the fly while raising a requisition."
       />

@@ -278,7 +278,7 @@ function Team() {
         </Button>
       </div>
       <PageHeader
-        eyebrow="Administration"
+        eyebrow="Organisation"
         title="Users, roles & access control"
         description={
           org
