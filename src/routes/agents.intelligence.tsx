@@ -289,7 +289,7 @@ function GraphCanvas({
       const pad = 70;
       const x0 = Math.min(...xs) - pad, x1 = Math.max(...xs) + pad;
       const y0 = Math.min(...ys) - 40, y1 = Math.max(...ys) + 50;
-      const scale = Math.max((x1 - x0) / W, (y1 - y0) / H, 0.6);
+      const scale = Math.max((x1 - x0) / W, (y1 - y0) / H, 1);
       const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
       view = { x: cx - (W * scale) / 2, y: cy - (H * scale) / 2, w: W * scale, h: H * scale };
       svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.w} ${view.h}`);
@@ -425,9 +425,8 @@ function Inspector({ node, chip, tabKey }: { node: GNode | null; chip: Chip | nu
       <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Inspector</p>
       <h3 className="text-sm font-semibold">Nothing selected</h3>
       <p className="text-xs leading-relaxed text-muted-foreground">
-        Click any node for its numbers and its cause → effect → next best action, or a System read chip for the fleet-wide
-        finding. Every number here is a live query over this organisation's runs, steps, tasks and stage transitions —
-        deterministic, no model in the path.
+        Click a circle in the graph, or a card under "What needs attention", to see its numbers, why it matters and what
+        to do next. Every number comes from your organisation's own agent activity.
       </p>
     </div>
   );
