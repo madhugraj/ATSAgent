@@ -15,6 +15,8 @@ import { db } from "../server/db";
 import { agentDefinitions, agentRuns, agentSteps, agentTasks, applications, candidates, departments, matchScores, requisitions, stageEvents } from "@db/schema";
 import { assertRole, requireOrg } from "./auth.middleware";
 import { buildOntology } from "./ontology.server";
+import { computeHarness, type Harness } from "../server/agents/governance.server";
+export type * from "../server/agents/governance.server";
 
 const GOVERNANCE_ROLES = ["hr_head", "president_cbo"] as const;
 
@@ -94,15 +96,6 @@ export type ActionPlanRow = {
 
 export type RejectRow = { agentType: string; kind: string; title: string; tool: string | null; count: number };
 
-export type Tone = "good" | "warn" | "bad";
-export type Oversight = {
-  headline: { tone: Tone; title: string; detail: string }[];
-  weekly: { week: string; approved: number; declined: number }[];
-  disagreements: { agent: string; proposal: string; declined: number; total: number; reasons: string[] }[];
-  staleOpen: { agent: string; title: string; ageHours: number }[];
-  closedUndecided: number;
-  stageMoves: { stage: string; agent: number; person: number }[];
-};
 export type SkillGap = { skill: string; demand: number; supply: number };
 
 export type AgentIntelligence = {
@@ -118,14 +111,7 @@ export type AgentIntelligence = {
       rejects: RejectRow[];
       fleet: { registered: number; idle: number; gap: number };
     };
-    governance: {
-      tiles: [string, string, string][];
-      nodes: GNode[];
-      edges: GEdge[];
-      systemRead: Chip[];
-      sysreadSummary: string;
-      oversight: Oversight;
-    };
+    governance: { harness: Harness };
     vocabulary: {
       tiles: [string, string, string][];
       nodes: GNode[];
@@ -220,22 +206,6 @@ export const agentIntelligence = createServerFn({ method: "GET" })
           .innerJoin(applications, eq(applications.id, matchScores.applicationId))
           .where(eq(applications.orgId, org)),
       ]);
-
-    const [decisionRows, stageRows] = await Promise.all([
-      db
-        .select({
-          agentType: agentRuns.agentType,
-          status: agentTasks.status,
-          title: agentTasks.title,
-          response: agentTasks.response,
-          decidedAt: agentTasks.decidedAt,
-          createdAt: agentTasks.createdAt,
-        })
-        .from(agentTasks)
-        .innerJoin(agentRuns, eq(agentRuns.id, agentTasks.runId))
-        .where(and(eq(agentTasks.orgId, org), eq(agentRuns.orgId, org))),
-      db.select({ toStage: stageEvents.toStage, actor: stageEvents.actor }).from(stageEvents).where(eq(stageEvents.orgId, org)),
-    ]);
 
     // fold join rows into aggregates in JS (counts stay exact, one round trip per table)
     const runsAgg = new Map<string, { runs: Set<string>; steps: number }>();
@@ -548,115 +518,7 @@ export const agentIntelligence = createServerFn({ method: "GET" })
     const priOrder = { high: 0, medium: 1, ok: 2 } as const;
     plan.sort((x, y) => priOrder[x.pri] - priOrder[y.pri] || y.errors - x.errors || x.name.localeCompare(y.name));
 
-    // ---------------- governance view ----------------
-    const govNodes: GNode[] = [];
-    const govEdges: GEdge[] = [];
-    const kindNorm: Record<string, string> = { approval: "n-hitl", gate: "n-gates", clarification: "n-clarify" };
-    const kindWord: Record<string, string> = { approval: "cards", gate: "gates", clarification: "asks" };
-    let govOk = 0, govRej = 0, govAnswered = 0;
-    const govSeen = new Set<string>();
-    for (const [agent, kinds] of taskAgg) {
-      for (const [kind, st] of kinds) {
-        const ok = (st.get("approved") ?? 0) + (st.get("answered") ?? 0);
-        const rej = st.get("rejected") ?? 0;
-        if (!ok && !rej) continue;
-        govSeen.add(kind);
-        govOk += st.get("approved") ?? 0;
-        govAnswered += st.get("answered") ?? 0;
-        govRej += rej;
-        const nk: string = kindNorm[kind] ?? "";
-        if (ok > 0) {
-          govNodes.push({
-            id: `gv-ok-${agent}-${kind}`, type: "dOk", name: `${agent} · approved`, agent, kind, count: ok,
-            cause: `${ok} proposals approved by a person (${kindWord[kind]} on ${agent} runs).`,
-            effect: `Human-in-the-loop working as designed on this proposal type.`,
-            action: `None — approved decisions are the calibration baseline.`,
-          });
-          govEdges.push({ s: `gv-ok-${agent}-${kind}`, t: nk, k: "decided", label: `×${ok}` });
-        }
-        if (rej > 0) {
-          const titles = rejectRows.filter((d) => d.agentType === agent && d.kind === kind).map((d) => `${d.title} (${d.tool ?? "?"})`);
-          govNodes.push({
-            id: `gv-rej-${agent}-${kind}`, type: "dBad", name: `${agent} · declined`, agent, kind, count: rej, members: titles,
-            cause: `${rej} proposal(s) declined by a person: ${titles.join("; ")}.`,
-            effect: rej >= 2
-              ? `The same proposal type keeps getting declined — the agent's judgment or its wording is out of sync with reviewers.`
-              : `A single rejection is normal human disagreement — it becomes a pattern at 2.`,
-            action: rej >= 2 ? `Read the rejection reasons; fix proposal copy or scorer threshold, not the reviewer.` : `No action yet.`,
-          });
-          govEdges.push({ s: `gv-rej-${agent}-${kind}`, t: nk, k: "decided", label: `×${rej}` });
-        }
-      }
-    }
-    for (const s of normSpecs) {
-      const kindKey = s.id === "n-hitl" ? "approval" : s.id === "n-gates" ? "gate" : "clarification";
-      if (!govSeen.has(kindKey)) continue;
-      govNodes.push({
-        ...s, type: "norm",
-        cause: `${s.what}.`,
-        effect: s.rejected > 0 ? `${s.rejected} overturns against ${s.stops} stops.` : `${s.stops} stops, zero overturns — calibrated.`,
-        action: s.rejected >= 3 ? `Review the proposals under this norm — see the rejected chains.` : `None.`,
-      });
-    }
-    if (taskStatus.open > 0)
-      govNodes.push({
-        id: "gv-open", type: "dOpen", name: `Still open ×${taskStatus.open}`, members: [...openMap.keys()],
-        cause: `${taskStatus.open} cards still awaiting a person: ${[...openMap.entries()].map(([a, c]) => `${a} ×${c}`).join(", ")}.`,
-        effect: `Proposals (and the runs behind them) are parked mid-flight; ${awaiting} runs sit in awaiting_human.`,
-        action: `Clear the decisions inbox — oldest cards first.`,
-      });
-    if (taskStatus.cancelled > 0)
-      govNodes.push({
-        id: "gv-cancel", type: "dMut", name: `Cancelled ×${taskStatus.cancelled}`,
-        cause: `${taskStatus.cancelled} cards were cancelled — mostly stale ticks reaped when their run ended.`,
-        effect: `Harmless, but they bury the live signals in the decisions inbox.`,
-        action: `A liveness rule should cancel stale cards sooner and mark them, so open ≠ stale.`,
-      });
-
-    const govChips: Chip[] = [];
-    const repeatRej = govNodes.filter((n) => n.type === "dBad" && (n.count ?? 0) >= 2).sort((a, b) => (b.count ?? 0) - (a.count ?? 0))[0];
-    if (repeatRej)
-      govChips.push({
-        pri: "high", title: `⚠ Repeated overturns: ${repeatRej.agent} ${kindWord[repeatRej.kind!]} declined ×${repeatRej.count}`,
-        short: `${repeatRej.agent} ${repeatRej.kind} declined ×${repeatRej.count}`,
-        cause: (repeatRej.members ?? []).join("; "),
-        effect: `The chain ${repeatRej.agent} → ${repeatRej.kind} → person keeps ending in "no" — a calibration defect, not a disagreement.`,
-        action: `Read the rejection reasons; fix the proposal copy or the threshold. The reviewer is the ground truth here.`,
-      });
-    if (stageTotal > 0 && aiMoves / stageTotal >= 0.5) {
-      const pct = Math.round((aiMoves / stageTotal) * 100);
-      govChips.push({
-        pri: "medium", title: `◈ Agents moved ${pct}% of candidates between stages (${aiMoves}/${stageTotal})`,
-        short: `agents made ${pct}% of stage moves`,
-        cause: `${aiMoves} stage moves were made by an agent, ${stageTotal - aiMoves} by a person.`,
-        effect: `Most candidate progress is decided by agents — check that this matches how much autonomy you meant to give them.`,
-        action: `In Agent settings, set per stage whether an agent may move candidates on its own or must ask first.`,
-      });
-    }
-    if (taskStatus.open > 0)
-      govChips.push({
-        pri: "high", title: `⚠ ${taskStatus.open} decision cards open — work is parked`,
-        short: `${taskStatus.open} card${taskStatus.open === 1 ? "" : "s"} waiting for a decision`,
-        cause: `Open proposals: ${[...openMap.entries()].map(([a, c]) => `${a} ×${c}`).join(", ")}.`,
-        effect: `Each open card pauses the agent behind it; those candidates wait.`,
-        action: `Open "Waiting for you" and decide the oldest cards first.`,
-      });
-    if (taskStatus.cancelled > 0)
-      govChips.push({
-        pri: "medium", title: `◈ ${taskStatus.cancelled} cards closed without a decision`,
-        short: `${taskStatus.cancelled} cards closed undecided`,
-        cause: `These cards were closed because the agent run behind them ended before anyone decided.`,
-        effect: `Nobody reviewed these proposals — if this is frequent, decisions are taking too long.`,
-        action: `Check how quickly cards are being answered; agree a response time with the team.`,
-      });
-    govChips.push({
-      pri: "ok", title: `✓ Calibration baseline: ${govOk + govAnswered} approved vs ${govRej} declined`,
-      short: `${govOk + govAnswered} approved · ${govRej} declined`,
-      cause: `Every final decision a person made on an agent proposal is counted here.`,
-      effect: `People declined ${Math.round((govRej / Math.max(govOk + govRej, 1)) * 100)}% of agent proposals.`,
-      action: `Watch this each week — a rising share means agents and your people are drifting apart.`,
-    });
-    const govSysread = govChips.map((c) => ({ ...c, pri: priOf(c.title) }));
+    const harness = await computeHarness(org);
 
     // ---------------- vocabulary view (in-memory seed via the production normalizer) ----------------
     const ont = buildOntology({
@@ -740,81 +602,6 @@ export const agentIntelligence = createServerFn({ method: "GET" })
     });
     const vocabSysread = vocabChips.map((c) => ({ ...c, pri: priOf(c.title) })).sort((a, b) => priOrder[a.pri] - priOrder[b.pri]);
 
-    // ---------------- oversight (governance tab, plain answers) ----------------
-    const now = Date.now();
-    const weekStart = (d: Date) => {
-      const x = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-      x.setUTCDate(x.getUTCDate() - ((x.getUTCDay() + 6) % 7));
-      return x.toISOString().slice(0, 10);
-    };
-    const weeks: string[] = [];
-    for (let i = 7; i >= 0; i--) weeks.push(weekStart(new Date(now - i * 7 * 864e5)));
-    const weekly = weeks.map((week) => ({ week, approved: 0, declined: 0 }));
-    const dis = new Map<string, { agent: string; proposal: string; declined: number; total: number; reasons: string[] }>();
-    const staleOpen: Oversight["staleOpen"] = [];
-    let closedUndecided = 0;
-    for (const t of decisionRows) {
-      if (t.status === "cancelled" || t.status === "expired") closedUndecided += 1;
-      if (t.status === "open") {
-        const ageHours = Math.round((now - t.createdAt.getTime()) / 36e5);
-        if (ageHours >= 48) staleOpen.push({ agent: t.agentType, title: t.title.slice(0, 80), ageHours });
-      }
-      if (t.status !== "approved" && t.status !== "rejected") continue;
-      if (t.decidedAt) {
-        const w = weekly.find((x) => x.week === weekStart(t.decidedAt!));
-        if (w) t.status === "approved" ? (w.approved += 1) : (w.declined += 1);
-      }
-      const key = `${t.agentType}|${t.title}`;
-      const d = dis.get(key) ?? { agent: t.agentType, proposal: t.title.slice(0, 80), declined: 0, total: 0, reasons: [] };
-      d.total += 1;
-      if (t.status === "rejected") {
-        d.declined += 1;
-        const reason = (t.response as { reason?: unknown } | null)?.reason;
-        if (typeof reason === "string" && reason.trim() && d.reasons.length < 3 && !d.reasons.includes(reason.trim()))
-          d.reasons.push(reason.trim().slice(0, 140));
-      }
-      dis.set(key, d);
-    }
-    const disagreements = [...dis.values()].filter((d) => d.declined > 0).sort((a, b) => b.declined - a.declined);
-    staleOpen.sort((a, b) => b.ageHours - a.ageHours);
-    const moves = new Map<string, { stage: string; agent: number; person: number }>();
-    for (const e of stageRows) {
-      if (e.actor === "candidate") continue; // candidate's own action (e.g. withdrew) is neither
-      const m = moves.get(e.toStage) ?? { stage: e.toStage, agent: 0, person: 0 };
-      e.actor === "ai" ? (m.agent += 1) : (m.person += 1);
-      moves.set(e.toStage, m);
-    }
-    const stageMoves = [...moves.values()].sort((a, b) => b.agent - a.agent || b.person - a.person);
-    const decided = govOk + govRej;
-    const declinePct = Math.round((govRej / Math.max(decided, 1)) * 100);
-    const agentOnlyStages = stageMoves.filter((m) => m.agent > 0 && m.person === 0).map((m) => m.stage.replace(/_/g, " "));
-    const headline: Oversight["headline"] = [
-      decided === 0
-        ? { tone: "warn", title: "No decisions yet", detail: "People have not approved or declined any agent proposal yet, so oversight is untested." }
-        : declinePct === 0 && decided >= 20
-          ? { tone: "warn", title: "Every proposal approved", detail: `${decided} of ${decided} approved — check reviewers are reading, not just clicking approve.` }
-          : { tone: "good", title: "People are deciding", detail: `${decided} decisions on agent proposals — ${govOk} approved, ${govRej} declined (${declinePct}%).` },
-      disagreements.length === 0
-        ? { tone: "good", title: "No disagreements", detail: "People have not declined any agent proposal." }
-        : {
-            tone: disagreements[0]!.declined >= 3 || declinePct >= 20 ? "bad" : "warn",
-            title: `People disagree with ${disagreements[0]!.agent.replace(/_/g, " ")}`,
-            detail: `"${disagreements[0]!.proposal}" declined ${disagreements[0]!.declined} of ${disagreements[0]!.total} times.`,
-          },
-      staleOpen.length + closedUndecided + agentOnlyStages.length === 0
-        ? { tone: "good", title: "Nothing slipping past a person", detail: "No old open cards, no undecided closures, no stage a person never touches." }
-        : {
-            tone: staleOpen.length > 0 || agentOnlyStages.length > 0 ? "bad" : "warn",
-            title: "Some work skips a person",
-            detail: [
-              staleOpen.length ? `${staleOpen.length} card${staleOpen.length === 1 ? "" : "s"} waiting over 48h` : "",
-              closedUndecided ? `${closedUndecided} closed without a decision` : "",
-              agentOnlyStages.length ? `only agents move candidates to: ${agentOnlyStages.join(", ")}` : "",
-            ].filter(Boolean).join(" · ") + ".",
-          },
-    ];
-    const oversight: Oversight = { headline, weekly, disagreements: disagreements.slice(0, 10), staleOpen: staleOpen.slice(0, 10), closedUndecided, stageMoves };
-
     // skill gap: what requisitions ask for vs what the pool holds
     const gaps: SkillGap[] = ont.nodes
       .filter((n) => n.demand > 0 || n.supply > 0)
@@ -838,18 +625,7 @@ export const agentIntelligence = createServerFn({ method: "GET" })
           plan, rejects: rejectRows,
           fleet: { registered: registered.length, idle: idleAgents.length, gap: gapAgents.length },
         },
-        governance: {
-          tiles: [
-            ["Person decisions", String(govOk + govAnswered + govRej), `${govOk} approved · ${govRej} declined · ${govAnswered} answered`],
-            ["Open cards", String(taskStatus.open), [...openMap.entries()].map(([a, c]) => `${a} ×${c}`).slice(0, 3).join(", ") || "none"],
-            ["Cancelled cards", String(taskStatus.cancelled), "closed without a person deciding"],
-            ["Stage moves", String(stageTotal), stageTotal ? `${Math.round((aiMoves / stageTotal) * 100)}% moved by an agent · ${stageTotal - aiMoves} by a person` : "no stage moves yet"],
-          ],
-          nodes: govNodes, edges: govEdges,
-          systemRead: govSysread,
-          sysreadSummary: summarize(govSysread),
-          oversight,
-        },
+        governance: { harness },
         vocabulary: {
           tiles: [
             ["Skills", String(ont.stats.nodeCount), `${minorCount} rarely seen`],

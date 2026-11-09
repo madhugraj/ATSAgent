@@ -295,6 +295,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
       "Read bubble size as the combined weight of people with the skill and demand from open roles. Violet means healthier coverage, amber means tightening supply, red means scarce against demand and grey means dormant evidence.",
       "Capability-family zones group related skills. Select a bubble to isolate skills that occur alongside it, then use the detail panel to compare people in the pool, weighted demand, evidence validated by hires and recency.",
       "Use Decisions & prescriptions to identify skills to hire, build, borrow or redeploy, plus bridge skills that support reskilling into scarce capabilities.",
+      "Oversight of agent proposals (HR head, CBO) answers whether your people are really deciding what agents propose: approvals vs declines per week, where people disagree with an agent and the reasons they gave, cards waiting more than 48 hours, and which stages only an agent ever moves candidates into.",
       "The ontology learns from CV skills, requisition requirements and hiring outcomes. Evidence keeps full weight for 180 days, half weight through one year and quarter weight thereafter; unsupported skills become dormant after one year and retire after two years.",
       "Press Relearn ontology after substantial candidate, requisition or hiring changes. Deterministic analysis always runs; the organisation's configured AI provider can improve aliases, capability families and the executive narrative.",
     ],
@@ -383,10 +384,10 @@ export const MANUAL_SECTIONS: ManualSection[] = [
     id: "agent-intelligence",
     title: "Agent intelligence (Agent administration)",
     summary:
-      "The knowledge-graph view of the hiring fleet: agents, person gates, decision chains and the skill vocabulary, with a prescriptive system read.",
+      "How your hiring agents behave, whether the harness around them is holding, and where your skill supply falls short of demand.",
     steps: [
       "Agent administration → Agent intelligence is the knowledge-graph view of your hiring fleet, computed live from this organisation's telemetry. Governance roles (HR head, CBO).",
-      "Three tabs, each answering what exists, what happened and what to do next: Agent behavior (agents, person gates and failure clusters with candidates folded into edge counts, plus a priority-sorted action plan for every registered agent), Governance (every person decision chained to the gate it acted under, overturn chains, and an autonomy check on who moves candidates between stages), and Vocabulary (skills and role families, built live by the matching engine's own ontology builder — the same nodes Phase 1 will persist).",
+      "Three tabs. Agent behavior: each agent that ran, the person checkpoints it passed and the tools it failed on, plus a priority-sorted action plan for every registered agent. Governance: whether the harness around the agents is holding — are agents staying inside their limits, does their autonomy match their risk tier (and did any change run without an approved card), did each run use the approved and tested definition, are hand-offs between agents healthy (a map of which events and which agents start which agents), and are agents within budget. Vocabulary: the skills your requisitions ask for against the skills your candidate pool holds, biggest gaps first.",
       "The System read panel on top lists only what needs attention, each with its cause, effect and next best action — every number is a live query over your runs, steps, tasks and stage transitions. Nothing here calls a model; it is deterministic and auditable. Auto-refreshes every minute, or use Refresh.",
     ],
   },

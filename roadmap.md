@@ -4,6 +4,9 @@
 
 - [x] `/agents/intelligence` (governance roles): the knowledge-graph view of the hiring fleet, computed live from this organisation's telemetry — three views, each with descriptive and prescriptive layers: agent behavior (agents × person gates × failure clusters, candidates folded into edge counts, per-agent action plan), governance (every person decision chained to the norm it acted under, overturn chains, autonomy check over `stage_events` actor attribution), and vocabulary (skills/role families seeded in-memory by the production `buildOntology()` + `deriveInsights()` — prescriptive sourcing/coverage insights, nothing persisted until Phase 1)
 - [x] System read: threshold-gated prescriptive chips per view (overturn clusters, open cards, definition churn vs eval coverage, alias-fold report card, idle/trace-gap coverage) with cause → effect → next best action; auto-refresh 60s; deterministic — no model calls, vendor- and model-neutral
+- [x] Governance tab rebuilt as agent governance (2026-11-09): five answers on whether the harness holds — limits (refused tool calls, injection flags), autonomy vs risk tier (changes with no approved card under "asks first", changes after an injection flag), definitions (runs on the approved, eval-covered manifest vs test or unrecorded versions; owner, eval count), hand-offs (event → agent routing and direct `start_agent` delegation as a hand-off map; stuck, failed and abandoned events; principal shifts; overlapping runs on the same work) and budget/run limits
+- [x] Vocabulary tab: skills asked for by requisitions vs held by the candidate pool, biggest gaps first; HR oversight (are people deciding, disagreements with reasons, cards waiting >48h, who moves candidates between stages) moved to the HR dashboard
+- [ ] Record the publishing run on `agent_events` so hand-off chains can be followed end to end and loops detected
 
 ## Prompt-injection guardrails — P0 (2026-11-01)
 
