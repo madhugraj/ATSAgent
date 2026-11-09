@@ -43,6 +43,7 @@ import { duplicateIndex, findDuplicateGroups, freshness, mergeCandidates } from 
 
 import { EmptyState, PageHeader, ScoreChip, StageBadge } from "@/components/ats";
 import { StageMover } from "@/components/StageMover";
+import { PoolInsightsCard } from "@/components/PoolInsightsCard";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useMe } from "@/hooks/useMe";
@@ -970,6 +971,8 @@ function Candidates() {
           </div>
         }
       />
+
+      <PoolInsightsCard />
 
       {/* Saved views */}
       <div className="flex gap-1.5 overflow-x-auto pb-1">

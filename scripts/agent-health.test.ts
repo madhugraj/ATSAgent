@@ -362,6 +362,26 @@ describe("rules", () => {
     expect((await open()).map((i) => i.rule)).toContain("skills.ai_errors");
   });
 
+  test("HR copilot AI errors (chat and demand outlook, outside agent runs)", async () => {
+    await db.insert(aiUsageEvents).values(
+      Array.from({ length: 6 }, (_, i) => ({
+        orgId,
+        feature: i % 2 ? "copilot" : "demand_outlook",
+        provider: "x",
+        model: "x",
+        status: (i < 4 ? "error" : "ok") as never,
+      })),
+    );
+    try {
+      await evaluate();
+      const issue = (await open()).find((i) => i.rule === "skills.copilot_errors");
+      expect(issue).toMatchObject({ agentType: "copilot", severity: "serious" });
+      expect(issue!.detail).toMatchObject({ requests: 6, errors: 4 });
+    } finally {
+      await db.delete(aiUsageEvents).where(eq(aiUsageEvents.orgId, orgId));
+    }
+  });
+
   test("audit gap: a completed write tool call without its audit entry is critical", async () => {
     const [def] = await db
       .insert(agentDefinitions)

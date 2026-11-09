@@ -30,6 +30,13 @@ We credit reporters in release notes on request.
   are the mandatory tenant boundary.
 - Roles are stored in a separate membership-role table. Platform administration is a separate,
   server-validated allowlist and is never inferred from browser storage.
+- HR copilot data is role-filtered on the server (`src/lib/copilot-scope.ts`,
+  `src/server/copilot/data.server.ts`): recruiters receive no pay or budget figures, hiring
+  managers and department heads only their own roles and approvals at their stage, governance
+  (audit log, agent issues, AI usage by feature) only leadership; tools outside a scope are not
+  offered to the model, so a prompt cannot widen access. Candidate names from pool lookups are
+  fenced as untrusted. A proposed agent hand-off is stored server-side and started only by the
+  person's click (claimed once); the client never supplies the goal.
 - Secrets: `SECRET_ENCRYPTION_KEY` encrypts stored credentials (AES-256-GCM); OAuth state
   is HMAC-signed with required secrets; no secret values are committed. Every organisation supplies
   its own AI provider key, and no deployment-level AI key is used as a fallback. That includes the
