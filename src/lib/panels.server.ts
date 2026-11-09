@@ -1,8 +1,14 @@
 /**
- * Interview panels per role and round (docs/interview-panel-plan.md, P2).
+ * Interview panels per role and round (docs/interview-panel-plan.md, P2;
+ * docs/panel-directory.md).
  *
- * - Who is eligible for a round: active members whose interviewer profile is on
- *   and takes that round, under their weekly cap — ranked by how many of the
+ * People come from the panel directory (`panelists`): internal panelists (org
+ * members, kept in step by syncMemberPanelists) and external ones added in the
+ * hiring desk. `memberId` throughout this file is the panelist's directory id.
+ *
+ * - Who is eligible for a round: active panelists who take that round, under
+ *   their weekly cap — for org members, their interviewer profile when the
+ *   organisation has registered interviewers — ranked by how many of the
  *   round's competencies their areas cover, then rounds they took for the role,
  *   then the lightest load. An organisation that has registered no
  *   interviewers yet falls back to every active member (said so on the card).
@@ -16,6 +22,7 @@ import {
   applications,
   interviews,
   orgMembers,
+  panelists,
   requisitions,
   rolePanels,
   roundSubstitutes,
@@ -23,9 +30,13 @@ import {
 import { db } from "../server/db";
 
 export type EligibleInterviewer = {
+  /** The panel directory id (panelists.id). */
   memberId: string;
   name: string;
   email: string;
+  kind: "internal" | "external";
+  /** External panelists: their organisation. */
+  company: string | null;
   /** The round's competencies their areas cover. */
   covers: string[];
   /** Rounds they already interviewed for this role. */
@@ -71,24 +82,34 @@ export async function eligibleInterviewers(
   const { roundOf } = await import("./interview-plan");
   const round = roundOf((await planFor(orgId, requisitionId)).plan, level);
   if (!round) throw new Error(`This role's interview plan has no round L${level}.`);
+  await syncMemberPanelists(orgId);
   const rows = (await db.execute(sql`
-    select m.id, coalesce(nullif(m.full_name, ''), m.email) as name, m.email,
-      p.active as profile_active, p.areas, p.rounds, p.weekly_cap,
+    select p.id, p.kind, p.company, p.full_name as name,
+      coalesce(m.email, p.email) as email,
+      p.member_id, prof.active as profile_active,
+      coalesce(prof.areas, p.areas) as areas,
+      coalesce(prof.rounds, p.rounds) as rounds,
+      coalesce(prof.weekly_cap, p.weekly_cap) as weekly_cap,
       (select count(*)::int from interviews i join applications a on a.id = i.application_id
         where i.org_id = ${orgId} and a.requisition_id = ${requisitionId}
-          and (lower(i.interviewer_email) = lower(m.email)
-            or i.panel @> jsonb_build_array(jsonb_build_object('email', m.email)))) as past_rounds,
+          and (lower(i.interviewer_email) = lower(coalesce(m.email, p.email))
+            or i.panel @> jsonb_build_array(jsonb_build_object('email', lower(coalesce(m.email, p.email)))))) as past_rounds,
       (select count(*)::int from interviews i
         where i.org_id = ${orgId} and i.status not in ('cancelled', 'no_show')
           and i.scheduled_at >= now() and i.scheduled_at < now() + interval '7 days'
-          and (lower(i.interviewer_email) = lower(m.email)
-            or i.panel @> jsonb_build_array(jsonb_build_object('email', m.email)))) as load
-    from org_members m
-    left join member_interviewer_profiles p on p.member_id = m.id and p.org_id = m.org_id
-    where m.org_id = ${orgId} and m.status = 'active'`)) as unknown as {
+          and (lower(i.interviewer_email) = lower(coalesce(m.email, p.email))
+            or i.panel @> jsonb_build_array(jsonb_build_object('email', lower(coalesce(m.email, p.email)))))) as load
+    from panelists p
+    left join org_members m on m.id = p.member_id and m.org_id = p.org_id
+    left join member_interviewer_profiles prof on prof.member_id = p.member_id and prof.org_id = p.org_id
+    where p.org_id = ${orgId} and p.active
+      and (p.member_id is null or m.status = 'active')`)) as unknown as {
     id: string;
+    kind: "internal" | "external";
+    company: string | null;
     name: string;
     email: string;
+    member_id: string | null;
     profile_active: boolean | null;
     areas: string[] | null;
     rounds: number[] | null;
@@ -96,12 +117,18 @@ export async function eligibleInterviewers(
     past_rounds: number;
     load: number;
   }[];
-  const registered = rows.some((r) => r.profile_active);
+  // "Registered": the organisation set up interviewer profiles for its members;
+  // members without one are then left out. Directory-only panelists (external,
+  // or internal without a login) are always in, by their own rounds and cap.
+  const registered = rows.some((r) => r.member_id && r.profile_active);
   const full: string[] = [];
   const people: EligibleInterviewer[] = [];
   for (const r of rows) {
-    if (registered) {
-      if (!r.profile_active || !(r.rounds ?? []).includes(level)) continue;
+    const member = Boolean(r.member_id);
+    const gated = !member || registered;
+    if (member && registered && !r.profile_active) continue;
+    if (gated) {
+      if (!(r.rounds ?? []).includes(level)) continue;
       if (r.weekly_cap !== null && r.load >= r.weekly_cap) {
         full.push(r.name);
         continue;
@@ -110,21 +137,108 @@ export async function eligibleInterviewers(
     people.push({
       memberId: r.id,
       name: r.name,
-      email: r.email,
+      email: r.email.toLowerCase(),
+      kind: r.kind,
+      company: r.company,
       covers: coverage(r.areas ?? [], round.competencies),
       pastRounds: r.past_rounds,
       load: r.load,
-      cap: registered ? r.weekly_cap : null,
+      cap: gated ? r.weekly_cap : null,
     });
   }
   return { registered, people: rankInterviewers(people), full };
 }
 
+export type PanelPerson = {
+  /** The panel directory id (panelists.id). */
+  memberId: string;
+  name: string;
+  email: string;
+  kind: "internal" | "external";
+};
+
 export type ApprovedPanel = {
   level: number;
   version: number;
-  members: { memberId: string; name: string; email: string }[];
+  members: PanelPerson[];
 };
+
+/**
+ * Directory ids for these ids, in order: a panel directory id stays as it is,
+ * an org member's id becomes their internal entry (panels and stand-ins stored
+ * before the directory, and callers that still pass member ids). Unknown ids
+ * are kept, so validation refuses them.
+ */
+export async function toPanelistIds(orgId: string, ids: string[]): Promise<string[]> {
+  if (!ids.length) return [];
+  const find = () =>
+    db
+      .select({ id: panelists.id, memberId: panelists.memberId })
+      .from(panelists)
+      .where(
+        and(
+          eq(panelists.orgId, orgId),
+          sql`(${panelists.id} = any(${sql.param(ids)}::uuid[]) or ${panelists.memberId} = any(${sql.param(ids)}::uuid[]))`,
+        ),
+      );
+  let rows = await find();
+  const missing = ids.some((id) => !rows.some((r) => r.id === id || r.memberId === id));
+  if (missing) {
+    await syncMemberPanelists(orgId);
+    rows = await find();
+  }
+  return ids.map((id) => rows.find((r) => r.id === id || r.memberId === id)?.id ?? id);
+}
+
+/**
+ * Directory entries for these ids that may sit on a panel now: active, and —
+ * for org members — still active members. In the order asked; others drop out.
+ */
+export async function panelPeople(orgId: string, given: string[]): Promise<PanelPerson[]> {
+  if (!given.length) return [];
+  const ids = await toPanelistIds(orgId, given);
+  const rows = await db
+    .select({
+      memberId: panelists.id,
+      name: panelists.fullName,
+      email: sql<string>`lower(coalesce(${orgMembers.email}, ${panelists.email}))`,
+      kind: panelists.kind,
+      linked: panelists.memberId,
+      memberStatus: orgMembers.status,
+    })
+    .from(panelists)
+    .leftJoin(
+      orgMembers,
+      and(eq(orgMembers.id, panelists.memberId), eq(orgMembers.orgId, panelists.orgId)),
+    )
+    .where(and(eq(panelists.orgId, orgId), eq(panelists.active, true), inArray(panelists.id, ids)));
+  const ok = rows.filter((r) => !r.linked || r.memberStatus === "active");
+  return ids
+    .map((id) => ok.find((r) => r.memberId === id))
+    .filter((r): r is NonNullable<typeof r> => Boolean(r))
+    .map(({ memberId, name, email, kind }) => ({ memberId, name, email, kind }));
+}
+
+/**
+ * Keep every org member in the directory as an internal panelist (members who
+ * joined after migration 0070), and their name and e-mail current.
+ */
+export async function syncMemberPanelists(orgId: string): Promise<void> {
+  await db.execute(sql`
+    insert into panelists (org_id, kind, member_id, full_name, email, approved_at)
+    select m.org_id, 'internal', m.id, coalesce(nullif(m.full_name, ''), m.email), lower(m.email), now()
+    from org_members m
+    where m.org_id = ${orgId}
+      and not exists (select 1 from panelists p where p.member_id = m.id)
+    on conflict do nothing`);
+  await db.execute(sql`
+    update panelists p
+    set full_name = coalesce(nullif(m.full_name, ''), m.email), email = lower(m.email), updated_at = now()
+    from org_members m
+    where p.member_id = m.id and p.org_id = ${orgId}
+      and (p.full_name is distinct from coalesce(nullif(m.full_name, ''), m.email)
+        or p.email is distinct from lower(m.email))`);
+}
 
 /** The approved panel for a role and round, with its members as they are now (null: none yet). */
 export async function approvedPanel(
@@ -133,7 +247,11 @@ export async function approvedPanel(
   level: number,
 ): Promise<ApprovedPanel | null> {
   const [p] = await db
-    .select({ memberIds: rolePanels.memberIds, version: rolePanels.version })
+    .select({
+      ids: rolePanels.panelistIds,
+      memberIds: rolePanels.memberIds,
+      version: rolePanels.version,
+    })
     .from(rolePanels)
     .where(
       and(
@@ -143,31 +261,17 @@ export async function approvedPanel(
       ),
     )
     .limit(1);
-  if (!p) return null;
-  const people = await db
-    .select({
-      memberId: orgMembers.id,
-      name: sql<string>`coalesce(nullif(${orgMembers.fullName}, ''), ${orgMembers.email})`,
-      email: orgMembers.email,
-    })
-    .from(orgMembers)
-    .where(
-      and(
-        eq(orgMembers.orgId, orgId),
-        eq(orgMembers.status, "active"),
-        inArray(orgMembers.id, p.memberIds),
-      ),
-    );
+  // Panels approved before the directory stored org-member ids.
+  const ids = p?.ids?.length ? p.ids : (p?.memberIds ?? []);
+  if (!p || !ids.length) return null;
   // In the approved order; anyone no longer active drops out.
-  const members = p.memberIds
-    .map((id) => people.find((m) => m.memberId === id))
-    .filter((m): m is NonNullable<typeof m> => Boolean(m));
+  const members = await panelPeople(orgId, ids);
   return members.length ? { level, version: p.version, members } : null;
 }
 
 /**
  * Store an approved panel (a person's decision; the caller checked who may
- * make it). Members must be active members of the organisation. Audited.
+ * make it). Everyone must be an active entry of the panel directory. Audited.
  */
 export async function savePanel(
   orgId: string,
@@ -177,7 +281,7 @@ export async function savePanel(
   memberIds: string[],
   changed: boolean,
 ): Promise<ApprovedPanel> {
-  const ids = [...new Set(memberIds)];
+  const ids = [...new Set(await toPanelistIds(orgId, memberIds))];
   if (ids.length < 1 || ids.length > 3) throw new Error("A panel has one to three people.");
   const [req] = await db
     .select({ code: requisitions.code })
@@ -185,18 +289,15 @@ export async function savePanel(
     .where(and(eq(requisitions.id, requisitionId), eq(requisitions.orgId, orgId)))
     .limit(1);
   if (!req) throw new Error("Requisition not found.");
-  const people = await db
-    .select({ id: orgMembers.id, email: orgMembers.email })
-    .from(orgMembers)
-    .where(
-      and(
-        eq(orgMembers.orgId, orgId),
-        eq(orgMembers.status, "active"),
-        inArray(orgMembers.id, ids),
-      ),
-    );
+  const people = await panelPeople(orgId, ids);
   if (people.length !== ids.length)
-    throw new Error("Everyone on a panel must be an active member of your organisation.");
+    throw new Error("Everyone on a panel must be an active entry of your panel directory.");
+  // Org members on the panel, for code that still reads member_ids.
+  const linked = await db
+    .select({ memberId: panelists.memberId })
+    .from(panelists)
+    .where(and(eq(panelists.orgId, orgId), inArray(panelists.id, ids)));
+  const linkedMembers = linked.map((r) => r.memberId).filter((x): x is string => Boolean(x));
   const now = new Date();
   await db
     .insert(rolePanels)
@@ -204,14 +305,16 @@ export async function savePanel(
       orgId,
       requisitionId,
       level,
-      memberIds: ids,
+      memberIds: linkedMembers,
+      panelistIds: ids,
       approvedBy: approverUserId,
       approvedAt: now,
     })
     .onConflictDoUpdate({
       target: [rolePanels.requisitionId, rolePanels.level],
       set: {
-        memberIds: ids,
+        memberIds: linkedMembers,
+        panelistIds: ids,
         approvedBy: approverUserId,
         approvedAt: now,
         version: sql`${rolePanels.version} + 1`,
@@ -228,7 +331,8 @@ export async function savePanel(
     detail: {
       code: req.code,
       level,
-      members: ids.map((id) => people.find((p) => p.id === id)!.email),
+      members: people.map((p) => p.email),
+      external: people.filter((p) => p.kind === "external").map((p) => p.email),
       changed,
     },
   });
@@ -254,7 +358,10 @@ export async function roundPanel(
   const panel = await approvedPanel(orgId, app.requisitionId, level);
   if (!panel) return null;
   const subs = await db
-    .select({ replace: roundSubstitutes.replaceMemberId, with: roundSubstitutes.withMemberId })
+    .select({
+      replace: sql<string>`coalesce(${roundSubstitutes.replacePanelistId}, ${roundSubstitutes.replaceMemberId})`,
+      with: sql<string>`coalesce(${roundSubstitutes.withPanelistId}, ${roundSubstitutes.withMemberId})`,
+    })
     .from(roundSubstitutes)
     .where(
       and(
@@ -264,21 +371,20 @@ export async function roundPanel(
       ),
     );
   if (!subs.length) return { ...panel, substituted: [] };
-  const withIds = subs.map((x) => x.with);
-  const people = await db
-    .select({
-      memberId: orgMembers.id,
-      name: sql<string>`coalesce(nullif(${orgMembers.fullName}, ''), ${orgMembers.email})`,
-      email: orgMembers.email,
-    })
-    .from(orgMembers)
-    .where(
-      and(
-        eq(orgMembers.orgId, orgId),
-        eq(orgMembers.status, "active"),
-        inArray(orgMembers.id, withIds),
-      ),
-    );
+  // Stand-ins stored before the directory hold org-member ids.
+  const replaced = await toPanelistIds(
+    orgId,
+    subs.map((x) => x.replace),
+  );
+  const withIds = await toPanelistIds(
+    orgId,
+    subs.map((x) => x.with),
+  );
+  subs.forEach((x, i) => {
+    x.replace = replaced[i]!;
+    x.with = withIds[i]!;
+  });
+  const people = await panelPeople(orgId, withIds);
   const substituted: { replaced: string; with: string }[] = [];
   const members = panel.members.map((m) => {
     const sub = subs.find((x) => x.replace === m.memberId);
@@ -327,6 +433,7 @@ export async function substituteOptions(
 }> {
   const panel = await roundPanel(orgId, applicationId, level);
   if (!panel) throw new Error(`Round L${level} has no approved panel yet.`);
+  replaceMemberId = (await toPanelistIds(orgId, [replaceMemberId]))[0] ?? replaceMemberId;
   if (!panel.members.some((m) => m.memberId === replaceMemberId))
     throw new Error("That person is not on this candidate's panel for the round.");
   const [app] = await db

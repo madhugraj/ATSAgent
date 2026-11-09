@@ -73,6 +73,7 @@ export type GateKind =
   | "panel_approval"
   | "panel_substitute"
   | "panel_review"
+  | "new_panelist"
   | "org_profile"
   | "expert_brief"
   | "general";

@@ -321,6 +321,16 @@ export const EVAL_CATALOG: Record<string, EvalExplainer> = {
       "It offers Asha times with exactly the approved panel.",
     ],
   },
+  "interview: asks HR for a new panellist when nobody fits the round": {
+    title: "Asks HR for a new panellist when nobody fits the round",
+    situation:
+      "Ravi is ready for his first interview round, and nobody in the panel directory takes that round.",
+    checks: [
+      "It asks the HR head to add someone — it never invents a person or an e-mail.",
+      "The HR head types an external panellist in and approves; they join the panel directory.",
+      "It then proposes the round's panel with that person.",
+    ],
+  },
   "interview: asks for a scheduling call when e-mailed times go unanswered": {
     title: "Asks for a scheduling call when e-mailed times go unanswered",
     situation: "Meera has not picked one of the interview times e-mailed 30 hours ago.",
