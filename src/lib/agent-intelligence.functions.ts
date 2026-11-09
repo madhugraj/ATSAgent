@@ -9,7 +9,7 @@
  * Deterministic: no model calls, no vendor or model names anywhere in the payload.
  */
 import { createServerFn } from "@tanstack/react-start";
-import { eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 
 import { db } from "../server/db";
 import { agentDefinitions, agentRuns, agentSteps, agentTasks, applications, candidates, departments, matchScores, requisitions, stageEvents } from "@db/schema";
@@ -92,7 +92,7 @@ export type ActionPlanRow = {
   action: string;
 };
 
-export type RejectRow = { agentType: string; kind: string; title: string; tool: string | null };
+export type RejectRow = { agentType: string; kind: string; title: string; tool: string | null; count: number };
 
 export type AgentIntelligence = {
   generatedAt: string;
@@ -161,20 +161,26 @@ export const agentIntelligence = createServerFn({ method: "GET" })
           })
           .from(agentTasks)
           .innerJoin(agentRuns, eq(agentRuns.id, agentTasks.runId))
-          .where(eq(agentTasks.orgId, org)),
+          .where(and(eq(agentTasks.orgId, org), eq(agentTasks.status, "rejected"))),
         db
           .select({ agentType: agentRuns.agentType, tool: agentSteps.toolName, n: agentSteps.id })
           .from(agentSteps)
           .innerJoin(agentRuns, eq(agentRuns.id, agentSteps.runId))
-          .where(eq(agentSteps.orgId, org)),
-        db.select({ agentType: agentRuns.agentType, n: agentRuns.id }).from(agentRuns).where(eq(agentRuns.orgId, org)),
-        db.select({ agentType: agentDefinitions.agentType, version: agentDefinitions.version }).from(agentDefinitions),
+          .where(and(eq(agentSteps.orgId, org), eq(agentSteps.status, "error"))),
+        db
+          .select({ agentType: agentRuns.agentType, n: agentRuns.id })
+          .from(agentRuns)
+          .where(and(eq(agentRuns.orgId, org), eq(agentRuns.status, "awaiting_human"))),
+        db
+          .select({ agentType: agentDefinitions.agentType, version: agentDefinitions.version })
+          .from(agentDefinitions)
+          .orderBy(desc(agentDefinitions.createdAt)),
         db.select({ agentType: agentDefinitions.agentType, hash: agentDefinitions.hash }).from(agentDefinitions),
         db
           .select({ agentType: agentRuns.agentType, n: agentTasks.id })
           .from(agentTasks)
           .innerJoin(agentRuns, eq(agentRuns.id, agentTasks.runId))
-          .where(eq(agentTasks.orgId, org)),
+          .where(and(eq(agentTasks.orgId, org), eq(agentTasks.status, "open"))),
         db.select({ status: agentTasks.status, n: agentTasks.id }).from(agentTasks).where(eq(agentTasks.orgId, org)),
         db.select({ actor: stageEvents.actor, n: stageEvents.id }).from(stageEvents).where(eq(stageEvents.orgId, org)),
         db
@@ -222,7 +228,7 @@ export const agentIntelligence = createServerFn({ method: "GET" })
     }
     const taskTotal = (a: string, kind: string) => {
       const st = taskAgg.get(a)?.get(kind);
-      return st ? Object.values(st).reduce((x, y) => x + y, 0) : 0;
+      return st ? [...st.values()].reduce((x, y) => x + y, 0) : 0;
     };
     const taskStat = (a: string, kind: string, s: string) => taskAgg.get(a)?.get(kind)?.get(s) ?? 0;
     const sumKind = (kind: string, status?: string) => {
@@ -230,18 +236,24 @@ export const agentIntelligence = createServerFn({ method: "GET" })
       for (const kinds of taskAgg.values()) {
         const st = kinds.get(kind);
         if (!st) continue;
-        n += status ? (st.get(status) ?? 0) : Object.values(st).reduce((x, y) => x + y, 0);
+        n += status ? (st.get(status) ?? 0) : [...st.values()].reduce((x, y) => x + y, 0);
       }
       return n;
     };
-    const rejectRows: RejectRow[] = rejectDetails
-      .filter((r) => (taskAgg.get(r.agentType)?.get(r.kind)?.get("rejected") ?? 0) > 0)
-      .map((r) => ({
+    const rejectGroups = new Map<string, RejectRow>();
+    for (const r of rejectDetails) {
+      const row = {
         agentType: r.agentType,
         kind: r.kind,
         title: r.title.slice(0, 70),
         tool: ((r.tool as Record<string, unknown> | null)?.["name"] as string | null) ?? null,
-      }));
+      };
+      const key = `${row.agentType}|${row.kind}|${row.title}|${row.tool ?? ""}`;
+      const g = rejectGroups.get(key);
+      if (g) g.count += 1;
+      else rejectGroups.set(key, { ...row, count: 1 });
+    }
+    const rejectRows: RejectRow[] = [...rejectGroups.values()].sort((a, b) => b.count - a.count);
     const errByAgent = new Map<string, Map<string, number>>();
     for (const e of errorClusters) {
       if (!e.tool) continue;
@@ -258,7 +270,12 @@ export const agentIntelligence = createServerFn({ method: "GET" })
     const churn = new Map<string, number>();
     for (const r of defChurn) churn.set(r.agentType, (churn.get(r.agentType) ?? 0) + 1);
     const defVersions = new Map<string, string>();
-    for (const r of definitions) defVersions.set(r.agentType, r.version);
+    // rows arrive newest-first; prefer the newest released version over eval/test manifests
+    const isPrerelease = (v: string) => /-(eval|test)/.test(v);
+    for (const r of definitions) {
+      const cur = defVersions.get(r.agentType);
+      if (cur === undefined || (isPrerelease(cur) && !isPrerelease(r.version))) defVersions.set(r.agentType, r.version);
+    }
     const registered = [...new Set(definitions.map((d) => d.agentType))].sort();
     const taskStatus = { cancelled: 0, answered: 0, open: 0 };
     for (const r of taskTotals) if (r.status in taskStatus) taskStatus[r.status as keyof typeof taskStatus] += 1;
@@ -430,15 +447,15 @@ export const agentIntelligence = createServerFn({ method: "GET" })
       const intakeR = taskStat("intake", "approval", "rejected");
       behaviorChips.push({
         pri: "high", title: `⚠ Persons are rejecting agent proposals (${approvalsRejected} overturns)`,
-        short: `${approvalsRejected} proposal overturns (${Math.round((approvalsRejected / Math.max(approvals, 1)) * 100)}% rate)`,
-        cause: intakeR >= 2 ? `Intake's shortlist proposal was declined ${intakeR}× — the same proposal, repeatedly.` : `Rejections across ${new Set(rejectRows.map((r) => r.agentType)).size} agents.`,
+        short: `${approvalsRejected} of ${approvals} proposals declined (${Math.round((approvalsRejected / Math.max(approvals, 1)) * 100)}%)`,
+        cause: intakeR >= 2 ? `Intake's proposals were declined ${intakeR}× — mostly "${rejectRows.find((x) => x.agentType === "intake")?.title ?? "proposed action"}".` : `Rejections across ${new Set(rejectRows.map((r) => r.agentType)).size} agents.`,
         effect: `Overturn rate on HITL cards: ${Math.round((approvalsRejected / Math.max(approvals, 1)) * 100)}%. The agent's judgment and the reviewer's disagree.`,
         action: `Read the rejection reasons. If the wording is the problem, change the proposal copy; if the candidates are, change the scorer threshold. Don't touch the reviewer.`,
       });
     }
     if (idleAgents.includes("copilot"))
       behaviorChips.push({
-        pri: "high", title: `⚠ The front door never opened — copilot has 0 runs`,
+        pri: "medium", title: `◈ The front door never opened — copilot has 0 runs`,
         short: `copilot never invoked — routing untested`,
         cause: `All ${totalRuns} runs reached specialists directly; the routing layer and its confirmations were never exercised.`,
         effect: `The one agent designed to gate which specialist acts is the least-tested one.`,
@@ -452,10 +469,14 @@ export const agentIntelligence = createServerFn({ method: "GET" })
         effect: `These agents bypass every step-based rule and this graph.`,
         action: `Emit session turns as steps so governance covers them.`,
       });
+    const failRate = failed / Math.max(totalRuns, 1);
     behaviorChips.push({
-      pri: "ok", title: `✓ The fleet is quiet — ${awaiting} runs await a person, ${failed} failed`,
-      short: `fleet quiet — ${awaiting} awaiting, ${failed} failed`,
-      cause: `${totalRuns} runs · ${totalSteps} steps.`,
+      pri: failRate >= 0.1 ? "medium" : "ok",
+      title: failRate >= 0.1
+        ? `◈ ${failed} of ${totalRuns} runs failed (${Math.round(failRate * 100)}%) — ${awaiting} await a person`
+        : `✓ The fleet is quiet — ${awaiting} runs await a person, ${failed} failed`,
+      short: failRate >= 0.1 ? `${failed}/${totalRuns} runs failed · ${awaiting} awaiting` : `fleet quiet — ${awaiting} awaiting, ${failed} failed`,
+      cause: `${totalRuns} runs · ${totalSteps} steps · ${failed} failed · ${cancelledRuns} cancelled.`,
       effect: `Gate stops (${norm.hitl.stops + norm.gates.stops}) behaved as designed.`,
       action: `Cancelled runs (${cancelledRuns}) are stale ticks — harmless, but a liveness rule could reap them sooner.`,
     });
@@ -466,13 +487,6 @@ export const agentIntelligence = createServerFn({ method: "GET" })
       effect: `Governance coverage is ${Math.round(((registered.length - idleAgents.length - gapAgents.length) / Math.max(registered.length, 1)) * 100)}% of the fleet.`,
       action: `The Action plan table has the per-agent decision; make idle a decision, and pull voice sessions into the trace.`,
     });
-    behaviorChips.push({
-      pri: "medium", title: `◈ Vocabulary: ${matchScoresCount} match scores await a skill graph`,
-      short: `skill graph: 0 nodes — vocabulary layer missing`,
-      cause: `Match scores and candidates carry raw text[] skills; normalization is still the hardcoded alias list.`,
-      effect: `The vocabulary view below is computed in-memory — no agent can query it yet.`,
-      action: `Phase 1 persists these nodes into skill_nodes/skill_edges.`,
-    });
     const behaviorSysread = behaviorChips.map((c) => ({ ...c, pri: priOf(c.title) }));
     behaviorChips.sort((a, b) => a.pri.localeCompare(b.pri));
 
@@ -481,7 +495,7 @@ export const agentIntelligence = createServerFn({ method: "GET" })
       const st = statMap.get(a);
       const ver = defVersions.get(a) ?? "?";
       if (!st) {
-        plan.push({ name: a, ver, state: "idle", pri: "ok", runs: 0, stops: 0, overturned: 0, errors: 0, awaiting: 0, action: `Enable (tick / copilot route / feature flag) or park — an idle manifest should be a decision.` });
+        plan.push({ name: a, ver, state: "idle", pri: "ok", runs: 0, stops: 0, overturned: 0, errors: 0, awaiting: 0, action: `Not used yet — turn it on in Agent settings if you expect it to work for you; otherwise no action.` });
         continue;
       }
       const appT = taskTotal(a, "approval"), appR = taskStat(a, "approval", "rejected");
@@ -494,16 +508,17 @@ export const agentIntelligence = createServerFn({ method: "GET" })
       let state: string, pri: Pri, action: string;
       if (st.steps === 0) {
         state = "no trace"; pri = "medium";
-        action = `Add session-shaped telemetry so voice/panel behavior joins governance and this graph.`;
+        action = `Runs as a live call — review its call transcripts; step-level governance does not cover it yet.`;
       } else if (overturned >= 2 && stops > 0) {
         state = "out of sync"; pri = "high";
         action = `Persons declined ${overturned} of ${stops} proposals — read the rejection reasons; fix proposal copy or scorer threshold, not the reviewer.`;
       } else if (errors >= 10) {
-        state = "infra"; pri = "high";
-        action = `Top failure is infrastructure-shaped — fix egress/parser first, then re-run a stretch.`;
+        const top = [...(errByAgent.get(a) ?? new Map<string, number>())].sort((x, y) => y[1] - x[1])[0];
+        state = "failing"; pri = "high";
+        action = `${errors} failed tool calls${top ? ` — mostly ${top[0]} ×${top[1]}` : ""}. Ask your admin to check that step before relying on this agent's output.`;
       } else if (errors >= 3) {
         state = "flaky"; pri = "medium";
-        action = `${errors} tool errors — re-run a stretch after the relevant fix and verify the count drops.`;
+        action = `${errors} failed tool calls — watch the next runs; escalate if the count keeps rising.`;
       } else if (awaitingN > 0) {
         state = "waiting"; pri = "medium";
         action = `${awaitingN} run(s) parked awaiting a person — clear the decisions inbox.`;
@@ -512,7 +527,7 @@ export const agentIntelligence = createServerFn({ method: "GET" })
         action = `None — ${stops} touchpoints, overturn rate inside band.`;
       } else {
         state = "clean"; pri = "ok";
-        action = `None — autonomous, no errors, no interventions.`;
+        action = errors > 0 ? `None — ${errors} isolated failed call(s), below the alert threshold.` : `None — autonomous, no errors, no interventions.`;
       }
       plan.push({ name: a, ver, state, pri, runs: st.runs, stops, overturned, errors, awaiting: awaitingN, action });
     }
@@ -743,8 +758,8 @@ export const agentIntelligence = createServerFn({ method: "GET" })
           tiles: [
             ["Runs", String(totalRuns), `${failed} failed · ${cancelledRuns} cancelled`],
             ["Agent steps", String(totalSteps), `${registered.length - idleAgents.length}/${registered.length} registered agents active`],
-            ["Person touchpoints", String(norm.hitl.stops + norm.gates.stops + norm.clarify.stops), `${approvalsRejected + gatesRejected} declined by a person`],
-            ["Match scores", String(matchScoresCount), "awaiting a persisted skill graph"],
+            ["Person touchpoints", String(norm.hitl.stops + norm.gates.stops + norm.clarify.stops), `${approvalsRejected + gatesRejected} declined · ${taskStatus.open} still open`],
+            ["Match scores", String(matchScoresCount), "candidates scored against requisitions"],
           ],
           nodes, edges,
           systemRead: behaviorSysread.map((c) => ({ ...c, pri: priOf(c.title) })).sort((a, b) => priOrder[a.pri] - priOrder[b.pri]),
