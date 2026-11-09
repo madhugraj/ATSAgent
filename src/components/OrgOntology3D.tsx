@@ -99,7 +99,7 @@ export function OrgOntology3D({
   time: number;
   focus: OntologyFocus;
   onSelect: (f: OntologyFocus) => void;
-  height?: number;
+  height?: number | string;
 }) {
   const host = useRef<HTMLDivElement | null>(null);
   const timeRef = useRef(time);
