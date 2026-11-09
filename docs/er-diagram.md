@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-102 tables across 9 domains.
+103 tables across 9 domains.
 
 ## Identity & access
 
@@ -294,6 +294,7 @@ erDiagram
     integer weight_impact
     integer weight_education
     integer weight_social
+    jsonb custom_weights
     jsonb approval_trail
     uuid created_by FK
     timestamptz opened_at
@@ -447,6 +448,7 @@ erDiagram
     integer social_score
     integer overall_score
     jsonb weights
+    jsonb custom_scores
     text matched_skills
     text missing_skills
     text rationale "nullable"
@@ -969,6 +971,7 @@ erDiagram
     uuid user_id
     text role
     text content
+    jsonb handoff "nullable"
     timestamptz created_at
   }
   skill_nodes {
@@ -1212,6 +1215,8 @@ erDiagram
 | `compensation_requests` | `org_id` | `organizations` | cascade |
 | `content_templates` | `org_id` | `organizations` | cascade |
 | `copilot_messages` | `org_id` | `organizations` | cascade |
+| `demand_outlooks` | `generated_by` | `users` | no action |
+| `demand_outlooks` | `org_id` | `organizations` | cascade |
 | `departments` | `org_id` | `organizations` | cascade |
 | `email_outbox` | `application_id` | `applications` | cascade |
 | `email_outbox` | `org_id` | `organizations` | cascade |
@@ -1416,7 +1421,8 @@ erDiagram
 | `compensation_details` | — | 19 | — |
 | `compensation_requests` | — | 12 | (token) |
 | `content_templates` | Requisitions & job content | 16 | — |
-| `copilot_messages` | Intelligence | 6 | — |
+| `copilot_messages` | Intelligence | 7 | — |
+| `demand_outlooks` | — | 4 | — |
 | `departments` | Organisations & masters | 8 | (orgId+name) |
 | `email_outbox` | Communications & AI settings | 16 | (idempotency_key) |
 | `email_settings` | Communications & AI settings | 11 | (org_id) |
@@ -1435,7 +1441,7 @@ erDiagram
 | `job_descriptions` | Requisitions & job content | 17 | — |
 | `job_index_notifications` | — | 10 | — |
 | `master_items` | Organisations & masters | 8 | — |
-| `match_scores` | Candidates & pipeline | 26 | — |
+| `match_scores` | Candidates & pipeline | 27 | — |
 | `member_interviewer_profiles` | — | 9 | (member_id) |
 | `notification_states` | — | 7 | — |
 | `offer_negotiations` | — | 24 | — |
@@ -1460,7 +1466,7 @@ erDiagram
 | `product_catalogue_commercials` | Organisations & masters | 8 | — |
 | `rate_limit_hits` | — | 3 | — |
 | `requisition_board_postings` | — | 16 | (requisitionId+provider) |
-| `requisitions` | Requisitions & job content | 43 | (orgId+code) |
+| `requisitions` | Requisitions & job content | 44 | (orgId+code) |
 | `role_panels` | — | 9 | (requisitionId+level) |
 | `round_substitutes` | — | 11 | — |
 | `salary_benchmarks` | Intelligence | 15 | — |

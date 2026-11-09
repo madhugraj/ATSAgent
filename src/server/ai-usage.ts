@@ -31,6 +31,8 @@ export const AI_FEATURES = [
   "offer_letter",
   "copilot",
   "talent_brain",
+  // Copilot: market signal for the demand outlook (src/lib/demand-outlook.ts).
+  "demand_outlook",
   "model_test",
   // Agent steps (docs/agentic-plan.md §4) — one slug per agent.
   "agent_copilot",
