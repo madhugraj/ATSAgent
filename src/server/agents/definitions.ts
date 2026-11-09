@@ -465,7 +465,14 @@ export function registerPhase2Agents(): void {
     // names or definitions; rephrases once and never as yes/no; a bare "yes" to its own
     // suggestion is recorded as prompted (not counted as answered, graded weak and
     // flagged); claims nothing about earlier calls. record_answer gained `prompted`.
-    version: "1.1.16",
+    // 1.2.0 (a real call on 9 November): as many screening questions as the call's length
+    // allows (two in 10 minutes, was four), said in one short spoken sentence with the kit's
+    // CV lead-in dropped, and one open follow-up; a shorter opening and role overview; waits
+    // for an answer to the consent question after a concern; never insists a person applied;
+    // answers a question back ("relocation support?") instead of recording it as a yes;
+    // answers the candidate's questions before moving on; waits 1.6 s before taking its
+    // turn; the opening cue repeats until it speaks (it was silent ~10 s after one cue).
+    version: "1.2.0",
     owner: "hr_head",
     responsibility:
       "Holds one AI screening phone call with a shortlisted candidate the way an HR recruiter does: says who it is and why it is calling, asks consent, explains the role and why it called them, records their practical details (including the pay they state, for HR only) and their answers to the role's screening questions, or agrees a better time — nothing else.",

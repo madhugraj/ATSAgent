@@ -27,8 +27,10 @@ import type { PhoneScreeningPolicy } from "./settings.server";
 export {
   type BriefFacts,
   type CallQuestion,
+  callQuestionCount,
   callSystemPrompt,
   questionsForCall,
+  spokenQuestion,
 } from "./call-prompt";
 
 /** Everything the call needs from the database for one application. */
@@ -135,7 +137,7 @@ export async function loadBriefFacts(input: {
       expectedPay: pay.expectedCtc != null,
     },
     emailDomain: row.candidateEmail?.split("@")[1]?.toLowerCase() || null,
-    questions: questionsForCall(kitQuestions),
+    questions: questionsForCall(kitQuestions, input.policy.maxMinutes),
     maxMinutes: input.policy.maxMinutes,
     nextSteps:
       input.policy.nextStepsText ||

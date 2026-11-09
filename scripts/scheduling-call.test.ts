@@ -1194,4 +1194,20 @@ describe("who speaks first", () => {
     w.stop();
     expect(w.sent).toEqual(["(The person has answered the phone. Reply to them now.)"]);
   }, 15_000);
+
+  test("still silent after the cue: it is repeated, at most twice more", async () => {
+    const heardAt = Date.now();
+    const w = watch(
+      () => heardAt,
+      () => false,
+      60_000,
+    );
+    await wait(4_000 + 3_000 * 3 + 600);
+    w.stop();
+    expect(w.sent).toEqual([
+      "(The person has answered the phone. Reply to them now.)",
+      "(The person is on the line and waiting. Speak now.)",
+      "(The person is on the line and waiting. Speak now.)",
+    ]);
+  }, 20_000);
 });
