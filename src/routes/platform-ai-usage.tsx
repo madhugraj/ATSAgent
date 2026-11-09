@@ -7,7 +7,6 @@ import { toast } from "sonner";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
 import {
-  aiUsageEventsList,
   aiUsageExport,
   aiUsageOverview,
   type AiUsageEventRow,
@@ -15,6 +14,7 @@ import {
 import { listAllOrganizations } from "@/lib/platform.functions";
 import { usePlatform } from "@/hooks/usePlatform";
 import { PageHeader, StatCard } from "@/components/ats";
+import { AiRequestLog } from "@/components/AiRequestLog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -135,7 +135,6 @@ function downloadCsv(rows: AiUsageEventRow[]) {
 function AiUsage() {
   const { isSuperUser, isLoading } = usePlatform();
   const fetchOverview = useServerFn(aiUsageOverview);
-  const fetchEvents = useServerFn(aiUsageEventsList);
   const fetchExport = useServerFn(aiUsageExport);
   const fetchOrgs = useServerFn(listAllOrganizations);
 
@@ -143,8 +142,6 @@ function AiUsage() {
   const [orgId, setOrgId] = useState("all");
   const [feature, setFeature] = useState("all");
   const [provider, setProvider] = useState("all");
-  const [page, setPage] = useState(0);
-  const PAGE_SIZE = 50;
 
   const filters = useMemo(
     () => ({
@@ -168,20 +165,16 @@ function AiUsage() {
     enabled: isSuperUser,
     placeholderData: keepPreviousData,
   });
-  const events = useQuery({
-    queryKey: ["ai_usage_events", filters, page],
-    queryFn: () =>
-      fetchEvents({ data: { ...filters, limit: PAGE_SIZE, offset: page * PAGE_SIZE } }),
-    enabled: isSuperUser,
-    placeholderData: keepPreviousData,
-  });
-
   const featureOptions = useMemo(
     () => (overview.data?.byFeature ?? []).map((f) => f.feature),
     [overview.data],
   );
   const providerOptions = useMemo(
     () => Array.from(new Set((overview.data?.byModel ?? []).map((m) => m.provider))).sort(),
+    [overview.data],
+  );
+  const modelOptions = useMemo(
+    () => Array.from(new Set((overview.data?.byModel ?? []).map((m) => m.model))).sort(),
     [overview.data],
   );
   const topFeatures = useMemo(() => (overview.data?.byFeature ?? []).slice(0, 12), [overview.data]);
@@ -240,7 +233,6 @@ function AiUsage() {
           value={String(days)}
           onValueChange={(v) => {
             setDays(Number(v));
-            setPage(0);
           }}
         >
           <SelectTrigger className="w-[150px]">
@@ -258,7 +250,6 @@ function AiUsage() {
           value={orgId}
           onValueChange={(v) => {
             setOrgId(v);
-            setPage(0);
           }}
         >
           <SelectTrigger className="w-[210px]">
@@ -277,7 +268,6 @@ function AiUsage() {
           value={feature}
           onValueChange={(v) => {
             setFeature(v);
-            setPage(0);
           }}
         >
           <SelectTrigger className="w-[190px]">
@@ -296,7 +286,6 @@ function AiUsage() {
           value={provider}
           onValueChange={(v) => {
             setProvider(v);
-            setPage(0);
           }}
         >
           <SelectTrigger className="w-[160px]">
@@ -319,7 +308,6 @@ function AiUsage() {
             setOrgId("all");
             setFeature("all");
             setProvider("all");
-            setPage(0);
           }}
         >
           Reset
@@ -497,86 +485,7 @@ function AiUsage() {
         </table>
       </section>
 
-      <section className="panel overflow-x-auto p-4">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold">Request log</h2>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span>
-              {events.data ? (page * PAGE_SIZE + 1).toLocaleString() : 0}–
-              {Math.min((page + 1) * PAGE_SIZE, events.data?.total ?? 0).toLocaleString()} of{" "}
-              {(events.data?.total ?? 0).toLocaleString()}
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page === 0}
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!events.data || (page + 1) * PAGE_SIZE >= events.data.total}
-              onClick={() => setPage((p) => p + 1)}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
-        <table className="num mt-3 w-full text-xs">
-          <thead className="text-left text-muted-foreground">
-            <tr>
-              <th className="pb-2 font-medium">Time</th>
-              <th className="pb-2 font-medium">Organisation</th>
-              <th className="pb-2 font-medium">Module</th>
-              <th className="pb-2 font-medium">Model</th>
-              <th className="pb-2 font-medium">Status</th>
-              <th className="pb-2 text-right font-medium">Tokens</th>
-              <th className="pb-2 text-right font-medium">Try</th>
-              <th className="pb-2 text-right font-medium">Latency</th>
-            </tr>
-          </thead>
-          <tbody
-            className={events.isFetching && !events.isPlaceholderData ? "opacity-60" : undefined}
-          >
-            {(events.data?.rows ?? []).map((r) => (
-              <tr
-                key={r.id}
-                className="border-t border-border/60"
-                title={r.errorMessage ?? undefined}
-              >
-                <td className="py-1.5 font-sans">{new Date(r.createdAt).toLocaleString()}</td>
-                <td className="py-1.5 font-sans">{r.orgName ?? "—"}</td>
-                <td className="py-1.5 font-sans">{r.feature}</td>
-                <td className="py-1.5 font-sans">
-                  {r.provider} · {r.model}
-                </td>
-                <td className="py-1.5 font-sans">
-                  {r.status === "ok" ? (
-                    <Badge variant="outline">ok</Badge>
-                  ) : (
-                    <Badge variant="destructive">error</Badge>
-                  )}
-                  {r.grounded ? <span className="ml-1 text-muted-foreground">web</span> : null}
-                </td>
-                <td className="py-1.5 text-right">{r.totalTokens.toLocaleString()}</td>
-                <td className="py-1.5 text-right">{r.attempt > 1 ? r.attempt : "—"}</td>
-                <td className="py-1.5 text-right">
-                  {r.durationMs != null ? `${(r.durationMs / 1000).toFixed(1)}s` : "—"}
-                </td>
-              </tr>
-            ))}
-            {!events.data?.rows.length && (
-              <tr>
-                <td colSpan={8} className="py-3 text-muted-foreground">
-                  No requests logged in this range yet.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </section>
+      <AiRequestLog base={filters} modelOptions={modelOptions} />
 
       <p className="text-xs text-muted-foreground">
         Token counts come from the providers&apos; own usage reports; web-search tool fees are not
