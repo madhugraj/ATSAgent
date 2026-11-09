@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agent governance — mockup</title>
+<style>
+  :root {
+    --bg: #fafaf9; --card: #fff; --fg: #1c1b19; --muted: #6f6d66; --border: #e7e5e0;
+    --primary: #5b4ff5; --red: #d03b3b; --red-bg: #fdecec; --amber: #c27c0e; --amber-bg: #fdf4e3;
+    --green: #1f9d55; --green-bg: #e8f6ee; --agent: #2a78d6; --deleg: #7c5cff; --event: #9a988f;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; color: var(--fg); background: var(--bg); }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 28px 28px 60px; }
+  .mock-note { font-size: 12px; color: var(--muted); background: #f1f0ec; border-radius: 6px; padding: 6px 10px; display: inline-block; margin-bottom: 14px; }
+  header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+  h1 { font-size: 22px; margin: 0 0 2px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); margin: 0; }
+  .controls { display: flex; gap: 8px; }
+  .select { white-space: nowrap; border: 1px solid var(--border); background: var(--card); border-radius: 8px; padding: 6px 10px; font-size: 13px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
+
+  /* 1 — verdict */
+  .verdict { display: flex; align-items: center; gap: 20px; padding: 16px 18px; margin-bottom: 16px; }
+  .verdict .big { font-size: 18px; font-weight: 650; white-space: nowrap; }
+  .verdict .big b { color: var(--red); }
+  .pills { display: flex; gap: 8px; flex-wrap: wrap; }
+  .pill { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--border); border-radius: 999px; padding: 5px 12px 5px 10px; font-size: 13px; cursor: pointer; background: var(--card); }
+  .pill:hover { border-color: #cfccc4; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
+  .dot.red { background: var(--red); } .dot.amber { background: #e3a21a; } .dot.green { background: var(--green); } .dot.grey { background: #cfccc4; }
+  .pill .word { color: var(--muted); }
+  .pill.red { background: var(--red-bg); border-color: #f4c7c7; }
+
+  /* 2 — main visual */
+  .grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .sec-h { display: flex; align-items: baseline; justify-content: space-between; padding: 14px 18px 0; }
+  .sec-h h2 { font-size: 15px; margin: 0; }
+  .sec-h .hint { font-size: 12px; color: var(--muted); }
+  .legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); padding: 6px 18px 0; }
+  .legend i { display: inline-block; width: 18px; height: 0; border-top: 2px solid; vertical-align: middle; margin-right: 6px; }
+  .map { padding: 6px 10px 4px; }
+  .map svg { width: 100%; height: auto; display: block; }
+  .stats { display: flex; gap: 22px; padding: 10px 18px 14px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+  .stats b { color: var(--fg); font-weight: 600; }
+  .stats .bad b, .stats .bad { color: var(--red); }
+
+  /* 3 — fix list */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; font-weight: 500; font-size: 12px; color: var(--muted); padding: 10px 18px 8px; border-bottom: 1px solid var(--border); }
+  td { padding: 11px 18px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  .sev { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 12px; }
+  .sev.red { color: var(--red); } .sev.amber { color: var(--amber); }
+  .what { font-weight: 600; }
+  .why { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+  .agent { display: inline-block; background: #eef3fc; color: #1d5bb0; border-radius: 5px; padding: 1px 7px; font-size: 12px; font-weight: 500; }
+  .next a { color: var(--primary); text-decoration: none; font-weight: 500; }
+  .passing { display: flex; align-items: center; justify-content: space-between; padding: 11px 18px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; cursor: pointer; }
+  .passing:hover { background: #fbfbf9; }
+
+  /* agent matrix */
+  .matrix td, .matrix th { text-align: center; padding: 9px 10px; }
+  .matrix td:first-child, .matrix th:first-child { text-align: left; padding-left: 18px; }
+  .matrix .meta { color: var(--muted); font-size: 12px; text-align: left; }
+  .matrix tr.expand td { background: #fbfbf9; text-align: left; padding: 12px 18px 14px 18px; }
+  .kv { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; font-size: 12.5px; }
+  .kv div span { display: block; color: var(--muted); font-size: 11.5px; margin-bottom: 2px; }
+  .chev { color: var(--muted); font-size: 11px; }
+  .two { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 16px; }
+  .annot { border: 1.5px dashed #c9c3f7; border-radius: 10px; padding: 10px 14px; margin-top: 24px; font-size: 12.5px; color: #4a42b8; background: #f7f6ff; }
+  .annot ol { margin: 6px 0 0 18px; padding: 0; }
+  .annot li { margin: 3px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <span class="mock-note">Mockup · layout proposal for Agent administration → Agent governance · numbers are this demo organisation's where they exist; the hand-off map uses illustrative traffic so the layout can be judged</span>
+
+  <header>
+    <div>
+      <h1>Agent governance</h1>
+      <p class="sub">Is the harness around your agents holding — and are they handing work to each other safely?</p>
+    </div>
+    <div class="controls">
+      <span class="select">Last 30 days ▾</span>
+      <span class="select">All agents ▾</span>
+    </div>
+  </header>
+
+  <!-- 1. VERDICT -->
+  <div class="card verdict">
+    <div class="big"><b>3 things</b> need you</div>
+    <div class="pills">
+      <span class="pill"><span class="dot green"></span>Limits <span class="word">ok</span></span>
+      <span class="pill red"><span class="dot red"></span>Autonomy <span class="word">act</span></span>
+      <span class="pill red"><span class="dot red"></span>Definitions <span class="word">act</span></span>
+      <span class="pill red"><span class="dot red"></span>Hand-offs <span class="word">act</span></span>
+      <span class="pill"><span class="dot green"></span>Budget <span class="word">ok</span></span>
+    </div>
+  </div>
+
+  <div class="grid">
+    <!-- 3. FIX LIST — directly under the verdict: what to do comes first -->
+    <div class="card">
+      <div class="sec-h"><h2>Fix list</h2><span class="hint">Only what needs action · most severe first</span></div>
+      <table style="margin-top:8px">
+        <thead><tr><th style="width:90px">Severity</th><th>What</th><th style="width:120px">Agent</th><th style="width:230px">Next step</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="sev red"><span class="dot red"></span>Act</span></td>
+            <td><div class="what">43 changes made with no approval card</div><div class="why">Set to “asks first”, but only 23 approvals exist for 43 changes.</div></td>
+            <td><span class="agent">intake</span></td>
+            <td class="next"><a href="#">Review the 20 unmatched changes →</a></td>
+          </tr>
+          <tr>
+            <td><span class="sev red"><span class="dot red"></span>Act</span></td>
+            <td><div class="what">30 runs recorded no definition version</div><div class="why">Nobody can prove which rulebook these runs followed.</div></td>
+            <td><span class="agent">intake</span> <span class="agent">+4</span></td>
+            <td class="next"><a href="#">See the runs →</a></td>
+          </tr>
+          <tr>
+            <td><span class="sev red"><span class="dot red"></span>Act</span></td>
+            <td><div class="what">An event gave up after 3 attempts</div><div class="why">requisition.status_changed never reached an agent — the hand-off was lost.</div></td>
+            <td><span class="agent">orchestrator</span></td>
+            <td class="next"><a href="#">Retry the event →</a></td>
+          </tr>
+          <tr>
+            <td><span class="sev amber"><span class="dot amber"></span>Watch</span></td>
+            <td><div class="what">Copilot has never delegated</div><div class="why">The agent → agent channel is untested in this organisation.</div></td>
+            <td><span class="agent">copilot</span></td>
+            <td class="next"><a href="#">Try one task through Copilot →</a></td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="passing"><span><span class="dot green" style="margin-right:8px"></span><b style="color:var(--fg)">17 checks passing</b> · no refused calls · no injection flags · autonomy within risk tier · within budget</span><span class="chev">Show ▾</span></div>
+    </div>
+
+    <!-- 2. MAIN VISUAL — hand-off map -->
+    <div class="card">
+      <div class="sec-h"><h2>How agents hand work to each other</h2><span class="hint">Hover a box to trace its path</span></div>
+      <div class="legend">
+        <span><i style="border-color:#b6b4ab"></i>publishes</span>
+        <span><i style="border-color:#9a988f"></i>starts</span>
+        <span><i style="border-color:var(--deleg);border-top-style:dashed"></i>delegates (agent → agent)</span>
+        <span><i style="border-color:var(--red)"></i>failed</span>
+      </div>
+      <div class="map">
+        <svg viewBox="0 0 1100 330" font-family="Inter, system-ui, sans-serif">
+          <g font-size="11" font-weight="600" fill="#8a887f" letter-spacing=".04em">
+            <text x="20" y="20">PUBLISHED BY</text><text x="420" y="20">EVENT</text><text x="820" y="20">AGENT STARTED</text>
+          </g>
+          <!-- edges -->
+          <g fill="none" stroke-linecap="round">
+            <path d="M280,62 C350,62 350,62 420,62" stroke="#b6b4ab" stroke-width="4"/>
+            <path d="M280,122 C350,122 350,122 420,122" stroke="#b6b4ab" stroke-width="2.5"/>
+            <path d="M280,182 C350,182 350,182 420,182" stroke="#b6b4ab" stroke-width="3"/>
+            <path d="M280,62 C350,62 350,242 420,242" stroke="#d03b3b" stroke-width="1.6"/>
+            <path d="M680,62 C750,62 750,62 820,62" stroke="#9a988f" stroke-width="4"/>
+            <path d="M680,122 C750,122 750,122 820,122" stroke="#9a988f" stroke-width="2.5"/>
+            <path d="M680,182 C750,182 750,182 820,182" stroke="#9a988f" stroke-width="3"/>
+            <path d="M280,302 C550,302 550,242 820,242" stroke="#7c5cff" stroke-width="2" stroke-dasharray="7 5"/>
+          </g>
+          <g font-size="11" font-weight="600" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="4">
+            <text x="750" y="56" fill="#66655e">×12</text>
+            <text x="750" y="116" fill="#66655e">×5</text>
+            <text x="750" y="176" fill="#66655e">×8</text>
+            <text x="350" y="160" fill="#d03b3b">×1 failed</text>
+            <text x="550" y="266" fill="#7c5cff">×2</text>
+          </g>
+          <!-- nodes -->
+          <g font-size="13">
+            <!-- left -->
+            <g transform="translate(20,40)"><rect width="260" height="44" rx="9" fill="#fff" stroke="#e7e5e0"/><rect x="7" y="8" width="4" height="28" rx="2" fill="#c3c2b7"/><text x="22" y="19" font-weight="600">a person</text><text x="22" y="35" font-size="11.5" fill="#6f6d66">13 hand-offs · 1 failed</text></g>
+            <g transform="translate(20,100)"><rect width="260" height="44" rx="9" fill="#fff" stroke="#e7e5e0"/><rect x="7" y="8" width="4" height="28" rx="2" fill="#7c5cff"/><text x="22" y="19" font-weight="600">jd</text><text x="22" y="35" font-size="11.5" fill="#6f6d66">5 hand-offs</text></g>
+            <g transform="translate(20,160)"><rect width="260" height="44" rx="9" fill="#fff" stroke="#e7e5e0"/><rect x="7" y="8" width="4" height="28" rx="2" fill="#7c5cff"/><text x="22" y="19" font-weight="600">intake</text><text x="22" y="35" font-size="11.5" fill="#6f6d66">8 hand-offs</text></g>
+            <g transform="translate(20,280)"><rect width="260" height="44" rx="9" fill="#fff" stroke="#e7e5e0"/><rect x="7" y="8" width="4" height="28" rx="2" fill="#7c5cff"/><text x="22" y="19" font-weight="600">copilot</text><text x="22" y="35" font-size="11.5" fill="#6f6d66">2 delegations</text></g>
+            <!-- middle -->
+            <g transform="translate(420,40)"><rect width="260" height="44" rx="9" fill="#fff" stroke="#e7e5e0"/><rect x="7" y="8" width="4" height="28" rx="2" fill="#9a988f"/><text x="22" y="19" font-weight="600">requisition approved</text><text x="22" y="35" font-size="11.5" fill="#6f6d66">published 12×</text></g>
+            <g transform="translate(420,100)"><rect width="260" height="44" rx="9" fill="#fff" stroke="#e7e5e0"/><rect x="7" y="8" width="4" height="28" rx="2" fill="#9a988f"/><text x="22" y="19" font-weight="600">JD approved</text><text x="22" y="35" font-size="11.5" fill="#6f6d66">published 5×</text></g>
+            <g transform="translate(420,160)"><rect width="260" height="44" rx="9" fill="#fff" stroke="#e7e5e0"/><rect x="7" y="8" width="4" height="28" rx="2" fill="#9a988f"/><text x="22" y="19" font-weight="600">candidate shortlisted</text><text x="22" y="35" font-size="11.5" fill="#6f6d66">published 8×</text></g>
+            <g transform="translate(420,220)"><rect width="260" height="44" rx="9" fill="#fff" stroke="#f4c7c7"/><rect x="7" y="8" width="4" height="28" rx="2" fill="#d03b3b"/><text x="22" y="19" font-weight="600">requisition changed</text><text x="22" y="35" font-size="11.5" fill="#d03b3b">gave up after 3 attempts</text></g>
+            <!-- right -->
+            <g transform="translate(820,40)"><rect width="260" height="44" rx="9" fill="#fff" stroke="#e7e5e0"/><rect x="7" y="8" width="4" height="28" rx="2" fill="#2a78d6"/><text x="22" y="19" font-weight="600">jd</text><text x="22" y="35" font-size="11.5" fill="#6f6d66">12 runs started</text></g>
+            <g transform="translate(820,100)"><rect width="260" height="44" rx="9" fill="#fff" stroke="#e7e5e0"/><rect x="7" y="8" width="4" height="28" rx="2" fill="#2a78d6"/><text x="22" y="19" font-weight="600">publishing</text><text x="22" y="35" font-size="11.5" fill="#6f6d66">5 runs started</text></g>
+            <g transform="translate(820,160)"><rect width="260" height="44" rx="9" fill="#fff" stroke="#e7e5e0"/><rect x="7" y="8" width="4" height="28" rx="2" fill="#2a78d6"/><text x="22" y="19" font-weight="600">screening</text><text x="22" y="35" font-size="11.5" fill="#6f6d66">8 runs started</text></g>
+            <g transform="translate(820,220)"><rect width="260" height="44" rx="9" fill="#fff" stroke="#e7e5e0"/><rect x="7" y="8" width="4" height="28" rx="2" fill="#2a78d6"/><text x="22" y="19" font-weight="600">requisition</text><text x="22" y="35" font-size="11.5" fill="#6f6d66">2 runs started</text></g>
+          </g>
+        </svg>
+      </div>
+      <div class="stats">
+        <span><b>27</b> runs started by another agent</span>
+        <span>Longest chain: <b>requisition → jd → publishing</b></span>
+        <span><b>0</b> loops</span>
+        <span class="bad"><b>1</b> event lost</span>
+      </div>
+    </div>
+
+    <!-- per-agent matrix replaces four separate tables -->
+    <div class="card">
+      <div class="sec-h"><h2>Agents</h2><span class="hint">6 active · 15 switched off (hidden) · click a row for details</span></div>
+      <table class="matrix" style="margin-top:8px">
+        <thead><tr><th>Agent</th><th>Limits</th><th>Autonomy</th><th>Definition</th><th>Hand-offs</th><th>Budget</th><th class="meta">Setting · risk · owner</th></tr></thead>
+        <tbody>
+          <tr><td><b>intake</b> <span class="chev">▾</span></td><td><span class="dot green"></span></td><td><span class="dot red"></span></td><td><span class="dot red"></span></td><td><span class="dot green"></span></td><td><span class="dot green"></span></td><td class="meta">asks first · high · HR head</td></tr>
+          <tr class="expand"><td colspan="7">
+            <div class="kv">
+              <div><span>Limits</span>0 refused · 0 injection flags</div>
+              <div><span>Autonomy</span><b style="color:var(--red)">43 changes, 23 approved</b></div>
+              <div><span>Definition</span>approved 1.5.0 · <b style="color:var(--red)">26 runs unrecorded</b> · 1 eval</div>
+              <div><span>Hand-offs</span>started 8× by shortlisting · published 8</div>
+              <div><span>Budget</span>0 of 60,000 tokens</div>
+            </div>
+          </td></tr>
+          <tr><td><b>requisition</b></td><td><span class="dot green"></span></td><td><span class="dot red"></span></td><td><span class="dot red"></span></td><td><span class="dot red"></span></td><td><span class="dot green"></span></td><td class="meta">asks first · medium · HR head</td></tr>
+          <tr><td><b>jd</b></td><td><span class="dot green"></span></td><td><span class="dot red"></span></td><td><span class="dot red"></span></td><td><span class="dot green"></span></td><td><span class="dot grey"></span></td><td class="meta">off · medium · department head</td></tr>
+          <tr><td><b>screening</b></td><td><span class="dot green"></span></td><td><span class="dot green"></span></td><td><span class="dot green"></span></td><td><span class="dot green"></span></td><td><span class="dot grey"></span></td><td class="meta">acts, then tells · medium · HR head</td></tr>
+          <tr><td><b>evaluation</b></td><td><span class="dot green"></span></td><td><span class="dot green"></span></td><td><span class="dot red"></span></td><td><span class="dot grey"></span></td><td><span class="dot grey"></span></td><td class="meta">asks first · high · hiring manager</td></tr>
+          <tr><td><b>panel L1</b></td><td><span class="dot green"></span></td><td><span class="dot grey"></span></td><td><span class="dot red"></span></td><td><span class="dot grey"></span></td><td><span class="dot grey"></span></td><td class="meta">off · high · HR head</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="annot">
+    <b>What changed vs today’s page</b>
+    <ol>
+      <li><b>One verdict</b> (“3 things need you”) plus five one-word pills replaces five full-width question cards and the tiles.</li>
+      <li><b>Fix list first</b> — only actionable rows, each with an agent and a next-step link; the 17 passing checks collapse to one line.</li>
+      <li><b>One main visual</b> — the hand-off map, with a one-line legend and four numbers under it instead of a paragraph.</li>
+      <li><b>One agent matrix</b> (agent × five checks as dots, expand a row for detail) replaces the separate limits, autonomy, definitions and budget tables. Switched-off agents are hidden by default.</li>
+      <li><b>Own page, own audience</b> — Agent administration → Agent governance, for agent owners. Agent behaviour stays on Agent intelligence; skill supply vs demand moves to the Intelligence section.</li>
+      <li><b>No side inspector, no prose cards</b> — detail opens in place.</li>
+    </ol>
+  </div>
+</div>
+</body>
+</html>
