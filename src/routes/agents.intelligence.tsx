@@ -46,13 +46,13 @@ const NODE_STYLE: Record<string, Record<string, { color: string; r: number; labe
   governance: {
     norm: { color: "#eb6834", r: 14, label: "Person gate" },
     dOk: { color: "#0ca30c", r: 11, label: "Approved" },
-    dBad: { color: "#d03b3b", r: 12, label: "Overturned" },
+    dBad: { color: "#d03b3b", r: 12, label: "Declined" },
     dOpen: { color: "#fab219", r: 10, label: "Open card" },
     dMut: { color: "#898781", r: 9, label: "Cancelled" },
   },
   vocabulary: {
-    family: { color: "#2a78d6", r: 14, label: "Role family (dept proxy)" },
-    skill: { color: "#1baf7a", r: 9, label: "Skill (size = evidence)" },
+    family: { color: "#2a78d6", r: 14, label: "Department" },
+    skill: { color: "#1baf7a", r: 9, label: "Skill" },
   },
 };
 const EDGE_STYLE: Record<string, Record<string, { color: string; width: number; dash?: string; opacity?: number }>> = {
@@ -74,15 +74,9 @@ const EDGE_LABEL: Record<string, Record<string, string>> = {
   governance: { decided: "decided under" },
   vocabulary: { asks_for: "asks for", cooccurs: "co-occurs" },
 };
-const SPRING: Record<string, Record<string, number>> = {
-  behavior: { gated: 185, errored: 150, awaits: 190, idle: 140, gap: 170 },
-  governance: { decided: 175 },
-  vocabulary: { asks_for: 165, cooccurs: 120 },
-};
 
 const nodeStyle = (vk: string, t: string) => NODE_STYLE[vk]?.[t] ?? { color: "#898781", r: 10, label: t };
 const edgeStyle = (vk: string, k: string) => EDGE_STYLE[vk]?.[k] ?? { color: "#c3c2b7", width: 1.4 };
-const springOf = (vk: string, k: string) => SPRING[vk]?.[k] ?? 150;
 const TAB_TITLE: Record<TabKey, string> = {
   behavior: "Each agent, the person checkpoints it passes through, and where it fails",
   governance: "Every decision a person made on an agent proposal, and the rule it was made under",
@@ -106,14 +100,46 @@ function PriBadge({ pri }: { pri: Pri }) {
 
 /* ------------------------------------------------------------- graph */
 
-type SimNode = GNode & {
-  x: number; y: number; vx: number; vy: number; fixed?: boolean | undefined; _r: number;
-  group?: SVGGElement | undefined; circle?: SVGCircleElement | undefined; labelEl?: SVGTextElement | undefined;
+/**
+ * Deterministic flow map: nodes sit in fixed columns (left → right reads as
+ * cause → checkpoint → outcome), edges are curves between columns. No physics,
+ * so the same data always draws the same picture and nothing overlaps.
+ */
+const COLUMNS: Record<TabKey, { title: string; types: string[] }[]> = {
+  behavior: [
+    { title: "Where it fails", types: ["failure"] },
+    { title: "Agents that ran", types: ["agent", "hub"] },
+    { title: "Person checkpoints", types: ["norm"] },
+  ],
+  governance: [
+    { title: "Checkpoint", types: ["norm"] },
+    { title: "What the person decided", types: ["dOk", "dBad", "dOpen", "dMut"] },
+  ],
+  vocabulary: [
+    { title: "Department asking", types: ["family"] },
+    { title: "Skill asked for · in your pool", types: ["skill"] },
+  ],
 };
-type SimEdge = {
-  s: SimNode; t: SimNode; k: string; label?: string | undefined;
-  line?: SVGLineElement | undefined; tag?: SVGTextElement | undefined; off?: number | undefined; hidden?: boolean | undefined;
-};
+const TYPE_ORDER = ["dBad", "dOpen", "dOk", "dMut"];
+const VOCAB_MAX = 30;
+const PILL_W = 210, PILL_H = 40, ROW = 52, HEAD = 34, VB_W = 900;
+
+function nodeSub(n: GNode): string {
+  switch (n.type) {
+    case "agent": return `${n.runs ?? 0} run${n.runs === 1 ? "" : "s"}${n.awaiting ? ` · ${n.awaiting} waiting` : ""}`;
+    case "norm": return `${n.stops ?? 0} check${n.stops === 1 ? "" : "s"}${n.rejected ? ` · ${n.rejected} declined` : ""}`;
+    case "hub": return `${n.members?.length ?? 0} agents — click to list`;
+    case "failure": return "failed tool calls";
+    case "dOk": case "dBad": return `${n.count ?? 0} decision${n.count === 1 ? "" : "s"}`;
+    case "dOpen": return "waiting for a person";
+    case "dMut": return "closed without a decision";
+    case "skill": return `${n.demand ? `asked for ${n.demand}×` : "not asked for"} · ${n.supply ?? 0} in pool`;
+    case "family": return "department";
+    default: return "";
+  }
+}
+const pretty = (s: string) => s.replace(/^[✓✗]\s*/, "").replace(/_/g, " ");
+const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 function GraphCanvas({
   viewKey,
@@ -126,188 +152,97 @@ function GraphCanvas({
   edges: { s: string; t: string; k: string; label?: string | undefined }[];
   onSelect: (n: GNode | null) => void;
 }) {
-  const svgRef = useRef<SVGSVGElement | null>(null);
-  const selectRef = useRef(onSelect);
-  selectRef.current = onSelect;
+  const [active, setActive] = useState<string | null>(null);
+  useEffect(() => setActive(null), [viewKey]);
 
-  useEffect(() => {
-    const svg = svgRef.current;
-    if (!svg) return;
-    svg.replaceChildren();
-    const W = svg.clientWidth || 860;
-    const H = 600;
-    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
-    let view = { x: 0, y: 0, w: W, h: H };
-    const ns = "http://www.w3.org/2000/svg";
-    const el = <T extends SVGElement>(tag: string, attrs: Record<string, string | number>): T => {
-      const e = document.createElementNS(ns, tag) as T;
-      for (const k in attrs) e.setAttribute(k, String(attrs[k]));
-      return e;
-    };
+  const hasFamilies = nodes.some((n) => n.type === "family");
+  const cols = viewKey === "vocabulary" && !hasFamilies ? [{ title: "Skills seen most · asked for · in your pool", types: ["skill"] }] : COLUMNS[viewKey];
+  // vocabulary: only skills a department asks for (co-occurrence lives in the inspector), capped
+  let pool = nodes.filter((n) => !n.idle);
+  if (viewKey === "vocabulary") {
+    const asked = new Set(edges.filter((e) => e.k === "asks_for").map((e) => e.t));
+    // no department asks yet → fall back to the most-evidenced skills so the map is never blank
+    const all = pool.filter((n) => n.type === "skill");
+    const skills = (asked.size ? all.filter((n) => asked.has(n.id)) : all)
+      .sort((a, b) => (b.demand ?? 0) - (a.demand ?? 0) || (b.ev ?? 0) - (a.ev ?? 0))
+      .slice(0, VOCAB_MAX);
+    pool = [...pool.filter((n) => n.type === "family"), ...skills];
+  }
+  const weight = (n: GNode) => n.runs ?? n.count ?? n.stops ?? n.demand ?? 0;
+  const columns = cols.map((c) =>
+    pool
+      .filter((n) => (n.id === "hub-gap" ? c.types.includes("failure") : c.types.includes(n.type)))
+      .sort((a, b) =>
+        (a.type === "hub" ? 1 : 0) - (b.type === "hub" ? 1 : 0) ||
+        TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type) ||
+        weight(b) - weight(a) ||
+        a.name.localeCompare(b.name),
+      ),
+  );
+  const rows = cols.length === 1 ? Math.ceil((columns[0]?.length ?? 0) / 4) || 1 : Math.max(1, ...columns.map((c) => c.length));
+  const H = HEAD + rows * ROW + 12;
+  const gap = cols.length > 1 ? (VB_W - 20 - PILL_W) / (cols.length - 1) : 0;
+  const single = cols.length === 1;
+  const pos = new Map<string, { x: number; y: number; col: number }>();
+  columns.forEach((list, ci) => {
+    const offset = ((rows - list.length) * ROW) / 2; // centre short columns
+    // a single column wraps into a grid of boxes instead of one tall list
+    if (single) list.forEach((n, ri) => pos.set(n.id, { x: 10 + (ri % 4) * (PILL_W + 12), y: HEAD + Math.floor(ri / 4) * ROW, col: 0 }));
+    else list.forEach((n, ri) => pos.set(n.id, { x: 10 + ci * gap, y: HEAD + offset + ri * ROW, col: ci }));
+  });
+  const links = edges.filter((e) => pos.has(e.s) && pos.has(e.t) && pos.get(e.s)!.col !== pos.get(e.t)!.col);
+  const touches = (id: string) => !active || id === active || links.some((l) => (l.s === active && l.t === id) || (l.t === active && l.s === id));
 
-    // idle agents are listed in the action plan; on the graph they collapse into their group node
-    const shown = nodes.filter((n) => !n.idle);
-    const sim: SimNode[] = shown.map((n, i) => {
-      const ts = nodeStyle(viewKey, n.type);
-      const r = n.idle ? 9 : viewKey === "vocabulary" && n.type === "skill" ? Math.min(14, 6 + Math.sqrt(n.ev ?? 4) * 1.3) : ts.r;
-      const ang = (i / shown.length) * Math.PI * 2;
-      const rad = viewKey === "behavior" ? (n.type === "agent" ? 110 : 230) : viewKey === "vocabulary" ? (n.type === "family" ? 110 : 240) : 200;
-      return {
-        ...n, _r: r, vx: 0, vy: 0,
-        x: W / 2 + Math.cos(ang) * rad,
-        y: H / 2 + Math.sin(ang) * rad * 0.9,
-      };
-    });
-    const byId = new Map(sim.map((n) => [n.id, n]));
-    const links: SimEdge[] = [];
-    for (const e of edges) {
-      const s = byId.get(e.s), t = byId.get(e.t);
-      if (s && t) links.push({ s, t, k: e.k, label: e.label });
-    }
+  if (pool.length === 0)
+    return <p className="p-6 text-sm text-muted-foreground">Nothing to show yet — this fills in as agents run, people decide and candidates arrive.</p>;
 
-    const gE = el("g", {}), gN = el("g", {}), gL = el("g", {});
-    svg.append(gE, gN, gL);
-    let tagCount = 0;
-    for (const l of links) {
-      const st = edgeStyle(viewKey, l.k);
-      l.line = el<SVGLineElement>("line", { stroke: st.color, "stroke-width": st.width, opacity: st.opacity ?? 1 });
-      if (st.dash) l.line.setAttribute("stroke-dasharray", st.dash);
-      gE.appendChild(l.line);
-      if (l.label) {
-        l.tag = el<SVGTextElement>("text", {
-          "font-size": 10, fill: st.color, "text-anchor": "middle",
-          "paint-order": "stroke", stroke: "var(--surface, #fcfcfb)", "stroke-width": 3, "font-weight": 600,
-        });
-        l.tag.textContent = l.label;
-        l.off = [30, -30, 48, -48, 64][tagCount++ % 5];
-        gE.appendChild(l.tag);
-      }
-    }
-    for (const n of sim) {
-      n.group = el<SVGGElement>("g", { tabindex: 0, role: "button", "aria-label": `${n.name}, ${nodeStyle(viewKey, n.type).label}` });
-      const circle = el<SVGCircleElement>("circle", {
-        r: n._r, fill: nodeStyle(viewKey, n.type).color,
-        stroke: n.type === "hub" ? "#fab219" : "var(--surface, #fcfcfb)",
-        "stroke-width": 2, "stroke-dasharray": n.type === "hub" ? "3 2" : "",
-        opacity: n.idle ? 0.45 : n.dormant ? 0.4 : 1, cursor: "grab",
-      });
-      n.circle = circle;
-      n.group.appendChild(circle);
-      gN.appendChild(n.group);
-      const label = el<SVGTextElement>("text", {
-        "font-size": n.idle ? 10 : 11, fill: "currentColor", "text-anchor": "middle",
-        "paint-order": "stroke", stroke: "var(--surface, #fcfcfb)", "stroke-width": 3,
-        opacity: n.idle ? 0.7 : n.dormant ? 0.5 : 1,
-      });
-      const pretty = n.name.replace(/_/g, " ");
-      label.textContent =
-        n.type === "agent" ? `${pretty} · ${n.runs} run${n.runs === 1 ? "" : "s"}` : n.type === "failure" ? `fails: ${pretty}` : pretty;
-      n.labelEl = label;
-      gL.appendChild(label);
-
-      let drag: { id: number } | null = null;
-      n.group.addEventListener("pointerdown", (ev) => {
-        drag = { id: ev.pointerId };
-        n.fixed = true;
-        alpha = 1;
-        n.group?.setPointerCapture(ev.pointerId);
-      });
-      n.group.addEventListener("pointermove", (ev) => {
-        if (!drag) return;
-        const rect = svg.getBoundingClientRect();
-        n.x = view.x + (ev.clientX - rect.left) * (view.w / rect.width);
-        n.y = view.y + (ev.clientY - rect.top) * (view.h / rect.height);
-        alpha = 1;
-      });
-      n.group.addEventListener("pointerup", () => {
-        drag = null;
-        n.fixed = false;
-      });
-      n.group.addEventListener("click", () => selectRef.current(n));
-      n.group.addEventListener("focus", () => selectRef.current(n));
-    }
-
-    const REPULSION = 3800, FRICTION = 0.86, CENTER = 0.012;
-    let alpha = 1;
-    function tick() {
-      for (let i = 0; i < sim.length; i++)
-        for (let j = i + 1; j < sim.length; j++) {
-          const a = sim[i]!, b = sim[j]!;
-          const dx = b.x - a.x, dy = b.y - a.y, d2 = dx * dx + dy * dy || 1;
-          if (d2 > 300 * 300) continue;
-          const f = REPULSION / d2, d = Math.sqrt(d2);
-          a.vx -= (dx / d) * f; a.vy -= (dy / d) * f;
-          b.vx += (dx / d) * f; b.vy += (dy / d) * f;
-          const minD = Math.min(50 + Math.max(a.name.length, b.name.length) * 3.1, 140);
-          if (d < minD) {
-            const p = (minD - d) * 0.09;
-            a.vx -= (dx / d) * p; a.vy -= (dy / d) * p;
-            b.vx += (dx / d) * p; b.vy += (dy / d) * p;
-          }
-        }
-      for (const l of links) {
-        const dx = l.t.x - l.s.x, dy = l.t.y - l.s.y, d = Math.hypot(dx, dy) || 1;
-        const f = (d - springOf(viewKey, l.k)) * 0.012;
-        l.s.vx += (dx / d) * f; l.s.vy += (dy / d) * f;
-        l.t.vx -= (dx / d) * f; l.t.vy -= (dy / d) * f;
-      }
-      for (const n of sim) {
-        if (n.fixed) { n.vx = 0; n.vy = 0; continue; }
-        n.vx += (W / 2 - n.x) * CENTER;
-        n.vy += (H / 2 - n.y) * CENTER;
-        n.vx *= FRICTION; n.vy *= FRICTION;
-        n.x = Math.max(50, Math.min(W - 50, n.x + n.vx));
-        n.y = Math.max(30, Math.min(H - 30, n.y + n.vy));
-      }
-    }
-    function draw() {
-      for (const l of links) {
-        if (!l.line) continue;
-        l.line.setAttribute("x1", String(l.s.x));
-        l.line.setAttribute("y1", String(l.s.y));
-        l.line.setAttribute("x2", String(l.t.x));
-        l.line.setAttribute("y2", String(l.t.y));
-        if (l.tag && l.off != null) {
-          const mx = (l.s.x + l.t.x) / 2, my = (l.s.y + l.t.y) / 2;
-          const dx = l.t.x - l.s.x, dy = l.t.y - l.s.y, d = Math.hypot(dx, dy) || 1;
-          l.tag.setAttribute("x", String(mx - (dy / d) * l.off));
-          l.tag.setAttribute("y", String(my + (dx / d) * l.off + 3));
-        }
-      }
-      for (const n of sim) {
-        n.group?.setAttribute("transform", `translate(${n.x},${n.y})`);
-        if (n.labelEl) {
-          n.labelEl.setAttribute("x", String(n.x));
-          n.labelEl.setAttribute("y", String(n.y + n._r + 13));
-        }
-      }
-    }
-    for (let i = 0; i < 900; i++) tick();
-    // fit the settled layout (plus label room) so the graph fills the frame instead of floating in it
-    {
-      const xs = sim.map((n) => n.x), ys = sim.map((n) => n.y);
-      const pad = 70;
-      const x0 = Math.min(...xs) - pad, x1 = Math.max(...xs) + pad;
-      const y0 = Math.min(...ys) - 40, y1 = Math.max(...ys) + 50;
-      const scale = Math.max((x1 - x0) / W, (y1 - y0) / H, 1);
-      const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-      view = { x: cx - (W * scale) / 2, y: cy - (H * scale) / 2, w: W * scale, h: H * scale };
-      svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.w} ${view.h}`);
-    }
-    let raf = 0;
-    const loop = () => {
-      if (alpha > 0.005) {
-        for (let i = 0; i < 4; i++) tick();
-        alpha *= 0.994;
-      }
-      draw();
-      raf = requestAnimationFrame(loop);
-    };
-    loop();
-    return () => cancelAnimationFrame(raf);
-  }, [viewKey, nodes, edges]);
-
-  return <svg ref={svgRef} className="block h-[600px] w-full" role="img" aria-label="Agent intelligence graph" />;
+  return (
+    <svg viewBox={`0 0 ${VB_W} ${H}`} className="block w-full" role="img" aria-label="Agent intelligence map">
+      {cols.map((c, ci) => (
+        <text key={c.title} x={10 + ci * gap + (ci === cols.length - 1 && ci > 0 ? PILL_W : 0)} y={16} fontSize={11}
+          textAnchor={ci === cols.length - 1 && ci > 0 ? "end" : "start"} className="fill-muted-foreground" fontWeight={600}>
+          {c.title.toUpperCase()}
+        </text>
+      ))}
+      {links.map((l, i) => {
+        let a = pos.get(l.s)!, b = pos.get(l.t)!;
+        if (a.col > b.col) [a, b] = [b, a];
+        const x1 = a.x + PILL_W, y1 = a.y + PILL_H / 2, x2 = b.x, y2 = b.y + PILL_H / 2, mx = (x1 + x2) / 2;
+        const st = edgeStyle(viewKey, l.k);
+        const on = !active || l.s === active || l.t === active;
+        return (
+          <g key={i} opacity={on ? (st.opacity ?? 1) : 0.12}>
+            <path d={`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`} fill="none" stroke={st.color}
+              strokeWidth={on && active ? st.width + 1 : st.width} strokeDasharray={st.dash} />
+            {l.label && (on || !active) && (
+              <text x={mx} y={(y1 + y2) / 2 - 4} fontSize={10} textAnchor="middle" fill={st.color === "#c3c2b7" ? "#77766f" : st.color}
+                fontWeight={600} paintOrder="stroke" stroke="var(--background, #fff)" strokeWidth={3}>
+                {l.label}
+              </text>
+            )}
+          </g>
+        );
+      })}
+      {[...pos.entries()].map(([id, p]) => {
+        const n = pool.find((x) => x.id === id)!;
+        const color = nodeStyle(viewKey, n.type).color;
+        return (
+          <g key={id} transform={`translate(${p.x},${p.y})`} opacity={touches(id) ? (n.dormant ? 0.55 : 1) : 0.3}
+            className="cursor-pointer" role="button" tabIndex={0} aria-label={`${pretty(n.name)}: ${nodeSub(n)}`}
+            onMouseEnter={() => setActive(id)} onMouseLeave={() => setActive(null)}
+            onFocus={() => setActive(id)} onBlur={() => setActive(null)}
+            onClick={() => onSelect(n)}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onSelect(n); }}>
+            <rect width={PILL_W} height={PILL_H} rx={8} className="fill-card stroke-border" strokeWidth={1}
+              strokeDasharray={n.type === "hub" || n.type === "dMut" ? "4 3" : undefined} />
+            <rect width={4} height={PILL_H - 12} x={6} y={6} rx={2} fill={color} />
+            <text x={18} y={17} fontSize={12} fontWeight={600} className="fill-foreground">{clip(pretty(n.name), 28)}</text>
+            <text x={18} y={31} fontSize={10.5} className="fill-muted-foreground">{clip(nodeSub(n), 34)}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
 }
 
 /* ------------------------------------------------------------- page */
@@ -425,7 +360,7 @@ function Inspector({ node, chip, tabKey }: { node: GNode | null; chip: Chip | nu
       <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Inspector</p>
       <h3 className="text-sm font-semibold">Nothing selected</h3>
       <p className="text-xs leading-relaxed text-muted-foreground">
-        Click a circle in the graph, or a card under "What needs attention", to see its numbers, why it matters and what
+        Click a box in the map, or a card under "What needs attention", to see its numbers, why it matters and what
         to do next. Every number comes from your organisation's own agent activity.
       </p>
     </div>
@@ -523,7 +458,7 @@ function IntelligencePage() {
             <div className="overflow-hidden rounded-lg border border-border bg-card">
               <div className="flex items-center justify-between border-b border-border px-3 py-2 text-xs text-muted-foreground">
                 <span>{TAB_TITLE[tab]}</span>
-                <span>click a circle for details · drag to rearrange</span>
+                <span>hover to trace · click for details</span>
               </div>
               <GraphCanvas
                 viewKey={tab}
