@@ -85,9 +85,9 @@ const nodeStyle = (vk: string, t: string) => NODE_STYLE[vk]?.[t] ?? { color: "#8
 const edgeStyle = (vk: string, k: string) => EDGE_STYLE[vk]?.[k] ?? { color: "#c3c2b7", width: 1.4 };
 const springOf = (vk: string, k: string) => SPRING[vk]?.[k] ?? 150;
 const TAB_TITLE: Record<TabKey, string> = {
-  behavior: "agent_runs · agent_steps · agent_tasks — the fleet and its governance from live data",
-  governance: "agent_tasks decisions — every person verdict, the norm it acted under, and what it means",
-  vocabulary: "skills · role-family proxies · co-occurrence — built live by the production buildOntology()",
+  behavior: "Each agent, the person checkpoints it passes through, and where it fails",
+  governance: "Every decision a person made on an agent proposal, and the rule it was made under",
+  vocabulary: "The skills your candidates offer and your requisitions ask for, and how they cluster",
 };
 
 const PRI_BADGE: Record<Pri, { cls: string; icon: string; label: string }> = {
@@ -308,7 +308,7 @@ function ChipCard({ chip, onSelect, selected }: { chip: Chip; onSelect: () => vo
     >
       <span className="flex items-center gap-2">
         <PriBadge pri={chip.pri} />
-        <span className="truncate text-xs font-semibold" title={chip.title.replace(/^[⚠✓◈]\s*/, "")}>
+        <span className="line-clamp-2 text-xs font-semibold leading-snug" title={chip.title.replace(/^[⚠✓◈]\s*/, "")}>
           {chip.short}
         </span>
       </span>
@@ -439,7 +439,7 @@ function IntelligencePage() {
     <div className="space-y-4">
       <PageHeader
         title="Agent intelligence"
-        description="Knowledge-graph view of the hiring fleet — agents, person gates, decision chains and the emerging skill vocabulary — computed live from this organisation's telemetry. Deterministic: no model in the path."
+        description="Is your hiring-agent team doing work your people trust? See which agents are busy, where people overrule them, what is failing — and what to do next. Calculated from your organisation's own activity; no AI is used to produce this page."
         actions={
           <Button variant="outline" size="sm" onClick={() => q.refetch()} disabled={q.isFetching}>
             <RefreshCw className={`mr-1.5 size-3.5 ${q.isFetching ? "animate-spin" : ""}`} aria-hidden />
@@ -470,7 +470,7 @@ function IntelligencePage() {
                 {t.label}
               </button>
             ))}
-            <span className="ml-auto pr-2 text-[11px] text-muted-foreground">auto-refreshes every 60s · {data.generatedAt.slice(11, 16)} UTC</span>
+            <span className="ml-auto pr-2 text-[11px] text-muted-foreground">updated {new Date(data.generatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · refreshes every minute</span>
           </div>
 
           <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
@@ -486,9 +486,9 @@ function IntelligencePage() {
           <div className="rounded-lg border border-border bg-card">
             <div className="flex items-center justify-between border-b border-border px-3 py-2 text-xs text-muted-foreground">
               <span>
-                System read — <b className="text-foreground">{view.sysreadSummary}</b>
+                What needs attention — <b className="text-foreground">{view.sysreadSummary}</b>
               </span>
-              <span>threshold-gated rules over live SQL · click a chip for the full cause → effect → action</span>
+              <span>click a card for the cause, the effect and the next step</span>
             </div>
             <div className="grid grid-cols-2 gap-2 p-3 lg:grid-cols-4">
               {view.systemRead.map((chip) => (
@@ -528,7 +528,7 @@ function IntelligencePage() {
                   </span>
                 ))}
                 <span>faded = idle / dormant</span>
-                <span>edge labels = folded real counts</span>
+                <span>line labels = real counts</span>
               </div>
             </div>
             <div className="min-h-[300px] max-h-[652px] overflow-y-auto rounded-lg border border-border bg-card p-3">
@@ -539,20 +539,20 @@ function IntelligencePage() {
           {tab === "behavior" && data.views.behavior.plan.length > 0 && (
             <div className="overflow-hidden rounded-lg border border-border bg-card">
               <div className="border-b border-border px-3 py-2 text-xs text-muted-foreground">
-                Action plan — all {data.views.behavior.fleet.registered} registered agents, priority-sorted; the next-action snapshot for the whole fleet
+                Action plan — all {data.views.behavior.fleet.registered} agents, most urgent first
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-xs tabular-nums">
                   <thead>
                     <tr className="border-b border-border text-left text-[11px] text-muted-foreground">
-                      <th className="px-3 py-2 font-medium">Pri</th>
+                      <th className="px-3 py-2 font-medium">Priority</th>
                       <th className="px-3 py-2 font-medium">Agent</th>
                       <th className="px-3 py-2 font-medium">Ver</th>
                       <th className="px-3 py-2 font-medium">State</th>
                       <th className="px-3 py-2 font-medium">Runs</th>
-                      <th className="px-3 py-2 font-medium">Stops</th>
-                      <th className="px-3 py-2 font-medium">Overturned</th>
-                      <th className="px-3 py-2 font-medium">Errors</th>
+                      <th className="px-3 py-2 font-medium">Person checks</th>
+                      <th className="px-3 py-2 font-medium">Declined</th>
+                      <th className="px-3 py-2 font-medium">Failed calls</th>
                       <th className="px-3 py-2 font-medium">Next best action</th>
                     </tr>
                   </thead>
@@ -579,7 +579,7 @@ function IntelligencePage() {
           {tab === "behavior" && data.views.behavior.rejects.length > 0 && (
             <div className="overflow-hidden rounded-lg border border-border bg-card">
               <div className="border-b border-border px-3 py-2 text-xs text-muted-foreground">
-                Rejected proposals — every overturn the fleet produced
+                Declined proposals — what people said no to, grouped
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-xs tabular-nums">
@@ -589,6 +589,7 @@ function IntelligencePage() {
                       <th className="px-3 py-2 font-medium">Kind</th>
                       <th className="px-3 py-2 font-medium">Rejected proposal</th>
                       <th className="px-3 py-2 font-medium">Tool</th>
+                      <th className="px-3 py-2 font-medium">Times</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -598,6 +599,7 @@ function IntelligencePage() {
                         <td className="px-3 py-2 text-muted-foreground">{r.kind}</td>
                         <td className="px-3 py-2">{r.title}</td>
                         <td className="px-3 py-2 text-muted-foreground">{r.tool ?? "—"}</td>
+                        <td className="px-3 py-2 font-medium">×{r.count}</td>
                       </tr>
                     ))}
                   </tbody>
