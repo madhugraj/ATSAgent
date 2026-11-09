@@ -103,6 +103,7 @@ erDiagram
     text rejection_reason "nullable"
     text capture_token UK "nullable"
     text capture_token_hash UK "nullable"
+    text distribution_token_hash UK "nullable"
   }
   org_members {
     uuid id PK
@@ -293,6 +294,7 @@ erDiagram
     integer weight_impact
     integer weight_education
     integer weight_social
+    jsonb custom_weights
     jsonb approval_trail
     uuid created_by FK
     timestamptz opened_at
@@ -446,6 +448,7 @@ erDiagram
     integer social_score
     integer overall_score
     jsonb weights
+    jsonb custom_scores
     text matched_skills
     text missing_skills
     text rationale "nullable"
@@ -1433,7 +1436,7 @@ erDiagram
 | `job_descriptions` | Requisitions & job content | 17 | — |
 | `job_index_notifications` | — | 10 | — |
 | `master_items` | Organisations & masters | 8 | — |
-| `match_scores` | Candidates & pipeline | 26 | — |
+| `match_scores` | Candidates & pipeline | 27 | — |
 | `member_interviewer_profiles` | — | 9 | (member_id) |
 | `notification_states` | — | 7 | — |
 | `offer_negotiations` | — | 24 | — |
@@ -1448,7 +1451,7 @@ erDiagram
 | `org_pool_shares` | Organisations & masters | 10 | (ownerOrg+partnerOrg) |
 | `org_profile_versions` | Organisations & masters | 16 | (orgId+version) |
 | `org_profiles` | Organisations & masters | 12 | — |
-| `organizations` | Organisations & masters | 26 | (slug), (capture_token), (capture_token_hash) |
+| `organizations` | Organisations & masters | 27 | (slug), (capture_token), (capture_token_hash), (distribution_token_hash) |
 | `panel_agent_settings` | — | 5 | — |
 | `panel_assessments` | — | 23 | (interview_id) |
 | `panelist_scorecard_links` | — | 8 | (interviewId+panelistId), (token_hash) |
@@ -1458,7 +1461,7 @@ erDiagram
 | `product_catalogue_commercials` | Organisations & masters | 8 | — |
 | `rate_limit_hits` | — | 3 | — |
 | `requisition_board_postings` | — | 16 | (requisitionId+provider) |
-| `requisitions` | Requisitions & job content | 43 | (orgId+code) |
+| `requisitions` | Requisitions & job content | 44 | (orgId+code) |
 | `role_panels` | — | 9 | (requisitionId+level) |
 | `round_substitutes` | — | 11 | — |
 | `salary_benchmarks` | Intelligence | 15 | — |

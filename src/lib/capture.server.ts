@@ -6,6 +6,7 @@
  * description, or an attached CV) and posts it here with the organisation's
  * capture token. Nothing on our side pretends to be the recruiter.
  */
+import { createHmac } from "node:crypto";
 import { channelById } from "./job-channels";
 import { eq } from "drizzle-orm";
 
@@ -147,6 +148,39 @@ export async function orgForCaptureToken(
     // Hash match covers encrypted tokens; the plaintext equality is the
     // pre-migration fallback and disappears once every org rotates its key.
     .where(or(eq(organizations.captureTokenHash, hash), eq(organizations.captureToken, token)))
+    .limit(1);
+  if (!org) return null;
+  if (org.status && org.status !== "active") return null;
+  return org;
+}
+
+/** The message the browser companion HMACs the capture key with for this surface. */
+export const DISTRIBUTION_TOKEN_MESSAGE = "distribution";
+
+/** The derived, distribution-surface token for a capture key (companion computes the same). */
+export function distributionTokenOf(captureKey: string): string {
+  return createHmac("sha256", captureKey).update(DISTRIBUTION_TOKEN_MESSAGE).digest("hex");
+}
+
+/**
+ * Resolve the organisation behind a token presented to the distribution
+ * endpoint: its own derived token, or (transition, until every companion has
+ * updated) the raw capture key. A token accepted here is never valid for
+ * candidate capture, and vice versa (2026-11 audit N-15).
+ */
+export async function orgForDistributionToken(
+  token: string,
+): Promise<{ id: string; name: string; status: string } | null> {
+  if (!token || token.length < 20) return null;
+  const { createHash } = await import("node:crypto");
+  const { or, eq } = await import("drizzle-orm");
+  const hash = createHash("sha256").update(token).digest("hex");
+  const [org] = await db
+    .select({ id: organizations.id, name: organizations.name, status: organizations.status })
+    .from(organizations)
+    .where(
+      or(eq(organizations.distributionTokenHash, hash), eq(organizations.captureTokenHash, hash)),
+    )
     .limit(1);
   if (!org) return null;
   if (org.status && org.status !== "active") return null;

@@ -9,6 +9,7 @@ import { db } from "../server/db";
 import { env } from "../server/env";
 import { captureEvents, organizations } from "@db/schema";
 import { requireOrg, requireRole } from "./auth.middleware";
+import { distributionTokenOf } from "./capture.server";
 
 export type CaptureEvent = {
   id: string;
@@ -35,10 +36,31 @@ const loadSetup = createServerOnlyFn(async function loadSetup(
 ): Promise<CaptureSetup> {
   const { decryptSecret } = await import("../server/crypto");
   const [org] = await db
-    .select({ captureToken: organizations.captureToken })
+    .select({
+      captureToken: organizations.captureToken,
+      distributionTokenHash: organizations.distributionTokenHash,
+    })
     .from(organizations)
     .where(eq(organizations.id, orgId))
     .limit(1);
+  // The companion derives the distribution token from the capture key itself;
+  // record its hash here so the derived token starts resolving without
+  // waiting for a rotation.
+  let master: string | null = null;
+  if (org?.captureToken) {
+    master = decryptSecret(org.captureToken);
+    if (!org.distributionTokenHash) {
+      const { createHash } = await import("node:crypto");
+      await db
+        .update(organizations)
+        .set({
+          distributionTokenHash: createHash("sha256")
+            .update(distributionTokenOf(master))
+            .digest("hex"),
+        })
+        .where(eq(organizations.id, orgId));
+    }
+  }
   const events = await db
     .select({
       id: captureEvents.id,
@@ -54,7 +76,7 @@ const loadSetup = createServerOnlyFn(async function loadSetup(
     .orderBy(desc(captureEvents.createdAt))
     .limit(20);
   return {
-    token: org?.captureToken ? decryptSecret(org.captureToken) : null,
+    token: master,
     endpoint: `${endpointBase()}/api/public/capture`,
     events: events.map((e) => ({
       id: e.id,
@@ -87,6 +109,9 @@ export const rotateCaptureToken = createServerFn({ method: "POST" })
       .set({
         captureToken: encryptSecret(token),
         captureTokenHash: createHash("sha256").update(token).digest("hex"),
+        distributionTokenHash: createHash("sha256")
+          .update(distributionTokenOf(token))
+          .digest("hex"),
       })
       .where(eq(organizations.id, context.orgId));
     const { writeAudit } = await import("../server/audit");

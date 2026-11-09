@@ -109,13 +109,14 @@ export function assertReusable(
 export async function addApplicationsCore(
   actor: LifecycleActor,
   input: { requisitionId: string; candidateIds: string[]; source: string },
-): Promise<{ added: number }> {
+): Promise<{ added: number; skipped: { candidateId: string; name: string; reason: string }[] }> {
   const [requisition] = await db
     .select({ id: requisitions.id })
     .from(requisitions)
     .where(and(eq(requisitions.id, input.requisitionId), eq(requisitions.orgId, actor.orgId)))
     .limit(1);
   if (!requisition) throw new Error("Requisition not found");
+  const requestedIds = [...new Set(input.candidateIds)];
   const owned = await db
     .select({
       id: candidates.id,
@@ -124,20 +125,48 @@ export async function addApplicationsCore(
       poolUseSource: candidates.poolUseSource,
     })
     .from(candidates)
-    .where(and(inArray(candidates.id, input.candidateIds), eq(candidates.orgId, actor.orgId)));
-  if (owned.length !== new Set(input.candidateIds).size) {
+    .where(and(inArray(candidates.id, requestedIds), eq(candidates.orgId, actor.orgId)));
+  if (owned.length !== requestedIds.length) {
     throw new Error("Some candidates are not in this organisation's talent pool.");
   }
   assertReusable(owned);
-  await db.insert(applications).values(
-    input.candidateIds.map((candidateId) => ({
-      requisitionId: input.requisitionId,
-      candidateId,
-      orgId: actor.orgId,
-      source: input.source,
-    })),
-  );
-  return { added: input.candidateIds.length };
+  // Candidates already in this requisition's pipeline are skipped and
+  // reported, never a database error: the unique (requisition, candidate)
+  // index used to fail the whole batch, and the caller then retried it.
+  const existing = await db
+    .select({ candidateId: applications.candidateId })
+    .from(applications)
+    .where(
+      and(
+        eq(applications.requisitionId, input.requisitionId),
+        eq(applications.orgId, actor.orgId),
+        inArray(applications.candidateId, requestedIds),
+      ),
+    );
+  const existingIds = new Set(existing.map((e) => e.candidateId));
+  const fresh = requestedIds.filter((id) => !existingIds.has(id));
+  const names = new Map(owned.map((o) => [o.id, o.name]));
+  const skipped = requestedIds
+    .filter((id) => existingIds.has(id))
+    .map((id) => ({
+      candidateId: id,
+      name: names.get(id) ?? "Candidate",
+      reason: "Already in this requisition's pipeline",
+    }));
+  if (fresh.length) {
+    await db
+      .insert(applications)
+      .values(
+        fresh.map((candidateId) => ({
+          requisitionId: input.requisitionId,
+          candidateId,
+          orgId: actor.orgId,
+          source: input.source,
+        })),
+      )
+      .onConflictDoNothing();
+  }
+  return { added: fresh.length, skipped };
 }
 
 export async function addCandidateNoteCore(

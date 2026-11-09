@@ -1923,7 +1923,10 @@ async function handleCall(
   const parsed = tool.input.safeParse(call.args);
   if (!parsed.success) return toolError(`Invalid arguments: ${parsed.error.message}`);
 
-  if (tool.precheck && tool.risk !== "read") {
+  // A precheck is a security or correctness rule (host allowlists, guessed-URL
+  // guards, state checks) — it must run for read-risk tools too, not only
+  // writes (2026-11 audit N-10).
+  if (tool.precheck) {
     const refusal = await tool.precheck(ctx, parsed.data);
     if (refusal) return toolError(refusal, true);
   }
@@ -2108,6 +2111,52 @@ async function simulated(
   };
 }
 
+/**
+ * Model-supplied ids may be hallucinated or poisoned: before an id scopes the
+ * run's AI attribution and training capture, verify it belongs to the run's
+ * organisation — otherwise a foreign org's candidate could be attached to this
+ * org's `ai_usage_events` / `training_inferences` rows (2026-11 audit N-8).
+ * The tools re-check org on every read themselves; this guards the ledger.
+ */
+async function subjectInOrgScope(
+  orgId: string,
+  ids: { applicationId: string | null; requisitionId: string | null },
+): Promise<{
+  applicationId: string | null;
+  requisitionId: string | null;
+  candidateId: string | null;
+}> {
+  const scoped: {
+    applicationId: string | null;
+    requisitionId: string | null;
+    candidateId: string | null;
+  } = {
+    applicationId: null,
+    requisitionId: null,
+    candidateId: null,
+  };
+  if (ids.applicationId) {
+    const [a] = await db
+      .select({ orgId: applications.orgId, candidateId: applications.candidateId })
+      .from(applications)
+      .where(eq(applications.id, ids.applicationId))
+      .limit(1);
+    if (a && a.orgId === orgId) {
+      scoped.applicationId = ids.applicationId;
+      scoped.candidateId = a.candidateId;
+    }
+  }
+  if (ids.requisitionId) {
+    const [r] = await db
+      .select({ orgId: requisitions.orgId })
+      .from(requisitions)
+      .where(eq(requisitions.id, ids.requisitionId))
+      .limit(1);
+    if (r && r.orgId === orgId) scoped.requisitionId = ids.requisitionId;
+  }
+  return scoped;
+}
+
 /** Run an allowed tool and turn its result (or failure) into a tool message. */
 async function execute(
   run: AgentRun,
@@ -2125,10 +2174,10 @@ async function execute(
     const a = (args ?? {}) as { applicationId?: unknown; requisitionId?: unknown };
     const { withAiSubject } = await import("./context");
     const result = await withAiSubject(
-      {
+      await subjectInOrgScope(ctx.orgId, {
         applicationId: typeof a.applicationId === "string" ? a.applicationId : null,
         requisitionId: typeof a.requisitionId === "string" ? a.requisitionId : null,
-      },
+      }),
       () => tool.run(ctx, args),
     );
     const raw = typeof result === "string" ? result : JSON.stringify(result ?? null);

@@ -12,11 +12,16 @@ import {
   stripUnreplacedPlaceholders,
 } from "./templates.server";
 import {
+  DIRECTION_MISMATCH_FLAG,
+  gatedRecommendation,
+  INJECTION_HOLD_FLAG,
+  LEVEL_MISMATCH_FLAG,
   mapWithConcurrency,
   scoreCandidate,
   type MatchResult,
   type MatchWire,
 } from "./matching.server";
+import { CTC_CEILING_BLOCKER } from "./logistics";
 import { type SocialSignal } from "./social.server";
 
 export type { MatchWire };
@@ -521,6 +526,9 @@ const PersistInput = z.object({
     socialScore: z.number(),
     overallScore: z.number(),
     weights: z.record(z.string(), z.number()),
+    customScores: z
+      .array(z.object({ key: z.string(), score: z.number(), evidence: z.string() }))
+      .nullish(),
     matchedSkills: z.array(z.string()),
     missingSkills: z.array(z.string()),
     rationale: z.string().nullish(),
@@ -560,6 +568,15 @@ export const persistMatchResult = createServerFn({ method: "POST" })
     // score row still records which engine produced the result.
     const { resolveAiConfig } = await import("./ai-gateway.server");
     const cfg = await resolveAiConfig(context.orgId);
+    // The recommendation is recomputed here from the deterministic dimensions —
+    // the client's copy is display-only, never the basis for stage logic.
+    const recommendation = gatedRecommendation(s.overallScore, {
+      injectionSuspected: s.riskFlags.includes(INJECTION_HOLD_FLAG),
+      experienceScore: s.experienceScore,
+      levelMismatch: s.riskFlags.includes(LEVEL_MISMATCH_FLAG),
+      directionMismatch: s.riskFlags.includes(DIRECTION_MISMATCH_FLAG),
+      ctcOverBand: s.logisticsFlags.includes(CTC_CEILING_BLOCKER),
+    });
     await db.insert(matchScores).values({
       applicationId: application.id,
       orgId: context.orgId,
@@ -577,11 +594,12 @@ export const persistMatchResult = createServerFn({ method: "POST" })
       socialScore: s.socialScore,
       overallScore: s.overallScore,
       weights: s.weights,
+      customScores: s.customScores ?? [],
       matchedSkills: s.matchedSkills,
       missingSkills: s.missingSkills,
       rationale: s.rationale ?? null,
       riskFlags: s.riskFlags,
-      recommendation: s.recommendation ?? null,
+      recommendation,
       model: cfg.model,
     });
 
@@ -616,7 +634,7 @@ export const persistMatchResult = createServerFn({ method: "POST" })
         });
     }
 
-    if (data.autoShortlist && application.stage === "applied") {
+    if (data.autoShortlist && application.stage === "applied" && recommendation === "select") {
       // Same shape as autoscore: write the stage, then journal the transition
       // (which also emails the candidate and enqueues background screening-kit
       // preparation). This path previously skipped the stage_events audit row.

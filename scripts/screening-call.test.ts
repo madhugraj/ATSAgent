@@ -139,6 +139,10 @@ const KIT = [
 class FakeLine implements session.PhoneLine {
   dialled: string | null = null;
   hungUp = false;
+  /** Set when placeCall attaches its audio handler; deliver() needs it. */
+  audioCb: ((pcm: Int16Array) => void) | null = null;
+  /** When set, the assistant's reply counts as queued (the VAD gate is closed). */
+  hold = false;
   private resolveEnded!: () => void;
   readonly ended = new Promise<void>((r) => (this.resolveEnded = r));
   constructor(private fail: string | null = null) {}
@@ -146,11 +150,13 @@ class FakeLine implements session.PhoneLine {
     this.dialled = number;
     if (this.fail) throw new Error(this.fail);
   }
-  onAudio() {}
+  onAudio(cb: (pcm: Int16Array) => void) {
+    this.audioCb = cb;
+  }
   play() {}
   clear() {}
   pendingSeconds() {
-    return 0;
+    return this.hold ? 1 : 0;
   }
   async hangup() {
     this.hungUp = true;
@@ -159,10 +165,14 @@ class FakeLine implements session.PhoneLine {
   candidateHangsUp() {
     this.resolveEnded();
   }
+  /** Deliver one 20 ms frame from the caller's side. */
+  deliver(pcm: Int16Array) {
+    this.audioCb?.(pcm);
+  }
 }
 
 /** A voice session that plays `steps` once the call is answered. */
-function scriptedVoice(steps: Step[], seen: { opts?: VoiceOpts; results: unknown[] }) {
+function scriptedVoice(steps: Step[], seen: { opts?: VoiceOpts; results: unknown[]; sent?: number[] }) {
   return (async (opts: VoiceOpts) => {
     seen.opts = opts;
     const transcript: { who: "caller" | "ai"; text: string; at: string }[] = [];
@@ -191,7 +201,9 @@ function scriptedVoice(steps: Step[], seen: { opts?: VoiceOpts; results: unknown
     return {
       ok: true as const,
       session: {
-        sendAudio() {},
+        sendAudio(pcm?: Int16Array) {
+          if (pcm && seen.sent) seen.sent.push(pcm.length);
+        },
         sendText(text: string) {
           if (text.includes("picked up")) void run();
         },
@@ -480,6 +492,12 @@ describe("the call brief", () => {
     expect(brief.callSystemPrompt(facts({ appliedVia: null, appliedOn: null }))).toContain(
       "We came across your profile",
     );
+    // A referred person did not apply: the opening says so, and never names the referrer.
+    expect(brief.appliedVia("referral")).toBe("a referral");
+    const referred = brief.callSystemPrompt(facts({ appliedVia: "a referral" }));
+    expect(referred).toContain("Your details came to us through a referral");
+    expect(referred).toContain("Never name or guess who referred them");
+    expect(referred).not.toContain("you applied through a referral");
     expect(brief.callingHours(WIN)).toBe("Monday to Saturday, 10:00 to 19:00");
   });
 });
@@ -861,6 +879,30 @@ describe("a whole call with a fake line", () => {
     expect(JSON.stringify(audit!.detail)).not.toMatch(/2400000|3200000|Chennai/);
 
     expect((await endedEvents(appId))[0]!.payload).toMatchObject({ status: "completed" });
+  });
+
+  test("while the assistant is playing, only speech goes upstream (VAD gate)", async () => {
+    const { callId } = await seedCall();
+    const seen: { opts?: VoiceOpts; results: unknown[]; sent?: number[] } = {
+      results: [],
+      sent: [],
+    };
+    const line = new FakeLine();
+    // The assistant's reply is queued: upstream gets only what the VAD calls
+    // speech, so line noise and speakerphone echo cannot read as an interruption.
+    line.hold = true;
+    const done = run(callId, line, scriptedVoice([], seen));
+    for (let i = 0; i < 200 && !line.audioCb; i++) await new Promise((r) => setTimeout(r, 5));
+    const quiet = new Int16Array(160); // a 20 ms frame of line silence
+    for (let i = 0; i < 10; i++) line.deliver(quiet);
+    expect(seen.sent).toEqual([]);
+    const loud = new Int16Array(160).fill(2000); // the caller starts talking
+    for (let i = 0; i < 10; i++) line.deliver(loud);
+    // Two frames warm the VAD up (60 ms of speech to open a segment); speech then
+    // passes upstream, resampled 8 → 16 kHz (doubled).
+    expect(seen.sent).toEqual([320, 320, 320, 320, 320, 320, 320, 320]);
+    line.candidateHangsUp();
+    await done;
   });
 
   test("declined: nothing kept, the agent is told", async () => {

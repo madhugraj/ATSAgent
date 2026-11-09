@@ -17,7 +17,13 @@ import {
   requisitions,
   socialProfiles,
 } from "@db/schema";
-import { DEFAULT_WEIGHTS, harvestProfileLinks, scoreCandidate } from "./matching.server";
+import {
+  DEFAULT_WEIGHTS,
+  EXPERIENCE_BAND_GATE,
+  harvestProfileLinks,
+  scoreCandidate,
+} from "./matching.server";
+import { CTC_CEILING_BLOCKER } from "./logistics";
 import { recordStageTransition } from "./stage-events.server";
 
 export type AutoScoreOutcome = {
@@ -177,6 +183,7 @@ export async function scoreUnscored(opts: {
               education: req.weightEducation ?? DEFAULT_WEIGHTS.education,
               social: req.weightSocial ?? DEFAULT_WEIGHTS.social,
             },
+            customDimensions: req.customWeights ?? [],
             includeSocial: true,
             orgId: opts.orgId,
           });
@@ -201,6 +208,7 @@ export async function scoreUnscored(opts: {
             socialScore: result.social_score,
             overallScore: result.overall_score,
             weights: result.weights,
+            customScores: result.custom_scores,
             matchedSkills: result.matched_skills,
             missingSkills: result.missing_skills,
             rationale: result.rationale,
@@ -251,22 +259,37 @@ export async function scoreUnscored(opts: {
           }
 
           if ((AUTO_STAGES as readonly string[]).includes(app.stage)) {
-            // A candidate whose CV tripped the injection detector never advances
-            // automatically — the score is recorded, a human decides the stage.
-            const nextStage =
-              injection || result.overall_score < 75 ? "ai_screened" : "shortlisted";
+            // A candidate whose CV tripped the injection detector, or whom the
+            // scorer gated (level mismatch, far outside the experience band),
+            // never advances automatically — the score is recorded, a human
+            // decides the stage.
+            const held = injection || result.recommendation !== "select";
+            const nextStage = held ? "ai_screened" : "shortlisted";
             await db
               .update(applications)
               .set({ stage: nextStage, lastActivityAt: now })
               .where(eq(applications.id, app.id));
             // Journal the AI transition so the pipeline history stays complete.
+            const gatedWhy = !injection
+              ? result.experience_fit !== "within"
+                ? " — career level does not match the role, held at ai_screened"
+                : result.direction_fit !== "aligned"
+                  ? " — the CV points at a different kind of role, held at ai_screened"
+                  : result.logistics?.blockers.includes(CTC_CEILING_BLOCKER)
+                    ? " — expected CTC above the approved band, held at ai_screened"
+                    : result.experience_score <= EXPERIENCE_BAND_GATE
+                      ? " — far outside the experience band, held at ai_screened"
+                      : ""
+              : injection
+                ? " — prompt-injection flag held at ai_screened"
+                : "";
             await recordStageTransition({
               orgId: opts.orgId,
               applicationId: app.id,
               fromStage: app.stage,
               toStage: nextStage,
               actor: AUTO_STAGE_ACTOR,
-              reason: `Auto-${nextStage === "shortlisted" ? "shortlisted" : "screened"} by matching score ${result.overall_score}/100${injection ? " — prompt-injection flag held at ai_screened" : ""}`,
+              reason: `Auto-${nextStage === "shortlisted" ? "shortlisted" : "screened"} by matching score ${result.overall_score}/100${gatedWhy}`,
               source: "ai",
             });
           }

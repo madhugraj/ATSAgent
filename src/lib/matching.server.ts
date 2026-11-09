@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { looksLikeInjection } from "../server/agents/injection";
-import { aiJson, INJECTION_RULES, untrusted } from "./ai-gateway.server";
+import { aiJson, INJECTION_RULES, untrusted, type AiConfig } from "./ai-gateway.server";
 import {
   careerScore,
   computeCareerMetrics,
@@ -9,7 +9,12 @@ import {
   type CareerMetrics,
   type EmploymentRow,
 } from "./career";
-import { logisticsCheck, type LogisticsCheck, type LogisticsRequisition } from "./logistics";
+import {
+  CTC_CEILING_BLOCKER,
+  logisticsCheck,
+  type LogisticsCheck,
+  type LogisticsRequisition,
+} from "./logistics";
 import {
   blendSocial,
   fetchGithubSignal,
@@ -18,7 +23,8 @@ import {
   type SocialSignal,
 } from "./social.server";
 
-const clamp = (n: number) => Math.max(0, Math.min(100, Math.round(n)));
+/** NaN can never enter a score: a broken number degrades to 0, never past a gate. */
+const clamp = (n: number) => (Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : 0);
 
 export type JdInputShape = {
   title: string;
@@ -91,6 +97,14 @@ export type MatchResult = {
   transferable_skills: string[];
   rationale: string;
   risk_flags: string[];
+  /** The model's per-JD verdict on the candidate's career level vs the role's level. */
+  experience_fit: ExperienceFit;
+  experience_fit_reason: string | null;
+  /** The model's verdict on the career direction the CV points at vs the JD's role family. */
+  direction_fit: "aligned" | "different_direction";
+  direction_fit_reason: string | null;
+  /** The requisition's custom dimensions, scored with the cited CV evidence. */
+  custom_scores: CustomScore[];
   recommendation: "select" | "reject" | "hold";
   /**
    * The CV or profile text looked like it was trying to instruct the model
@@ -140,12 +154,76 @@ export function harvestProfileLinks(resumeText: string | null | undefined) {
   };
 }
 
-/** Deterministic experience band score — auditable, never AI-guessed. */
+/**
+ * Deterministic experience band score — auditable, never AI-guessed. The decay
+ * is symmetric (22 points per year outside, either side): experience and
+ * compensation move together, so a candidate years above the band is as much
+ * a hiring risk as one years below — they cost more than the band budgeted.
+ */
 export function experienceScore(years: number, min: number, max: number) {
   if (years >= min && years <= max) return 100;
   if (years < min) return clamp(100 - (min - years) * 22);
-  return clamp(100 - (years - max) * 10);
+  return clamp(100 - (years - max) * 22);
 }
+
+/**
+ * An experience score at or below this means the candidate sits roughly three
+ * or more years outside the band (the band's own decay: 22 points per year,
+ * either side). The band is a hard requirement of the role, so it caps the
+ * recommendation no matter how the organisation weights the score.
+ */
+export const EXPERIENCE_BAND_GATE = 30;
+
+/**
+ * The recommendation, after the hard gates. The weighted overall expresses
+ * emphasis, not licence: a dimension the band says failed — or an ask the
+ * approved compensation band cannot pay — cannot be weighted away into an
+ * auto-select. A gated candidate keeps their score (ranking is unchanged) but
+ * a person reads them before anyone advances. Pure; unit-tested.
+ */
+export function gatedRecommendation(
+  overall: number,
+  gate: {
+    injectionSuspected: boolean;
+    experienceScore: number;
+    levelMismatch: boolean;
+    /** The candidate's career points at a different role family than the JD. */
+    directionMismatch: boolean;
+    /** Expected CTC materially above the approved band (logistics blocker). */
+    ctcOverBand: boolean;
+  },
+): MatchResult["recommendation"] {
+  // A non-finite overall is a broken score: it never earns "select" — a person
+  // reads it (hold), whatever the broken number was supposed to be.
+  if (!Number.isFinite(overall)) return "hold";
+  if (overall < 75) return overall >= 60 ? "hold" : "reject";
+  return gate.injectionSuspected ||
+    gate.levelMismatch ||
+    gate.directionMismatch ||
+    gate.ctcOverBand ||
+    gate.experienceScore <= EXPERIENCE_BAND_GATE
+    ? "hold"
+    : "select";
+}
+
+/**
+ * What level of career is this JD actually hiring for, judged by the model
+ * against the role's title, band and language (internship, fresher, senior,
+ * lead) — not just the years numbers. "within" is the fallback when the model
+ * cannot tell; the deterministic years gate still applies on its own.
+ */
+export type ExperienceFit = "within" | "overqualified" | "underqualified";
+
+/**
+ * An organisation-specific scoring dimension (docs: custom dimensions). The
+ * recruiter writes what to look for; the hint is the whole instruction the
+ * scorer sees, so it must be job-related — "evidence of maintaining open-source
+ * packages", never "cultural fit". Weight joins the six built-ins in the
+ * roll-up and the combined weights still total 100. Judged by the same single
+ * AI call; a dimension missing from the model's answer scores 0, never fails.
+ */
+export type CustomDimension = { key: string; label: string; hint: string; weight: number };
+export type CustomScore = { key: string; score: number; evidence: string };
 
 /**
  * The scorer's JSON, validated (AGENTS.md: model JSON is zod-validated).
@@ -190,11 +268,28 @@ export const ScoreAiSchema = z.object({
   innovation_signals: strs,
   impact_rationale: str,
   suspected_prompt_injection: z.boolean().catch(false),
+  experience_fit: z.enum(["within", "overqualified", "underqualified"]).catch("within"),
+  experience_fit_reason: str,
+  direction_fit: z.enum(["aligned", "different_direction"]).catch("aligned"),
+  direction_fit_reason: str,
+  additional_scores: z
+    .array(
+      z.object({ key: str, score: num, evidence: str }).catch({ key: "", score: 0, evidence: "" }),
+    )
+    .catch([]),
 });
 
 /** Risk flag shown when a score is held because the text tried to instruct the model. */
 export const INJECTION_HOLD_FLAG =
   "Possible prompt injection in the CV or profile — score held for a person to review";
+
+/** Deterministic flag for the model's per-JD level verdict; exact-matched on recompute. */
+export const LEVEL_MISMATCH_FLAG =
+  "Career level does not match the level this role is hiring for — held for a person to review";
+
+/** Deterministic flag for the model's career-direction verdict; exact-matched on recompute. */
+export const DIRECTION_MISMATCH_FLAG =
+  "The candidate's career points at a different kind of role than this one — held for a person to review";
 
 /**
  * Score one CV against one JD. Shared by the single-candidate server fn and the
@@ -205,8 +300,12 @@ export async function scoreCandidate(opts: {
   candidate: CandidateInputShape;
   weights: Weights;
   includeSocial: boolean;
+  /** Org-specific dimensions with their weights (requisitions.custom_weights). */
+  customDimensions?: CustomDimension[];
   /** Org context for AI credential resolution. */
   orgId?: string | null | undefined;
+  /** Eval-only: a fixed model config instead of the org's saved key (scripts/matching-eval.ts). */
+  aiConfig?: AiConfig;
 }): Promise<MatchResult> {
   const { jd, candidate, weights } = opts;
 
@@ -247,10 +346,38 @@ export async function scoreCandidate(opts: {
       "certifications, self-taught pivots, new technology adopted per year, side projects, and evidence of " +
       "inventing a process or product rather than only executing one. 0 only when there is no such evidence at all.\n" +
       "• impact_highlights and innovation_signals: 2-5 short strings each, quoting the CV evidence.\n" +
+      (opts.customDimensions?.length
+        ? "• additional_scores: ONE {key, score, evidence} entry for EACH dimension listed below, scored " +
+          "0-100 against its hint strictly from CV evidence — every listed dimension gets an entry, even " +
+          "when the score is 0 (say so in the evidence).\n" +
+          opts.customDimensions
+            .map((d) => `  - key "${d.key}" — ${d.label}: ${d.hint}`)
+            .join("\n") +
+          "\n"
+        : "") +
+      "• experience_fit: judge the candidate's career LEVEL against the level THIS job description is hiring " +
+      "for — read the level from the role's title, its experience band and its language (internship, fresher, " +
+      "entry, mid, senior, lead), never from a fixed years rule. 'overqualified' when the candidate demonstrably " +
+      "operates well above that level (a VP or staff engineer for an internship, a senior specialist for a " +
+      "fresher role); 'underqualified' when clearly below it; 'within' otherwise — including a junior who is " +
+      "a stretch but plausibly growing into the role. Cite the evidence in experience_fit_reason (1-2 sentences).\n" +
+      "• direction_fit: judge what the candidate's career is actually POINTED AT against what THIS job " +
+      "description is. Read the JD's role family from its title and responsibilities (backend, frontend, " +
+      "mobile, data science, AI/ML, DevOps, QA, design, management…), then judge the candidate's direction " +
+      "from the bulk of their experience, their dominant specialisation, and any stated objective — " +
+      "'different_direction' when their strongest work and their own stated goal sit in another family than " +
+      "the JD, even when the JD's must-have skills appear in their CV as supporting skills (an AI/voice " +
+      "engineer with strong Node.js who says they seek AI roles is different_direction for a backend JD); " +
+      "'aligned' when the CV's centre of gravity is the JD's family. A stretch across a adjacent family is " +
+      "'aligned' — judge direction, not keyword overlap. Cite the evidence in direction_fit_reason " +
+      "(1-2 sentences).\n" +
       "Return ONLY JSON with keys: skills_score, education_score, matched_skills, missing_skills, " +
       "transferable_skills, risk_flags (short strings), rationale (3-4 sentences, cite evidence), " +
       "employment_history, skill_recency_years, impact_score, innovation_score, impact_highlights, " +
-      "innovation_signals, impact_rationale (2-3 sentences), suspected_prompt_injection (boolean).",
+      "innovation_signals, impact_rationale (2-3 sentences), suspected_prompt_injection (boolean), " +
+      "experience_fit, experience_fit_reason, direction_fit, direction_fit_reason" +
+      (opts.customDimensions?.length ? ", additional_scores" : "") +
+      ".",
     prompt: untrusted(
       "job_description_and_candidate",
       JSON.stringify({
@@ -260,6 +387,7 @@ export async function scoreCandidate(opts: {
       }),
     ),
     orgId: opts.orgId,
+    ...(opts.aiConfig ? { config: opts.aiConfig } : {}),
     schema: ScoreAiSchema,
   });
   if (!ai.ok) throw new Error(ai.message);
@@ -353,6 +481,19 @@ export async function scoreCandidate(opts: {
     { label: "Education", raw: education, weight: weights.education },
     { label: "Social profile", raw: social.score, weight: weights.social },
   ];
+  // The organisation's own dimensions join the roll-up on the same terms: a
+  // missing or malformed entry scores 0 (the zod fallback), the same clamp and
+  // weight arithmetic as the built-ins.
+  const extra = new Map(ai.data.additional_scores.map((s) => [s.key, s]));
+  const customDimensions = opts.customDimensions ?? [];
+  const customScores: CustomScore[] = customDimensions.map((d) => {
+    const s = extra.get(d.key);
+    const score = clamp(s?.score ?? 0);
+    // A malformed weight contributes 0, never NaN into the roll-up.
+    const weight = Number.isFinite(d.weight) && d.weight > 0 ? d.weight : 0;
+    parts.push({ label: d.label, raw: score, weight });
+    return { key: d.key, score, evidence: s?.evidence ?? "" };
+  });
   const totalWeight = parts.reduce((s, p) => s + p.weight, 0) || 100;
   const contributions = parts.map((p) => ({
     ...p,
@@ -362,8 +503,30 @@ export async function scoreCandidate(opts: {
 
   const riskFlags = [...(ai.data.risk_flags ?? []), ...career.flags];
   if (injectionSuspected) riskFlags.unshift(INJECTION_HOLD_FLAG);
+  const levelMismatch = ai.data.experience_fit !== "within";
+  if (levelMismatch) {
+    riskFlags.push(LEVEL_MISMATCH_FLAG);
+    if (ai.data.experience_fit_reason) riskFlags.push(ai.data.experience_fit_reason);
+  }
+  const directionMismatch = ai.data.direction_fit !== "aligned";
+  if (directionMismatch) {
+    riskFlags.push(DIRECTION_MISMATCH_FLAG);
+    if (ai.data.direction_fit_reason) riskFlags.push(ai.data.direction_fit_reason);
+  }
   if (candidate.experienceYears < jd.experienceMin)
     riskFlags.push("Below requisition experience band");
+  if (experience <= EXPERIENCE_BAND_GATE)
+    riskFlags.push(
+      "Far outside the experience band — held at ai_screened for a person to decide, whatever the weighted score",
+    );
+  // Experience and compensation move together: an ask the approved band cannot
+  // pay is a cost decision, so it holds the candidate for a person to decide
+  // (an offer above the band needs an exception anyway). Missing CTC never gates.
+  const ctcOverBand = logistics?.blockers.includes(CTC_CEILING_BLOCKER) ?? false;
+  if (ctcOverBand)
+    riskFlags.push(
+      "Expected CTC above the approved band — held at ai_screened; a person decides before any advance",
+    );
   if (opts.includeSocial && !signals.some((s) => s.status === "ok"))
     riskFlags.push("No verifiable public profile signal — social score defaulted to 0");
 
@@ -383,9 +546,21 @@ export async function scoreCandidate(opts: {
     transferable_skills: ai.data.transferable_skills ?? [],
     rationale: ai.data.rationale,
     risk_flags: [...new Set(riskFlags)],
-    // A suspected injection never earns "select": a person reads it first.
-    recommendation:
-      overall >= 75 ? (injectionSuspected ? "hold" : "select") : overall >= 60 ? "hold" : "reject",
+    // A suspected injection, a level or career direction the JD is not hiring
+    // for, an ask above the approved band, or a candidate far outside the band
+    // never earns "select": a person reads them first.
+    recommendation: gatedRecommendation(overall, {
+      injectionSuspected,
+      experienceScore: experience,
+      levelMismatch,
+      directionMismatch,
+      ctcOverBand,
+    }),
+    experience_fit: ai.data.experience_fit,
+    experience_fit_reason: ai.data.experience_fit_reason || null,
+    direction_fit: ai.data.direction_fit,
+    direction_fit_reason: ai.data.direction_fit_reason || null,
+    custom_scores: customScores,
     injection_suspected: injectionSuspected,
     social: {
       blended: social.score,

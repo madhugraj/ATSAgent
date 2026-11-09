@@ -55,6 +55,11 @@ export const CALL_TOOL_INPUTS = {
     summary: z.string().trim().min(1).max(600),
     /** They chose not to answer: asked, never graded and never held against them. */
     declined: z.boolean().optional(),
+    /**
+     * They only agreed with or repeated something you said (an example, a tool, a
+     * yes/no) and gave no specifics of their own: not evidence, never counted as answered.
+     */
+    prompted: z.boolean().optional(),
   }),
   book_slot: z.object({
     when_local: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/),
@@ -71,7 +76,7 @@ export const CALL_TOOL_DESCRIPTIONS: Record<CallToolName, string> = {
   record_details:
     "Record the practical details the candidate told you, as they said them: current job title and company, total years of experience, where they live now, whether they are open to relocating, notice period in days, earliest joining date (YYYY-MM-DD), and current fixed pay, current variable pay and expected pay as rupees per year (e.g. 18 lakhs = 1800000) — only figures they actually stated; never calculate one. Anything about pay that is not a figure (a percentage hike, shares, bonuses) goes in pay_note in their words; anything else the hiring team should know (a time limit they set, skills they said are new to them) in candidate_note. Call it again as more details come; leave out anything they did not say. Never comment on the figures.",
   record_answer:
-    "After you ask one of the listed screening questions: the question's id and a faithful one or two sentence summary of what the candidate said. If they chose not to answer it, set declined true and say so in the summary — it is never held against them.",
+    'After you ask one of the listed screening questions: the question\'s id and a faithful one or two sentence summary of what the candidate said. If they chose not to answer it, set declined true and say so in the summary — it is never held against them. Saying they have not done it or lack the experience is an answer: declined false. The summary holds only what the candidate said in their own words — never a tool, method or detail that you said first. If they only agreed with or repeated something you said ("yes, I used that") and gave no specifics of their own, set prompted true and say so in the summary.',
   book_slot:
     "The candidate cannot talk now and agreed a time for the call: when_local is that time as YYYY-MM-DDTHH:mm in the organisation's local time (see the current local time and the calling hours). A confirmation is e-mailed to them.",
   end_call:
@@ -99,7 +104,13 @@ export type CallState = {
   consentAt?: number;
   consentWords?: string;
   details: CallDetailsInput | null;
-  answers: { question_id: string; summary: string; at: string; declined?: boolean }[];
+  answers: {
+    question_id: string;
+    summary: string;
+    at: string;
+    declined?: boolean;
+    prompted?: boolean;
+  }[];
   booking: { whenLocal: string } | null;
   endReason: EndReason | null;
   /** How many more times the call may be moved to another time (undefined: no limit known). */
@@ -170,7 +181,12 @@ export function applyCallTool(
       return { ok: true, recorded: Object.keys(parsed.data as object) };
     }
     case "record_answer": {
-      const a = parsed.data as { question_id: string; summary: string; declined?: boolean };
+      const a = parsed.data as {
+        question_id: string;
+        summary: string;
+        declined?: boolean;
+        prompted?: boolean;
+      };
       if (!questionIds.has(a.question_id))
         return { ok: false, error: "That is not one of the listed question ids." };
       state.answers = state.answers.filter((x) => x.question_id !== a.question_id);
@@ -179,6 +195,7 @@ export function applyCallTool(
         summary: a.summary,
         at: new Date(now).toISOString(),
         ...(a.declined ? { declined: true } : {}),
+        ...(a.prompted && !a.declined ? { prompted: true } : {}),
       });
       return { ok: true, asked: state.answers.length };
     }

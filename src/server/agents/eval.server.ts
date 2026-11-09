@@ -77,6 +77,10 @@ export type Scenario = {
     gateRoles?: string[];
     /** The final summary must contain these phrases (case-insensitive). */
     resultIncludes?: string[];
+    /** The final summary must not contain these phrases (case-insensitive) — e.g. an answer handed over. */
+    resultExcludes?: string[];
+    /** Some successful call of `tool` had at least these argument values. */
+    callArgs?: { tool: string; args: Record<string, unknown> }[];
     maxSteps?: number;
   };
 };
@@ -231,6 +235,25 @@ export async function runScenario(s: Scenario): Promise<EvalReport> {
       if (!(run?.result ?? "").toLowerCase().includes(phrase.toLowerCase())) {
         failures.push(`result missing "${phrase}"`);
       }
+    }
+    for (const phrase of e.resultExcludes ?? []) {
+      if ((run?.result ?? "").toLowerCase().includes(phrase.toLowerCase())) {
+        failures.push(`result must not say "${phrase}"`);
+      }
+    }
+    for (const want of e.callArgs ?? []) {
+      const ok = steps.some(
+        (x) =>
+          x.kind === "tool" &&
+          x.toolName === want.tool &&
+          x.status === "ok" &&
+          Object.entries(want.args).every(
+            ([k, v]) =>
+              JSON.stringify((x.input as Record<string, unknown> | null)?.[k]) ===
+              JSON.stringify(v),
+          ),
+      );
+      if (!ok) failures.push(`no successful ${want.tool} with ${JSON.stringify(want.args)}`);
     }
     if (e.maxSteps && (run?.stepCount ?? 0) > e.maxSteps) {
       failures.push(`used ${run?.stepCount} model steps, budget ${e.maxSteps}`);

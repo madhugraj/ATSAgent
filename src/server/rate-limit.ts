@@ -15,6 +15,12 @@
  */
 export const RATE_LIMIT = 60;
 export const RATE_WINDOW_MS = 60_000;
+/**
+ * Tighter budget for unauthenticated credential endpoints (`/api/auth`
+ * mutations): password guessing and reset spam must not get the full budget
+ * (2026-11 audit N-1).
+ */
+export const AUTH_RATE_LIMIT = 10;
 const RATE_MAP_PRUNE_THRESHOLD = 5_000;
 /** One request in this many also deletes windows older than five minutes. */
 const CLEANUP_ONE_IN = 200;
@@ -22,9 +28,9 @@ const CLEANUP_ONE_IN = 200;
 const rateBuckets = new Map<string, number[]>();
 
 /** Per-instance sliding window (the fallback, and the store for one instance). */
-export function allowInMemory(key: string, now = Date.now()): boolean {
+export function allowInMemory(key: string, now = Date.now(), limit = RATE_LIMIT): boolean {
   const recent = (rateBuckets.get(key) ?? []).filter((t) => now - t < RATE_WINDOW_MS);
-  if (recent.length >= RATE_LIMIT) {
+  if (recent.length >= limit) {
     rateBuckets.set(key, recent);
     return false;
   }
@@ -47,7 +53,7 @@ export function slidingCount(previous: number, current: number, elapsed: number)
   return previous * (1 - Math.min(1, Math.max(0, elapsed))) + current;
 }
 
-async function allowShared(key: string, now: number): Promise<boolean> {
+async function allowShared(key: string, now: number, limit = RATE_LIMIT): Promise<boolean> {
   const { sql } = await import("./db");
   const windowStart = Math.floor(now / RATE_WINDOW_MS) * RATE_WINDOW_MS;
   // ISO strings: this client takes no Date parameters.
@@ -75,21 +81,25 @@ async function allowShared(key: string, now: number): Promise<boolean> {
   if (!r) return true;
   // The increment already counted this request; it is allowed while the
   // estimate including it stays within the limit.
-  return slidingCount(r.prev, r.cur, (now - windowStart) / RATE_WINDOW_MS) <= RATE_LIMIT;
+  return slidingCount(r.prev, r.cur, (now - windowStart) / RATE_WINDOW_MS) <= limit;
 }
 
 let warned = false;
 
 /** Is this request within the caller's limit? */
-export async function allowRequest(key: string, now = Date.now()): Promise<boolean> {
-  if (process.env["RATE_LIMIT_STORE"] !== "postgres") return allowInMemory(key, now);
+export async function allowRequest(
+  key: string,
+  now = Date.now(),
+  limit = RATE_LIMIT,
+): Promise<boolean> {
+  if (process.env["RATE_LIMIT_STORE"] !== "postgres") return allowInMemory(key, now, limit);
   try {
-    return await allowShared(key.slice(0, 300), now);
+    return await allowShared(key.slice(0, 300), now, limit);
   } catch (e) {
     if (!warned) {
       warned = true;
       console.error("[rate-limit] shared store unavailable; using the per-instance limit", e);
     }
-    return allowInMemory(key, now);
+    return allowInMemory(key, now, limit);
   }
 }

@@ -31,6 +31,14 @@ export type LogisticsCheck = {
   missing: string[];
 };
 
+/**
+ * The one compensation blocker the match gates on: the candidate's ask is
+ * materially above the approved band, so auto-advancing them sets up an offer
+ * that needs an exception anyway. Exact-matched on recompute; missing CTC
+ * never gates (the blocker only exists when the ask is known).
+ */
+export const CTC_CEILING_BLOCKER = "Expected CTC is more than 20% above the band ceiling";
+
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z]/g, "");
 
 export function logisticsCheck(c: LogisticsCandidate, r: LogisticsRequisition): LogisticsCheck {
@@ -45,7 +53,7 @@ export function logisticsCheck(c: LogisticsCandidate, r: LogisticsRequisition): 
   if (c.expectedCtc == null) missing.push("expected CTC");
   else if (bandMax) {
     if (c.expectedCtc > bandMax * 1.2) {
-      blockers.push(`Expected CTC is more than 20% above the band ceiling`);
+      blockers.push(CTC_CEILING_BLOCKER);
       risk += 3;
     } else if (c.expectedCtc > bandMax) {
       flags.push("Expected CTC is above the approved band — needs an exception");
