@@ -90,7 +90,10 @@ export function registerPhase1Agents(): void {
     // 1.5.0: works from the approved organisation profile (department purpose, work modes and hiring norms are defaults the person can change; pay philosophy in words in the brief); request_approval gained the organisation profile subject.
     // 1.6.0: drafts from the organisation's role ontology (get_role_profile) when the goal has no
     // skills, and states in the brief how many people in the pool already fit (check_talent_availability).
-    version: "1.6.0",
+    // 1.7.0: scoring weights from the organisation's knowledge — suggest_weights reads the
+    // profile, the role's demand and pool supply, and location/work mode, and may propose
+    // custom dimensions (location fit, compliance); save_weights saves them with the six.
+    version: "1.7.0",
     owner: "hr_head",
     responsibility:
       "Turns a hiring need into a complete, evidence-backed draft requisition and walks it through the DH → HR → CBO approval chain.",
@@ -149,7 +152,7 @@ export function registerPhase1Agents(): void {
       "2b. If the goal does not list the skills, get_role_profile for the role and use its must-haves and good-to-haves (adjusted by anything the person said). Then check_talent_availability with the title and must-haves, and note in your approval brief how many people in the pool already fit (strong, partial, internal).",
       "3. draft_requisition with concrete must-have and good-to-have skills, experience range, location, openings and responsibilities. For client-facing roles (forward deployed, field, implementation), include the work mode (onsite or hybrid), client location and expected travel in the responsibilities.",
       "4. research_compensation. A budget or pay band the person gave (in the goal, or already on the draft from get_requisition) is the organisation's own figure: keep it exactly. Use the research only for what they did not give, and in your brief compare their figures with the market (source count and median) — say so plainly if they sit above or below it. Then set_compensation.",
-      "5. suggest_weights, then save_weights.",
+      "5. suggest_weights, then save_weights with its six weights and any custom dimensions it proposed (key, label, hint, weight). In your approval brief, state the split in one line and why — the role type, the organisation knowledge, demand and supply, and location that shaped it.",
       "6. submit_requisition_for_approval.",
       "7. request_approval with subject {type: 'requisition', id} and a short approval brief: why the role, the band and its evidence, risks or open points. Address it to department_head.",
       "8. When an approval comes back, request the next one the same way (the chain is department_head → hr_head → president_cbo) until the requisition is approved.",

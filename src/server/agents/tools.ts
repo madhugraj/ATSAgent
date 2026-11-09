@@ -204,7 +204,7 @@ export function registerPhase1Tools(): void {
   registerTool({
     name: "suggest_weights",
     description:
-      "Suggest how the 100 candidate-scoring points should be split across skills, experience, career, impact, education and social for this requisition.",
+      "Suggest how the 100 candidate-scoring points should be split for this requisition — skills, experience, career, impact, education, social and up to two proposed organisation-specific dimensions (for example location fit or regulatory compliance) — from the role, the organisation profile, the role's demand and pool supply, and its location and work mode. Returns the knowledge it was based on.",
     input: RequisitionId,
     risk: "read",
     skills: ["weight_suggest"],
@@ -212,6 +212,9 @@ export function registerPhase1Tools(): void {
       const r = await loadRequisition(ctx.orgId, i.requisitionId);
       const { suggestWeightsCore } = await import("@/lib/matching.functions");
       return suggestWeightsCore(ctx.orgId, {
+        requisitionId: r.id,
+        location: r.location,
+        workMode: r.workMode,
         title: r.title,
         mustHave: r.mustHaveSkills,
         goodToHave: r.goodToHaveSkills,
@@ -351,7 +354,7 @@ export function registerPhase1Tools(): void {
   registerTool({
     name: "save_weights",
     description:
-      "Save the six candidate-scoring weights (integers that sum to 100) on a draft requisition — one in approval must be sent back for changes first.",
+      "Save the candidate-scoring weights on a draft requisition: the six built-in weights plus any custom dimensions (key, label, hint, weight; at most 4), all integers that together sum to 100 — one in approval must be sent back for changes first.",
     input: RequisitionId.extend({
       skills: z.number().int().min(0).max(100),
       experience: z.number().int().min(0).max(100),
@@ -359,15 +362,25 @@ export function registerPhase1Tools(): void {
       impact: z.number().int().min(0).max(100),
       education: z.number().int().min(0).max(100),
       social: z.number().int().min(0).max(100),
+      custom: z
+        .array(
+          z.object({
+            key: z.string().max(40),
+            label: z.string().max(60),
+            hint: z.string().max(300),
+            weight: z.number().int().min(0).max(100),
+          }),
+        )
+        .max(4)
+        .optional(),
     }),
     risk: "write",
     describe: () => "Save candidate-scoring weights",
     run: async (ctx, i) => {
-      const { requisitionId, ...w } = i;
-      const total = Object.values(w).reduce((s, v) => s + v, 0);
-      if (total !== 100) throw new Error(`Weights must sum to 100 (got ${total}).`);
+      const { requisitionId, custom, ...w } = i;
       const { saveRequisitionWeightsCore } = await import("@/lib/requisitions.server");
-      await saveRequisitionWeightsCore(await actor(ctx), requisitionId, w);
+      // Totals and custom-dimension rules are checked by the core (weightsProblem).
+      await saveRequisitionWeightsCore(await actor(ctx), requisitionId, w, custom ?? []);
       return { ok: true };
     },
   });

@@ -150,7 +150,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
       "Create a requisition (/requisitions) with department, openings, experience band, budget, location, must-have and good-to-have skills.",
       "Use role-profile assistance to fill missing skills, qualifications and responsibilities from the role title; existing HR entries are preserved and remain editable.",
       "Use Get market range for a current low, median and high compensation benchmark. Review the named public sources, evidence extracts, freshness and confidence before adopting the suggested CTC band.",
-      "Set the scoring weights on the requisition: skills, experience, career history, impact, education and social. They must total 100. Ask the AI for a suggestion if unsure.",
+      "Set the scoring weights on the requisition: skills, experience, career history, impact, education and social. They must total 100. \"Suggest weights for this role\" proposes a split from the role type, your organisation profile, how often you hire the role and how many people in your pool already fit, and the location and work mode — and may add up to two custom dimensions such as location fit or regulatory compliance. It shows what it was based on; you decide.",
       "Draft or paste the JD; the parser splits purpose, responsibilities, must-have and good-to-have skills and qualifications into versioned fields.",
       "Send for approval: department head, then HR head, then president/CBO where required. Every decision is recorded in the approval trail.",
       "Approved requisitions become open, can be posted internally (IJP) and start accepting applications.",
