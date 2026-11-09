@@ -55,6 +55,7 @@ const { registerDistributionTools } = await import("../src/server/agents/tools-d
 const { registerOrgTools } = await import("../src/server/agents/tools-org");
 const { registerExpertTools } = await import("../src/server/agents/tools-expert");
 const { registerPanelTools } = await import("../src/server/agents/tools-panel");
+const { registerOntologyTools } = await import("../src/server/agents/tools-ontology");
 const {
   registerPhase1Agents,
   registerPhase2Agents,
@@ -168,6 +169,7 @@ describe("change control", () => {
     registerOrgTools();
     registerExpertTools();
     registerPanelTools();
+    registerOntologyTools();
     registerPhase1Agents();
     registerPhase2Agents();
     registerPhase3Agents();

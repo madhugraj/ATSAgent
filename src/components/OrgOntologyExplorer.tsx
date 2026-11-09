@@ -5,13 +5,13 @@
  * ask for a suggested name and confirm it into job architecture.
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Suspense, lazy, useEffect, useState } from "react";
-import { Maximize2, Minimize2, Pause, Play } from "lucide-react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
+import { Maximize2, Minimize2, Pause, Play, Video } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import type { OntologyFocus } from "@/components/OrgOntology3D";
+import type { OntologyFocus, OntologyRecorder } from "@/components/OrgOntology3D";
 import {
   confirmEmergingRole,
   suggestRoleName,
@@ -79,6 +79,30 @@ export function OrgOntologyExplorer({
   const [playing, setPlaying] = useState(false);
   const [focus, setFocus] = useState<OntologyFocus>(initial?.focus ?? null);
   const [expanded, setExpanded] = useState(false);
+  const recorder = useRef<OntologyRecorder | null>(null);
+  const [recording, setRecording] = useState(false);
+  /** Replays the timeline from the first month and saves it as a video. */
+  const recordReplay = async () => {
+    if (!recorder.current || recording) return;
+    setRecording(true);
+    setFocus(null);
+    setT(0);
+    setPlaying(true);
+    try {
+      const blob = await recorder.current.record((last + 1) * 900 + 1800);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `org-ontology-${ont.domain.key}-${new Date().toISOString().slice(0, 10)}.webm`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      toast.success("Video saved");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not record the video");
+    } finally {
+      setRecording(false);
+    }
+  };
   const mapH = full ? "calc(100vh - 150px)" : 620;
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -125,7 +149,14 @@ export function OrgOntologyExplorer({
                   <div className="animate-pulse rounded-xl bg-slate-900" style={{ height: mapH }} />
                 }
               >
-                <OrgOntology3D ont={ont} time={t} focus={focus} onSelect={setFocus} height={mapH} />
+                <OrgOntology3D
+                  ont={ont}
+                  time={t}
+                  focus={focus}
+                  onSelect={setFocus}
+                  height={mapH}
+                  recorderRef={recorder}
+                />
               </Suspense>
             )}
             <button
@@ -137,6 +168,22 @@ export function OrgOntologyExplorer({
               {full ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
               {full ? "Close" : "Full screen"}
             </button>
+            {!expanded && (
+              <button
+                type="button"
+                onClick={() => void recordReplay()}
+                disabled={recording}
+                className="absolute right-3 top-12 inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-black/40 px-2.5 py-1.5 text-xs font-medium text-white backdrop-blur hover:bg-black/60 disabled:opacity-80"
+                aria-label="Record the replay as a video"
+              >
+                {recording ? (
+                  <span className="inline-block size-2.5 animate-pulse rounded-full bg-red-500" />
+                ) : (
+                  <Video className="size-3.5" />
+                )}
+                {recording ? "Recording…" : "Record video"}
+              </button>
+            )}
           </div>
         ) : (
           <div className="rounded-xl bg-slate-900" style={{ height: mapH }} />

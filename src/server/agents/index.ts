@@ -22,6 +22,7 @@ import { registerDistributionTools } from "./tools-distribution";
 import { registerOrgTools } from "./tools-org";
 import { registerExpertTools } from "./tools-expert";
 import { registerPanelTools } from "./tools-panel";
+import { registerOntologyTools } from "./tools-ontology";
 import type { AgentType } from "@db/schema";
 
 let registered = false;
@@ -39,6 +40,7 @@ export function ensureAgentsRegistered(): void {
   registerOrgTools();
   registerExpertTools();
   registerPanelTools();
+  registerOntologyTools();
   registerPhase1Agents();
   registerPhase2Agents();
   registerPhase3Agents();

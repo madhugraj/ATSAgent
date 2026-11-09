@@ -87,6 +87,25 @@ export const EVAL_CATALOG: Record<string, EvalExplainer> = {
       "Nothing is created until the hand-over is made.",
     ],
   },
+  "copilot: profiles a forward deployment role, checks the pool and hands it over after confirmation": {
+    title: "Explains a requested role and who already fits it, then asks before acting",
+    situation:
+      "Someone asks the copilot for a forward deployment resource for a manufacturing client in Pune; the talent pool already holds one internal employee who fits.",
+    checks: [
+      "The copilot names the role the organisation calls it and its must-have skills.",
+      "It reports how many people in the pool already fit, naming the closest match.",
+      "It asks the person whether to open a requisition or shortlist, and only then hands the role to the Requisition agent with those skills.",
+    ],
+  },
+  "requisition: drafts a forward deployed engineer from the role ontology and reports pool fit": {
+    title: "Drafts a role from the organisation's role map and says who already fits",
+    situation:
+      "A request comes in for one forward deployed engineer in Pune, onsite, 4–8 years, with no skills listed.",
+    checks: [
+      "The draft takes its must-have and good-to-have skills from the organisation's role map.",
+      "The summary states how many people in the pool already fit the role.",
+    ],
+  },
   "requisition: drafts, bands, submits and routes the real requisition to the DH": {
     title: "Turns a hiring need into a requisition and sends it for approval",
     situation:

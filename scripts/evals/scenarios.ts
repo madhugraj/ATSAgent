@@ -295,6 +295,120 @@ export function scenarios(): ScriptedScenario[] {
       ],
     },
     {
+      name: "copilot: profiles a forward deployment role, checks the pool and hands it over after confirmation",
+      agentType: "copilot",
+      alsoEnable: ["requisition"],
+      setup: async ({ orgId }) => {
+        await seedPoolCandidate(orgId, "Meera Iyer", true, [
+          "Python",
+          "APIs and system integration",
+          "Docker",
+          "Kubernetes",
+          "Customer workshops and discovery",
+          "On-site implementation",
+        ]);
+        await seedPoolCandidate(orgId, "Ravi Kumar", false, ["Python", "Docker", "Kubernetes"]);
+        return {};
+      },
+      goal: "I need a forward deployment resource for a manufacturing client in Pune.",
+      decide: (t) =>
+        t.kind === "clarification"
+          ? { status: "answered", answer: "Open one requisition; I'll look at Meera separately." }
+          : { status: "approved" },
+      expect: {
+        status: "done",
+        calls: ["get_role_profile", "check_talent_availability", "ask_human", "start_agent"],
+        callArgs: [{ tool: "start_agent", args: { agent: "requisition" } }],
+        resultIncludes: ["Forward deployed engineer", "Meera"],
+      },
+      script: [
+        call("p", "get_role_profile", { request: "a forward deployment resource" }),
+        (m) => {
+          const p = toolResult(m, "get_role_profile");
+          return call("a", "check_talent_availability", {
+            title: String(p["name"]),
+            skills: p["mustHave"] as string[],
+          });
+        },
+        (m) => {
+          const a = toolResult(m, "check_talent_availability");
+          const best = (a["best"] as { name: string; coverage: string }[])[0];
+          return call("q", "ask_human", {
+            question: `That's a forward deployed engineer. ${String(a["strong"])} people in your pool fit it closely${best ? `, best ${best.name} (${best.coverage})` : ""}. Open a requisition, shortlist them, or both?`,
+          });
+        },
+        (m) => {
+          const p = toolResult(m, "get_role_profile");
+          return call("s", "start_agent", {
+            agent: "requisition",
+            goal: `Open one ${String(p["name"])} role for a manufacturing client in Pune, onsite. Must-haves: ${(p["mustHave"] as string[]).join(", ")}. Good-to-haves: ${(p["goodToHave"] as string[]).join(", ")}.`,
+          });
+        },
+        (m) => {
+          const p = toolResult(m, "get_role_profile");
+          const best = (
+            toolResult(m, "check_talent_availability")["best"] as { name: string }[]
+          )[0];
+          return say(
+            `Started the requisition agent for one ${String(p["name"])} in Pune. Closest fit in your pool: ${best?.name ?? "none"}.`,
+          );
+        },
+      ],
+    },
+    {
+      name: "requisition: drafts a forward deployed engineer from the role ontology and reports pool fit",
+      agentType: "requisition",
+      autonomy: "act_and_notify",
+      setup: async ({ orgId }) => {
+        await seedPoolCandidate(orgId, "Meera Iyer", true, [
+          "Python",
+          "APIs and system integration",
+          "Docker",
+          "Kubernetes",
+          "Customer workshops and discovery",
+          "On-site implementation",
+        ]);
+        return {};
+      },
+      goal: "Open one forward deployed engineer role in Pune, onsite, 4–8 years.",
+      decide: () => ({ status: "approved" }),
+      expect: {
+        status: "done",
+        calls: ["get_role_profile", "check_talent_availability", "draft_requisition"],
+        callArgs: [{ tool: "draft_requisition", args: { title: "Forward deployed engineer" } }],
+        resultIncludes: ["1 strong"],
+      },
+      script: [
+        call("p", "get_role_profile", { request: "forward deployed engineer" }),
+        (m) => {
+          const p = toolResult(m, "get_role_profile");
+          return call("a", "check_talent_availability", {
+            title: String(p["name"]),
+            skills: p["mustHave"] as string[],
+            experienceMin: 4,
+            experienceMax: 8,
+          });
+        },
+        (m) => {
+          const p = toolResult(m, "get_role_profile");
+          return call("d", "draft_requisition", {
+            title: String(p["name"]),
+            location: "Pune",
+            experienceMin: 4,
+            experienceMax: 8,
+            mustHaveSkills: p["mustHave"] as string[],
+            goodToHaveSkills: p["goodToHave"] as string[],
+          });
+        },
+        (m) => {
+          const a = toolResult(m, "check_talent_availability");
+          return say(
+            `Drafted the forward deployed engineer requisition from the role ontology. Pool: ${String(a["strong"])} strong, ${String(a["partial"])} partial, ${String(a["internal"])} internal.`,
+          );
+        },
+      ],
+    },
+    {
       name: "requisition: drafts, bands, submits and routes the real requisition to the DH",
       agentType: "requisition",
       autonomy: "act_and_notify",
@@ -3155,6 +3269,29 @@ async function seedTranscribedRound(
     segmentCount: segments.length,
   });
   return r!.id;
+}
+
+/** A pool candidate (not in any pipeline) with the given skills. */
+async function seedPoolCandidate(
+  orgId: string,
+  name: string,
+  internal: boolean,
+  skills: string[],
+): Promise<string> {
+  const { db } = await import("../../src/server/db");
+  const { candidates } = await import("../../drizzle/schema");
+  const [c] = await db
+    .insert(candidates)
+    .values({
+      orgId,
+      fullName: name,
+      email: `${name.toLowerCase().replace(/\s+/g, ".")}-${Math.random().toString(36).slice(2, 7)}@eval.local`,
+      skills,
+      isInternal: internal,
+      experienceYears: 6,
+    } as never)
+    .returning({ id: candidates.id });
+  return c!.id;
 }
 
 async function seedApplication(

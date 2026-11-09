@@ -8,66 +8,18 @@
  * data, audited); the judgement on the suggestion is captured for training.
  */
 import { createServerFn } from "@tanstack/react-start";
-import { and, eq, gte } from "drizzle-orm";
+
 import { z } from "zod";
 
 import { db } from "../server/db";
-import { candidates, masterItems, organizations, requisitions } from "@db/schema";
+import { loadOntology } from "../server/org-ontology.server";
+import { masterItems } from "@db/schema";
 import { assertRole, requireOrg } from "./auth.middleware";
-import { ONTOLOGY_MONTHS, buildOrgOntology, type OrgOntology } from "./org-ontology";
+import type { OrgOntology } from "./org-ontology";
 
 export type * from "./org-ontology";
 
 const ROLES = ["hr_head", "president_cbo"] as const;
-
-async function loadOntology(orgId: string): Promise<OrgOntology> {
-  const since = new Date();
-  since.setUTCMonth(since.getUTCMonth() - ONTOLOGY_MONTHS);
-  const [org, reqs, cands, confirmed] = await Promise.all([
-    db
-      .select({ industry: organizations.industry })
-      .from(organizations)
-      .where(eq(organizations.id, orgId)),
-    db
-      .select({
-        id: requisitions.id,
-        title: requisitions.title,
-        must: requisitions.mustHaveSkills,
-        good: requisitions.goodToHaveSkills,
-        createdAt: requisitions.createdAt,
-      })
-      .from(requisitions)
-      .where(and(eq(requisitions.orgId, orgId), gte(requisitions.createdAt, since))),
-    db
-      .select({ skills: candidates.skills, createdAt: candidates.createdAt })
-      .from(candidates)
-      .where(eq(candidates.orgId, orgId)),
-    db
-      .select({ name: masterItems.name })
-      .from(masterItems)
-      .where(
-        and(
-          eq(masterItems.orgId, orgId),
-          eq(masterItems.kind, "role_title"),
-          eq(masterItems.active, true),
-        ),
-      ),
-  ]);
-  return buildOrgOntology({
-    industry: org[0]?.industry ?? null,
-    requisitions: reqs.map((r) => ({
-      id: r.id,
-      title: r.title,
-      skills: [...((r.must as string[] | null) ?? []), ...((r.good as string[] | null) ?? [])],
-      createdAt: r.createdAt,
-    })),
-    candidates: cands.map((c) => ({
-      skills: (c.skills as string[] | null) ?? [],
-      createdAt: c.createdAt,
-    })),
-    confirmedTitles: confirmed.map((c) => c.name),
-  });
-}
 
 export const readOrgOntology = createServerFn({ method: "POST" })
   .middleware([requireOrg])

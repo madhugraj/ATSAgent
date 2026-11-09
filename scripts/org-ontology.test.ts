@@ -8,7 +8,7 @@
  */
 import { describe, expect, test } from "bun:test";
 
-import { buildOrgOntology, domainOf } from "../src/lib/org-ontology";
+import { buildOrgOntology, domainOf, findRoleProfile } from "../src/lib/org-ontology";
 
 const NOW = new Date("2026-11-15T00:00:00Z");
 const monthsAgo = (n: number) => new Date(Date.UTC(2026, 10 - n, 10));
@@ -126,5 +126,35 @@ describe("role emergence (manufacturing)", () => {
     const iiot = o.emerging.find((e) => e.name === "Industrial IoT Engineer");
     expect(iiot?.parents.sort()).toEqual(["automation", "data-analyst"]);
     expect(iiot?.status).toBe("emerging");
+  });
+});
+
+describe("role lookup", () => {
+  const AI = ["Python", "LLM", "RAG", "REST APIs", "Microservices", "Pandas"];
+  const o = buildOrgOntology({
+    industry: "IT services",
+    requisitions: [6, 5, 4, 3].map((m) => req("AI Engineer", AI, m)),
+    candidates: [],
+    confirmedTitles: [],
+    now: NOW,
+  });
+
+  test("a forward deployment resource resolves to the forward deployed engineer", () => {
+    const p = findRoleProfile(o, "I need a forward deployment resource");
+    expect(p?.name).toBe("Forward deployed engineer");
+    expect(p?.kind).toBe("starter");
+    expect(p?.mustHave).toContain("Customer workshops and discovery");
+    expect(p?.families).toContain("Client delivery");
+  });
+
+  test("a role the organisation is growing resolves to the emerging role", () => {
+    const p = findRoleProfile(o, "AI engineer");
+    expect(p?.kind).toBe("emerging");
+    expect(p?.bornFrom.length).toBe(2);
+    expect(p?.requisitions).toBe(4);
+  });
+
+  test("an unrelated request finds nothing", () => {
+    expect(findRoleProfile(o, "pastry chef")).toBeNull();
   });
 });
