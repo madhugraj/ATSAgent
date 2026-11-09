@@ -6,10 +6,11 @@
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Suspense, lazy, useEffect, useState } from "react";
-import { Pause, Play } from "lucide-react";
+import { Maximize2, Minimize2, Pause, Play } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import type { OntologyFocus } from "@/components/OrgOntology3D";
 import {
   confirmEmergingRole,
@@ -62,14 +63,23 @@ function Spark({ values, upto }: { values: number[]; upto: number }) {
 export function OrgOntologyExplorer({
   ont,
   queryKey,
+  full = false,
+  initial,
+  onClose,
 }: {
   ont: OrgOntology;
   queryKey: readonly unknown[];
+  /** Full-screen popup mode: taller map, close instead of expand. */
+  full?: boolean;
+  initial?: { t: number; focus: OntologyFocus } | undefined;
+  onClose?: (() => void) | undefined;
 }) {
   const last = ont.months.length - 1;
-  const [t, setT] = useState(last);
+  const [t, setT] = useState(initial?.t ?? last);
   const [playing, setPlaying] = useState(false);
-  const [focus, setFocus] = useState<OntologyFocus>(null);
+  const [focus, setFocus] = useState<OntologyFocus>(initial?.focus ?? null);
+  const [expanded, setExpanded] = useState(false);
+  const mapH = full ? "calc(100vh - 150px)" : 620;
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   useEffect(() => {
@@ -96,15 +106,40 @@ export function OrgOntologyExplorer({
   };
   for (const e of visible) counts[statusAt(e, t)!] += 1;
 
-  return (
+  const body = (
     <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
       <div className="space-y-2">
         {mounted ? (
-          <Suspense fallback={<div className="h-[620px] animate-pulse rounded-xl bg-slate-900" />}>
-            <OrgOntology3D ont={ont} time={t} focus={focus} onSelect={setFocus} />
-          </Suspense>
+          <div className="relative">
+            {expanded ? (
+              // one live 3D scene at a time: the popup owns it while open
+              <div
+                className="flex items-center justify-center rounded-xl bg-slate-900 text-sm text-slate-400"
+                style={{ height: mapH }}
+              >
+                Open in full screen
+              </div>
+            ) : (
+              <Suspense
+                fallback={
+                  <div className="animate-pulse rounded-xl bg-slate-900" style={{ height: mapH }} />
+                }
+              >
+                <OrgOntology3D ont={ont} time={t} focus={focus} onSelect={setFocus} height={mapH} />
+              </Suspense>
+            )}
+            <button
+              type="button"
+              onClick={() => (full ? onClose?.() : setExpanded(true))}
+              className="absolute right-3 top-3 inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-black/40 px-2.5 py-1.5 text-xs font-medium text-white backdrop-blur hover:bg-black/60"
+              aria-label={full ? "Close full screen" : "Expand to full screen"}
+            >
+              {full ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+              {full ? "Close" : "Full screen"}
+            </button>
+          </div>
         ) : (
-          <div className="h-[620px] rounded-xl bg-slate-900" />
+          <div className="rounded-xl bg-slate-900" style={{ height: mapH }} />
         )}
         <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-2">
           <button
@@ -140,7 +175,10 @@ export function OrgOntologyExplorer({
         </div>
       </div>
 
-      <aside className="max-h-[680px] overflow-y-auto rounded-xl border border-border bg-card p-4 text-[13px]">
+      <aside
+        className="overflow-y-auto rounded-xl border border-border bg-card p-4 text-[13px]"
+        style={{ maxHeight: full ? "calc(100vh - 90px)" : 680 }}
+      >
         {focus?.kind === "emerging" ? (
           <EmergingDetail
             e={ont.emerging.find((x) => x.id === focus.id)!}
@@ -268,6 +306,25 @@ export function OrgOntologyExplorer({
         )}
       </aside>
     </div>
+  );
+  return (
+    <>
+      {body}
+      {expanded && (
+        <Dialog open onOpenChange={(o) => !o && setExpanded(false)}>
+          <DialogContent className="h-[100vh] w-[100vw] max-w-none gap-0 rounded-none border-0 p-3 sm:rounded-none [&>button]:hidden">
+            <DialogTitle className="sr-only">{ont.domain.name} organisation ontology</DialogTitle>
+            <OrgOntologyExplorer
+              ont={ont}
+              queryKey={queryKey}
+              full
+              initial={{ t, focus }}
+              onClose={() => setExpanded(false)}
+            />
+          </DialogContent>
+        </Dialog>
+      )}
+    </>
   );
 }
 
