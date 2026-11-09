@@ -14,7 +14,16 @@
 
 export type DomainKey = "tech" | "healthcare" | "manufacturing" | "bfsi";
 type FamilySeed = { name: string; color: string; match: RegExp };
-type RoleSeed = { id: string; name: string; skills: string[] };
+type RoleSeed = {
+  id: string;
+  name: string;
+  /** Lower-case keywords that recognise the role's skills in requisitions and CVs. */
+  skills: string[];
+  /** How the role's skills are written in a requisition: must-haves first. */
+  display?: { must: string[]; good: string[] };
+  /** Other titles the market uses for the role. */
+  titles?: string[];
+};
 type DomainPack = { key: DomainKey; name: string; families: FamilySeed[]; roles: RoleSeed[] };
 
 const TECH_FAMILIES: FamilySeed[] = [
@@ -74,12 +83,74 @@ const BUSINESS_FAMILIES: FamilySeed[] = [
   },
 ];
 
+const CLIENT_DELIVERY: FamilySeed = {
+  name: "Client delivery",
+  color: "#fbd38d",
+  match:
+    /(solution design|solutioning|customer|client.?facing|workshop|stakeholder|pre.?sales|implementation|onsite|on-site|consulting|discovery|travel)/,
+};
+
 const PACKS: Record<DomainKey, DomainPack> = {
   tech: {
     key: "tech",
     name: "Technology",
-    families: [...TECH_FAMILIES, ...BUSINESS_FAMILIES],
+    families: [...TECH_FAMILIES, CLIENT_DELIVERY, ...BUSINESS_FAMILIES],
     roles: [
+      {
+        id: "solutions-engineer",
+        name: "Solutions engineer",
+        skills: [
+          "solution design",
+          "pre-sales",
+          "customer",
+          "workshop",
+          "stakeholder",
+          "api",
+          "demo",
+        ],
+        display: {
+          must: [
+            "Solution design",
+            "Customer workshops",
+            "Stakeholder management",
+            "APIs and integrations",
+          ],
+          good: ["Pre-sales demos", "Technical writing"],
+        },
+        titles: ["Solutions Engineer", "Sales Engineer", "Solutions Architect"],
+      },
+      {
+        id: "forward-deployed",
+        name: "Forward deployed engineer",
+        skills: [
+          "python",
+          "typescript",
+          "api",
+          "integration",
+          "docker",
+          "kubernetes",
+          "customer",
+          "workshop",
+          "implementation",
+          "onsite",
+        ],
+        display: {
+          must: [
+            "Python or TypeScript",
+            "APIs and system integration",
+            "Cloud deployment (Docker, Kubernetes)",
+            "Customer workshops and discovery",
+            "On-site implementation",
+          ],
+          good: ["Data pipelines", "LLM integration", "Client domain knowledge", "Travel"],
+        },
+        titles: [
+          "Forward Deployed Engineer",
+          "Field Engineer",
+          "Deployment Engineer",
+          "Customer Engineer",
+        ],
+      },
       {
         id: "backend",
         name: "Backend engineer",
@@ -381,27 +452,35 @@ const ESTABLISHED_AT = 6;
 const ESTABLISHED_SPAN = 3; // months between first signal and established
 
 /**
- * Two roles that together explain a bundle: the best role, plus the role that
- * best explains what the first leaves over. Both must bring at least two
- * skills, and together cover at least 60% of the bundle — the rest is what is
- * genuinely new about the role (LLMs and RAG for an AI engineer).
+ * Two roles that together explain a bundle: of every pair, the one covering
+ * most of it (fewest shared skills on a tie), where each brings at least two
+ * skills and one the other lacks — so a role with broad keywords cannot claim
+ * a bundle alone. Together they must cover at least 60% of it; the rest is
+ * what is genuinely new about the role (LLMs and RAG for an AI engineer).
  */
 function hybridSplit(
   bundle: string[],
   roles: { id: string; skills: string[] }[],
 ): [string, string] | null {
-  const ranked = roles.map((r) => ({ r, c: coverage(bundle, r) })).sort((a, b) => b.c - a.c);
-  const a = ranked[0];
-  if (!a || a.c === 0) return null;
-  const rest = bundle.filter((s) => !a.r.skills.some((k) => hit(s, k)));
-  if (rest.length < 2) return null;
-  const b = roles
-    .filter((r) => r.id !== a.r.id)
-    .map((r) => ({ r, n: rest.filter((s) => r.skills.some((k) => hit(s, k))).length }))
-    .sort((x, y) => y.n - x.n)[0];
-  if (!b || b.n < 2) return null;
-  const covered = bundle.length - rest.length + b.n;
-  return covered / bundle.length >= 0.6 ? [a.r.id, b.r.id] : null;
+  // every pair of roles: the pair that explains most of the bundle wins, as
+  // long as each parent brings at least two skills and one the other lacks
+  const covered = roles.map((r) => new Set(bundle.filter((s) => r.skills.some((k) => hit(s, k)))));
+  let best: { i: number; j: number; union: number; overlap: number } | null = null;
+  for (let i = 0; i < roles.length; i++)
+    for (let j = i + 1; j < roles.length; j++) {
+      const a = covered[i]!,
+        b = covered[j]!;
+      if (a.size < 2 || b.size < 2) continue;
+      const overlap = [...a].filter((x) => b.has(x)).length;
+      if (overlap === a.size || overlap === b.size) continue;
+      const union = a.size + b.size - overlap;
+      if (!best || union > best.union || (union === best.union && overlap < best.overlap))
+        best = { i, j, union, overlap };
+    }
+  if (!best || best.union / bundle.length < 0.6) return null;
+  const first = covered[best.i]!.size >= covered[best.j]!.size ? best.i : best.j;
+  const second = first === best.i ? best.j : best.i;
+  return [roles[first]!.id, roles[second]!.id];
 }
 
 /* ------------------------------------------------------------------ build */
@@ -608,4 +687,104 @@ export function buildOrgOntology(input: {
 export function roleSkillNodes(role: { skills: string[] }, families: OrgFamily[]): string[] {
   const all = families.flatMap((f) => f.skills.map((s) => s.name));
   return all.filter((s) => role.skills.some((k) => hit(s, norm(k)) || hit(k, norm(s))));
+}
+
+/* ------------------------------------------------------------------ role lookup */
+
+export type RoleProfile = {
+  name: string;
+  kind: "established" | "emerging" | "starter";
+  domain: string;
+  mustHave: string[];
+  goodToHave: string[];
+  bornFrom: string[];
+  titles: string[];
+  families: string[];
+  /** Requisitions the organisation raised for it (last 18 months). */
+  requisitions: number;
+  /** Candidates in the pool covering most of the bundle. */
+  inPool: number;
+  status?: RoleStatus;
+};
+
+/**
+ * The role a request names ("a forward deployment resource", "AI engineer"),
+ * from the organisation's ontology: its emerging roles first, then established
+ * and starter roles, matched on title words and known titles. Null when
+ * nothing in the ontology resembles it.
+ */
+export function findRoleProfile(ont: OrgOntology, query: string): RoleProfile | null {
+  const pack = PACKS[ont.domain.key];
+  const words = new Set(
+    titleKey(query)
+      .replace(/\b(resource|role|person|people|someone|hire|need|an?|the|for|of)\b/g, " ")
+      .split(" ")
+      .filter((w) => w.length >= 2),
+  );
+  // "forward deployment" ↔ "forward deployed": compare word stems
+  const stem = (w: string) => w.replace(/(ment|ed|ing|er|s)$/, "");
+  const stems = new Set([...words].map(stem));
+  const score = (names: string[]) =>
+    Math.max(
+      0,
+      ...names.map((n) => {
+        const ws = titleKey(n)
+          .split(" ")
+          .filter((w) => w.length >= 2);
+        if (!ws.length) return 0;
+        const hits = ws.filter((w) => stems.has(stem(w))).length;
+        return hits / ws.length;
+      }),
+    );
+  const famsOf = (skills: string[]) => [
+    ...new Set(
+      skills
+        .map((s) => pack.families.find((f) => f.match.test(norm(s)))?.name)
+        .filter((x): x is string => !!x),
+    ),
+  ];
+  type Cand = { profile: RoleProfile; s: number };
+  const cands: Cand[] = [];
+  for (const e of ont.emerging) {
+    cands.push({
+      s: score([e.name, ...e.titles]) + 0.05,
+      profile: {
+        name: e.name,
+        kind: "emerging",
+        domain: ont.domain.name,
+        mustHave: e.skills.slice(0, 5),
+        goodToHave: e.skills.slice(5),
+        bornFrom: e.parents.map(
+          (p) => [...ont.roles, ...ont.emerging].find((r) => r.id === p)?.name ?? p,
+        ),
+        titles: e.titles,
+        families: famsOf(e.skills),
+        requisitions: e.requisitions,
+        inPool: e.supply,
+        status: e.status,
+      },
+    });
+  }
+  for (const r of ont.roles) {
+    const seed = pack.roles.find((x) => x.id === r.id);
+    const must = seed?.display?.must ?? r.skills.slice(0, 5).map(pretty);
+    const good = seed?.display?.good ?? r.skills.slice(5).map(pretty);
+    cands.push({
+      s: score([r.name, ...(seed?.titles ?? [])]),
+      profile: {
+        name: r.name,
+        kind: r.demand > 0 ? "established" : "starter",
+        domain: ont.domain.name,
+        mustHave: must,
+        goodToHave: good,
+        bornFrom: [],
+        titles: seed?.titles ?? [r.name],
+        families: famsOf(r.skills),
+        requisitions: r.demand,
+        inPool: r.supply,
+      },
+    });
+  }
+  const best = cands.sort((a, b) => b.s - a.s)[0];
+  return best && best.s >= 0.5 ? best.profile : null;
 }

@@ -88,18 +88,23 @@ type Pickable = THREE.Mesh & {
   userData: { kind: "skill" | "role" | "emerging"; id: string; lbl?: CSS2DObject };
 };
 
+export type OntologyRecorder = { record: (ms: number) => Promise<Blob> };
+
 export function OrgOntology3D({
   ont,
   time,
   focus,
   onSelect,
   height = 620,
+  recorderRef,
 }: {
   ont: OrgOntology;
   time: number;
   focus: OntologyFocus;
   onSelect: (f: OntologyFocus) => void;
   height?: number | string;
+  /** Exposes record(ms): the map with its labels as a WebM video. */
+  recorderRef?: React.MutableRefObject<OntologyRecorder | null> | undefined;
 }) {
   const host = useRef<HTMLDivElement | null>(null);
   const timeRef = useRef(time);
@@ -120,7 +125,12 @@ export function OrgOntology3D({
     const W = () => el.clientWidth;
     const H = () => el.clientHeight;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    // preserveDrawingBuffer: the recorder copies each finished frame
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true,
+      preserveDrawingBuffer: true,
+    });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(W(), H());
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -636,7 +646,83 @@ export function OrgOntology3D({
       controls.update();
       renderer.render(scene, camera);
       labels.render(scene, camera);
+      if (rec) composite(rec.ctx);
     };
+
+    /* ---- recording: the WebGL frame plus the HTML labels, drawn on one canvas */
+    let rec: { ctx: CanvasRenderingContext2D } | null = null;
+    const labelObjects: CSS2DObject[] = [];
+    scene.traverse((o) => {
+      if (o instanceof CSS2DObject) labelObjects.push(o);
+    });
+    const proj = new THREE.Vector3();
+    const composite = (ctx: CanvasRenderingContext2D) => {
+      const w = ctx.canvas.width,
+        h = ctx.canvas.height;
+      ctx.fillStyle = "#0b0c18";
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(renderer.domElement, 0, 0, w, h);
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      for (const o of labelObjects) {
+        const e = o.element;
+        const op = Number(e.style.opacity || "1");
+        if (!o.visible || op < 0.05 || e.style.display === "none") continue;
+        let hidden = false;
+        o.traverseAncestors((a) => {
+          if (!a.visible) hidden = true;
+        });
+        if (hidden) continue;
+        o.getWorldPosition(proj).project(camera);
+        if (proj.z > 1) continue;
+        const cs = getComputedStyle(e);
+        ctx.globalAlpha = op;
+        ctx.font = `${cs.fontWeight} ${parseFloat(cs.fontSize) * (w / W())}px Inter, system-ui, sans-serif`;
+        ctx.fillStyle = cs.color;
+        ctx.shadowColor = "#000";
+        ctx.shadowBlur = 6;
+        ctx.fillText(
+          cs.textTransform === "uppercase"
+            ? (e.textContent ?? "").toUpperCase()
+            : (e.textContent ?? ""),
+          ((proj.x + 1) / 2) * w,
+          ((1 - proj.y) / 2) * h,
+        );
+      }
+      ctx.globalAlpha = 1;
+      ctx.shadowBlur = 0;
+    };
+    if (recorderRef)
+      recorderRef.current = {
+        record: (ms) =>
+          new Promise<Blob>((resolve, reject) => {
+            const canvas = document.createElement("canvas");
+            canvas.width = renderer.domElement.width;
+            canvas.height = renderer.domElement.height;
+            const ctx = canvas.getContext("2d");
+            if (!ctx || typeof MediaRecorder === "undefined") {
+              reject(new Error("This browser cannot record video."));
+              return;
+            }
+            const mime = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].find(
+              (m) => MediaRecorder.isTypeSupported(m),
+            );
+            const recorder = new MediaRecorder(canvas.captureStream(30), {
+              ...(mime ? { mimeType: mime } : {}),
+              videoBitsPerSecond: 6_000_000,
+            });
+            const chunks: Blob[] = [];
+            recorder.ondataavailable = (ev) => ev.data.size && chunks.push(ev.data);
+            recorder.onstop = () => {
+              rec = null;
+              resolve(new Blob(chunks, { type: mime ?? "video/webm" }));
+            };
+            rec = { ctx };
+            composite(ctx);
+            recorder.start(500);
+            setTimeout(() => recorder.state !== "inactive" && recorder.stop(), ms);
+          }),
+      };
     animate();
 
     const ro = new ResizeObserver(() => {
@@ -649,6 +735,7 @@ export function OrgOntology3D({
 
     return () => {
       cancelAnimationFrame(raf);
+      if (recorderRef) recorderRef.current = null;
       ro.disconnect();
       el.removeEventListener("wheel", onWheel, { capture: true });
       flyRef.current = null;

@@ -1,7 +1,7 @@
 {
   "copilot": {
-    "version": "1.2.5",
-    "hash": "26fc876df0c1757fc325098f7a3fef5e60b63377eb0ca5b59a2eafc32aa367f3"
+    "version": "1.3.0",
+    "hash": "b9935dd4845dfd8e6a2f2425e365500a8114dc73b76a59d9483230d6b1946b1d"
   },
   "distribution": {
     "version": "1.1.3",
@@ -64,8 +64,8 @@
     "hash": "8cfceff5e69ef697711f98e88a1f334433740269902aa5a43447b7b7a3b89786"
   },
   "requisition": {
-    "version": "1.5.0",
-    "hash": "e4df0aec9e7729fdd5f3f167c932dc940e08cd100b734a602e355e1dea280587"
+    "version": "1.6.0",
+    "hash": "15a3bc095967b62f61b69ea39dae549c6619dd1f3924b8e8c1cdab413b42c344"
   },
   "scheduling_call": {
     "version": "1.7.2",
