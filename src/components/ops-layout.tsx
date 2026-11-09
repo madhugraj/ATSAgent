@@ -32,11 +32,14 @@ export function Verdict({
   active,
   onPick,
   okText = "Nothing needs you",
+  neutral = false,
 }: {
   pills: Pill[];
   active?: string | null;
   onPick?: (key: string | null) => void;
   okText?: string;
+  /** Show okText in grey: there is nothing to judge yet. */
+  neutral?: boolean;
 }) {
   const need = pills.filter((p) => p.status === "bad").length;
   const watch = pills.filter((p) => p.status === "warn").length;
@@ -54,8 +57,8 @@ export function Verdict({
           <>
             <span className="text-amber-600 dark:text-amber-400">{watch}</span> to watch
           </>
-        ) : pills.length > 0 && pills.every((p) => p.status === "none") ? (
-          <span className="text-muted-foreground">Not enough data yet</span>
+        ) : neutral || (pills.length > 0 && pills.every((p) => p.status === "none")) ? (
+          <span className="text-muted-foreground">{neutral ? okText : "Not enough data yet"}</span>
         ) : (
           <span className="text-emerald-600 dark:text-emerald-400">{okText}</span>
         )}

@@ -1026,7 +1026,7 @@ function Templates() {
   return (
     <>
       <PageHeader
-        eyebrow="Administration"
+        eyebrow="Organisation"
         title="Content templates"
         description="How your organisation sounds and looks — templates steer every AI-drafted LinkedIn post, job description and branded job-card image. The default template applies automatically; recruiters can pick another while designing."
       />

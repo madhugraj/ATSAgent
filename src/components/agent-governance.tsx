@@ -200,10 +200,12 @@ export function AgentGovernancePanel({ h }: { h: Harness }) {
   const [check, setCheck] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [showOff, setShowOff] = useState(false);
+  // no runs and no events in the period: nothing to judge, so no green
+  const quiet = h.agents.every((a) => a.runs === 0) && h.handoffs.events.total === 0;
   const pills: Pill[] = CHECKS.map((c) => ({
     key: c.key,
     label: c.label,
-    status: TONE_STATUS[h.questions.find((q) => q.key === c.q)?.tone ?? "none"],
+    status: quiet ? "none" : TONE_STATUS[h.questions.find((q) => q.key === c.q)?.tone ?? "none"],
   }));
   const fixes = check ? h.fixes.filter((f) => f.check === check) : h.fixes;
   const rows = showOff ? h.agents : h.agents.filter((a) => a.enabled || a.runs > 0);
@@ -211,7 +213,13 @@ export function AgentGovernancePanel({ h }: { h: Harness }) {
   const ho = h.handoffs;
   return (
     <div className="space-y-4">
-      <Verdict pills={pills} active={check} onPick={setCheck} okText="The harness is holding" />
+      <Verdict
+        pills={pills}
+        active={check}
+        onPick={setCheck}
+        okText={quiet ? "No agent activity in this period" : "The harness is holding"}
+        neutral={quiet}
+      />
 
       <FixList
         rows={fixes}

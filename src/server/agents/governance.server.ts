@@ -11,7 +11,7 @@
  *   delegation — an agent calling start_agent (today: the copilot); the step's
  *                output carries the child runId.
  */
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq, gte, inArray, lte, or } from "drizzle-orm";
 
 import { db } from "../db";
 import { agentEvents, agentPolicies, agentRuns, agentSteps, agentTasks } from "@db/schema";
@@ -140,87 +140,120 @@ const MAX_EVENT_ATTEMPTS = 3;
 const isPrerelease = (v: string) => /-(eval|test)/.test(v);
 const ACTIVE = new Set(["queued", "running", "awaiting_human"]);
 
-export async function computeHarness(orgId: string): Promise<Harness> {
+export async function computeHarness(
+  orgId: string,
+  win: { from: Date; to: Date; agent: string | null } = {
+    from: new Date(0),
+    to: new Date(),
+    agent: null,
+  },
+): Promise<Harness> {
   ensureAgentsRegistered();
-  const defs = listAgents();
+  const defs = listAgents().filter((d) => !win.agent || d.type === win.agent);
   const monthStart = new Date();
   monthStart.setUTCDate(1);
   monthStart.setUTCHours(0, 0, 0, 0);
+  // runs started in the window (one agent when filtered); steps and tasks follow their run
+  const inRun = and(
+    eq(agentRuns.orgId, orgId),
+    gte(agentRuns.createdAt, win.from),
+    lte(agentRuns.createdAt, win.to),
+    ...(win.agent ? [eq(agentRuns.agentType, win.agent as never)] : []),
+  );
 
-  const [runs, events, policies, toolSteps, delegSteps, approvals] = await Promise.all([
-    db
-      .select({
-        id: agentRuns.id,
-        agentType: agentRuns.agentType,
-        status: agentRuns.status,
-        principalUserId: agentRuns.principalUserId,
-        subjectId: agentRuns.subjectId,
-        triggerEventId: agentRuns.triggerEventId,
-        definitionVersion: agentRuns.definitionVersion,
-        tokensUsed: agentRuns.tokensUsed,
-        lastError: agentRuns.lastError,
-        createdAt: agentRuns.createdAt,
-        finishedAt: agentRuns.finishedAt,
-      })
-      .from(agentRuns)
-      .where(eq(agentRuns.orgId, orgId)),
-    db
-      .select({
-        id: agentEvents.id,
-        type: agentEvents.type,
-        actorUserId: agentEvents.actorUserId,
-        sourceRunId: agentEvents.sourceRunId,
-        status: agentEvents.status,
-        attempts: agentEvents.attempts,
-        createdAt: agentEvents.createdAt,
-      })
-      .from(agentEvents)
-      .where(eq(agentEvents.orgId, orgId)),
-    db
-      .select({
-        agentType: agentPolicies.agentType,
-        enabled: agentPolicies.enabled,
-        autonomy: agentPolicies.autonomy,
-        monthlyTokenBudget: agentPolicies.monthlyTokenBudget,
-      })
-      .from(agentPolicies)
-      .where(eq(agentPolicies.orgId, orgId)),
-    db
-      .select({
-        runId: agentSteps.runId,
-        toolName: agentSteps.toolName,
-        status: agentSteps.status,
-        injectionSuspected: agentSteps.injectionSuspected,
-        seq: agentSteps.seq,
-        toolCallId: agentSteps.toolCallId,
-      })
-      .from(agentSteps)
-      .where(
-        and(
-          eq(agentSteps.orgId, orgId),
-          or(eq(agentSteps.kind, "tool"), eq(agentSteps.injectionSuspected, true)),
+  const [runs, events, policies, toolSteps, delegSteps, approvals, monthTokens] = await Promise.all(
+    [
+      db
+        .select({
+          id: agentRuns.id,
+          agentType: agentRuns.agentType,
+          status: agentRuns.status,
+          principalUserId: agentRuns.principalUserId,
+          subjectId: agentRuns.subjectId,
+          triggerEventId: agentRuns.triggerEventId,
+          definitionVersion: agentRuns.definitionVersion,
+          tokensUsed: agentRuns.tokensUsed,
+          lastError: agentRuns.lastError,
+          createdAt: agentRuns.createdAt,
+          finishedAt: agentRuns.finishedAt,
+        })
+        .from(agentRuns)
+        .where(inRun),
+      db
+        .select({
+          id: agentEvents.id,
+          type: agentEvents.type,
+          actorUserId: agentEvents.actorUserId,
+          sourceRunId: agentEvents.sourceRunId,
+          status: agentEvents.status,
+          attempts: agentEvents.attempts,
+          createdAt: agentEvents.createdAt,
+        })
+        .from(agentEvents)
+        .where(
+          and(
+            eq(agentEvents.orgId, orgId),
+            gte(agentEvents.createdAt, win.from),
+            lte(agentEvents.createdAt, win.to),
+          ),
         ),
-      ),
-    db
-      .select({
-        runId: agentSteps.runId,
-        status: agentSteps.status,
-        input: agentSteps.input,
-        output: agentSteps.output,
-        seq: agentSteps.seq,
-        createdAt: agentSteps.createdAt,
-      })
-      .from(agentSteps)
-      .where(and(eq(agentSteps.orgId, orgId), eq(agentSteps.toolName, "start_agent"))),
-    db
-      .select({
-        runId: agentTasks.runId,
-        status: agentTasks.status,
-        proposedAction: agentTasks.proposedAction,
-      })
-      .from(agentTasks)
-      .where(and(eq(agentTasks.orgId, orgId), inArray(agentTasks.kind, ["approval", "gate"]))),
-  ]);
+      db
+        .select({
+          agentType: agentPolicies.agentType,
+          enabled: agentPolicies.enabled,
+          autonomy: agentPolicies.autonomy,
+          monthlyTokenBudget: agentPolicies.monthlyTokenBudget,
+        })
+        .from(agentPolicies)
+        .where(eq(agentPolicies.orgId, orgId)),
+      db
+        .select({
+          runId: agentSteps.runId,
+          toolName: agentSteps.toolName,
+          status: agentSteps.status,
+          injectionSuspected: agentSteps.injectionSuspected,
+          seq: agentSteps.seq,
+          toolCallId: agentSteps.toolCallId,
+        })
+        .from(agentSteps)
+        .innerJoin(agentRuns, eq(agentRuns.id, agentSteps.runId))
+        .where(
+          and(
+            eq(agentSteps.orgId, orgId),
+            inRun,
+            or(eq(agentSteps.kind, "tool"), eq(agentSteps.injectionSuspected, true)),
+          ),
+        ),
+      db
+        .select({
+          runId: agentSteps.runId,
+          status: agentSteps.status,
+          input: agentSteps.input,
+          output: agentSteps.output,
+          seq: agentSteps.seq,
+          createdAt: agentSteps.createdAt,
+        })
+        .from(agentSteps)
+        .innerJoin(agentRuns, eq(agentRuns.id, agentSteps.runId))
+        .where(and(eq(agentSteps.orgId, orgId), inRun, eq(agentSteps.toolName, "start_agent"))),
+      db
+        .select({
+          runId: agentTasks.runId,
+          status: agentTasks.status,
+          proposedAction: agentTasks.proposedAction,
+        })
+        .from(agentTasks)
+        .innerJoin(agentRuns, eq(agentRuns.id, agentTasks.runId))
+        .where(
+          and(eq(agentTasks.orgId, orgId), inRun, inArray(agentTasks.kind, ["approval", "gate"])),
+        ),
+      // monthly budget is always this calendar month, whatever the window
+      db
+        .select({ agentType: agentRuns.agentType, tokensUsed: agentRuns.tokensUsed })
+        .from(agentRuns)
+        .where(and(eq(agentRuns.orgId, orgId), gte(agentRuns.createdAt, monthStart))),
+    ],
+  );
 
   const runById = new Map(runs.map((r) => [r.id, r]));
   const agentOfRun = (id: string) => runById.get(id)?.agentType ?? "?";
@@ -510,8 +543,8 @@ export async function computeHarness(orgId: string): Promise<Harness> {
       const mine = runs.filter((r) => r.agentType === d.type);
       return {
         agent: d.type,
-        tokensMonth: mine
-          .filter((r) => r.createdAt >= monthStart)
+        tokensMonth: monthTokens
+          .filter((r) => r.agentType === d.type)
           .reduce((s, r) => s + r.tokensUsed, 0),
         budget: policyOf.get(d.type)?.monthlyTokenBudget ?? null,
         limitStops: mine.filter((r) => r.lastError && limitText.includes(r.lastError)).length,

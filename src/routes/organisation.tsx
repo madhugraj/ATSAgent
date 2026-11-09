@@ -104,7 +104,7 @@ function OrganisationSettings() {
         </div>
       </div>
       <PageHeader
-        eyebrow="Administration"
+        eyebrow="Organisation"
         title="Organisation"
         description={
           isOwner

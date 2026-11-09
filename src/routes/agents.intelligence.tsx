@@ -7,8 +7,7 @@
  */
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { useRef, useState } from "react";
 
 import { PageHeader } from "@/components/ats";
 import {
@@ -20,7 +19,9 @@ import {
   type Pill,
   type Status,
 } from "@/components/ops-layout";
-import { Button } from "@/components/ui/button";
+import { ReportBar, useReportWindow } from "@/components/report-bar";
+import { agentActivityReport } from "@/lib/agent-governance.functions";
+import { downloadBehaviourReport } from "@/lib/agent-reports";
 import {
   agentIntelligence,
   type ActionPlanRow,
@@ -121,8 +122,8 @@ function AgentMap({
     id === active ||
     links.some((l) => (l.s === active && l.t === id) || (l.t === active && l.s === id));
 
-  if (pool.length === 0)
-    return <p className="px-4 py-6 text-sm text-muted-foreground">No agent has run yet.</p>;
+  if (!pool.some((n) => n.type === "agent"))
+    return <p className="px-4 py-6 text-sm text-muted-foreground">No agent ran in this period.</p>;
 
   return (
     <svg viewBox={`0 0 ${VB_W} ${H}`} className="block w-full" role="img" aria-label="Agent map">
@@ -290,37 +291,50 @@ function IntelligencePage() {
   const [selected, setSelected] = useState<GNode | null>(null);
   const [check, setCheck] = useState<string | null>(null);
   const [showIdle, setShowIdle] = useState(false);
+  const rw = useReportWindow({ withAgent: true });
   const q = useQuery({
-    queryKey: ["agent-intelligence"],
-    queryFn: () => agentIntelligence(),
+    queryKey: ["agent-intelligence", rw.window],
+    queryFn: () => agentIntelligence({ data: rw.window }),
     refetchInterval: 60_000,
+    placeholderData: (prev) => prev,
   });
   const b = q.data?.views.behavior;
+  // the agent list stays complete while one agent is selected
+  const allAgents = useRef<string[]>([]);
+  if (q.data && !q.data.window.agent)
+    allAgents.current = q.data.views.behavior.plan.map((p) => p.name).sort();
 
   const plan = b?.plan ?? [];
   const has = (...states: string[]) => plan.filter((p) => states.includes(p.state));
   const failRate = b ? b.fleet.failed / Math.max(b.fleet.runs, 1) : 0;
-  const pills: Pill[] = b
-    ? [
-        {
-          key: "overruled",
-          label: "Overruled",
-          status: has("out of sync").length ? "bad" : "good",
-        },
-        {
-          key: "tools",
-          label: "Tools",
-          status: has("failing").length ? "bad" : has("flaky").length ? "warn" : "good",
-        },
-        {
-          key: "runs",
-          label: "Runs",
-          status: failRate >= 0.25 ? "bad" : failRate >= 0.1 ? "warn" : "good",
-        },
-        { key: "traced", label: "Traced", status: has("no trace").length ? "warn" : "good" },
-        { key: "waiting", label: "Waiting", status: has("waiting").length ? "warn" : "good" },
-      ]
-    : [];
+  const quiet = !!b && b.fleet.runs === 0;
+  const pills: Pill[] = quiet
+    ? ["Overruled", "Tools", "Runs", "Traced", "Waiting"].map((label) => ({
+        key: label.toLowerCase(),
+        label,
+        status: "none" as const,
+      }))
+    : b
+      ? [
+          {
+            key: "overruled",
+            label: "Overruled",
+            status: has("out of sync").length ? "bad" : "good",
+          },
+          {
+            key: "tools",
+            label: "Tools",
+            status: has("failing").length ? "bad" : has("flaky").length ? "warn" : "good",
+          },
+          {
+            key: "runs",
+            label: "Runs",
+            status: failRate >= 0.25 ? "bad" : failRate >= 0.1 ? "warn" : "good",
+          },
+          { key: "traced", label: "Traced", status: has("no trace").length ? "warn" : "good" },
+          { key: "waiting", label: "Waiting", status: has("waiting").length ? "warn" : "good" },
+        ]
+      : [];
   const PILL_STATES: Record<string, string[]> = {
     overruled: ["out of sync"],
     tools: ["failing", "flaky"],
@@ -334,7 +348,7 @@ function IntelligencePage() {
     fixes.push({
       severity: failRate >= 0.25 ? "act" : "watch",
       what: `${b.fleet.failed} of ${b.fleet.runs} runs failed`,
-      why: `${b.fleet.cancelled} more were cancelled. Look at the failed runs and retry or report them.`,
+      why: `${b.fleet.cancelled} more ${b.fleet.cancelled === 1 ? "was" : "were"} cancelled. Look at the failed runs and retry or report them.`,
       agents: [],
       next: { label: "See the runs", to: "/agents", search: { tab: "activity" } },
     });
@@ -349,13 +363,16 @@ function IntelligencePage() {
         title="Agent intelligence"
         description="Which agents are working, where your people overrule them, and which tools fail."
         actions={
-          <Button variant="outline" size="sm" onClick={() => q.refetch()} disabled={q.isFetching}>
-            <RefreshCw
-              className={`mr-1.5 size-3.5 ${q.isFetching ? "animate-spin" : ""}`}
-              aria-hidden
-            />
-            {q.isFetching ? "Refreshing…" : "Refresh"}
-          </Button>
+          <ReportBar
+            rw={rw}
+            agents={allAgents.current}
+            disabled={!b}
+            onDownload={async (kind) => {
+              if (!q.data) return;
+              const activity = await agentActivityReport({ data: rw.window });
+              downloadBehaviourReport(kind, q.data, activity, rw.window, fixes);
+            }}
+          />
         }
       />
       {!b && (
@@ -369,7 +386,8 @@ function IntelligencePage() {
             pills={pills}
             active={check}
             onPick={setCheck}
-            okText="Your agents are behaving"
+            okText={quiet ? "No agent activity in this period" : "Your agents are behaving"}
+            neutral={quiet}
           />
           <FixList
             rows={fixes}
@@ -480,7 +498,7 @@ function IntelligencePage() {
               >
                 {showIdle
                   ? "Hide agents that never ran"
-                  : `Show ${idle.length} agents that never ran`}
+                  : `Show ${idle.length} agent${idle.length === 1 ? "" : "s"} that never ran`}
               </button>
             )}
           </Panel>

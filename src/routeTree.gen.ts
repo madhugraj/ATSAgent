@@ -35,7 +35,7 @@ import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as RoiRouteImport } from './routes/roi'
 import { Route as ScreeningRouteImport } from './routes/screening'
-import { Route as SkillSupplyRouteImport } from './routes/skill-supply'
+import { Route as SkillOntologyRouteImport } from './routes/skill-ontology'
 import { Route as TeamRouteImport } from './routes/team'
 import { Route as TemplatesRouteImport } from './routes/templates'
 import { Route as TermsRouteImport } from './routes/terms'
@@ -214,9 +214,9 @@ const ScreeningRoute = ScreeningRouteImport.update({
   path: '/screening',
   getParentRoute: () => rootRouteImport,
 } as any)
-const SkillSupplyRoute = SkillSupplyRouteImport.update({
-  id: '/skill-supply',
-  path: '/skill-supply',
+const SkillOntologyRoute = SkillOntologyRouteImport.update({
+  id: '/skill-ontology',
+  path: '/skill-ontology',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TeamRoute = TeamRouteImport.update({
@@ -489,7 +489,7 @@ export interface FileRoutesByFullPath {
   '/reports': typeof ReportsRoute
   '/roi': typeof RoiRoute
   '/screening': typeof ScreeningRoute
-  '/skill-supply': typeof SkillSupplyRoute
+  '/skill-ontology': typeof SkillOntologyRoute
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
   '/terms': typeof TermsRoute
@@ -565,7 +565,7 @@ export interface FileRoutesByTo {
   '/reports': typeof ReportsRoute
   '/roi': typeof RoiRoute
   '/screening': typeof ScreeningRoute
-  '/skill-supply': typeof SkillSupplyRoute
+  '/skill-ontology': typeof SkillOntologyRoute
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
   '/terms': typeof TermsRoute
@@ -642,7 +642,7 @@ export interface FileRoutesById {
   '/reports': typeof ReportsRoute
   '/roi': typeof RoiRoute
   '/screening': typeof ScreeningRoute
-  '/skill-supply': typeof SkillSupplyRoute
+  '/skill-ontology': typeof SkillOntologyRoute
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
   '/terms': typeof TermsRoute
@@ -720,7 +720,7 @@ export interface FileRouteTypes {
     | '/reports'
     | '/roi'
     | '/screening'
-    | '/skill-supply'
+    | '/skill-ontology'
     | '/team'
     | '/templates'
     | '/terms'
@@ -796,7 +796,7 @@ export interface FileRouteTypes {
     | '/reports'
     | '/roi'
     | '/screening'
-    | '/skill-supply'
+    | '/skill-ontology'
     | '/team'
     | '/templates'
     | '/terms'
@@ -872,7 +872,7 @@ export interface FileRouteTypes {
     | '/reports'
     | '/roi'
     | '/screening'
-    | '/skill-supply'
+    | '/skill-ontology'
     | '/team'
     | '/templates'
     | '/terms'
@@ -949,7 +949,7 @@ export interface RootRouteChildren {
   ReportsRoute: typeof ReportsRoute
   RoiRoute: typeof RoiRoute
   ScreeningRoute: typeof ScreeningRoute
-  SkillSupplyRoute: typeof SkillSupplyRoute
+  SkillOntologyRoute: typeof SkillOntologyRoute
   TeamRoute: typeof TeamRoute
   TemplatesRoute: typeof TemplatesRoute
   TermsRoute: typeof TermsRoute
@@ -1183,11 +1183,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ScreeningRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/skill-supply': {
-      id: '/skill-supply'
-      path: '/skill-supply'
-      fullPath: '/skill-supply'
-      preLoaderRoute: typeof SkillSupplyRouteImport
+    '/skill-ontology': {
+      id: '/skill-ontology'
+      path: '/skill-ontology'
+      fullPath: '/skill-ontology'
+      preLoaderRoute: typeof SkillOntologyRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/team': {
@@ -1549,7 +1549,7 @@ const rootRouteChildren: RootRouteChildren = {
   ReportsRoute: ReportsRoute,
   RoiRoute: RoiRoute,
   ScreeningRoute: ScreeningRoute,
-  SkillSupplyRoute: SkillSupplyRoute,
+  SkillOntologyRoute: SkillOntologyRoute,
   TeamRoute: TeamRoute,
   TemplatesRoute: TemplatesRoute,
   TermsRoute: TermsRoute,

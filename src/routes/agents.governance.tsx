@@ -1,16 +1,18 @@
 /**
  * Agent governance (governance roles): is the harness around the agents
  * holding, and are they handing work to each other safely? Verdict, fix list,
- * hand-off map and an agent × check matrix. Deterministic: no model calls.
+ * hand-off map and an agent × check matrix for the chosen period and agent,
+ * with the same window downloadable as a PDF or Excel report. Deterministic.
  */
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { RefreshCw } from "lucide-react";
+import { useRef } from "react";
 
 import { AgentGovernancePanel } from "@/components/agent-governance";
 import { PageHeader } from "@/components/ats";
-import { Button } from "@/components/ui/button";
-import { agentGovernance } from "@/lib/agent-governance.functions";
+import { ReportBar, useReportWindow } from "@/components/report-bar";
+import { agentActivityReport, agentGovernance } from "@/lib/agent-governance.functions";
+import { downloadGovernanceReport } from "@/lib/agent-reports";
 
 export const Route = createFileRoute("/agents/governance")({
   head: () => ({
@@ -27,24 +29,34 @@ export const Route = createFileRoute("/agents/governance")({
 });
 
 function GovernancePage() {
+  const rw = useReportWindow({ withAgent: true });
   const q = useQuery({
-    queryKey: ["agent-governance"],
-    queryFn: () => agentGovernance(),
+    queryKey: ["agent-governance", rw.window],
+    queryFn: () => agentGovernance({ data: rw.window }),
     refetchInterval: 60_000,
+    placeholderData: (prev) => prev,
   });
+  // the agent list stays complete while one agent is selected
+  const allAgents = useRef<string[]>([]);
+  if (q.data && !q.data.window.agent)
+    allAgents.current = q.data.harness.agents.map((a) => a.agent).sort();
+
   return (
     <div className="space-y-4">
       <PageHeader
         title="Agent governance"
         description="Is the harness around your agents holding — and are they handing work to each other safely?"
         actions={
-          <Button variant="outline" size="sm" onClick={() => q.refetch()} disabled={q.isFetching}>
-            <RefreshCw
-              className={`mr-1.5 size-3.5 ${q.isFetching ? "animate-spin" : ""}`}
-              aria-hidden
-            />
-            {q.isFetching ? "Refreshing…" : "Refresh"}
-          </Button>
+          <ReportBar
+            rw={rw}
+            agents={allAgents.current}
+            disabled={!q.data}
+            onDownload={async (kind) => {
+              if (!q.data) return;
+              const activity = await agentActivityReport({ data: rw.window });
+              downloadGovernanceReport(kind, q.data.harness, activity, rw.window);
+            }}
+          />
         }
       />
       {q.isError && (
