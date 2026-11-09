@@ -2249,6 +2249,14 @@ export const agentEvents = pgTable(
     subjectType: text("subject_type"),
     subjectId: uuid("subject_id"),
     actorUserId: uuid("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    /**
+     * The agent run that published this event (null when a person or the
+     * system did). With agent_runs.trigger_event_id this makes hand-off chains
+     * traceable end to end: run → event → run → event …
+     */
+    sourceRunId: uuid("source_run_id").references((): AnyPgColumn => agentRuns.id, {
+      onDelete: "set null",
+    }),
     payload: jsonb("payload")
       .$type<Record<string, unknown>>()
       .notNull()
@@ -2262,6 +2270,7 @@ export const agentEvents = pgTable(
   (t) => [
     index("agent_events_queue_idx").on(t.status, t.createdAt),
     index("agent_events_org_idx").on(t.orgId, t.createdAt),
+    index("agent_events_source_run_idx").on(t.sourceRunId),
   ],
 );
 

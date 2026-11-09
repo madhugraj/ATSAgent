@@ -54,12 +54,21 @@ export type HarnessDefinitionRow = {
 };
 export type HarnessHandoffNode = {
   id: string;
-  type: "event" | "delegator" | "agent";
+  /** publisher: who published events or delegated (left); event (middle); agent: started (right). */
+  type: "publisher" | "event" | "agent";
   name: string;
   count: number;
   failed: number;
 };
-export type HarnessHandoffEdge = { s: string; t: string; runs: number; failed: number };
+export type HarnessHandoffEdge = {
+  s: string;
+  t: string;
+  /** publish: publisher → event · start: event → agent · delegate: agent → agent */
+  k: "publish" | "start" | "delegate";
+  runs: number;
+  failed: number;
+};
+export type HarnessChain = { path: string[]; subject: string | null; depth: number };
 export type HarnessDelegation = {
   from: string;
   to: string;
@@ -94,7 +103,12 @@ export type Harness = {
     principalShifts: number;
     overlaps: { agent: string; subject: string; runs: number }[];
     delegations: HarnessDelegation[];
-    lineageGap: boolean;
+    /** Events published before lineage was recorded (no run, no person). */
+    unattributed: number;
+    /** Runs started by another agent's event or delegation. */
+    chainedRuns: number;
+    longest: HarnessChain | null;
+    loops: HarnessChain[];
   };
   budget: HarnessBudgetRow[];
 };
@@ -132,6 +146,7 @@ export async function computeHarness(orgId: string): Promise<Harness> {
         id: agentEvents.id,
         type: agentEvents.type,
         actorUserId: agentEvents.actorUserId,
+        sourceRunId: agentEvents.sourceRunId,
         status: agentEvents.status,
         attempts: agentEvents.attempts,
         createdAt: agentEvents.createdAt,
@@ -323,24 +338,41 @@ export async function computeHarness(orgId: string): Promise<Harness> {
     if (failed) n.failed += 1;
     nodes.set(id, n);
   };
-  const link = (s: string, t: string, failed: boolean) => {
-    const k = `${s}>${t}`;
-    const e = edges.get(k) ?? { s, t, runs: 0, failed: 0 };
+  const link = (s: string, t: string, k: HarnessHandoffEdge["k"], failed: boolean) => {
+    const key = `${s}>${t}`;
+    const e = edges.get(key) ?? { s, t, k, runs: 0, failed: 0 };
     e.runs += 1;
     if (failed) e.failed += 1;
-    edges.set(k, e);
+    edges.set(key, e);
   };
+  // who published each event: an agent run (lineage), a person, or unrecorded
+  let unattributed = 0;
+  for (const ev of events) {
+    const src = ev.sourceRunId ? runById.get(ev.sourceRunId) : undefined;
+    const pub = src
+      ? { id: `pub-${src.agentType}`, name: src.agentType }
+      : ev.actorUserId
+        ? { id: "pub-person", name: "a person" }
+        : { id: "pub-unrecorded", name: "system / not recorded" };
+    if (!src && !ev.actorUserId) unattributed += 1;
+    const failed = ev.status === "failed";
+    bump(pub.id, "publisher", pub.name, failed);
+    bump(`ev-${ev.type}`, "event", ev.type, failed);
+    link(pub.id, `ev-${ev.type}`, "publish", failed);
+  }
+  // reset event counts to "runs started" semantics is not needed: event count = published
   let principalShifts = 0;
   const routedTypes = new Set<string>();
+  const parentOf = new Map<string, string>(); // child run → parent run
   for (const r of runs) {
     if (!r.triggerEventId) continue;
     const ev = eventById.get(r.triggerEventId);
     if (!ev) continue;
     routedTypes.add(ev.type);
     const failed = r.status === "failed";
-    bump(`ev-${ev.type}`, "event", ev.type, failed);
     bump(`ag-${r.agentType}`, "agent", r.agentType, failed);
-    link(`ev-${ev.type}`, `ag-${r.agentType}`, failed);
+    link(`ev-${ev.type}`, `ag-${r.agentType}`, "start", failed);
+    if (ev.sourceRunId && runById.has(ev.sourceRunId)) parentOf.set(r.id, ev.sourceRunId);
     if (ev.actorUserId && r.principalUserId && ev.actorUserId !== r.principalUserId)
       principalShifts += 1;
   }
@@ -354,9 +386,10 @@ export async function computeHarness(orgId: string): Promise<Harness> {
     const to = child?.agentType ?? (typeof input.agent === "string" ? input.agent : "?");
     const failed = s.status !== "ok" || child?.status === "failed";
     const flagSeq = injectedRuns.get(parent.id);
-    bump(`dl-${parent.agentType}`, "delegator", parent.agentType, failed);
+    bump(`pub-${parent.agentType}`, "publisher", parent.agentType, failed);
     bump(`ag-${to}`, "agent", to, failed);
-    link(`dl-${parent.agentType}`, `ag-${to}`, failed);
+    link(`pub-${parent.agentType}`, `ag-${to}`, "delegate", failed);
+    if (child) parentOf.set(child.id, parent.id);
     if (child && parent.principalUserId !== child.principalUserId) principalShifts += 1;
     delegations.push({
       from: parent.agentType,
@@ -367,6 +400,43 @@ export async function computeHarness(orgId: string): Promise<Harness> {
       at: s.createdAt.toISOString(),
     });
   }
+
+  // chains: walk each run up to its root; a loop is the same agent re-entered
+  // on the same subject further down its own chain
+  const MAX_DEPTH = 25;
+  let longest: HarnessChain | null = null;
+  const loopKeys = new Set<string>();
+  const loops: HarnessChain[] = [];
+  for (const r of runs) {
+    if (!parentOf.has(r.id)) continue;
+    const path: (typeof runs)[number][] = [r];
+    const seen = new Set([r.id]);
+    let cur = parentOf.get(r.id);
+    while (cur && path.length < MAX_DEPTH && !seen.has(cur)) {
+      const run = runById.get(cur);
+      if (!run) break;
+      path.unshift(run);
+      seen.add(cur);
+      cur = parentOf.get(cur);
+    }
+    const chain: HarnessChain = {
+      path: path.map((p) => p.agentType),
+      subject: r.subjectId ? r.subjectId.slice(0, 8) : null,
+      depth: path.length,
+    };
+    if (!longest || chain.depth > longest.depth) longest = chain;
+    const reentered = path
+      .slice(0, -1)
+      .some((p) => p.agentType === r.agentType && p.subjectId === r.subjectId);
+    if (reentered || path.length >= MAX_DEPTH || (cur && seen.has(cur))) {
+      const key = `${chain.path.join(">")}|${chain.subject}`;
+      if (!loopKeys.has(key)) {
+        loopKeys.add(key);
+        loops.push(chain);
+      }
+    }
+  }
+  const chainedRuns = parentOf.size;
   delegations.sort((a, b) => b.at.localeCompare(a.at));
 
   const now = Date.now();
@@ -524,7 +594,7 @@ export async function computeHarness(orgId: string): Promise<Harness> {
     {
       key: "handoffs",
       question: "Are hand-offs between agents healthy?",
-      ...(dead > 0 || riskyDelegations > 0 || overlaps.length > 0
+      ...(dead > 0 || riskyDelegations > 0 || overlaps.length > 0 || loops.length > 0
         ? {
             tone: "bad" as const,
             title: "Hand-offs need attention",
@@ -538,6 +608,9 @@ export async function computeHarness(orgId: string): Promise<Harness> {
                   : "",
                 overlaps.length
                   ? `${overlaps.length} case${overlaps.length === 1 ? "" : "s"} of two runs on the same work`
+                  : "",
+                loops.length
+                  ? `${loops.length} loop${loops.length === 1 ? "" : "s"}: an agent re-started itself on the same work through a chain`
                   : "",
               ]
                 .filter(Boolean)
@@ -599,7 +672,10 @@ export async function computeHarness(orgId: string): Promise<Harness> {
       principalShifts,
       overlaps,
       delegations: delegations.slice(0, 20),
-      lineageGap: true,
+      unattributed,
+      chainedRuns,
+      longest,
+      loops: loops.slice(0, 10),
     },
     budget,
   };

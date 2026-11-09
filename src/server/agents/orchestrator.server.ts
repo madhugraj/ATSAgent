@@ -26,6 +26,7 @@ import {
   requisitions,
 } from "@db/schema";
 import { log } from "../log";
+import { agentRunScope } from "./context";
 import { loadPolicy } from "./policy";
 import { getAgent } from "./registry";
 import { startRun, syncGateTasks } from "./runtime.server";
@@ -612,7 +613,9 @@ export function kickAgents(orgId: string): void {
   const lead = !kicking.has(orgId);
   if (lead) kicking.add(orgId);
   inFlight++;
-  void (async () => {
+  // Detach from the caller's run scope: the tick drives other runs (each sets
+  // its own scope) and must not credit their events to the run that kicked it.
+  void agentRunScope.exit(async () => {
     try {
       const { ensureAgentsRegistered } = await import("./index");
       ensureAgentsRegistered();
@@ -627,7 +630,7 @@ export function kickAgents(orgId: string): void {
       inFlight--;
       if (lead) kicking.delete(orgId);
     }
-  })();
+  });
 }
 
 /** Events still waiting, for diagnostics. */

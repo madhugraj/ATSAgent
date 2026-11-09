@@ -62,6 +62,22 @@ const PILL_W = 230,
   HEAD = 30,
   VB_W = 860;
 
+const COL_X = [10, 315, 620];
+const COL_TITLE = ["PUBLISHED BY", "EVENT", "AGENT STARTED"];
+const COL_OF: Record<HarnessHandoffNode["type"], number> = { publisher: 0, event: 1, agent: 2 };
+const EDGE_COLOR: Record<HarnessHandoffEdge["k"], string> = {
+  publish: "#b6b4ab",
+  start: "#9a988f",
+  delegate: "#7c5cff",
+};
+
+function nodeSub(n: HarnessHandoffNode) {
+  if (n.type === "publisher")
+    return `${n.count} hand-off${n.count === 1 ? "" : "s"} out${n.failed ? ` · ${n.failed} failed` : ""}`;
+  if (n.type === "event") return `published ${n.count}×${n.failed ? ` · ${n.failed} failed` : ""}`;
+  return `${n.count} run${n.count === 1 ? "" : "s"} started${n.failed ? ` · ${n.failed} failed` : ""}`;
+}
+
 function HandoffMap({
   nodes,
   edges,
@@ -70,26 +86,30 @@ function HandoffMap({
   edges: HarnessHandoffEdge[];
 }) {
   const [active, setActive] = useState<string | null>(null);
-  if (edges.length === 0)
+  if (nodes.length === 0)
     return (
       <p className="px-4 py-6 text-sm text-muted-foreground">
-        No agent has been started by an event or by another agent yet.
+        No events have been published and no agent has started another yet.
       </p>
     );
-  const left = nodes
-    .filter((n) => n.type !== "agent")
-    .sort((a, b) => Number(a.type === "event") - Number(b.type === "event") || b.count - a.count);
-  const right = nodes.filter((n) => n.type === "agent").sort((a, b) => b.count - a.count);
-  const rows = Math.max(left.length, right.length);
+  const cols = [0, 1, 2].map((c) =>
+    nodes
+      .filter((n) => COL_OF[n.type] === c)
+      .sort(
+        (a, b) =>
+          Number(a.id === "pub-unrecorded") - Number(b.id === "pub-unrecorded") ||
+          b.count - a.count,
+      ),
+  );
+  const rows = Math.max(...cols.map((c) => c.length));
   const H = HEAD + rows * ROW;
   const pos = new Map<string, { x: number; y: number }>();
-  left.forEach((n, i) =>
-    pos.set(n.id, { x: 10, y: HEAD + ((rows - left.length) * ROW) / 2 + i * ROW }),
+  cols.forEach((list, c) =>
+    list.forEach((n, i) =>
+      pos.set(n.id, { x: COL_X[c]!, y: HEAD + ((rows - list.length) * ROW) / 2 + i * ROW }),
+    ),
   );
-  right.forEach((n, i) =>
-    pos.set(n.id, { x: VB_W - 10 - PILL_W, y: HEAD + ((rows - right.length) * ROW) / 2 + i * ROW }),
-  );
-  const peak = Math.max(...edges.map((e) => e.runs));
+  const peak = Math.max(1, ...edges.map((e) => e.runs));
   const on = (e: HarnessHandoffEdge) => !active || e.s === active || e.t === active;
   const lit = (id: string) =>
     !active || id === active || edges.some((e) => on(e) && (e.s === id || e.t === id));
@@ -100,19 +120,18 @@ function HandoffMap({
       role="img"
       aria-label="Agent hand-off map"
     >
-      <text x={10} y={16} fontSize={11} fontWeight={600} className="fill-muted-foreground">
-        WHAT STARTED IT
-      </text>
-      <text
-        x={VB_W - 10}
-        y={16}
-        fontSize={11}
-        fontWeight={600}
-        textAnchor="end"
-        className="fill-muted-foreground"
-      >
-        AGENT STARTED
-      </text>
+      {COL_TITLE.map((t, c) => (
+        <text
+          key={t}
+          x={COL_X[c]}
+          y={16}
+          fontSize={11}
+          fontWeight={600}
+          className="fill-muted-foreground"
+        >
+          {t}
+        </text>
+      ))}
       {edges.map((e) => {
         const a = pos.get(e.s),
           b = pos.get(e.t);
@@ -124,41 +143,44 @@ function HandoffMap({
           mx = (x1 + x2) / 2;
         const bad = e.failed > 0;
         return (
-          <g key={`${e.s}>${e.t}`} opacity={on(e) ? 1 : 0.1}>
+          <g key={`${e.s}>${e.t}`} opacity={on(e) ? 1 : 0.08}>
             <path
               d={`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`}
               fill="none"
-              stroke={bad ? "#d03b3b" : e.s.startsWith("dl-") ? "#7c5cff" : "#9a988f"}
+              stroke={bad ? "#d03b3b" : EDGE_COLOR[e.k]}
               strokeWidth={1.2 + (e.runs / peak) * 4}
-              strokeDasharray={e.s.startsWith("dl-") ? "6 4" : undefined}
+              strokeDasharray={e.k === "delegate" ? "6 4" : undefined}
             />
-            <text
-              x={mx}
-              y={(y1 + y2) / 2 - 5}
-              fontSize={10.5}
-              fontWeight={600}
-              textAnchor="middle"
-              fill={bad ? "#d03b3b" : "#66655e"}
-              paintOrder="stroke"
-              stroke="var(--background, #fff)"
-              strokeWidth={3}
-            >
-              ×{e.runs}
-              {bad ? ` · ${e.failed} failed` : ""}
-            </text>
+            {(active || e.k !== "publish") && (
+              <text
+                x={mx}
+                y={(y1 + y2) / 2 - 5}
+                fontSize={10.5}
+                fontWeight={600}
+                textAnchor="middle"
+                fill={bad ? "#d03b3b" : "#66655e"}
+                paintOrder="stroke"
+                stroke="var(--background, #fff)"
+                strokeWidth={3}
+              >
+                ×{e.runs}
+                {bad ? ` · ${e.failed} failed` : ""}
+              </text>
+            )}
           </g>
         );
       })}
-      {[...left, ...right].map((n) => {
+      {cols.flat().map((n) => {
         const p = pos.get(n.id)!;
         const color =
-          n.type === "delegator" ? "#7c5cff" : n.type === "event" ? "#9a988f" : "#2a78d6";
-        const sub =
           n.type === "event"
-            ? `event · started ${n.count} run${n.count === 1 ? "" : "s"}`
-            : n.type === "delegator"
-              ? `agent → agent · ${n.count} delegation${n.count === 1 ? "" : "s"}`
-              : `${n.count} run${n.count === 1 ? "" : "s"} started by others${n.failed ? ` · ${n.failed} failed` : ""}`;
+            ? "#9a988f"
+            : n.type === "agent"
+              ? "#2a78d6"
+              : n.id.startsWith("pub-") && !["pub-person", "pub-unrecorded"].includes(n.id)
+                ? "#7c5cff"
+                : "#c3c2b7";
+        const sub = nodeSub(n);
         return (
           <g
             key={n.id}
@@ -225,11 +247,11 @@ export function AgentGovernancePanel({ h }: { h: Harness }) {
       <div id="gov-handoffs" className="scroll-mt-4">
         <Section
           title="How agents start each other"
-          hint="Grey: a lifecycle event the orchestrator routed to an agent. Purple, dashed: one agent delegating to another (start_agent). Red: hand-offs whose run failed. Hover to trace."
+          hint="Left: who published an event or handed work over (purple = an agent). Middle: the event. Right: the agent it started. Purple dashed: an agent delegating straight to another (start_agent). Red: failed. Hover to trace a path."
         >
           <div className="flex flex-wrap gap-x-6 gap-y-1 border-b border-border px-4 py-2 text-xs text-muted-foreground">
             <span>
-              <b className="text-foreground">{ev.total}</b> events
+              <b className="text-foreground">{ev.total}</b> event{ev.total === 1 ? "" : "s"}
             </span>
             <span>
               <b className="text-foreground">{ev.done}</b> routed
@@ -249,12 +271,47 @@ export function AgentGovernancePanel({ h }: { h: Harness }) {
             </span>
           </div>
           <HandoffMap nodes={h.handoffs.nodes} edges={h.handoffs.edges} />
-          {h.handoffs.lineageGap && (
-            <p className="border-t border-border bg-amber-500/5 px-4 py-2 text-xs text-amber-700 dark:text-amber-400">
-              Gap: an event does not yet record which agent run published it, so a chain can be
-              followed one hop (event → agent) but not end to end, and loops cannot be detected.
+          <div className="space-y-1.5 border-t border-border px-4 py-3 text-xs">
+            <p>
+              <b>{h.handoffs.chainedRuns}</b> run{h.handoffs.chainedRuns === 1 ? "" : "s"} started
+              by another agent
+              {h.handoffs.longest && h.handoffs.longest.depth > 1 && (
+                <>
+                  {" "}
+                  · longest chain:{" "}
+                  <span className="font-medium capitalize">
+                    {h.handoffs.longest.path.map(nice).join(" → ")}
+                  </span>
+                </>
+              )}
             </p>
-          )}
+            {h.handoffs.loops.length > 0 ? (
+              <div className="text-red-600 dark:text-red-400">
+                <p className="font-semibold">
+                  Loops — an agent restarted itself on the same work through a chain:
+                </p>
+                {h.handoffs.loops.map((l, i) => (
+                  <p key={i} className="capitalize">
+                    {l.path.map(nice).join(" → ")}
+                    {l.subject ? (
+                      <span className="normal-case text-muted-foreground"> · on {l.subject}…</span>
+                    ) : null}
+                  </p>
+                ))}
+              </div>
+            ) : (
+              <p className="text-muted-foreground">
+                No loops: no agent restarted itself on the same work.
+              </p>
+            )}
+            {h.handoffs.unattributed > 0 && (
+              <p className="text-muted-foreground">
+                {h.handoffs.unattributed} event{h.handoffs.unattributed === 1 ? "" : "s"}{" "}
+                {h.handoffs.unattributed === 1 ? "has" : "have"} no recorded publisher (published by
+                the system, or before the publishing run was recorded).
+              </p>
+            )}
+          </div>
         </Section>
       </div>
 

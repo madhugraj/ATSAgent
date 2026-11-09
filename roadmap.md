@@ -6,7 +6,7 @@
 - [x] System read: threshold-gated prescriptive chips per view (overturn clusters, open cards, definition churn vs eval coverage, alias-fold report card, idle/trace-gap coverage) with cause → effect → next best action; auto-refresh 60s; deterministic — no model calls, vendor- and model-neutral
 - [x] Governance tab rebuilt as agent governance (2026-11-09): five answers on whether the harness holds — limits (refused tool calls, injection flags), autonomy vs risk tier (changes with no approved card under "asks first", changes after an injection flag), definitions (runs on the approved, eval-covered manifest vs test or unrecorded versions; owner, eval count), hand-offs (event → agent routing and direct `start_agent` delegation as a hand-off map; stuck, failed and abandoned events; principal shifts; overlapping runs on the same work) and budget/run limits
 - [x] Vocabulary tab: skills asked for by requisitions vs held by the candidate pool, biggest gaps first; HR oversight (are people deciding, disagreements with reasons, cards waiting >48h, who moves candidates between stages) moved to the HR dashboard
-- [ ] Record the publishing run on `agent_events` so hand-off chains can be followed end to end and loops detected
+- [x] Event lineage (2026-11-09): `agent_events.source_run_id` records the agent run that published each event (from the run scope, never across organisations; migration 0069), so Governance follows run → event → run chains end to end, shows who published each event, and flags loops where an agent restarts itself on the same work
 
 ## Prompt-injection guardrails — P0 (2026-11-01)
 

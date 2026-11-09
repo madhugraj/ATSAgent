@@ -1378,7 +1378,7 @@ erDiagram
 |---|---|---|---|
 | `agent_cost_rates` | — | 6 | — |
 | `agent_definitions` | — | 6 | (agentType+hash) |
-| `agent_events` | — | 12 | — |
+| `agent_events` | — | 13 | — |
 | `agent_issues` | — | 16 | — |
 | `agent_metrics_daily` | — | 17 | — |
 | `agent_policies` | — | 12 | (orgId+agentType) |

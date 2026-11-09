@@ -5,6 +5,7 @@
 import { db } from "../db";
 import { agentEvents } from "@db/schema";
 import { log } from "../log";
+import { currentAgentRun } from "./context";
 
 export type AgentEventType =
   | "requisition.created"
@@ -39,9 +40,14 @@ export async function emitAgentEvent(e: {
   actorUserId: string | null;
   payload?: Record<string, unknown>;
 }): Promise<void> {
+  // The run executing on this call chain published the event (a tool calling a
+  // lifecycle core); null when a person or the system did. Never cross orgs.
+  const run = currentAgentRun();
+  const sourceRunId = run && run.orgId === e.orgId ? run.runId : null;
   try {
     await db.insert(agentEvents).values({
       orgId: e.orgId,
+      sourceRunId,
       type: e.type,
       subjectType: e.subjectType,
       subjectId: e.subjectId,
