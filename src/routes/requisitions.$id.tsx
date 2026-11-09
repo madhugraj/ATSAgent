@@ -514,6 +514,7 @@ function RequisitionDetail() {
     try {
       const a = await runSuggestWeights({
         data: {
+          requisitionId: r!.id,
           title: r!.title,
           mustHave: r!.must_have_skills,
           goodToHave: r!.good_to_have_skills,
@@ -1799,7 +1800,7 @@ function WeightsPanel({
   save: (w: Weights, custom: CustomWeight[]) => Promise<boolean>;
   advising: boolean;
   onAdvise: () => void;
-  advice: (Weights & { rationale: string; notes: string[] }) | null;
+  advice: WeightAdvice | null;
   onDismissAdvice: () => void;
 }) {
   const [draft, setDraft] = useState<Weights>(saved);
@@ -1986,7 +1987,7 @@ function WeightsPanel({
           <div className="border-t border-border pt-3">
             <Button size="sm" variant="outline" onClick={onAdvise} disabled={advising}>
               <Sparkles className="size-4" />{" "}
-              {advising ? "Reading the JD…" : "Suggest weights from this JD"}
+              {advising ? "Reading the role…" : "Suggest weights for this role"}
             </Button>
             {advice && (
               <div className="mt-3 space-y-2 rounded-lg border border-dashed border-border p-3 text-xs">
@@ -1994,7 +1995,18 @@ function WeightsPanel({
                   Skills {advice.skills} · Experience {advice.experience} · Career {advice.career} ·
                   Impact {advice.impact} · Education {advice.education} · Social {advice.social}
                 </p>
+                {advice.customDimensions.length > 0 && (
+                  <p className="num font-semibold">
+                    {advice.customDimensions.map((d) => `${d.label} ${d.weight}`).join(" · ")}
+                  </p>
+                )}
                 <p className="text-muted-foreground">{advice.rationale}</p>
+                {advice.basis.length > 0 && (
+                  <p className="text-muted-foreground">
+                    <span className="font-medium text-foreground">Based on: </span>
+                    {advice.basis.join(" · ")}
+                  </p>
+                )}
                 {advice.notes.length > 0 && (
                   <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground">
                     {advice.notes.map((n, i) => (
@@ -2005,7 +2017,7 @@ function WeightsPanel({
                 <div className="flex gap-2 pt-1">
                   <Button
                     size="sm"
-                    onClick={() =>
+                    onClick={() => {
                       setDraft({
                         skills: advice.skills,
                         experience: advice.experience,
@@ -2013,8 +2025,10 @@ function WeightsPanel({
                         impact: advice.impact,
                         education: advice.education,
                         social: advice.social,
-                      })
-                    }
+                      });
+                      // The advice's split is complete: its custom dimensions replace the draft's.
+                      setDraftCustom(advice.customDimensions);
+                    }}
                   >
                     Use these weights
                   </Button>

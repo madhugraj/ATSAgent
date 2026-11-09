@@ -5,7 +5,8 @@ import { z } from "zod";
 import { db } from "../server/db";
 import { applications, matchScores, socialProfiles, sourceIntegrations } from "@db/schema";
 import { requireIdentity, requireOrg } from "./auth.middleware";
-import { aiJson, untrusted } from "./ai-gateway.server";
+import { aiJson, INJECTION_RULES, untrusted, type AiConfig } from "./ai-gateway.server";
+import { normaliseAdvice, type WeightAdvice } from "./weight-advice";
 import {
   buildTemplateSystemPrompt,
   resolveTemplate,
@@ -149,6 +150,8 @@ export const importJd = createServerFn({ method: "POST" })
 /* ------------------------------------------- JD-aware weight intelligence */
 
 const WeightAdviceInput = z.object({
+  /** When given, the requisition's saved fields, location and work mode are read server-side. */
+  requisitionId: z.string().uuid().optional().nullable(),
   title: z.string(),
   seniorityHint: z.string().optional().nullable(),
   mustHave: z.array(z.string()),
@@ -157,68 +160,187 @@ const WeightAdviceInput = z.object({
   experienceMin: z.number(),
   experienceMax: z.number(),
   jdText: z.string().optional().nullable(),
+  location: z.string().optional().nullable(),
+  workMode: z.enum(["onsite", "hybrid", "remote"]).optional().nullable(),
 });
 
-export type WeightAdvice = {
-  skills: number;
-  experience: number;
-  career: number;
-  impact: number;
-  education: number;
-  social: number;
-  rationale: string;
-  notes: string[];
-};
+export type { WeightAdvice } from "./weight-advice";
 
-/**
- * Ask the model to distribute the 100 scoring points across the six dimensions
- * for THIS job, then hard-normalise server-side so the total is always exactly 100.
- */
-/** Distribute the 100 scoring points for one JD; shared by the server fn and agents. */
+const WeightAdviceSchema = z
+  .object({
+    skills: z.coerce.number(),
+    experience: z.coerce.number(),
+    career: z.coerce.number(),
+    impact: z.coerce.number(),
+    education: z.coerce.number(),
+    social: z.coerce.number(),
+    rationale: z.string().optional().default(""),
+    notes: z.array(z.string()).optional().default([]),
+    custom_dimensions: z
+      .array(
+        z.object({
+          label: z.string(),
+          hint: z.string(),
+          weight: z.coerce.number(),
+        }),
+      )
+      .optional()
+      .default([]),
+  })
+  .passthrough();
+
+const WEIGHT_SYSTEM = [
+  "You tune the candidate-scoring model for one specific role at one specific organisation. Distribute",
+  "exactly 100 points across six built-in dimensions — skills, experience (years vs band), career (tenure",
+  "stability, progression, gaps), impact (quantified outcomes, ownership, innovation), education (degrees,",
+  "licences, certifications) and social (public-profile evidence: GitHub, publications, portfolio) — plus",
+  "up to two organisation-specific custom dimensions when the knowledge below calls for them.",
+  "",
+  "Decide from four kinds of knowledge, and name in the rationale which of them moved the split:",
+  "1. The role itself (title, skills, experience band, responsibilities).",
+  "2. The organisation profile (its domain, regulators, hiring norms, culture, locations and work modes).",
+  "3. Demand and supply from the organisation's role ontology: how often it hires this role and how many",
+  "   people in its pool already fit. Scarce supply → weight transferable skills and career trajectory a",
+  "   little more and do not over-weight rare credentials; abundant supply → be stricter on the",
+  "   differentiators (impact, certifications).",
+  "4. Location and work mode. For an onsite or hybrid role with a stated location, propose a custom",
+  "   'Location fit' dimension (5–15 points) scoring the candidate's current or preferred location and",
+  "   stated willingness to relocate against the role's location and work mode. Never for remote roles.",
+  "",
+  "Role archetypes (adapt, do not copy):",
+  "- Licence- or regulation-bound technical roles (lab technician, pharmacist, nurse, radiographer):",
+  "  education/certification high (25–35), experience with the specific procedures and equipment high,",
+  "  social low (0–5). Consider a custom 'Regulatory & safety compliance' dimension (GLP, NABL, ISO,",
+  "  biosafety) when the domain or regulators call for it.",
+  "- Skilled trades and hands-on roles (mechanic, electrician, technician, operator): skills and hands-on",
+  "  experience dominate (together 60–75), trade certifications count under education, impact and social",
+  "  low (social 0–5 — trades rarely have a public footprint). Consider a custom 'Equipment / platform",
+  "  expertise' dimension for the specific machines, vehicles or systems named.",
+  "- Deep technical and research roles (AI/ML engineer, data scientist, platform engineer): skills",
+  "  highest (30–40), impact high (shipped models, measured outcomes), social meaningful (10–20 — GitHub,",
+  "  papers, Kaggle), education moderate. Consider 'Production ML / shipped systems' when the role ships.",
+  "- Leadership, client-facing and regulated business roles: experience and career higher; impact for",
+  "  growth and founding roles; social for developer-relations, design and content roles.",
+  "",
+  "Keep career and impact between 5 and 25 each. Social may be 0–5 only for roles with no public",
+  "footprint; otherwise 5–30. A custom dimension needs a concrete scoring hint (what CV evidence earns",
+  "high and low scores, 20–300 characters) and must not duplicate a built-in dimension.",
+  "Return ONLY JSON with keys: skills, experience, career, impact, education, social (integers),",
+  "custom_dimensions (array of {label, hint, weight}, may be empty), rationale (2-4 sentences naming the",
+  "knowledge used), notes (2-4 short bullet strings). All weights together sum to 100.",
+].join("\n");
+
+/** Distribute the 100 scoring points for one role; shared by the server fn and agents. */
 export const suggestWeightsCore = createServerOnlyFn(async function suggestWeightsCore(
   orgId: string,
-  data: z.infer<typeof WeightAdviceInput>,
+  input: z.infer<typeof WeightAdviceInput>,
+  /** Evals pass a test key explicitly; product calls use the organisation's configured key. */
+  opts: { config?: AiConfig } = {},
 ): Promise<WeightAdvice> {
-  const result = await aiJson<WeightAdvice>({
+  const data = { ...input };
+  if (input.requisitionId) {
+    // The saved requisition is the source of truth for location and work mode.
+    const { requisitions } = await import("@db/schema");
+    const [r] = await db
+      .select({
+        title: requisitions.title,
+        location: requisitions.location,
+        workMode: requisitions.workMode,
+        mustHave: requisitions.mustHaveSkills,
+        goodToHave: requisitions.goodToHaveSkills,
+      })
+      .from(requisitions)
+      .where(and(eq(requisitions.id, input.requisitionId), eq(requisitions.orgId, orgId)))
+      .limit(1);
+    if (!r) throw new Error("Requisition not found.");
+    data.location = data.location ?? r.location;
+    data.workMode = data.workMode ?? r.workMode;
+    if (!data.mustHave.length) data.mustHave = (r.mustHave as string[] | null) ?? [];
+    if (!data.goodToHave.length) data.goodToHave = (r.goodToHave as string[] | null) ?? [];
+  }
+
+  const basis: string[] = ["The role's skills, experience band and responsibilities"];
+
+  const { orgContextFor } = await import("./org-context.server");
+  const org = await orgContextFor({ orgId, audience: "internal", purpose: "scoring" });
+  basis.push(
+    org.version ? `Organisation profile (version ${org.version})` : "No approved organisation profile yet",
+  );
+
+  let demand = "No matching role in the organisation's ontology.";
+  try {
+    const [{ loadOntology }, { findRoleProfile }] = await Promise.all([
+      import("../server/org-ontology.server"),
+      import("./org-ontology"),
+    ]);
+    const ont = await loadOntology(orgId);
+    const found = findRoleProfile(ont, data.title);
+    // A shared generic word ("engineer", "manager") is not the same role.
+    const GENERIC = /^(senior|junior|lead|engineer|manager|specialist|executive|associate|analyst|officer|technician|developer|consultant|head|staff|and|of)$/;
+    const words = (t: string) =>
+      new Set(t.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1 && !GENERIC.test(w)));
+    const mine = words(data.title);
+    const role =
+      found && [found.name, ...found.titles].some((t) => [...words(t)].some((w) => mine.has(w)))
+        ? found
+        : null;
+    if (role) {
+      demand =
+        `Ontology role: ${role.name} (${role.kind}${role.status ? `, ${role.status}` : ""}) in ${role.domain}. ` +
+        `Requisitions raised for it in the last 18 months: ${role.requisitions}. ` +
+        `People in the pool who already cover most of its skills: ${role.inPool}.`;
+      basis.push(
+        `Demand and supply: ${role.name} — ${role.requisitions} requisition(s), ${role.inPool} in the pool`,
+      );
+    } else {
+      basis.push(`Domain: ${ont.domain.name} (no matching role in the ontology yet)`);
+    }
+  } catch {
+    // The ontology is advisory: advice still works from the role and profile.
+  }
+
+  const where = data.workMode === "remote"
+    ? "Remote role."
+    : data.location
+      ? `${data.location}${data.workMode ? `, ${data.workMode}` : ""}.`
+      : "No location stated.";
+  basis.push(`Location: ${where.replace(/\.$/, "")}`);
+
+  const result = await aiJson<z.infer<typeof WeightAdviceSchema>>({
     orgId,
     feature: "weight_suggest",
-    system:
-      "You tune the scoring model for one specific job description. Distribute exactly 100 points across " +
-      "six dimensions: skills, experience (years vs band), career (tenure stability, progression, gaps), " +
-      "impact (quantified outcomes, ownership, innovation evidence), education and social (public-profile " +
-      "evidence). Reason about the role: deep technical/IC roles weight skills highest; leadership and " +
-      "regulated roles weight experience and career higher; high-churn or business-critical roles raise " +
-      "career; product, founding, R&D and growth roles raise impact; research, medical, academic or " +
-      "licence-bound roles raise education; developer-relations, design, content and open-source-heavy " +
-      "roles raise social. Keep career and impact between 5 and 25 each, and social between 5 and 30 and " +
-      "never 0 unless the role has no public footprint at all. Return ONLY JSON with keys: skills, " +
-      "experience, career, impact, education, social (integers summing to 100), rationale (2-3 sentences), " +
-      "notes (2-4 short bullet strings).",
-    prompt: JSON.stringify(data),
+    schema: WeightAdviceSchema,
+    ...(opts.config ? { config: opts.config } : {}),
+    system: `${INJECTION_RULES}\n\n${WEIGHT_SYSTEM}`,
+    prompt: [
+      `Location and work mode: ${where}`,
+      `Demand and supply: ${demand}`,
+      untrusted("organisation_profile", org.blocks),
+      untrusted(
+        "role",
+        JSON.stringify({
+          title: data.title,
+          seniority: data.seniorityHint ?? null,
+          must_have: data.mustHave,
+          good_to_have: data.goodToHave,
+          education: data.education ?? null,
+          experience_years: [data.experienceMin, data.experienceMax],
+        }),
+      ),
+      untrusted("job_description", (data.jdText ?? "").slice(0, 8000)),
+    ].join("\n\n"),
   });
   if (!result.ok) throw new Error(result.message);
-
-  const keys = ["skills", "experience", "career", "impact", "education", "social"] as const;
-  const raw = Object.fromEntries(
-    keys.map((k) => [
-      k,
-      Math.max(0, Math.round(Number((result.data as never as Record<string, unknown>)[k]) || 0)),
-    ]),
-  ) as Record<(typeof keys)[number], number>;
-  const total = keys.reduce((s, k) => s + raw[k], 0) || 1;
-  const scaled = Object.fromEntries(
-    keys.map((k) => [k, Math.round((raw[k] / total) * 100)]),
-  ) as Record<(typeof keys)[number], number>;
-  // Push any rounding drift onto the largest bucket so the total is exactly 100.
-  const drift = 100 - keys.reduce((s, k) => s + scaled[k], 0);
-  const biggest = keys.reduce((a, b) => (scaled[a] >= scaled[b] ? a : b));
-  scaled[biggest] += drift;
-
-  return {
-    ...scaled,
-    rationale: result.data.rationale ?? "",
-    notes: result.data.notes ?? [],
-  };
+  const advice = normaliseAdvice(result.data as Record<string, unknown>, basis);
+  // Location fit only makes sense when the work happens somewhere.
+  if (data.workMode === "remote" || !data.location) {
+    const loc = advice.customDimensions.findIndex((d) => /location/i.test(d.label));
+    if (loc >= 0) {
+      const [dropped] = advice.customDimensions.splice(loc, 1);
+      advice.skills += dropped!.weight;
+    }
+  }
+  return advice;
 });
 
 export const suggestWeights = createServerFn({ method: "POST" })
