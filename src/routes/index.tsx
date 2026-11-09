@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { HiringOversightSection } from "@/components/hiring-oversight";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -836,6 +837,7 @@ function Dashboard() {
       {isExecutive ? (
         <>
           <RoiBand />
+          <HiringOversightSection />
           <div className="grid lg:grid-cols-[minmax(0,1.65fr)_minmax(280px,0.75fr)]">
             <section className="border-b border-border p-5 sm:p-7 lg:border-b-0 lg:border-r">
               <div className="mb-5 flex items-start justify-between gap-3">
