@@ -356,8 +356,8 @@ export const agentIntelligence = createServerFn({ method: "GET" })
         if (top) n.action = n.action.startsWith("None") ? `Investigate top failure ${top[0]} ×${top[1]}.` : `${n.action} Top failure: ${top[0]} ×${top[1]}.`;
       }
       nodes.push(n);
-      if (appT > 0) edges.push({ s: `ag-${a}`, t: "n-hitl", k: "gated", label: appR ? `×${appT}, ${appR} rejected` : undefined });
-      if (gateT > 0) edges.push({ s: `ag-${a}`, t: "n-gates", k: "gated", label: gateR ? `×${gateT}, ${gateR} rejected` : undefined });
+      if (appT > 0) edges.push({ s: `ag-${a}`, t: "n-hitl", k: "gated", label: appR ? `×${appT}, ${appR} declined` : `×${appT}` });
+      if (gateT > 0) edges.push({ s: `ag-${a}`, t: "n-gates", k: "gated", label: gateR ? `×${gateT}, ${gateR} declined` : `×${gateT}` });
       if (cla > 0) edges.push({ s: `ag-${a}`, t: "n-clarify", k: "gated", label: `×${cla}` });
       for (const [tool, cnt] of errByAgent.get(a) ?? []) {
         if (cnt >= 3) edges.push({ s: `ag-${a}`, t: `fail-${tool}`, k: "errored", label: `×${cnt}` });
@@ -442,17 +442,17 @@ export const agentIntelligence = createServerFn({ method: "GET" })
       behaviorChips.push({
         pri: "medium", title: `◈ The front door never opened — copilot has 0 runs`,
         short: `copilot never invoked — routing untested`,
-        cause: `All ${totalRuns} runs reached specialists directly; the routing layer and its confirmations were never exercised.`,
-        effect: `The one agent designed to gate which specialist acts is the least-tested one.`,
-        action: `Drive one stretch of work through the copilot deliberately, or accept direct routing as the real UX and re-scope the copilot.`,
+        cause: `All ${totalRuns} runs started directly from a page; nobody has asked the Copilot to hand work to an agent yet.`,
+        effect: `The Copilot's hand-off to agents is untried in your organisation.`,
+        action: `Try one task through the Copilot so you know it works — or ignore this if your team prefers starting agents from each page.`,
       });
     if (gapAgents.length)
       behaviorChips.push({
         pri: "medium", title: `◈ ${gapAgents.join(", ")} run out-of-band — invisible to the step trace`,
         short: `${gapAgents.join(", ")}: runs with 0 steps`,
-        cause: `Voice/panel sessions are captured in transcripts, not agent_steps.`,
-        effect: `These agents bypass every step-based rule and this graph.`,
-        action: `Emit session turns as steps so governance covers them.`,
+        cause: `Call and panel agents keep their work in call transcripts, not in step-by-step records.`,
+        effect: `The automatic checks on this page cannot see inside those calls.`,
+        action: `Review their call transcripts directly until step-level checks cover them.`,
       });
     const failRate = failed / Math.max(totalRuns, 1);
     behaviorChips.push({
@@ -463,14 +463,14 @@ export const agentIntelligence = createServerFn({ method: "GET" })
       short: failRate >= 0.1 ? `${failed}/${totalRuns} runs failed · ${awaiting} awaiting` : `fleet quiet — ${awaiting} awaiting, ${failed} failed`,
       cause: `${totalRuns} runs · ${totalSteps} steps · ${failed} failed · ${cancelledRuns} cancelled.`,
       effect: `Gate stops (${norm.hitl.stops + norm.gates.stops}) behaved as designed.`,
-      action: `Cancelled runs (${cancelledRuns}) are stale ticks — harmless, but a liveness rule could reap them sooner.`,
+      action: `Open Agent activity, look at the failed runs and retry or report them. ${cancelledRuns} cancelled runs need no action.`,
     });
     behaviorChips.push({
       pri: "medium", title: `◈ Fleet coverage: ${registered.length - idleAgents.length}/${registered.length} agents active, ${idleAgents.length} idle`,
       short: `coverage ${registered.length - idleAgents.length}/${registered.length} active · ${idleAgents.length} idle`,
       cause: `${idleAgents.length} agents have manifests but no runs.`,
       effect: `Governance coverage is ${Math.round(((registered.length - idleAgents.length - gapAgents.length) / Math.max(registered.length, 1)) * 100)}% of the fleet.`,
-      action: `The Action plan table has the per-agent decision; make idle a decision, and pull voice sessions into the trace.`,
+      action: `See the action plan below: switch off agents you don't plan to use so the list reflects how you actually hire.`,
     });
     const behaviorSysread = behaviorChips.map((c) => ({ ...c, pri: priOf(c.title) }));
     behaviorChips.sort((a, b) => a.pri.localeCompare(b.pri));
@@ -538,24 +538,24 @@ export const agentIntelligence = createServerFn({ method: "GET" })
         const nk: string = kindNorm[kind] ?? "";
         if (ok > 0) {
           govNodes.push({
-            id: `gv-ok-${agent}-${kind}`, type: "dOk", name: `✓ ${kindWord[kind]} · ${agent}`, agent, kind, count: ok,
+            id: `gv-ok-${agent}-${kind}`, type: "dOk", name: `${agent} · approved`, agent, kind, count: ok,
             cause: `${ok} proposals approved by a person (${kindWord[kind]} on ${agent} runs).`,
             effect: `Human-in-the-loop working as designed on this proposal type.`,
             action: `None — approved decisions are the calibration baseline.`,
           });
-          govEdges.push({ s: `gv-ok-${agent}-${kind}`, t: nk, k: "decided" });
+          govEdges.push({ s: `gv-ok-${agent}-${kind}`, t: nk, k: "decided", label: `×${ok}` });
         }
         if (rej > 0) {
           const titles = rejectRows.filter((d) => d.agentType === agent && d.kind === kind).map((d) => `${d.title} (${d.tool ?? "?"})`);
           govNodes.push({
-            id: `gv-rej-${agent}-${kind}`, type: "dBad", name: `✗ ${kindWord[kind]} · ${agent}`, agent, kind, count: rej, members: titles,
+            id: `gv-rej-${agent}-${kind}`, type: "dBad", name: `${agent} · declined`, agent, kind, count: rej, members: titles,
             cause: `${rej} proposal(s) declined by a person: ${titles.join("; ")}.`,
             effect: rej >= 2
               ? `The same proposal type keeps getting declined — the agent's judgment or its wording is out of sync with reviewers.`
               : `A single rejection is normal human disagreement — it becomes a pattern at 2.`,
             action: rej >= 2 ? `Read the rejection reasons; fix proposal copy or scorer threshold, not the reviewer.` : `No action yet.`,
           });
-          govEdges.push({ s: `gv-rej-${agent}-${kind}`, t: nk, k: "decided" });
+          govEdges.push({ s: `gv-rej-${agent}-${kind}`, t: nk, k: "decided", label: `×${rej}` });
         }
       }
     }
@@ -571,14 +571,14 @@ export const agentIntelligence = createServerFn({ method: "GET" })
     }
     if (taskStatus.open > 0)
       govNodes.push({
-        id: "gv-open", type: "dOpen", name: `open cards ×${taskStatus.open}`, members: [...openMap.keys()],
+        id: "gv-open", type: "dOpen", name: `Still open ×${taskStatus.open}`, members: [...openMap.keys()],
         cause: `${taskStatus.open} cards still awaiting a person: ${[...openMap.entries()].map(([a, c]) => `${a} ×${c}`).join(", ")}.`,
         effect: `Proposals (and the runs behind them) are parked mid-flight; ${awaiting} runs sit in awaiting_human.`,
         action: `Clear the decisions inbox — oldest cards first.`,
       });
     if (taskStatus.cancelled > 0)
       govNodes.push({
-        id: "gv-cancel", type: "dMut", name: `cancelled ×${taskStatus.cancelled}`,
+        id: "gv-cancel", type: "dMut", name: `Cancelled ×${taskStatus.cancelled}`,
         cause: `${taskStatus.cancelled} cards were cancelled — mostly stale ticks reaped when their run ended.`,
         effect: `Harmless, but they bury the live signals in the decisions inbox.`,
         action: `A liveness rule should cancel stale cards sooner and mark them, so open ≠ stale.`,
@@ -597,46 +597,35 @@ export const agentIntelligence = createServerFn({ method: "GET" })
     if (stageTotal > 0 && aiMoves / stageTotal >= 0.5) {
       const pct = Math.round((aiMoves / stageTotal) * 100);
       govChips.push({
-        pri: "medium", title: `◈ Autonomy check: ai moves ${pct}% of pipeline transitions (${aiMoves}/${stageTotal})`,
-        short: `ai moves ${pct}% of stage transitions`,
-        cause: `stage_events actor field: ai ×${aiMoves}; person-via-agent ×${stageTotal - aiMoves}.`,
-        effect: `The autonomy dial may say one thing while the pipeline says another — candidate progression is almost entirely model-driven.`,
-        action: `Decide per transition whether ai-driven is intended (ai_screened: probably yes; shortlisted: maybe not) — encode it in the autonomy dial, not in convention.`,
+        pri: "medium", title: `◈ Agents moved ${pct}% of candidates between stages (${aiMoves}/${stageTotal})`,
+        short: `agents made ${pct}% of stage moves`,
+        cause: `${aiMoves} stage moves were made by an agent, ${stageTotal - aiMoves} by a person.`,
+        effect: `Most candidate progress is decided by agents — check that this matches how much autonomy you meant to give them.`,
+        action: `In Agent settings, set per stage whether an agent may move candidates on its own or must ask first.`,
       });
     }
     if (taskStatus.open > 0)
       govChips.push({
         pri: "high", title: `⚠ ${taskStatus.open} decision cards open — work is parked`,
-        short: `${taskStatus.open} cards open — clear the inbox`,
+        short: `${taskStatus.open} card${taskStatus.open === 1 ? "" : "s"} waiting for a decision`,
         cause: `Open proposals: ${[...openMap.entries()].map(([a, c]) => `${a} ×${c}`).join(", ")}.`,
-        effect: `Each open card holds its run in awaiting_human; candidates behind them age in place.`,
-        action: `Clear the inbox oldest-first; then add a health rule for card age (e.g. >48h → escalation).`,
+        effect: `Each open card pauses the agent behind it; those candidates wait.`,
+        action: `Open "Waiting for you" and decide the oldest cards first.`,
       });
     if (taskStatus.cancelled > 0)
       govChips.push({
-        pri: "medium", title: `◈ ${taskStatus.cancelled} cancelled cards bury the live ones`,
-        short: `${taskStatus.cancelled} cancelled cards — reap stale`,
-        cause: `Cancelled cards are mostly stale ticks whose runs ended.`,
-        effect: `They add noise to every decisions inbox and to this graph's denominators.`,
-        action: `Liveness rule: cancel + mark stale cards early instead of at run end.`,
+        pri: "medium", title: `◈ ${taskStatus.cancelled} cards closed without a decision`,
+        short: `${taskStatus.cancelled} cards closed undecided`,
+        cause: `These cards were closed because the agent run behind them ended before anyone decided.`,
+        effect: `Nobody reviewed these proposals — if this is frequent, decisions are taking too long.`,
+        action: `Check how quickly cards are being answered; agree a response time with the team.`,
       });
-    {
-      const totalVersions = [...churn.values()].reduce((s, n) => s + n, 0);
-      const top = [...churn.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([a, n]) => `${a} ×${n}`).join(", ");
-      govChips.push({
-        pri: "medium", title: `◈ Definition churn: ${totalVersions} manifest versions — top ${top || "—"}`,
-        short: `${totalVersions} definition versions — eval coverage per bump?`,
-        cause: `Rapid iteration; ${top} lead the fleet.`,
-        effect: `Every version bump changes behavior; without an eval per version, regressions ship silently.`,
-        action: `Keep agents.lock + the eval gate strict: no version without an eval — the lock file is the enforcement point.`,
-      });
-    }
     govChips.push({
       pri: "ok", title: `✓ Calibration baseline: ${govOk + govAnswered} approved vs ${govRej} declined`,
-      short: `${govOk + govAnswered}✓ / ${govRej}✗ — baseline recorded`,
-      cause: `Every terminal person decision is on the governance graph with its norm.`,
-      effect: `Overturn rate ${Math.round((govRej / Math.max(govOk + govRej, 1)) * 100)}% — this ratio is the fleet's calibration curve over time.`,
-      action: `Track it per week; a rising curve is the earliest signal that agents and reviewers are drifting apart.`,
+      short: `${govOk + govAnswered} approved · ${govRej} declined`,
+      cause: `Every final decision a person made on an agent proposal is counted here.`,
+      effect: `People declined ${Math.round((govRej / Math.max(govOk + govRej, 1)) * 100)}% of agent proposals.`,
+      action: `Watch this each week — a rising share means agents and your people are drifting apart.`,
     });
     const govSysread = govChips.map((c) => ({ ...c, pri: priOf(c.title) }));
 
@@ -696,9 +685,9 @@ export const agentIntelligence = createServerFn({ method: "GET" })
       const fid = `fam-${dept.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
       vocabNodes.push({
         id: fid, type: "family", name: dept,
-        cause: `Department standing in as a role family — ${[...m.values()].reduce((s, n) => s + n, 0)} must-have asks.`,
+        cause: `${[...m.values()].reduce((s, n) => s + n, 0)} must-have skill asks across this department's requisitions.`,
         effect: `${m.size} distinct skills demanded by this family.`,
-        action: `Real role-family nodes (with builds_on) arrive with Phase 1; today departments are the proxy.`,
+        action: `None.`,
       });
       for (const [raw, n] of [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)) {
         const slug = slugOf(raw) ?? raw.toLowerCase().replace(/[^a-z0-9]+/g, "-");
@@ -709,30 +698,16 @@ export const agentIntelligence = createServerFn({ method: "GET" })
       pri: (ins.severity === "high" ? "high" : ins.severity === "medium" ? "medium" : "ok") as Pri,
       title: `${ins.severity === "high" ? "⚠" : "◈"} ${ins.kind}: ${ins.title}`,
       short: ins.title,
-      cause: `deriveInsights over ${ont.stats.candidates} candidates / ${ont.stats.requisitions} requisitions · skills: ${ins.skills.join(", ") || "—"}`,
+      cause: `Across ${ont.stats.candidates} candidates and ${ont.stats.requisitions} requisitions · skills: ${ins.skills.join(", ") || "—"}`,
       effect: ins.detail,
-      action: ins.actionLabel ? `${ins.actionLabel} — route ${ins.actionTo}` : ins.detail,
+      action: ins.actionLabel ? `${ins.actionLabel}.` : ins.detail,
     }));
     vocabChips.push({
-      pri: "medium", title: `◈ Alias fold: ${rawForms.size} raw skill forms resolve to ${ont.nodes.length} nodes`,
-      short: `${rawForms.size} raw forms → ${ont.nodes.length} nodes`,
-      cause: `Every variant fold comes from the hardcoded alias table in ontology.server.ts — it learned nothing by itself.`,
-      effect: `A form the table misses becomes a spurious node; this count is the alias table's report card.`,
-      action: `Phase 1 replaces the hardcoded table with evidence-folded aliases (skillEvidence → alias learning).`,
-    });
-    vocabChips.push({
-      pri: "medium", title: `◈ skill_nodes is still empty — this view is computed in-memory, not persisted`,
-      short: `seed only — nothing persisted yet`,
-      cause: `The nodes on this graph were built by the production buildOntology() from raw text[] columns at request time.`,
-      effect: `Nothing is stored, so no agent can query this vocabulary yet.`,
-      action: `Phase 1 persists these same nodes into skill_nodes/skill_edges — after that, agents query them through the deterministic layer.`,
-    });
-    vocabChips.push({
-      pri: "ok", title: `◈ ${minorCount} low-evidence skills folded out of the graph`,
-      short: `${minorCount} single-evidence skills hidden`,
-      cause: `Skills with one evidence link, no demand and no aliases are real but insignificant.`,
-      effect: `They still count in node totals and surface as evidence accumulates.`,
-      action: `Thresholds stay: demand > 0 or evidence ≥ 2 puts a skill on the graph.`,
+      pri: "ok", title: `✓ ${minorCount} rarely-seen skills left off the map`,
+      short: `${minorCount} rarely-seen skills hidden`,
+      cause: `Skills seen only once and not asked for by any requisition are hidden to keep the map readable.`,
+      effect: `They still count in the totals and appear once they are seen more often.`,
+      action: `None.`,
     });
     const vocabSysread = vocabChips.map((c) => ({ ...c, pri: priOf(c.title) })).sort((a, b) => priOrder[a.pri] - priOrder[b.pri]);
 
@@ -756,8 +731,8 @@ export const agentIntelligence = createServerFn({ method: "GET" })
           tiles: [
             ["Person decisions", String(govOk + govAnswered + govRej), `${govOk} approved · ${govRej} declined · ${govAnswered} answered`],
             ["Open cards", String(taskStatus.open), [...openMap.entries()].map(([a, c]) => `${a} ×${c}`).slice(0, 3).join(", ") || "none"],
-            ["Cancelled cards", String(taskStatus.cancelled), "stale — reap with a liveness rule"],
-            ["Stage moves", String(stageTotal), `${Math.round((aiMoves / Math.max(stageTotal, 1)) * 100)}% ai · ${stageTotal - aiMoves} person (via agent)`],
+            ["Cancelled cards", String(taskStatus.cancelled), "closed without a person deciding"],
+            ["Stage moves", String(stageTotal), stageTotal ? `${Math.round((aiMoves / stageTotal) * 100)}% moved by an agent · ${stageTotal - aiMoves} by a person` : "no stage moves yet"],
           ],
           nodes: govNodes, edges: govEdges,
           systemRead: govSysread,
@@ -765,10 +740,10 @@ export const agentIntelligence = createServerFn({ method: "GET" })
         },
         vocabulary: {
           tiles: [
-            ["Skill nodes", String(ont.stats.nodeCount), `${vocabNodes.filter((n) => n.type === "skill").length} shown · ${minorCount} low-evidence folded`],
-            ["Co-occurrence edges", String(ont.stats.edgeCount), `${vocabEdges.filter((e) => e.k === "cooccurs").length} shown (top by count)`],
+            ["Skills", String(ont.stats.nodeCount), `${minorCount} rarely seen`],
+            ["Skill pairings", String(ont.stats.edgeCount), "skills that appear together on CVs"],
             ["Insights", String(ont.insights.length), `${ont.insights.filter((i) => i.severity === "high").length} high severity`],
-            ["Persisted", "0 rows", "skill_nodes empty — Phase 1 persists these"],
+            ["Asked for, none in pool", String(ont.nodes.filter((n) => n.demand > 0 && n.supply === 0).length), "skills that need sourcing"],
           ],
           nodes: vocabNodes, edges: vocabEdges,
           systemRead: vocabSysread,
