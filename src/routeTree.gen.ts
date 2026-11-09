@@ -35,10 +35,12 @@ import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as RoiRouteImport } from './routes/roi'
 import { Route as ScreeningRouteImport } from './routes/screening'
+import { Route as SkillSupplyRouteImport } from './routes/skill-supply'
 import { Route as TeamRouteImport } from './routes/team'
 import { Route as TemplatesRouteImport } from './routes/templates'
 import { Route as TermsRouteImport } from './routes/terms'
 import { Route as AgentsIndexRouteImport } from './routes/agents.index'
+import { Route as AgentsGovernanceRouteImport } from './routes/agents.governance'
 import { Route as AgentsIntelligenceRouteImport } from './routes/agents.intelligence'
 import { Route as AgentsObservabilityRouteImport } from './routes/agents.observability'
 import { Route as AgentsRegisterRouteImport } from './routes/agents.register'
@@ -211,6 +213,11 @@ const ScreeningRoute = ScreeningRouteImport.update({
   path: '/screening',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SkillSupplyRoute = SkillSupplyRouteImport.update({
+  id: '/skill-supply',
+  path: '/skill-supply',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TeamRoute = TeamRouteImport.update({
   id: '/team',
   path: '/team',
@@ -229,6 +236,11 @@ const TermsRoute = TermsRouteImport.update({
 const AgentsIndexRoute = AgentsIndexRouteImport.update({
   id: '/agents/',
   path: '/agents/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentsGovernanceRoute = AgentsGovernanceRouteImport.update({
+  id: '/agents/governance',
+  path: '/agents/governance',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgentsIntelligenceRoute = AgentsIntelligenceRouteImport.update({
@@ -471,9 +483,11 @@ export interface FileRoutesByFullPath {
   '/reports': typeof ReportsRoute
   '/roi': typeof RoiRoute
   '/screening': typeof ScreeningRoute
+  '/skill-supply': typeof SkillSupplyRoute
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
   '/terms': typeof TermsRoute
+  '/agents/governance': typeof AgentsGovernanceRoute
   '/agents/intelligence': typeof AgentsIntelligenceRoute
   '/agents/observability': typeof AgentsObservabilityRoute
   '/agents/register': typeof AgentsRegisterRoute
@@ -544,9 +558,11 @@ export interface FileRoutesByTo {
   '/reports': typeof ReportsRoute
   '/roi': typeof RoiRoute
   '/screening': typeof ScreeningRoute
+  '/skill-supply': typeof SkillSupplyRoute
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
   '/terms': typeof TermsRoute
+  '/agents/governance': typeof AgentsGovernanceRoute
   '/agents/intelligence': typeof AgentsIntelligenceRoute
   '/agents/observability': typeof AgentsObservabilityRoute
   '/agents/register': typeof AgentsRegisterRoute
@@ -618,9 +634,11 @@ export interface FileRoutesById {
   '/reports': typeof ReportsRoute
   '/roi': typeof RoiRoute
   '/screening': typeof ScreeningRoute
+  '/skill-supply': typeof SkillSupplyRoute
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
   '/terms': typeof TermsRoute
+  '/agents/governance': typeof AgentsGovernanceRoute
   '/agents/intelligence': typeof AgentsIntelligenceRoute
   '/agents/observability': typeof AgentsObservabilityRoute
   '/agents/register': typeof AgentsRegisterRoute
@@ -693,9 +711,11 @@ export interface FileRouteTypes {
     | '/reports'
     | '/roi'
     | '/screening'
+    | '/skill-supply'
     | '/team'
     | '/templates'
     | '/terms'
+    | '/agents/governance'
     | '/agents/intelligence'
     | '/agents/observability'
     | '/agents/register'
@@ -766,9 +786,11 @@ export interface FileRouteTypes {
     | '/reports'
     | '/roi'
     | '/screening'
+    | '/skill-supply'
     | '/team'
     | '/templates'
     | '/terms'
+    | '/agents/governance'
     | '/agents/intelligence'
     | '/agents/observability'
     | '/agents/register'
@@ -839,9 +861,11 @@ export interface FileRouteTypes {
     | '/reports'
     | '/roi'
     | '/screening'
+    | '/skill-supply'
     | '/team'
     | '/templates'
     | '/terms'
+    | '/agents/governance'
     | '/agents/intelligence'
     | '/agents/observability'
     | '/agents/register'
@@ -913,9 +937,11 @@ export interface RootRouteChildren {
   ReportsRoute: typeof ReportsRoute
   RoiRoute: typeof RoiRoute
   ScreeningRoute: typeof ScreeningRoute
+  SkillSupplyRoute: typeof SkillSupplyRoute
   TeamRoute: typeof TeamRoute
   TemplatesRoute: typeof TemplatesRoute
   TermsRoute: typeof TermsRoute
+  AgentsGovernanceRoute: typeof AgentsGovernanceRoute
   AgentsIntelligenceRoute: typeof AgentsIntelligenceRoute
   AgentsObservabilityRoute: typeof AgentsObservabilityRoute
   AgentsRegisterRoute: typeof AgentsRegisterRoute
@@ -1144,6 +1170,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ScreeningRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/skill-supply': {
+      id: '/skill-supply'
+      path: '/skill-supply'
+      fullPath: '/skill-supply'
+      preLoaderRoute: typeof SkillSupplyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/team': {
       id: '/team'
       path: '/team'
@@ -1170,6 +1203,13 @@ declare module '@tanstack/react-router' {
       path: '/agents'
       fullPath: '/agents/'
       preLoaderRoute: typeof AgentsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agents/governance': {
+      id: '/agents/governance'
+      path: '/agents/governance'
+      fullPath: '/agents/governance'
+      preLoaderRoute: typeof AgentsGovernanceRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/agents/intelligence': {
@@ -1489,9 +1529,11 @@ const rootRouteChildren: RootRouteChildren = {
   ReportsRoute: ReportsRoute,
   RoiRoute: RoiRoute,
   ScreeningRoute: ScreeningRoute,
+  SkillSupplyRoute: SkillSupplyRoute,
   TeamRoute: TeamRoute,
   TemplatesRoute: TemplatesRoute,
   TermsRoute: TermsRoute,
+  AgentsGovernanceRoute: AgentsGovernanceRoute,
   AgentsIntelligenceRoute: AgentsIntelligenceRoute,
   AgentsObservabilityRoute: AgentsObservabilityRoute,
   AgentsRegisterRoute: AgentsRegisterRoute,

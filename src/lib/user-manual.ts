@@ -382,13 +382,14 @@ export const MANUAL_SECTIONS: ManualSection[] = [
   },
   {
     id: "agent-intelligence",
-    title: "Agent intelligence (Agent administration)",
+    title: "Agent intelligence, Agent governance and Skill supply",
     summary:
-      "How your hiring agents behave, whether the harness around them is holding, and where your skill supply falls short of demand.",
+      "Three read-only pages, one layout: a verdict, a fix list of only what needs action, one main picture and a per-item table.",
     steps: [
-      "Agent administration → Agent intelligence is the knowledge-graph view of your hiring fleet, computed live from this organisation's telemetry. Governance roles (HR head, CBO).",
-      "Three tabs. Agent behavior: each agent that ran, the person checkpoints it passed and the tools it failed on, plus a priority-sorted action plan for every registered agent. Governance: whether the harness around the agents is holding — are agents staying inside their limits, does their autonomy match their risk tier (and did any change run without an approved card), did each run use the approved and tested definition, are hand-offs between agents healthy (a map of who published each event and which agent it started, the longest chain of agents starting agents, and any loop where an agent restarts itself on the same work), and are agents within budget. Vocabulary: the skills your requisitions ask for against the skills your candidate pool holds, biggest gaps first.",
-      "The System read panel on top lists only what needs attention, each with its cause, effect and next best action — every number is a live query over your runs, steps, tasks and stage transitions. Nothing here calls a model; it is deterministic and auditable. Auto-refreshes every minute, or use Refresh.",
+      "Every page opens with a verdict (\u201c3 things need you\u201d) and one-word status pills — click a pill to filter the fix list. The fix list shows only what needs action, most severe first, each with a next-step link; everything that passes collapses into one line. Governance roles (HR head, CBO). Nothing here calls a model; it is deterministic and refreshes every minute.",
+      "Agent administration → Agent intelligence: how the agents behave — which agents ran, where your people declined their proposals, which tools fail, and runs that are not step-traced. The map shows each agent between the tools it failed on and the person checkpoints it passed; the table lists each agent's runs, checks, declines and failed calls.",
+      "Agent administration → Agent governance: whether the harness around the agents is holding — limits (refused calls, injection flags), autonomy against risk tier (including changes made with no approval card), definitions (runs on the approved, tested rulebook), hand-offs and budget. The hand-off map shows who published each event, the event, and the agent it started, with direct agent-to-agent delegation dashed; under it, chains, loops and lost events. The agents table shows each agent against the five checks — click a row for detail.",
+      "Intelligence → Skill supply vs demand: the skills your requisitions ask for against the skills your candidate pool holds, biggest gaps first, with sourcing gaps and thin cover in the fix list.",
     ],
   },
   {

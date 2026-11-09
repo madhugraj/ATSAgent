@@ -1,59 +1,21 @@
 /**
- * Agent governance panel (Agent intelligence → Governance): five answers on
- * whether the harness is holding, a hand-off map of how agents start one
- * another (lifecycle events routed by the orchestrator, and direct
- * delegation via start_agent), and the evidence tables behind each answer.
+ * Agent governance page body: a verdict with five check pills, a fix list of
+ * only what needs action, the hand-off map (lifecycle events routed by the
+ * orchestrator and direct start_agent delegation) and an agent × check matrix.
  */
-import { useState } from "react";
+import { Fragment, useState } from "react";
+
+import { Dot, FixList, Panel, Verdict, type Pill, type Status } from "@/components/ops-layout";
 
 import type {
+  CheckKey,
+  CheckTone,
   Harness,
   HarnessHandoffEdge,
   HarnessHandoffNode,
-  Tone,
-} from "@/lib/agent-intelligence.functions";
+} from "@/lib/agent-governance.functions";
 
-const TONE: Record<Tone, { dot: string; ring: string; word: string }> = {
-  good: { dot: "bg-emerald-500", ring: "border-emerald-500/30", word: "OK" },
-  warn: { dot: "bg-amber-500", ring: "border-amber-500/40", word: "Watch" },
-  bad: { dot: "bg-red-500", ring: "border-red-500/40", word: "Act" },
-};
 const nice = (s: string) => s.replace(/_/g, " ");
-const RISK_CLS: Record<string, string> = {
-  low: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-  medium: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-  high: "bg-red-500/10 text-red-700 dark:text-red-400",
-};
-const AUTONOMY_WORD: Record<string, string> = {
-  suggest: "asks first",
-  act_and_notify: "acts, then tells",
-  autonomous: "fully autonomous",
-};
-
-function Section({
-  title,
-  hint,
-  children,
-}: {
-  title: string;
-  hint: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="overflow-hidden rounded-lg border border-border bg-card">
-      <div className="border-b border-border px-4 py-3">
-        <h3 className="text-sm font-semibold">{title}</h3>
-        <p className="text-xs text-muted-foreground">{hint}</p>
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function Flag({ text }: { text: string | null }) {
-  if (!text) return <span className="text-muted-foreground">—</span>;
-  return <span className="font-medium text-red-600 dark:text-red-400">{text}</span>;
-}
 
 /* ---- hand-off map: what started each agent (left) → agent started (right) */
 const PILL_W = 230,
@@ -198,7 +160,7 @@ function HandoffMap({
             <rect width={PILL_W} height={PILL_H} rx={8} className="fill-card stroke-border" />
             <rect width={4} height={PILL_H - 12} x={6} y={6} rx={2} fill={color} />
             <text x={18} y={17} fontSize={12} fontWeight={600} className="fill-foreground">
-              {n.type === "event" ? n.name : nice(n.name)}
+              {n.type === "event" ? n.name.replace(/[._]/g, " ") : nice(n.name)}
             </text>
             <text
               x={18}
@@ -215,354 +177,168 @@ function HandoffMap({
   );
 }
 
+const CHECKS: { key: CheckKey; label: string; q: string }[] = [
+  { key: "limits", label: "Limits", q: "limits" },
+  { key: "autonomy", label: "Autonomy", q: "autonomy" },
+  { key: "definition", label: "Definitions", q: "definitions" },
+  { key: "handoffs", label: "Hand-offs", q: "handoffs" },
+  { key: "budget", label: "Budget", q: "budget" },
+];
+const TONE_STATUS: Record<CheckTone, Status> = {
+  bad: "bad",
+  warn: "warn",
+  good: "good",
+  none: "none",
+};
+const AUTONOMY_WORD: Record<string, string> = {
+  suggest: "asks first",
+  act_and_notify: "acts, then tells",
+  autonomous: "fully autonomous",
+};
+
 export function AgentGovernancePanel({ h }: { h: Harness }) {
-  const [allAgents, setAllAgents] = useState(false);
-  const ev = h.handoffs.events;
-  const autonomyRows = allAgents ? h.autonomy : h.autonomy.filter((a) => a.enabled || a.flag);
-  const defRows = allAgents ? h.definitions : h.definitions.filter((d) => d.runs > 0 || d.flag);
+  const [check, setCheck] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+  const [showOff, setShowOff] = useState(false);
+  const pills: Pill[] = CHECKS.map((c) => ({
+    key: c.key,
+    label: c.label,
+    status: TONE_STATUS[h.questions.find((q) => q.key === c.q)?.tone ?? "none"],
+  }));
+  const fixes = check ? h.fixes.filter((f) => f.check === check) : h.fixes;
+  const rows = showOff ? h.agents : h.agents.filter((a) => a.enabled || a.runs > 0);
+  const hidden = h.agents.length - rows.length;
+  const ho = h.handoffs;
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {h.questions.map((q) => (
-          <a
-            key={q.key}
-            href={`#gov-${q.key}`}
-            className={`rounded-lg border bg-card p-4 transition-colors hover:bg-muted/40 ${TONE[q.tone].ring}`}
-          >
-            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-              {q.question}
-            </p>
-            <p className="mt-2 flex items-center gap-2 text-sm font-semibold">
-              <span
-                className={`inline-block size-2.5 shrink-0 rounded-full ${TONE[q.tone].dot}`}
-                aria-label={TONE[q.tone].word}
-              />
-              {q.title}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">{q.detail}</p>
-          </a>
-        ))}
-      </div>
+      <Verdict pills={pills} active={check} onPick={setCheck} okText="The harness is holding" />
 
-      <div id="gov-handoffs" className="scroll-mt-4">
-        <Section
-          title="How agents start each other"
-          hint="Left: who published an event or handed work over (purple = an agent). Middle: the event. Right: the agent it started. Purple dashed: an agent delegating straight to another (start_agent). Red: failed. Hover to trace a path."
-        >
-          <div className="flex flex-wrap gap-x-6 gap-y-1 border-b border-border px-4 py-2 text-xs text-muted-foreground">
-            <span>
-              <b className="text-foreground">{ev.total}</b> event{ev.total === 1 ? "" : "s"}
-            </span>
-            <span>
-              <b className="text-foreground">{ev.done}</b> routed
-            </span>
-            <span className={ev.pending ? "text-amber-600" : ""}>
-              <b>{ev.pending}</b> waiting
-              {ev.oldestPendingMins != null
-                ? ` (oldest ${ev.oldestPendingMins < 120 ? `${ev.oldestPendingMins} min` : `${Math.round(ev.oldestPendingMins / 60)} h`})`
-                : ""}
-            </span>
-            <span className={ev.failed ? "text-red-600" : ""}>
-              <b>{ev.failed}</b> failed · {ev.dead} gave up
-            </span>
-            <span className={h.handoffs.principalShifts ? "text-amber-600" : ""}>
-              <b>{h.handoffs.principalShifts}</b> acted for a different person than the one who
-              caused it
-            </span>
-          </div>
-          <HandoffMap nodes={h.handoffs.nodes} edges={h.handoffs.edges} />
-          <div className="space-y-1.5 border-t border-border px-4 py-3 text-xs">
-            <p>
-              <b>{h.handoffs.chainedRuns}</b> run{h.handoffs.chainedRuns === 1 ? "" : "s"} started
-              by another agent
-              {h.handoffs.longest && h.handoffs.longest.depth > 1 && (
-                <>
-                  {" "}
-                  · longest chain:{" "}
-                  <span className="font-medium capitalize">
-                    {h.handoffs.longest.path.map(nice).join(" → ")}
-                  </span>
-                </>
-              )}
-            </p>
-            {h.handoffs.loops.length > 0 ? (
-              <div className="text-red-600 dark:text-red-400">
-                <p className="font-semibold">
-                  Loops — an agent restarted itself on the same work through a chain:
-                </p>
-                {h.handoffs.loops.map((l, i) => (
-                  <p key={i} className="capitalize">
-                    {l.path.map(nice).join(" → ")}
-                    {l.subject ? (
-                      <span className="normal-case text-muted-foreground"> · on {l.subject}…</span>
-                    ) : null}
-                  </p>
-                ))}
-              </div>
-            ) : (
-              <p className="text-muted-foreground">
-                No loops: no agent restarted itself on the same work.
-              </p>
-            )}
-            {h.handoffs.unattributed > 0 && (
-              <p className="text-muted-foreground">
-                {h.handoffs.unattributed} event{h.handoffs.unattributed === 1 ? "" : "s"}{" "}
-                {h.handoffs.unattributed === 1 ? "has" : "have"} no recorded publisher (published by
-                the system, or before the publishing run was recorded).
-              </p>
-            )}
-          </div>
-        </Section>
-      </div>
+      <FixList
+        rows={fixes}
+        passing={h.passing}
+        filterLabel={check ? CHECKS.find((c) => c.key === check)?.label.toLowerCase() : null}
+        onClearFilter={() => setCheck(null)}
+      />
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Section
-          title="Direct delegations (agent → agent)"
-          hint="Every start_agent call: who handed what to whom. Flagged when the delegating run had already seen a suspected injected instruction."
-        >
-          {h.handoffs.delegations.length === 0 ? (
-            <p className="px-4 py-4 text-sm text-muted-foreground">
-              No agent has delegated to another yet — this channel is untested in your organisation.
-            </p>
-          ) : (
-            <ul className="divide-y divide-border text-xs">
-              {h.handoffs.delegations.map((d, i) => (
-                <li key={i} className="px-4 py-2">
-                  <p>
-                    <b className="capitalize">{nice(d.from)}</b> →{" "}
-                    <b className="capitalize">{nice(d.to)}</b>
-                    <span className="ml-2 text-muted-foreground">{d.status}</span>
-                    {d.afterInjectionFlag && (
-                      <span className="ml-2 font-semibold text-red-600">after injection flag</span>
-                    )}
-                  </p>
-                  <p className="mt-0.5 text-muted-foreground">“{d.goal}”</p>
-                </li>
-              ))}
-            </ul>
+      <Panel title="How agents hand work to each other" hint="Hover a box to trace its path">
+        <div className="flex flex-wrap gap-x-5 gap-y-1 px-4 pt-2 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5">
+            <i className="inline-block w-4 border-t-2 border-[#b6b4ab]" />
+            publishes
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <i className="inline-block w-4 border-t-2 border-[#9a988f]" />
+            starts
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <i className="inline-block w-4 border-t-2 border-dashed border-[#7c5cff]" />
+            delegates (agent → agent)
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <i className="inline-block w-4 border-t-2 border-red-500" />
+            failed
+          </span>
+        </div>
+        <HandoffMap nodes={ho.nodes} edges={ho.edges} />
+        <div className="flex flex-wrap gap-x-6 gap-y-1 border-t border-border px-4 py-2.5 text-[13px] text-muted-foreground">
+          <span>
+            <b className="text-foreground">{ho.chainedRuns}</b> run{ho.chainedRuns === 1 ? "" : "s"}{" "}
+            started by another agent
+          </span>
+          {ho.longest && ho.longest.depth > 1 && (
+            <span>
+              Longest chain:{" "}
+              <b className="capitalize text-foreground">{ho.longest.path.map(nice).join(" → ")}</b>
+            </span>
           )}
-        </Section>
-        <Section
-          title="Events no agent picked up, and duplicated work"
-          hint="Routed events that started nothing, and the same agent running twice on the same work at once."
-        >
-          <div className="space-y-3 px-4 py-3 text-xs">
-            {h.handoffs.unrouted.length === 0 && h.handoffs.overlaps.length === 0 && (
-              <p className="text-sm text-muted-foreground">None.</p>
-            )}
-            {h.handoffs.unrouted.length > 0 && (
-              <div>
-                <p className="mb-1 font-medium">Events that started no agent</p>
-                <p className="text-muted-foreground">
-                  {h.handoffs.unrouted.map((u) => `${u.type} ×${u.n}`).join(" · ")}
-                </p>
-                <p className="mt-1 text-muted-foreground">
-                  Fine if no agent is meant to react; otherwise an agent is switched off or a route
-                  is missing.
-                </p>
-              </div>
-            )}
-            {h.handoffs.overlaps.length > 0 && (
-              <div>
-                <p className="mb-1 font-medium text-red-600">Overlapping runs on the same work</p>
-                {h.handoffs.overlaps.map((o) => (
-                  <p key={`${o.agent}-${o.subject}`} className="text-muted-foreground">
-                    <b className="capitalize text-foreground">{nice(o.agent)}</b> ran {o.runs}× at
-                    once on {o.subject}…
-                  </p>
-                ))}
-              </div>
-            )}
-          </div>
-        </Section>
-      </div>
+          <span className={ho.loops.length ? "text-red-600" : ""}>
+            <b className={ho.loops.length ? "" : "text-foreground"}>{ho.loops.length}</b> loop
+            {ho.loops.length === 1 ? "" : "s"}
+          </span>
+          <span className={ho.events.dead ? "text-red-600" : ""}>
+            <b className={ho.events.dead ? "" : "text-foreground"}>{ho.events.dead}</b> event
+            {ho.events.dead === 1 ? "" : "s"} lost
+          </span>
+          {ho.events.pending > 0 && (
+            <span>
+              <b className="text-foreground">{ho.events.pending}</b> waiting
+            </span>
+          )}
+        </div>
+      </Panel>
 
-      <div id="gov-limits" className="scroll-mt-4">
-        <Section
-          title="Limits: refused calls and injection flags"
-          hint="Tool calls the harness refused because they fell outside the agent's permissions, and steps where untrusted text looked like instructions."
-        >
-          {h.limits.length === 0 ? (
-            <p className="px-4 py-4 text-sm text-muted-foreground">
-              No refusals and no injection flags.
-            </p>
-          ) : (
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-border text-left text-[11px] text-muted-foreground">
-                  <th className="px-4 py-2 font-medium">Agent</th>
-                  <th className="px-4 py-2 font-medium">Refused calls</th>
-                  <th className="px-4 py-2 font-medium">Tools refused</th>
-                  <th className="px-4 py-2 font-medium">Injection flags</th>
-                </tr>
-              </thead>
-              <tbody>
-                {h.limits.map((l) => (
-                  <tr key={l.agent} className="border-b border-border last:border-0">
-                    <td className="px-4 py-2 font-medium capitalize">{nice(l.agent)}</td>
-                    <td className="px-4 py-2 tabular-nums">{l.refused}</td>
-                    <td className="px-4 py-2 text-muted-foreground">
-                      {l.refusedTools.join(", ") || "—"}
+      <Panel
+        title="Agents"
+        hint={`${rows.length} shown${hidden ? ` · ${hidden} switched off and never run (hidden)` : ""} · click a row for details`}
+      >
+        <table className="mt-2 w-full text-[13px]">
+          <thead>
+            <tr className="border-b border-border text-xs text-muted-foreground">
+              <th className="px-4 py-2 text-left font-medium">Agent</th>
+              {CHECKS.map((c) => (
+                <th key={c.key} className="px-2 py-2 text-center font-medium">
+                  {c.label}
+                </th>
+              ))}
+              <th className="hidden px-4 py-2 text-left font-medium lg:table-cell">
+                Setting · risk · owner
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((a) => (
+              <Fragment key={a.agent}>
+                <tr
+                  className="cursor-pointer border-b border-border hover:bg-muted/40"
+                  onClick={() => setOpen(open === a.agent ? null : a.agent)}
+                >
+                  <td className="px-4 py-2.5 font-semibold capitalize">
+                    {nice(a.agent)}{" "}
+                    <span className="text-[10px] text-muted-foreground">
+                      {open === a.agent ? "▴" : "▾"}
+                    </span>
+                  </td>
+                  {CHECKS.map((c) => (
+                    <td key={c.key} className="px-2 py-2.5 text-center" title={a.detail[c.key]}>
+                      <Dot status={TONE_STATUS[a.checks[c.key]]} />
                     </td>
-                    <td
-                      className={`px-4 py-2 tabular-nums ${l.injection ? "font-semibold text-red-600" : ""}`}
-                    >
-                      {l.injection}
+                  ))}
+                  <td className="hidden px-4 py-2.5 text-xs text-muted-foreground lg:table-cell">
+                    {a.enabled ? (AUTONOMY_WORD[a.autonomy] ?? a.autonomy) : "off"} · {a.risk} ·{" "}
+                    {nice(a.owner)}
+                  </td>
+                </tr>
+                {open === a.agent && (
+                  <tr className="border-b border-border bg-muted/30">
+                    <td colSpan={7} className="px-4 py-3">
+                      <div className="grid grid-cols-2 gap-3 text-xs md:grid-cols-5">
+                        {CHECKS.map((c) => (
+                          <div key={c.key}>
+                            <p className="mb-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                              <Dot status={TONE_STATUS[a.checks[c.key]]} />
+                              {c.label}
+                            </p>
+                            <p>{a.detail[c.key]}</p>
+                          </div>
+                        ))}
+                      </div>
                     </td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </Section>
-      </div>
-
-      <div className="flex justify-end">
-        <button
-          type="button"
-          className="text-xs font-medium text-primary hover:underline"
-          onClick={() => setAllAgents((v) => !v)}
-        >
-          {allAgents
-            ? "Show only active or flagged agents"
-            : `Show all ${h.autonomy.length} agents`}
-        </button>
-      </div>
-
-      <div id="gov-autonomy" className="scroll-mt-4">
-        <Section
-          title="Autonomy vs risk"
-          hint="How much each agent may do on its own (Agent settings) against the risk tier in its definition, and what it actually did."
-        >
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-border text-left text-[11px] text-muted-foreground">
-                <th className="px-4 py-2 font-medium">Agent</th>
-                <th className="px-4 py-2 font-medium">Switched on</th>
-                <th className="px-4 py-2 font-medium">Autonomy</th>
-                <th className="px-4 py-2 font-medium">Risk tier</th>
-                <th className="px-4 py-2 font-medium">Changes it made</th>
-                <th className="px-4 py-2 font-medium">Times it asked first</th>
-                <th className="px-4 py-2 font-medium">With no approval card</th>
-                <th className="px-4 py-2 font-medium">Flag</th>
-              </tr>
-            </thead>
-            <tbody>
-              {autonomyRows.map((a) => (
-                <tr key={a.agent} className="border-b border-border last:border-0">
-                  <td className="px-4 py-2 font-medium capitalize">{nice(a.agent)}</td>
-                  <td className="px-4 py-2">
-                    {a.enabled ? "yes" : <span className="text-muted-foreground">no</span>}
-                  </td>
-                  <td className="px-4 py-2">{AUTONOMY_WORD[a.autonomy] ?? a.autonomy}</td>
-                  <td className="px-4 py-2">
-                    <span
-                      className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${RISK_CLS[a.risk]}`}
-                    >
-                      {a.risk}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2 tabular-nums">{a.writesRun}</td>
-                  <td className="px-4 py-2 tabular-nums">{a.askedFirst}</td>
-                  <td
-                    className={`px-4 py-2 tabular-nums ${a.withoutApproval ? "font-semibold text-amber-600" : ""}`}
-                  >
-                    {a.withoutApproval}
-                  </td>
-                  <td className="px-4 py-2">
-                    <Flag text={a.flag} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Section>
-      </div>
-
-      <div id="gov-definitions" className="scroll-mt-4">
-        <Section
-          title="Definitions"
-          hint="The approved version of each agent's rulebook, its accountable owner and eval coverage — and runs that executed anything else."
-        >
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-border text-left text-[11px] text-muted-foreground">
-                <th className="px-4 py-2 font-medium">Agent</th>
-                <th className="px-4 py-2 font-medium">Approved version</th>
-                <th className="px-4 py-2 font-medium">Owner</th>
-                <th className="px-4 py-2 font-medium">Evals</th>
-                <th className="px-4 py-2 font-medium">Runs</th>
-                <th className="px-4 py-2 font-medium">Ran on other versions</th>
-                <th className="px-4 py-2 font-medium">Flag</th>
-              </tr>
-            </thead>
-            <tbody>
-              {defRows.map((d) => (
-                <tr key={d.agent} className="border-b border-border last:border-0">
-                  <td className="px-4 py-2 font-medium capitalize">{nice(d.agent)}</td>
-                  <td className="px-4 py-2 tabular-nums">{d.current}</td>
-                  <td className="px-4 py-2">{nice(d.owner)}</td>
-                  <td
-                    className={`px-4 py-2 tabular-nums ${d.evals === 0 ? "font-semibold text-red-600" : ""}`}
-                  >
-                    {d.evals}
-                  </td>
-                  <td className="px-4 py-2 tabular-nums">{d.runs}</td>
-                  <td className="px-4 py-2 text-muted-foreground">
-                    {d.offVersion.map((o) => `${o.version} ×${o.runs}`).join(", ") || "—"}
-                  </td>
-                  <td className="px-4 py-2">
-                    <Flag text={d.flag} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Section>
-      </div>
-
-      <div id="gov-budget" className="scroll-mt-4">
-        <Section
-          title="Budget and run limits"
-          hint="Tokens used this month against the monthly budget set in Agent settings, and runs stopped at their step or token ceiling."
-        >
-          {h.budget.length === 0 ? (
-            <p className="px-4 py-4 text-sm text-muted-foreground">No usage this month.</p>
-          ) : (
-            <ul className="space-y-2 px-4 py-3 text-xs">
-              {h.budget.map((b) => {
-                const pct = b.budget ? Math.min(100, (b.tokensMonth / b.budget) * 100) : null;
-                return (
-                  <li key={b.agent} className="grid grid-cols-[140px_1fr_220px] items-center gap-3">
-                    <span className="truncate font-medium capitalize">{nice(b.agent)}</span>
-                    <div className="h-2.5 overflow-hidden rounded-sm bg-muted">
-                      {pct !== null && (
-                        <div
-                          className={
-                            pct >= 100
-                              ? "h-full bg-red-500"
-                              : pct >= 80
-                                ? "h-full bg-amber-500"
-                                : "h-full bg-emerald-500"
-                          }
-                          style={{ width: `${pct}%` }}
-                        />
-                      )}
-                    </div>
-                    <span className="tabular-nums text-muted-foreground">
-                      {b.tokensMonth.toLocaleString()} tokens
-                      {b.budget ? ` of ${b.budget.toLocaleString()}` : " · no budget set"}
-                      {b.limitStops ? (
-                        <b className="ml-2 text-amber-600">{b.limitStops} stopped at limit</b>
-                      ) : null}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </Section>
-      </div>
+                )}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+        {hidden > 0 || showOff ? (
+          <button
+            type="button"
+            onClick={() => setShowOff((v) => !v)}
+            className="w-full border-t border-border px-4 py-2 text-left text-xs font-medium text-primary hover:bg-muted/40"
+          >
+            {showOff ? "Hide switched-off agents" : `Show ${hidden} switched-off agents`}
+          </button>
+        ) : null}
+      </Panel>
     </div>
   );
 }

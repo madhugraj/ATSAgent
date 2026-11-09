@@ -83,7 +83,30 @@ export type HarnessBudgetRow = {
   budget: number | null;
   limitStops: number;
 };
+export type CheckKey = "limits" | "autonomy" | "definition" | "handoffs" | "budget";
+export type CheckTone = Tone | "none";
+export type HarnessFix = {
+  severity: "act" | "watch";
+  check: CheckKey;
+  what: string;
+  why: string;
+  agents: string[];
+  next: { label: string; to: string; search?: Record<string, string> };
+};
+export type HarnessAgentRow = {
+  agent: string;
+  enabled: boolean;
+  autonomy: string;
+  risk: "low" | "medium" | "high";
+  owner: string;
+  runs: number;
+  checks: Record<CheckKey, CheckTone>;
+  detail: Record<CheckKey, string>;
+};
 export type Harness = {
+  fixes: HarnessFix[];
+  passing: { count: number; summary: string[] };
+  agents: HarnessAgentRow[];
   questions: HarnessQuestion[];
   limits: HarnessLimitRow[];
   autonomy: HarnessAutonomyRow[];
@@ -652,7 +675,280 @@ export async function computeHarness(orgId: string): Promise<Harness> {
     },
   ];
 
+  // ---- fix list (only what needs action) and the per-agent check matrix
+  const fixes: HarnessFix[] = [];
+  const ACTIVITY = { to: "/agents", search: { tab: "activity" } };
+  const SETTINGS = { to: "/agents/settings" };
+  const OBS = { to: "/agents/observability" };
+  const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
+  for (const l of limits) {
+    if (l.injection)
+      fixes.push({
+        severity: "act",
+        check: "limits",
+        what: `${plural(l.injection, "suspected injected instruction")}`,
+        why: "Untrusted text (CV, mail, web page) looked like it was giving the agent orders.",
+        agents: [l.agent],
+        next: { label: "Review the flagged runs", ...ACTIVITY },
+      });
+    if (l.refused)
+      fixes.push({
+        severity: "watch",
+        check: "limits",
+        what: `${plural(l.refused, "tool call")} refused`,
+        why: `The harness blocked ${l.refusedTools.join(", ")} — it held, but the agent tried.`,
+        agents: [l.agent],
+        next: { label: "See the runs", ...ACTIVITY },
+      });
+  }
+  for (const a of autonomy) {
+    const tainted = taintedUnapproved.get(a.agent) ?? 0;
+    const noCard = unapproved.get(a.agent) ?? 0;
+    if (tainted)
+      fixes.push({
+        severity: "act",
+        check: "autonomy",
+        what: `${plural(tainted, "change")} after an injection flag, not approved`,
+        why: "A run that had read suspicious text went on to change data without a person.",
+        agents: [a.agent],
+        next: { label: "Review the changes", ...ACTIVITY },
+      });
+    else if (a.autonomy === "suggest" && noCard)
+      fixes.push({
+        severity: "act",
+        check: "autonomy",
+        what: `${plural(noCard, "change")} made with no approval card`,
+        why: `Set to “asks first”, yet none of these has an approved card for its tool call (${plural(a.askedFirst, "approval card")} in total across ${plural(a.writesRun, "change")}).`,
+        agents: [a.agent],
+        next: {
+          label: noCard === 1 ? "Review the change" : `Review the ${noCard} changes`,
+          ...ACTIVITY,
+        },
+      });
+    else if (a.flag)
+      fixes.push({
+        severity: "act",
+        check: "autonomy",
+        what: a.flag,
+        why: `Risk tier ${a.risk}; autonomy “${a.autonomy.replace(/_/g, " ")}”.`,
+        agents: [a.agent],
+        next: { label: "Tighten in Agent settings", ...SETTINGS },
+      });
+  }
+  const testRunsOf = (d: HarnessDefinitionRow) =>
+    d.offVersion
+      .filter((o) => isPrerelease(o.version) || o.version === "unrecorded")
+      .reduce((x, o) => x + o.runs, 0);
+  const defBad = definitions.filter((d) => testRunsOf(d) > 0);
+  if (defBad.length) {
+    const n = defBad.reduce((x, d) => x + testRunsOf(d), 0);
+    fixes.push({
+      severity: "act",
+      check: "definition",
+      what:
+        unrecordedTotal === n
+          ? `${plural(n, "run")} recorded no definition version`
+          : `${plural(n, "run")} on a test or unrecorded definition`,
+      why: "Nobody can prove which rulebook these runs followed.",
+      agents: defBad.map((d) => d.agent),
+      next: { label: "See the runs", ...ACTIVITY },
+    });
+  }
+  for (const d of definitions)
+    if (d.evals === 0 && d.runs > 0)
+      fixes.push({
+        severity: "watch",
+        check: "definition",
+        what: "No eval covers this agent",
+        why: "A change to its rulebook can ship without a test.",
+        agents: [d.agent],
+        next: { label: "See the Agent register", to: "/agents/register" },
+      });
+  if (dead)
+    fixes.push({
+      severity: "act",
+      check: "handoffs",
+      what: `${plural(dead, "event")} gave up after ${MAX_EVENT_ATTEMPTS} attempts`,
+      why: `${[...new Set(failedEvents.filter((e) => e.attempts >= MAX_EVENT_ATTEMPTS).map((e) => e.type))].join(", ")} never reached an agent — the hand-off was lost.`,
+      agents: ["orchestrator"],
+      next: { label: "Check the orchestrator", ...OBS },
+    });
+  for (const l of loops)
+    fixes.push({
+      severity: "act",
+      check: "handoffs",
+      what: "Loop: an agent restarted itself on the same work",
+      why: l.path.join(" → "),
+      agents: [...new Set(l.path)],
+      next: { label: "See the runs", ...ACTIVITY },
+    });
+  for (const o of overlaps)
+    fixes.push({
+      severity: "act",
+      check: "handoffs",
+      what: `Ran ${o.runs}× at once on the same work`,
+      why: `Duplicate runs on ${o.subject}… waste budget and can act twice.`,
+      agents: [o.agent],
+      next: { label: "See the runs", ...ACTIVITY },
+    });
+  if (riskyDelegations)
+    fixes.push({
+      severity: "act",
+      check: "handoffs",
+      what: `${plural(riskyDelegations, "delegation")} after an injection flag`,
+      why: "Instructions from untrusted text may have been passed to another agent.",
+      agents: [...new Set(delegations.filter((d) => d.afterInjectionFlag).map((d) => d.from))],
+      next: { label: "Review the delegations", ...ACTIVITY },
+    });
+  if (pendingEvents.length && (oldestPending ?? 0) > 60)
+    fixes.push({
+      severity: "watch",
+      check: "handoffs",
+      what: `${plural(pendingEvents.length, "event")} waiting to be routed`,
+      why: `Oldest has waited ${Math.round((oldestPending ?? 0) / 60)} h.`,
+      agents: ["orchestrator"],
+      next: { label: "Check the orchestrator", ...OBS },
+    });
+  if (principalShifts)
+    fixes.push({
+      severity: "watch",
+      check: "handoffs",
+      what: `${plural(principalShifts, "run")} acted for a different person than the one who caused it`,
+      why: "Check the new run had no more permission than the person who started the chain.",
+      agents: [],
+      next: { label: "See the runs", ...ACTIVITY },
+    });
+  const copilotOn = autonomy.find((a) => a.agent === "copilot")?.enabled;
+  if (delegations.length === 0)
+    fixes.push({
+      severity: "watch",
+      check: "handoffs",
+      what: "No agent has delegated to another yet",
+      why: copilotOn
+        ? "Copilot is on, but the agent → agent channel is untested."
+        : "The agent → agent channel (Copilot) is untested in this organisation.",
+      agents: ["copilot"],
+      next: { label: "Try one task through Copilot", to: "/desk" },
+    });
+  for (const b of budget) {
+    if (b.budget !== null && b.tokensMonth > b.budget)
+      fixes.push({
+        severity: "act",
+        check: "budget",
+        what: "Over monthly budget",
+        why: `${b.tokensMonth.toLocaleString()} of ${b.budget.toLocaleString()} tokens.`,
+        agents: [b.agent],
+        next: { label: "Review in Agent settings", ...SETTINGS },
+      });
+    else if (b.limitStops)
+      fixes.push({
+        severity: "watch",
+        check: "budget",
+        what: `${plural(b.limitStops, "run")} stopped at a step or token limit`,
+        why: "The limit may be too tight — or the agent went round in circles.",
+        agents: [b.agent],
+        next: { label: "See the runs", ...ACTIVITY },
+      });
+  }
+  fixes.sort((a, b) => Number(a.severity === "watch") - Number(b.severity === "watch"));
+
+  const loopAgents = new Set(loops.flatMap((l) => l.path));
+  const overlapAgents = new Set(overlaps.map((o) => o.agent));
+  const handoffIn = new Map<string, { n: number; failed: number }>();
+  for (const e of edges.values()) {
+    if (!e.t.startsWith("ag-")) continue;
+    const a = e.t.slice(3);
+    const cur = handoffIn.get(a) ?? { n: 0, failed: 0 };
+    cur.n += e.runs;
+    cur.failed += e.failed;
+    handoffIn.set(a, cur);
+  }
+  const published = new Map<string, number>();
+  for (const n of nodes.values())
+    if (n.type === "publisher" && n.id.startsWith("pub-")) published.set(n.name, n.count);
+  const agentsMatrix: HarnessAgentRow[] = defs
+    .map((d) => {
+      const lim = limitMap.get(d.type);
+      const au = autonomy.find((x) => x.agent === d.type)!;
+      const def = definitions.find((x) => x.agent === d.type)!;
+      const bud = budget.find((x) => x.agent === d.type);
+      const hin = handoffIn.get(d.type);
+      const pub = published.get(d.type) ?? 0;
+      const noCard = unapproved.get(d.type) ?? 0;
+      const testRuns = testRunsOf(def);
+      const pct = bud?.budget ? bud.tokensMonth / bud.budget : 0;
+      const checks: Record<CheckKey, CheckTone> = {
+        limits: lim?.injection ? "bad" : lim?.refused ? "warn" : def.runs ? "good" : "none",
+        autonomy: au.flag ? "bad" : au.enabled || def.runs ? "good" : "none",
+        definition: testRuns
+          ? "bad"
+          : d.evals.length === 0
+            ? "warn"
+            : def.offVersion.length
+              ? "warn"
+              : def.runs
+                ? "good"
+                : "none",
+        handoffs:
+          loopAgents.has(d.type) || overlapAgents.has(d.type) || (hin?.failed ?? 0) > 0
+            ? "bad"
+            : hin || pub
+              ? "good"
+              : "none",
+        budget:
+          bud?.budget && bud.tokensMonth > bud.budget
+            ? "bad"
+            : bud?.limitStops || pct >= 0.8
+              ? "warn"
+              : bud && (bud.tokensMonth || bud.budget)
+                ? "good"
+                : "none",
+      };
+      const detail: Record<CheckKey, string> = {
+        limits: `${lim?.refused ?? 0} refused · ${lim?.injection ?? 0} injection flags`,
+        autonomy: `${au.writesRun} changes, ${au.askedFirst} asked first${noCard && au.autonomy === "suggest" ? ` · ${noCard} with no card` : ""}`,
+        definition: `approved ${def.current}${testRuns ? ` · ${testRuns} runs unrecorded/test` : ""} · ${plural(def.evals, "eval")}`,
+        handoffs: `started ${hin?.n ?? 0}× by others${hin?.failed ? ` (${hin.failed} failed)` : ""} · published ${pub}`,
+        budget: bud
+          ? `${bud.tokensMonth.toLocaleString()}${bud.budget ? ` of ${bud.budget.toLocaleString()}` : ""} tokens${bud.limitStops ? ` · ${bud.limitStops} limit stops` : ""}`
+          : "no usage",
+      };
+      return {
+        agent: d.type,
+        enabled: au.enabled,
+        autonomy: au.autonomy,
+        risk: d.riskTier,
+        owner: d.owner,
+        runs: def.runs,
+        checks,
+        detail,
+      };
+    })
+    .sort((a, b) => {
+      const score = (r: HarnessAgentRow) =>
+        Object.values(r.checks).filter((t) => t === "bad").length * 10 +
+        Object.values(r.checks).filter((t) => t === "warn").length;
+      return score(b) - score(a) || b.runs - a.runs || a.agent.localeCompare(b.agent);
+    });
+  const passingCount = agentsMatrix.reduce(
+    (s, r) => s + Object.values(r.checks).filter((t) => t === "good").length,
+    0,
+  );
+  const summary = [
+    limits.every((l) => !l.refused) ? "no refused calls" : "",
+    limits.every((l) => !l.injection) ? "no injection flags" : "",
+    autonomy.every((a) => !a.flag || a.flag.includes("approval"))
+      ? "autonomy within risk tier"
+      : "",
+    loops.length === 0 ? "no loops" : "",
+    overlaps.length === 0 ? "no duplicated runs" : "",
+    overBudget.length === 0 ? "within budget" : "",
+  ].filter(Boolean);
+
   return {
+    fixes,
+    passing: { count: passingCount, summary },
+    agents: agentsMatrix,
     questions,
     limits,
     autonomy,
