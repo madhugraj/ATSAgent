@@ -40,9 +40,8 @@ const NODE_STYLE: Record<string, Record<string, { color: string; r: number; labe
   behavior: {
     agent: { color: "#2a78d6", r: 15, label: "Agent" },
     norm: { color: "#eb6834", r: 14, label: "Person gate" },
-    failure: { color: "#898781", r: 9, label: "Failure cluster" },
-    vocab: { color: "#1baf7a", r: 11, label: "Vocabulary" },
-    hub: { color: "#898781", r: 13, label: "Diagnosis hub" },
+    failure: { color: "#d03b3b", r: 9, label: "Failing tool" },
+    hub: { color: "#898781", r: 13, label: "Group (click for members)" },
   },
   governance: {
     norm: { color: "#eb6834", r: 14, label: "Person gate" },
@@ -138,6 +137,7 @@ function GraphCanvas({
     const W = svg.clientWidth || 860;
     const H = 600;
     svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    let view = { x: 0, y: 0, w: W, h: H };
     const ns = "http://www.w3.org/2000/svg";
     const el = <T extends SVGElement>(tag: string, attrs: Record<string, string | number>): T => {
       const e = document.createElementNS(ns, tag) as T;
@@ -145,10 +145,12 @@ function GraphCanvas({
       return e;
     };
 
-    const sim: SimNode[] = nodes.map((n, i) => {
+    // idle agents are listed in the action plan; on the graph they collapse into their group node
+    const shown = nodes.filter((n) => !n.idle);
+    const sim: SimNode[] = shown.map((n, i) => {
       const ts = nodeStyle(viewKey, n.type);
       const r = n.idle ? 9 : viewKey === "vocabulary" && n.type === "skill" ? Math.min(14, 6 + Math.sqrt(n.ev ?? 4) * 1.3) : ts.r;
-      const ang = (i / nodes.length) * Math.PI * 2;
+      const ang = (i / shown.length) * Math.PI * 2;
       const rad = viewKey === "behavior" ? (n.type === "agent" ? 110 : 230) : viewKey === "vocabulary" ? (n.type === "family" ? 110 : 240) : 200;
       return {
         ...n, _r: r, vx: 0, vy: 0,
@@ -197,7 +199,9 @@ function GraphCanvas({
         "paint-order": "stroke", stroke: "var(--surface, #fcfcfb)", "stroke-width": 3,
         opacity: n.idle ? 0.7 : n.dormant ? 0.5 : 1,
       });
-      label.textContent = n.name + (n.type === "agent" && !n.idle ? ` ×${n.runs}` : n.idle ? " (idle)" : "");
+      const pretty = n.name.replace(/_/g, " ");
+      label.textContent =
+        n.type === "agent" ? `${pretty} · ${n.runs} run${n.runs === 1 ? "" : "s"}` : n.type === "failure" ? `fails: ${pretty}` : pretty;
       n.labelEl = label;
       gL.appendChild(label);
 
@@ -211,8 +215,8 @@ function GraphCanvas({
       n.group.addEventListener("pointermove", (ev) => {
         if (!drag) return;
         const rect = svg.getBoundingClientRect();
-        n.x = (ev.clientX - rect.left) * (W / rect.width);
-        n.y = (ev.clientY - rect.top) * (600 / rect.height);
+        n.x = view.x + (ev.clientX - rect.left) * (view.w / rect.width);
+        n.y = view.y + (ev.clientY - rect.top) * (view.h / rect.height);
         alpha = 1;
       });
       n.group.addEventListener("pointerup", () => {
@@ -279,6 +283,17 @@ function GraphCanvas({
       }
     }
     for (let i = 0; i < 900; i++) tick();
+    // fit the settled layout (plus label room) so the graph fills the frame instead of floating in it
+    {
+      const xs = sim.map((n) => n.x), ys = sim.map((n) => n.y);
+      const pad = 70;
+      const x0 = Math.min(...xs) - pad, x1 = Math.max(...xs) + pad;
+      const y0 = Math.min(...ys) - 40, y1 = Math.max(...ys) + 50;
+      const scale = Math.max((x1 - x0) / W, (y1 - y0) / H, 0.6);
+      const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+      view = { x: cx - (W * scale) / 2, y: cy - (H * scale) / 2, w: W * scale, h: H * scale };
+      svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.w} ${view.h}`);
+    }
     let raf = 0;
     const loop = () => {
       if (alpha > 0.005) {
@@ -509,7 +524,7 @@ function IntelligencePage() {
             <div className="overflow-hidden rounded-lg border border-border bg-card">
               <div className="flex items-center justify-between border-b border-border px-3 py-2 text-xs text-muted-foreground">
                 <span>{TAB_TITLE[tab]}</span>
-                <span>drag · click to inspect</span>
+                <span>click a circle for details · drag to rearrange</span>
               </div>
               <GraphCanvas
                 viewKey={tab}
@@ -527,7 +542,7 @@ function IntelligencePage() {
                     {st.label}
                   </span>
                 ))}
-                <span>faded = idle / dormant</span>
+                {tab === "vocabulary" && <span>faded = dormant</span>}
                 <span>line labels = real counts</span>
               </div>
             </div>

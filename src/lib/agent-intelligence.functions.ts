@@ -366,23 +366,23 @@ export const agentIntelligence = createServerFn({ method: "GET" })
 
     if (idleAgents.length)
       nodes.push({
-        id: "hub-idle", type: "hub", name: `no traffic (${idleAgents.length})`, members: idleAgents,
+        id: "hub-idle", type: "hub", name: `${idleAgents.length} agents not used yet`, members: idleAgents,
         cause: `${idleAgents.length} of ${registered.length} registered agents ran zero times: ${idleAgents.join(", ")}.`,
         effect: `Copilot — the routing front door — is among them: requests reach specialists directly, so routing and its guardrails are untested.`,
         action: `Per agent: enable (tick, copilot route, feature flag) or park. An idle manifest should be a decision, not an accident.`,
       });
     if (gapAgents.length)
       nodes.push({
-        id: "hub-gap", type: "hub", name: `step-trace gap (${gapAgents.length})`, members: gapAgents,
+        id: "hub-gap", type: "hub", name: `${gapAgents.length} call agents (no step trace)`, members: gapAgents,
         cause: `${gapAgents.join(", ")} ran with zero rows in agent_steps — voice/panel sessions are captured out-of-band.`,
         effect: `These agents bypass every step-based rule: error clusters, run limits on tools, and this graph.`,
         action: `Emit session turns as steps (consent, tool calls, outcomes) — until then, treat their transcripts as unaudited.`,
       });
 
     const normSpecs = [
-      { id: "n-hitl", name: "hitl_cards", what: "proposed actions wait for a person (shortlist, feed listing…)", stops: norm.hitl.stops, rejected: norm.hitl.rejected },
-      { id: "n-gates", name: "approval_gates", what: "requisition/org-profile/jd approvals before any publish", stops: norm.gates.stops, rejected: norm.gates.rejected },
-      { id: "n-clarify", name: "clarification", what: "agent asks, a person answers (ask_human)", stops: norm.clarify.stops, rejected: 0 },
+      { id: "n-hitl", name: "Approval cards", what: "proposed actions wait for a person (shortlist, feed listing…)", stops: norm.hitl.stops, rejected: norm.hitl.rejected },
+      { id: "n-gates", name: "Sign-off gates", what: "requisition/org-profile/jd approvals before any publish", stops: norm.gates.stops, rejected: norm.gates.rejected },
+      { id: "n-clarify", name: "Questions to a person", what: "agent asks, a person answers (ask_human)", stops: norm.clarify.stops, rejected: 0 },
     ];
     for (const s of normSpecs) {
       nodes.push({
@@ -391,15 +391,6 @@ export const agentIntelligence = createServerFn({ method: "GET" })
         effect: s.rejected > 0 ? `${s.rejected} overturned by a person (${Math.round((s.rejected / Math.max(s.stops, 1)) * 100)}%) — the miscalibration signal.` : `Zero overturns — calibrated.`,
         action: s.rejected >= 3 ? `This norm (or the proposals under it) needs review — see the rejected chains.` : `None.`,
       });
-    }
-    nodes.push({
-      id: "vocab-seed", type: "vocab", name: "skill graph",
-      cause: `Match scores and candidate skill arrays carry raw text[] — the skill ontology has not been persisted yet.`,
-      effect: `Matching normalizes with a hardcoded alias list; cross-run vocabulary learning is impossible until nodes exist.`,
-      action: `The Vocabulary tab of this page is the live seed — Phase 1 persists it into skill_nodes/skill_edges.`,
-    });
-    if (matchScoreRows.length > 0) {
-      edges.push({ s: "ag-intake", t: "vocab-seed", k: "awaits", label: `×${matchScoreRows.length} scores` });
     }
     for (const [tool, count] of errByTool) {
       if (count < 3) continue;
@@ -418,12 +409,6 @@ export const agentIntelligence = createServerFn({ method: "GET" })
             ? `Check egress rules / parser sandbox health; this is infrastructure, not intelligence.`
             : `Inspect last_error on the steps.`,
       });
-    }
-
-    for (const n of nodes) {
-      if (n.type === "agent" && !n.idle && (n.steps ?? 0) > 0 && !edges.some((e) => e.s === n.id)) {
-        edges.push({ s: n.id, t: "n-gates", k: "gated", label: "ran ungated" });
-      }
     }
 
     const behaviorChips: Chip[] = [];
