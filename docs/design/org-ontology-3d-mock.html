@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Org ontology 3D — mockup</title>
+<style>
+  :root { --fg:#e8e9f3; --muted:#9396ad; --panel:rgba(18,19,32,.78); --border:rgba(255,255,255,.09); --accent:#8b7dff; --emerg:#ffb648; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:#07080f; color:var(--fg); font:13px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; overflow:hidden; }
+  #stage { position:fixed; inset:0; background: radial-gradient(1200px 800px at 55% 45%, #161a33 0%, #0b0c18 55%, #06070d 100%); }
+  #labels { position:fixed; inset:0; pointer-events:none; }
+  .lbl { color:#cfd2e6; font-size:11px; white-space:nowrap; text-shadow:0 1px 3px #000, 0 0 8px #000; transition:opacity .3s; }
+  .lbl.fam { font-size:12px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#fff; opacity:.9; }
+  .lbl.role { font-weight:600; color:#fff; font-size:12px; }
+  .lbl.emerg { font-weight:700; color:var(--emerg); font-size:12.5px; }
+  .lbl.dom { font-weight:800; font-size:14px; color:#fff; letter-spacing:.04em; }
+  .top { position:fixed; top:14px; left:16px; right:16px; display:flex; align-items:center; gap:14px; pointer-events:none; }
+  .top > * { pointer-events:auto; }
+  .title { font-weight:700; font-size:15px; }
+  .title small { display:block; font-weight:400; color:var(--muted); font-size:11.5px; }
+  .seg { display:flex; background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:3px; backdrop-filter: blur(10px); }
+  .seg button { background:none; border:0; color:var(--muted); font:inherit; padding:6px 12px; border-radius:7px; cursor:pointer; }
+  .seg button.on { background:rgba(139,125,255,.2); color:#fff; }
+  .note { margin-left:auto; color:var(--muted); font-size:11px; background:var(--panel); border:1px solid var(--border); padding:6px 10px; border-radius:8px; }
+  .panel { position:fixed; right:16px; top:64px; width:330px; max-height:calc(100% - 170px); overflow:auto; background:var(--panel); border:1px solid var(--border); border-radius:14px; backdrop-filter: blur(12px); padding:14px 16px; }
+  .panel h3 { margin:0 0 2px; font-size:14px; }
+  .panel .k { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.06em; margin-top:12px; }
+  .chip { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; margin:3px 4px 0 0; border:1px solid var(--border); }
+  .stat { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:8px; }
+  .stat div { background:rgba(255,255,255,.04); border-radius:8px; padding:6px 8px; }
+  .stat b { display:block; font-size:16px; }
+  .stat span { color:var(--muted); font-size:10.5px; }
+  .em { display:flex; justify-content:space-between; gap:8px; padding:8px 0; border-top:1px solid var(--border); cursor:pointer; }
+  .em:first-of-type { border-top:0; }
+  .em:hover .n { color:var(--emerg); }
+  .em .n { font-weight:600; }
+  .em .p { color:var(--muted); font-size:11.5px; }
+  .badge { font-size:10.5px; padding:1px 7px; border-radius:999px; height:fit-content; white-space:nowrap; }
+  .b-signal { background:rgba(147,150,173,.18); color:#c9cbe0; }
+  .b-emerging { background:rgba(255,182,72,.18); color:var(--emerg); }
+  .b-established { background:rgba(80,200,140,.18); color:#7ce0ae; }
+  .btn { margin-top:12px; width:100%; background:var(--accent); color:#fff; border:0; border-radius:8px; padding:8px; font:inherit; font-weight:600; cursor:pointer; }
+  .btn.ghost { background:rgba(255,255,255,.06); }
+  .timeline { position:fixed; left:16px; right:362px; bottom:16px; background:var(--panel); border:1px solid var(--border); border-radius:14px; backdrop-filter: blur(12px); padding:10px 14px; display:flex; align-items:center; gap:12px; }
+  .timeline button { background:var(--accent); border:0; color:#fff; width:32px; height:32px; border-radius:50%; cursor:pointer; font-size:13px; flex:none; }
+  .timeline input { flex:1; accent-color:var(--accent); }
+  .timeline .m { min-width:84px; font-weight:600; }
+  .legend { position:fixed; left:16px; top:64px; background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:10px 12px; font-size:11.5px; color:var(--muted); backdrop-filter: blur(10px); }
+  .legend div { display:flex; align-items:center; gap:8px; margin:3px 0; }
+  .sw { width:10px; height:10px; border-radius:50%; display:inline-block; }
+  .sw.oct { border-radius:2px; transform:rotate(45deg); width:9px; height:9px; }
+  .spark { width:100%; height:42px; margin-top:6px; }
+  .legend summary { cursor:pointer; color:#fff; font-weight:600; list-style:none; }
+  .legend summary::-webkit-details-marker { display:none; }
+  @media (max-width: 1100px) {
+    .top { flex-wrap: wrap; }
+    .title small, .note { display:none; }
+    .legend { top:auto; bottom:226px; }
+    .panel { top:auto; bottom:64px; left:16px; right:16px; width:auto; max-height:150px; padding:10px 12px; }
+    .timeline { right:16px; bottom:12px; padding:6px 10px; }
+    .timeline #tsum { display:none; }
+  }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="labels"></div>
+
+<div class="top">
+  <div class="title">Organisation ontology <small>domain → capability families → skills → roles · new roles appear where skills from two roles keep combining</small></div>
+  <div class="seg" id="domains"></div>
+  <div class="note">Mockup · illustrative data · drag to rotate · scroll to zoom · click anything</div>
+</div>
+
+<details class="legend" open>
+  <summary>Legend</summary>
+  <div><span class="sw" style="background:#fff"></span>Domain</div>
+  <div><span class="sw" style="background:#8b7dff;opacity:.6"></span>Capability family</div>
+  <div><span class="sw" style="background:#9aa3c7;width:7px;height:7px"></span>Skill</div>
+  <div><span class="sw oct" style="background:#dfe3ff"></span>Established role</div>
+  <div><span class="sw" style="background:var(--emerg);box-shadow:0 0 8px var(--emerg)"></span>Emerging role</div>
+  <div style="margin-top:6px">Particles = a new role drawing from its parent roles</div>
+</details>
+
+<div class="panel" id="panel"></div>
+
+<div class="timeline">
+  <button id="play" title="Play">▶</button>
+  <span class="m" id="month"></span>
+  <input type="range" id="t" min="0" max="17" value="17" />
+  <span style="color:var(--muted);font-size:11.5px" id="tsum"></span>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
+
+/* ------------------------------------------------------------------ data (illustrative) */
+const MONTHS = ["Jun 25","Jul 25","Aug 25","Sep 25","Oct 25","Nov 25","Dec 25","Jan 26","Feb 26","Mar 26","Apr 26","May 26","Jun 26","Jul 26","Aug 26","Sep 26","Oct 26","Nov 26"];
+const DOMAINS = {
+  tech: {
+    name: "IT services",
+    families: {
+      Backend: { c: "#6c8cff", skills: ["Java","Spring","Node.js","Go","REST APIs","Microservices"] },
+      "Data science": { c: "#c06cff", skills: ["Python","Statistics","Pandas","Scikit-learn","Feature eng."] },
+      "AI / ML": { c: "#ff6cb8", skills: ["PyTorch","LLMs","RAG","Prompt eng.","Vector DBs","MLOps"] },
+      Frontend: { c: "#4fd1c5", skills: ["React","TypeScript","Next.js","CSS","Accessibility"] },
+      "Cloud & DevOps": { c: "#f6ad55", skills: ["AWS","Kubernetes","Terraform","CI/CD","Docker","Observability"] },
+      Data: { c: "#68d391", skills: ["SQL","Spark","dbt","Airflow","Snowflake"] },
+    },
+    roles: [
+      { id:"be", name:"Backend engineer", skills:["Java","Spring","REST APIs","Microservices","SQL"] },
+      { id:"ds", name:"Data scientist", skills:["Python","Statistics","Pandas","Scikit-learn","Feature eng."] },
+      { id:"fe", name:"Frontend engineer", skills:["React","TypeScript","Next.js","CSS","Accessibility"] },
+      { id:"devops", name:"DevOps engineer", skills:["AWS","Kubernetes","Terraform","CI/CD","Docker"] },
+      { id:"de", name:"Data engineer", skills:["SQL","Spark","dbt","Airflow","Snowflake","Python"] },
+    ],
+    emerging: [
+      { id:"aie", name:"AI engineer", parents:["be","ds"], skills:["Python","LLMs","RAG","Vector DBs","REST APIs","Microservices"], signal:3, emerging:7, established:13, demand:[0,0,0,1,1,2,3,3,5,6,8,9,11,12,14,15,17,19], supply:6, titles:["AI Engineer","GenAI Engineer","LLM Engineer"] },
+      { id:"fde", name:"Frontend deployment engineer", parents:["fe","devops"], skills:["Next.js","CI/CD","Docker","Observability","TypeScript"], signal:8, emerging:12, demand:[0,0,0,0,0,0,0,0,1,1,2,2,3,4,4,5,6,7], supply:2, titles:["Frontend Platform Engineer","Frontend Infra Engineer"] },
+      { id:"mlops", name:"ML platform engineer", parents:["devops","ds"], skills:["MLOps","Kubernetes","Python","Observability"], signal:10, emerging:15, demand:[0,0,0,0,0,0,0,0,0,0,1,1,2,2,3,3,4,5], supply:1, titles:["MLOps Engineer","ML Platform Engineer"] },
+      { id:"aide", name:"AI data engineer", parents:["de","aie"], skills:["Spark","Vector DBs","RAG","Airflow"], signal:14, demand:[0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,2,2], supply:0, titles:["AI Data Engineer"] },
+    ],
+  },
+  health: {
+    name: "Healthcare",
+    families: {
+      Clinical: { c: "#ff7a8a", skills: ["Patient care","Triage","Clinical protocols","Pharmacology","EHR charting"] },
+      "Health informatics": { c: "#6c8cff", skills: ["HL7 / FHIR","EHR systems","Clinical data","SQL","Interoperability"] },
+      "Regulatory": { c: "#f6ad55", skills: ["HIPAA","GCP","Audit","Quality systems","Clinical trials"] },
+      "Revenue cycle": { c: "#68d391", skills: ["ICD-10 coding","Billing","Claims","Denials mgmt"] },
+      "Data & AI": { c: "#c06cff", skills: ["Python","Statistics","ML models","Dashboards"] },
+      "Digital care": { c: "#4fd1c5", skills: ["Telehealth","Remote monitoring","Care pathways","Patient apps"] },
+    },
+    roles: [
+      { id:"nurse", name:"Clinical nurse", skills:["Patient care","Triage","Clinical protocols","EHR charting"] },
+      { id:"hia", name:"Health informatics analyst", skills:["HL7 / FHIR","EHR systems","Clinical data","SQL"] },
+      { id:"coder", name:"Medical coder", skills:["ICD-10 coding","Billing","Claims"] },
+      { id:"qa", name:"Clinical QA / regulatory", skills:["HIPAA","GCP","Audit","Quality systems"] },
+      { id:"da", name:"Data analyst", skills:["Python","Statistics","Dashboards","SQL"] },
+    ],
+    emerging: [
+      { id:"cda", name:"Clinical data analyst", parents:["nurse","da"], skills:["Clinical data","EHR charting","Statistics","Dashboards"], signal:2, emerging:6, established:12, demand:[0,0,1,1,2,2,3,4,4,5,6,7,7,8,9,9,10,11], supply:4, titles:["Clinical Data Analyst"] },
+      { id:"vcn", name:"Virtual care nurse", parents:["nurse"], skills:["Telehealth","Remote monitoring","Patient care","Care pathways"], signal:5, emerging:10, demand:[0,0,0,0,0,1,1,2,2,3,4,5,5,6,7,7,8,9], supply:3, titles:["Telehealth Nurse","Virtual Care Nurse"] },
+      { id:"cai", name:"Clinical AI specialist", parents:["hia","da"], skills:["ML models","HL7 / FHIR","Clinical protocols","Quality systems"], signal:11, emerging:15, demand:[0,0,0,0,0,0,0,0,0,0,0,1,1,2,2,3,4,5], supply:0, titles:["Clinical AI Specialist"] },
+      { id:"rca", name:"Revenue integrity analyst", parents:["coder","da"], skills:["Denials mgmt","Claims","Dashboards","Statistics"], signal:13, demand:[0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,2,2,3], supply:1, titles:["Revenue Integrity Analyst"] },
+    ],
+  },
+  mfg: {
+    name: "Manufacturing",
+    families: {
+      "OT / automation": { c: "#f6ad55", skills: ["PLC","SCADA","HMI","Robotics","Industrial networks"] },
+      Quality: { c: "#68d391", skills: ["Six Sigma","GMP","SPC","Root cause","ISO 9001"] },
+      "Supply chain": { c: "#4fd1c5", skills: ["Planning","Inventory","ERP (SAP)","Procurement","Logistics"] },
+      Maintenance: { c: "#ff7a8a", skills: ["Predictive maint.","Vibration analysis","CMMS","Reliability"] },
+      "Data & IIoT": { c: "#c06cff", skills: ["Python","Time-series","IoT sensors","Edge computing","Dashboards"] },
+      "Process engineering": { c: "#6c8cff", skills: ["Lean","Process design","CAD","Simulation"] },
+    },
+    roles: [
+      { id:"auto", name:"Automation engineer", skills:["PLC","SCADA","HMI","Industrial networks"] },
+      { id:"qe", name:"Quality engineer", skills:["Six Sigma","SPC","Root cause","ISO 9001"] },
+      { id:"mt", name:"Maintenance engineer", skills:["CMMS","Reliability","Vibration analysis"] },
+      { id:"sc", name:"Supply chain planner", skills:["Planning","Inventory","ERP (SAP)","Procurement"] },
+      { id:"da", name:"Data analyst", skills:["Python","Dashboards","Time-series"] },
+    ],
+    emerging: [
+      { id:"iiot", name:"Industrial IoT engineer", parents:["auto","da"], skills:["IoT sensors","Edge computing","SCADA","Time-series"], signal:2, emerging:7, established:13, demand:[0,0,1,1,2,3,3,4,5,6,6,7,8,9,9,10,11,12], supply:3, titles:["IIoT Engineer","Industrial IoT Engineer"] },
+      { id:"pdm", name:"Predictive maintenance analyst", parents:["mt","da"], skills:["Predictive maint.","Vibration analysis","Python","Time-series"], signal:6, emerging:11, demand:[0,0,0,0,0,0,1,1,2,3,3,4,5,5,6,7,7,8], supply:2, titles:["Reliability Data Analyst","PdM Analyst"] },
+      { id:"dq", name:"Digital quality engineer", parents:["qe","da"], skills:["SPC","Dashboards","Python","Root cause"], signal:12, emerging:16, demand:[0,0,0,0,0,0,0,0,0,0,0,0,1,1,2,2,3,4], supply:1, titles:["Digital Quality Engineer"] },
+      { id:"dtp", name:"Digital twin engineer", parents:["auto","mt"], skills:["Simulation","CAD","IoT sensors","Edge computing"], signal:15, demand:[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,2], supply:0, titles:["Digital Twin Engineer"] },
+    ],
+  },
+};
+
+const statusAt = (e, t) => t < e.signal ? null : e.established !== undefined && t >= e.established ? "established" : e.emerging !== undefined && t >= e.emerging ? "emerging" : "signal";
+
+/* ------------------------------------------------------------------ scene */
+const stage = document.getElementById("stage");
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+stage.appendChild(renderer.domElement);
+const labels = new CSS2DRenderer({ element: document.getElementById("labels") });
+labels.setSize(innerWidth, innerHeight);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x0a0b16, 0.0042);
+const camera = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 1, 2000);
+const HOME = () => (innerWidth < 1100 ? 330 : 240);
+camera.position.set(0, 110, HOME());
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.06;
+controls.autoRotate = true; controls.autoRotateSpeed = 0.35;
+controls.minDistance = 60; controls.maxDistance = 420;
+
+scene.add(new THREE.HemisphereLight(0xbfc8ff, 0x10111a, 0.9));
+const key = new THREE.DirectionalLight(0xffffff, 1.4); key.position.set(80, 140, 120); scene.add(key);
+const rim = new THREE.PointLight(0x8b7dff, 900, 600); rim.position.set(-120, -40, -100); scene.add(rim);
+
+// soft star field for depth
+{
+  const g = new THREE.BufferGeometry(); const p = [];
+  for (let i = 0; i < 1400; i++) { const r = 500 + Math.random() * 500, a = Math.random() * Math.PI * 2, b = Math.acos(2 * Math.random() - 1); p.push(r * Math.sin(b) * Math.cos(a), r * Math.cos(b), r * Math.sin(b) * Math.sin(a)); }
+  g.setAttribute("position", new THREE.Float32BufferAttribute(p, 3));
+  scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0x6b6f99, size: 1.4, transparent: true, opacity: 0.55 })));
+}
+
+function glowTexture(color) {
+  const c = document.createElement("canvas"); c.width = c.height = 128; const x = c.getContext("2d");
+  const g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
+  g.addColorStop(0, color); g.addColorStop(0.25, color + "aa"); g.addColorStop(1, color + "00");
+  x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+const GLOW_EMERG = glowTexture("#ffb648");
+
+let world = null; // current domain group + bookkeeping
+const pickables = [];
+
+function label(text, cls) {
+  const d = document.createElement("div"); d.className = "lbl " + cls; d.textContent = text;
+  const o = new CSS2DObject(d); return o;
+}
+
+function buildDomain(key) {
+  const D = DOMAINS[key];
+  const g = new THREE.Group();
+  const book = { group: g, nodes: new Map(), roleLinks: [], emerg: [], particles: [], domain: D, key };
+
+  // domain core
+  const core = new THREE.Mesh(new THREE.IcosahedronGeometry(7, 3), new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x8b7dff, emissiveIntensity: 0.6, roughness: 0.3, metalness: 0.2 }));
+  g.add(core); const cl = label(D.name, "dom"); cl.position.set(0, 12, 0); core.add(cl);
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture("#8b7dff"), depthWrite: false, transparent: true, opacity: 0.6 }));
+  halo.scale.set(48, 48, 1); g.add(halo);
+
+  // families on a tilted ring, skills on a small sphere around each family
+  const fams = Object.entries(D.families);
+  const skillPos = new Map();
+  fams.forEach(([name, f], i) => {
+    const a = (i / fams.length) * Math.PI * 2;
+    const center = new THREE.Vector3(Math.cos(a) * 92, Math.sin(a * 2) * 14, Math.sin(a) * 92);
+    const col = new THREE.Color(f.c);
+    const shell = new THREE.Mesh(new THREE.SphereGeometry(19, 40, 40), new THREE.MeshStandardMaterial({ color: col, transparent: true, opacity: 0.07, roughness: 1, depthWrite: false }));
+    shell.position.copy(center); g.add(shell);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(19, 0.18, 8, 90), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.35 }));
+    ring.position.copy(center); ring.rotation.x = Math.PI / 2; g.add(ring);
+    const fl = label(name, "fam"); fl.position.copy(center).add(new THREE.Vector3(0, 25, 0)); g.add(fl);
+    // spoke to the core
+    const spoke = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), center]), new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: 0.18 }));
+    g.add(spoke);
+    f.skills.forEach((s, j) => {
+      const n = f.skills.length, y = 1 - (j / Math.max(n - 1, 1)) * 2, r = Math.sqrt(1 - y * y), th = j * 2.399963;
+      const p = center.clone().add(new THREE.Vector3(Math.cos(th) * r * 11, y * 9, Math.sin(th) * r * 11));
+      skillPos.set(s, { p, col, fam: name });
+      const m = new THREE.Mesh(new THREE.SphereGeometry(1.7, 20, 20), new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 0.35, roughness: 0.45 }));
+      m.position.copy(p); m.userData = { kind: "skill", name: s, fam: name }; g.add(m); pickables.push(m);
+      const sl = label(s, ""); sl.position.set(0, 3.4, 0); m.add(sl); m.userData.lbl = sl;
+      book.nodes.set("s:" + s, m);
+    });
+  });
+
+  // established roles: just outside the centroid of their skills
+  const rolePos = new Map();
+  for (const r of D.roles) {
+    const pts = r.skills.map((s) => skillPos.get(s)?.p).filter(Boolean);
+    const c = pts.reduce((a, b) => a.add(b), new THREE.Vector3()).divideScalar(pts.length);
+    const p = c.clone().setY(0).normalize().multiplyScalar(c.clone().setY(0).length() * 0.62).setY(-34);
+    rolePos.set(r.id, p);
+    const m = new THREE.Mesh(new THREE.OctahedronGeometry(4.2), new THREE.MeshStandardMaterial({ color: 0xdfe3ff, emissive: 0x5560a0, emissiveIntensity: 0.5, roughness: 0.25, metalness: 0.35, flatShading: true }));
+    m.position.copy(p); m.userData = { kind: "role", role: r }; g.add(m); pickables.push(m);
+    const rl = label(r.name, "role"); rl.position.set(0, -7.5, 0); m.add(rl);
+    book.nodes.set("r:" + r.id, m);
+    for (const s of r.skills) {
+      const sp = skillPos.get(s); if (!sp) continue;
+      const curve = new THREE.QuadraticBezierCurve3(p, p.clone().lerp(sp.p, 0.5).add(new THREE.Vector3(0, 10, 0)), sp.p);
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(28)), new THREE.LineBasicMaterial({ color: sp.col, transparent: true, opacity: 0.22 }));
+      g.add(line); book.roleLinks.push({ line, role: r.id, skill: s });
+    }
+  }
+
+  // emerging roles: above the midpoint of their parents, born at `signal`
+  for (const e of D.emerging) {
+    const parents = e.parents.map((id) => rolePos.get(id) ?? book.emerg.find((x) => x.e.id === id)?.pos).filter(Boolean);
+    const mid = parents.reduce((a, b) => a.add(b), new THREE.Vector3()).divideScalar(parents.length);
+    // spread new roles around the ring above their parents, staggered in height so labels never stack
+    const k = book.emerg.length;
+    const ang = Math.atan2(mid.z, mid.x) + (k % 2 ? 0.35 : -0.35);
+    const pos = new THREE.Vector3(Math.cos(ang) * 70, 46 + k * 15, Math.sin(ang) * 70);
+    const mesh = new THREE.Mesh(new THREE.IcosahedronGeometry(4.6, 1), new THREE.MeshStandardMaterial({ color: 0xffc56b, emissive: 0xff9a1f, emissiveIntensity: 1.1, roughness: 0.25, metalness: 0.1 }));
+    mesh.position.copy(pos); mesh.userData = { kind: "emerging", e }; g.add(mesh); pickables.push(mesh);
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_EMERG, depthWrite: false, transparent: true, blending: THREE.AdditiveBlending }));
+    glow.scale.set(30, 30, 1); mesh.add(glow);
+    const el = label(e.name, "emerg"); el.position.set(0, 8.5, 0); mesh.add(el);
+    // "born from" streams with particles; dashed links to its skills
+    const streams = [];
+    for (const pp of parents) {
+      const curve = new THREE.CatmullRomCurve3([pp, pp.clone().lerp(pos, 0.5).add(new THREE.Vector3(0, 22, 0)), pos]);
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(48)), new THREE.LineBasicMaterial({ color: 0xffb648, transparent: true, opacity: 0.55 }));
+      g.add(line);
+      const dots = [];
+      for (let k = 0; k < 6; k++) {
+        const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_EMERG, depthWrite: false, transparent: true, blending: THREE.AdditiveBlending }));
+        s.scale.set(3.2, 3.2, 1); g.add(s); dots.push({ s, off: k / 6 });
+      }
+      streams.push({ curve, line, dots });
+    }
+    const skillLines = e.skills.map((s) => {
+      const sp = skillPos.get(s); if (!sp) return null;
+      const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints([pos, sp.p]), new THREE.LineDashedMaterial({ color: 0xffb648, dashSize: 1.6, gapSize: 1.6, transparent: true, opacity: 0.28 }));
+      l.computeLineDistances(); g.add(l); return l;
+    }).filter(Boolean);
+    book.emerg.push({ e, mesh, glow, label: el, streams, skillLines, pos, scale: 0 });
+    book.nodes.set("e:" + e.id, mesh);
+  }
+
+  g.userData.fade = 0; // fades in
+  return book;
+}
+
+/* ------------------------------------------------------------------ state + UI */
+let T = 17, playing = false, focus = null, flyTo = null;
+const tInput = document.getElementById("t");
+const monthEl = document.getElementById("month");
+const tsum = document.getElementById("tsum");
+const panel = document.getElementById("panel");
+
+function setDomain(key) {
+  if (world) {
+    // CSS2D labels live in the DOM; removing the group does not remove nested ones
+    world.group.traverse((o) => { if (o.isCSS2DObject) o.element.remove(); });
+    scene.remove(world.group);
+    pickables.length = 0;
+  }
+  world = buildDomain(key); scene.add(world.group);
+  document.querySelectorAll("#domains button").forEach((b) => b.classList.toggle("on", b.dataset.k === key));
+  focus = null; renderPanel(); applyTime();
+}
+const seg = document.getElementById("domains");
+for (const [k, d] of Object.entries(DOMAINS)) {
+  const b = document.createElement("button"); b.textContent = d.name; b.dataset.k = k; b.onclick = () => setDomain(k); seg.appendChild(b);
+}
+
+function sparkline(arr, upto) {
+  const w = 298, h = 42, max = Math.max(1, ...arr);
+  const pts = arr.slice(0, upto + 1).map((v, i) => `${(i / (arr.length - 1)) * w},${h - 4 - (v / max) * (h - 8)}`).join(" ");
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}"><polyline points="${pts}" fill="none" stroke="#ffb648" stroke-width="2"/><line x1="0" x2="${w}" y1="${h - 4}" y2="${h - 4}" stroke="rgba(255,255,255,.12)"/></svg>`;
+}
+const roleName = (id) => world.domain.roles.find((r) => r.id === id)?.name ?? world.domain.emerging.find((r) => r.id === id)?.name ?? id;
+
+function renderPanel() {
+  const D = world.domain;
+  if (focus?.kind === "emerging") {
+    const e = focus.e, st = statusAt(e, T);
+    panel.innerHTML = `
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:start"><h3>${e.name}</h3>${st ? `<span class="badge b-${st}">${st}</span>` : `<span class="badge b-signal">not yet</span>`}</div>
+      <div style="color:var(--muted)">Born from <b style="color:#fff">${e.parents.map(roleName).join(" + ")}</b></div>
+      <div class="stat"><div><b>${e.demand[T]}</b><span>open asks</span></div><div><b>${e.supply}</b><span>in your pool</span></div><div><b>${MONTHS[e.signal]}</b><span>first signal</span></div></div>
+      <div class="k">Demand over time</div>${sparkline(e.demand, T)}
+      <div class="k">Skill bundle</div>${e.skills.map((s) => `<span class="chip">${s}</span>`).join("")}
+      <div class="k">Titles seen in requisitions and CVs</div>${e.titles.map((s) => `<span class="chip">${s}</span>`).join("")}
+      <div class="k">Why it was flagged</div>
+      <div style="color:var(--muted);margin-top:4px">Requisitions and CVs started asking for skills from ${e.parents.map(roleName).join(" and ")} together, more often each month, under new job titles.</div>
+      <button class="btn">Confirm into job architecture</button>
+      <button class="btn ghost" onclick="window.__back()">← All emerging roles</button>`;
+    return;
+  }
+  if (focus?.kind === "role") {
+    const r = focus.role;
+    const kids = D.emerging.filter((e) => e.parents.includes(r.id));
+    panel.innerHTML = `<h3>${r.name}</h3><div style="color:var(--muted)">Established role</div>
+      <div class="k">Skill bundle</div>${r.skills.map((s) => `<span class="chip">${s}</span>`).join("")}
+      <div class="k">New roles growing out of it</div>${kids.length ? kids.map((e) => `<span class="chip" style="color:var(--emerg)">${e.name}</span>`).join("") : '<div style="color:var(--muted)">None yet</div>'}
+      <button class="btn ghost" onclick="window.__back()">← All emerging roles</button>`;
+    return;
+  }
+  if (focus?.kind === "skill") {
+    const roles = [...D.roles, ...D.emerging].filter((r) => r.skills.includes(focus.name));
+    panel.innerHTML = `<h3>${focus.name}</h3><div style="color:var(--muted)">${focus.fam}</div>
+      <div class="k">Used by roles</div>${roles.map((r) => `<span class="chip" ${r.parents ? 'style="color:var(--emerg)"' : ""}>${r.name}</span>`).join("") || "—"}
+      <button class="btn ghost" onclick="window.__back()">← All emerging roles</button>`;
+    return;
+  }
+  const visible = D.emerging.filter((e) => statusAt(e, T));
+  panel.innerHTML = `<h3>New roles in ${D.name}</h3><div style="color:var(--muted)">Where skills from two roles keep combining · as of ${MONTHS[T]}</div>
+    <div style="margin-top:10px">${visible.length ? visible.map((e) => `
+      <div class="em" data-id="${e.id}"><div><div class="n">${e.name}</div><div class="p">${e.parents.map(roleName).join(" + ")} · ${e.demand[T]} asks · ${e.supply} in pool</div></div><span class="badge b-${statusAt(e, T)}">${statusAt(e, T)}</span></div>`).join("") : '<div style="color:var(--muted)">No new roles yet at this point — press play.</div>'}</div>`;
+  panel.querySelectorAll(".em").forEach((el) => (el.onclick = () => select(world.nodes.get("e:" + el.dataset.id))));
+}
+window.__back = () => { focus = null; flyTo = { target: new THREE.Vector3(0, 12, 0), dist: HOME() }; controls.autoRotate = true; renderPanel(); };
+
+function applyTime() {
+  tInput.value = T; monthEl.textContent = MONTHS[T];
+  const D = world.domain;
+  const counts = { signal: 0, emerging: 0, established: 0 };
+  for (const e of D.emerging) { const s = statusAt(e, T); if (s) counts[s]++; }
+  tsum.textContent = `${counts.established} established · ${counts.emerging} emerging · ${counts.signal} early signal`;
+  renderPanel();
+}
+tInput.oninput = () => { T = +tInput.value; applyTime(); };
+document.getElementById("play").onclick = () => {
+  playing = !playing; document.getElementById("play").textContent = playing ? "❚❚" : "▶";
+  if (playing && T >= 17) { T = 0; applyTime(); }
+};
+setInterval(() => { if (!playing) return; if (T >= 17) { playing = false; document.getElementById("play").textContent = "▶"; return; } T++; applyTime(); }, 900);
+
+/* ------------------------------------------------------------------ picking + camera */
+const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
+let hovered = null;
+function pick(ev) {
+  mouse.set((ev.clientX / innerWidth) * 2 - 1, -(ev.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(mouse, camera);
+  return ray.intersectObjects(pickables, false).find((h) => h.object.visible && h.object.material.opacity !== 0)?.object ?? null;
+}
+renderer.domElement.addEventListener("pointermove", (ev) => {
+  const o = pick(ev); hovered = o; renderer.domElement.style.cursor = o ? "pointer" : "grab";
+});
+let downAt = null;
+renderer.domElement.addEventListener("pointerdown", (ev) => (downAt = [ev.clientX, ev.clientY]));
+renderer.domElement.addEventListener("pointerup", (ev) => {
+  if (!downAt || Math.hypot(ev.clientX - downAt[0], ev.clientY - downAt[1]) > 4) return;
+  const o = pick(ev); if (o) select(o);
+});
+function select(mesh) {
+  if (!mesh) return;
+  focus = mesh.userData.kind === "emerging" ? { kind: "emerging", e: mesh.userData.e } : mesh.userData.kind === "role" ? { kind: "role", role: mesh.userData.role } : { kind: "skill", name: mesh.userData.name, fam: mesh.userData.fam };
+  const p = new THREE.Vector3(); mesh.getWorldPosition(p);
+  let dist = mesh.userData.kind === "skill" ? 80 : 150;
+  if (mesh.userData.kind === "emerging") {
+    // frame the new role together with the roles it was born from
+    const pts = [p, ...mesh.userData.e.parents.map((id) => world.nodes.get("r:" + id) ?? world.nodes.get("e:" + id)).filter(Boolean).map((m) => m.getWorldPosition(new THREE.Vector3()))];
+    const c = pts.reduce((a, b) => a.add(b.clone()), new THREE.Vector3()).divideScalar(pts.length);
+    dist = Math.max(170, Math.max(...pts.map((q) => q.distanceTo(c))) * 2.6);
+    p.copy(c);
+  }
+  if (innerWidth < 1100) dist *= 1.25;
+  flyTo = { target: p, dist };
+  controls.autoRotate = false; renderPanel();
+}
+
+/* ------------------------------------------------------------------ loop */
+const clock = new THREE.Clock();
+const tmp = new THREE.Vector3();
+function related(mesh) {
+  if (!focus) return true;
+  const D = world.domain;
+  const u = mesh.userData;
+  if (focus.kind === "emerging") {
+    const e = focus.e;
+    return (u.kind === "emerging" && u.e.id === e.id) || (u.kind === "role" && e.parents.includes(u.role.id)) || (u.kind === "skill" && e.skills.includes(u.name));
+  }
+  if (focus.kind === "role") {
+    const r = focus.role;
+    return (u.kind === "role" && u.role.id === r.id) || (u.kind === "skill" && r.skills.includes(u.name)) || (u.kind === "emerging" && u.e.parents.includes(r.id));
+  }
+  return (u.kind === "skill" && u.name === focus.name) || (u.kind === "role" && u.role.skills.includes(focus.name)) || (u.kind === "emerging" && u.e.skills.includes(focus.name));
+}
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
+  if (flyTo) {
+    controls.target.lerp(flyTo.target, 1 - Math.pow(0.002, dt));
+    const dir = tmp.copy(camera.position).sub(controls.target).normalize();
+    const want = controls.target.clone().add(dir.multiplyScalar(flyTo.dist));
+    camera.position.lerp(want, 1 - Math.pow(0.01, dt));
+    if (camera.position.distanceTo(want) < 0.5 && controls.target.distanceTo(flyTo.target) < 0.3) flyTo = null;
+  }
+  if (world) {
+    world.group.userData.fade = Math.min(1, world.group.userData.fade + dt * 1.5);
+    // nodes: dim what is unrelated to the focus, ease every change
+    for (const m of pickables) {
+      const on = related(m);
+      const target = m.userData.kind === "emerging" ? undefined : on ? 1 : 0.15;
+      if (target !== undefined) {
+        m.material.transparent = true;
+        m.material.opacity += (target * world.group.userData.fade - m.material.opacity) * Math.min(1, dt * 6);
+        if (m.userData.lbl) m.userData.lbl.element.style.opacity = focus ? (on ? 1 : 0) : hovered === m ? 1 : 0;
+      }
+      const s = hovered === m ? 1.35 : 1; m.scale.lerp(tmp.set(s, s, s), Math.min(1, dt * 8));
+    }
+    for (const l of world.roleLinks) {
+      const on = !focus || (focus.kind === "role" && focus.role.id === l.role) || (focus.kind === "skill" && focus.name === l.skill);
+      l.line.material.opacity += ((on ? (focus ? 0.7 : 0.22) : 0.03) - l.line.material.opacity) * Math.min(1, dt * 6);
+    }
+    // emerging roles grow in with time; particles flow from parents
+    for (const em of world.emerg) {
+      const st = statusAt(em.e, T);
+      const want = !st ? 0 : st === "signal" ? 0.55 : st === "emerging" ? 0.85 : 1;
+      em.scale += (want - em.scale) * Math.min(1, dt * 3);
+      const on = related(em.mesh) || !focus;
+      const vis = em.scale > 0.02;
+      const pulse = 1 + Math.sin(time * 2.4 + em.pos.x) * 0.06;
+      em.mesh.visible = vis; em.mesh.scale.setScalar(Math.max(0.001, em.scale * pulse));
+      em.mesh.material.transparent = true; em.mesh.material.opacity = on ? 1 : 0.2;
+      em.glow.material.opacity = (on ? 0.85 : 0.15) * em.scale;
+      em.label.element.style.opacity = vis ? (on ? 1 : 0.15) : 0;
+      for (const s of em.streams) {
+        s.line.material.opacity = vis ? (on ? 0.55 : 0.06) * em.scale : 0;
+        for (const d of s.dots) {
+          const u = (time * 0.18 + d.off) % 1;
+          s.curve.getPoint(u, d.s.position);
+          d.s.material.opacity = vis ? (on ? 0.9 : 0.1) * Math.sin(u * Math.PI) * em.scale : 0;
+        }
+      }
+      for (const l of em.skillLines) l.material.opacity = vis && focus?.kind === "emerging" && focus.e.id === em.e.id ? 0.55 : vis ? 0.12 * em.scale : 0;
+    }
+  }
+  controls.update();
+  renderer.render(scene, camera);
+  labels.render(scene, camera);
+}
+
+addEventListener("resize", () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight); labels.setSize(innerWidth, innerHeight);
+});
+
+controls.target.set(0, 12, 0);
+if (innerWidth < 1100) document.querySelector(".legend").removeAttribute("open");
+setDomain("tech");
+animate();
+</script>
+</body>
+</html>
