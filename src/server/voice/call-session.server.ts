@@ -96,6 +96,10 @@ export const REPLY_NUDGE_MS = 4_000;
 /** Cue the screening assistant this long after the candidate's hello if it has not begun. */
 export const SCREENING_REPLY_CUE_MS = 1_200;
 
+/** Still silent this long after a cue → cue again, at most MAX_REPEAT_NUDGES more times. */
+export const REPEAT_NUDGE_MS = 3_000;
+export const MAX_REPEAT_NUDGES = 2;
+
 /**
  * The candidate speaks first (they say "hello" when they pick up); the
  * assistant answers them. If they say nothing for `callerFirstMs`, the
@@ -116,30 +120,39 @@ export function openingWatch(o: {
 }): () => void {
   const t0 = Date.now();
   let cuedAt: number | null = null;
-  let done = false;
-  const nudge = (text: string) => {
-    done = true;
-    log.warn(`${o.tag}.no_greeting`, { call_id: o.callId });
+  // A real call on 9 November: one cue 1.2 s after the hello, then ~10 s of silence
+  // before the model spoke. The cue is now repeated until it does.
+  let nudgedAt: number | null = null;
+  let nudges = 0;
+  const nudge = (text: string, t: number) => {
+    nudges++;
+    nudgedAt = t;
+    log.warn(`${o.tag}.no_greeting`, { call_id: o.callId, nudge: nudges });
     o.session.sendText(text);
   };
   const timer = setInterval(() => {
-    if (done || o.aiSpoke()) {
+    if (o.aiSpoke() || nudges > MAX_REPEAT_NUDGES) {
       clearInterval(timer);
       return;
     }
     const t = Date.now();
+    if (nudgedAt !== null) {
+      if (t - nudgedAt > REPEAT_NUDGE_MS)
+        nudge("(The person is on the line and waiting. Speak now.)", t);
+      return;
+    }
     const heard = o.lastHeard();
     if (heard !== null) {
       // Counted from when they stopped talking, not from their first word.
       if (t - heard > (o.replyNudgeMs ?? REPLY_NUDGE_MS))
-        nudge("(The person has answered the phone. Reply to them now.)");
+        nudge("(The person has answered the phone. Reply to them now.)", t);
       return;
     }
     if (cuedAt === null && t - t0 >= o.callerFirstMs) {
       cuedAt = t;
       o.session.sendText("(The person picked up but has not said anything yet. Greet them now.)");
     } else if (cuedAt !== null && t - cuedAt > GREETING_NUDGE_MS) {
-      nudge("(The person is on the line and waiting. Speak now.)");
+      nudge("(The person is on the line and waiting. Speak now.)", t);
     }
   }, 100);
   return () => clearInterval(timer);
@@ -149,7 +162,7 @@ export const DEFAULT_LIMITS: CallLimits = {
   ringMs: 45_000,
   silenceMs: 20_000,
   firstWordsMs: 25_000,
-  callerFirstMs: 5_000,
+  callerFirstMs: 4_000,
 };
 
 export {
@@ -427,7 +440,9 @@ async function placeCall(
     tools: CALL_TOOLS,
     voice: policy.voice,
     // Wait through a thinking pause instead of jumping in.
-    turnTaking: { silenceMs: 1000, endOfSpeech: "low", prefixPaddingMs: 300 },
+    // 1.6 s, not 1 s: a real call on 9 November cut in ("Got it — implemented") while
+    // the candidate paused mid-list.
+    turnTaking: { silenceMs: 1600, endOfSpeech: "low", prefixPaddingMs: 300 },
     // Indian English, so short replies ("yes", "okay") are not heard as another language.
     languageCode: "en-IN",
     events,

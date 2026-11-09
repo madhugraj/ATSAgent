@@ -145,6 +145,10 @@ export async function buildScreeningKit(input: {
       "inflated experience, employment gaps and short tenures, ownership versus participation, salary/notice/" +
       "location fit, and mindset for this team. Never ask something the CV already answers plainly, and never ask " +
       "about age, marital status, religion, caste, gender, health or family. " +
+      "Never put an e-mail address, phone number or a member of staff's name (a reporting manager, a recruiter) in a " +
+      "question — say \"the hiring team\" instead; reporting lines are not something to ask the candidate about. " +
+      "Questions may be asked aloud on a phone call: keep each one short (under 30 words), one plain ask, no list of " +
+      "buzzwords, and keep your reasoning about the CV in reason, not in the question. " +
       (organisationContext
         ? "organisation_context is approved fact about the employer: you may verify what it states about the organisation's domain and regulators (licence checks, compliance norms, registered titles). It never changes a score or a verdict.\n"
         : "") +

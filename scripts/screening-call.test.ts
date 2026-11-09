@@ -358,8 +358,29 @@ describe("the call brief", () => {
     ...over,
   });
 
-  test("screening questions: never pay or logistics; the weightiest four", () => {
+  test("screening questions: never pay or logistics; as many as the call allows", () => {
     expect(brief.questionsForCall(KIT as never).map((q) => q.id)).toEqual(["q1", "q2"]);
+  });
+
+  test("questions fit the call: two in 10 minutes, said without the CV lead-in", () => {
+    expect(brief.callQuestionCount(10)).toBe(2);
+    expect(brief.callQuestionCount(6)).toBe(1);
+    expect(brief.callQuestionCount(20)).toBe(4);
+    expect(
+      brief.spokenQuestion(
+        "While your profile details high-level model adaptation, how hands-on are you with Python today?",
+      ),
+    ).toBe("How hands-on are you with Python today?");
+    expect(brief.spokenQuestion("How do you run incidents?")).toBe("How do you run incidents?");
+  });
+
+  test("9 November call: consent after a concern, no insisting, questions back answered", () => {
+    const p = brief.callSystemPrompt(facts());
+    expect(p).toContain("an earlier \"yes, it's a good time\" does not count");
+    expect(p).toContain("never insist or say you have it on record");
+    expect(p).toContain("record open_to_relocate only if they then say yes or no");
+    expect(p).toContain("one open follow-up");
+    expect(p).toContain('never answer a question with "Thank you, noted"');
   });
 
   test("the HR call: who, why, consent with alternatives, the role, why them, details, questions", () => {
@@ -792,7 +813,7 @@ describe("a whole call with a fake line", () => {
     expect(seen.opts!.system).toContain("Current local time:");
     expect(seen.opts!.system).not.toContain("expected CTC is above our budget");
     expect(seen.opts!.voice).toBe("Kore");
-    expect(seen.opts!.turnTaking).toMatchObject({ endOfSpeech: "low", silenceMs: 1000 });
+    expect(seen.opts!.turnTaking).toMatchObject({ endOfSpeech: "low", silenceMs: 1600 });
     expect(seen.opts!.languageCode).toBe("en-IN");
     // Refused before consent, and for the pay question.
     expect(
