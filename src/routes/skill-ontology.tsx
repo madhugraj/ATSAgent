@@ -15,6 +15,8 @@ import { PageHeader } from "@/components/ats";
 import { FixList, Panel, Verdict, type FixRow, type Pill } from "@/components/ops-layout";
 import { ReportBar, useReportWindow } from "@/components/report-bar";
 import { readTalentBrain, type TalentBrain } from "@/lib/ontology.functions";
+import { readOrgOntology, type OrgOntology } from "@/lib/org-ontology.functions";
+import { OrgOntologyExplorer } from "@/components/OrgOntologyExplorer";
 import { downloadOntologyReport } from "@/lib/agent-reports";
 
 export const Route = createFileRoute("/skill-ontology")({
@@ -33,8 +35,21 @@ export const Route = createFileRoute("/skill-ontology")({
 
 type Node = TalentBrain["nodes"][number];
 
-export function ontologyFixes(d: TalentBrain): FixRow[] {
+export function ontologyFixes(d: TalentBrain, org?: OrgOntology): FixRow[] {
   const fixes: FixRow[] = [];
+  for (const e of org?.emerging ?? []) {
+    if (e.confirmed || e.status === "signal") continue;
+    const parents = e.parents.map(
+      (p) => [...org!.roles, ...org!.emerging].find((r) => r.id === p)?.name ?? p,
+    );
+    fixes.push({
+      severity: e.status === "established" ? "act" : "watch",
+      what: `New role forming: ${e.name}`,
+      why: `Born from ${parents.join(" + ")} — ${e.requisitions} requisitions so far, ${e.supply} in your pool. Confirm it into job architecture so it can be hired against.`,
+      agents: [e.name],
+      next: { label: "Review and confirm", to: "#roles" },
+    });
+  }
   const active = d.nodes.filter((n) => n.status !== "retired");
   if (d.stats.requisitions > 0 && active.every((n) => n.demand === 0))
     fixes.push({
@@ -82,6 +97,11 @@ function SkillOntologyPage() {
   });
   const [selected, setSelected] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
+  const org = useQuery({
+    queryKey: ["org-ontology"],
+    queryFn: () => readOrgOntology(),
+    staleTime: 60_000,
+  });
   const d = q.data;
   const from = new Date(rw.window.from),
     to = new Date(rw.window.to);
@@ -148,7 +168,9 @@ function SkillOntologyPage() {
           <ReportBar
             rw={rw}
             disabled={!d}
-            onDownload={(kind) => d && downloadOntologyReport(kind, d, rw.window, ontologyFixes(d))}
+            onDownload={(kind) =>
+              d && downloadOntologyReport(kind, d, rw.window, ontologyFixes(d, org.data), org.data)
+            }
           />
         }
       />
@@ -170,7 +192,7 @@ function SkillOntologyPage() {
             neutral={d.stats.requisitions === 0}
           />
           <FixList
-            rows={ontologyFixes(d)}
+            rows={ontologyFixes(d, org.data)}
             subjectHeader="Skill"
             passing={{
               count: view.covered,
@@ -182,8 +204,25 @@ function SkillOntologyPage() {
             }}
           />
 
+          <div id="roles" className="scroll-mt-4">
+            <Panel
+              title={`Roles and how new ones are forming${org.data ? ` · ${org.data.domain.name}` : ""}`}
+              hint="Press play to watch roles form month by month · click a new role to name and confirm it"
+            >
+              <div className="p-3">
+                {org.data ? (
+                  <OrgOntologyExplorer ont={org.data} queryKey={["org-ontology"]} />
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    {org.isError ? "Roles could not be loaded." : "Loading…"}
+                  </p>
+                )}
+              </div>
+            </Panel>
+          </div>
+
           <Panel
-            title="Ontology graph"
+            title="Skill graph"
             hint={`${d.stats.nodeCount} skills · ${d.stats.edgeCount} co-occurrence links · click a skill for detail`}
           >
             <div className="flex justify-end px-4 pt-1 text-xs">

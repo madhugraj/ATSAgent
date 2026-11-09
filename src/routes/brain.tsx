@@ -2,7 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   Brain,
@@ -17,6 +17,8 @@ import {
 } from "lucide-react";
 
 import { readTalentBrain, rebuildTalentBrain, type TalentBrain } from "@/lib/ontology.functions";
+import { readOrgOntology } from "@/lib/org-ontology.functions";
+import { OrgOntologyExplorer } from "@/components/OrgOntologyExplorer";
 import { usePlatform } from "@/hooks/usePlatform";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,9 +26,20 @@ import { Badge } from "@/components/ui/badge";
 import { OntologyGraph } from "@/components/OntologyGraph";
 // three / react-force-graph-3d touch `window` at module scope, so this module
 // must never be evaluated during server rendering — load it lazily, client-side.
-const OntologyGraph3D = lazy(() =>
-  import("@/components/OntologyGraph3D").then((m) => ({ default: m.OntologyGraph3D })),
-);
+// The 3D view is the organisation ontology (domain → families → skills →
+// roles, with emerging roles); it loads three lazily, client-side only.
+function OrgOntology3DView() {
+  const read = useServerFn(readOrgOntology);
+  const q = useQuery({ queryKey: ["org-ontology"], queryFn: () => read() });
+  if (q.isLoading) return <p className="text-sm text-muted-foreground">Loading the 3D map…</p>;
+  if (!q.data)
+    return (
+      <p className="text-sm text-muted-foreground">
+        The organisation ontology could not be loaded.
+      </p>
+    );
+  return <OrgOntologyExplorer ont={q.data} queryKey={["org-ontology"]} />;
+}
 
 export const Route = createFileRoute("/brain")({
   head: () => ({
@@ -54,6 +67,7 @@ function TalentBrainPage() {
   const { isSuperUser } = usePlatform();
   const [scope, setScope] = useState<"org" | "platform">("org");
   const [view, setView] = useState<"3d" | "2d">("3d");
+  const orgView3d = view === "3d" && scope === "org";
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   const [selected, setSelected] = useState<string | null>(null);
@@ -182,7 +196,7 @@ function TalentBrainPage() {
         </section>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+      <div className={orgView3d ? "grid gap-4" : "grid gap-4 lg:grid-cols-[1fr_320px]"}>
         <div className="space-y-3">
           <div className="relative max-w-sm">
             <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -242,17 +256,8 @@ function TalentBrainPage() {
               No skill evidence yet. Add candidates or raise a requisition, then press “Relearn
               ontology”.
             </p>
-          ) : mounted && view === "3d" ? (
-            <Suspense
-              fallback={<p className="text-sm text-muted-foreground">Loading the 3D map…</p>}
-            >
-              <OntologyGraph3D
-                nodes={nodes}
-                edges={data?.edges ?? []}
-                selected={selected}
-                onSelect={(slug) => setSelected((cur) => (cur === slug ? null : slug))}
-              />
-            </Suspense>
+          ) : mounted && view === "3d" && scope === "org" ? (
+            <OrgOntology3DView />
           ) : (
             <OntologyGraph
               nodes={nodes}
@@ -263,7 +268,8 @@ function TalentBrainPage() {
           )}
         </div>
 
-        <aside className="space-y-4">
+        {/* the 3D explorer carries its own detail panel */}
+        <aside className={orgView3d ? "hidden" : "space-y-4"}>
           <section className="panel-lift p-4">
             <h2 className="text-sm font-semibold">{node ? node.name : "Select a skill"}</h2>
             {node ? (

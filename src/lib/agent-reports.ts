@@ -14,6 +14,7 @@ import type { ReportKind, Window } from "@/components/report-bar";
 import type { AgentIntelligence } from "@/lib/agent-intelligence.functions";
 import type { ActivityReport, Harness } from "@/lib/agent-governance.functions";
 import type { TalentBrain } from "@/lib/ontology.functions";
+import type { OrgOntology } from "@/lib/org-ontology.functions";
 import { windowLabel } from "@/lib/report-window";
 
 type Cell = string | number;
@@ -486,11 +487,73 @@ export function downloadGovernanceReport(
 
 /* ------------------------------------------------------------- ontology */
 
+function orgSections(org: OrgOntology, window: Window): Section[] {
+  const name = (id: string) => [...org.roles, ...org.emerging].find((r) => r.id === id)?.name ?? id;
+  const month = (i: number | null) => (i === null ? "" : (org.months[i] ?? ""));
+  const from = window.from.slice(0, 7),
+    to = window.to.slice(0, 7);
+  return [
+    {
+      title: "Emerging roles",
+      note: `Roles forming from combinations of established ones (${org.domain.name}). Status as of today; "In period" marks a first signal inside the report period.`,
+      head: [
+        "Role",
+        "Born from",
+        "Status",
+        "Confirmed",
+        "Requisitions",
+        "In pool",
+        "First signal",
+        "Emerging",
+        "Established",
+        "In period",
+        "Skill bundle",
+        "Titles seen",
+      ],
+      rows: org.emerging.map((e) => {
+        const first = month(e.signal);
+        return [
+          e.name,
+          e.parents.map(name).join(" + "),
+          e.status,
+          e.confirmed ? "yes" : "no",
+          e.requisitions,
+          e.supply,
+          first,
+          month(e.emerging),
+          month(e.established),
+          first >= from && first <= to ? "yes" : "",
+          e.skills.join(", "),
+          e.titles.join(" · "),
+        ];
+      }),
+    },
+    {
+      title: "Role demand by month",
+      note: "Cumulative requisitions asking for each emerging role's skill bundle.",
+      head: ["Role", ...org.months],
+      rows: org.emerging.map((e) => [e.name, ...e.demand]),
+    },
+    {
+      title: "Established roles",
+      head: ["Role", "Source", "Requisitions", "In pool", "Typical skills"],
+      rows: org.roles.map((r) => [
+        r.name,
+        r.source === "seed" ? `${org.domain.name} starter role` : "learned",
+        r.demand,
+        r.supply,
+        r.skills.join(", "),
+      ]),
+    },
+  ];
+}
+
 export function downloadOntologyReport(
   kind: ReportKind,
   d: TalentBrain,
   window: Window,
   fixes: FixRow[],
+  org?: OrgOntology,
 ) {
   const from = new Date(window.from),
     to = new Date(window.to);
@@ -535,6 +598,7 @@ export function downloadOntologyReport(
     ],
     sections: [
       fixSection(fixes),
+      ...(org ? orgSections(org, window) : []),
       {
         title: "Skills",
         head: [
