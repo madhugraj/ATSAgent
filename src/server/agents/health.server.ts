@@ -976,7 +976,11 @@ export const RULES: Rule[] = [
         where c.org_id = ${orgId} and c.purpose = 'screening'
           and c.updated_at >= now() - interval '7 days'`);
       const x = r[0];
-      if (!x || x.total < HEALTH.minCallAnswers7d || x.prompted / x.total < HEALTH.callPromptedShare)
+      if (
+        !x ||
+        x.total < HEALTH.minCallAnswers7d ||
+        x.prompted / x.total < HEALTH.callPromptedShare
+      )
         return [];
       return [
         {
