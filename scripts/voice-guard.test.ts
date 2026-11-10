@@ -663,6 +663,27 @@ describe("the sweep", () => {
       .from(callReviews)
       .where(and(eq(callReviews.orgId, orgId), eq(callReviews.id, gaveUp!.id)));
     expect(due).toMatchObject({ status: "due", attempts: 0 });
+
+    // Dialled again (a retry reuses the call) and talked this time: reviewed again, in
+    // full — a test call on 10 November kept the line-only review of its first attempt.
+    await db
+      .update(screeningCalls)
+      .set({
+        status: "completed",
+        attempt: 2,
+        consentAt: new Date(),
+        endedAt: new Date(),
+        transcript: [
+          { who: "ai", text: "Hello, I'm an AI assistant.", at: new Date().toISOString() },
+        ],
+      })
+      .where(eq(screeningCalls.id, declined));
+    expect((await review.sweepCallReviews({ orgId })).queued).toBe(1);
+    const [redialled] = await db.select().from(callReviews).where(eq(callReviews.callId, declined));
+    expect(redialled).toMatchObject({ scope: "full", attempts: 1 });
+    expect(redialled!.status).not.toBe("done");
+    // …and only once.
+    expect((await review.sweepCallReviews({ orgId })).queued).toBe(0);
   });
 
   test("another run cannot read or file a call it is not reviewing", async () => {
