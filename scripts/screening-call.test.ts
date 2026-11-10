@@ -1478,7 +1478,89 @@ describe("the hiring desk", () => {
       .select({ body: hiringMessages.body })
       .from(hiringMessages)
       .where(eq(hiringMessages.conversationId, conv!.id));
-    expect(again.at(-1)?.body).toMatch(/already arranged/);
+    // "Call again" while that call waits moves it (inside the calling hours) — one call only.
+    expect(again.at(-1)?.body).toMatch(
+      /^(Moved the screening call with .* to now|It's outside your calling hours \(.*\), so the earliest is )/,
+    );
+    expect(
+      await db
+        .select({ id: screeningCalls.id })
+        .from(screeningCalls)
+        .where(and(eq(screeningCalls.applicationId, appId), eq(screeningCalls.status, "approved"))),
+    ).toHaveLength(1);
+  });
+});
+
+describe("an arranged call, from the desk (10 November)", () => {
+  test("when, call now, cancel — and a repeat whose reason the record contradicts is cancelled", async () => {
+    const desk = await import("../src/server/desk/desk.server");
+    const { writeAudit } = await import("../src/server/audit");
+    const { orgMembers, userRoles } = await import("../drizzle/schema");
+    await db
+      .insert(orgMembers)
+      .values({ orgId, userId, email: `sc-${stamp}@test.local`, status: "active" } as never)
+      .onConflictDoNothing();
+    await db.insert(userRoles).values({ userId, orgId, role: "recruiter" }).onConflictDoNothing();
+    const { callId, appId } = await seedCall({ status: "approved", attempt: 0 });
+    const tomorrow = new Date(Date.now() + 86_400_000);
+    await db.update(screeningCalls).set({ dueAt: tomorrow }).where(eq(screeningCalls.id, callId));
+    const [app] = await db
+      .select({ requisitionId: applications.requisitionId })
+      .from(applications)
+      .where(eq(applications.id, appId));
+    const [conv] = await db
+      .insert(hiringConversations)
+      .values({
+        orgId,
+        requisitionId: app!.requisitionId,
+        createdBy: userId,
+        title: "SRE",
+      } as never)
+      .returning();
+    const last = async () =>
+      (
+        await db
+          .select({ body: hiringMessages.body })
+          .from(hiringMessages)
+          .where(eq(hiringMessages.conversationId, conv!.id))
+      ).at(-1)?.body;
+    const row = async () =>
+      (await db.select().from(screeningCalls).where(eq(screeningCalls.id, callId)))[0]!;
+    // The desk knows it is arranged, and when.
+    expect(await desk.deskFacts(conv as never)).toMatch(
+      /Arranged AI screening calls: .* — approved, rings /,
+    );
+    await desk.manageCallFromDesk(conv as never, userId, { action: "when" });
+    expect(await last()).toMatch(/^The screening call with .* rings /);
+    // "Call now" on an arranged call moves it — never "already arranged".
+    await desk.callCandidateFromDesk(conv as never, userId, {});
+    expect(await last()).toMatch(
+      /^(Moved the screening call with .* to now|It's outside your calling hours \(.*\), so the earliest is )/,
+    );
+    expect((await row()).dueAt!.getTime()).toBeLessThan(tomorrow.getTime());
+    const moved = await db
+      .select({ detail: auditLog.detail })
+      .from(auditLog)
+      .where(and(eq(auditLog.entityId, callId), eq(auditLog.action, "screening_call.moved")));
+    expect(moved).toHaveLength(1);
+    // A repeat arranged on a reason the record does not back: re-checked, then cancelled.
+    await writeAudit({
+      actor: `user:${userId}`,
+      actorUserId: userId,
+      orgId,
+      action: "screening_call.requested",
+      entityType: "screening_call",
+      entityId: callId,
+      detail: { again: true, reason: "the call is unclear" },
+    });
+    await desk.manageCallFromDesk(conv as never, userId, { action: "move", when: "now" });
+    expect(await last()).toMatch(
+      /arranged on "the call is unclear"\. The last call's record does not support that: .* So I have cancelled it\./,
+    );
+    expect((await row()).status).toBe("cancelled");
+    // Nothing left to move or cancel: said plainly.
+    await desk.manageCallFromDesk(conv as never, userId, { action: "cancel" });
+    expect(await last()).toMatch(/^No screening call is arranged for /);
   });
 });
 

@@ -17,7 +17,19 @@ import { localWhen } from "@/lib/local-time";
 import { placeLabel } from "@/lib/work-mode";
 import type { Stage } from "@/lib/lifecycle";
 import { sourceLabel as channelSourceLabel } from "@/lib/job-channels";
-import { and, asc, desc, eq, ilike, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm";
 import { z } from "zod";
 
 import { INJECTION_RULES, aiJson, untrusted } from "@/lib/ai-gateway.server";
@@ -337,6 +349,16 @@ const Command = z.discriminatedUnion("type", [
     reason: z.string().trim().max(500).optional(),
   }),
   z.object({
+    // An AI screening call already arranged: when it rings, move it, cancel it.
+    type: z.literal("manage_call"),
+    action: z.enum(["when", "move", "cancel"]),
+    name: z.string().trim().max(120).optional(),
+    ranks: z.array(z.number().int().min(1).max(50)).max(1).optional(),
+    /** "now", or the organisation's local time "YYYY-MM-DD HH:mm". */
+    when: z.string().trim().max(40).optional(),
+    reason: z.string().trim().max(500).optional(),
+  }),
+  z.object({
     // Going back a step (the organisation's rule: only for a reason the desk judges).
     type: z.literal("go_back"),
     step: z.enum(["rescore", "move_candidate"]),
@@ -412,6 +434,7 @@ const SYSTEM = [
   '- "command": {"type":"none"} unless the person asks to act: "talk to / screen / call the first 5" → {"type":"screen","top":5}; "screen 1, 3 and 4" → {"type":"screen","ranks":[1,3,4]}; "create a new role" → {"type":"new_role"}; "use REQ-2026-014" → {"type":"use_existing","code":"REQ-2026-014"}.',
   '- "command" also: "close / cancel / delete / withdraw this role" → {"type":"close_role"}.',
   '- Going back a step: "re-score the candidates" → {"type":"go_back","step":"rescore"}; "send Meera back to screening", "move candidate 2 back to shortlisted", "undo the rejection of Ravi", "bring her back to L1" → {"type":"go_back","step":"move_candidate"} with "name" or "ranks":[n] and "toStage" (one of sourced, applied, ai_screened, shortlisted, l1, l2, l3, reserve — "screening" is "applied", undoing a rejection is "shortlisted" unless they say otherwise). Add "reason":"<their words>" when they say why; when the desk has just asked why and they answer, it is the same go_back command with "reason" and the details from the conversation. Never feedback.',
+  '- An AI screening call that FACTS shows is already arranged: "when is the call?" → {"type":"manage_call","action":"when"}; "call now", "call her now", "move the call to Friday 3 pm", "she is unavailable tomorrow, call on Thursday" → {"type":"manage_call","action":"move","when":"now" or "YYYY-MM-DD HH:mm" in the organisation\'s time (NOW gives today)}; "cancel the call" → {"type":"manage_call","action":"cancel"}. Add "name" when they name the candidate and "reason" with their words. With no call arranged, calling is call_candidate.',
   '- "call again", "do the screening call again", "redo the AI call", "phone Meera", "call candidate 2" → {"type":"call_candidate"} with "name" when they name the candidate (as they said it) or "ranks":[n] for a rank — never feedback, even when OPEN REQUESTS lists something: the system arranges an AI phone screening call. Add "reason":"<their words>" when they say why. When the desk has just asked why a call should be repeated and they answer, that is the same command with "reason" (and the name from the conversation).',
   '- When the person delegates a detail to you or to the market ("as per market needs", "you decide", "what does the market say?", "pick it up from research") → {"type":"research","fields":[...]} with the fields they delegated: "skills", "experience" and/or "budget". (JD details are not a research command — for those set researchRole true as above.) When OPEN PROPOSAL is yes and they agree ("ok", "yes", "use these", "go ahead") → {"type":"accept"}.',
   '- "show / see / open / read the JD (job description)" → {"type":"show_jd"}; the system posts the full text. Never summarise the JD instead or send the person elsewhere to read it.',
@@ -452,6 +475,7 @@ export async function runTurn(
       (await hiringManagerOptions(orgId)).map((m) => m.name).join(", ") || "none registered yet"
     }`,
     `STAGE: ${conv.status}`,
+    `NOW (organisation's time): ${localWhen(new Date(), await orgTimeZone(orgId))}`,
     `OPEN PROPOSAL: ${open ? `yes — ${JSON.stringify({ ...open.proposal, sources: undefined, reasoning: undefined })} (if the person asks for changes to it, put the changed full lists in "slots")` : "no"}`,
     `OPEN REQUESTS (from agents in this thread): ${
       requests.length
@@ -1215,6 +1239,10 @@ async function handleUserMessageInner(
       return;
     }
     await screenCandidates(conv, userId, ids);
+    return;
+  }
+  if (cmd.type === "manage_call") {
+    await manageCallFromDesk(conv, userId, cmd);
     return;
   }
   if (cmd.type === "go_back") {
@@ -2837,6 +2865,7 @@ export async function deskFacts(conv: Conversation): Promise<string> {
     `Job description: ${jd ? jd.replace("_", " ") : "none yet"}.`,
     await jdTemplateFacts(conv.orgId, conv.requisitionId),
     `Candidates in its pipeline: ${c?.total ?? 0} (${c?.scored ?? 0} scored, ${c?.shortlisted ?? 0} shortlisted).`,
+    await arrangedCallsFact(conv),
     progress.next ? `Current journey step: ${progress.next.stage} — ${progress.next.text}` : "",
   ]
     .filter(Boolean)
@@ -4382,6 +4411,208 @@ export async function announceNewApplicants(orgId?: string): Promise<number> {
   return posted;
 }
 
+/** The candidate's AI screening call that has not happened yet, if any. */
+async function openCallFor(orgId: string, applicationId: string) {
+  const { screeningCalls } = await import("@db/schema");
+  const { OPEN_CALL } = await import("../voice/request.server");
+  const [c] = await db
+    .select({ id: screeningCalls.id, status: screeningCalls.status, dueAt: screeningCalls.dueAt })
+    .from(screeningCalls)
+    .where(
+      and(
+        eq(screeningCalls.orgId, orgId),
+        eq(screeningCalls.applicationId, applicationId),
+        eq(screeningCalls.purpose, "screening"),
+        inArray(screeningCalls.status, [...OPEN_CALL]),
+      ),
+    )
+    .orderBy(desc(screeningCalls.createdAt))
+    .limit(1);
+  return c ?? null;
+}
+
+/** FACTS: this role's arranged AI screening calls, and when they ring. */
+async function arrangedCallsFact(conv: Conversation): Promise<string> {
+  if (!conv.requisitionId) return "";
+  const { screeningCalls } = await import("@db/schema");
+  const { OPEN_CALL } = await import("../voice/request.server");
+  const rows = await db
+    .select({
+      name: candidates.fullName,
+      status: screeningCalls.status,
+      dueAt: screeningCalls.dueAt,
+    })
+    .from(screeningCalls)
+    .innerJoin(candidates, eq(candidates.id, screeningCalls.candidateId))
+    .where(
+      and(
+        eq(screeningCalls.orgId, conv.orgId),
+        eq(screeningCalls.requisitionId, conv.requisitionId),
+        eq(screeningCalls.purpose, "screening"),
+        inArray(screeningCalls.status, [...OPEN_CALL]),
+      ),
+    )
+    .limit(10);
+  if (!rows.length) return "Arranged AI screening calls: none.";
+  const tz = await orgTimeZone(conv.orgId);
+  return `Arranged AI screening calls: ${rows
+    .map(
+      (r) =>
+        `${r.name} — ${r.status.replace(/_/g, " ")}${r.dueAt ? `, rings ${localWhen(r.dueAt, tz)}` : ""}`,
+    )
+    .join("; ")}.`;
+}
+
+/**
+ * An arranged AI screening call, from the chat: when it rings, move it (inside
+ * the calling hours — "now" outside them is the next opening, said plainly), or
+ * cancel it. Same roles as "Call now"; every change audited. Moving a call that
+ * repeats a completed screen re-checks the reason it was arranged on against the
+ * last call's record first, and cancels it when the record does not support it —
+ * the hiring desk's judgement stands. (A real thread on 10 November could only
+ * answer "A screening call is already arranged" to "call now".)
+ */
+export async function manageCallFromDesk(
+  conv: Conversation,
+  userId: string,
+  cmd: {
+    action: "when" | "move" | "cancel";
+    name?: string | undefined;
+    ranks?: number[] | undefined;
+    when?: string | undefined;
+    reason?: string | undefined;
+  },
+): Promise<void> {
+  const say = (body: string) => postMessage(conv, { role: "desk", body });
+  if (!conv.requisitionId) {
+    await say("Choose or create the role first.");
+    return;
+  }
+  const { assertRole } = await import("@/lib/auth.middleware");
+  try {
+    await assertRole(userId, conv.orgId, ["recruiter", "hr_head", "president_cbo"]);
+  } catch {
+    await say("Only TA, the HR head or the CBO can change a screening call.");
+    return;
+  }
+  const app = await pickCandidate(conv, cmd, say, { lastCalled: true });
+  if (!app) return;
+  const call = await openCallFor(conv.orgId, app.id);
+  const tz = await orgTimeZone(conv.orgId);
+  if (!call) {
+    await say(
+      `No screening call is arranged for ${app.name}. Say "call ${app.name} again" to arrange one.`,
+    );
+    return;
+  }
+  const { screeningCalls } = await import("@db/schema");
+  const audit = (action: string, detail: Record<string, unknown>) =>
+    writeAudit({
+      actor: `user:${userId}`,
+      actorUserId: userId,
+      orgId: conv.orgId,
+      action,
+      entityType: "screening_call",
+      entityId: call.id,
+      detail: { via: "hiring_desk", conversation_id: conv.id, ...detail },
+    });
+  const cancel = async (why: string) => {
+    await db
+      .update(screeningCalls)
+      .set({ status: "cancelled", dueAt: null, updatedAt: new Date() })
+      .where(
+        and(
+          eq(screeningCalls.id, call.id),
+          eq(screeningCalls.orgId, conv.orgId),
+          inArray(screeningCalls.status, [
+            "requested",
+            "approved",
+            "callback",
+            "no_answer",
+            "failed",
+          ]),
+        ),
+      );
+    await audit("screening_call.cancelled", { reason: why.slice(0, 500) });
+  };
+  if (call.status === "dialling" || call.status === "in_progress") {
+    await say(`The call with ${app.name} is happening right now.`);
+    return;
+  }
+  if (cmd.action === "when") {
+    await say(
+      call.dueAt
+        ? `The screening call with ${app.name} rings ${localWhen(call.dueAt, tz)}.`
+        : `A screening call with ${app.name} is arranged (${call.status.replace(/_/g, " ")}).`,
+    );
+    return;
+  }
+  if (cmd.action === "cancel") {
+    await cancel(cmd.reason ?? "cancelled from the hiring desk");
+    await say(`Cancelled the screening call with ${app.name}.`);
+    return;
+  }
+  // Move. A repeat of a completed screen is re-checked on its record first.
+  const { auditLog } = await import("@db/schema");
+  const [asked] = await db
+    .select({ detail: auditLog.detail })
+    .from(auditLog)
+    .where(
+      and(
+        eq(auditLog.orgId, conv.orgId),
+        eq(auditLog.action, "screening_call.requested"),
+        eq(auditLog.entityId, call.id),
+      ),
+    )
+    .orderBy(desc(auditLog.createdAt))
+    .limit(1);
+  const d = (asked?.detail ?? {}) as { again?: boolean; reason?: string };
+  if (d.again) {
+    const verdict = await judgeGoingBack(conv.orgId, {
+      step: `repeat the AI phone screening call with ${app.name}, who has already completed one`,
+      reason: d.reason ?? "(no reason was recorded)",
+      evidence: await callEvidence(conv.orgId, app.id).catch(() => ""),
+    });
+    if (!verdict?.valid) {
+      const why = verdict?.why ?? "the reason could not be checked";
+      await cancel(`re-checked before moving: ${why}`);
+      await audit("desk.go_back_refused", {
+        step: "screening_call_again",
+        reason: (d.reason ?? "").slice(0, 500),
+        why,
+      });
+      await say(
+        `This call repeats ${app.name}'s completed screen, and it was arranged on "${d.reason ?? "no reason"}". The last call's record does not support that: ${why} So I have cancelled it. If there is a real problem with the last call or new information, tell me what it is and I'll arrange a call.`,
+      );
+      return;
+    }
+  }
+  const { phoneScreeningPolicyOf } = await import("../voice/settings.server");
+  const { callbackAt, inWindow, nextWindowStart } = await import("../voice/schedule");
+  const { callingHours } = await import("../voice/call-brief.server");
+  const policy = await phoneScreeningPolicyOf(conv.orgId);
+  const now = Date.now();
+  const asap = !cmd.when || /^now$/i.test(cmd.when);
+  const dueAt = asap ? nextWindowStart(now, policy, tz) : callbackAt(cmd.when, now, policy, tz);
+  await db
+    .update(screeningCalls)
+    .set({ dueAt, updatedAt: new Date() })
+    .where(and(eq(screeningCalls.id, call.id), eq(screeningCalls.orgId, conv.orgId)));
+  await audit("screening_call.moved", {
+    from: call.dueAt?.toISOString() ?? null,
+    to: dueAt.toISOString(),
+    asked: cmd.when ?? "now",
+    reason: (cmd.reason ?? "").slice(0, 500),
+  });
+  const soon = dueAt.getTime() - now < 2 * 60_000;
+  const outside = asap && !inWindow(now, policy, tz);
+  await say(
+    soon
+      ? `Moved the screening call with ${app.name} to now — it rings in a minute or two.`
+      : `${outside ? `It's outside your calling hours (${callingHours(policy)}), so the earliest is ` : `Moved the screening call with ${app.name} to `}${localWhen(dueAt, tz)}.${outside ? ` The call with ${app.name} now rings then.` : ""}`,
+  );
+}
+
 /**
  * The candidate a desk command is about, in this role: named or ranked, else (when
  * asked) the one the role's latest screening call was with. Says why when none or
@@ -4481,6 +4712,16 @@ export async function callCandidateFromDesk(
   }
   const app = await pickCandidate(conv, cmd, say, { lastCalled: true });
   if (!app) return;
+  // Already arranged: "call now" moves that call — never a dead end.
+  if (await openCallFor(conv.orgId, app.id)) {
+    await manageCallFromDesk(conv, userId, {
+      action: "move",
+      name: app.name,
+      when: "now",
+      reason: cmd.reason,
+    });
+    return;
+  }
   // Going back a step — a completed screen done again — needs a reason, judged here.
   const { screeningCalls } = await import("@db/schema");
   const [last] = await db

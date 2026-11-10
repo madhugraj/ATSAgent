@@ -346,6 +346,23 @@ brief, so a per-answer "thank you" or "noted" on these calls is a low finding.
   - **Not included:** an approved job description cannot be reopened. Approval
     is final, and changes are asked for before approval.
 
+**An arranged call is managed from the desk too** (`manageCallFromDesk`).
+
+- **Ask about it:** "when is the call?" says when it rings, and the desk's facts
+  list the role's arranged calls.
+- **Move it:** "call now" or "move it to Friday 3 pm" moves it inside the
+  calling hours. "Now" outside them goes to the next opening, and the desk says
+  so. "Call again" on an arranged call moves it instead of being refused.
+- **Cancel it:** "cancel the call".
+- **Who and audit:** the same roles as "Call now". Changes are audited
+  `screening_call.moved` / `screening_call.cancelled`.
+- **A repeat is re-checked before it is moved.** If the call repeats a completed
+  screen, the reason it was arranged on is checked again against the last
+  call's record. When the record does not support it, the call is cancelled and
+  the desk says why; the hiring desk's judgement stands.
+- **Why:** on 10 November "call now" could only get "A screening call is
+  already arranged for this candidate."
+
 A completed call must leave with the earliest joining date, current pay and
 expected pay (Screening call agent 1.3.0): after consent, `end_call` with
 `completed` or `other` is refused until each is recorded or listed in
