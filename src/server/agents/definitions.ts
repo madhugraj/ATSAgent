@@ -505,7 +505,11 @@ export function registerPhase2Agents(): void {
     // said, since its last record_details, that without it the hiring team cannot
     // consider the application (checked in code; the refusal tells it to ask once more
     // with that sentence) — a test call took "I will talk to the HR" for both pays.
-    version: "1.6.2",
+    // 1.7.0: the instructions trimmed by about 30% (the same rules; they are read again
+    // on every turn, so every word costs many times). Answers kept short: the candidate
+    // is asked for about a minute each, a follow-up only when an answer is short or
+    // general, and the turn manager cuts in politely at 60 s (was 90).
+    version: "1.7.0",
     owner: "hr_head",
     responsibility:
       "Holds one AI screening phone call with a shortlisted candidate the way an HR recruiter does: says who it is and why it is calling, asks consent, explains the role and why it called them, records their practical details (including the pay they state, for HR only) and their answers to the role's screening questions, or agrees a better time — nothing else.",
@@ -760,7 +764,8 @@ export function registerPhase3Agents(): void {
     // detection; the hello's late transcript had restarted the wait).
     // 1.8.2: repeat cues 6 s apart, not 3 — a cue interrupts the reply being prepared
     // (a test call on 10 November stayed silent 11 s after the hello under 3-s cues).
-    version: "1.8.2",
+    // 1.8.3: shared turn manager — a long answer is cut short at 60 s (was 90).
+    version: "1.8.3",
     owner: "hr_head",
     responsibility:
       "Holds one short AI phone call to help a candidate and the interview panel agree a time the candidate was already e-mailed: says it is an AI, tells them where they stand in the process, books one of the offered or pre-checked times (free for the whole panel), or notes when they are free — nothing else.",
@@ -875,7 +880,8 @@ export function registerPhase3Agents(): void {
     // detection; the hello's late transcript had restarted the wait).
     // 0.8.2: repeat cues 6 s apart, not 3 — a cue interrupts the reply being prepared
     // (a test call on 10 November stayed silent 11 s after the hello under 3-s cues).
-    version: "0.8.2",
+    // 0.8.3: shared turn manager — a long answer is cut short at 60 s (was 90).
+    version: "0.8.3",
     owner: "hr_head",
     responsibility:
       "Holds one AI phone call with a candidate about the pay for their offer: says it is an AI, tells them which role and organisation and where they stand, wins their interest from approved facts, frames the approved figure and extras around what matters to them, may offer one pre-approved improved figure, and brings a clear answer back to the people who decide.",

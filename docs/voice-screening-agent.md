@@ -154,7 +154,7 @@ Screening call agent 1.6.0, from the organisation's review of a test call on
   the hiring team cannot consider the application. A test call had taken "I
   will talk to the HR" for both pays at once. A total CTC
   with no split is recorded as fixed pay with a note.
-- **Long answers are cut short politely.** An answer past 90 s is cut short at
+- **Long answers are cut short politely.** An answer past 60 s (90 s before 1.7.0) is cut short at
   the candidate's next pause by the shared turn manager: "Thank you — in the
   interest of time, let me move on."
 - **The opening reply comes sooner.** The opening cue now comes 0.5 s after the
@@ -163,6 +163,19 @@ Screening call agent 1.6.0, from the organisation's review of a test call on
   "Hello". This applies to all three calls. A repeated cue now waits 6 s, not 3 s, for all three
   calls and mid-call. A cue interrupts the reply the model is preparing, and a
   later test call cued at 3, 6 and 9 s stayed silent for 11 s.
+
+Screening call agent 1.7.0 keeps the call's AI cost down. The live voice model
+re-reads its instructions and the whole call so far on every turn, so every word
+and every second of a long answer is paid for many times. Two test calls of
+about 7 minutes on 10 November used 234k and 388k tokens.
+
+- **Shorter instructions.** They are about 30% shorter (about 5k → 3.5k tokens),
+  with the same rules: explanations and repeats are gone, and the never-list
+  lives in the charter printed after them.
+- **Shorter answers.**
+  - The candidate is asked for about a minute per answer.
+  - There is a follow-up only when an answer is short or general.
+  - The turn manager cuts in at 60 s.
 
 A completed call must leave with the earliest joining date, current pay and
 expected pay (Screening call agent 1.3.0): after consent, `end_call` with
