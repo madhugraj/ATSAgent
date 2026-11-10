@@ -193,7 +193,10 @@ function scriptedVoice(
       closedBy: "client",
       error: null,
     });
+    let started = false;
     const run = async () => {
+      if (started) return;
+      started = true;
       for (const s of steps) {
         if ("waitCue" in s) {
           const want = s.waitCue;
@@ -231,6 +234,9 @@ function scriptedVoice(
           seen.cues?.push(text);
           onCue?.();
           if (text.includes("picked up")) void run();
+          // The ready-made greeting is asked for while the phone rings (greeting.ts): the
+          // script plays from there, once the fake line has picked up.
+          if (text.includes("phone is ringing")) setTimeout(() => void run(), 20);
         },
         close: async () => {
           const s = summary();
@@ -413,8 +419,9 @@ describe("the call brief", () => {
     expect(p).toContain(
       "You are Saranya, an AI recruiting assistant with Yavar's talent acquisition team",
     );
-    expect(p).toContain("Let them speak first");
-    expect(p).toContain('Then: "Hello, am I speaking with Meera?"');
+    expect(p).toContain(
+      'Your first words are said as they pick up: "Hello, am I speaking with Meera?"',
+    );
     // The source is never mentioned (the organisation's rule, 10 November).
     expect(p).toContain(
       "I'm calling about our Platform SRE role, for a short call — about 3 minutes.",
@@ -1171,6 +1178,9 @@ describe("a whole call with a fake line", () => {
     line.hold = true;
     const done = run(callId, line, scriptedVoice([], seen));
     for (let i = 0; i < 200 && !line.audioCb; i++) await new Promise((r) => setTimeout(r, 5));
+    // Nothing goes upstream until the ready-made greeting is released (greeting.ts) —
+    // here at the first watchdog tick, as the limits give the hello no wait.
+    await new Promise((r) => setTimeout(r, 300));
     const quiet = new Int16Array(160); // a 20 ms frame of line silence
     for (let i = 0; i < 10; i++) line.deliver(quiet);
     expect(seen.sent).toEqual([]);

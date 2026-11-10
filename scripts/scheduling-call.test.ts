@@ -766,7 +766,10 @@ function scriptedVoice(steps: Step[], seen: { opts?: VoiceOpts; results: unknown
       closedBy: "client",
       error: null,
     });
+    let started = false;
     const play = async () => {
+      if (started) return;
+      started = true;
       for (const st of steps) {
         if ("say" in st) {
           const turn = { who: st.say, text: st.text, at: new Date().toISOString() };
@@ -784,6 +787,12 @@ function scriptedVoice(steps: Step[], seen: { opts?: VoiceOpts; results: unknown
       session: {
         sendAudio() {},
         sendText(text: string) {
+          // The ready-made greeting is asked for while the phone rings (greeting.ts):
+          // the script plays from there, once the fake line has picked up.
+          if (text.includes("phone is ringing")) {
+            setTimeout(() => void play(), 20);
+            return;
+          }
           if (text.includes("picked up")) void play();
         },
         close: async () => {

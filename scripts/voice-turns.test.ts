@@ -6,6 +6,8 @@
 import { describe, expect, test } from "bun:test";
 
 const { TurnKeeper, TURN_TIMING, SAYS_NOTED } = await import("../src/server/voice/turns");
+const { ReadyGreeting, GREETING_WAIT_MS, greetingCue } =
+  await import("../src/server/voice/greeting");
 
 function keeper(over: { recordTools?: string[]; speakAfter?: (n: string) => boolean } = {}) {
   let t = 0;
@@ -212,5 +214,48 @@ describe("the planned length runs out", () => {
     expect(k.counts.close).toBe(1);
     tick(60_000);
     expect(sent.filter((s) => /Time is nearly up/.test(s))).toHaveLength(1);
+  });
+});
+
+describe("the first words, ready before pickup (greeting.ts)", () => {
+  const chunk = (n: number) => new Int16Array([n]);
+
+  test("held while it rings, played in order on release, then passed straight through", () => {
+    const played: number[] = [];
+    const g = new ReadyGreeting({ play: (p) => played.push(p[0]!) });
+    g.asked();
+    g.audio(chunk(1));
+    g.audio(chunk(2));
+    expect(played).toEqual([]);
+    expect(g.isReady).toBe(true);
+    expect(g.isReleased).toBe(false);
+    g.release("hello");
+    expect(played).toEqual([1, 2]);
+    g.audio(chunk(3));
+    expect(played).toEqual([1, 2, 3]);
+    g.release("silence"); // once only
+    expect(played).toEqual([1, 2, 3]);
+  });
+
+  test("preparing until its turn is done or the wait runs out — the opening cue holds off", () => {
+    let t = 0;
+    const g = new ReadyGreeting({ play: () => {}, now: () => t });
+    expect(g.preparing()).toBe(false); // never asked
+    g.asked();
+    expect(g.preparing()).toBe(true);
+    t = GREETING_WAIT_MS - 1;
+    expect(g.preparing()).toBe(true);
+    t = GREETING_WAIT_MS;
+    expect(g.preparing()).toBe(false); // too long: the opening cue may step in
+    const h = new ReadyGreeting({ play: () => {}, now: () => 0 });
+    h.asked();
+    h.turnDone();
+    expect(h.preparing()).toBe(false);
+  });
+
+  test("the cue asks for the exact words and nothing more", () => {
+    expect(greetingCue("Hello, am I speaking with Meera?")).toContain(
+      'exactly: "Hello, am I speaking with Meera?" — nothing more',
+    );
   });
 });
