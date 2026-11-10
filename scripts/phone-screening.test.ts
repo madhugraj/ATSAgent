@@ -98,7 +98,7 @@ describe("the organisation's phone screening policy", () => {
       windowEndMinute: 18 * 60,
       callDays: [5, 1, 3, 1],
       maxAttempts: 2,
-      maxMinutes: 12,
+      maxMinutes: 3,
       maxReschedules: 1,
       voice: "Aoede",
       nextStepsText: "  we reply within two working days  ",
@@ -118,6 +118,14 @@ describe("the organisation's phone screening policy", () => {
       .from(auditLog)
       .where(and(eq(auditLog.orgId, orgId), eq(auditLog.action, "screening_call.settings.set")));
     expect(audit).toHaveLength(1);
+
+    // 0072: the call's planned length — a value saved before (a 5–30 ceiling) is
+    // planned at most 5 minutes.
+    await db
+      .update(phoneScreeningSettings)
+      .set({ maxMinutes: 10 })
+      .where(eq(phoneScreeningSettings.orgId, orgId));
+    expect((await settings.phoneScreeningPolicyOf(orgId)).maxMinutes).toBe(5);
   });
 
   test("the database refuses impossible policies", async () => {

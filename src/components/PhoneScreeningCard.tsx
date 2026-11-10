@@ -156,17 +156,17 @@ export function PhoneScreeningCard({ canEdit }: { canEdit: boolean }) {
           </div>
           <div className="space-y-1">
             <Label htmlFor="ps-minutes" className="text-xs">
-              Max minutes
+              Call length (minutes)
             </Label>
             <Input
               id="ps-minutes"
               type="number"
-              min={5}
-              max={30}
+              min={2}
+              max={5}
               disabled={!canEdit}
               value={p.maxMinutes}
               onChange={(e) =>
-                set({ maxMinutes: Math.min(30, Math.max(5, Number(e.target.value))) })
+                set({ maxMinutes: Math.min(5, Math.max(2, Number(e.target.value))) })
               }
             />
           </div>

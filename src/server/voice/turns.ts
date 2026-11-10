@@ -30,7 +30,8 @@
  */
 import { voiceDebug } from "./debug";
 
-export type CueReason = "after_tool" | "mid_turn" | "reply" | "unrecorded_note" | "long_answer";
+export type CueReason =
+  "after_tool" | "mid_turn" | "reply" | "unrecorded_note" | "long_answer" | "close";
 export type CueCounts = Record<CueReason, number>;
 
 export const TURN_TIMING = {
@@ -71,9 +72,14 @@ const CUE_TEXT: Record<CueReason, string> = {
     "(There is silence on the line. If the candidate has answered, reply now; if not, ask simply whether they can hear you.)",
   unrecorded_note:
     "(You told the candidate you noted something, but nothing was recorded. Call the record tool now with what they said — in their words — then carry on.)",
+  close:
+    "(Time is nearly up. Finish the point you are on and record anything they just said. If a required detail is still missing, ask only that. Then close now: thank them, say what happens next, say goodbye, and call end_call. Ask nothing new.)",
   long_answer:
     '(The candidate\'s answer has run long. Record what they said, then at this pause say "Thank you — in the interest of time, let me move on." and go to your next step.)',
 };
+
+/** Quiet this long before the close cue, so it lands in a pause, not over them. */
+const CLOSE_QUIET_MS = 600;
 
 /** "I'll note that", "I have noted", "noted down", "I'll pass that on" … */
 export const SAYS_NOTED =
@@ -97,7 +103,13 @@ export class TurnKeeper {
     reply: 0,
     unrecorded_note: 0,
     long_answer: 0,
+    close: 0,
   };
+  /** When the candidate picked up (null until answered). */
+  private answeredAt: number | null = null;
+  private closeCued = false;
+  /** The candidate is speaking now (their VAD). */
+  private callerSpeaking = false;
 
   constructor(
     private readonly o: {
@@ -106,6 +118,11 @@ export class TurnKeeper {
       onCue?: (reason: CueReason) => void;
       /** Tools that keep a record the assistant may say it "noted". Empty: no note check. */
       recordTools?: ReadonlySet<string>;
+      /**
+       * From pickup, when the assistant is told to close (once, at a quiet moment) —
+       * the screening call is planned short (screening 1.8.0). Unset: never.
+       */
+      closeAfterMs?: number;
       /** Tools that end the call: nothing is owed after them. */
       endTools: ReadonlySet<string>;
       /** Whether a tool result needs a spoken follow-up (default: every non-end tool). */
@@ -126,6 +143,11 @@ export class TurnKeeper {
   private owe(reason: CueReason | null): void {
     this.owed = reason;
     this.cues = 0;
+  }
+
+  /** The candidate picked up: the close timer starts. */
+  answered(): void {
+    this.answeredAt = this.now();
   }
 
   /** A chunk of the assistant's audio. */
@@ -159,6 +181,7 @@ export class TurnKeeper {
   /** The candidate's VAD: speech started or ended. */
   caller(event: "start" | "end" | null, active: boolean): void {
     const t = this.now();
+    this.callerSpeaking = event === "end" ? false : active || event === "start";
     if (active || event === "start") {
       this.lastSound = t;
       this.owe(null);
@@ -212,6 +235,20 @@ export class TurnKeeper {
     const t = this.now();
     if (playing) {
       this.lastSound = t;
+      return;
+    }
+    // Time to close: at the first quiet moment (nothing playing, nobody speaking).
+    if (
+      this.o.closeAfterMs !== undefined &&
+      !this.closeCued &&
+      this.answeredAt !== null &&
+      t - this.answeredAt >= this.o.closeAfterMs &&
+      !this.callerSpeaking &&
+      t - this.lastSound >= CLOSE_QUIET_MS
+    ) {
+      this.closeCued = true;
+      this.owe(null);
+      this.cue("close");
       return;
     }
     if (this.noteSince !== null && t - this.noteSince > this.t.noteGraceMs) {

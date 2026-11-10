@@ -20,6 +20,7 @@ export type PhoneScreeningPolicy = {
   /** ISO weekdays (1 = Monday … 7 = Sunday). */
   callDays: number[];
   maxAttempts: number;
+  /** The screening call's planned length in minutes (2–5): it closes 30 s before, and is ended a minute after. */
   maxMinutes: number;
   /** Times a candidate may move the call; then the written assessment or a person is offered. */
   maxReschedules: number;
@@ -34,6 +35,10 @@ export type PhoneScreeningPolicy = {
   /** Pay negotiation calls: the assistant talks through an approved offer (a person approves each). */
   negotiationEnabled: boolean;
 };
+
+/** A screening call's planned length, in minutes (0072). */
+export const MIN_CALL_MINUTES = 2;
+export const MAX_CALL_MINUTES = 5;
 
 /** Voices the assistant may use (the voice service's prebuilt voices). */
 export const ASSISTANT_VOICES = [
@@ -54,7 +59,7 @@ export const DEFAULT_PHONE_SCREENING_POLICY: PhoneScreeningPolicy = {
   windowEndMinute: 1140,
   callDays: [1, 2, 3, 4, 5, 6],
   maxAttempts: 3,
-  maxMinutes: 10,
+  maxMinutes: 3,
   maxReschedules: 2,
   voice: "Kore",
   nextStepsText: null,
@@ -77,7 +82,8 @@ export async function phoneScreeningPolicyOf(orgId: string): Promise<PhoneScreen
     windowEndMinute: r.windowEndMinute,
     callDays: [...r.callDays].sort((a, b) => a - b),
     maxAttempts: r.maxAttempts,
-    maxMinutes: r.maxMinutes,
+    // Saved before 0072 as a ceiling of 5–30: the call is never planned longer than 5.
+    maxMinutes: Math.min(MAX_CALL_MINUTES, Math.max(MIN_CALL_MINUTES, r.maxMinutes)),
     maxReschedules: r.maxReschedules,
     voice: r.voice,
     nextStepsText: r.nextStepsText,

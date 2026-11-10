@@ -179,3 +179,38 @@ describe("an answer that runs long", () => {
     expect(sent.filter((s) => /answer has run long/.test(s))).toHaveLength(0);
   });
 });
+
+describe("the planned length runs out", () => {
+  test("told to close once, at the first quiet moment after the time, never before pickup", () => {
+    let t = 0;
+    const sent: string[] = [];
+    const k = new TurnKeeper({
+      send: (s) => sent.push(s),
+      endTools: new Set(["end_call"]),
+      closeAfterMs: 150_000,
+      now: () => t,
+    });
+    const tick = (ms: number, playing = false) => {
+      for (let i = 0; i < ms; i += 250) {
+        t += 250;
+        k.tick(playing);
+      }
+    };
+    k.aiAudio();
+    tick(200_000); // not answered yet: no close
+    expect(sent.filter((s) => /Time is nearly up/.test(s))).toHaveLength(0);
+    t = 0;
+    k.answered();
+    k.aiTurn("What is your expected CTC?");
+    tick(140_000, true); // talking the whole time
+    k.caller("start", true);
+    tick(20_000); // past 150 s, but they are still speaking
+    expect(sent.filter((s) => /Time is nearly up/.test(s))).toHaveLength(0);
+    k.caller("end", false);
+    tick(1_000);
+    expect(sent.filter((s) => /Time is nearly up/.test(s))).toHaveLength(1);
+    expect(k.counts.close).toBe(1);
+    tick(60_000);
+    expect(sent.filter((s) => /Time is nearly up/.test(s))).toHaveLength(1);
+  });
+});
