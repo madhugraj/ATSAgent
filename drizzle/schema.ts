@@ -3472,6 +3472,12 @@ export type CallStats = {
   slowReplies: number;
   /** How smoothly the assistant's audio went out (the SIP line). */
   audio: { frames: number; gaps: number; lateTicks: number; maxLateMs: number } | null;
+  /**
+   * Times the turn manager had to cue a silent assistant (src/server/voice/turns.ts):
+   * after a tool result, after a statement, after the candidate stopped, or to record
+   * something it said it noted. Absent on calls before it.
+   */
+  cues?: { after_tool: number; mid_turn: number; reply: number; unrecorded_note: number };
 };
 
 export type CallReviewStatus = "due" | "reviewing" | "done" | "failed";
@@ -3490,6 +3496,7 @@ export type CallReviewCheckId =
   | "agreements"
   | "record_accuracy"
   | "charter"
+  | "call_steps"
   | "turn_taking"
   | "transcription";
 export type CallReviewCheck = {

@@ -43,6 +43,7 @@ import {
   requiredDetailStatus,
 } from "./call-tools";
 import { CallStatsTracker } from "./call-stats";
+import { TurnKeeper } from "./turns";
 import { dialNumber } from "./phone";
 import { Resampler } from "./resample";
 import { afterAttempt, callbackAt, localNow } from "./schedule";
@@ -179,6 +180,7 @@ export {
   END_REASONS,
   freshCallState,
   mandatoryMissing,
+  RAISES_CONCERN,
   requiredDetailStatus,
   type CallToolName,
   type EndReason,
@@ -400,8 +402,13 @@ async function placeCall(
   let bookedAt: Date | null = null;
   // What the assistant has said so far: consent counts only after the disclosure.
   let aiSaid = "";
+  // What the candidate said since the assistant's latest question: consent is their
+  // answer to it (null until it asked one).
+  let reply: string | null = null;
   // Turn-taking on the line, kept on the call for the Voice Guard (no words).
   const stats = new CallStatsTracker(now);
+  // Who owes the next words (src/server/voice/turns.ts): set once the session is open.
+  let keeper: TurnKeeper | null = null;
   let agentEnded!: () => void;
   const agentEnd = new Promise<void>((r) => (agentEnded = r));
 
@@ -410,6 +417,7 @@ async function placeCall(
       aiSpoke = true;
       lastActivity = now();
       stats.aiAudio();
+      keeper?.aiAudio();
       line.play(down.process(pcm));
     },
     onInterrupted: () => {
@@ -418,7 +426,11 @@ async function placeCall(
     },
     onTurn: (t) => {
       turns++;
-      if (t.who === "ai") aiSaid += ` ${t.text}`;
+      if (t.who === "ai") {
+        aiSaid += ` ${t.text}`;
+        keeper?.aiTurn(t.text);
+        if (t.text.includes("?")) reply = "";
+      } else if (reply !== null) reply += ` ${t.text}`;
       lastActivity = now();
       if (t.who === "caller") {
         candidateSpoke = true;
@@ -426,7 +438,16 @@ async function placeCall(
       }
     },
     onToolCall: async (c) => {
-      const out = applyCallTool(state, c.name, c.args, questionIds, now(), aiSaid);
+      const out = applyCallTool(
+        state,
+        c.name,
+        c.args,
+        questionIds,
+        now(),
+        aiSaid,
+        reply ?? undefined,
+      );
+      keeper?.tool(c.name, out["ok"] === true);
       if (c.name === "record_details" && out["ok"]) detailsUpToTurn = turns;
       if (c.name === "book_slot" && out["ok"] && state.booking) {
         // The time actually booked (moved into the calling hours if needed) — the
@@ -471,6 +492,12 @@ async function placeCall(
     });
   }
   const session: VoiceSession = opened.session;
+  keeper = new TurnKeeper({
+    send: (text) => session.sendText(text),
+    onCue: (reason) => log.warn("screening_call.cue", { call_id: call.id, reason }),
+    recordTools: new Set(["record_details", "record_answer", "record_consent"]),
+    endTools: new Set(["end_call"]),
+  });
   await setCall(call.id, orgId, { phoneLast4: number.last4 });
 
   try {
@@ -505,6 +532,7 @@ async function placeCall(
     // The candidate talking counts as activity even before a transcript line arrives.
     const heard = vad.process(pcm);
     stats.caller(heard);
+    keeper?.caller(heard, vad.isActive());
     if (heard === "start") candidateSpoke = true;
     if (vad.isActive()) {
       lastHeardAt = Date.now();
@@ -539,6 +567,7 @@ async function placeCall(
       if (t - answeredAt > policy.maxMinutes * 60_000) resolve("time_limit");
       else if (!candidateSpoke && t - answeredAt > limits.firstWordsMs) resolve("no_response");
       else if (t - lastActivity > limits.silenceMs) resolve("silence");
+      keeper?.tick(line.pendingSeconds() > 0);
     }, 250);
   });
   const why = await Promise.race([
@@ -548,6 +577,7 @@ async function placeCall(
     limitHit,
   ]);
   if (watchdog) clearInterval(watchdog);
+  keeper.end();
   stopOpening();
   await line.hangup().catch(() => undefined);
   const audio = line.audioStats?.() ?? null;
@@ -570,7 +600,7 @@ async function placeCall(
     transcript,
     answers: state.consent === true ? state.answers : [],
     details: state.consent === true ? publicDetails(state.details) : {},
-    callStats: stats.finish({ languageCode: VOICE_LANGUAGE, audio }),
+    callStats: stats.finish({ languageCode: VOICE_LANGUAGE, audio, cues: keeper.counts }),
   };
 
   // What they said about pay, notice and availability goes to the HR-only record.
@@ -746,6 +776,32 @@ export async function gradeCallAnswers(input: {
  * Tell the role's hiring-desk thread how the call went, in plain words, so the
  * team sees it where they follow the hiring journey.
  */
+/** Ways a call ends without the assistant closing it (no goodbye, no end_call). */
+const CUT_OFF: Record<string, string> = {
+  silence: "the line went silent",
+  candidate_hung_up: "they hung up",
+  voice_closed: "the AI voice connection dropped",
+  voice_ended: "the AI voice connection ended",
+  time_limit: "the call reached its time limit",
+};
+
+const REQUIRED_WORDS: Record<string, string> = {
+  joining_date: "the earliest joining date",
+  current_pay: "current pay",
+  expected_pay: "expected pay",
+};
+
+/**
+ * Required details still to get after a completed call (pure): the ones neither
+ * recorded nor declined in the candidate's words. Checked on every ending — a
+ * call cut off by silence or a hang-up never reached end_call's own check.
+ */
+export function missingRequired(details: ScreeningCallDetails | null | undefined): string[] {
+  return Object.entries(details?.required ?? {})
+    .filter(([, v]) => v === "missing")
+    .map(([k]) => REQUIRED_WORDS[k] ?? k);
+}
+
 export async function postCallToThread(
   orgId: string,
   call: typeof screeningCalls.$inferSelect,
@@ -759,7 +815,11 @@ export async function postCallToThread(
   const convId = await desk.conversationForSubject(orgId, "application", call.applicationId);
   if (!convId) return;
   const [row] = await db
-    .select({ name: candidates.fullName, durationS: screeningCalls.durationS })
+    .select({
+      name: candidates.fullName,
+      durationS: screeningCalls.durationS,
+      details: screeningCalls.details,
+    })
     .from(screeningCalls)
     .innerJoin(candidates, eq(candidates.id, screeningCalls.candidateId))
     .where(eq(screeningCalls.id, call.id))
@@ -794,7 +854,18 @@ export async function postCallToThread(
         };
       }
     }
-    body = `Had the AI screening call with ${name}${mins ? ` (${mins} min)` : ""}. ${graded} Practical details and pay are recorded for the HR team only. The Screening agent reviews it and asks you to decide who moves on.`;
+    const missing = missingRequired(row?.details);
+    const cut = CUT_OFF[endReason];
+    body = [
+      `Had the AI screening call with ${name}${mins ? ` (${mins} min)` : ""}.`,
+      cut ? `It ended before the assistant closed it (${cut}).` : null,
+      graded,
+      "Practical details and pay are recorded for the HR team only.",
+      missing.length ? `Still to get from ${name}: ${missing.join(", ")}.` : null,
+      "The Screening agent reviews it and asks you to decide who moves on.",
+    ]
+      .filter(Boolean)
+      .join(" ");
   } else {
     const how: Record<string, string> = {
       not_interested: `${name} is not interested in the role.`,
@@ -948,7 +1019,15 @@ async function finish(
       subjectType: "application",
       subjectId: call.applicationId,
       actorUserId: null,
-      payload: { callId: call.id, status, endReason: o.endReason, screeningRunId },
+      payload: {
+        callId: call.id,
+        status,
+        endReason: o.endReason,
+        screeningRunId,
+        // Required details neither recorded nor declined — on every ending.
+        missingDetails: missingRequired(o.extra?.details),
+        cutOff: o.endReason in CUT_OFF,
+      },
     });
   }
   return { status, endReason: o.endReason, screeningRunId };

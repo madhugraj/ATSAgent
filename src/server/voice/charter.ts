@@ -76,6 +76,9 @@ export const SCREENING_CALL_CHARTER: VoiceCharter = {
     ),
     i("Why it is calling and what happens next, from the facts it is given."),
     c(
+      "Take consent only from the candidate's answer to its latest question, in their words — never from a reply that raised a concern before the concern is answered.",
+    ),
+    c(
       "Ask the earliest joining date, current pay and expected pay — a completed call cannot end until each is recorded or noted as not given (declined, in their words, or not working).",
     ),
   ],

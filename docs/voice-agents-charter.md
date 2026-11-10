@@ -28,6 +28,7 @@ contact given is the organisation's mailbox.
 | Who it is calling, before anything about the application. | instruction + evals |
 | That it is an AI recruiting assistant, makes notes for the hiring team and that the call is checked for quality — before consent counts. | code |
 | Why it is calling and what happens next, from the facts it is given. | instruction + evals |
+| Take consent only from the candidate's answer to its latest question, in their words — never from a reply that raised a concern before the concern is answered. | code |
 | Ask the earliest joining date, current pay and expected pay — a completed call cannot end until each is recorded or noted as not given (declined, in their words, or not working). | code |
 
 **May talk about only**

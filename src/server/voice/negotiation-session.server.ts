@@ -39,6 +39,7 @@ import {
 import { disclosureMissing } from "./call-tools";
 import { loadNegotiationBrief, type NegotiationBrief } from "./negotiation-brief.server";
 import { CallStatsTracker } from "./call-stats";
+import { TURN_TIMING, TurnKeeper } from "./turns";
 import { Vad } from "./vad";
 import {
   applyNegotiationTool,
@@ -70,7 +71,7 @@ export const NEGOTIATION_REPLY_CUE_MS = 1_200;
  * step), cue it if no audio starts within this. A real call went silent after the
  * go-ahead until the candidate hung up.
  */
-export const NEGOTIATION_TOOL_SILENCE_CUE_MS = 2_500;
+export const NEGOTIATION_TOOL_SILENCE_CUE_MS = TURN_TIMING.afterToolMs;
 
 /**
  * The live figure guard (pure; unit-tested): a figure in what the assistant is
@@ -200,18 +201,18 @@ async function place(
   let heardAfterAsk: string | null = null;
   let agentEnded!: () => void;
   const agentEnd = new Promise<void>((r) => (agentEnded = r));
-  // Real clock: when a tool result that needs a spoken follow-up came back with no audio since.
-  let awaitingSpeechSince: number | null = null;
-  let cue: (() => void) | null = null;
+  // Who owes the next words (src/server/voice/turns.ts): set once the session is open.
+  // It replaces this call's own cue after a tool result (0.1.1) — one rule for every call.
+  let keeper: TurnKeeper | null = null;
   // The live guard (fires once): cut the line, correct, hand off, flag.
   let guard: ((amount: number) => void) | null = null;
 
   const events: VoiceSessionEvents = {
     onAudio: (pcm) => {
       aiSpoke = true;
-      awaitingSpeechSince = null;
       lastActivity = now();
       stats.aiAudio();
+      keeper?.aiAudio();
       line.play(down.process(pcm));
     },
     onInterrupted: () => {
@@ -238,8 +239,8 @@ async function place(
     },
     onTurn: (t) => {
       if (t.who === "ai") {
-        awaitingSpeechSince = null;
         aiSaid += ` ${t.text}`;
+        keeper?.aiTurn(t.text);
         if (t.text.includes("?") && !disclosureMissing(aiSaid)) heardAfterAsk = "";
       } else if (heardAfterAsk !== null) heardAfterAsk += ` ${t.text}`;
       lastActivity = now();
@@ -264,12 +265,7 @@ async function place(
         ok: out.ok,
         ...(out.ok ? {} : { error: out.error }),
       });
-      if (
-        out.ok &&
-        SPEAK_AFTER.has(c.name) &&
-        !(c.name === "record_permission" && !state.permission)
-      )
-        awaitingSpeechSince = Date.now();
+      keeper?.tool(c.name, out.ok);
       if (!out.ok) return out;
       if (c.name === "record_permission") {
         await setCall(call.id, orgId, {
@@ -318,12 +314,15 @@ async function place(
     });
     session.sendText(GUARD_CORRECTION);
   };
-  cue = () => {
-    log.warn("negotiation_call.cue_after_tool", { call_id: call.id });
-    session.sendText(
-      "(The candidate is waiting in silence. Continue now, out loud: say what the last tool result gave you to say, or your next step.)",
-    );
-  };
+  keeper = new TurnKeeper({
+    send: (text) => session.sendText(text),
+    onCue: (reason) => log.warn("negotiation_call.cue", { call_id: call.id, reason }),
+    recordTools: new Set(["record_call_notes", "record_their_position"]),
+    endTools: new Set(["end_negotiation_call"]),
+    // A declined go-ahead ends the call; other results it speaks on (0.1.1).
+    speakAfter: (name) =>
+      SPEAK_AFTER.has(name) && !(name === "record_permission" && !state.permission),
+  });
   await setCall(call.id, orgId, { phoneLast4: number.last4 });
 
   try {
@@ -352,6 +351,7 @@ async function place(
   line.onAudio((pcm) => {
     const heard = vad.process(pcm);
     stats.caller(heard);
+    keeper?.caller(heard, vad.isActive());
     if (heard === "start") candidateSpoke = true;
     if (vad.isActive()) {
       lastHeardAt = Date.now();
@@ -380,14 +380,7 @@ async function place(
       if (t - answeredAt > brief.facts.maxMinutes * 60_000) resolve("time_limit");
       else if (!candidateSpoke && t - answeredAt > limits.firstWordsMs) resolve("no_response");
       else if (t - lastActivity > limits.silenceMs) resolve("silence");
-      // Once per tool result: a quiet assistant after a result it should speak on.
-      if (
-        awaitingSpeechSince !== null &&
-        Date.now() - awaitingSpeechSince > NEGOTIATION_TOOL_SILENCE_CUE_MS
-      ) {
-        awaitingSpeechSince = null;
-        cue?.();
-      }
+      if (!state.halted) keeper?.tick(line.pendingSeconds() > 0);
     }, 250);
   });
   const why = await Promise.race([
@@ -397,6 +390,7 @@ async function place(
     limitHit,
   ]);
   if (watchdog) clearInterval(watchdog);
+  keeper.end();
   stopOpening();
   await line.hangup().catch(() => undefined);
   log.info("negotiation_call.vad", { call_id: call.id, segments: vad.segments });
@@ -413,7 +407,7 @@ async function place(
     extra: {
       startedAt: new Date(answeredAt),
       endedAt: new Date(endedAt),
-      callStats: stats.finish({ languageCode: "en-IN", audio }),
+      callStats: stats.finish({ languageCode: "en-IN", audio, cues: keeper.counts }),
       durationS: Math.round((endedAt - answeredAt) / 1000),
       // Kept only when they agreed to notes of the call.
       transcript: state.permission === true ? (summary.transcript as ScreeningCallTurn[]) : [],

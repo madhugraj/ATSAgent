@@ -93,7 +93,7 @@ export const CALL_TOOL_NAMES = Object.keys(CALL_TOOL_INPUTS) as CallToolName[];
 
 export const CALL_TOOL_DESCRIPTIONS: Record<CallToolName, string> = {
   record_consent:
-    "Record whether the candidate agreed to the screening call now (and to notes for the hiring team): granted true only if they clearly agreed; their_words is exactly what they said.",
+    "Record whether the candidate agreed to the screening call now (and to notes for the hiring team and the quality check): granted true only if they clearly agreed in their answer to your latest question; their_words is exactly what they said. Refused when that answer raised a concern (they did not apply, how you got their details, not sure…): answer it, ask again, and record their answer to that.",
   record_details:
     "Record the practical details the candidate told you, as they said them: current job title and company, total years of experience, where they live now, whether they are open to relocating (only a yes or no they actually said — a question back is not an answer), notice period in days, earliest joining date (YYYY-MM-DD), and current fixed pay, current variable pay and expected pay as rupees per year (e.g. 18 lakhs = 1800000) — only figures they actually stated; never calculate one. Anything about pay that is not a figure (a percentage hike, shares, bonuses) goes in pay_note in their words; anything else the hiring team should know (a time limit they set, skills they said are new to them) in candidate_note. Call it again as more details come; leave out anything they did not say. Never comment on the figures. The earliest joining date, current pay and expected pay are required before the call can end as completed: if they would rather not say one, list it in not_given with why 'declined' (their words in pay_note, or in candidate_note for the joining date); if they are not working now, list current_pay with why 'not_working'.",
   record_answer:
@@ -224,6 +224,15 @@ export function requiredDetailStatus(
 }
 
 /**
+ * A reply that raises a concern (pure; unit-tested): consent cannot come from
+ * it — the concern is answered and they are asked again. A real call on
+ * 10 November took "It is okay, but I have never applied for this post" as
+ * consent before the concern was answered.
+ */
+export const RAISES_CONCERN =
+  /\b(never|not|didn'?t|did not|haven'?t|have not)\s+(applied|apply)\b|\bhow did you (get|find|have)\b|\bwhere did you get\b|\bwho (gave|are you|is this)\b|\bwhat is this (about|for)\b|\bnot interested\b|\bdon'?t want\b|\bwrong (number|person)\b|\bnot sure\b/i;
+
+/**
  * Validate and apply one in-call tool call (pure over the state; unit-tested).
  * Returns what the model is told back — never the figures it recorded.
  * `aiSaid` (the assistant's own spoken lines so far, on a live call) lets the
@@ -236,6 +245,12 @@ export function applyCallTool(
   questionIds: Set<string>,
   now: number,
   aiSaid?: string,
+  /**
+   * What the candidate said since the assistant's latest question (live call):
+   * consent is their answer to it, in these words, and never a reply that
+   * raised a concern.
+   */
+  reply?: string,
 ): Record<string, unknown> {
   if (!(name in CALL_TOOL_INPUTS)) return { ok: false, error: "Unknown tool." };
   const parsed = CALL_TOOL_INPUTS[name as CallToolName].safeParse(args);
@@ -252,8 +267,14 @@ export function applyCallTool(
           ok: false,
           error: `Not recorded: first tell them ${missing}, then ask again whether they are happy to continue.`,
         };
+      if (granted && reply !== undefined && RAISES_CONCERN.test(reply))
+        return {
+          ok: false,
+          error: `Not recorded: their reply raised a concern ("${reply.trim().slice(0, 120)}"). Answer it first, then ask again whether they are happy to continue, and record their answer to that.`,
+        };
       state.consent = granted;
-      state.consentWords = their_words;
+      // The words actually heard, not the model's paraphrase.
+      state.consentWords = reply?.trim() ? reply.trim().slice(0, 300) : their_words;
       if (granted) state.consentAt = now;
       return { ok: true };
     }

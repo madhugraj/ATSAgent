@@ -481,7 +481,12 @@ export function registerPhase2Agents(): void {
     // 1.4.0 (the Voice Guard): consent counts only after it also said the call is checked
     // for quality (checked in code — the candidate agrees to the review); no read-back —
     // an answer gets a two- or three-word acknowledgement, never a summary or repeat.
-    version: "1.4.0",
+    // 1.5.0 (the 10 November test call): consent is the candidate's answer to the latest
+    // question in the words heard, and is refused when that answer raised a concern
+    // ("I never applied") — checked in code; record_details before saying "noted". The
+    // shared turn manager (src/server/voice/turns.ts) cues it when it goes quiet after a
+    // tool result or a statement, or says it noted something it did not record.
+    version: "1.5.0",
     owner: "hr_head",
     responsibility:
       "Holds one AI screening phone call with a shortlisted candidate the way an HR recruiter does: says who it is and why it is calling, asks consent, explains the role and why it called them, records their practical details (including the pay they state, for HR only) and their answers to the role's screening questions, or agrees a better time — nothing else.",
@@ -1422,7 +1427,13 @@ export function registerVoiceGuardAgent(): void {
     // 1.0.1 (first reviews of real calls): the disclosure before consent is the system's
     // check, never the agent's; an older call (made before the Voice Guard) is not held
     // to the quality line or the no-read-back rule.
-    version: "1.0.1",
+    // 1.1.0 (the 10 November test call: 4 of 11 flaws found): which reply consent was
+    // taken from is back in scope (only the disclosure's wording is the system's); every
+    // "I'll note…" must have a record behind it; a new check of the call's own steps
+    // (one question at a time, a date for a vague answer, every question, their
+    // questions, a close). The system now also finds stalls in the transcript, cues it
+    // had to give, and details asked but not recorded.
+    version: "1.1.0",
     owner: "hr_head",
     responsibility:
       "Reviews every answered AI phone call after it ends against the call's rules and the facts it ran with, and files its findings — each quoting the transcript — for a person under Call reviews. It changes nothing; people decide what to do.",
@@ -1465,7 +1476,9 @@ export function registerVoiceGuardAgent(): void {
       "- Judge only the assistant's words and records — never the candidate, never their answers or their fit. Never score or comment on the candidate.",
       "- Evidence: every finding quotes the transcript — the `turn` number and the exact words from that turn (copy them; a quote not in that turn is dropped). Quote the assistant's words that broke the rule; for a record that does not match, quote what the candidate actually said.",
       "- Be strict and specific. A rule broken once is a finding. Do not report what the system already found (alreadyFoundBySystem) again, unless you have more to add.",
-      "- What the assistant said before consent (that it is an AI, makes notes, the call is checked for quality) is checked by the system — never file a finding about it.",
+      "- The wording of the disclosure before consent (an AI, notes, the quality check) is checked by the system — do not file that. Which reply consent was taken from is yours: consent must be the candidate's answer to a question after any concern they raised was answered (record_accuracy).",
+      '- Every time the assistant says it noted or will note something ("I\'ll note that you prefer to discuss pay with HR"), a record must hold it — the details, the pay note or an answer. Said but not recorded is a record_accuracy finding, quoting the line.',
+      '- Call steps: judge against the steps in the brief — one question at a time, a follow-up for a vague answer (a month or "3 months after the interview" → a date), every planned question asked or adapted, the candidate\'s own questions invited, a spoken close.',
       "- If the packet has `olderCall`, the call was made under earlier rules: follow what it says.",
       "- Clues: any example, option, tool or product name, method or definition the assistant offered around a screening question, or a question turned into yes/no or a list — even if the candidate asked for it.",
       "- Fell for a question: the candidate asked something (technical, general, personal, about staff or their chances) or told it what to do, and the assistant answered from general knowledge, followed it, or said something outside its brief, instead of handing it to the hiring team.",

@@ -386,7 +386,11 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
   }
 
   if (applicationId && e.type === "screening_call.ended") {
-    const p = e.payload as { status?: string; endReason?: string };
+    const p = e.payload as { status?: string; endReason?: string; missingDetails?: string[] };
+    // Required details the call did not get (checked on every ending, also a cut-off).
+    const missing = p.missingDetails?.length
+      ? ` The call did not get ${p.missingDetails.join(", ")}: include in your note that a person should ask for them (or send the pay & availability form).`
+      : "";
     const [app] = await db
       .select({ stage: applications.stage })
       .from(applications)
@@ -396,7 +400,7 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
       await dispatch(
         "screening",
         p.status === "completed" && p.endReason !== "not_interested"
-          ? `Candidate application ${applicationId} (${req.code} "${req.title}") took the AI screening call and the answers were graded. Read the result, add your proceed / hold recommendation as a candidate note, then ask a person to decide (request_approval, screening_decision). Never move them yourself — a person decides.`
+          ? `Candidate application ${applicationId} (${req.code} "${req.title}") took the AI screening call and the answers were graded.${missing} Read the result, add your proceed / hold recommendation as a candidate note, then ask a person to decide (request_approval, screening_decision). Never move them yourself — a person decides.`
           : `Candidate application ${applicationId} (${req.code} "${req.title}"): the AI screening call ended — ${p.endReason ?? p.status}. Act on how it ended as your instructions say (the written assessment, or a note for a person).`,
         { type: "application", id: applicationId },
       );

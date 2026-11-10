@@ -36,6 +36,7 @@ import {
 import { dialNumber } from "./phone";
 import { Resampler } from "./resample";
 import { CallStatsTracker } from "./call-stats";
+import { TurnKeeper } from "./turns";
 import { Vad } from "./vad";
 import { localNow, retryAt } from "./schedule";
 import {
@@ -163,6 +164,8 @@ async function place(
   // What the candidate said since the assistant's latest question after its
   // disclosure (null until it has asked one) — the go-ahead comes from here.
   let heardAfterAsk: string | null = null;
+  // Who owes the next words (src/server/voice/turns.ts): set once the session is open.
+  let keeper: TurnKeeper | null = null;
   let agentEnded!: () => void;
   const agentEnd = new Promise<void>((r) => (agentEnded = r));
 
@@ -171,6 +174,7 @@ async function place(
       aiSpoke = true;
       lastActivity = now();
       stats.aiAudio();
+      keeper?.aiAudio();
       line.play(down.process(pcm));
     },
     onInterrupted: () => {
@@ -180,6 +184,7 @@ async function place(
     onTurn: (t) => {
       if (t.who === "ai") {
         aiSaid += ` ${t.text}`;
+        keeper?.aiTurn(t.text);
         if (t.text.includes("?") && !disclosureMissing(aiSaid)) heardAfterAsk = "";
       } else if (heardAfterAsk !== null) heardAfterAsk += ` ${t.text}`;
       lastActivity = now();
@@ -197,6 +202,7 @@ async function place(
         aiSaid,
         heardAfterAsk ?? "",
       );
+      keeper?.tool(c.name, out.ok);
       if (!out.ok) return out;
       if (c.name === "record_permission") {
         await setCall(call.id, orgId, {
@@ -260,6 +266,12 @@ async function place(
       lastError: opened.message,
     });
   const session: VoiceSession = opened.session;
+  keeper = new TurnKeeper({
+    send: (text) => session.sendText(text),
+    onCue: (reason) => log.warn("scheduling_call.cue", { call_id: call.id, reason }),
+    recordTools: new Set(["record_availability", "record_permission"]),
+    endTools: new Set(["end_scheduling_call"]),
+  });
   await setCall(call.id, orgId, { phoneLast4: number.last4 });
 
   try {
@@ -288,6 +300,7 @@ async function place(
   line.onAudio((pcm) => {
     const heard = vad.process(pcm);
     stats.caller(heard);
+    keeper?.caller(heard, vad.isActive());
     if (heard === "start") candidateSpoke = true;
     if (vad.isActive()) {
       lastHeardAt = Date.now();
@@ -319,6 +332,7 @@ async function place(
       if (t - answeredAt > brief.facts.maxMinutes * 60_000) resolve("time_limit");
       else if (!candidateSpoke && t - answeredAt > limits.firstWordsMs) resolve("no_response");
       else if (t - lastActivity > limits.silenceMs) resolve("silence");
+      keeper?.tick(line.pendingSeconds() > 0);
     }, 250);
   });
   const why = await Promise.race([
@@ -328,6 +342,7 @@ async function place(
     limitHit,
   ]);
   if (watchdog) clearInterval(watchdog);
+  keeper.end();
   stopOpening();
   await line.hangup().catch(() => undefined);
   log.info("scheduling_call.vad", { call_id: call.id, segments: vad.segments });
@@ -343,7 +358,7 @@ async function place(
     extra: {
       startedAt: new Date(answeredAt),
       endedAt: new Date(endedAt),
-      callStats: stats.finish({ languageCode: "en-IN", audio }),
+      callStats: stats.finish({ languageCode: "en-IN", audio, cues: keeper.counts }),
       durationS: Math.round((endedAt - answeredAt) / 1000),
       // The transcript is kept only when they agreed to a note of the call.
       transcript: state.permission === true ? (summary.transcript as ScreeningCallTurn[]) : [],

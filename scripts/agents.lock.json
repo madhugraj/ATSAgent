@@ -76,15 +76,15 @@
     "hash": "15cfc3682026b5429282abf1aaa21071c77dcdccd6af59d3814212307224a89d"
   },
   "screening_call": {
-    "version": "1.4.0",
-    "hash": "6a184fcef9b926bad6dedcf2003e1cee6ae2b03722c56f5b1a00ad50b7486ea0"
+    "version": "1.5.0",
+    "hash": "86f5d999e625fc56f6652943314b4c1053629ec588f734bcdedb09d4e3da00a2"
   },
   "sourcing": {
     "version": "1.0.5",
     "hash": "57baaeda0febfc80286eb20a14432ddb10a15237607f4d5265d7bae3c7e50b5c"
   },
   "voice_guard": {
-    "version": "1.0.1",
-    "hash": "0d76ead1caf6e8102a7670dc69b080979af90bd5133ddab4947d4da5163ce067"
+    "version": "1.1.0",
+    "hash": "8cf1c592cfa6e4776b607f12f056b25baf1949c5bcbf40ab422cdac5d9ae8ae0"
   }
 }

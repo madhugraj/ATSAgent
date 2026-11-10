@@ -162,6 +162,8 @@ jobs:
         run: bun test scripts/screening-call.test.ts
       - name: Voice agents' charter (dos and don'ts, generated doc in sync)
         run: bun test scripts/voice-charter.test.ts
+      - name: Voice turn manager (who owes the next words, cues, said-but-not-recorded)
+        run: bun test scripts/voice-turns.test.ts
       - name: Voice Guard (line stats, checks, quoted evidence, mandatory review sweep)
         run: bun test scripts/voice-guard.test.ts
       - name: Scheduling call (tools, brief, timing, booking, call-back, opt-out)

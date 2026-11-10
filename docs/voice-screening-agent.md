@@ -121,6 +121,15 @@ hiring team and that the call is checked for quality (Screening call agent
 After an answer it says only a short acknowledgement — never a summary or
 read-back of what the candidate said.
 
+Consent is the candidate's answer to the assistant's latest question, saved in
+the words heard; `record_consent` is refused when that answer raised a concern
+("I never applied", "how did you get my number?") until it is answered
+(Screening call agent 1.5.0). The shared turn manager (`src/server/voice/turns.ts`)
+cues the assistant when it goes quiet after a tool result or a statement, and
+when it says it noted something it did not record. Every ending — a goodbye,
+silence or a hang-up — reports the required details still to get to the hiring
+desk and the Screening agent.
+
 A completed call must leave with the earliest joining date, current pay and
 expected pay (Screening call agent 1.3.0): after consent, `end_call` with
 `completed` or `other` is refused until each is recorded or listed in

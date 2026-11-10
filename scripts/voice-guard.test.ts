@@ -203,6 +203,87 @@ describe("the system's checks", () => {
   });
 });
 
+describe("what the 10 November test call showed", () => {
+  const call = turns(
+    ["caller", "Hello."],
+    [
+      "ai",
+      "This is Saranya, an AI recruiting assistant. I will make notes of our conversation for the hiring team, and the call is checked for quality. Is now a good time?",
+    ],
+    ["caller", "It is okay, but I have never applied for this post."],
+    ["ai", "Sorry for the confusion. Would you still like to hear about it?"],
+    ["caller", "Yes, of course."],
+    ["ai", "Now for a few practical details."],
+    ["caller", "Are you there?"],
+    ["ai", "Yes, I am. Since the role is based in Bangalore, would you be open to relocating?"],
+    ["caller", "Maybe."],
+    ["ai", "Regarding your notice period and the earliest date you could join, could you tell me?"],
+    ["caller", "3 months after successful completion of the interview."],
+    ["ai", "Thank you."],
+  );
+  const r = checks.codeChecks(
+    base({
+      transcript: call,
+      endReason: "silence",
+      consentWords: "It is okay, but I have never applied for this post.",
+      details: {
+        required: { joining_date: "missing", current_pay: "missing", expected_pay: "missing" },
+      },
+      stats: {
+        v: 1,
+        languageCode: "en-IN",
+        firstCallerMs: 900,
+        firstAiMs: 1500,
+        aiSpokeFirst: false,
+        callerSegments: 6,
+        aiUtterances: 6,
+        talkOver: 0,
+        bargeIns: 0,
+        replyMs: { count: 5, p50: 1500, p90: 2000, max: 2000 },
+        slowReplies: 0,
+        audio: null,
+        cues: { after_tool: 1, mid_turn: 1, reply: 0, unrecorded_note: 1 },
+      },
+    }),
+  );
+  const summaries = r.findings.map((f) => `${f.check}: ${f.summary}`);
+
+  test("the stall at 'Are you there?' and the cut-off end", () => {
+    expect(summaries).toContain(
+      "turn_taking: It went quiet until the candidate had to ask whether it was still there.",
+    );
+    expect(summaries).toContain(
+      "turn_taking: The assistant stopped speaking and the call was cut off (silence) without a close.",
+    );
+    expect(summaries).toContain(
+      "turn_taking: It went quiet when it should have spoken and had to be cued 3 times (1 to record something it said it noted).",
+    );
+  });
+
+  test("details asked and answered but not recorded; consent from a concerned reply", () => {
+    expect(summaries).toContain(
+      "record_accuracy: It asked whether they would relocate, the candidate answered, and nothing was recorded.",
+    );
+    expect(summaries).toContain(
+      "record_accuracy: It asked their notice period, the candidate answered, and nothing was recorded.",
+    );
+    expect(r.findings).toContainEqual(
+      expect.objectContaining({
+        check: "record_accuracy",
+        severity: "critical",
+        evidence: [{ turn: 2, quote: "It is okay, but I have never applied for this post." }],
+      }),
+    );
+  });
+
+  test("the call's own steps are a check for calls made under them", () => {
+    expect(checks.checksFor("screening", "full").map((c) => c.id)).toContain("call_steps");
+    expect(checks.checksFor("screening", "full", true).map((c) => c.id)).not.toContain(
+      "call_steps",
+    );
+  });
+});
+
 describe("merging the agent's review", () => {
   const transcript = turns(
     ["ai", "Tell me about Kubernetes, for example Helm or Argo CD?"],
