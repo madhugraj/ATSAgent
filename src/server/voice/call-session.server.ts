@@ -34,6 +34,7 @@ import { log } from "../log";
 import type { AudioStats } from "./rtp";
 import { Vad } from "./vad";
 import { type BriefFacts, callSystemPrompt, loadBriefFacts } from "./call-brief.server";
+import { screeningFirstWords } from "./call-prompt";
 import {
   applyCallTool,
   CALL_TOOLS,
@@ -43,6 +44,8 @@ import {
   requiredDetailStatus,
 } from "./call-tools";
 import { CallStatsTracker } from "./call-stats";
+import { voiceDebug } from "./debug";
+import { GREETING_WAIT_MS, greetingCue, ReadyGreeting } from "./greeting";
 import { TurnKeeper } from "./turns";
 import { dialNumber } from "./phone";
 import { Resampler } from "./resample";
@@ -132,6 +135,11 @@ export function openingWatch(o: {
   callerFirstMs: number;
   /** After they stop talking, cue the assistant if it has not begun by then. */
   replyNudgeMs?: number;
+  /**
+   * While true, send nothing — the ready-made greeting (src/server/voice/greeting.ts)
+   * is held or still being prepared, and a cue would restart it.
+   */
+  wait?: () => boolean;
   tag: string;
   callId: string;
 }): () => void {
@@ -145,9 +153,11 @@ export function openingWatch(o: {
     nudges++;
     nudgedAt = t;
     log.warn(`${o.tag}.no_greeting`, { call_id: o.callId, nudge: nudges });
+    voiceDebug({ kind: "opening_cue", nudge: nudges });
     o.session.sendText(text);
   };
   const timer = setInterval(() => {
+    if (o.wait?.()) return;
     if (o.aiSpoke() || nudges > MAX_REPEAT_NUDGES) {
       clearInterval(timer);
       return;
@@ -167,6 +177,7 @@ export function openingWatch(o: {
     }
     if (cuedAt === null && t - t0 >= o.callerFirstMs) {
       cuedAt = t;
+      voiceDebug({ kind: "opening_cue", nudge: 0 });
       o.session.sendText("(The person picked up but has not said anything yet. Greet them now.)");
     } else if (cuedAt !== null && t - cuedAt > GREETING_NUDGE_MS) {
       nudge("(The person is on the line and waiting. Speak now.)", t);
@@ -435,14 +446,19 @@ async function placeCall(
   let agentEnded!: () => void;
   const agentEnd = new Promise<void>((r) => (agentEnded = r));
 
-  const events: VoiceSessionEvents = {
-    onAudio: (pcm) => {
+  // The first words, asked for while the phone rings and held until their hello ends
+  // (src/server/voice/greeting.ts): the model's first reply had taken up to 12 s.
+  const greeting = new ReadyGreeting({
+    play: (pcm) => {
       aiSpoke = true;
       lastActivity = now();
       stats.aiAudio();
       keeper?.aiAudio();
       line.play(down.process(pcm));
     },
+  });
+  const events: VoiceSessionEvents = {
+    onAudio: (pcm) => greeting.audio(pcm),
     onInterrupted: () => {
       stats.bargeIn();
       line.clear();
@@ -450,6 +466,7 @@ async function placeCall(
     onTurn: (t) => {
       turns++;
       if (t.who === "ai") {
+        greeting.turnDone();
         aiSaid += ` ${t.text}`;
         keeper?.aiTurn(t.text);
         if (t.text.includes("?")) reply = "";
@@ -526,6 +543,9 @@ async function placeCall(
     timing: { longAnswerMs: SCREENING_LONG_ANSWER_MS },
   });
   await setCall(call.id, orgId, { phoneLast4: number.last4 });
+  // Ready while it rings: played the moment their hello ends.
+  greeting.asked();
+  session.sendText(greetingCue(screeningFirstWords(facts)));
 
   try {
     await line.dial(number.dial, limits.ringMs);
@@ -567,6 +587,10 @@ async function placeCall(
       lastHeardAt = Date.now();
       lastActivity = now();
     }
+    // Their hello ended: the greeting plays. The hello itself never reaches the model,
+    // which already said its first words — so it does not greet them twice.
+    if (heard === "end") greeting.release("hello");
+    if (!greeting.isReleased) return;
     // While the assistant's audio is queued or playing, pass upstream only what
     // the VAD calls speech: a loud speakerphone carried the assistant's own voice
     // back up the line, the model read it as an interruption and cut itself off
@@ -586,6 +610,7 @@ async function placeCall(
     // default 4 s after the hello, the candidate said "Hello? Hello?" over the late
     // greeting, and that cut it off.
     replyNudgeMs: SCREENING_REPLY_CUE_MS,
+    wait: () => !greeting.isReleased || greeting.preparing(),
     tag: "screening_call",
     callId: call.id,
   });
@@ -594,6 +619,12 @@ async function placeCall(
   const limitHit = new Promise<string>((resolve) => {
     watchdog = setInterval(() => {
       const t = now();
+      // They said nothing (or are still talking) a few seconds in: greet them anyway.
+      if (
+        !greeting.isReleased &&
+        t - answeredAt >= (candidateSpoke ? GREETING_WAIT_MS : limits.callerFirstMs)
+      )
+        greeting.release("silence");
       // Ended a minute after the planned length — room to finish the goodbye.
       if (t - answeredAt > policy.maxMinutes * 60_000 + HARD_STOP_AFTER_MS) resolve("time_limit");
       else if (!candidateSpoke && t - answeredAt > limits.firstWordsMs) resolve("no_response");

@@ -33,6 +33,13 @@ export type SchedulingFacts = {
 };
 
 /** "Priya" / "a panel of 3 from the hiring team: Priya, Arun and Kavitha" (pure). */
+/** The assistant's first words, prepared while the phone rings (pure; greeting.ts). */
+export function schedulingFirstWords(
+  f: Pick<SchedulingFacts, "assistantName" | "orgName" | "candidateFirstName">,
+): string {
+  return `Hello, this is ${f.assistantName}, an AI recruiting assistant from ${f.orgName} — am I speaking with ${f.candidateFirstName}?`;
+}
+
 /**
  * Who the interview is with, without naming anyone (staff are confidential):
  * "the hiring team" / "a panel of 2 from the hiring team" (pure).
@@ -60,7 +67,7 @@ export function schedulingSystemPrompt(f: SchedulingFacts): string {
     ...optionLines,
     "",
     "## The call",
-    `1. Let them speak first — people say "hello" when they pick up — then answer at once, in one line: "Hello, this is ${f.assistantName}, an AI recruiting assistant from ${f.orgName} — am I speaking with ${f.candidateFirstName}?" (If you are told they have not said anything, say that line then.) Say nothing about the interview until they confirm it is them. Someone else: thank them, say the team will be in touch, end (wrong_person).`,
+    `1. Your first words are said as they pick up: "${schedulingFirstWords(f)}" Say nothing about the interview until they confirm it is them. Someone else: thank them, say the team will be in touch, end (wrong_person).`,
     f.isCallback
       ? `2. Once they confirm, in this order — first that you note the call, then why: "Thank you. I'll note this short call for the hiring team, and it is checked for quality. You asked me to call back to pick a time for your ${f.roundLabel} for the ${f.roleTitle} role — is now a good time?" Then record_permission with their answer. No → say the link in their e-mail still works; goodbye; end (not_now).`
       : `2. Once they confirm, in this order — first that you note the call, then why: "Thank you. I'll note this short call for the hiring team, and it is checked for quality. I'm calling to help you and the interview panel agree a time for your ${f.roundLabel} for the ${f.roleTitle} role, which we e-mailed you about — do you have a minute now?" Never mention the interview before you have said you are an AI and that you note the call. Then record_permission with their answer. No → ${f.callbackAllowed ? "if they would like a call back shortly, follow step 2a; otherwise " : ""}say the link in their e-mail still works and the team looks forward to hearing from them; goodbye; end (not_now).`,

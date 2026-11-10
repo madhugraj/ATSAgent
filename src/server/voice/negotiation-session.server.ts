@@ -40,6 +40,7 @@ import {
 import { disclosureMissing } from "./call-tools";
 import { loadNegotiationBrief, type NegotiationBrief } from "./negotiation-brief.server";
 import { CallStatsTracker } from "./call-stats";
+import { GREETING_WAIT_MS, greetingCue, ReadyGreeting } from "./greeting";
 import { TURN_TIMING, TurnKeeper } from "./turns";
 import { Vad } from "./vad";
 import {
@@ -53,7 +54,7 @@ import {
   type NegotiationCallState,
 } from "./negotiation-call-tools";
 import { amountsIn } from "./negotiation-graders";
-import { negotiationSystemPrompt } from "./negotiation-prompt";
+import { negotiationSystemPrompt, negotiationFirstWords } from "./negotiation-prompt";
 import { dialNumber } from "./phone";
 import { Resampler } from "./resample";
 import { localNow, retryAt } from "./schedule";
@@ -210,14 +211,18 @@ async function place(
   // The live guard (fires once): cut the line, correct, hand off, flag.
   let guard: ((amount: number) => void) | null = null;
 
-  const events: VoiceSessionEvents = {
-    onAudio: (pcm) => {
+  // The first words, ready while the phone rings (src/server/voice/greeting.ts).
+  const greeting = new ReadyGreeting({
+    play: (pcm) => {
       aiSpoke = true;
       lastActivity = now();
       stats.aiAudio();
       keeper?.aiAudio();
       line.play(down.process(pcm));
     },
+  });
+  const events: VoiceSessionEvents = {
+    onAudio: (pcm) => greeting.audio(pcm),
     onInterrupted: () => {
       stats.bargeIn();
       line.clear();
@@ -242,6 +247,7 @@ async function place(
     },
     onTurn: (t) => {
       if (t.who === "ai") {
+        greeting.turnDone();
         aiSaid += ` ${t.text}`;
         keeper?.aiTurn(t.text);
         if (t.text.includes("?") && !disclosureMissing(aiSaid)) heardAfterAsk = "";
@@ -327,6 +333,9 @@ async function place(
       SPEAK_AFTER.has(name) && !(name === "record_permission" && !state.permission),
   });
   await setCall(call.id, orgId, { phoneLast4: number.last4 });
+  // Ready while it rings: played the moment their hello ends.
+  greeting.asked();
+  session.sendText(greetingCue(negotiationFirstWords(brief.facts)));
 
   try {
     await line.dial(number.dial, limits.ringMs);
@@ -361,6 +370,9 @@ async function place(
       lastHeardAt = Date.now();
       lastActivity = now();
     }
+    // Their hello ended: the greeting plays; the hello itself never reaches the model.
+    if (heard === "end") greeting.release("hello");
+    if (!greeting.isReleased) return;
     // While the assistant is playing, upstream gets only real speech — noise and
     // echo read as an interruption and cut the assistant off mid-word.
     if (line.pendingSeconds() > 0 && !vad.isActive()) return;
@@ -374,6 +386,7 @@ async function place(
     aiSpoke: () => aiSpoke,
     callerFirstMs: limits.callerFirstMs,
     replyNudgeMs: NEGOTIATION_REPLY_CUE_MS,
+    wait: () => !greeting.isReleased || greeting.preparing(),
     tag: "negotiation_call",
     callId: call.id,
   });
@@ -382,6 +395,12 @@ async function place(
   const limitHit = new Promise<string>((resolve) => {
     watchdog = setInterval(() => {
       const t = now();
+      // They said nothing (or are still talking) a few seconds in: greet them anyway.
+      if (
+        !greeting.isReleased &&
+        t - answeredAt >= (candidateSpoke ? GREETING_WAIT_MS : limits.callerFirstMs)
+      )
+        greeting.release("silence");
       if (t - answeredAt > brief.facts.maxMinutes * 60_000) resolve("time_limit");
       else if (!candidateSpoke && t - answeredAt > limits.firstWordsMs) resolve("no_response");
       else if (t - lastActivity > limits.silenceMs) resolve("silence");

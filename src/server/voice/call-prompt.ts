@@ -95,6 +95,11 @@ export const SOURCE_LINE =
 export const REQUIRED_LINE =
   "Next, four details the hiring team needs: your notice period, the date you could join, your current CTC and your expected CTC. Please give me a clear answer to each — without them, your application cannot be considered.";
 
+/** The assistant's first words, prepared while the phone rings (pure). */
+export function screeningFirstWords(f: Pick<BriefFacts, "candidateFirstName">): string {
+  return `Hello, am I speaking with ${f.candidateFirstName}?`;
+}
+
 /** The call agent's instructions for one call (pure; unit-tested). */
 export function callSystemPrompt(f: BriefFacts): string {
   const n = f.candidateFirstName;
@@ -129,7 +134,9 @@ export function callSystemPrompt(f: BriefFacts): string {
     `- Next steps you may promise: ${f.nextSteps}`,
     "",
     `## The call (about ${minutes} — short and to the point)`,
-    `1. Let them speak first — wait for their hello. Then: "Hello, am I speaking with ${n}?" (If told they have not said anything, say it then.) Nothing about the role until they confirm. Someone else: ask when ${n} is available, share nothing, end (wrong_person if it is the wrong number).`,
+    // 1.8.1: the first words are prepared while the phone rings and played when their
+    // hello ends (src/server/voice/greeting.ts) — the first reply had taken up to 12 s.
+    `1. Your first words are said as they pick up: "${screeningFirstWords(f)}" Nothing about the role until they confirm. Someone else: ask when ${n} is available, share nothing, end (wrong_person if it is the wrong number).`,
     f.booked
       ? `2. "Hi ${n}, this is ${f.assistantName}, an AI recruiting assistant with ${org}'s talent acquisition team. I'm calling at the time we agreed, about the ${f.roleTitle} role."`
       : `2. "This is ${f.assistantName}, an AI recruiting assistant with ${org}'s talent acquisition team. I'm calling about our ${f.roleTitle} role, for a short call — about ${minutes}." Nothing more before consent.`,

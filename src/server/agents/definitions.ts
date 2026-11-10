@@ -102,7 +102,11 @@ export function registerPhase1Agents(): void {
     // screening question (about 45 s, cut short at 45 s), and a close that sends their
     // questions to the hiring team by e-mail — no title, company or years (on the CV),
     // no "why them", no "Do you have any questions for me?".
-    version: "1.8.0",
+    // 1.8.1: the first words are prepared while the phone rings and played the moment the
+    // candidate's hello ends (src/server/voice/greeting.ts); the hello itself is not
+    // passed to the model, and the opening cue holds off while the greeting is pending.
+    // Test calls on 10 November first spoke 12–14 s after pickup and were hung up on.
+    version: "1.8.1",
     owner: "hr_head",
     responsibility:
       "Turns a hiring need into a complete, evidence-backed draft requisition and walks it through the DH → HR → CBO approval chain.",
@@ -772,7 +776,11 @@ export function registerPhase3Agents(): void {
     // 1.8.2: repeat cues 6 s apart, not 3 — a cue interrupts the reply being prepared
     // (a test call on 10 November stayed silent 11 s after the hello under 3-s cues).
     // 1.8.3: shared turn manager — a long answer is cut short at 60 s (was 90).
-    version: "1.8.3",
+    // 1.8.4: the first words are prepared while the phone rings and played the moment the
+    // candidate's hello ends (src/server/voice/greeting.ts); the hello itself is not
+    // passed to the model, and the opening cue holds off while the greeting is pending.
+    // Test calls on 10 November first spoke 12–14 s after pickup and were hung up on.
+    version: "1.8.4",
     owner: "hr_head",
     responsibility:
       "Holds one short AI phone call to help a candidate and the interview panel agree a time the candidate was already e-mailed: says it is an AI, tells them where they stand in the process, books one of the offered or pre-checked times (free for the whole panel), or notes when they are free — nothing else.",
@@ -888,7 +896,11 @@ export function registerPhase3Agents(): void {
     // 0.8.2: repeat cues 6 s apart, not 3 — a cue interrupts the reply being prepared
     // (a test call on 10 November stayed silent 11 s after the hello under 3-s cues).
     // 0.8.3: shared turn manager — a long answer is cut short at 60 s (was 90).
-    version: "0.8.3",
+    // 0.8.4: the first words are prepared while the phone rings and played the moment the
+    // candidate's hello ends (src/server/voice/greeting.ts); the hello itself is not
+    // passed to the model, and the opening cue holds off while the greeting is pending.
+    // Test calls on 10 November first spoke 12–14 s after pickup and were hung up on.
+    version: "0.8.4",
     owner: "hr_head",
     responsibility:
       "Holds one AI phone call with a candidate about the pay for their offer: says it is an AI, tells them which role and organisation and where they stand, wins their interest from approved facts, frames the approved figure and extras around what matters to them, may offer one pre-approved improved figure, and brings a clear answer back to the people who decide.",

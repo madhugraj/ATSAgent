@@ -198,6 +198,23 @@ default 3, migration 0072. A value saved earlier is planned at most 5.
 - **The call is ended a minute after the planned length** (`time_limit`).
 - **The grade rests on one answer.**
 
+**The first words are ready before pickup** (screening 1.8.1, scheduling 1.8.4,
+negotiation 0.8.4; `src/server/voice/greeting.ts`).
+
+- **Why:** the voice model's first reply after the candidate's hello sometimes
+  took 9 s or more, and a second cue restarted it. Two test calls on 10 November
+  first spoke 13.9 s and 12.0 s after pickup, and were hung up on.
+- **What happens now:**
+  - While the phone rings, the assistant is asked to say its fixed first line.
+  - The audio is held and played the moment the candidate's hello ends, or
+    after the usual wait if they say nothing.
+  - The hello itself is not passed to the voice model, so it does not greet them
+    twice.
+- **The opening cue holds off** while the greeting is held or still being
+  prepared (up to 8 s).
+- **Tracing:** `VOICE_DEBUG_FILE` now traces the greeting (asked, ready, played)
+  and each opening cue.
+
 A completed call must leave with the earliest joining date, current pay and
 expected pay (Screening call agent 1.3.0): after consent, `end_call` with
 `completed` or `other` is refused until each is recorded or listed in
