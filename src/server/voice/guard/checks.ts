@@ -442,6 +442,9 @@ const REQUIRED_ASKED: { what: string; asked: RegExp }[] = [
   },
 ];
 
+/** A leading clause that states what they already said ("If …,", "Since …,", "Given …,"). */
+const PREMISE = /^\s*(if|since|given|with|now that)\b[^,?]*,\s*/i;
+
 /**
  * Required details asked for together in one question ("your notice period and
  * the earliest date you could join?", "your current and expected pay?"). One
@@ -456,7 +459,10 @@ export function stackedQuestions(
     if (t.who !== "ai") return;
     for (const raw of t.text.split(/(?<=[.?!])\s+/)) {
       if (!/\?\s*$/.test(raw.trim())) continue;
-      const asks = REQUIRED_ASKED.filter((r) => r.asked.test(raw)).map((r) => r.what);
+      // A detail given as the premise is not asked again: "If your notice period
+      // is three months, what date could you join?" asks for the date only.
+      const asked = raw.replace(PREMISE, "");
+      const asks = REQUIRED_ASKED.filter((r) => r.asked.test(asked)).map((r) => r.what);
       if (asks.length > 1) out.push({ turn, sentence: raw.trim(), asks });
     }
   });

@@ -309,6 +309,13 @@ describe("what the 10 November test call showed", () => {
     expect(s("What is your notice period?")).toEqual([]);
     expect(s("Thank you. And what is your expected pay?")).toEqual([]);
     expect(s("You mentioned a notice period of 90 days. Which date could you join?")).toEqual([]);
+    // A detail they already gave, as the premise, is not asked again (test call, 10 Nov).
+    expect(
+      s(
+        "If your notice period is three months, what would be the specific earliest date you could join?",
+      ),
+    ).toEqual([]);
+    expect(s("Given your notice period of 90 days, when could you join?")).toEqual([]);
     // Statements are not questions.
     expect(s("Now for your notice period and your expected pay.")).toEqual([]);
   });
