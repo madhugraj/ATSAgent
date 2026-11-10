@@ -1969,12 +1969,15 @@ export async function openVoiceSession(opts: {
         const call: VoiceToolCall = { id: fc.id ?? "", name: fc.name ?? "", args: fc.args ?? {} };
         toolCalls.push(call);
         let response: Record<string, unknown>;
+        voiceDebug({ kind: "tool_call", name: call.name });
         try {
           response = (await opts.events.onToolCall?.(call)) ?? { ok: true };
         } catch (e) {
           response = { ok: false, error: (e as Error).message };
         }
         send({ toolResponse: { functionResponses: [{ id: call.id, name: call.name, response }] } });
+        // Names and outcome only — never arguments or results (candidate data).
+        voiceDebug({ kind: "tool_response", name: call.name, ok: response["ok"] !== false });
       }
       if (msg.goAway) opts.events.onGoAway?.(msg.goAway.timeLeft ?? "");
       if (msg.error?.message) error = msg.error.message;

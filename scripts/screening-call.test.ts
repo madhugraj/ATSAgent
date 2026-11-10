@@ -94,7 +94,9 @@ const gw = await import("../src/lib/ai-gateway.server");
 type VoiceOpts = Parameters<typeof gw.aiVoiceSession>[0];
 type Step =
   | { say: "ai" | "caller"; text: string }
-  | { tool: string; args: Record<string, unknown>; expectOk?: boolean };
+  | { tool: string; args: Record<string, unknown>; expectOk?: boolean }
+  /** The model goes quiet until the session cues it (text matching this), or 8 s. */
+  | { waitCue: RegExp };
 
 const stamp = Date.now();
 let orgId: string;
@@ -174,8 +176,10 @@ class FakeLine implements session.PhoneLine {
 /** A voice session that plays `steps` once the call is answered. */
 function scriptedVoice(
   steps: Step[],
-  seen: { opts?: VoiceOpts; results: unknown[]; sent?: number[] },
+  seen: { opts?: VoiceOpts; results: unknown[]; sent?: number[]; cues?: string[] },
 ) {
+  const cues: string[] = [];
+  let onCue: (() => void) | null = null;
   return (async (opts: VoiceOpts) => {
     seen.opts = opts;
     const transcript: { who: "caller" | "ai"; text: string; at: string }[] = [];
@@ -190,6 +194,20 @@ function scriptedVoice(
     });
     const run = async () => {
       for (const s of steps) {
+        if ("waitCue" in s) {
+          const want = s.waitCue;
+          await new Promise<void>((resolve) => {
+            const timer = setTimeout(resolve, 8_000);
+            onCue = () => {
+              if (cues.some((c) => want.test(c))) {
+                clearTimeout(timer);
+                resolve();
+              }
+            };
+            onCue();
+          });
+          continue;
+        }
         if ("say" in s) {
           const turn = { who: s.say, text: s.text, at: new Date().toISOString() };
           transcript.push(turn);
@@ -208,6 +226,9 @@ function scriptedVoice(
           if (pcm && seen.sent) seen.sent.push(pcm.length);
         },
         sendText(text: string) {
+          cues.push(text);
+          seen.cues?.push(text);
+          onCue?.();
           if (text.includes("picked up")) void run();
         },
         close: async () => {
@@ -651,6 +672,38 @@ describe("in-call tools", () => {
     ).toEqual({ ok: true });
   });
 
+  test("consent is their answer to the latest question, never a reply that raised a concern", () => {
+    const said =
+      "I'm an AI assistant; I'll make notes for the team, and the call is checked for quality.";
+    const s = fresh();
+    const yes = { granted: true, their_words: "It is okay" };
+    // The 10 November call: consent taken from the reply that said they never applied.
+    expect(
+      session.applyCallTool(
+        s as never,
+        "record_consent",
+        yes,
+        ids,
+        0,
+        said,
+        " It is okay, but I have never applied for this post.",
+      ),
+    ).toMatchObject({ ok: false, error: expect.stringMatching(/raised a concern/) });
+    expect(s.consent).toBeNull();
+    expect(
+      session.applyCallTool(s as never, "record_consent", yes, ids, 0, said, " Yes, of course."),
+    ).toEqual({ ok: true });
+    expect(s.consentWords).toBe("Yes, of course.");
+    for (const r of [
+      "How did you get my number?",
+      "I'm not sure, what is this about?",
+      "I didn't apply anywhere.",
+    ])
+      expect(session.RAISES_CONCERN.test(r)).toBe(true);
+    for (const r of ["Yes, go ahead.", "Sure, I have ten minutes.", "Okay, but quickly please."])
+      expect(session.RAISES_CONCERN.test(r)).toBe(false);
+  });
+
   test("a call cannot be moved more often than the organisation allows", () => {
     const s = { ...fresh(), reschedulesLeft: 0 };
     expect(
@@ -828,6 +881,58 @@ describe("the calling window (Asia/Kolkata, Mon–Sat 10:00–19:00)", () => {
 /* -------------------------------------------------------- full calls */
 
 describe("a whole call with a fake line", () => {
+  test("a silent assistant after recording an answer is cued to go on (the 10 November call)", async () => {
+    const { callId, appId } = await seedCall();
+    const seen: { opts?: VoiceOpts; results: unknown[]; cues: string[] } = {
+      results: [],
+      cues: [],
+    };
+    const line = new FakeLine();
+    const r = await run(
+      callId,
+      line,
+      scriptedVoice(
+        [
+          {
+            say: "ai",
+            text: "This is Saranya, an AI recruiting assistant. I'll make notes of our conversation for the hiring team, and the call is checked for quality. Is now a good time?",
+          },
+          { say: "caller", text: "Yes, go ahead." },
+          { tool: "record_consent", args: { granted: true, their_words: "Yes, go ahead." } },
+          { say: "ai", text: "Tell me about running Kubernetes in production." },
+          { say: "caller", text: "I run three EKS clusters." },
+          // As on the real call: a short acknowledgement, the record, then silence.
+          { say: "ai", text: "Thank you." },
+          {
+            tool: "record_answer",
+            args: { question_id: "q1", summary: "Runs three EKS clusters." },
+          },
+          { waitCue: /waiting in silence/ },
+          { say: "ai", text: "Describe an incident you led." },
+          { say: "caller", text: "I would rather stop here, bye." },
+          { say: "ai", text: "Of course. Thank you for your time, goodbye." },
+          { tool: "end_call", args: { reason: "candidate_left" } },
+        ],
+        seen,
+      ),
+    );
+    expect(seen.cues.filter((c) => /waiting in silence/.test(c))).toHaveLength(1);
+    expect(r.endReason).toBe("candidate_left");
+    const c = await callRow(callId);
+    expect(c.callStats?.cues).toMatchObject({ after_tool: 1 });
+    // Every ending checks the required details: the Screening agent is told what is missing.
+    const [ev] = await endedEvents(appId);
+    expect(ev?.payload).toMatchObject({
+      missingDetails: ["the earliest joining date", "current pay", "expected pay"],
+      cutOff: false,
+    });
+    expect(
+      session.missingRequired({
+        required: { joining_date: "declined", current_pay: "recorded", expected_pay: "missing" },
+      }),
+    ).toEqual(["expected pay"]);
+  });
+
   test("completed: details first (pay to HR only), questions graded without them, agent told", async () => {
     const { callId, appId } = await seedCall();
     // The role's hiring-desk thread, where the call reports how it went.
@@ -913,7 +1018,8 @@ describe("a whole call with a fake line", () => {
     const c = await callRow(callId);
     expect(c).toMatchObject({ status: "completed", phoneLast4: "2345" });
     expect(c.answers.map((a) => a.question_id).sort()).toEqual(["q1", "q2"]);
-    expect(c.consentWords).toBe("Yes, go ahead.");
+    // The words heard after the question, not the model's paraphrase.
+    expect(c.consentWords).toBe("Yes, go ahead, that's fine.");
     // Details on the call row — never pay.
     expect(c.details).toEqual({
       noticePeriodDays: 30,

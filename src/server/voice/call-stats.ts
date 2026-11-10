@@ -76,7 +76,11 @@ export class CallStatsTracker {
     this.bargeIns++;
   }
 
-  finish(o: { languageCode: string; audio: AudioStats | null }): CallStats {
+  finish(o: {
+    languageCode: string;
+    audio: AudioStats | null;
+    cues?: NonNullable<CallStats["cues"]>;
+  }): CallStats {
     const base = this.answeredAt;
     const since = (t: number | null) => (t === null || base === null ? null : t - base);
     const sorted = [...this.replies].sort((a, b) => a - b);
@@ -99,6 +103,7 @@ export class CallStatsTracker {
       },
       slowReplies: sorted.filter((ms) => ms > SLOW_REPLY_MS).length,
       audio: o.audio,
+      ...(o.cues ? { cues: { ...o.cues } } : {}),
     };
   }
 }

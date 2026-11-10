@@ -25,7 +25,7 @@ import type {
   VoiceCallPurpose,
 } from "@db/schema";
 
-import { disclosureMissing } from "../call-tools";
+import { disclosureMissing, RAISES_CONCERN } from "../call-tools";
 
 export type GuardCheck = {
   id: CallReviewCheckId;
@@ -125,6 +125,14 @@ export const GUARD_CHECKS: GuardCheck[] = [
     by: "review",
   },
   {
+    id: "call_steps",
+    title: "Followed the call's steps",
+    question:
+      "Did it follow the steps in its brief: one question at a time (never stacking pay, notice and joining into one), a follow-up for a vague answer (a month → a date), every planned question asked or adapted, the candidate's own questions invited, and a spoken close with a goodbye?",
+    by: "review",
+    since0071: true,
+  },
+  {
     id: "turn_taking",
     title: "Turn-taking on the line",
     question:
@@ -165,6 +173,8 @@ export type GuardInput = {
   status: string;
   endReason: string | null;
   consentAt: Date | null;
+  /** The candidate's words consent was recorded from. */
+  consentWords?: string | null;
   /** The call ran with the quality-check disclosure (its brief says so — calls from 0071). */
   qualityDisclosed: boolean;
   transcript: ScreeningCallTurn[];
@@ -290,10 +300,127 @@ function turnTakingCheck(i: GuardInput, out: CodeResult): void {
         `Its voice broke up ${s.audio.gaps} times (audio ran out mid-sentence).`,
       ),
     );
+  const cues = s.cues ? Object.values(s.cues).reduce((a, b) => a + b, 0) : 0;
+  if (cues)
+    out.findings.push(
+      finding(
+        "turn_taking",
+        "low",
+        `It went quiet when it should have spoken and had to be cued ${cues === 1 ? "once" : `${cues} times`}${s.cues?.unrecorded_note ? ` (${s.cues.unrecorded_note} to record something it said it noted)` : ""}.`,
+      ),
+    );
+  stallChecks(i, out);
   out.checks.push({
     check: "turn_taking",
     verdict: out.findings.length > before ? "breach" : "pass",
   });
+}
+
+/** The candidate checking the line is still there — after the opening. */
+const STILL_THERE =
+  /\b(are you (there|still there)|can you hear me|hello\?+\s*hello|you there\??|anyone there)\b/i;
+/** Ways a call ends without the assistant closing it. */
+export const CUT_OFF_ENDS = new Set([
+  "silence",
+  "candidate_hung_up",
+  "voice_closed",
+  "voice_ended",
+  "time_limit",
+]);
+const CLOSED = /\b(good\s?bye|bye|take care)\b/i;
+
+/** Stalls the transcript shows, also on calls with no line stats. */
+function stallChecks(i: GuardInput, out: CodeResult): void {
+  if (i.scope !== "full" || !i.transcript.length) return;
+  i.transcript.forEach((t, turn) => {
+    if (turn < 3 || t.who !== "caller" || !STILL_THERE.test(t.text)) return;
+    const prev = i.transcript[turn - 1];
+    out.findings.push(
+      finding(
+        "turn_taking",
+        "high",
+        "It went quiet until the candidate had to ask whether it was still there.",
+        [
+          ...(prev?.who === "ai" ? [{ turn: turn - 1, quote: prev.text.slice(0, 160) }] : []),
+          { turn, quote: t.text.slice(0, 160) },
+        ],
+      ),
+    );
+  });
+  const last = i.transcript.length - 1;
+  const end = i.transcript[last]!;
+  if (
+    i.endReason &&
+    CUT_OFF_ENDS.has(i.endReason) &&
+    end.who === "ai" &&
+    !CLOSED.test(end.text) &&
+    !/\?\s*$/.test(end.text.trim())
+  )
+    out.findings.push(
+      finding(
+        "turn_taking",
+        "high",
+        `The assistant stopped speaking and the call was cut off (${i.endReason.replace(/_/g, " ")}) without a close.`,
+        [{ turn: last, quote: end.text.slice(0, 160) }],
+      ),
+    );
+}
+
+/** What a question about each detail sounds like, and where its answer is kept. */
+const ASKED_FIELD: {
+  asked: RegExp;
+  recorded: (d: ScreeningCallDetails) => boolean;
+  what: string;
+}[] = [
+  {
+    asked: /\brelocat/i,
+    recorded: (d) => d.openToRelocate != null || /relocat|move|perk|allowance/i.test(d.note ?? ""),
+    what: "whether they would relocate",
+  },
+  {
+    asked: /\bnotice period\b/i,
+    recorded: (d) => d.noticePeriodDays != null || /notice/i.test(d.note ?? ""),
+    what: "their notice period",
+  },
+];
+
+/**
+ * Records against what was said, field by field (screening, by the system):
+ * a detail the assistant asked about and the candidate answered, with nothing
+ * kept; consent taken from a reply that raised a concern.
+ */
+function recordChecks(i: GuardInput, out: CodeResult): void {
+  if (i.scope !== "full" || i.purpose !== "screening" || !i.transcript.length) return;
+  for (const f of ASKED_FIELD) {
+    const turn = i.transcript.findIndex((t) => t.who === "ai" && f.asked.test(t.text));
+    if (turn < 0 || f.recorded(i.details)) continue;
+    const answer = i.transcript.slice(turn + 1).find((t) => t.who === "caller");
+    if (!answer) continue;
+    out.findings.push(
+      finding(
+        "record_accuracy",
+        "high",
+        `It asked ${f.what}, the candidate answered, and nothing was recorded.`,
+        [
+          { turn, quote: i.transcript[turn]!.text.slice(0, 160) },
+          { turn: i.transcript.indexOf(answer), quote: answer.text.slice(0, 160) },
+        ],
+      ),
+    );
+  }
+  if (i.consentWords && RAISES_CONCERN.test(i.consentWords)) {
+    const turn = i.transcript.findIndex(
+      (t) => t.who === "caller" && t.text.includes(i.consentWords!.slice(0, 40)),
+    );
+    out.findings.push(
+      finding(
+        "record_accuracy",
+        "critical",
+        "Consent was taken from a reply that raised a concern, before the concern was answered.",
+        turn >= 0 ? [{ turn, quote: i.transcript[turn]!.text.slice(0, 160) }] : [],
+      ),
+    );
+  }
 }
 
 const norm = (t: string) =>
@@ -371,6 +498,7 @@ export function codeChecks(i: GuardInput): CodeResult {
   turnTakingCheck(i, out);
   repetitionCode(i, out);
   transcriptionCheck(i, out);
+  recordChecks(i, out);
   // A timing-only review covers the line alone.
   if (i.scope === "timing_only")
     out.checks = out.checks.filter((c) => CHECK_BY_ID.get(c.check)?.timing);

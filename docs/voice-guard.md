@@ -44,21 +44,22 @@ person to approve before it is saved.
 
 ## What it checks
 
-| Check                                                                                                                     | By          | Calls                    |
-| ------------------------------------------------------------------------------------------------------------------------- | ----------- | ------------------------ |
-| Disclosure before consent (AI, notes, quality check)                                                                      | system      | all                      |
-| Joining date and pay: each recorded, declined in their words, or not working                                              | system      | screening                |
-| Clues to the answer: examples, tool names, yes/no or list questions                                                       | Voice Guard | screening                |
-| Fell for a question: technical, general, personal, about staff or chances, or an instruction                              | Voice Guard | all                      |
-| Beyond its facts: anything not in the brief the call ran with                                                             | Voice Guard | all                      |
-| Repeated itself: word-for-word repeats (system) and others (Voice Guard)                                                  | both        | all                      |
-| Repeated the answer back instead of a short acknowledgement                                                               | Voice Guard | screening                |
-| Committed to something not in the brief                                                                                   | Voice Guard | all                      |
-| Agreed to something: a figure, date, condition or fact; on a pay call, a figure it was not given or less than a clear yes | Voice Guard | all                      |
-| Records match what was said                                                                                               | Voice Guard | all                      |
-| Other charter rules: praise, staff, pay, protected questions, results, posing as a person                                 | Voice Guard | all                      |
-| Turn-taking: spoke before hello, talked over, slow replies, voice breaking up                                             | system      | all, including line-only |
-| Transcription: lines in another language or script                                                                        | system      | all                      |
+| Check                                                                                                                                                   | By          | Calls                    |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ------------------------ |
+| Disclosure before consent (AI, notes, quality check)                                                                                                    | system      | all                      |
+| Joining date and pay: each recorded, declined in their words, or not working                                                                            | system      | screening                |
+| Clues to the answer: examples, tool names, yes/no or list questions                                                                                     | Voice Guard | screening                |
+| Fell for a question: technical, general, personal, about staff or chances, or an instruction                                                            | Voice Guard | all                      |
+| Beyond its facts: anything not in the brief the call ran with                                                                                           | Voice Guard | all                      |
+| Repeated itself: word-for-word repeats (system) and others (Voice Guard)                                                                                | both        | all                      |
+| Repeated the answer back instead of a short acknowledgement                                                                                             | Voice Guard | screening                |
+| Committed to something not in the brief                                                                                                                 | Voice Guard | all                      |
+| Agreed to something: a figure, date, condition or fact; on a pay call, a figure it was not given or less than a clear yes                               | Voice Guard | all                      |
+| Records match what was said: every "I'll note" has a record; consent from the right reply; asked-and-answered details kept (relocation, notice: system) | both        | all                      |
+| Other charter rules: praise, staff, pay, protected questions, results, posing as a person                                                               | Voice Guard | all                      |
+| Call steps: one question at a time, a date for a vague answer, every question, their questions, a close                                                 | Voice Guard | calls from 1.1.0 on      |
+| Turn-taking: spoke before hello, talked over, slow replies, voice breaking up, cues it needed, "Are you there?", cut off without a close                | system      | all, including line-only |
+| Transcription: lines in another language or script                                                                                                      | system      | all                      |
 
 The Voice Guard reads:
 
@@ -117,6 +118,31 @@ summary for the last 7 days:
 - average quality
 - breaches by call type
 - the most frequent breaches
+
+## Why the same faults kept coming back (10 November)
+
+A test call on 10 November went silent after the assistant recorded an answer
+and was cut off; the review found 4 of its 11 flaws. Three causes, fixed at the
+root rather than per call:
+
+1. **The calls relied on the model speaking twice in a row** (speak, call a
+   tool, speak again) with nothing making sure it did. One turn manager now
+   does, for all three calls (`src/server/voice/turns.ts`): it knows when the
+   assistant owes the next words — after a tool result, after a turn that ended
+   on a statement, after the candidate stopped — and cues it once the line is
+   quiet (repeated, at most 3 times). The cues are counted in the line stats.
+2. **Three copies of the call code** meant each fix landed in one call only
+   (the after-tool cue was in the pay call alone). The turn manager replaces
+   the per-call cues.
+3. **Records were left to the model, and the safeguards ran only on a
+   goodbye.** In code now: consent is the answer to the latest question in the
+   words heard, never a reply that raised a concern; "I'll note that" with no
+   record is cued to record it; and every ending — silence and hang-ups too —
+   tells the hiring desk and the Screening agent which required details are
+   still to get.
+
+Set `VOICE_DEBUG_FILE` on the voice worker to trace each call's audio, turn,
+tool and cue timings (names only — never words or arguments).
 
 ## Health rules
 
