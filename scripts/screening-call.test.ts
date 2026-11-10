@@ -26,6 +26,8 @@ const realGateway = await import("../src/lib/ai-gateway.server");
 const { coverageWords, notReached } = await import("../src/lib/screening-coverage");
 /** What the grader was last given (system rules and the prompt). */
 const lastGrade: { system?: string; prompt?: string } = {};
+/** What the desk's going-back judge was last given. */
+const lastJudge: { prompt?: string } = {};
 mock.module("../src/lib/ai-gateway.server", () => ({
   ...realGateway,
   aiJson: async (opts: { feature: string; system?: string; prompt?: string }) => {
@@ -33,6 +35,7 @@ mock.module("../src/lib/ai-gateway.server", () => ({
       Object.assign(lastGrade, { system: opts.system, prompt: opts.prompt });
     // The desk's judgement of a reason to go back a step: a dropped call is one.
     if (opts.feature === "hiring_desk") {
+      lastJudge.prompt = opts.prompt;
       const valid = /dropped|by mistake/i.test(opts.prompt ?? "");
       return {
         ok: true,
@@ -1404,6 +1407,11 @@ describe("the hiring desk", () => {
       .onConflictDoNothing();
     await db.insert(userRoles).values({ userId, orgId, role: "recruiter" }).onConflictDoNothing();
     const { appId } = await seedCall({ status: "completed", attempt: 1 });
+    // Answered and finished: that is the call the judge's evidence describes.
+    await db
+      .update(screeningCalls)
+      .set({ startedAt: new Date(), durationS: 200 })
+      .where(eq(screeningCalls.applicationId, appId));
     const [app] = await db
       .select({ requisitionId: applications.requisitionId })
       .from(applications)
@@ -1455,6 +1463,10 @@ describe("the hiring desk", () => {
       again: true,
       reason: "the call dropped halfway through",
     });
+    // The judge weighed the reason against the call's own record, not the claim alone.
+    expect(lastJudge.prompt).toMatch(/EVIDENCE: [\s\S]*Last screening call: completed/);
+    expect(lastJudge.prompt).toMatch(/Line audio: |Line audio: not measured/);
+    expect(lastJudge.prompt).toMatch(/Voice Guard review: /);
     const calls = await db
       .select({ status: screeningCalls.status, requestedBy: screeningCalls.requestedBy })
       .from(screeningCalls)

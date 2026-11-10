@@ -17,7 +17,7 @@ import { localWhen } from "@/lib/local-time";
 import { placeLabel } from "@/lib/work-mode";
 import type { Stage } from "@/lib/lifecycle";
 import { sourceLabel as channelSourceLabel } from "@/lib/job-channels";
-import { and, asc, desc, eq, ilike, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { INJECTION_RULES, aiJson, untrusted } from "@/lib/ai-gateway.server";
@@ -4505,6 +4505,7 @@ export async function callCandidateFromDesk(
       reason: cmd.reason,
       ask: `${app.name} has already had a screening call. Repeating a completed step needs a reason — why should ${app.name} be called again? (For example: the call dropped, an answer was misheard, or there is new information.)`,
       refuse: `I won't repeat ${app.name}'s screening call for that reason:`,
+      evidence: () => callEvidence(conv.orgId, app.id),
     });
     if (!accepted) return;
   }
@@ -4561,6 +4562,8 @@ async function reasonGate(
     ask: string;
     /** Opens the refusal; the judge's why follows. */
     refuse: string;
+    /** The system's record of the step, weighed against the reason. */
+    evidence: () => Promise<string>;
   },
 ): Promise<{ reason: string; why: string } | null> {
   const say = (body: string) => postMessage(conv, { role: "desk", body });
@@ -4569,7 +4572,8 @@ async function reasonGate(
     await say(g.ask);
     return null;
   }
-  const verdict = await judgeGoingBack(conv.orgId, { step: g.step, reason });
+  const evidence = await g.evidence().catch(() => "");
+  const verdict = await judgeGoingBack(conv.orgId, { step: g.step, reason, evidence });
   await writeAudit({
     actor: `user:${userId}`,
     actorUserId: userId,
@@ -4595,6 +4599,109 @@ async function reasonGate(
     return null;
   }
   return { reason, why: verdict.why };
+}
+
+/**
+ * The record of a candidate's latest screening call, for judging "call again"
+ * (no words of theirs, no pay): outcome, length, line audio, the required details'
+ * status, answers kept and the Voice Guard's review.
+ */
+export async function callEvidence(orgId: string, applicationId: string): Promise<string> {
+  const { screeningCalls, callReviews } = await import("@db/schema");
+  const [c] = await db
+    .select()
+    .from(screeningCalls)
+    .where(
+      and(
+        eq(screeningCalls.orgId, orgId),
+        eq(screeningCalls.applicationId, applicationId),
+        eq(screeningCalls.purpose, "screening"),
+        // The last call that was answered — not one only arranged.
+        isNotNull(screeningCalls.startedAt),
+      ),
+    )
+    .orderBy(desc(screeningCalls.startedAt))
+    .limit(1);
+  if (!c) return "No answered screening call on record.";
+  const [r] = await db
+    .select()
+    .from(callReviews)
+    .where(and(eq(callReviews.orgId, orgId), eq(callReviews.callId, c.id)))
+    .limit(1);
+  const st = c.callStats;
+  return [
+    `Last screening call: ${c.status}, ended ${c.endReason ?? "unknown"}, ${c.durationS ?? 0} s, consent ${c.consentAt ? "given" : "not given"}.`,
+    st?.audio
+      ? `Line audio: ${st.audio.gaps} gaps in ${st.audio.frames} frames (speech running out mid-sentence), worst delay ${st.audio.maxLateMs} ms.`
+      : "Line audio: not measured.",
+    st
+      ? `Turn-taking: ${st.slowReplies} slow replies, ${st.talkOver} talk-over, ${st.bargeIns} interruptions.`
+      : "",
+    `Required details: ${
+      Object.entries(c.details?.required ?? {})
+        .map(([k, v]) => `${k.replace(/_/g, " ")} ${v}`)
+        .join(", ") || "none recorded"
+    }. Screening answers kept: ${c.answers.length}.`,
+    r
+      ? `Voice Guard review: ${r.verdict ?? r.status}, quality ${r.qualityScore ?? "-"} of 5; findings: ${
+          r.findings.map((f) => `[${f.severity}] ${f.summary}`).join(" ") || "none"
+        }`
+      : "Voice Guard review: none yet.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** A candidate's stage history, for judging a move back. */
+export async function stageEvidence(orgId: string, applicationId: string): Promise<string> {
+  const { stageEvents } = await import("@db/schema");
+  const ev = await db
+    .select({
+      from: stageEvents.fromStage,
+      to: stageEvents.toStage,
+      reason: stageEvents.reason,
+      at: stageEvents.createdAt,
+    })
+    .from(stageEvents)
+    .where(and(eq(stageEvents.orgId, orgId), eq(stageEvents.applicationId, applicationId)))
+    .orderBy(desc(stageEvents.createdAt))
+    .limit(6);
+  if (!ev.length) return "No stage changes on record.";
+  return `Stage history (newest first): ${ev
+    .map(
+      (e) =>
+        `${e.from ?? "new"} → ${e.to} on ${e.at.toISOString().slice(0, 10)}${e.reason ? ` (reason: ${e.reason.slice(0, 120)})` : ""}`,
+    )
+    .join("; ")}.`;
+}
+
+/** When the role's scores were made against which job description, for judging a re-score. */
+export async function scoreEvidence(orgId: string, requisitionId: string): Promise<string> {
+  const [sc] = (await db.execute(sql`
+    select count(*)::int n, max(m.computed_at) last
+    from match_scores m join applications a on a.id = m.application_id
+    where a.org_id = ${orgId} and a.requisition_id = ${requisitionId}`)) as unknown as {
+    n: number;
+    last: string | null;
+  }[];
+  const jds = await db
+    .select({
+      version: jobDescriptions.version,
+      status: jobDescriptions.status,
+      at: jobDescriptions.createdAt,
+    })
+    .from(jobDescriptions)
+    .where(and(eq(jobDescriptions.orgId, orgId), eq(jobDescriptions.requisitionId, requisitionId)))
+    .orderBy(desc(jobDescriptions.createdAt))
+    .limit(3);
+  return [
+    `Scores: ${sc?.n ?? 0} candidates scored, last at ${sc?.last ? new Date(sc.last).toISOString().slice(0, 16) : "never"}.`,
+    `Job descriptions (newest first): ${
+      jds
+        .map((j) => `v${j.version} ${j.status}, made ${j.at.toISOString().slice(0, 16)}`)
+        .join("; ") || "none"
+    }.`,
+  ].join("\n");
 }
 
 /** Stages a candidate may be sent back to from the desk (offer stages are HR's, not here). */
@@ -4640,6 +4747,7 @@ export async function goBackFromDesk(
       reason: cmd.reason,
       ask: "Re-scoring replaces every candidate's current score, so it needs a reason — why should they be scored again? (For example: the job description changed, or the scores used the wrong requirements.)",
       refuse: "I won't re-score the candidates for that reason:",
+      evidence: () => scoreEvidence(conv.orgId, conv.requisitionId!),
     });
     if (!accepted) return;
     try {
@@ -4681,6 +4789,7 @@ export async function goBackFromDesk(
     reason: cmd.reason,
     ask: `Moving ${app.name} back from ${STAGE_LABEL[from]} to ${STAGE_LABEL[to]} needs a reason — why? (For example: they were rejected by mistake, or new information about them.)`,
     refuse: `I won't move ${app.name} back for that reason:`,
+    evidence: () => stageEvidence(conv.orgId, app.id),
   });
   if (!accepted) return;
   const { activeOrgOf } = await import("@/lib/auth.middleware");
@@ -4733,19 +4842,21 @@ const GoingBackVerdict = z.object({
  */
 export async function judgeGoingBack(
   orgId: string,
-  input: { step: string; reason: string },
+  input: { step: string; reason: string; evidence?: string },
 ): Promise<z.infer<typeof GoingBackVerdict> | null> {
   const res = await aiJson({
     system: [
       'You check whether a recruiter\'s reason to go back a step in hiring is a real reason. Reply with JSON {"valid": boolean, "why": "one plain sentence to the recruiter"}.',
       "Valid: something went wrong with the step (the call dropped or was cut off, answers were misheard or recorded wrongly, a technical fault, the candidate could not hear), new information that changes the step, or the candidate's own request with a reason.",
       'Not valid: no reason; the request repeated ("call again", "just do it"); only wanting a different result ("the score is low", "I think they can do better") — repeating a step to change its outcome is unfair to the other candidates.',
-      "Judge only the reason given; never invent facts about the call. Be brief and neutral; never mention the candidate's protected characteristics.",
+      "EVIDENCE is the system's own record of the step. A reason that states a fact about it (the call dropped or was cut off, the audio was unclear, answers were misheard or recorded wrongly, the scores used the wrong requirements, they were rejected by mistake) is valid only when EVIDENCE supports it; when EVIDENCE contradicts it or shows nothing of it, it is not valid — say which figures show otherwise. New information or the candidate's own request cannot be seen in the record: valid only when the reason says specifically what it is.",
+      "Judge only the reason and the evidence; never invent facts. Be brief and neutral; never mention the candidate's protected characteristics.",
       INJECTION_RULES,
     ].join("\n"),
     prompt: [
       `STEP TO REPEAT: ${input.step}`,
       `REASON GIVEN: ${untrusted("recruiter_reason", input.reason)}`,
+      `EVIDENCE: ${untrusted("system_record", input.evidence?.trim() || "none on record")}`,
     ].join("\n"),
     orgId,
     feature: "hiring_desk",

@@ -329,6 +329,20 @@ brief, so a per-answer "thank you" or "noted" on these calls is a low finding.
   - **Moves the flow only allows from On hold** go through On hold, and both
     moves are recorded. Moves forward are refused here; they use the pipeline
     as usual.
+  - **The reason is weighed against the system's own record of the step,**
+    not taken on trust:
+    - **Call again:** the last answered call's outcome, length, line audio,
+      turn-taking, required details and the Voice Guard's review
+      (`callEvidence`).
+    - **Move back:** the candidate's stage history (`stageEvidence`).
+    - **Re-score:** when the scores were made, and the job description versions
+      (`scoreEvidence`).
+
+    A stated fact the record contradicts or does not show is refused, with the
+    figures. On 10 November "the call is unclear" had been accepted for a call
+    with 0 audio gaps in about 12,000 frames. New information or the
+    candidate's own request is accepted only when the reason says what it is.
+
   - **Not included:** an approved job description cannot be reopened. Approval
     is final, and changes are asked for before approval.
 
