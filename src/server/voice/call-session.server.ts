@@ -472,6 +472,7 @@ async function placeCall(
   const greeting = new ReadyGreeting({
     play: (pcm) => {
       aiSpoke = true;
+      spokeSinceCaller = true;
       lastActivity = now();
       stats.aiAudio();
       keeper?.aiAudio();
@@ -481,6 +482,8 @@ async function placeCall(
   // The assistant reading out a tool call, code or its reasoning is stopped mid-line
   // (src/server/voice/spoken-guard.ts) — set once the session is open.
   let stopWorkings: (() => void) | null = null;
+  /** The assistant has said something since the candidate last finished speaking. */
+  let spokeSinceCaller = true;
   let workingsStopped = false;
   const events: VoiceSessionEvents = {
     onAudio: (pcm) => greeting.audio(pcm),
@@ -500,6 +503,7 @@ async function placeCall(
       turns++;
       if (t.who === "ai") {
         greeting.turnDone();
+        if (t.text.trim()) spokeSinceCaller = true;
         workingsStopped = false;
         aiSaid += ` ${t.text}`;
         keeper?.aiTurn(t.text);
@@ -512,6 +516,16 @@ async function placeCall(
       }
     },
     onToolCall: async (c) => {
+      // Never hang up on them in silence: a goodbye first (a test call on 10 November
+      // ended 0.8 s after their answer without a word).
+      if (c.name === "end_call" && !spokeSinceCaller) {
+        keeper?.tool(c.name, false);
+        return {
+          ok: false,
+          error:
+            "Not ended: say a short goodbye out loud first (thank them, and what happens next if it applies), then call end_call again.",
+        };
+      }
       const out = applyCallTool(
         state,
         c.name,
@@ -627,6 +641,7 @@ async function placeCall(
     },
     audio: (p) => session.sendAudio(up.process(p)),
     end: () => {
+      spokeSinceCaller = false;
       session.activityEnd?.();
       keeper?.caller("end", false);
     },

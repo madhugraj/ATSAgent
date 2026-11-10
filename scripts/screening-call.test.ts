@@ -429,7 +429,11 @@ describe("the call brief", () => {
     expect(p).not.toContain("Naukri");
     expect(p).not.toContain("20 October");
     expect(p.toLowerCase()).toContain(checks.SOURCE_RULE);
-    expect(p).toContain("written assessment by e-mail, or a call from a person");
+    // 1.9.3: the call does the screening itself — it never offers a person or the
+    // written assessment (offering them ended a test call at 33 s); only if they ask.
+    expect(p).not.toContain("You can also choose");
+    expect(p).toContain("Never offer a call from a person or the written assessment.");
+    expect(p).toContain("Only if they ask for a person or the written assessment themselves");
     expect(p).toContain("Keep the payments platform reliable as it grows.");
     // 1.8.0, a 3-minute call: the role in one sentence, no "why them", one question of
     // about 45 s, their questions go to the hiring team by e-mail.

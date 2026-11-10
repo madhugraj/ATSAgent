@@ -273,6 +273,17 @@ reasoning ("Wait, I shouldn't call record_details here…") to the candidate.
   cue are no longer needed, since the end mark always gets a reply. The turn
   manager's other cues stay.
 
+**It does the screening itself** (screening 1.9.3, the organisation's scope).
+
+- **No hand-off offers.** The call never offers a call from a person or the
+  written assessment, not at consent and not when it cannot be moved again. A
+  test call on 10 November ended at 33 s right after that offer.
+- **It still acts on a request.** If a candidate asks for one of them
+  themselves, the call notes it and ends as before.
+- **No hanging up in silence.** `end_call` is refused until the assistant has
+  said something since the candidate last spoke. The same test call hung up
+  without a goodbye.
+
 A completed call must leave with the earliest joining date, current pay and
 expected pay (Screening call agent 1.3.0): after consent, `end_call` with
 `completed` or `other` is refused until each is recorded or listed in
