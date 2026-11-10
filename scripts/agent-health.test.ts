@@ -873,6 +873,115 @@ describe("phone screening health", () => {
   });
 });
 
+describe("Voice Guard health", () => {
+  const ruleOf = async (rule: string) => (await open()).find((i) => i.rule === rule);
+  async function endedCall(minutesAgo: number) {
+    const { candidates, screeningCalls } = await import("../drizzle/schema");
+    const [c] = await db
+      .insert(candidates)
+      .values({ orgId, fullName: "Guard Test", email: `vg-${Math.random()}@cand.local` } as never)
+      .returning({ id: candidates.id });
+    const [call] = await db
+      .insert(screeningCalls)
+      .values({
+        orgId,
+        candidateId: c!.id,
+        status: "completed",
+        startedAt: ago(minutesAgo + 5),
+        endedAt: ago(minutesAgo),
+      } as never)
+      .returning({ id: screeningCalls.id });
+    return { candidateId: c!.id, callId: call!.id };
+  }
+  const clear = async (candidateId: string) => {
+    const { candidates } = await import("../drizzle/schema");
+    await db.delete(candidates).where(eq(candidates.id, candidateId));
+  };
+
+  test("an answered call left without a review is flagged; resolved once reviewed", async () => {
+    const { agentPolicies, callReviews } = await import("../drizzle/schema");
+    await db
+      .insert(agentPolicies)
+      .values({ orgId, agentType: "screening_call", enabled: true })
+      .onConflictDoNothing();
+    const fresh = await endedCall(30);
+    await evaluate();
+    expect(await ruleOf("voice_guard.unreviewed")).toBeUndefined();
+    const late = await endedCall(HEALTH.callReviewOverdueHours * 60 + 10);
+    await evaluate();
+    expect(await ruleOf("voice_guard.unreviewed")).toMatchObject({
+      agentType: "voice_guard",
+      severity: "warning",
+      title: "1 answered AI phone call has no Voice Guard review yet",
+    });
+    await db.insert(callReviews).values({
+      orgId,
+      callId: late.callId,
+      purpose: "screening",
+      status: "done",
+      reviewedAt: new Date(),
+    });
+    await evaluate();
+    expect(await ruleOf("voice_guard.unreviewed")).toBeUndefined();
+    await clear(fresh.candidateId);
+    await clear(late.candidateId);
+    await db
+      .delete(agentPolicies)
+      .where(and(eq(agentPolicies.orgId, orgId), eq(agentPolicies.agentType, "screening_call")));
+  });
+
+  test("repeated breaches on one phone agent's calls are flagged on that agent", async () => {
+    const { callReviews } = await import("../drizzle/schema");
+    const breach = {
+      check: "read_back",
+      severity: "high",
+      summary: "Read the answer back.",
+      evidence: [{ turn: 3, quote: "You run three clusters" }],
+      source: "review",
+    } as const;
+    const made: string[] = [];
+    for (let i = 0; i < HEALTH.callBreaches7d; i++) {
+      const c = await endedCall(60);
+      made.push(c.candidateId);
+      await db.insert(callReviews).values({
+        orgId,
+        callId: c.callId,
+        purpose: "screening",
+        status: "done",
+        verdict: i === 0 ? "pass" : "breach",
+        findings: i === 0 ? [] : [breach],
+        breaches: i === 0 ? 0 : 1,
+        reviewedAt: new Date(),
+      });
+    }
+    await evaluate();
+    expect(await ruleOf("voice_guard.breaches")).toBeUndefined();
+    const c = await endedCall(60);
+    made.push(c.candidateId);
+    await db.insert(callReviews).values({
+      orgId,
+      callId: c.callId,
+      purpose: "screening",
+      status: "done",
+      verdict: "breach",
+      findings: [breach],
+      breaches: 1,
+      reviewedAt: new Date(),
+    });
+    await evaluate();
+    const issue = await ruleOf("voice_guard.breaches");
+    expect(issue).toMatchObject({
+      agentType: "screening_call",
+      severity: "warning",
+      title: `${HEALTH.callBreaches7d} of ${HEALTH.callBreaches7d + 1} reviewed screening calls in 7 days broke the call's rules`,
+    });
+    expect((issue!.detail as { top: string }).top).toBe("read_back (2)");
+    for (const id of made) await clear(id);
+    await evaluate();
+    expect(await ruleOf("voice_guard.breaches")).toBeUndefined();
+  });
+});
+
 describe("interview panels", () => {
   test("candidates waiting for a round nobody is eligible to interview are flagged", async () => {
     const {

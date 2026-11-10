@@ -216,7 +216,7 @@ export function agentPolicy(f: AgentFacts, breaks: Breaks = {}): AgentPolicy {
     }
     // Greet and appreciate: the notes line, congratulations, what the team valued — then the go-ahead.
     io.say(
-      "Thank you. I make notes of this call for the hiring team, and they confirm anything we discuss. Congratulations — you cleared all the interview rounds, and the team has selected you.",
+      "Thank you. I make notes of this call for the hiring team, and it is checked for quality; the team confirms anything we discuss. Congratulations — you cleared all the interview rounds, and the team has selected you.",
       false,
     );
     const valued = await io.tool("explain_offer", { topic: "why_you" });

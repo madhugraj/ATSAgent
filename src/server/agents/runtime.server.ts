@@ -1500,7 +1500,8 @@ export async function runAgentTick(
         sql`(${agentRuns.leaseUntil} is null or ${agentRuns.leaseUntil} < now())`,
         sql`not exists (${paused})`,
         // A dry-run replay changes nothing, so it does not need the agent switched on.
-        sql`(${agentRuns.mode} = 'replay' or exists (${switchedOn}))`,
+        // The Voice Guard is on whenever an AI phone agent is (mandatory review).
+        sql`(${agentRuns.mode} = 'replay' or exists (${switchedOn}) or (${agentRuns.agentType} = 'voice_guard' and exists (select 1 from agent_policies vp where vp.org_id = ${agentRuns.orgId} and vp.agent_type in ('screening_call', 'scheduling_call', 'negotiation_call') and vp.enabled)))`,
         opts.orgId ? eq(agentRuns.orgId, opts.orgId) : undefined,
         opts.onlyRunId ? eq(agentRuns.id, opts.onlyRunId) : undefined,
       ),

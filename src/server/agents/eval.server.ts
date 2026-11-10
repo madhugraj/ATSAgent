@@ -81,6 +81,11 @@ export type Scenario = {
     resultExcludes?: string[];
     /** Some successful call of `tool` had at least these argument values. */
     callArgs?: { tool: string; args: Record<string, unknown> }[];
+    /**
+     * Checks on what the run left in the database (e.g. the review it filed):
+     * returns a failure message, or null when it holds.
+     */
+    verify?: (ctx: EvalContext & { seeded: Record<string, string> }) => Promise<string | null>;
     maxSteps?: number;
   };
 };
@@ -254,6 +259,10 @@ export async function runScenario(s: Scenario): Promise<EvalReport> {
           ),
       );
       if (!ok) failures.push(`no successful ${want.tool} with ${JSON.stringify(want.args)}`);
+    }
+    if (e.verify) {
+      const problem = await e.verify({ orgId, userId, seeded });
+      if (problem) failures.push(problem);
     }
     if (e.maxSteps && (run?.stepCount ?? 0) > e.maxSteps) {
       failures.push(`used ${run?.stepCount} model steps, budget ${e.maxSteps}`);

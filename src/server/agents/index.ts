@@ -12,6 +12,7 @@ import {
   registerOrgAgents,
   registerExpertAgents,
   registerPanelAgents,
+  registerVoiceGuardAgent,
 } from "./definitions";
 import { registerPhase1Tools } from "./tools";
 import { registerPhase2Tools } from "./tools-phase2";
@@ -23,6 +24,7 @@ import { registerOrgTools } from "./tools-org";
 import { registerExpertTools } from "./tools-expert";
 import { registerPanelTools } from "./tools-panel";
 import { registerOntologyTools } from "./tools-ontology";
+import { registerVoiceGuardTools } from "./tools-voice-guard";
 import type { AgentType } from "@db/schema";
 
 let registered = false;
@@ -41,6 +43,7 @@ export function ensureAgentsRegistered(): void {
   registerExpertTools();
   registerPanelTools();
   registerOntologyTools();
+  registerVoiceGuardTools();
   registerPhase1Agents();
   registerPhase2Agents();
   registerPhase3Agents();
@@ -49,6 +52,7 @@ export function ensureAgentsRegistered(): void {
   registerOrgAgents();
   registerExpertAgents();
   registerPanelAgents();
+  registerVoiceGuardAgent();
 }
 
 ensureAgentsRegistered();

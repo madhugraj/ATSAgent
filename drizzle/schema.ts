@@ -2217,7 +2217,8 @@ export type AgentType =
   | "expert_interview"
   | "panel_l1"
   | "panel_l2"
-  | "panel_l3";
+  | "panel_l3"
+  | "voice_guard";
 export type AgentAutonomy = "suggest" | "act_and_notify" | "autonomous";
 export type AgentRunStatus =
   "queued" | "running" | "awaiting_human" | "done" | "failed" | "cancelled";
@@ -3307,6 +3308,15 @@ export type ScreeningCallDetails = {
   earliestJoining?: string;
   /** Anything else the candidate said the hiring team should know, in their words. */
   note?: string;
+  /**
+   * Where each required detail stands at the end of the call — never the figures
+   * (pay is kept on the HR-only record): recorded, declined (their words noted),
+   * not_working (current pay only) or missing.
+   */
+  required?: Record<
+    "joining_date" | "current_pay" | "expected_pay",
+    "recorded" | "declined" | "not_working" | "missing"
+  >;
 };
 
 /** What the candidate said for one kit question, as the call agent recorded it. */
@@ -3399,6 +3409,10 @@ export const screeningCalls = pgTable(
     negotiationId: uuid("negotiation_id").references(() => offerNegotiations.id, {
       onDelete: "set null",
     }),
+    /** Turn-taking and audio stats of the answered call (0071) — reviewed by the Voice Guard. */
+    callStats: jsonb("call_stats").$type<CallStats>(),
+    /** The instructions and facts the answered call ran with (0071) — the Voice Guard's reference. */
+    brief: text("brief"),
     lastError: text("last_error"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -3429,6 +3443,134 @@ export const screeningCalls = pgTable(
       "screening_calls_negotiation_check",
       sql`${t.purpose} <> 'negotiation' or ${t.negotiationId} is not null`,
     ),
+  ],
+);
+
+/* ------------------------------------------------------- voice guard (0071) */
+
+/** How a call went, measured on the line (src/server/voice/call-stats.ts). */
+export type CallStats = {
+  v: 1;
+  /** The language the voice session ran in (e.g. en-IN). */
+  languageCode: string;
+  /** ms from the line being answered to the candidate's first speech / the assistant's first audio. */
+  firstCallerMs: number | null;
+  firstAiMs: number | null;
+  /** The assistant spoke before the candidate said hello. */
+  aiSpokeFirst: boolean;
+  /** Candidate speech segments (VAD). */
+  callerSegments: number;
+  /** The assistant's utterances (audio after a pause). */
+  aiUtterances: number;
+  /** The assistant started speaking while the candidate was still talking. */
+  talkOver: number;
+  /** The candidate spoke over the assistant and it stopped. */
+  bargeIns: number;
+  /** ms from the end of the candidate's speech to the assistant's reply. */
+  replyMs: { count: number; p50: number | null; p90: number | null; max: number | null };
+  /** Replies slower than 3 s. */
+  slowReplies: number;
+  /** How smoothly the assistant's audio went out (the SIP line). */
+  audio: { frames: number; gaps: number; lateTicks: number; maxLateMs: number } | null;
+};
+
+export type CallReviewStatus = "due" | "reviewing" | "done" | "failed";
+export type CallReviewVerdict = "pass" | "attention" | "breach";
+export type CallReviewSeverity = "critical" | "high" | "low";
+/** What the Voice Guard checks on every call (src/server/voice/guard/checks.ts). */
+export type CallReviewCheckId =
+  | "disclosure"
+  | "required_details"
+  | "answer_clues"
+  | "fell_for_questions"
+  | "beyond_scope"
+  | "repetition"
+  | "read_back"
+  | "commitments"
+  | "agreements"
+  | "record_accuracy"
+  | "charter"
+  | "turn_taking"
+  | "transcription";
+export type CallReviewCheck = {
+  check: CallReviewCheckId;
+  verdict: "pass" | "breach" | "not_applicable";
+  note?: string;
+};
+export type CallReviewFinding = {
+  check: CallReviewCheckId;
+  severity: CallReviewSeverity;
+  /** One plain sentence: what went wrong. */
+  summary: string;
+  /** The turns it rests on (index into the call's transcript) and the words, quoted. */
+  evidence: { turn: number | null; quote: string }[];
+  /** code: measured or checked by the system; review: the Voice Guard's reading. */
+  source: "code" | "review";
+};
+
+/**
+ * One review per answered AI phone call (0071): the Voice Guard's verdicts
+ * and findings, for a person. Observe-and-report only — it changes nothing on
+ * the call, the candidate or the hiring decision.
+ */
+export const callReviews = pgTable(
+  "call_reviews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    callId: uuid("call_id")
+      .notNull()
+      .references(() => screeningCalls.id, { onDelete: "cascade" }),
+    purpose: text("purpose").$type<VoiceCallPurpose>().notNull(),
+    status: text("status").$type<CallReviewStatus>().notNull().default("due"),
+    /** full: transcript kept (consented); timing_only: only the call's stats. */
+    scope: text("scope").$type<"full" | "timing_only">().notNull().default("full"),
+    agentRunId: uuid("agent_run_id").references(() => agentRuns.id, { onDelete: "set null" }),
+    verdict: text("verdict").$type<CallReviewVerdict>(),
+    qualityScore: integer("quality_score"),
+    summary: text("summary"),
+    checks: jsonb("checks")
+      .$type<CallReviewCheck[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    findings: jsonb("findings")
+      .$type<CallReviewFinding[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    breaches: integer("breaches").notNull().default(0),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    acknowledgedBy: uuid("acknowledged_by").references(() => users.id, { onDelete: "set null" }),
+    acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+    /** The person's reading of the review: the findings hold, or they do not. */
+    ackOutcome: text("ack_outcome").$type<"confirmed" | "disputed">(),
+    ackNote: text("ack_note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("call_reviews_call_key").on(t.callId),
+    index("call_reviews_org_status_idx").on(t.orgId, t.status, t.updatedAt),
+    index("call_reviews_org_created_idx").on(t.orgId, t.createdAt),
+    check("call_reviews_status_check", sql`${t.status} in ('due', 'reviewing', 'done', 'failed')`),
+    check("call_reviews_scope_check", sql`${t.scope} in ('full', 'timing_only')`),
+    check(
+      "call_reviews_verdict_check",
+      sql`${t.verdict} is null or ${t.verdict} in ('pass', 'attention', 'breach')`,
+    ),
+    check(
+      "call_reviews_quality_check",
+      sql`${t.qualityScore} is null or ${t.qualityScore} between 1 and 5`,
+    ),
+    check(
+      "call_reviews_ack_check",
+      sql`${t.ackOutcome} is null or ${t.ackOutcome} in ('confirmed', 'disputed')`,
+    ),
+    check("call_reviews_checks_array", sql`jsonb_typeof(${t.checks}) = 'array'`),
+    check("call_reviews_findings_array", sql`jsonb_typeof(${t.findings}) = 'array'`),
   ],
 );
 

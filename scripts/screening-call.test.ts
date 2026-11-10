@@ -172,7 +172,10 @@ class FakeLine implements session.PhoneLine {
 }
 
 /** A voice session that plays `steps` once the call is answered. */
-function scriptedVoice(steps: Step[], seen: { opts?: VoiceOpts; results: unknown[]; sent?: number[] }) {
+function scriptedVoice(
+  steps: Step[],
+  seen: { opts?: VoiceOpts; results: unknown[]; sent?: number[] },
+) {
   return (async (opts: VoiceOpts) => {
     seen.opts = opts;
     const transcript: { who: "caller" | "ai"; text: string; at: string }[] = [];
@@ -376,7 +379,7 @@ describe("the call brief", () => {
 
   test("9 November call: consent after a concern, no insisting, questions back answered", () => {
     const p = brief.callSystemPrompt(facts());
-    expect(p).toContain("an earlier \"yes, it's a good time\" does not count");
+    expect(p).toContain('an earlier "yes, it\'s a good time" does not count');
     expect(p).toContain("never insist or say you have it on record");
     expect(p).toContain("record open_to_relocate only if they then say yes or no");
     expect(p).toContain("one open follow-up");
@@ -402,7 +405,7 @@ describe("the call brief", () => {
     expect(p).toContain("the one ending in gmail.com");
     expect(p).toContain("[q1] Tell me about running Kubernetes in production.");
     expect(p).not.toContain("expected CTC is above our budget");
-    expect(p).toContain("reflect the gist back");
+    expect(p).toContain("never summarise, reflect or repeat what they said back");
     expect(p).toContain("Never answer a question yourself");
     expect(p).toContain('If they want to skip a question, say "Of course"');
     expect(p).toContain("do not answer from general knowledge");
@@ -602,6 +605,11 @@ describe("in-call tools", () => {
     expect(session.disclosureMissing("I'm Saranya, an AI recruiting assistant.")).toMatch(/notes/);
     expect(
       session.disclosureMissing("I'm an AI assistant and I'll make notes for the hiring team."),
+    ).toMatch(/checked for quality/);
+    expect(
+      session.disclosureMissing(
+        "I'm an AI assistant and I'll make notes for the hiring team; the call is checked for quality.",
+      ),
     ).toBeNull();
     const s = fresh();
     const yes = { granted: true, their_words: "Sure" };
@@ -626,7 +634,7 @@ describe("in-call tools", () => {
         yes,
         ids,
         0,
-        "I'm an AI assistant; I'll make notes for the team.",
+        "I'm an AI assistant; I'll make notes for the team, and the call is checked for quality.",
       ),
     ).toEqual({ ok: true });
     // Declining needs no disclosure.
@@ -672,6 +680,87 @@ describe("in-call tools", () => {
       expected_ctc: 3200000,
       current_location: "Chennai",
     });
+  });
+
+  test("a completed call cannot end without the joining date and pay", () => {
+    const s = { ...fresh(), consent: true };
+    const end = (st: unknown, reason = "completed") =>
+      session.applyCallTool(st as never, "end_call", { reason }, ids, 0);
+    expect(end(s)).toMatchObject({
+      ok: false,
+      missing: ["joining_date", "current_pay", "expected_pay"],
+      error: expect.stringMatching(/earliest date they could join/),
+    });
+    expect(end(s, "other")).toMatchObject({ ok: false });
+    expect(s.endReason).toBeNull();
+    // Ending early for another reason is unaffected.
+    expect(end({ ...fresh(), consent: true }, "prefers_human")).toEqual({ ok: true });
+    // Before consent nothing is recorded, so nothing is required.
+    expect(end(fresh())).toEqual({ ok: true });
+
+    session.applyCallTool(
+      s as never,
+      "record_details",
+      { earliest_joining: "2027-01-04", current_ctc_fixed: 1800000 },
+      ids,
+      0,
+    );
+    expect(end(s)).toMatchObject({ ok: false, missing: ["expected_pay"] });
+    // Declined needs their words in pay_note.
+    session.applyCallTool(
+      s as never,
+      "record_details",
+      { not_given: [{ item: "expected_pay", why: "declined" }] },
+      ids,
+      0,
+    );
+    expect(end(s)).toMatchObject({ ok: false, missing: ["expected_pay"] });
+    session.applyCallTool(
+      s as never,
+      "record_details",
+      { pay_note: "prefers to discuss pay with HR" },
+      ids,
+      0,
+    );
+    expect(end(s)).toEqual({ ok: true });
+    expect(s.endReason).toBe("completed");
+  });
+
+  test("not working excuses current pay only; a later value clears not_given", () => {
+    const m = session.mandatoryMissing;
+    expect(
+      m({
+        earliest_joining: "2027-01-04",
+        expected_ctc: 600000,
+        not_given: [{ item: "current_pay", why: "not_working" }],
+      }),
+    ).toEqual([]);
+    expect(
+      m({
+        current_ctc_fixed: 1,
+        expected_ctc: 1,
+        not_given: [{ item: "joining_date", why: "not_working" }],
+      }),
+    ).toEqual(["joining_date"]);
+    expect(
+      m({
+        current_ctc_fixed: 1,
+        expected_ctc: 1,
+        candidate_note: "will know after appraisal",
+        not_given: [{ item: "joining_date", why: "declined" }],
+      }),
+    ).toEqual([]);
+
+    const s = { ...fresh(), consent: true };
+    session.applyCallTool(
+      s as never,
+      "record_details",
+      { pay_note: "rather not say", not_given: [{ item: "expected_pay", why: "declined" }] },
+      ids,
+      0,
+    );
+    session.applyCallTool(s as never, "record_details", { expected_ctc: 2400000 }, ids, 0);
+    expect((s.details as { not_given?: unknown } | null)?.not_given).toBeUndefined();
   });
 
   test("outcomes", () => {
@@ -766,7 +855,7 @@ describe("a whole call with a fake line", () => {
           { say: "caller", text: "Yes, speaking." },
           {
             say: "ai",
-            text: "This is Saranya, an AI recruiting assistant with Yavar's team. I'll make notes of our conversation for the hiring team. Is now a good time?",
+            text: "This is Saranya, an AI recruiting assistant with Yavar's team. I'll make notes of our conversation for the hiring team, and the call is checked for quality. Is now a good time?",
           },
           { say: "caller", text: "Yes, go ahead, that's fine." },
           { tool: "record_answer", args: { question_id: "q1", summary: "too early" } },
@@ -774,12 +863,13 @@ describe("a whole call with a fake line", () => {
           { say: "ai", text: "What is your notice period, and your current and expected pay?" },
           {
             say: "caller",
-            text: "Thirty days. I earn 24 lakhs fixed and expect 32 lakhs. I live in Chennai.",
+            text: "Thirty days, so I could join on 4 January. I earn 24 lakhs fixed and expect 32 lakhs. I live in Chennai.",
           },
           {
             tool: "record_details",
             args: {
               notice_period_days: 30,
+              earliest_joining: "2027-01-04",
               current_ctc_fixed: 2400000,
               expected_ctc: 3200000,
               current_location: "Chennai",
@@ -827,10 +917,16 @@ describe("a whole call with a fake line", () => {
     // Details on the call row — never pay.
     expect(c.details).toEqual({
       noticePeriodDays: 30,
+      earliestJoining: "2027-01-04",
       currentLocation: "Chennai",
       totalExperienceYears: 7,
       note: "Asked to keep it short.",
+      // Where each required detail stands — never the figures.
+      required: { joining_date: "recorded", current_pay: "recorded", expected_pay: "recorded" },
     });
+    // The Voice Guard's inputs: the call's stats (no words) and what it ran with.
+    expect(c.callStats).toMatchObject({ v: 1, languageCode: "en-IN" });
+    expect(c.brief).toContain("checked for quality");
     expect(c.screeningRunId).toBe(r.screeningRunId);
 
     // The grader sees the screening part only — not pay, location or consent.
@@ -933,7 +1029,10 @@ describe("a whole call with a fake line", () => {
       new FakeLine(),
       scriptedVoice(
         [
-          { say: "ai", text: "Is now a good time? I'll make notes for the hiring team." },
+          {
+            say: "ai",
+            text: "Is now a good time? I'll make notes for the hiring team, and the call is checked for quality.",
+          },
           { say: "caller", text: "No, please don't." },
           { tool: "record_consent", args: { granted: false, their_words: "No, please don't." } },
           { tool: "end_call", args: { reason: "declined" } },
@@ -1035,7 +1134,7 @@ describe("a whole call with a fake line", () => {
       [
         {
           say: "ai",
-          text: "I'm an AI recruiting assistant and I'll make notes for the hiring team.",
+          text: "I'm an AI recruiting assistant and I'll make notes for the hiring team; the call is checked for quality.",
         },
         { tool: "record_consent", args: { granted: true, their_words: "Yes, go ahead." } },
         { say: "caller", text: "I run EKS." },

@@ -373,6 +373,25 @@ export const saveAgentPolicy = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { assertRole } = await import("./auth.middleware");
     await assertRole(context.userId, context.orgId, [...SETTINGS_ROLES]);
+    // Every AI phone call is reviewed: the Voice Guard stays on while a phone agent is.
+    if (data.agentType === "voice_guard" && !data.enabled) {
+      const { VOICE_CALL_AGENTS } = await import("../server/agents/policy");
+      const on = await db
+        .select({ t: agentPolicies.agentType })
+        .from(agentPolicies)
+        .where(
+          and(
+            eq(agentPolicies.orgId, context.orgId),
+            inArray(agentPolicies.agentType, [...VOICE_CALL_AGENTS]),
+            eq(agentPolicies.enabled, true),
+          ),
+        )
+        .limit(1);
+      if (on.length)
+        throw new Error(
+          "The Voice Guard reviews every AI phone call, so it stays on while an AI phone agent is on. Switch the phone agents off first.",
+        );
+    }
     // Autonomous needs a passed model safety check for the model in use
     // (docs/red-team.md). Checked when switching to it, never on other edits.
     if (data.agentType !== "*" && data.autonomy === "autonomous") {

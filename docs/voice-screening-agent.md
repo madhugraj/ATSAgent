@@ -107,12 +107,26 @@ other candidates, band) or mark their own answers.
 
 In-call tools (function calls the live model may make; each validated server-side):
 
-| tool                                  | effect                                                                                         |
-| ------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `record_consent(granted)`             | stamps `consent_at`; if declined → polite end, transcript discarded, status `consent_declined` |
-| `record_answer(question_id, summary)` | must be a kit question id; stored in `answers`                                                 |
-| `request_callback(when)`              | parsed in the org's time zone, clamped to calling hours → status `callback`                    |
-| `end_call(reason)`                    | goodbye already spoken; hang up                                                                |
+| tool                                  | effect                                                                                                |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `record_consent(granted)`             | stamps `consent_at`; if declined → polite end, transcript discarded, status `consent_declined`        |
+| `record_answer(question_id, summary)` | must be a kit question id; stored in `answers`                                                        |
+| `request_callback(when)`              | parsed in the org's time zone, clamped to calling hours → status `callback`                           |
+| `end_call(reason)`                    | goodbye already spoken; hang up                                                                       |
+| `record_details(...)`                 | practical details; `not_given` notes a required one they would not give (or current pay, not working) |
+
+Consent counts only after the assistant said it is an AI, makes notes for the
+hiring team and that the call is checked for quality (Screening call agent
+1.4.0; the Voice Guard reviews every answered call, `docs/voice-guard.md`).
+After an answer it says only a short acknowledgement — never a summary or
+read-back of what the candidate said.
+
+A completed call must leave with the earliest joining date, current pay and
+expected pay (Screening call agent 1.3.0): after consent, `end_call` with
+`completed` or `other` is refused until each is recorded or listed in
+`not_given` — "declined" with their words in `pay_note` / `candidate_note`, or
+"not_working" for current pay only. Ending for another reason (a later time, a
+person, not interested) is unaffected.
 
 Hard limits enforced by the worker, not the prompt: 15 min max, 20 s silence →
 close, voicemail / no speech in 10 s → one-line message and end, calling hours

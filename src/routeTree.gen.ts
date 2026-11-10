@@ -40,6 +40,7 @@ import { Route as TeamRouteImport } from './routes/team'
 import { Route as TemplatesRouteImport } from './routes/templates'
 import { Route as TermsRouteImport } from './routes/terms'
 import { Route as AgentsIndexRouteImport } from './routes/agents.index'
+import { Route as AgentsCallReviewsRouteImport } from './routes/agents.call-reviews'
 import { Route as AgentsGovernanceRouteImport } from './routes/agents.governance'
 import { Route as AgentsIntelligenceRouteImport } from './routes/agents.intelligence'
 import { Route as AgentsObservabilityRouteImport } from './routes/agents.observability'
@@ -236,6 +237,11 @@ const TermsRoute = TermsRouteImport.update({
 const AgentsIndexRoute = AgentsIndexRouteImport.update({
   id: '/agents/',
   path: '/agents/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentsCallReviewsRoute = AgentsCallReviewsRouteImport.update({
+  id: '/agents/call-reviews',
+  path: '/agents/call-reviews',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgentsGovernanceRoute = AgentsGovernanceRouteImport.update({
@@ -487,6 +493,7 @@ export interface FileRoutesByFullPath {
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
   '/terms': typeof TermsRoute
+  '/agents/call-reviews': typeof AgentsCallReviewsRoute
   '/agents/governance': typeof AgentsGovernanceRoute
   '/agents/intelligence': typeof AgentsIntelligenceRoute
   '/agents/observability': typeof AgentsObservabilityRoute
@@ -562,6 +569,7 @@ export interface FileRoutesByTo {
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
   '/terms': typeof TermsRoute
+  '/agents/call-reviews': typeof AgentsCallReviewsRoute
   '/agents/governance': typeof AgentsGovernanceRoute
   '/agents/intelligence': typeof AgentsIntelligenceRoute
   '/agents/observability': typeof AgentsObservabilityRoute
@@ -638,6 +646,7 @@ export interface FileRoutesById {
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
   '/terms': typeof TermsRoute
+  '/agents/call-reviews': typeof AgentsCallReviewsRoute
   '/agents/governance': typeof AgentsGovernanceRoute
   '/agents/intelligence': typeof AgentsIntelligenceRoute
   '/agents/observability': typeof AgentsObservabilityRoute
@@ -715,6 +724,7 @@ export interface FileRouteTypes {
     | '/team'
     | '/templates'
     | '/terms'
+    | '/agents/call-reviews'
     | '/agents/governance'
     | '/agents/intelligence'
     | '/agents/observability'
@@ -790,6 +800,7 @@ export interface FileRouteTypes {
     | '/team'
     | '/templates'
     | '/terms'
+    | '/agents/call-reviews'
     | '/agents/governance'
     | '/agents/intelligence'
     | '/agents/observability'
@@ -865,6 +876,7 @@ export interface FileRouteTypes {
     | '/team'
     | '/templates'
     | '/terms'
+    | '/agents/call-reviews'
     | '/agents/governance'
     | '/agents/intelligence'
     | '/agents/observability'
@@ -941,6 +953,7 @@ export interface RootRouteChildren {
   TeamRoute: typeof TeamRoute
   TemplatesRoute: typeof TemplatesRoute
   TermsRoute: typeof TermsRoute
+  AgentsCallReviewsRoute: typeof AgentsCallReviewsRoute
   AgentsGovernanceRoute: typeof AgentsGovernanceRoute
   AgentsIntelligenceRoute: typeof AgentsIntelligenceRoute
   AgentsObservabilityRoute: typeof AgentsObservabilityRoute
@@ -1203,6 +1216,13 @@ declare module '@tanstack/react-router' {
       path: '/agents'
       fullPath: '/agents/'
       preLoaderRoute: typeof AgentsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agents/call-reviews': {
+      id: '/agents/call-reviews'
+      path: '/agents/call-reviews'
+      fullPath: '/agents/call-reviews'
+      preLoaderRoute: typeof AgentsCallReviewsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/agents/governance': {
@@ -1533,6 +1553,7 @@ const rootRouteChildren: RootRouteChildren = {
   TeamRoute: TeamRoute,
   TemplatesRoute: TemplatesRoute,
   TermsRoute: TermsRoute,
+  AgentsCallReviewsRoute: AgentsCallReviewsRoute,
   AgentsGovernanceRoute: AgentsGovernanceRoute,
   AgentsIntelligenceRoute: AgentsIntelligenceRoute,
   AgentsObservabilityRoute: AgentsObservabilityRoute,

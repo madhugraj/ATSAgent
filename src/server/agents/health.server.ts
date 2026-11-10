@@ -130,6 +130,11 @@ export const HEALTH = {
   /** …with at least this many scorings before and after (days each side below). */
   scoreDriftMinSamples: 20,
   scoreDriftWindowDays: 14,
+  /** An answered AI phone call still without its Voice Guard review after this many hours. */
+  callReviewOverdueHours: 2,
+  /** Reviewed calls of one phone agent with a breach in 7 days before it is flagged (serious from the second number). */
+  callBreaches7d: 2,
+  callBreachesSerious7d: 5,
 } as const;
 
 export type HealthElement =
@@ -1456,6 +1461,73 @@ export const RULES: Rule[] = [
           detail: { refused: n },
         },
       ];
+    },
+  },
+  {
+    id: "voice_guard.unreviewed",
+    element: "harness",
+    severity: "warning",
+    description: `An answered AI phone call has had no Voice Guard review for more than ${HEALTH.callReviewOverdueHours} hours (not queued, still running, or given up after three tries). Every answered call is meant to be reviewed: check the agent scheduler and the Voice Guard's failed runs, then use Review again on Call reviews.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number; failed: number }>(sql`
+        select count(*)::int n, count(*) filter (where r.status = 'failed')::int failed
+        from screening_calls c
+        left join call_reviews r on r.call_id = c.id
+        where c.org_id = ${orgId}
+          and c.started_at is not null and c.ended_at is not null
+          and c.status not in ('dialling', 'in_progress')
+          and c.ended_at between now() - interval '14 days'
+            and now() - make_interval(hours => ${HEALTH.callReviewOverdueHours})
+          and (r.id is null or r.status <> 'done')
+          and exists (select 1 from agent_policies p where p.org_id = c.org_id and p.enabled
+            and p.agent_type in ('screening_call', 'scheduling_call', 'negotiation_call'))`);
+      const x = r[0];
+      if (!x || x.n === 0) return [];
+      return [
+        {
+          agentType: "voice_guard",
+          title: `${x.n} answered AI phone call${x.n === 1 ? " has" : "s have"} no Voice Guard review yet`,
+          detail: x,
+        },
+      ];
+    },
+  },
+  {
+    id: "voice_guard.breaches",
+    element: "definition",
+    severity: "warning",
+    description: `The Voice Guard found a breach of the call's rules (critical or high) on ${HEALTH.callBreaches7d} or more of one phone agent's calls in 7 days (serious from ${HEALTH.callBreachesSerious7d}). The detail lists which checks failed most — read those reviews under Call reviews and change the agent's instructions where the same mistake repeats.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{
+        purpose: string;
+        reviewed: number;
+        breached: number;
+        top: string | null;
+      }>(sql`
+        select r.purpose, count(*)::int reviewed,
+          count(*) filter (where r.verdict = 'breach')::int breached,
+          (select string_agg(x.chk || ' (' || x.n || ')', ', ' order by x.n desc)
+             from (select f ->> 'check' chk, count(*)::int n
+                   from call_reviews r2, jsonb_array_elements(r2.findings) f
+                   where r2.org_id = ${orgId} and r2.purpose = r.purpose and r2.verdict = 'breach'
+                     and r2.reviewed_at >= now() - interval '7 days'
+                     and f ->> 'severity' in ('critical', 'high')
+                   group by 1 order by 2 desc limit 3) x) top
+        from call_reviews r
+        where r.org_id = ${orgId} and r.status = 'done'
+          and r.reviewed_at >= now() - interval '7 days'
+        group by r.purpose`);
+      return r
+        .filter((x) => x.breached >= HEALTH.callBreaches7d)
+        .map((x) => ({
+          agentType: `${x.purpose}_call`,
+          severity:
+            x.breached >= HEALTH.callBreachesSerious7d
+              ? ("serious" as const)
+              : ("warning" as const),
+          title: `${x.breached} of ${x.reviewed} reviewed ${x.purpose} calls in 7 days broke the call's rules`,
+          detail: x,
+        }));
     },
   },
 ];

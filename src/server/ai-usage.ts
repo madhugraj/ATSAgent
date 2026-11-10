@@ -56,6 +56,8 @@ export const AI_FEATURES = [
   "agent_panel_l1",
   "agent_panel_l2",
   "agent_panel_l3",
+  // Voice Guard (docs/voice-guard.md): the after-call review of AI phone calls.
+  "agent_voice_guard",
   // Organisation context agent (docs/org-context-agent-plan.md): the org desk
   // conversation turns, website-page extraction and document OCR.
   "org_desk",

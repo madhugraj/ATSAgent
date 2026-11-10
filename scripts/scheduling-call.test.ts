@@ -204,7 +204,7 @@ describe("the in-call tools", () => {
         "record_permission",
         { granted: true, their_words: "yes" },
         options,
-        "This is Saranya, an AI recruiting assistant. I'll note the time you choose.",
+        "This is Saranya, an AI recruiting assistant. I'll note the time you choose, and the call is checked for quality.",
       ),
     ).toEqual({ ok: true });
     expect(
@@ -250,7 +250,8 @@ describe("the in-call tools", () => {
   });
 
   test("an unclear no is sent back once; a clear no is taken at once", () => {
-    const said = "This is Saranya, an AI recruiting assistant. I'll note the time you choose.";
+    const said =
+      "This is Saranya, an AI recruiting assistant. I'll note the time you choose, and the call is checked for quality.";
     const a = tools.freshSchedulingState();
     for (const words of [
       "I am not very clear with your ask.",
@@ -302,7 +303,7 @@ describe("the in-call tools", () => {
 
   test("on a live call the go-ahead comes only from an answer to the question, in the words heard", () => {
     const said =
-      "This is Saranya, an AI recruiting assistant. I'll note this short call. Do you have a minute now?";
+      "This is Saranya, an AI recruiting assistant. I'll note this short call, and it is checked for quality. Do you have a minute now?";
     const s = tools.freshSchedulingState();
     // Nothing said since the question (e.g. only "Yes, it's me" to "am I speaking with…?").
     expect(
@@ -797,7 +798,7 @@ function scriptedVoice(steps: Step[], seen: { opts?: VoiceOpts; results: unknown
 }
 
 const DISCLOSE =
-  "This is Saranya, an AI recruiting assistant from Sched Org, about your first-round interview. Do you have a minute to pick a time? I'll note the time you choose for the hiring team.";
+  "This is Saranya, an AI recruiting assistant from Sched Org, about your first-round interview. Do you have a minute to pick a time? I'll note the time you choose for the hiring team, and the call is checked for quality.";
 
 describe("a whole scheduling call (fake line)", () => {
   async function arranged(o: { attempt?: number } = {}) {
@@ -976,7 +977,7 @@ describe("a whole scheduling call (fake line)", () => {
           { tool: "record_permission", args: { granted: true, their_words: "Yeah, Meera here." } },
           {
             say: "ai",
-            text: "Thank you. I'll note this short call for the hiring team. Do you have a minute now?",
+            text: "Thank you. I'll note this short call for the hiring team, and it is checked for quality. Do you have a minute now?",
           },
           { say: "caller", text: "Yes, go ahead." },
           { tool: "record_permission", args: { granted: true, their_words: "yes" } },

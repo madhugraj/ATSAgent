@@ -38,6 +38,7 @@ import {
 } from "./call-session.server";
 import { disclosureMissing } from "./call-tools";
 import { loadNegotiationBrief, type NegotiationBrief } from "./negotiation-brief.server";
+import { CallStatsTracker } from "./call-stats";
 import { Vad } from "./vad";
 import {
   applyNegotiationTool,
@@ -192,6 +193,8 @@ async function place(
   let lastHeardAt: number | null = null;
   // The assistant's own lines: the go-ahead counts only after the disclosure.
   let aiSaid = "";
+  // Turn-taking on the line, kept on the call for the Voice Guard (no words).
+  const stats = new CallStatsTracker(now);
   // What the candidate said since the assistant's latest question after its
   // disclosure (null until it asked one) — a go-ahead or a yes comes from here.
   let heardAfterAsk: string | null = null;
@@ -208,9 +211,13 @@ async function place(
       aiSpoke = true;
       awaitingSpeechSince = null;
       lastActivity = now();
+      stats.aiAudio();
       line.play(down.process(pcm));
     },
-    onInterrupted: () => line.clear(),
+    onInterrupted: () => {
+      stats.bargeIn();
+      line.clear();
+    },
     onSaying: (soFar) => {
       if (state.halted) return;
       const bad = unapprovedFigure(
@@ -333,11 +340,19 @@ async function place(
   }
 
   const answeredAt = now();
-  await setCall(call.id, orgId, { status: "in_progress", startedAt: new Date(answeredAt) });
+  stats.answered();
+  // The instructions and facts this call ran with — what the Voice Guard checks it against.
+  await setCall(call.id, orgId, {
+    status: "in_progress",
+    startedAt: new Date(answeredAt),
+    brief: system,
+  });
   // The caller's line through a debounced VAD (see call-session.server.ts).
   const vad = new Vad();
   line.onAudio((pcm) => {
-    if (vad.process(pcm) === "start") candidateSpoke = true;
+    const heard = vad.process(pcm);
+    stats.caller(heard);
+    if (heard === "start") candidateSpoke = true;
     if (vad.isActive()) {
       lastHeardAt = Date.now();
       lastActivity = now();
@@ -385,6 +400,7 @@ async function place(
   stopOpening();
   await line.hangup().catch(() => undefined);
   log.info("negotiation_call.vad", { call_id: call.id, segments: vad.segments });
+  const audio = line.audioStats?.() ?? null;
   line.close();
   const summary = await session.close();
 
@@ -397,6 +413,7 @@ async function place(
     extra: {
       startedAt: new Date(answeredAt),
       endedAt: new Date(endedAt),
+      callStats: stats.finish({ languageCode: "en-IN", audio }),
       durationS: Math.round((endedAt - answeredAt) / 1000),
       // Kept only when they agreed to notes of the call.
       transcript: state.permission === true ? (summary.transcript as ScreeningCallTurn[]) : [],

@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-101 tables across 9 domains.
+102 tables across 9 domains.
 
 ## Identity & access
 
@@ -765,6 +765,7 @@ erDiagram
     uuid slot_offer_id FK
     jsonb alternates
     uuid negotiation_id FK
+    jsonb call_stats "nullable"
     text last_error "nullable"
     timestamptz created_at
     timestamptz updated_at
@@ -1185,6 +1186,10 @@ erDiagram
 | `board_sync_state` | `integration_id` | `source_integrations` | cascade |
 | `board_sync_state` | `org_id` | `organizations` | cascade |
 | `board_webhook_events` | `org_id` | `organizations` | no action |
+| `call_reviews` | `acknowledged_by` | `users` | no action |
+| `call_reviews` | `agent_run_id` | `agent_runs` | no action |
+| `call_reviews` | `call_id` | `screening_calls` | cascade |
+| `call_reviews` | `org_id` | `organizations` | cascade |
 | `candidate_assessments` | `application_id` | `applications` | no action |
 | `candidate_assessments` | `candidate_id` | `candidates` | cascade |
 | `candidate_assessments` | `org_id` | `organizations` | cascade |
@@ -1400,6 +1405,7 @@ erDiagram
 | `audit_log` | Identity & access | 10 | — |
 | `board_sync_state` | — | 11 | (integration_id) |
 | `board_webhook_events` | — | 15 | (dedupe_key) |
+| `call_reviews` | — | 22 | (call_id) |
 | `candidate_assessments` | Candidates & pipeline | 23 | (token) |
 | `candidate_notes` | Candidates & pipeline | 8 | — |
 | `candidate_ownership_events` | Candidates & pipeline | 8 | — |
@@ -1458,7 +1464,7 @@ erDiagram
 | `role_panels` | — | 8 | (requisitionId+level) |
 | `round_substitutes` | — | 9 | — |
 | `salary_benchmarks` | Intelligence | 15 | — |
-| `screening_calls` | Screening & interviews | 34 | — |
+| `screening_calls` | Screening & interviews | 35 | — |
 | `screening_kits` | Screening & interviews | 11 | — |
 | `screening_prep_jobs` | Screening & interviews | 10 | (application_id) |
 | `screening_runs` | Screening & interviews | 23 | — |

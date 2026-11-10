@@ -709,6 +709,15 @@ async function recentRun(
  */
 export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<number> {
   let started = 0;
+  // Every answered AI phone call gets its Voice Guard review (mandatory).
+  if (getAgent("voice_guard")) {
+    try {
+      const { sweepCallReviews } = await import("../voice/guard/review.server");
+      started += (await sweepCallReviews(opts)).started;
+    } catch (err) {
+      log.warn("voice_guard.sweep_failed", { error: err as Error });
+    }
+  }
   // Applicants who just arrived (any channel) are scored within minutes, not
   // at the next 6-hourly pass; agent-added ones are scored by the run that added them.
   if (getAgent("intake")) {

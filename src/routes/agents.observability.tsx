@@ -46,6 +46,7 @@ import {
 import { AGENT_CATALOG, AGENT_LABEL, AUTONOMY_OPTIONS } from "@/lib/agents.catalog";
 import { AgentDetailDrawer, type DrawerTab } from "@/components/AgentDetailDrawer";
 import { AgentUtilisation } from "@/components/AgentUtilisation";
+import { CallReviewsSummary } from "@/components/CallReviewsSummary";
 import { ModalityToggle } from "@/components/report-bar";
 import { modalityLabel, type ModalityFilter } from "@/lib/agent-modality";
 
@@ -264,6 +265,7 @@ function ObservabilityPage() {
           <KpiRow d={d} scope={modalityLabel(modality) ?? "All agents"} />
           <Trends d={d} />
           <AgentUtilisation />
+          <CallReviewsSummary />
           <IssuesPanel
             issues={[...d.orgIssues, ...d.agents.flatMap((a) => a.issues)]}
             rules={d.rules}

@@ -40,7 +40,9 @@ import {
   callOutcome,
   type CallState,
   freshCallState,
+  requiredDetailStatus,
 } from "./call-tools";
+import { CallStatsTracker } from "./call-stats";
 import { dialNumber } from "./phone";
 import { Resampler } from "./resample";
 import { afterAttempt, callbackAt, localNow } from "./schedule";
@@ -158,6 +160,9 @@ export function openingWatch(o: {
   return () => clearInterval(timer);
 }
 
+/** The voice session's language: Indian English (short words had been transcribed as Spanish). */
+const VOICE_LANGUAGE = "en-IN";
+
 export const DEFAULT_LIMITS: CallLimits = {
   ringMs: 45_000,
   silenceMs: 20_000,
@@ -173,6 +178,8 @@ export {
   callOutcome,
   END_REASONS,
   freshCallState,
+  mandatoryMissing,
+  requiredDetailStatus,
   type CallToolName,
   type EndReason,
 } from "./call-tools";
@@ -393,6 +400,8 @@ async function placeCall(
   let bookedAt: Date | null = null;
   // What the assistant has said so far: consent counts only after the disclosure.
   let aiSaid = "";
+  // Turn-taking on the line, kept on the call for the Voice Guard (no words).
+  const stats = new CallStatsTracker(now);
   let agentEnded!: () => void;
   const agentEnd = new Promise<void>((r) => (agentEnded = r));
 
@@ -400,9 +409,13 @@ async function placeCall(
     onAudio: (pcm) => {
       aiSpoke = true;
       lastActivity = now();
+      stats.aiAudio();
       line.play(down.process(pcm));
     },
-    onInterrupted: () => line.clear(),
+    onInterrupted: () => {
+      stats.bargeIn();
+      line.clear();
+    },
     onTurn: (t) => {
       turns++;
       if (t.who === "ai") aiSaid += ` ${t.text}`;
@@ -444,7 +457,7 @@ async function placeCall(
     // the candidate paused mid-list.
     turnTaking: { silenceMs: 1600, endOfSpeech: "low", prefixPaddingMs: 300 },
     // Indian English, so short replies ("yes", "okay") are not heard as another language.
-    languageCode: "en-IN",
+    languageCode: VOICE_LANGUAGE,
     events,
   });
   if (!opened.ok) {
@@ -478,13 +491,21 @@ async function placeCall(
   }
 
   const answeredAt = now();
-  await setCall(call.id, orgId, { status: "in_progress", startedAt: new Date(answeredAt) });
+  stats.answered();
+  // The instructions and facts this call ran with — what the Voice Guard checks it against.
+  await setCall(call.id, orgId, {
+    status: "in_progress",
+    startedAt: new Date(answeredAt),
+    brief: system,
+  });
   // The caller's line through a debounced VAD: a single frame's RMS flickered
   // with breaths and line noise, and quiet talkers never registered at all.
   const vad = new Vad();
   line.onAudio((pcm) => {
     // The candidate talking counts as activity even before a transcript line arrives.
-    if (vad.process(pcm) === "start") candidateSpoke = true;
+    const heard = vad.process(pcm);
+    stats.caller(heard);
+    if (heard === "start") candidateSpoke = true;
     if (vad.isActive()) {
       lastHeardAt = Date.now();
       lastActivity = now();
@@ -549,6 +570,7 @@ async function placeCall(
     transcript,
     answers: state.consent === true ? state.answers : [],
     details: state.consent === true ? publicDetails(state.details) : {},
+    callStats: stats.finish({ languageCode: VOICE_LANGUAGE, audio }),
   };
 
   // What they said about pay, notice and availability goes to the HR-only record.
@@ -793,7 +815,7 @@ export async function postCallToThread(
 
 /** The details kept on the call row — never pay (that is HR-only, elsewhere). */
 function publicDetails(d: CallState["details"]): ScreeningCallDetails {
-  if (!d) return {};
+  if (!d) return { required: requiredDetailStatus(null) };
   const out: ScreeningCallDetails = {};
   if (d.current_title) out.currentTitle = d.current_title;
   if (d.current_company) out.currentCompany = d.current_company;
@@ -803,6 +825,7 @@ function publicDetails(d: CallState["details"]): ScreeningCallDetails {
   if (d.notice_period_days != null) out.noticePeriodDays = d.notice_period_days;
   if (d.earliest_joining) out.earliestJoining = d.earliest_joining;
   if (d.candidate_note) out.note = d.candidate_note;
+  out.required = requiredDetailStatus(d);
   return out;
 }
 

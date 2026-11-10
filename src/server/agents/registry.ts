@@ -151,6 +151,9 @@ export const SUBMISSION_TOOLS: ReadonlySet<string> = new Set([
   // Marks roles as "waiting to be posted" — the person posts on the portal
   // themselves (the extension only fills the form they are looking at).
   "request_hand_posting",
+  // The Voice Guard files its after-call review for a person (Call reviews);
+  // it changes nothing on the call, the candidate or any decision.
+  "submit_call_review",
 ]);
 
 export function isGateToolName(name: string): boolean {
