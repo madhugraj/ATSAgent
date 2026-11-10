@@ -177,6 +177,27 @@ about 7 minutes on 10 November used 234k and 388k tokens.
   - There is a follow-up only when an answer is short or general.
   - The turn manager cuts in at 60 s.
 
+Screening call agent 1.8.0: **the call is about 3 minutes** (the organisation's
+rule). The setting `max_minutes` is now the call's planned length: 2–5 minutes,
+default 3, migration 0072. A value saved earlier is planned at most 5.
+
+| Time      | Part                                                      |
+| --------- | --------------------------------------------------------- |
+| 0:00–0:25 | Hello, who it is, consent                                 |
+| 0:25–0:40 | The role in one sentence; "Would you like to explore it?" |
+| 0:40–1:00 | Location and relocation                                   |
+| 1:00–1:50 | Notice period, joining date, current CTC, expected CTC    |
+| 1:50–2:40 | One screening question, about 45 s (cut short at 45 s)    |
+| 2:40–3:00 | Close: their questions go to the hiring team by e-mail    |
+
+- **Not asked any more:** title, company and years (they are on the CV), "why
+  them", the second question, and "Do you have any questions for me?".
+- **The turn manager closes the call on time.** It tells the assistant to close
+  30 s before the planned length, at the first pause, never while the candidate
+  is speaking.
+- **The call is ended a minute after the planned length** (`time_limit`).
+- **The grade rests on one answer.**
+
 A completed call must leave with the earliest joining date, current pay and
 expected pay (Screening call agent 1.3.0): after consent, `end_call` with
 `completed` or `other` is refused until each is recorded or listed in
@@ -184,7 +205,8 @@ expected pay (Screening call agent 1.3.0): after consent, `end_call` with
 "not_working" for current pay only. Ending for another reason (a later time, a
 person, not interested) is unaffected.
 
-Hard limits enforced by the worker, not the prompt: 15 min max, 20 s silence →
+Hard limits enforced by the worker, not the prompt: the planned length plus a
+minute (3 + 1 by default; the close is cued 30 s before the planned length), 20 s silence →
 close, voicemail / no speech in 10 s → one-line message and end, calling hours
 10:00–19:00 org time Mon–Sat, at most 3 attempts across 2 working days, PBX
 concurrency cap.

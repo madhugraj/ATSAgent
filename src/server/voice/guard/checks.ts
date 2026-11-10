@@ -129,7 +129,7 @@ export const GUARD_CHECKS: GuardCheck[] = [
     id: "call_steps",
     title: "Followed the call's steps",
     question:
-      "Did it follow the steps in its brief: one question at a time (never stacking pay, notice and joining into one), a follow-up for a vague answer (a month → a date), every planned question asked or adapted, the candidate's own questions invited, and a spoken close with a goodbye?",
+      "Did it follow the steps in its brief: one question at a time (never stacking pay, notice and joining into one), a follow-up for a vague answer (a month → a date), every planned question asked or adapted, the candidate's own questions invited or sent to the hiring team as its brief says, a spoken close with a goodbye, and the call kept to the length its brief plans?",
     by: "review",
     since0071: true,
   },
@@ -304,7 +304,7 @@ function turnTakingCheck(i: GuardInput, out: CodeResult): void {
       ),
     );
   // A long answer is the candidate's, not a silence: counted on its own.
-  const { long_answer: longAnswers = 0, ...quiet } = s.cues ?? {};
+  const { long_answer: longAnswers = 0, close: _close = 0, ...quiet } = s.cues ?? {};
   const cues = Object.values(quiet).reduce((a, b) => a + (b ?? 0), 0);
   if (longAnswers)
     out.findings.push(

@@ -766,6 +766,7 @@ erDiagram
     jsonb alternates
     uuid negotiation_id FK
     jsonb call_stats "nullable"
+    text brief "nullable"
     text last_error "nullable"
     timestamptz created_at
     timestamptz updated_at
@@ -1464,7 +1465,7 @@ erDiagram
 | `role_panels` | — | 8 | (requisitionId+level) |
 | `round_substitutes` | — | 9 | — |
 | `salary_benchmarks` | Intelligence | 15 | — |
-| `screening_calls` | Screening & interviews | 35 | — |
+| `screening_calls` | Screening & interviews | 36 | — |
 | `screening_kits` | Screening & interviews | 11 | — |
 | `screening_prep_jobs` | Screening & interviews | 10 | (application_id) |
 | `screening_runs` | Screening & interviews | 23 | — |

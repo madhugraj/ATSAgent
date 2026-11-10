@@ -64,8 +64,8 @@
     "hash": "8cfceff5e69ef697711f98e88a1f334433740269902aa5a43447b7b7a3b89786"
   },
   "requisition": {
-    "version": "1.7.0",
-    "hash": "60d8f7898fcc4192f6bb0900bbe732269455399dae50bcdfa663e3b523c5e657"
+    "version": "1.8.0",
+    "hash": "876c877162ce92388c89c555571643f4106abf8ecc4ad43e85dcf2a10be95385"
   },
   "scheduling_call": {
     "version": "1.8.3",
@@ -77,14 +77,14 @@
   },
   "screening_call": {
     "version": "1.7.0",
-    "hash": "a7917d89958ee4f63accd679c43ddc8a9bbc2f243d450df3a81e85560fdacb08"
+    "hash": "5e8e9ae988e5c27a72e4b7f6f5fb200e825d086ca5d0c91bc7281017b4b5b0c3"
   },
   "sourcing": {
     "version": "1.0.5",
     "hash": "57baaeda0febfc80286eb20a14432ddb10a15237607f4d5265d7bae3c7e50b5c"
   },
   "voice_guard": {
-    "version": "1.2.0",
-    "hash": "5dcdf7c39df453f0547e1924ef51d57d63d47625de8da22282e23d10637386c7"
+    "version": "1.3.0",
+    "hash": "56048c73ade7399b02d3583fe298a3fdb4f9d61da2efe1282fa2919ce09ff41f"
   }
 }

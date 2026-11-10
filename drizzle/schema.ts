@@ -3224,7 +3224,8 @@ export const phoneScreeningSettings = pgTable(
       .notNull()
       .default(sql`'{1,2,3,4,5,6}'`),
     maxAttempts: integer("max_attempts").notNull().default(3),
-    maxMinutes: integer("max_minutes").notNull().default(10),
+    /** The screening call's planned length (0072: 3 by default; the app uses 2–5). */
+    maxMinutes: integer("max_minutes").notNull().default(3),
     /** Times a candidate may move the call to another time; then alternatives are offered. */
     maxReschedules: integer("max_reschedules").notNull().default(2),
     /** Scheduling calls (a follow-up to an unanswered interview-time e-mail) switched on. */
@@ -3258,7 +3259,7 @@ export const phoneScreeningSettings = pgTable(
       sql`${t.windowEndMinute} > ${t.windowStartMinute}`,
     ),
     check("phone_screening_settings_max_attempts_check", sql`${t.maxAttempts} between 1 and 5`),
-    check("phone_screening_settings_max_minutes_check", sql`${t.maxMinutes} between 5 and 30`),
+    check("phone_screening_settings_max_minutes_check", sql`${t.maxMinutes} between 2 and 30`),
     check(
       "phone_screening_settings_scheduling_wait_check",
       sql`${t.schedulingWaitHours} between 2 and 96`,
@@ -3484,6 +3485,8 @@ export type CallStats = {
     unrecorded_note: number;
     /** The candidate talked past the limit and it was told to move on (from screening 1.6.0). */
     long_answer?: number;
+    /** Told to close as the planned length ran out (from screening 1.8.0). */
+    close?: number;
   };
 };
 

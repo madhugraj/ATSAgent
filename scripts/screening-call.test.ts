@@ -377,7 +377,7 @@ describe("the call brief", () => {
     known: { notice: false, currentPay: false, expectedPay: false },
     emailDomain: "gmail.com",
     questions: brief.questionsForCall(KIT as never),
-    maxMinutes: 10,
+    maxMinutes: 3,
     nextSteps: "the hiring team will get back to you within two working days",
     callingHours: "Monday to Saturday, 10:00 to 19:00",
     ...over,
@@ -416,23 +416,29 @@ describe("the call brief", () => {
     expect(p).toContain("Let them speak first");
     expect(p).toContain('Then: "Hello, am I speaking with Meera?"');
     // The source is never mentioned (the organisation's rule, 10 November).
-    expect(p).toContain("I'm calling about our Platform SRE role, for a short first conversation");
+    expect(p).toContain(
+      "I'm calling about our Platform SRE role, for a short call — about 3 minutes.",
+    );
     expect(p).not.toContain("Naukri");
     expect(p).not.toContain("20 October");
     expect(p.toLowerCase()).toContain(checks.SOURCE_RULE);
     expect(p).toContain("written assessment by e-mail, or a call from a person");
     expect(p).toContain("Keep the payments platform reliable as it grows.");
-    expect(p).toContain("What their CV mentions that the role works with: Kubernetes, Go");
-    expect(p).toContain("never say they are a fit, a good or great fit");
-    // 1.7.0: answers kept to about a minute; a follow-up only for a short answer.
-    expect(p).toContain("about a minute each, please");
+    // 1.8.0, a 3-minute call: the role in one sentence, no "why them", one question of
+    // about 45 s, their questions go to the hiring team by e-mail.
+    expect(p).toContain("Never say they are a fit or praise them.");
+    expect(p).not.toContain("What their CV mentions that the role works with");
+    expect(p).toContain("One question about your experience — about 45 seconds, please.");
     expect(p).toContain("never after a full answer");
+    expect(p).not.toContain("Do you have any questions for me?");
+    expect(p).toContain("please reply to our e-mail and the hiring team will answer");
     expect(p).toMatch(
-      /Now a few practical details[\s\S]*Then one question each, each once:[\s\S]*a\. their notice period;[\s\S]*b\. "Which date could you join\?"[\s\S]*c\. their current CTC per year[\s\S]*d\. their expected CTC per year\./,
+      /Ask where they live now[\s\S]*Then one question each, each once:[\s\S]*a\. their notice period;[\s\S]*b\. "Which date could you join\?"[\s\S]*c\. their current CTC per year[\s\S]*d\. their expected CTC per year\./,
     );
     // Each required detail is its own question (a real call stacked the paired items).
-    expect(p).toContain("their current job title and company (their CV says Acme");
-    expect(p).toContain("then their total years of experience (CV: about 7 years");
+    // Title, company and years are on the CV: not asked.
+    expect(p).not.toContain("their current job title");
+    expect(p).not.toContain("years of experience");
     expect(p).toContain("or skip the consent, politely");
     expect(p).toContain("the one ending in gmail.com");
     expect(p).toContain("[q1] Tell me about running Kubernetes in production.");
@@ -1039,7 +1045,7 @@ describe("a whole call with a fake line", () => {
             args: { question_id: "q1", summary: "Runs three EKS clusters." },
           },
           { tool: "record_answer", args: { question_id: "q3", summary: "Wants 40 LPA" } },
-          { say: "caller", text: "I led the payments outage postmortem." },
+          // A 3-minute call plans one question (1.8.0): another id is refused.
           {
             tool: "record_answer",
             args: { question_id: "q2", summary: "Led a payments outage postmortem." },
@@ -1059,14 +1065,14 @@ describe("a whole call with a fake line", () => {
     expect(seen.opts!.voice).toBe("Kore");
     expect(seen.opts!.turnTaking).toMatchObject({ endOfSpeech: "low", silenceMs: 1600 });
     expect(seen.opts!.languageCode).toBe("en-IN");
-    // Refused before consent, and for the pay question.
+    // Refused before consent, for the pay question, and for a question not planned.
     expect(
       seen.results.filter((x) => (x as { out: { ok: boolean } }).out.ok === false),
-    ).toHaveLength(2);
+    ).toHaveLength(3);
 
     const c = await callRow(callId);
     expect(c).toMatchObject({ status: "completed", phoneLast4: "2345" });
-    expect(c.answers.map((a) => a.question_id).sort()).toEqual(["q1", "q2"]);
+    expect(c.answers.map((a) => a.question_id).sort()).toEqual(["q1"]);
     // The words heard after the question, not the model's paraphrase.
     expect(c.consentWords).toBe("Yes, go ahead, that's fine.");
     // Details on the call row — never pay.
@@ -1105,9 +1111,9 @@ describe("a whole call with a fake line", () => {
     expect(lastGrade.prompt).toContain('"question_id":"q1"');
     expect(lastGrade.prompt).not.toContain('"question_id":"q3"');
     expect(graded!.coverage).toMatchObject({
-      planned: 2,
-      asked: 2,
-      answered: 2,
+      planned: 1,
+      asked: 1,
+      answered: 1,
       confidence: "high",
     });
     // The desk thread hears how it went.
@@ -1117,7 +1123,7 @@ describe("a whole call with a fake line", () => {
       .where(eq(hiringMessages.conversationId, conv!.id));
     const fromCall = posted.filter((m) => m.agentType === "screening_call");
     expect(fromCall).toHaveLength(1);
-    expect(fromCall[0]!.body).toContain("(2 asked of 2 planned · both answered; high confidence)");
+    expect(fromCall[0]!.body).toContain("(1 asked of 1 planned · answered; high confidence)");
     // …with the result card that opens "Why this score".
     const card = (
       await db

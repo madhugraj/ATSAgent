@@ -175,6 +175,13 @@ export function openingWatch(o: {
   return () => clearInterval(timer);
 }
 
+/** The screening call is told to close this long before its planned length… */
+export const CLOSE_BEFORE_END_MS = 30_000;
+/** …and is ended this long after it. */
+export const HARD_STOP_AFTER_MS = 60_000;
+/** A screening answer is cut short at this (the candidate is asked for about 45 s). */
+export const SCREENING_LONG_ANSWER_MS = 45_000;
+
 /** The voice session's language: Indian English (short words had been transcribed as Spanish). */
 const VOICE_LANGUAGE = "en-IN";
 
@@ -513,6 +520,10 @@ async function placeCall(
     onCue: (reason) => log.warn("screening_call.cue", { call_id: call.id, reason }),
     recordTools: new Set(["record_details", "record_answer", "record_consent"]),
     endTools: new Set(["end_call"]),
+    // Planned short (screening 1.8.0): told to close 30 s before the planned length;
+    // answers to the screening question cut short at 45 s.
+    closeAfterMs: Math.max(60_000, policy.maxMinutes * 60_000 - CLOSE_BEFORE_END_MS),
+    timing: { longAnswerMs: SCREENING_LONG_ANSWER_MS },
   });
   await setCall(call.id, orgId, { phoneLast4: number.last4 });
 
@@ -535,6 +546,7 @@ async function placeCall(
 
   const answeredAt = now();
   stats.answered();
+  keeper.answered();
   // The instructions and facts this call ran with — what the Voice Guard checks it against.
   await setCall(call.id, orgId, {
     status: "in_progress",
@@ -582,7 +594,8 @@ async function placeCall(
   const limitHit = new Promise<string>((resolve) => {
     watchdog = setInterval(() => {
       const t = now();
-      if (t - answeredAt > policy.maxMinutes * 60_000) resolve("time_limit");
+      // Ended a minute after the planned length — room to finish the goodbye.
+      if (t - answeredAt > policy.maxMinutes * 60_000 + HARD_STOP_AFTER_MS) resolve("time_limit");
       else if (!candidateSpoke && t - answeredAt > limits.firstWordsMs) resolve("no_response");
       else if (t - lastActivity > limits.silenceMs) resolve("silence");
       keeper?.tick(line.pendingSeconds() > 0);

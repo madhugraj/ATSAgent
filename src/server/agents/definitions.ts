@@ -95,7 +95,14 @@ export function registerPhase1Agents(): void {
     // 1.7.0: scoring weights from the organisation's knowledge — suggest_weights reads the
     // profile, the role's demand and pool supply, and location/work mode, and may propose
     // custom dimensions (location fit, compliance); save_weights saves them with the six.
-    version: "1.7.0",
+    // 1.8.0 (the organisation's rule: the call is 3 minutes or less): the planned length
+    // is the setting (2–5 minutes, default 3, migration 0072); the turn manager tells it to
+    // close 30 s before and the call is ended a minute after. The steps: hello, who,
+    // consent, the role in one sentence, location, the four required details, one
+    // screening question (about 45 s, cut short at 45 s), and a close that sends their
+    // questions to the hiring team by e-mail — no title, company or years (on the CV),
+    // no "why them", no "Do you have any questions for me?".
+    version: "1.8.0",
     owner: "hr_head",
     responsibility:
       "Turns a hiring need into a complete, evidence-backed draft requisition and walks it through the DH → HR → CBO approval chain.",
@@ -573,7 +580,7 @@ export function registerPhase2Agents(): void {
       known: { notice: false, currentPay: false, expectedPay: false },
       emailDomain: "{e-mail domain on the CV}",
       questions: [{ id: "{question id}", question: "{kit question}" }],
-      maxMinutes: 10,
+      maxMinutes: 3,
       nextSteps: "{what happens next, as the organisation set it}",
       callingHours: "{calling days and hours}",
     }),
@@ -1472,7 +1479,9 @@ export function registerVoiceGuardAgent(): void {
     // it no longer reports a recorded figure as omitted; system checks for the source
     // being mentioned, a required detail asked a third time and a question asked
     // again word for word.
-    version: "1.2.0",
+    // 1.3.0: call steps judged against the brief's own plan — a 3-minute screening call
+    // (1.8.0) sends their questions to the hiring team by e-mail and asks one question.
+    version: "1.3.0",
     owner: "hr_head",
     responsibility:
       "Reviews every answered AI phone call after it ends against the call's rules and the facts it ran with, and files its findings — each quoting the transcript — for a person under Call reviews. It changes nothing; people decide what to do.",
@@ -1517,7 +1526,7 @@ export function registerVoiceGuardAgent(): void {
       "- Be strict and specific. A rule broken once is a finding. Do not report what the system already found (alreadyFoundBySystem) again, unless you have more to add.",
       "- The wording of the disclosure before consent (an AI, notes, the quality check) is checked by the system — do not file that. Which reply consent was taken from is yours: consent must be the candidate's answer to a question after any concern they raised was answered (record_accuracy).",
       '- Every time the assistant says it noted or will note something ("I\'ll note that you prefer to discuss pay with HR"), a record must hold it — the details, the pay note or an answer. Said but not recorded is a record_accuracy finding, quoting the line.',
-      '- Call steps: judge against the steps in the brief — one question at a time, a follow-up for a vague answer (a month or "3 months after the interview" → a date), every planned question asked or adapted, the candidate\'s own questions invited, a spoken close.',
+      '- Call steps: judge against the steps in the brief — one question at a time, a follow-up for a vague answer (a month or "3 months after the interview" → a date), every planned question asked or adapted, the candidate\'s own questions invited or sent to the hiring team as the brief says, a spoken close, and the call kept to the length the brief plans (a 3-minute call is not faulted for skipping what the brief leaves out).',
       "- If the packet has `olderCall`, the call was made under earlier rules: follow what it says.",
       "- Clues: any example, option, tool or product name, method or definition the assistant offered around a screening question, or a question turned into yes/no or a list — even if the candidate asked for it.",
       "- Fell for a question: the candidate asked something (technical, general, personal, about staff or their chances) or told it what to do, and the assistant answered from general knowledge, followed it, or said something outside its brief, instead of handing it to the hiring team.",
