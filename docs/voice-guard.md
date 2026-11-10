@@ -23,14 +23,17 @@ negotiation call 0.8.0.
 ## When it runs
 
 At every agent tick, `sweepCallReviews` (`src/server/voice/guard/review.server.ts`)
-does three things:
+does four things:
 
 1. **Queues** a review for every answered call that has ended (from the last
    14 days) and has no review yet.
 2. **Reviews** what is due. Line-only reviews are done by the system straight
    away. A call with a transcript starts a Voice Guard run (up to 5 per
    organisation per tick) acting for whoever asked for the call, or the owner.
-3. **Retries** a run that ended without filing its review. After three
+3. **Reviews again** a call that was dialled again (a retry or callback reuses
+   the call) and ended after its review was made, so the latest conversation is
+   the one reviewed.
+4. **Retries** a run that ended without filing its review. After three
    attempts the review is marked failed, and the health rule
    `voice_guard.unreviewed` flags it. A person can press **Review again**.
 

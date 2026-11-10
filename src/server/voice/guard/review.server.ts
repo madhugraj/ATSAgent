@@ -267,6 +267,26 @@ export async function sweepCallReviews(opts: { orgId?: string } = {}): Promise<S
         returning id`)) as unknown as { id: string }[];
       counts.queued += queued.length;
 
+      // 1b. A call that was dialled again (a retry or callback reuses the call) and ended
+      // after its review was made: reviewed again, for its latest conversation. A test
+      // call on 10 November got a line-only review for its unanswered first attempt, and
+      // the seven-minute conversation on the retry was never reviewed.
+      const redialled = (await db.execute(sql`
+        update call_reviews r set
+          status = 'due',
+          scope = case when jsonb_array_length(c.transcript) > 0 then 'full' else 'timing_only' end,
+          agent_run_id = null, attempts = 0, last_error = null, verdict = null,
+          checks = '[]'::jsonb, findings = '[]'::jsonb, breaches = 0, quality_score = null,
+          summary = null, reviewed_at = null, acknowledged_by = null, acknowledged_at = null,
+          ack_outcome = null, ack_note = null, created_at = now(), updated_at = now()
+        from screening_calls c
+        where r.call_id = c.id and r.org_id = ${orgId} and c.org_id = ${orgId}
+          and r.status in ('done', 'failed')
+          and c.status not in ('dialling', 'in_progress')
+          and c.ended_at is not null and c.ended_at > r.created_at
+        returning r.id`)) as unknown as { id: string }[];
+      counts.queued += redialled.length;
+
       // 2. Retry: a run that ended without filing its review.
       const stalled = (await db.execute(sql`
         select r.id, r.attempts, ar.status run_status, ar.last_error
