@@ -130,6 +130,34 @@ when it says it noted something it did not record. Every ending — a goodbye,
 silence or a hang-up — reports the required details still to get to the hiring
 desk and the Screening agent.
 
+Screening call agent 1.6.0, from the organisation's review of a test call on
+10 November:
+
+- **The source is never mentioned.** The call says only that it is about the
+  role, never where, when or whether the candidate applied or was referred. If
+  asked, it says the profile was shared with the talent acquisition team and the
+  hiring team can tell them more (`SOURCE_LINE`).
+- **Consent is asked once more at most.** After a concern it answers in one
+  sentence and asks only "Shall we go ahead?", never the disclosure again.
+- **"Why them" is a fact from the CV,** never "a great fit" or praise, and no
+  detail is asked in the same turn.
+- **Each practical detail is its own question:** title and company, years,
+  location.
+- **The four required details are their own step:** notice period, the date
+  they could join, current CTC and expected CTC. The candidate is told once
+  that without a clear answer to each the application cannot be considered
+  (`REQUIRED_LINE`). An unclear answer ("around three months", "you can
+  calculate it", "as per the norms") is asked once more. A date or figure is
+  never worked out for them, and nothing is asked a third time. A total CTC
+  with no split is recorded as fixed pay with a note.
+- **Long answers are cut short politely.** An answer past 90 s is cut short at
+  the candidate's next pause by the shared turn manager: "Thank you — in the
+  interest of time, let me move on."
+- **The opening reply comes sooner.** The opening cue now comes 0.5 s after the
+  candidate's hello ends, timed from the line's own voice detection. The hello's
+  late transcript had restarted the wait, and the test call took 3.9 s to answer
+  "Hello". This applies to all three calls.
+
 A completed call must leave with the earliest joining date, current pay and
 expected pay (Screening call agent 1.3.0): after consent, `end_call` with
 `completed` or `other` is refused until each is recorded or listed in

@@ -30,6 +30,7 @@ import {
   closeCallRun,
   DEFAULT_LIMITS,
   openCallRun,
+  OPENING_REPLY_CUE_MS,
   openingWatch,
   setCall,
 } from "./call-session.server";
@@ -62,7 +63,7 @@ import { phoneScreeningPolicyOf } from "./settings.server";
 type Call = typeof screeningCalls.$inferSelect;
 
 /** After the candidate's hello ends, cue the assistant if it has not begun by then. */
-export const SCHEDULING_REPLY_CUE_MS = 1_200;
+export const SCHEDULING_REPLY_CUE_MS = OPENING_REPLY_CUE_MS;
 
 /** Turn-taking for a scheduling call: end of speech after half a second, high sensitivity. */
 export const SCHEDULING_TURN_TAKING = {
@@ -157,6 +158,8 @@ async function place(
   let aiSpoke = false;
   // Real clock (not the injectable one): when the candidate's voice was last heard.
   let lastHeardAt: number | null = null;
+  /** When the line's voice detection last heard the candidate (not the transcript). */
+  let lineHeardAt: number | null = null;
   // What the assistant has said so far: a "yes" counts only after the disclosure.
   let aiSaid = "";
   // Turn-taking on the line, kept on the call for the Voice Guard (no words).
@@ -303,6 +306,7 @@ async function place(
     keeper?.caller(heard, vad.isActive());
     if (heard === "start") candidateSpoke = true;
     if (vad.isActive()) {
+      lineHeardAt = Date.now();
       lastHeardAt = Date.now();
       lastActivity = now();
     }
@@ -315,7 +319,8 @@ async function place(
   // They speak first; the assistant answers (or greets them if they stay quiet).
   const stopOpening = openingWatch({
     session,
-    lastHeard: () => lastHeardAt,
+    // The line's voice detection only — the hello's late transcript restarted the wait.
+    lastHeard: () => lineHeardAt,
     aiSpoke: () => aiSpoke,
     callerFirstMs: limits.callerFirstMs,
     // Real calls: the model often did not answer a plain "hello" on its own —

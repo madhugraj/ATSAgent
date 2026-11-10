@@ -13,6 +13,7 @@
  * A finding the agent files must quote the transcript; a quote that is not in
  * the turn it names is dropped (mergeReview), so it cannot invent evidence.
  */
+import { TURN_TIMING } from "../turns";
 import type {
   CallReviewCheck,
   CallReviewCheckId,
@@ -177,6 +178,8 @@ export type GuardInput = {
   consentWords?: string | null;
   /** The call ran with the quality-check disclosure (its brief says so — calls from 0071). */
   qualityDisclosed: boolean;
+  /** The instructions the call ran with: a rule is checked only on calls that had it. */
+  brief?: string | null;
   transcript: ScreeningCallTurn[];
   answers: ScreeningCallAnswer[];
   details: ScreeningCallDetails;
@@ -300,7 +303,17 @@ function turnTakingCheck(i: GuardInput, out: CodeResult): void {
         `Its voice broke up ${s.audio.gaps} times (audio ran out mid-sentence).`,
       ),
     );
-  const cues = s.cues ? Object.values(s.cues).reduce((a, b) => a + b, 0) : 0;
+  // A long answer is the candidate's, not a silence: counted on its own.
+  const { long_answer: longAnswers = 0, ...quiet } = s.cues ?? {};
+  const cues = Object.values(quiet).reduce((a, b) => a + (b ?? 0), 0);
+  if (longAnswers)
+    out.findings.push(
+      finding(
+        "turn_taking",
+        "low",
+        `${longAnswers === 1 ? "An answer" : `${longAnswers} answers`} ran past ${Math.round(TURN_TIMING.longAnswerMs / 1000)} s and it had to be told to move on.`,
+      ),
+    );
   if (cues)
     out.findings.push(
       finding(
@@ -482,6 +495,92 @@ function stackedCheck(i: GuardInput, out: CodeResult): void {
     );
 }
 
+/** The brief's rule against saying how the profile came to us (screening 1.6.0). */
+export const SOURCE_RULE = "never say where, when or whether they applied";
+/** "You applied through Naukri on 9 November", "your details came through a referral". */
+const SAYS_SOURCE =
+  /\b(you(?:'ve| have)? applied|your application (?:through|via|on)|applied (?:through|via|on)|you were referred|through a referral|referred (?:you|by)|came to us through)\b/i;
+
+/** It said how the profile came to us, on a call whose brief told it not to (by the system). */
+function sourceCheck(i: GuardInput, out: CodeResult): void {
+  if (i.scope !== "full" || i.purpose !== "screening" || !i.brief?.includes(SOURCE_RULE)) return;
+  const turn = i.transcript.findIndex((t) => t.who === "ai" && SAYS_SOURCE.test(t.text));
+  if (turn >= 0)
+    out.findings.push(
+      finding("charter", "high", "It said how the candidate's profile came to us.", [
+        { turn, quote: i.transcript[turn]!.text.slice(0, 200) },
+      ]),
+    );
+}
+
+/**
+ * Asked again (by the system): a required detail asked for in more than two
+ * questions (the question and one follow-up for an unclear answer are allowed),
+ * and a question asked again word for word after the candidate had answered,
+ * when they had not asked to hear it again.
+ */
+export function askedAgain(transcript: ScreeningCallTurn[]): {
+  detail: { what: string; turns: number[] }[];
+  same: { sentence: string; turns: number[] }[];
+} {
+  const byDetail = new Map<string, number[]>();
+  const seen = new Map<string, { sentence: string; turns: number[] }>();
+  transcript.forEach((t, turn) => {
+    if (t.who !== "ai") return;
+    const prev = transcript[turn - 1];
+    const askedToRepeat = prev?.who === "caller" && ASKED_AGAIN.test(prev.text);
+    for (const raw of t.text.split(/(?<=[.?!])\s+/)) {
+      if (!/\?\s*$/.test(raw.trim())) continue;
+      const asked = raw.replace(PREMISE, "");
+      for (const r of REQUIRED_ASKED)
+        if (r.asked.test(asked)) {
+          const at = byDetail.get(r.what) ?? [];
+          if (!at.includes(turn)) at.push(turn);
+          byDetail.set(r.what, at);
+        }
+      const key = norm(raw);
+      if (key.split(" ").length < 3 || askedToRepeat) continue;
+      const e = seen.get(key) ?? { sentence: raw.trim(), turns: [] };
+      const last = e.turns[e.turns.length - 1];
+      // Only after the candidate said something in between.
+      const answered =
+        last === undefined || transcript.slice(last + 1, turn).some((x) => x.who === "caller");
+      if (answered && !e.turns.includes(turn)) e.turns.push(turn);
+      seen.set(key, e);
+    }
+  });
+  return {
+    detail: [...byDetail]
+      .filter(([, at]) => at.length > 2)
+      .map(([what, turns]) => ({ what, turns })),
+    same: [...seen.values()].filter((e) => e.turns.length > 1),
+  };
+}
+
+function askedAgainCheck(i: GuardInput, out: CodeResult): void {
+  if (i.scope !== "full" || !i.qualityDisclosed || !i.transcript.length) return;
+  const a = askedAgain(i.transcript);
+  if (i.purpose === "screening")
+    for (const d of a.detail)
+      out.findings.push(
+        finding(
+          "repetition",
+          "high",
+          `It asked for their ${d.what} ${d.turns.length} times (one follow-up is the most).`,
+          d.turns.map((turn) => ({ turn, quote: i.transcript[turn]!.text.slice(0, 200) })),
+        ),
+      );
+  for (const r of a.same)
+    out.findings.push(
+      finding(
+        "repetition",
+        "low",
+        `It asked the same question again after the candidate had answered (${r.turns.length} times).`,
+        r.turns.map((turn) => ({ turn, quote: r.sentence.slice(0, 200) })),
+      ),
+    );
+}
+
 const norm = (t: string) =>
   t
     .toLowerCase()
@@ -559,6 +658,8 @@ export function codeChecks(i: GuardInput): CodeResult {
   transcriptionCheck(i, out);
   recordChecks(i, out);
   stackedCheck(i, out);
+  sourceCheck(i, out);
+  askedAgainCheck(i, out);
   // A timing-only review covers the line alone.
   if (i.scope === "timing_only")
     out.checks = out.checks.filter((c) => CHECK_BY_ID.get(c.check)?.timing);

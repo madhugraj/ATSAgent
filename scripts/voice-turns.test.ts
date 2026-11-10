@@ -146,3 +146,36 @@ describe("said it noted it, so it must be recorded", () => {
     expect(c.sent.filter((s) => /nothing was recorded/.test(s))).toHaveLength(0);
   });
 });
+
+describe("an answer that runs long", () => {
+  test("past the limit: told at their next pause to move on, once per answer", () => {
+    const { k, sent, quiet } = keeper();
+    k.aiAudio();
+    k.aiTurn("Can you walk me through an incident you led?");
+    // They talk for 100 s in 20 s stretches with short breaths between.
+    for (let i = 0; i < 5; i++) {
+      k.caller("start", true);
+      quiet(20_000, false);
+      k.caller("end", false);
+      quiet(500);
+    }
+    const long = sent.filter((s) => /answer has run long/.test(s));
+    expect(long).toHaveLength(1);
+    expect(k.counts.long_answer).toBe(1);
+  });
+
+  test("under the limit, or a new answer after the assistant spoke: no cue", () => {
+    const { k, sent, quiet } = keeper();
+    k.aiAudio();
+    k.aiTurn("What is your notice period?");
+    k.caller("start", true);
+    quiet(TURN_TIMING.longAnswerMs - 5_000);
+    k.caller("end", false);
+    k.aiAudio(); // it replied: the next answer starts afresh
+    k.aiTurn("Which date could you join?");
+    k.caller("start", true);
+    quiet(10_000);
+    k.caller("end", false);
+    expect(sent.filter((s) => /answer has run long/.test(s))).toHaveLength(0);
+  });
+});

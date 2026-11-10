@@ -15,6 +15,8 @@
  *    the read-back the system returned, a refusal it must act on);
  *  - mid_turn: its turn ended on a statement, not a question or a goodbye;
  *  - reply: the candidate stopped speaking and it has not answered.
+ * And when the candidate's answer runs past `longAnswerMs`, it is told at their
+ * next pause to thank them and move on (long_answer, once per answer).
  * The line must then be quiet (nothing playing, nobody speaking) for the
  * reason's wait before a cue; a cue repeats after `repeatMs`, at most
  * `maxCues` times per silence. Any assistant audio or candidate speech clears
@@ -28,7 +30,7 @@
  */
 import { voiceDebug } from "./debug";
 
-export type CueReason = "after_tool" | "mid_turn" | "reply" | "unrecorded_note";
+export type CueReason = "after_tool" | "mid_turn" | "reply" | "unrecorded_note" | "long_answer";
 export type CueCounts = Record<CueReason, number>;
 
 export const TURN_TIMING = {
@@ -46,6 +48,12 @@ export const TURN_TIMING = {
   notedWithinMs: 15_000,
   /** …and this long after it to make the record before it is reminded. */
   noteGraceMs: 6_000,
+  /**
+   * The candidate has been answering this long (from their first word since the
+   * assistant last spoke): at their next pause it is told to move on. A test call
+   * on 10 November let answers run on while it kept listening.
+   */
+  longAnswerMs: 90_000,
 };
 
 const CUE_TEXT: Record<CueReason, string> = {
@@ -57,6 +65,8 @@ const CUE_TEXT: Record<CueReason, string> = {
     "(There is silence on the line. If the candidate has answered, reply now; if not, ask simply whether they can hear you.)",
   unrecorded_note:
     "(You told the candidate you noted something, but nothing was recorded. Call the record tool now with what they said — in their words — then carry on.)",
+  long_answer:
+    '(The candidate\'s answer has run long. Record what they said, then at this pause say "Thank you — in the interest of time, let me move on." and go to your next step.)',
 };
 
 /** "I'll note that", "I have noted", "noted down", "I'll pass that on" … */
@@ -72,7 +82,16 @@ export class TurnKeeper {
   private ended = false;
   private lastRecordAt = Number.NEGATIVE_INFINITY;
   private noteSince: number | null = null;
-  readonly counts: CueCounts = { after_tool: 0, mid_turn: 0, reply: 0, unrecorded_note: 0 };
+  /** When the candidate began answering (first word since the assistant last spoke). */
+  private answerSince: number | null = null;
+  private longCued = false;
+  readonly counts: CueCounts = {
+    after_tool: 0,
+    mid_turn: 0,
+    reply: 0,
+    unrecorded_note: 0,
+    long_answer: 0,
+  };
 
   constructor(
     private readonly o: {
@@ -108,6 +127,8 @@ export class TurnKeeper {
     this.started = true;
     this.lastSound = this.now();
     this.owe(null);
+    this.answerSince = null;
+    this.longCued = false;
   }
 
   /** A finished line of the assistant's (the turn's transcript). */
@@ -131,14 +152,27 @@ export class TurnKeeper {
 
   /** The candidate's VAD: speech started or ended. */
   caller(event: "start" | "end" | null, active: boolean): void {
+    const t = this.now();
     if (active || event === "start") {
-      this.lastSound = this.now();
+      this.lastSound = t;
       this.owe(null);
+      if (this.answerSince === null && this.started) this.answerSince = t;
     }
     if (event === "end") {
       // Timed from when they stopped, not from their first word.
-      this.lastSound = this.now();
-      if (this.started && !this.ended) this.owe("reply");
+      this.lastSound = t;
+      if (this.started && !this.ended) {
+        this.owe("reply");
+        // Talked past the limit: at this pause it is told to move on (once per answer).
+        if (
+          !this.longCued &&
+          this.answerSince !== null &&
+          t - this.answerSince > this.t.longAnswerMs
+        ) {
+          this.longCued = true;
+          this.cue("long_answer");
+        }
+      }
     }
   }
 

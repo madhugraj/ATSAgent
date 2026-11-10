@@ -96,8 +96,16 @@ export const GREETING_NUDGE_MS = 6_000;
  */
 export const REPLY_NUDGE_MS = 4_000;
 
-/** Cue the screening assistant this long after the candidate's hello if it has not begun. */
-export const SCREENING_REPLY_CUE_MS = 1_200;
+/**
+ * Cue the assistant this long after the candidate's hello ends, if it has not
+ * begun — all three calls. Timed from the line's own voice detection (which
+ * already waits 300 ms of quiet), never from the transcript: the hello's
+ * transcript arrives late and restarted the wait, and a test call on
+ * 10 November took 3.9 s to answer "Hello" (the model on its own waits 1.6 s
+ * of silence, then thinks).
+ */
+export const OPENING_REPLY_CUE_MS = 500;
+export const SCREENING_REPLY_CUE_MS = OPENING_REPLY_CUE_MS;
 
 /** Still silent this long after a cue → cue again, at most MAX_REPEAT_NUDGES more times. */
 export const REPEAT_NUDGE_MS = 3_000;
@@ -395,6 +403,8 @@ async function placeCall(
   let aiSpoke = false;
   // Real clock (not the injectable one): when the candidate's voice was last heard.
   let lastHeardAt: number | null = null;
+  /** When the line's voice detection last heard the candidate (not the transcript). */
+  let lineHeardAt: number | null = null;
   // Transcript lines so far, and how many there were when the practical
   // details were last recorded: grading reads only what came after.
   let turns = 0;
@@ -535,6 +545,7 @@ async function placeCall(
     keeper?.caller(heard, vad.isActive());
     if (heard === "start") candidateSpoke = true;
     if (vad.isActive()) {
+      lineHeardAt = Date.now();
       lastHeardAt = Date.now();
       lastActivity = now();
     }
@@ -549,7 +560,8 @@ async function placeCall(
   // They speak first; the assistant answers (or greets them if they stay quiet).
   const stopOpening = openingWatch({
     session,
-    lastHeard: () => lastHeardAt,
+    // The line's voice detection only — the hello's late transcript restarted the wait.
+    lastHeard: () => lineHeardAt,
     aiSpoke: () => aiSpoke,
     callerFirstMs: limits.callerFirstMs,
     // As the scheduling and negotiation calls: two real calls on 2 November waited the

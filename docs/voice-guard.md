@@ -59,6 +59,8 @@ person to approve before it is saved.
 | Other charter rules: praise, staff, pay, protected questions, results, posing as a person                                                               | Voice Guard | all                      |
 | Call steps: one question at a time (two required details in one question: system), a date for a vague answer, every question, their questions, a close  | both        | calls from 1.1.0 on      |
 | Turn-taking: spoke before hello, talked over, slow replies, voice breaking up, cues it needed, "Are you there?", cut off without a close                | system      | all, including line-only |
+| Said how the profile came to us (calls whose brief forbids it)                                                                                          | system      | screening                |
+| Asked again: a required detail a third time, or a question word for word after an answer                                                                | system      | all                      |
 | Transcription: lines in another language or script                                                                                                      | system      | all                      |
 
 The Voice Guard reads:
@@ -148,6 +150,20 @@ those details, so the model asked each pair in one breath. They are now four
 separate questions (screening call 1.5.1), and the system flags any question
 that asks for two required details, counting what is asked rather than
 question marks (`stackedQuestions`). The re-review found 11 of 11.
+
+A second test call that day, under screening 1.5.1, asked each required
+detail on its own and closed properly. The organisation's review of it led to
+screening 1.6.0 (`docs/voice-screening-agent.md`) and Voice Guard 1.2.0:
+
+- Pay figures and the pay note are never in the records the Voice Guard sees.
+  It now trusts `details.required` instead of reporting a recorded figure as
+  omitted.
+- New system checks:
+  - the source mentioned, on calls whose brief forbids it;
+  - a required detail asked a third time;
+  - a question asked again word for word after the candidate had answered.
+- A long answer the turn manager had to cut short is counted on its own, not as
+  a silence.
 
 Set `VOICE_DEBUG_FILE` on the voice worker to trace each call's audio, turn,
 tool and cue timings (names only — never words or arguments).

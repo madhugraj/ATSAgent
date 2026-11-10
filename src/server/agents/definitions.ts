@@ -489,7 +489,17 @@ export function registerPhase2Agents(): void {
     // 1.5.1: notice period, joining date, current pay and expected pay are four separate
     // questions in its steps (they were two paired items, and it asked each pair in one
     // breath); the Voice Guard flags a stacked one in code.
-    version: "1.5.1",
+    // 1.6.0 (a test call on 10 November, the organisation's review): never says how the
+    // profile came to us; consent asked once more at most after a concern, never the
+    // disclosure again; the overview and "why them" are facts, never "a great fit", and
+    // no detail is asked in that turn; title, company and years are separate questions;
+    // the four required details (notice, joining date, current and expected CTC) are a
+    // step of their own — the candidate is told once that without clear answers the
+    // application cannot be considered, an unclear answer is asked once more, a date or
+    // figure is never worked out for them, never a third time. Shared turn manager: an
+    // answer past 90 s is cut short politely at the next pause; the opening cue comes
+    // 0.5 s after the hello (the line's own voice detection, not the late transcript).
+    version: "1.6.0",
     owner: "hr_head",
     responsibility:
       "Holds one AI screening phone call with a shortlisted candidate the way an HR recruiter does: says who it is and why it is calling, asks consent, explains the role and why it called them, records their practical details (including the pay they state, for HR only) and their answers to the role's screening questions, or agrees a better time — nothing else.",
@@ -739,7 +749,10 @@ export function registerPhase3Agents(): void {
     // 1.7.2: the request_approval subject gained the organisation profile; no behaviour change for this agent.
     // 1.8.0 (the Voice Guard): says the call is checked for quality with the note
     // disclosure; the go-ahead counts only after it (checked in code).
-    version: "1.8.0",
+    // 1.8.1: shared turn manager — an answer past 90 s is cut short politely at the next
+    // pause; the opening cue comes 0.5 s after the hello (the line's own voice
+    // detection; the hello's late transcript had restarted the wait).
+    version: "1.8.1",
     owner: "hr_head",
     responsibility:
       "Holds one short AI phone call to help a candidate and the interview panel agree a time the candidate was already e-mailed: says it is an AI, tells them where they stand in the process, books one of the offered or pre-checked times (free for the whole panel), or notes when they are free — nothing else.",
@@ -849,7 +862,10 @@ export function registerPhase3Agents(): void {
     // I choose you?".
     // 0.8.0 (the Voice Guard): says the call is checked for quality with the note
     // disclosure; the go-ahead counts only after it (checked in code).
-    version: "0.8.0",
+    // 0.8.1: shared turn manager — an answer past 90 s is cut short politely at the next
+    // pause; the opening cue comes 0.5 s after the hello (the line's own voice
+    // detection; the hello's late transcript had restarted the wait).
+    version: "0.8.1",
     owner: "hr_head",
     responsibility:
       "Holds one AI phone call with a candidate about the pay for their offer: says it is an AI, tells them which role and organisation and where they stand, wins their interest from approved facts, frames the approved figure and extras around what matters to them, may offer one pre-approved improved figure, and brings a clear answer back to the people who decide.",
@@ -1436,7 +1452,11 @@ export function registerVoiceGuardAgent(): void {
     // (one question at a time, a date for a vague answer, every question, their
     // questions, a close). The system now also finds stalls in the transcript, cues it
     // had to give, and details asked but not recorded.
-    version: "1.1.0",
+    // 1.2.0 (a test call on 10 November): pay is never in its records (HR-only), so
+    // it no longer reports a recorded figure as omitted; system checks for the source
+    // being mentioned, a required detail asked a third time and a question asked
+    // again word for word.
+    version: "1.2.0",
     owner: "hr_head",
     responsibility:
       "Reviews every answered AI phone call after it ends against the call's rules and the facts it ran with, and files its findings — each quoting the transcript — for a person under Call reviews. It changes nothing; people decide what to do.",
@@ -1488,6 +1508,7 @@ export function registerVoiceGuardAgent(): void {
       "- Beyond its facts: any statement about the company, role, team, process, timelines or pay that is not in the brief.",
       "- Read-back: on a screening call the assistant must only acknowledge an answer in two or three words; summarising or reflecting the answer back to the candidate is a breach (a booked time read back from the system is fine).",
       "- Commitments and agreements: any promise not in the brief's own words, and any acceptance of what the candidate proposed (a figure, a date, a condition), are breaches — the assistant only notes things for the hiring team.",
+      "- Pay is never in the records you see: pay figures and the pay note go to an HR-only record. `details.required` says whether each required detail was recorded, declined (in their words) or missing — trust it. Never report a pay figure or a pay note as missing or omitted; a promise to note something about pay is kept when `required` shows that pay item as recorded or declined.",
       "- Records: compare each record with what the candidate said in the transcript; the assistant's own words recorded as theirs, an answer marked answered when they only agreed with a suggestion, or something they said that is missing from a record, is a finding.",
       "- Severity: critical — the candidate was misled, a record is wrong, or a hard rule broke (pay, protected questions, a promise or agreement, saying or implying it is a person); high — any other clear breach of the rules; low — a lapse in manner (filler, an unasked repeat).",
       "- qualityScore: 5 the call felt like a skilled, respectful recruiter; 3 acceptable with lapses; 1 the candidate was confused, talked over or misled.",

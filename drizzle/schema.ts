@@ -3477,7 +3477,14 @@ export type CallStats = {
    * after a tool result, after a statement, after the candidate stopped, or to record
    * something it said it noted. Absent on calls before it.
    */
-  cues?: { after_tool: number; mid_turn: number; reply: number; unrecorded_note: number };
+  cues?: {
+    after_tool: number;
+    mid_turn: number;
+    reply: number;
+    unrecorded_note: number;
+    /** The candidate talked past the limit and it was told to move on (from screening 1.6.0). */
+    long_answer?: number;
+  };
 };
 
 export type CallReviewStatus = "due" | "reviewing" | "done" | "failed";
