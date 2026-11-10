@@ -826,6 +826,42 @@ describe("in-call tools", () => {
     expect((s.details as { not_given?: unknown } | null)?.not_given).toBeUndefined();
   });
 
+  test("a required detail is declined only after they were told what it means (10 November)", () => {
+    const s = { ...fresh(), consent: true };
+    let said = "Next, four details the hiring team needs. What is your current CTC per year?";
+    const details = (args: object) =>
+      session.applyCallTool(s as never, "record_details", args, ids, 0, said);
+    const declineCurrent = {
+      pay_note: "will talk to the HR",
+      not_given: [{ item: "current_pay", why: "declined" }],
+    };
+    // "I will talk to the HR": not taken yet — the note is kept, the decline is not.
+    const first = details(declineCurrent);
+    expect(first).toMatchObject({ ok: false, error: expect.stringContaining("cannot consider") });
+    expect(s.details).toMatchObject({ pay_note: "will talk to the HR" });
+    expect((s.details as { not_given?: unknown }).not_given).toBeUndefined();
+    // Told, and asked once more: their second no is taken.
+    said +=
+      " Without your current CTC, the hiring team cannot consider your application. Could you share it?";
+    expect(details(declineCurrent)).toMatchObject({ ok: true });
+    expect((s.details as { not_given?: unknown }).not_given).toEqual([
+      { item: "current_pay", why: "declined" },
+    ]);
+    // The next detail needs its own telling: the one before does not carry over.
+    said += " Understood. And what is your expected CTC per year?";
+    expect(details({ not_given: [{ item: "expected_pay", why: "declined" }] })).toMatchObject({
+      ok: false,
+    });
+    // Not working is never pressed; nor are text-mode runs (no spoken lines).
+    expect(details({ not_given: [{ item: "current_pay", why: "not_working" }] })).toMatchObject({
+      ok: true,
+    });
+    const t = { ...fresh(), consent: true };
+    expect(
+      session.applyCallTool(t as never, "record_details", declineCurrent, ids, 0),
+    ).toMatchObject({ ok: true });
+  });
+
   test("outcomes", () => {
     const o = session.callOutcome;
     const answered = {
