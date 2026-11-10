@@ -278,7 +278,7 @@ export const CATALOGUE_MODULES: CatalogueModule[] = [
   },
   {
     id: "copilot",
-    name: "Embedded HR copilot",
+    name: "Aditi — embedded HR copilot",
     category: "Intelligence",
     audience: "Whole HR team",
     summary:

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { ArrowUp, BookOpen, BrainCircuit, ChevronRight, Compass, RotateCcw, X } from "lucide-react";
+import { ArrowUp, BookOpen, ChevronRight, Compass, RotateCcw, X } from "lucide-react";
 import { Link, useRouter } from "@tanstack/react-router";
 import { toast } from "sonner";
 
@@ -16,6 +16,7 @@ import { FIRST_RUN_JOURNEY } from "@/lib/user-manual";
 import { useMe } from "@/hooks/useMe";
 import { useNavCtx } from "@/hooks/useNavCtx";
 import { useOrg } from "@/hooks/useOrg";
+import { AditiMark } from "@/components/AditiMark";
 import { AgentMarkdown } from "@/components/AgentMarkdown";
 import { Button } from "@/components/ui/button";
 
@@ -26,7 +27,7 @@ const PROMPTS = [
   "Which roles are emerging in our ontology?",
 ];
 
-/** Always-available HR copilot: one ongoing conversation, stored in the database. */
+/** Aditi, the always-available HR copilot: one ongoing conversation, stored in the database. */
 export function Copilot() {
   const qc = useQueryClient();
   const fetchHistory = useServerFn(copilotHistory);
@@ -85,7 +86,7 @@ export function Copilot() {
       ]);
     },
     onSettled: () => qc.invalidateQueries({ queryKey: ["copilot"] }),
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Copilot failed"),
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Aditi could not answer"),
   });
 
   const startAgents = useMutation({
@@ -122,13 +123,13 @@ export function Copilot() {
       <Button
         type="button"
         onClick={() => setOpen(true)}
-        aria-label="Open HR copilot"
+        aria-label="Ask Aditi, the AI copilot"
         className="group fixed bottom-5 right-5 z-50 flex items-center gap-2 rounded-full bg-foreground/90 px-4 py-3 text-sm font-medium text-background shadow-[0_10px_30px_-12px_color-mix(in_oklab,var(--foreground)_60%,transparent)] backdrop-blur-xl transition-all hover:bg-foreground hover:shadow-[0_16px_40px_-14px_color-mix(in_oklab,var(--primary)_55%,transparent)]"
       >
-        <span className="relative flex size-5 items-center justify-center rounded-full bg-primary/90">
-          <BrainCircuit className="size-3 text-primary-foreground" />
+        <span className="relative flex size-6 items-center justify-center rounded-full bg-primary/90">
+          <AditiMark className="size-4 text-primary-foreground" />
         </span>
-        Copilot
+        Ask Aditi
       </Button>
     );
   }
@@ -143,13 +144,13 @@ export function Copilot() {
 
       <header className="relative flex items-center justify-between border-b border-border/50 px-4 py-3">
         <div className="flex items-center gap-2">
-          <span className="flex size-6 items-center justify-center rounded-full bg-primary/90 shadow-[inset_0_1px_0_color-mix(in_oklab,white_45%,transparent)]">
-            <BrainCircuit className="size-3.5 text-primary-foreground" />
+          <span className="flex size-7 items-center justify-center rounded-full bg-primary/90 shadow-[inset_0_1px_0_color-mix(in_oklab,white_45%,transparent)]">
+            <AditiMark className="size-[1.125rem] text-primary-foreground" />
           </span>
           <span className="leading-tight">
-            <span className="block text-sm font-semibold tracking-tight">HR copilot</span>
+            <span className="block text-sm font-semibold tracking-tight">Aditi</span>
             <span className="block text-[11px] text-muted-foreground">
-              Help and questions ·{" "}
+              AI copilot ·{" "}
               <Link to="/desk" className="text-primary underline" onClick={() => setOpen(false)}>
                 hire with agents
               </Link>
@@ -185,7 +186,7 @@ export function Copilot() {
             type="button"
             variant="ghost"
             size="icon"
-            aria-label="Close copilot"
+            aria-label="Close Aditi"
             className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
             onClick={() => setOpen(false)}
           >
@@ -345,7 +346,7 @@ export function Copilot() {
                 submit(draft);
               }
             }}
-            placeholder="Ask your copilot…"
+            placeholder="Ask Aditi…"
             className="min-h-[3rem] w-full resize-none bg-transparent px-3.5 py-2.5 pr-12 text-sm outline-none placeholder:text-muted-foreground"
           />
           <Button
