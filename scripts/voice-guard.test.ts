@@ -283,6 +283,9 @@ describe("merging the agent's review", () => {
     ).toBe("pass");
     // Screening-only checks do not apply to a scheduling call.
     expect(checks.checksFor("scheduling", "full").map((c) => c.id)).not.toContain("read_back");
+    // An older call (no brief kept) is not held to rules that came with the Voice Guard.
+    expect(checks.checksFor("screening", "full", true).map((c) => c.id)).not.toContain("read_back");
+    expect(checks.checksFor("screening", "full").map((c) => c.id)).toContain("read_back");
   });
 });
 
@@ -494,7 +497,9 @@ describe("the sweep", () => {
     const runA = await start();
     const runB = await start();
     const packet = await review.reviewPacket(orgId, runA, id);
-    expect(packet.yourChecks.map((c) => c.check)).toContain("read_back");
+    // No brief kept: an older call, not held to the rules that came with the Voice Guard.
+    expect(packet.yourChecks.map((c) => c.check)).not.toContain("read_back");
+    expect(packet).toHaveProperty("olderCall");
     expect(packet.transcript[0]).toMatchObject({ turn: 0, who: "assistant" });
     expect(packet).not.toHaveProperty("model");
     await expect(review.reviewPacket(orgId, runB, id)).rejects.toThrow(

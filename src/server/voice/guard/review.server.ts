@@ -107,6 +107,12 @@ export async function reviewPacket(orgId: string, runId: string, callId: string)
     },
     rules: charterBlock(CHARTER[c.purpose]),
     brief: c.brief ?? "(The call's brief was not kept — judge facts conservatively.)",
+    ...(c.brief
+      ? {}
+      : {
+          olderCall:
+            "This call was made before the Voice Guard: its rules then did not include saying the call is checked for quality or the no-read-back rule. Do not hold it to those two; judge it by the other rules.",
+        }),
     transcript: c.transcript.map((t: ScreeningCallTurn, turn: number) => ({
       turn,
       who: t.who === "ai" ? "assistant" : "candidate",
@@ -129,7 +135,7 @@ export async function reviewPacket(orgId: string, runId: string, callId: string)
       severity: f.severity,
       summary: f.summary,
     })),
-    yourChecks: checksFor(c.purpose, r.scope)
+    yourChecks: checksFor(c.purpose, r.scope, !c.brief)
       .filter((x) => x.by === "review")
       .map((x) => ({ check: x.id, title: x.title, question: x.question })),
   };
@@ -161,6 +167,7 @@ export async function fileReview(
     codeChecks(guardInput(c, r.scope)),
     review,
     c.transcript,
+    !c.brief,
   );
   await db
     .update(callReviews)

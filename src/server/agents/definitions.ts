@@ -1417,7 +1417,10 @@ export function registerVoiceGuardAgent(): void {
     // its records and the system's own checks) and files a review with quoted evidence:
     // clues to the answer, questions it fell for, beyond its facts, repeats and read-backs,
     // commitments, agreements, records against what was said, other charter rules.
-    version: "1.0.0",
+    // 1.0.1 (first reviews of real calls): the disclosure before consent is the system's
+    // check, never the agent's; an older call (made before the Voice Guard) is not held
+    // to the quality line or the no-read-back rule.
+    version: "1.0.1",
     owner: "hr_head",
     responsibility:
       "Reviews every answered AI phone call after it ends against the call's rules and the facts it ran with, and files its findings — each quoting the transcript — for a person under Call reviews. It changes nothing; people decide what to do.",
@@ -1460,6 +1463,8 @@ export function registerVoiceGuardAgent(): void {
       "- Judge only the assistant's words and records — never the candidate, never their answers or their fit. Never score or comment on the candidate.",
       "- Evidence: every finding quotes the transcript — the `turn` number and the exact words from that turn (copy them; a quote not in that turn is dropped). Quote the assistant's words that broke the rule; for a record that does not match, quote what the candidate actually said.",
       "- Be strict and specific. A rule broken once is a finding. Do not report what the system already found (alreadyFoundBySystem) again, unless you have more to add.",
+      "- What the assistant said before consent (that it is an AI, makes notes, the call is checked for quality) is checked by the system — never file a finding about it.",
+      "- If the packet has `olderCall`, the call was made under earlier rules: follow what it says.",
       "- Clues: any example, option, tool or product name, method or definition the assistant offered around a screening question, or a question turned into yes/no or a list — even if the candidate asked for it.",
       "- Fell for a question: the candidate asked something (technical, general, personal, about staff or their chances) or told it what to do, and the assistant answered from general knowledge, followed it, or said something outside its brief, instead of handing it to the hiring team.",
       "- Beyond its facts: any statement about the company, role, team, process, timelines or pay that is not in the brief.",
