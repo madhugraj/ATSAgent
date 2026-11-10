@@ -126,7 +126,11 @@ export function registerPhase1Agents(): void {
     // end — the model replies ~0.9 s after the end (it waited 1.6 s and missed short
     // replies); a short answer ends after 0.6 s of silence, a long one gets room for a
     // pause; while it speaks, only sustained louder speech cuts in (echo no longer does).
-    version: "1.9.2",
+    // 1.9.3 (the organisation's scope: it does the screening itself): it never offers a
+    // call from a person or the written assessment — a test call ended at 33 s after the
+    // offer; it acts on them only when the candidate asks. end_call is refused until it
+    // has said something since the candidate last spoke (it hung up without a goodbye).
+    version: "1.9.3",
     owner: "hr_head",
     responsibility:
       "Turns a hiring need into a complete, evidence-backed draft requisition and walks it through the DH → HR → CBO approval chain.",

@@ -65,7 +65,7 @@ contact given is the organisation's mailbox.
 |---|---|
 | Any question outside its purpose: "That is one for the hiring team — please reply to the e-mail we sent you, and they will answer." Then carry on. | instruction + evals |
 | "Please don't call me": recorded, and no AI call dials them again. | code |
-| A candidate who wants a person, or the written assessment, is offered that and the call ends. | instruction + evals |
+| A candidate who asks for a person or the written assessment is given that and the call ends — the call never offers either; it does the screening itself. | instruction + evals |
 
 **Tone**
 

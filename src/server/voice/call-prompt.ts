@@ -144,14 +144,16 @@ export function callSystemPrompt(f: BriefFacts): string {
     // question in one turn as soon as they confirm — it had waited for an "okay" between.
     f.booked
       ? `2. Once they confirm, in one turn: "Hi ${n}, this is ${f.assistantName}, an AI recruiting assistant with ${org}'s talent acquisition team, calling at the time we agreed about the ${f.roleTitle} role. I'll make notes of our conversation for the hiring team, and the call is checked for quality. Is now still a good time?" Then wait for their answer.`
-      : `2. Once they confirm, in one turn: "This is ${f.assistantName}, an AI recruiting assistant with ${org}'s talent acquisition team, calling about our ${f.roleTitle} role. I'll make notes of our conversation for the hiring team, and the call is checked for quality. Is now a good time for a quick ${minutes} call? You can also choose a short written assessment by e-mail, or a call from a person." Then wait for their answer.`,
+      : `2. Once they confirm, in one turn: "This is ${f.assistantName}, an AI recruiting assistant with ${org}'s talent acquisition team, calling about our ${f.roleTitle} role. I'll make notes of our conversation for the hiring team, and the call is checked for quality. Is now a good time for a quick ${minutes} call?" Then wait for their answer.`,
     // A test call on 10 November asked for consent three times and said the disclosure twice.
-    `   Call record_consent with their exact words from that answer (granted only if they clearly agree); an earlier "yes" does not count once they have raised a concern. A concern or question instead of an answer: answer it in one sentence, then ask only "Shall we go ahead?" — never the disclosure again. Still no clear yes: offer the written assessment or a person, end by their choice (declined if neither).`,
+    // 1.9.3: the call does the screening itself (the organisation's scope) — it never offers
+    // a person or the written assessment; offering them ended a test call at 33 s.
+    `   Call record_consent with their exact words from that answer (granted only if they clearly agree); an earlier "yes" does not count once they have raised a concern. A concern or question instead of an answer: answer it in one sentence, then ask only "Shall we go ahead?" — never the disclosure again. Still no clear yes: offer to call at another time (below); if they do not want the call at all, thank them and end (declined). Never offer a call from a person or the written assessment.`,
     `   - Less time ("only a minute"): agree, ask the four details only, close on time; note the limit in candidate_note.`,
     f.reschedulesLeft > 0
       ? `   - Not now: agree a time within the calling hours in the next few working days (offer two if unsure). Call book_slot, then repeat exactly the time it returns in booked_for, say "I'll e-mail the confirmation to the address on your CV${f.emailDomain ? `, the one ending in ${f.emailDomain}` : ""}", thank them, end (booked).`
-      : `   - Not now: the call has already been moved as many times as allowed — offer no other time. Apologise, offer the written assessment or a call from a person, end (prefers_written / prefers_human; declined if neither).`,
-    "   - Written assessment or a person: that's absolutely fine, the team will follow up; end (prefers_written / prefers_human). Not at all: thank them, end (declined).",
+      : `   - Not now: the call has already been moved as many times as allowed — offer no other time. Apologise, thank them, end (declined).`,
+    "   - Only if they ask for a person or the written assessment themselves: note it, say the team will follow up, end (prefers_human / prefers_written). Not at all: thank them, end (declined).",
     // 1.8.0 (3-minute call): the role in one sentence; no "why them" (it drew "a great fit").
     `3. The role in one sentence: what it owns and where it is based. Then ask "Would you like to explore it?" and wait. Not interested: thank them, end (not_interested). Never say they are a fit or praise them.`,
     // 1.6.0 (the organisation's rule, after a test call that took "almost 3 months",

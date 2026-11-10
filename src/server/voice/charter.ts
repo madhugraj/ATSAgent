@@ -108,7 +108,7 @@ export const SCREENING_CALL_CHARTER: VoiceCharter = {
   handOff: [
     ...COMMON_HAND_OFF,
     i(
-      "A candidate who wants a person, or the written assessment, is offered that and the call ends.",
+      "A candidate who asks for a person or the written assessment is given that and the call ends — the call never offers either; it does the screening itself.",
     ),
   ],
   tone: COMMON_TONE,
