@@ -85,6 +85,7 @@ const {
   users,
 } = schema;
 const brief = await import("../src/server/voice/call-brief.server");
+const checks = await import("../src/server/voice/guard/checks");
 const session = await import("../src/server/voice/call-session.server");
 const sched = await import("../src/server/voice/schedule");
 const dispatcher = await import("../src/server/voice/dispatcher.server");
@@ -401,7 +402,7 @@ describe("the call brief", () => {
   test("9 November call: consent after a concern, no insisting, questions back answered", () => {
     const p = brief.callSystemPrompt(facts());
     expect(p).toContain('an earlier "yes, it\'s a good time" does not count');
-    expect(p).toContain("never insist or say you have it on record");
+    expect(p).toContain(brief.SOURCE_LINE);
     expect(p).toContain("record open_to_relocate only if they then say yes or no");
     expect(p).toContain("one open follow-up");
     expect(p).toContain('never answer a question with "Thank you, noted"');
@@ -414,18 +415,22 @@ describe("the call brief", () => {
     );
     expect(p).toContain("Let them speak first");
     expect(p).toContain('Then your first words: "Hello, am I speaking with Meera?"');
-    expect(p).toContain("you applied through Naukri on 20 October");
+    // The source is never mentioned (the organisation's rule, 10 November).
+    expect(p).toContain("I'm calling about our Platform SRE role, for a short first conversation");
+    expect(p).not.toContain("Naukri");
+    expect(p).not.toContain("20 October");
+    expect(p).toContain(checks.SOURCE_RULE);
     expect(p).toContain("written assessment by e-mail, or a call from a person");
     expect(p).toContain("Keep the payments platform reliable as it grows.");
-    expect(p).toContain("What fits from their CV: Kubernetes, Go");
+    expect(p).toContain("What their CV mentions that the role works with: Kubernetes, Go");
+    expect(p).toContain("never say they are a fit, a good or great fit");
     expect(p).toMatch(
-      /Practical details, before anything technical[\s\S]*current pay, fixed and variable, per year — ask afresh[\s\S]*then, as its own question, their expected pay/,
+      /Practical details, before anything technical[\s\S]*The four required details[\s\S]*a\. their notice period;[\s\S]*b\. the date they could join[\s\S]*c\. their current CTC per year[\s\S]*d\. their expected CTC per year\./,
     );
     // Each required detail is its own question (a real call stacked the paired items).
-    expect(p).toContain("their notice period — ask plainly");
-    expect(p).toContain("then, as its own question, the earliest date they could join");
+    expect(p).toContain("their current job title and company (their CV says Acme");
+    expect(p).toContain("then their total years of experience (CV: about 7 years");
     expect(p).toContain("or skip the consent, politely");
-    expect(p).toContain("(their CV says Acme, about 7 years — confirm it rather than read it out)");
     expect(p).toContain("the one ending in gmail.com");
     expect(p).toContain("[q1] Tell me about running Kubernetes in production.");
     expect(p).not.toContain("expected CTC is above our budget");
@@ -434,7 +439,7 @@ describe("the call brief", () => {
     expect(p).toContain('If they want to skip a question, say "Of course"');
     expect(p).toContain("do not answer from general knowledge");
     expect(p).toContain('not "great", "good", "impressive", "very comprehensive"');
-    expect(p).toContain("ask afresh even if it was given before");
+    expect(p).toContain('Pay is always asked afresh ("so our notes are up to date")');
     expect(p).toContain("Whenever they mention a detail at any point in the call");
     expect(p).toContain("Discuss, judge or negotiate pay");
     expect(p).toContain("within two working days");
@@ -448,11 +453,14 @@ describe("the call brief", () => {
         forClient: true,
       }),
     );
-    // The notice period is always asked plainly — never "we have it on record".
-    expect(p).toContain("never say you have it on record");
+    // The required details: one at a time, a clear answer, told why, never a third time.
+    expect(p).toContain(brief.REQUIRED_LINE);
+    expect(p).toContain("Never work out a date or a figure for them");
+    expect(p).toContain("Never ask for the same detail a third time");
+    expect(p).toContain('ask only "Shall we go ahead?"');
     expect(p).not.toContain("We have your notice period from earlier");
-    expect(p).toContain("ask afresh even if it was given before");
-    expect(p).toContain("Never tell them a detail is not needed");
+    expect(p).toContain('Pay is always asked afresh ("so our notes are up to date")');
+    expect(p).toContain("never tell them a detail is not needed");
     expect(p).toContain("at most once in the whole call");
     expect(p).toContain("I'm calling at the time we agreed");
     expect(p).toContain("on behalf of a client");
@@ -537,15 +545,14 @@ describe("the call brief", () => {
     expect(brief.appliedVia("direct")).toBeNull();
     expect(brief.appliedVia("hiring_desk")).toBeNull();
     expect(brief.appliedVia("agent_talent_pool")).toBeNull();
-    expect(brief.callSystemPrompt(facts({ appliedVia: null, appliedOn: null }))).toContain(
-      "We came across your profile",
-    );
-    // A referred person did not apply: the opening says so, and never names the referrer.
+    // How the profile came to us is never said — applied, referred or neither.
     expect(brief.appliedVia("referral")).toBe("a referral");
-    const referred = brief.callSystemPrompt(facts({ appliedVia: "a referral" }));
-    expect(referred).toContain("Your details came to us through a referral");
-    expect(referred).toContain("Never name or guess who referred them");
-    expect(referred).not.toContain("you applied through a referral");
+    for (const appliedVia of [null, "a referral", "Naukri"]) {
+      const p = brief.callSystemPrompt(facts({ appliedVia }));
+      expect(p).not.toContain("We came across your profile");
+      expect(p).not.toContain("through a referral");
+      expect(p).not.toContain("you applied");
+    }
     expect(brief.callingHours(WIN)).toBe("Monday to Saturday, 10:00 to 19:00");
   });
 });

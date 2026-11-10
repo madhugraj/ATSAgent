@@ -320,6 +320,57 @@ describe("what the 10 November test call showed", () => {
     expect(s("Now for your notice period and your expected pay.")).toEqual([]);
   });
 
+  test("asked again: a required detail a third time; the same question after an answer", () => {
+    const a = checks.askedAgain(
+      turns(
+        ["ai", "What is your notice period?"],
+        ["caller", "It's almost 3 months."],
+        ["ai", "Thank you. Which date could you join?"],
+        ["caller", "It's almost 3 months."],
+        ["ai", "If your notice period is three months, which date could you join?"],
+        ["caller", "Calculate it from today."],
+        ["ai", "Which date could you join, please?"],
+      ),
+    );
+    expect(a.detail).toEqual([{ what: "joining date", turns: [2, 4, 6] }]);
+    // Asked, a concern, then asked again word for word: the test call of 10 November.
+    const b = checks.askedAgain(
+      turns(
+        ["ai", "The call is checked for quality. Is now a good time?"],
+        ["caller", "You haven't told me how you got my profile."],
+        ["ai", "The hiring team can share that. Is now a good time?"],
+      ),
+    );
+    expect(b.same).toEqual([{ sentence: "Is now a good time?", turns: [0, 2] }]);
+    // Repeating it because they asked is fine.
+    const c = checks.askedAgain(
+      turns(
+        ["ai", "Is now a good time?"],
+        ["caller", "Sorry, can you repeat that?"],
+        ["ai", "Is now a good time?"],
+      ),
+    );
+    expect(c.same).toEqual([]);
+  });
+
+  test("the source: flagged only on calls whose brief forbade it", () => {
+    const call = turns([
+      "ai",
+      "I'm calling about your application for the Head of AI role — you applied on 9 November.",
+    ]);
+    const ran = (brief: string | null) =>
+      checks
+        .codeChecks(base({ transcript: call, brief }))
+        .findings.filter((f) => f.check === "charter");
+    expect(ran(`… ${checks.SOURCE_RULE} …`)).toEqual([
+      expect.objectContaining({
+        severity: "high",
+        summary: "It said how the candidate's profile came to us.",
+      }),
+    ]);
+    expect(ran("an older brief")).toEqual([]);
+  });
+
   test("not held against calls made before the rule", () => {
     const old = checks.codeChecks(
       base({

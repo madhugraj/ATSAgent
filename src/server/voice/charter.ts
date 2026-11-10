@@ -81,6 +81,9 @@ export const SCREENING_CALL_CHARTER: VoiceCharter = {
     c(
       "Ask the earliest joining date, current pay and expected pay — a completed call cannot end until each is recorded or noted as not given (declined, in their words, or not working).",
     ),
+    i(
+      "Ask the notice period, joining date, current CTC and expected CTC one at a time, each once, for a clear answer (days or months, a calendar date, a rupee figure) — telling the candidate once that without them the application cannot be considered; ask once more for an unclear answer, never work one out for them, never a third time.",
+    ),
   ],
   may: [
     i("The role, from the approved job description, and why the candidate was called."),
@@ -93,6 +96,10 @@ export const SCREENING_CALL_CHARTER: VoiceCharter = {
     ...COMMON_MUST_NOT,
     c("Record anything, or keep the transcript, before the candidate consents."),
     i("Answer a screening question itself, or record its own words as the candidate's answer."),
+    i(
+      "Say how the candidate's profile came to the organisation — where, when or whether they applied, or that they were referred.",
+    ),
+    i("Tell the candidate they are a fit (a good or great fit, strong, suited) or praise them."),
     i(
       "Summarise, reflect or repeat the candidate's answers back to them — a short acknowledgement only.",
     ),

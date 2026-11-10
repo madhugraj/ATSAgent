@@ -33,6 +33,7 @@ import {
   closeCallRun,
   DEFAULT_LIMITS,
   openCallRun,
+  OPENING_REPLY_CUE_MS,
   openingWatch,
   setCall,
 } from "./call-session.server";
@@ -64,7 +65,7 @@ type Call = typeof screeningCalls.$inferSelect;
 export const NEGOTIATION_MAX_ATTEMPTS = 2;
 
 /** Cue the assistant this long after the candidate's hello if it has not begun. */
-export const NEGOTIATION_REPLY_CUE_MS = 1_200;
+export const NEGOTIATION_REPLY_CUE_MS = OPENING_REPLY_CUE_MS;
 
 /**
  * After a tool result the assistant should speak on (the offer's words, the next
@@ -192,6 +193,8 @@ async function place(
   let candidateSpoke = false;
   let aiSpoke = false;
   let lastHeardAt: number | null = null;
+  /** When the line's voice detection last heard the candidate (not the transcript). */
+  let lineHeardAt: number | null = null;
   // The assistant's own lines: the go-ahead counts only after the disclosure.
   let aiSaid = "";
   // Turn-taking on the line, kept on the call for the Voice Guard (no words).
@@ -354,6 +357,7 @@ async function place(
     keeper?.caller(heard, vad.isActive());
     if (heard === "start") candidateSpoke = true;
     if (vad.isActive()) {
+      lineHeardAt = Date.now();
       lastHeardAt = Date.now();
       lastActivity = now();
     }
@@ -365,7 +369,8 @@ async function place(
   lastActivity = now();
   const stopOpening = openingWatch({
     session,
-    lastHeard: () => lastHeardAt,
+    // The line's voice detection only — the hello's late transcript restarted the wait.
+    lastHeard: () => lineHeardAt,
     aiSpoke: () => aiSpoke,
     callerFirstMs: limits.callerFirstMs,
     replyNudgeMs: NEGOTIATION_REPLY_CUE_MS,

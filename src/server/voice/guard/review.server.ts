@@ -57,6 +57,7 @@ function guardInput(c: CallRow, scope: "full" | "timing_only"): GuardInput {
     consentAt: c.consentAt,
     consentWords: c.consentWords,
     qualityDisclosed: (c.brief ?? "").includes("checked for quality"),
+    brief: c.brief,
     transcript: c.transcript,
     answers: c.answers,
     details: c.details,

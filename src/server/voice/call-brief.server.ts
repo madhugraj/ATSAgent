@@ -30,6 +30,8 @@ export {
   callQuestionCount,
   callSystemPrompt,
   questionsForCall,
+  REQUIRED_LINE,
+  SOURCE_LINE,
   spokenQuestion,
 } from "./call-prompt";
 
