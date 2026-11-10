@@ -1146,6 +1146,7 @@ function openAiAgentBody(
   system: string,
   messages: AgentMessage[],
   tools: AgentToolSpec[],
+  maxOutputTokens?: number,
 ) {
   const out: unknown[] = [{ role: "system", content: system }];
   for (const m of messages) {
@@ -1175,6 +1176,7 @@ function openAiAgentBody(
   return {
     model: cfg.model,
     messages: out,
+    ...(maxOutputTokens ? { max_completion_tokens: maxOutputTokens } : {}),
     ...(tools.length
       ? {
           tools: tools.map((t) => ({
@@ -1222,6 +1224,7 @@ function anthropicAgentBody(
   system: string,
   messages: AgentMessage[],
   tools: AgentToolSpec[],
+  maxOutputTokens?: number,
 ) {
   // Anthropic requires every tool_result for one assistant turn in a single
   // user message, and strictly alternating roles — fold consecutive turns.
@@ -1249,7 +1252,7 @@ function anthropicAgentBody(
   }
   return {
     model: cfg.model,
-    max_tokens: AGENT_MAX_OUTPUT_TOKENS,
+    max_tokens: maxOutputTokens ?? AGENT_MAX_OUTPUT_TOKENS,
     system,
     messages: out,
     ...(tools.length
@@ -1296,7 +1299,12 @@ function parseAnthropicAgent(json: Loose): Omit<Extract<AgentStepResult, { ok: t
 
 /* Google Gemini dialect */
 
-function googleAgentBody(system: string, messages: AgentMessage[], tools: AgentToolSpec[]) {
+function googleAgentBody(
+  system: string,
+  messages: AgentMessage[],
+  tools: AgentToolSpec[],
+  maxOutputTokens?: number,
+) {
   const contents: { role: "user" | "model"; parts: unknown[] }[] = [];
   const push = (role: "user" | "model", part: unknown) => {
     const last = contents[contents.length - 1];
@@ -1326,7 +1334,7 @@ function googleAgentBody(system: string, messages: AgentMessage[], tools: AgentT
   return {
     systemInstruction: { parts: [{ text: system }] },
     contents,
-    generationConfig: { maxOutputTokens: AGENT_MAX_OUTPUT_TOKENS },
+    generationConfig: { maxOutputTokens: maxOutputTokens ?? AGENT_MAX_OUTPUT_TOKENS },
     ...(tools.length
       ? {
           tools: [
@@ -1387,6 +1395,8 @@ async function aiAgentStepCall(opts: {
   orgId?: string | null | undefined;
   config?: AiConfig;
   feature: string;
+  /** Output cap for this step (default 8192). Thinking models spend part of it on reasoning. */
+  maxOutputTokens?: number;
 }): Promise<AgentStepResult> {
   const cfg = opts.config ?? (await resolveAiConfig(opts.orgId));
   if (!cfg.apiKey) return NO_KEY_ERROR;
@@ -1412,15 +1422,15 @@ async function aiAgentStepCall(opts: {
   if (cfg.provider === "anthropic") {
     url = ANTHROPIC_ENDPOINT;
     headers = { ...headers, "x-api-key": cfg.apiKey, "anthropic-version": "2023-06-01" };
-    body = anthropicAgentBody(cfg, opts.system, opts.messages, tools);
+    body = anthropicAgentBody(cfg, opts.system, opts.messages, tools, opts.maxOutputTokens);
   } else if (cfg.provider === "google") {
     url = `${GOOGLE_ENDPOINT}/${encodeURIComponent(cfg.model)}:generateContent`;
     headers = { ...headers, "x-goog-api-key": cfg.apiKey };
-    body = googleAgentBody(opts.system, opts.messages, tools);
+    body = googleAgentBody(opts.system, opts.messages, tools, opts.maxOutputTokens);
   } else {
     url = OPENAI_ENDPOINT;
     headers = { ...headers, Authorization: `Bearer ${cfg.apiKey}` };
-    body = openAiAgentBody(cfg, opts.system, opts.messages, tools);
+    body = openAiAgentBody(cfg, opts.system, opts.messages, tools, opts.maxOutputTokens);
   }
 
   let res: Response;

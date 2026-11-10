@@ -4,7 +4,9 @@ import type { ReactNode } from "react";
  * The markdown agents write in chat — headings, tables, bullet and numbered
  * lists, rules, **bold**, *italics*, `code` and links — rendered as React
  * elements, never as HTML: agent text can carry third-party content (a CV, a
- * web page), so it always stays escaped. Links open only for http(s).
+ * web page), so it always stays escaped. Links open only for http(s); a
+ * markdown link to an in-app path ([Agent settings](/agents/settings)) renders
+ * as a same-tab link marked `data-internal`, which a host can route itself.
  */
 export function AgentMarkdown({ text }: { text: string }) {
   return <div className="space-y-2">{blocks(text)}</div>;
@@ -13,6 +15,17 @@ export function AgentMarkdown({ text }: { text: string }) {
 /* ------------------------------------------------------------ inline */
 
 const SAFE_URL = /^https?:\/\/[^\s<>"']+$/i;
+/** An app path: one leading slash (never `//host`), plain path and query characters. */
+const APP_PATH = /^\/(?![/\\])[\w\-./?=&%]*$/;
+
+function appLink(href: string, label: ReactNode, key: string) {
+  if (!APP_PATH.test(href)) return <span key={key}>{label}</span>;
+  return (
+    <a key={key} href={href} data-internal="" className="text-primary underline underline-offset-2">
+      {label}
+    </a>
+  );
+}
 
 function link(href: string, label: ReactNode, key: string) {
   // Trailing punctuation belongs to the sentence, not the link.
@@ -38,7 +51,7 @@ function link(href: string, label: ReactNode, key: string) {
 function inline(text: string, keyBase = "i"): ReactNode[] {
   const out: ReactNode[] = [];
   const re =
-    /(\*\*[^*]+\*\*)|(`[^`\n]+`)|(\[[^\]\n]+\]\(https?:\/\/[^\s)]+\))|(https?:\/\/[^\s<>()`'"]+)|(\*[^*\s][^*\n]*\*)/g;
+    /(\*\*[^*]+\*\*)|(`[^`\n]+`)|(\[[^\]\n]+\]\((?:https?:\/\/|\/)[^\s)]*\))|(https?:\/\/[^\s<>()`'"]+)|(\*[^*\s][^*\n]*\*)/g;
   let last = 0;
   let m: RegExpExecArray | null;
   let n = 0;
@@ -59,8 +72,9 @@ function inline(text: string, keyBase = "i"): ReactNode[] {
         ),
       );
     } else if (m[3]) {
-      const label = t.slice(1, t.indexOf("]("));
-      out.push(link(t.slice(t.indexOf("](") + 2, -1), inline(label, key), key));
+      const label = inline(t.slice(1, t.indexOf("](")), key);
+      const href = t.slice(t.indexOf("](") + 2, -1);
+      out.push(href.startsWith("/") ? appLink(href, label, key) : link(href, label, key));
     } else if (m[4]) out.push(link(t, null, key));
     else if (m[5]) out.push(<em key={key}>{inline(t.slice(1, -1), key)}</em>);
     last = m.index + t.length;

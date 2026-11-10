@@ -53,4 +53,16 @@ describe("agent markdown", () => {
     expect(out).toContain("&lt;script&gt;");
     expect(out).not.toContain("<b>x</b>");
   });
+
+  test("in-app links stay in the tab and are marked internal; protocol-relative paths are not links", () => {
+    const out = html(
+      "Run it on [Agent settings](/agents/settings) or [activity](/agents?tab=activity). Not [evil](//evil.example) or [x](/\\evil).",
+    );
+    expect(out).toContain('href="/agents/settings" data-internal=""');
+    expect(out).toContain('href="/agents?tab=activity" data-internal=""');
+    expect(out).not.toContain('_blank">Agent settings');
+    expect(out).not.toContain('href="//evil.example"');
+    expect(out).not.toMatch(/href="\/\\/);
+    expect(out).toContain("evil");
+  });
 });

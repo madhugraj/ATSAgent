@@ -28,6 +28,13 @@ import {
 } from "./data.server";
 
 export const COPILOT_MAX_STEPS = 6;
+/**
+ * Output cap per step — a backstop; the prompt's word budget sets the visible
+ * length. Reasoning models count their thinking against it (measured: about
+ * 1,200 thinking tokens for a 200-token answer, and 2,048 cut answers off), so
+ * it sits well above the visible budget.
+ */
+export const COPILOT_MAX_OUTPUT_TOKENS = 4096;
 
 export type CopilotHandoff = { goal: string; summary: string };
 
@@ -194,7 +201,14 @@ export function copilotSystem(base: string, injectionRules: string, scope: Copil
     "- For future demand, always use demand_outlook and say how confident it is and why; separate the organisation's own trend from the market signal; if history is thin, say so.",
     "- For 'do we have enough people', use pool_coverage (and talent_availability for one role).",
     "- When the person wants work done, describe what you would hand over and call propose_agent_handoff; never claim the work has started.",
-    "- Reply in plain text (no markdown headings or tables), concise: short paragraphs or tight bullets, numbers over adjectives.",
+    "- Say a cause only when a tool returned data that shows it. If the data shows the symptom but not the cause, say the cause is unknown and name the one page or record that would show it. Never present a guess as a finding.",
+    "",
+    "FORMAT AND LENGTH:",
+    "- Lead with the answer in one sentence. Then at most 3–5 bullets of one line each. Stay under about 120 words unless the person asks for detail.",
+    "- When comparing several items (requisitions, roles, agents, months), use a small markdown table (up to 5 rows and 4 columns) instead of bullets.",
+    "- Markdown allowed: **bold** for the key number or action, `-` bullets, numbered steps, tables, and links to pages as [Page name](/path) using only the page list. No headings, no code blocks.",
+    "- One list only: when the bullets already say what to do, do not repeat them as a separate recommendations list. At most 3 actions, most important first, each one line: the action and the page — no background explanation.",
+    "- Name only settings the USER MANUAL or a tool result names; if you are unsure a setting exists, name just the page.",
   ].join("\n");
 }
 
@@ -234,10 +248,16 @@ export async function runCopilotTurn(input: {
       system: last ? `${system}\n\nAnswer now from what you have; do not call tools.` : system,
       messages,
       tools: last ? [] : specs,
+      maxOutputTokens: COPILOT_MAX_OUTPUT_TOKENS,
     });
     if (!res.ok) return { answer: "", handoff: null, failed: res.message };
     if (!res.toolCalls.length) {
-      return { answer: res.text.trim(), handoff: state.handoff };
+      const answer = res.text.trim();
+      const cut = res.stopReason === "max_tokens" && answer;
+      return {
+        answer: cut ? `${answer}…\n\n_(Answer cut short — ask for the rest.)_` : answer,
+        handoff: state.handoff,
+      };
     }
     messages.push({ role: "assistant", content: res.text, toolCalls: res.toolCalls });
     for (const call of res.toolCalls) {
