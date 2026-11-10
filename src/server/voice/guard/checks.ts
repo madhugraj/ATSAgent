@@ -13,6 +13,7 @@
  * A finding the agent files must quote the transcript; a quote that is not in
  * the turn it names is dropped (mergeReview), so it cannot invent evidence.
  */
+import { readsOutWorkings } from "../spoken-guard";
 import { TURN_TIMING } from "../turns";
 import type {
   CallReviewCheck,
@@ -495,6 +496,21 @@ function stackedCheck(i: GuardInput, out: CodeResult): void {
     );
 }
 
+/** The finding's summary (the health rule voice_guard.read_out_workings looks for it). */
+export const WORKINGS_FINDING =
+  "It read out a tool call, code or its own reasoning to the candidate.";
+
+/** It read out a tool call, code or its reasoning to the candidate (always wrong; by the system). */
+function workingsCheck(i: GuardInput, out: CodeResult): void {
+  if (i.scope !== "full") return;
+  i.transcript.forEach((t, turn) => {
+    if (t.who === "ai" && readsOutWorkings(t.text))
+      out.findings.push(
+        finding("charter", "critical", WORKINGS_FINDING, [{ turn, quote: t.text.slice(0, 200) }]),
+      );
+  });
+}
+
 /** The brief's rule against saying how the profile came to us (screening 1.6.0). */
 export const SOURCE_RULE = "never say where, when or whether they applied";
 /** "You applied through Naukri on 9 November", "your details came through a referral". */
@@ -664,6 +680,7 @@ export function codeChecks(i: GuardInput): CodeResult {
   recordChecks(i, out);
   stackedCheck(i, out);
   sourceCheck(i, out);
+  workingsCheck(i, out);
   askedAgainCheck(i, out);
   // A timing-only review covers the line alone.
   if (i.scope === "timing_only")

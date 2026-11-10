@@ -26,6 +26,7 @@ const {
 } = await import("../drizzle/schema");
 const { CallStatsTracker } = await import("../src/server/voice/call-stats");
 const checks = await import("../src/server/voice/guard/checks");
+const { readsOutWorkings } = await import("../src/server/voice/spoken-guard");
 const { voiceGuardPolicy, loadPolicy } = await import("../src/server/agents/policy");
 const { ensureAgentsRegistered } = await import("../src/server/agents");
 const review = await import("../src/server/voice/guard/review.server");
@@ -720,5 +721,36 @@ describe("the sweep", () => {
         summary: "x",
       }),
     ).rejects.toThrow("this run is not reviewing it");
+  });
+});
+
+describe("reading out its workings (10 November)", () => {
+  test("tool calls, code and reasoning are caught; ordinary speech is not", () => {
+    for (const s of [
+      'Thank you. What is your current CTC per year?---\n```json\n{\n  "action": "record_details",',
+      "Wait, I shouldn't call record_details here because the user just answered.",
+      '{"thought": "I need to ask for the current CTC"}',
+    ])
+      expect(readsOutWorkings(s)).toBe(true);
+    for (const s of [
+      "Thank you. What is your current CTC per year?",
+      "I'll make notes of our conversation for the hiring team.",
+      "Which date could you join?",
+    ])
+      expect(readsOutWorkings(s)).toBe(false);
+  });
+
+  test("the Voice Guard flags it as critical", () => {
+    const r = checks.codeChecks(
+      base({
+        transcript: turns([
+          "ai",
+          'What is your current CTC per year?```json {"action": "record_details"}',
+        ]),
+      }),
+    );
+    expect(r.findings).toContainEqual(
+      expect.objectContaining({ check: "charter", severity: "critical", source: "code" }),
+    );
   });
 });

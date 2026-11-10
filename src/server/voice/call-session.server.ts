@@ -45,6 +45,7 @@ import {
 } from "./call-tools";
 import { CallStatsTracker } from "./call-stats";
 import { voiceDebug } from "./debug";
+import { readsOutWorkings, WORKINGS_CORRECTION } from "./spoken-guard";
 import { GREETING_WAIT_MS, greetingCue, ReadyGreeting } from "./greeting";
 import { TurnKeeper } from "./turns";
 import { dialNumber } from "./phone";
@@ -459,10 +460,20 @@ async function placeCall(
       line.play(down.process(pcm));
     },
   });
+  // The assistant reading out a tool call, code or its reasoning is stopped mid-line
+  // (src/server/voice/spoken-guard.ts) — set once the session is open.
+  let stopWorkings: (() => void) | null = null;
+  let workingsStopped = false;
   const events: VoiceSessionEvents = {
     onAudio: (pcm) => greeting.audio(pcm),
     // The model heard them: the turn manager waits its usual time before a reply cue.
     onHeard: () => keeper?.heard(),
+    onSaying: (soFar) => {
+      if (!workingsStopped && readsOutWorkings(soFar)) {
+        workingsStopped = true;
+        stopWorkings?.();
+      }
+    },
     onInterrupted: () => {
       stats.bargeIn();
       line.clear();
@@ -471,6 +482,7 @@ async function placeCall(
       turns++;
       if (t.who === "ai") {
         greeting.turnDone();
+        workingsStopped = false;
         aiSaid += ` ${t.text}`;
         keeper?.aiTurn(t.text);
         if (t.text.includes("?")) reply = "";
@@ -536,6 +548,13 @@ async function placeCall(
     });
   }
   const session: VoiceSession = opened.session;
+  stopWorkings = () => {
+    // Drop what is queued: the rest of the line never reaches the candidate.
+    line.clear();
+    log.error("screening_call.read_out_workings", { call_id: call.id });
+    voiceDebug({ kind: "workings_stopped" });
+    session.sendText(WORKINGS_CORRECTION);
+  };
   keeper = new TurnKeeper({
     send: (text) => session.sendText(text),
     onCue: (reason) => log.warn("screening_call.cue", { call_id: call.id, reason }),

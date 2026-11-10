@@ -10,6 +10,7 @@
  *
  * Thresholds are explicit constants so every issue is explainable.
  */
+import { WORKINGS_FINDING } from "../voice/guard/checks";
 import { sourceLabel } from "@/lib/job-channels";
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
 
@@ -1528,6 +1529,28 @@ export const RULES: Rule[] = [
           title: `${x.breached} of ${x.reviewed} reviewed ${x.purpose} calls in 7 days broke the call's rules`,
           detail: x,
         }));
+    },
+  },
+  {
+    // A screening test call on 10 November spoke a block of code and its reasoning.
+    id: "voice_guard.read_out_workings",
+    element: "definition",
+    severity: "serious",
+    description:
+      "An AI phone agent read out a tool call, code or its own reasoning to a candidate on a call in the last 7 days (found by the Voice Guard). The live guard cuts such a line off, but the candidate heard part of it: read the call under Call reviews, and check the agent's instructions and tools.",
+    evaluate: async (orgId) => {
+      const r = await rows<{ purpose: string; n: number }>(sql`
+        select r.purpose, count(distinct r.id)::int n
+        from call_reviews r, jsonb_array_elements(r.findings) f
+        where r.org_id = ${orgId} and r.status = 'done'
+          and r.reviewed_at >= now() - interval '7 days'
+          and f ->> 'summary' = ${WORKINGS_FINDING}
+        group by r.purpose`);
+      return r.map((x) => ({
+        agentType: `${x.purpose}_call`,
+        title: `${x.n} ${x.purpose} call${x.n === 1 ? "" : "s"} read out a tool call, code or its reasoning to the candidate`,
+        detail: x,
+      }));
     },
   },
 ];

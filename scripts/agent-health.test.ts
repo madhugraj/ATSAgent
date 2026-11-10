@@ -980,6 +980,41 @@ describe("Voice Guard health", () => {
     await evaluate();
     expect(await ruleOf("voice_guard.breaches")).toBeUndefined();
   });
+
+  test("reading out a tool call, code or its reasoning is serious from the first call", async () => {
+    const { WORKINGS_FINDING } = await import("../src/server/voice/guard/checks");
+    const { callReviews } = await import("../drizzle/schema");
+    await evaluate();
+    expect(await ruleOf("voice_guard.read_out_workings")).toBeUndefined();
+    const c = await endedCall(30);
+    await db.insert(callReviews).values({
+      orgId,
+      callId: c.callId,
+      purpose: "screening",
+      status: "done",
+      verdict: "breach",
+      findings: [
+        {
+          check: "charter",
+          severity: "critical",
+          summary: WORKINGS_FINDING,
+          evidence: [{ turn: 12, quote: "```json" }],
+          source: "code",
+        },
+      ],
+      breaches: 1,
+      reviewedAt: new Date(),
+    });
+    await evaluate();
+    expect(await ruleOf("voice_guard.read_out_workings")).toMatchObject({
+      agentType: "screening_call",
+      severity: "serious",
+      title: "1 screening call read out a tool call, code or its reasoning to the candidate",
+    });
+    await clear(c.candidateId);
+    await evaluate();
+    expect(await ruleOf("voice_guard.read_out_workings")).toBeUndefined();
+  });
 });
 
 describe("interview panels", () => {

@@ -238,6 +238,19 @@ Screening call 1.9.0, from the organisation's review of a 3-minute test call:
   a reply, asking them to say it again if it was missed. It used to wait 7 s. A
   0.6 s "Okay" had been lost that way.
 
+**It never reads out its workings** (screening 1.9.1, scheduling 1.8.7,
+negotiation 0.8.7). A test call on 10 November spoke a block of code and its
+reasoning ("Wait, I shouldn't call record_details here…") to the candidate.
+
+- **The line is cut off live.** All three calls watch the assistant's words as
+  they are transcribed (`src/server/voice/spoken-guard.ts`). When they contain a
+  tool name, code or a reasoning label, the line is cleared and the assistant is
+  told to say "Sorry about that — let me say that again" and ask again in plain
+  words.
+- **The instructions** say to call tools silently.
+- **Afterwards,** the Voice Guard flags any such call as critical, and the
+  health rule `voice_guard.read_out_workings` raises it.
+
 A completed call must leave with the earliest joining date, current pay and
 expected pay (Screening call agent 1.3.0): after consent, `end_call` with
 `completed` or `other` is refused until each is recorded or listed in

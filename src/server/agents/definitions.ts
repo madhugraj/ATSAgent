@@ -117,7 +117,11 @@ export function registerPhase1Agents(): void {
     // as an answer — never asked again, never a mention of support. Shared:
     // the turn manager cues a reply 3 s after the candidate stops when the model has not
     // even started transcribing them (it missed a 0.6 s "Okay" and waited 7 s).
-    version: "1.9.0",
+    // 1.9.1: a line that reads out a tool call, code or its reasoning is stopped as it is
+    // transcribed and the assistant is told to apologise and ask again in plain words
+    // (src/server/voice/spoken-guard.ts); instructions say to call tools silently. A
+    // screening test call on 10 November spoke a block of code and its reasoning.
+    version: "1.9.1",
     owner: "hr_head",
     responsibility:
       "Turns a hiring need into a complete, evidence-backed draft requisition and walks it through the DH → HR → CBO approval chain.",
@@ -797,7 +801,11 @@ export function registerPhase3Agents(): void {
     // model's first transcript of each caller utterance and every text sent (timing only).
     // 1.8.6: shared the turn manager cues a reply 3 s after the candidate stops when the model has not
     // even started transcribing them (it missed a 0.6 s "Okay" and waited 7 s).
-    version: "1.8.6",
+    // 1.8.7: a line that reads out a tool call, code or its reasoning is stopped as it is
+    // transcribed and the assistant is told to apologise and ask again in plain words
+    // (src/server/voice/spoken-guard.ts); instructions say to call tools silently. A
+    // screening test call on 10 November spoke a block of code and its reasoning.
+    version: "1.8.7",
     owner: "hr_head",
     responsibility:
       "Holds one short AI phone call to help a candidate and the interview panel agree a time the candidate was already e-mailed: says it is an AI, tells them where they stand in the process, books one of the offered or pre-checked times (free for the whole panel), or notes when they are free — nothing else.",
@@ -923,7 +931,11 @@ export function registerPhase3Agents(): void {
     // model's first transcript of each caller utterance and every text sent (timing only).
     // 0.8.6: shared the turn manager cues a reply 3 s after the candidate stops when the model has not
     // even started transcribing them (it missed a 0.6 s "Okay" and waited 7 s).
-    version: "0.8.6",
+    // 0.8.7: a line that reads out a tool call, code or its reasoning is stopped as it is
+    // transcribed and the assistant is told to apologise and ask again in plain words
+    // (src/server/voice/spoken-guard.ts); instructions say to call tools silently. A
+    // screening test call on 10 November spoke a block of code and its reasoning.
+    version: "0.8.7",
     owner: "hr_head",
     responsibility:
       "Holds one AI phone call with a candidate about the pay for their offer: says it is an AI, tells them which role and organisation and where they stand, wins their interest from approved facts, frames the approved figure and extras around what matters to them, may offer one pre-approved improved figure, and brings a clear answer back to the people who decide.",
@@ -1516,7 +1528,9 @@ export function registerVoiceGuardAgent(): void {
     // again word for word.
     // 1.3.0: call steps judged against the brief's own plan — a 3-minute screening call
     // (1.8.0) sends their questions to the hiring team by e-mail and asks one question.
-    version: "1.3.0",
+    // 1.4.0: a system check flags a call where the assistant read out a tool call, code
+    // or its reasoning (critical); the health rule voice_guard.read_out_workings raises it.
+    version: "1.4.0",
     owner: "hr_head",
     responsibility:
       "Reviews every answered AI phone call after it ends against the call's rules and the facts it ran with, and files its findings — each quoting the transcript — for a person under Call reviews. It changes nothing; people decide what to do.",
