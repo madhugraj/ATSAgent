@@ -8,6 +8,7 @@ import { describe, expect, test } from "bun:test";
 const { TurnKeeper, TURN_TIMING, SAYS_NOTED } = await import("../src/server/voice/turns");
 const { ReadyGreeting, GREETING_WAIT_MS, greetingCue } =
   await import("../src/server/voice/greeting");
+const { TurnDetector, TURN_DETECT } = await import("../src/server/voice/turn-detector");
 
 function keeper(over: { recordTools?: string[]; speakAfter?: (n: string) => boolean } = {}) {
   let t = 0;
@@ -291,5 +292,78 @@ describe("the first words, ready before pickup (greeting.ts)", () => {
     expect(greetingCue("Hello, am I speaking with Meera?")).toContain(
       'exactly: "Hello, am I speaking with Meera?" — nothing more',
     );
+  });
+});
+
+describe("our line decides the turns (turn-detector.ts)", () => {
+  const LOUD = 2_000; // speech
+  const LOUDER = 4_000; // speech clearly over the line's echo
+  const QUIET = 50; // line silence
+  function detector() {
+    let t = 0;
+    const log: string[] = [];
+    let frames = 0;
+    const d = new TurnDetector({
+      start: () => log.push("start"),
+      audio: () => frames++,
+      end: () => log.push("end"),
+      bargeIn: () => log.push("barge_in"),
+      now: () => t,
+    });
+    /** `ms` of frames at `level` (20 ms each). */
+    const run = (ms: number, level: number, assistant = false) => {
+      for (let i = 0; i < ms; i += 20) {
+        t += 20;
+        d.frame(new Int16Array(160), level, assistant);
+      }
+    };
+    return { d, log, run, frames: () => frames };
+  }
+
+  test("a short answer ends after a short silence; the start is kept (10 November)", () => {
+    const { log, run, frames } = detector();
+    run(500, QUIET);
+    run(700, LOUD); // "Yes, speaking."
+    expect(log).toEqual(["start"]);
+    run(TURN_DETECT.endAfterShortMs - 40, QUIET);
+    expect(log).toEqual(["start"]);
+    run(60, QUIET);
+    expect(log).toEqual(["start", "end"]);
+    // the 200 ms before it opened went with it
+    expect(frames()).toBeGreaterThanOrEqual((200 + 700) / 20);
+  });
+
+  test("a longer answer gets room for a thinking pause", () => {
+    const { log, run } = detector();
+    run(3_000, LOUD);
+    run(TURN_DETECT.endAfterShortMs + 100, QUIET); // a pause mid-answer
+    run(2_500, LOUD);
+    expect(log).toEqual(["start"]);
+    run(TURN_DETECT.endAfterLongMs + 40, QUIET);
+    expect(log).toEqual(["start", "end"]);
+  });
+
+  test("while the assistant speaks, its own echo is dropped", () => {
+    const { log, run, frames } = detector();
+    run(440, LOUD, true); // the 0.44 s echo that cut a call off
+    run(500, QUIET, true);
+    expect(log).toEqual([]);
+    expect(frames()).toBe(0);
+  });
+
+  test("a real interruption is passed on whole, and the assistant stops", () => {
+    const { log, run, frames } = detector();
+    run(TURN_DETECT.bargeInMs + 100, LOUDER, true);
+    expect(log).toEqual(["barge_in", "start"]);
+    expect(frames()).toBeGreaterThanOrEqual(TURN_DETECT.bargeInMs / 20);
+    run(600, QUIET);
+    expect(log).toEqual(["barge_in", "start", "end"]);
+  });
+
+  test("speech that began over its last words is a normal turn once it stops", () => {
+    const { log, run } = detector();
+    run(200, LOUD, true);
+    run(600, LOUD, false);
+    expect(log).toEqual(["start"]);
   });
 });

@@ -251,6 +251,28 @@ reasoning ("Wait, I shouldn't call record_details here…") to the candidate.
 - **Afterwards,** the Voice Guard flags any such call as critical, and the
   health rule `voice_guard.read_out_workings` raises it.
 
+**Our line decides the turns** (screening 1.9.2, scheduling 1.8.8, negotiation
+0.8.8; `src/server/voice/turn-detector.ts`).
+
+- **Why:** the voice service's own speech detection waited 1.6 s of silence, missed
+  short replies ("Okay", "Yes"), and took the assistant's own voice echoing back
+  as the candidate cutting in. Every pause and stall on 10 November's test calls
+  came back to one of those.
+- **How it works now:** the service's detection is off (manual turns). Our
+  line's detector, which heard every utterance, marks each one with a start and
+  an end.
+  - **Reply time:** on the real service the model replies about 0.9 s after the
+    end. It was 1.8–2.4 s, when it noticed at all.
+  - **Pauses:** a short answer is ended after 0.6 s of silence; a longer one gets
+    0.9–1.3 s, room for a thinking pause.
+  - **Interruptions:** while the assistant speaks, the candidate's speech is
+    passed on only once it has lasted 0.6 s and is clearly louder than the echo.
+    Then the held start goes with it and the assistant stops. Shorter bursts are
+    dropped as echo.
+- **Cues retired:** the opening cue after the greeting and the 3 s "not heard"
+  cue are no longer needed, since the end mark always gets a reply. The turn
+  manager's other cues stay.
+
 A completed call must leave with the earliest joining date, current pay and
 expected pay (Screening call agent 1.3.0): after consent, `end_call` with
 `completed` or `other` is refused until each is recorded or listed in

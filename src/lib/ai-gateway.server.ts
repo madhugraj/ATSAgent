@@ -1684,6 +1684,10 @@ export type VoiceSession = {
   sendAudio(pcm16k: Int16Array): void;
   /** A text nudge to the model (e.g. "the person has picked up"). */
   sendText(text: string): void;
+  /** Manual turns: the caller started speaking (their audio follows). */
+  activityStart?(): void;
+  /** Manual turns: the caller finished — the model replies now. */
+  activityEnd?(): void;
   /** Close and wait for the ledger row; returns what was said and done. */
   close(): Promise<VoiceSessionSummary>;
   /** Resolves when the session ends for any reason. */
@@ -1736,6 +1740,12 @@ export type VoiceTurnTaking = {
   endOfSpeech: "low" | "high";
   /** Audio kept from just before speech is detected (ms). */
   prefixPaddingMs: number;
+  /**
+   * Our line decides the turns: the provider's own speech detection is off, and the
+   * session marks each caller utterance with activityStart / activityEnd (the other
+   * fields are then unused). Its detection missed short replies and waited 1.6 s.
+   */
+  manual?: boolean;
 };
 
 /** The setup frame for a live session; `model` is the full resource name (exported for tests). */
@@ -1776,14 +1786,16 @@ export function voiceSetupMessage(opts: {
       ...(opts.turnTaking
         ? {
             realtimeInputConfig: {
-              automaticActivityDetection: {
-                endOfSpeechSensitivity:
-                  opts.turnTaking.endOfSpeech === "low"
-                    ? "END_SENSITIVITY_LOW"
-                    : "END_SENSITIVITY_HIGH",
-                silenceDurationMs: opts.turnTaking.silenceMs,
-                prefixPaddingMs: opts.turnTaking.prefixPaddingMs,
-              },
+              automaticActivityDetection: opts.turnTaking.manual
+                ? { disabled: true }
+                : {
+                    endOfSpeechSensitivity:
+                      opts.turnTaking.endOfSpeech === "low"
+                        ? "END_SENSITIVITY_LOW"
+                        : "END_SENSITIVITY_HIGH",
+                    silenceDurationMs: opts.turnTaking.silenceMs,
+                    prefixPaddingMs: opts.turnTaking.prefixPaddingMs,
+                  },
             },
           }
         : {}),
@@ -1897,6 +1909,14 @@ export async function openVoiceSession(opts: {
       // Timing only — never the words (VOICE_DEBUG_FILE).
       voiceDebug({ kind: "client_text", chars: text.length });
       send({ realtimeInput: { text } });
+    },
+    activityStart: () => {
+      voiceDebug({ kind: "activity_start" });
+      send({ realtimeInput: { activityStart: {} } });
+    },
+    activityEnd: () => {
+      voiceDebug({ kind: "activity_end" });
+      send({ realtimeInput: { activityEnd: {} } });
     },
     close: async () => {
       closedBy = "client";

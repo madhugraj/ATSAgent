@@ -32,7 +32,7 @@ import { agentRunScope, withAiSubject } from "../agents/context";
 import { db } from "../db";
 import { log } from "../log";
 import type { AudioStats } from "./rtp";
-import { Vad } from "./vad";
+import { rms, Vad } from "./vad";
 import { type BriefFacts, callSystemPrompt, loadBriefFacts } from "./call-brief.server";
 import { screeningFirstWords } from "./call-prompt";
 import {
@@ -45,9 +45,10 @@ import {
 } from "./call-tools";
 import { CallStatsTracker } from "./call-stats";
 import { voiceDebug } from "./debug";
+import { ECHO_TAIL_MS, TurnDetector } from "./turn-detector";
 import { readsOutWorkings, WORKINGS_CORRECTION } from "./spoken-guard";
 import { GREETING_WAIT_MS, greetingCue, ReadyGreeting } from "./greeting";
-import { TurnKeeper } from "./turns";
+import { TURN_TIMING, TurnKeeper } from "./turns";
 import { dialNumber } from "./phone";
 import { Resampler } from "./resample";
 import { afterAttempt, callbackAt, localNow } from "./schedule";
@@ -135,7 +136,7 @@ export function openingWatch(o: {
   aiSpoke: () => boolean;
   callerFirstMs: number;
   /** After they stop talking, cue the assistant if it has not begun by then. */
-  replyNudgeMs?: number;
+  replyNudgeMs?: number | (() => number);
   /**
    * While true, send nothing — the ready-made greeting (src/server/voice/greeting.ts)
    * is held or still being prepared, and a cue would restart it.
@@ -172,7 +173,11 @@ export function openingWatch(o: {
     const heard = o.lastHeard();
     if (heard !== null) {
       // Counted from when they stopped talking, not from their first word.
-      if (t - heard > (o.replyNudgeMs ?? REPLY_NUDGE_MS))
+      const replyNudge =
+        typeof o.replyNudgeMs === "function"
+          ? o.replyNudgeMs()
+          : (o.replyNudgeMs ?? REPLY_NUDGE_MS);
+      if (t - heard > replyNudge)
         nudge("(The person has answered the phone. Reply to them now.)", t);
       return;
     }
@@ -532,7 +537,8 @@ async function placeCall(
     // Wait through a thinking pause instead of jumping in.
     // 1.6 s, not 1 s: a real call on 9 November cut in ("Got it — implemented") while
     // the candidate paused mid-list.
-    turnTaking: { silenceMs: 1600, endOfSpeech: "low", prefixPaddingMs: 300 },
+    // Our line decides the turns (manual); the rest is kept for the record.
+    turnTaking: { manual: true, silenceMs: 1600, endOfSpeech: "low", prefixPaddingMs: 300 },
     // Indian English, so short replies ("yes", "okay") are not heard as another language.
     languageCode: VOICE_LANGUAGE,
     events,
@@ -563,7 +569,8 @@ async function placeCall(
     // Planned short (screening 1.8.0): told to close 30 s before the planned length;
     // answers to the screening question cut short at 45 s.
     closeAfterMs: Math.max(60_000, policy.maxMinutes * 60_000 - CLOSE_BEFORE_END_MS),
-    timing: { longAnswerMs: SCREENING_LONG_ANSWER_MS },
+    // Manual turns: the model always gets the end of their words, so no early cue.
+    timing: { longAnswerMs: SCREENING_LONG_ANSWER_MS, unheardMs: TURN_TIMING.replyMs },
   });
   await setCall(call.id, orgId, { phoneLast4: number.last4 });
   // Ready while it rings: played the moment their hello ends.
@@ -599,12 +606,25 @@ async function placeCall(
   // The caller's line through a debounced VAD: a single frame's RMS flickered
   // with breaths and line noise, and quiet talkers never registered at all.
   const vad = new Vad();
+  let assistantUntil = 0;
+  const detector = new TurnDetector({
+    start: () => {
+      session.activityStart?.();
+      keeper?.caller("start", true);
+    },
+    audio: (p) => session.sendAudio(up.process(p)),
+    end: () => {
+      session.activityEnd?.();
+      keeper?.caller("end", false);
+    },
+    // They cut in: the rest of the assistant's line is dropped.
+    bargeIn: () => line.clear(),
+  });
   line.onAudio((pcm) => {
     // The candidate talking counts as activity even before a transcript line arrives.
     const heard = vad.process(pcm);
     if (heard) voiceDebug({ kind: "caller", vad: heard });
     stats.caller(heard);
-    keeper?.caller(heard, vad.isActive());
     if (heard === "start") candidateSpoke = true;
     if (vad.isActive()) {
       lineHeardAt = Date.now();
@@ -617,12 +637,11 @@ async function placeCall(
     if (!greeting.isReleased) return;
     if (greeting.played && vad.isActive() && line.pendingSeconds() === 0)
       answerHeardAt = Date.now();
-    // While the assistant's audio is queued or playing, pass upstream only what
-    // the VAD calls speech: a loud speakerphone carried the assistant's own voice
-    // back up the line, the model read it as an interruption and cut itself off
-    // mid-word. Real speech (the caller talking over the reply) still passes.
-    if (line.pendingSeconds() > 0 && !vad.isActive()) return;
-    session.sendAudio(up.process(pcm));
+    // Our line decides the turns (src/server/voice/turn-detector.ts): the model gets
+    // each utterance marked start and end, and echo of its own voice never cuts it off.
+    const playing = line.pendingSeconds() > 0;
+    if (playing) assistantUntil = Date.now() + ECHO_TAIL_MS;
+    detector.frame(pcm, rms(pcm), playing || Date.now() < assistantUntil);
   });
   lastActivity = now();
   // They speak first; the assistant answers (or greets them if they stay quiet).
@@ -636,7 +655,9 @@ async function placeCall(
     // As the scheduling and negotiation calls: two real calls on 2 November waited the
     // default 4 s after the hello, the candidate said "Hello? Hello?" over the late
     // greeting, and that cut it off.
-    replyNudgeMs: SCREENING_REPLY_CUE_MS,
+    // Manual turns: the end of their reply makes the model answer — no cue unless
+    // the greeting never played.
+    replyNudgeMs: () => (greeting.played ? 60_000 : SCREENING_REPLY_CUE_MS),
     // Nothing while the greeting is held or prepared; after it, nothing until they reply.
     wait: () =>
       !greeting.isReleased || greeting.preparing() || (greeting.played && answerHeardAt === null),

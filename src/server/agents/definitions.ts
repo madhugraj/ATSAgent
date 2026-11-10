@@ -121,7 +121,12 @@ export function registerPhase1Agents(): void {
     // transcribed and the assistant is told to apologise and ask again in plain words
     // (src/server/voice/spoken-guard.ts); instructions say to call tools silently. A
     // screening test call on 10 November spoke a block of code and its reasoning.
-    version: "1.9.1",
+    // 1.9.2: our line decides the turns (src/server/voice/turn-detector.ts): the voice
+    // service's own speech detection is off and each caller utterance is marked start and
+    // end — the model replies ~0.9 s after the end (it waited 1.6 s and missed short
+    // replies); a short answer ends after 0.6 s of silence, a long one gets room for a
+    // pause; while it speaks, only sustained louder speech cuts in (echo no longer does).
+    version: "1.9.2",
     owner: "hr_head",
     responsibility:
       "Turns a hiring need into a complete, evidence-backed draft requisition and walks it through the DH → HR → CBO approval chain.",
@@ -805,7 +810,12 @@ export function registerPhase3Agents(): void {
     // transcribed and the assistant is told to apologise and ask again in plain words
     // (src/server/voice/spoken-guard.ts); instructions say to call tools silently. A
     // screening test call on 10 November spoke a block of code and its reasoning.
-    version: "1.8.7",
+    // 1.8.8: our line decides the turns (src/server/voice/turn-detector.ts): the voice
+    // service's own speech detection is off and each caller utterance is marked start and
+    // end — the model replies ~0.9 s after the end (it waited 1.6 s and missed short
+    // replies); a short answer ends after 0.6 s of silence, a long one gets room for a
+    // pause; while it speaks, only sustained louder speech cuts in (echo no longer does).
+    version: "1.8.8",
     owner: "hr_head",
     responsibility:
       "Holds one short AI phone call to help a candidate and the interview panel agree a time the candidate was already e-mailed: says it is an AI, tells them where they stand in the process, books one of the offered or pre-checked times (free for the whole panel), or notes when they are free — nothing else.",
@@ -935,7 +945,12 @@ export function registerPhase3Agents(): void {
     // transcribed and the assistant is told to apologise and ask again in plain words
     // (src/server/voice/spoken-guard.ts); instructions say to call tools silently. A
     // screening test call on 10 November spoke a block of code and its reasoning.
-    version: "0.8.7",
+    // 0.8.8: our line decides the turns (src/server/voice/turn-detector.ts): the voice
+    // service's own speech detection is off and each caller utterance is marked start and
+    // end — the model replies ~0.9 s after the end (it waited 1.6 s and missed short
+    // replies); a short answer ends after 0.6 s of silence, a long one gets room for a
+    // pause; while it speaks, only sustained louder speech cuts in (echo no longer does).
+    version: "0.8.8",
     owner: "hr_head",
     responsibility:
       "Holds one AI phone call with a candidate about the pay for their offer: says it is an AI, tells them which role and organisation and where they stand, wins their interest from approved facts, frames the approved figure and extras around what matters to them, may offer one pre-approved improved figure, and brings a clear answer back to the people who decide.",

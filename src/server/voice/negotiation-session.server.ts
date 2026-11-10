@@ -41,10 +41,11 @@ import { disclosureMissing } from "./call-tools";
 import { loadNegotiationBrief, type NegotiationBrief } from "./negotiation-brief.server";
 import { CallStatsTracker } from "./call-stats";
 import { voiceDebug } from "./debug";
+import { ECHO_TAIL_MS, TurnDetector } from "./turn-detector";
 import { readsOutWorkings, WORKINGS_CORRECTION } from "./spoken-guard";
 import { GREETING_WAIT_MS, greetingCue, ReadyGreeting } from "./greeting";
 import { TURN_TIMING, TurnKeeper } from "./turns";
-import { Vad } from "./vad";
+import { rms, Vad } from "./vad";
 import {
   applyNegotiationTool,
   freshNegotiationState,
@@ -107,6 +108,8 @@ const SPEAK_AFTER = new Set([
 
 /** Turn-taking: people pause before answering about pay — a little more room than scheduling. */
 export const NEGOTIATION_TURN_TAKING = {
+  // Our line decides the turns (turn-detector.ts); the rest is kept for the record.
+  manual: true,
   silenceMs: 800,
   endOfSpeech: "high" as const,
   prefixPaddingMs: 300,
@@ -351,6 +354,8 @@ async function place(
     onCue: (reason) => log.warn("negotiation_call.cue", { call_id: call.id, reason }),
     recordTools: new Set(["record_call_notes", "record_their_position"]),
     endTools: new Set(["end_negotiation_call"]),
+    // Manual turns: the model always gets the end of their words, so no early cue.
+    timing: { unheardMs: TURN_TIMING.replyMs },
     // A declined go-ahead ends the call; other results it speaks on (0.1.1).
     speakAfter: (name) =>
       SPEAK_AFTER.has(name) && !(name === "record_permission" && !state.permission),
@@ -383,11 +388,24 @@ async function place(
   });
   // The caller's line through a debounced VAD (see call-session.server.ts).
   const vad = new Vad();
+  let assistantUntil = 0;
+  const detector = new TurnDetector({
+    start: () => {
+      session.activityStart?.();
+      keeper?.caller("start", true);
+    },
+    audio: (p) => session.sendAudio(up.process(p)),
+    end: () => {
+      session.activityEnd?.();
+      keeper?.caller("end", false);
+    },
+    // They cut in: the rest of the assistant's line is dropped.
+    bargeIn: () => line.clear(),
+  });
   line.onAudio((pcm) => {
     const heard = vad.process(pcm);
     if (heard) voiceDebug({ kind: "caller", vad: heard });
     stats.caller(heard);
-    keeper?.caller(heard, vad.isActive());
     if (heard === "start") candidateSpoke = true;
     if (vad.isActive()) {
       lineHeardAt = Date.now();
@@ -399,10 +417,11 @@ async function place(
     if (!greeting.isReleased) return;
     if (greeting.played && vad.isActive() && line.pendingSeconds() === 0)
       answerHeardAt = Date.now();
-    // While the assistant is playing, upstream gets only real speech — noise and
-    // echo read as an interruption and cut the assistant off mid-word.
-    if (line.pendingSeconds() > 0 && !vad.isActive()) return;
-    session.sendAudio(up.process(pcm));
+    // Our line decides the turns (src/server/voice/turn-detector.ts): the model gets
+    // each utterance marked start and end, and echo of its own voice never cuts it off.
+    const playing = line.pendingSeconds() > 0;
+    if (playing) assistantUntil = Date.now() + ECHO_TAIL_MS;
+    detector.frame(pcm, rms(pcm), playing || Date.now() < assistantUntil);
   });
   lastActivity = now();
   const stopOpening = openingWatch({
@@ -412,7 +431,9 @@ async function place(
     lastHeard: () => (greeting.played ? answerHeardAt : lineHeardAt),
     aiSpoke: () => (greeting.played ? greeting.repliedSince : aiSpoke),
     callerFirstMs: limits.callerFirstMs,
-    replyNudgeMs: NEGOTIATION_REPLY_CUE_MS,
+    // Manual turns: the end of their reply makes the model answer — no cue unless
+    // the greeting never played.
+    replyNudgeMs: () => (greeting.played ? 60_000 : NEGOTIATION_REPLY_CUE_MS),
     // Nothing while the greeting is held or prepared; after it, nothing until they reply.
     wait: () =>
       !greeting.isReleased || greeting.preparing() || (greeting.played && answerHeardAt === null),
