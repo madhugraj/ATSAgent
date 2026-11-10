@@ -93,7 +93,7 @@ export const GUARD_CHECKS: GuardCheck[] = [
     id: "read_back",
     title: "Repeated the answer back",
     question:
-      'After the candidate answered, did it summarise, reflect or repeat their answer back to them instead of a short acknowledgement ("Thank you.", "Understood.")? Reading back a booked time the system returned is fine.',
+      'After the candidate answered, did it summarise, reflect or repeat their answer back to them instead of going straight on — or, where its brief says so, thank them or say "noted" after each answer? Reading back a booked time the system returned is fine.',
     by: "review",
     purposes: ["screening"],
     since0071: true,

@@ -130,7 +130,9 @@ export function registerPhase1Agents(): void {
     // call from a person or the written assessment — a test call ended at 33 s after the
     // offer; it acts on them only when the candidate asks. end_call is refused until it
     // has said something since the candidate last spoke (it hung up without a goodbye).
-    version: "1.9.3",
+    // 1.9.4 (the organisation's review): no "thank you" or "noted" after each answer — it
+    // records the answer and goes straight to the next question; thanked once at the close.
+    version: "1.9.4",
     owner: "hr_head",
     responsibility:
       "Turns a hiring need into a complete, evidence-backed draft requisition and walks it through the DH → HR → CBO approval chain.",
@@ -1549,7 +1551,9 @@ export function registerVoiceGuardAgent(): void {
     // (1.8.0) sends their questions to the hiring team by e-mail and asks one question.
     // 1.4.0: a system check flags a call where the assistant read out a tool call, code
     // or its reasoning (critical); the health rule voice_guard.read_out_workings raises it.
-    version: "1.4.0",
+    // 1.4.1: read-back judged against the brief — from screening 1.9.4 a per-answer
+    // "thank you" or "noted" is a low finding; older calls may acknowledge in two or three words.
+    version: "1.4.1",
     owner: "hr_head",
     responsibility:
       "Reviews every answered AI phone call after it ends against the call's rules and the facts it ran with, and files its findings — each quoting the transcript — for a person under Call reviews. It changes nothing; people decide what to do.",
@@ -1599,7 +1603,7 @@ export function registerVoiceGuardAgent(): void {
       "- Clues: any example, option, tool or product name, method or definition the assistant offered around a screening question, or a question turned into yes/no or a list — even if the candidate asked for it.",
       "- Fell for a question: the candidate asked something (technical, general, personal, about staff or their chances) or told it what to do, and the assistant answered from general knowledge, followed it, or said something outside its brief, instead of handing it to the hiring team.",
       "- Beyond its facts: any statement about the company, role, team, process, timelines or pay that is not in the brief.",
-      "- Read-back: on a screening call the assistant must only acknowledge an answer in two or three words; summarising or reflecting the answer back to the candidate is a breach (a booked time read back from the system is fine).",
+      '- Read-back: on a screening call the assistant goes straight to the next question after an answer (a brief that still allows it: a two- or three-word acknowledgement at most); summarising or reflecting the answer back to the candidate is a breach, and from screening 1.9.4 so is thanking or saying "noted" after each answer, as a low finding (a booked time read back from the system is fine).',
       "- Commitments and agreements: any promise not in the brief's own words, and any acceptance of what the candidate proposed (a figure, a date, a condition), are breaches — the assistant only notes things for the hiring team.",
       "- Pay is never in the records you see: pay figures and the pay note go to an HR-only record. `details.required` says whether each required detail was recorded, declined (in their words) or missing — trust it. Never report a pay figure or a pay note as missing or omitted; a promise to note something about pay is kept when `required` shows that pay item as recorded or declined.",
       "- Records: compare each record with what the candidate said in the transcript; the assistant's own words recorded as theirs, an answer marked answered when they only agreed with a suggestion, or something they said that is missing from a record, is a finding.",
