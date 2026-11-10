@@ -290,6 +290,20 @@ question, with no "thank you", "noted" or "understood". The candidate is thanked
 once, at the close. The Voice Guard (1.4.1) judges read-backs against the
 brief, so a per-answer "thank you" or "noted" on these calls is a low finding.
 
+**"Call again" on the hiring desk** arranges another AI screening call
+(`callCandidateFromDesk`, `src/server/desk/desk.server.ts`).
+
+- **Who is called:** the candidate named or ranked; otherwise the one the
+  role's latest screening call was with.
+- **How:** it uses the same core and role check as "Call now" (TA, the HR head
+  or the CBO), audited `screening_call.requested`.
+- **After a completed screen:** a person's request may call again, recorded as
+  `again` in the audit entry. The Screening agent's own request never can, and
+  there is still never a second open call.
+- **Why:** before this, the desk had no such command, and a real thread on
+  10 November sent "call again" to a waiting job-feed listing as a change
+  request.
+
 A completed call must leave with the earliest joining date, current pay and
 expected pay (Screening call agent 1.3.0): after consent, `end_call` with
 `completed` or `other` is refused until each is recorded or listed in

@@ -1377,6 +1377,51 @@ describe("the dispatcher", () => {
   });
 });
 
+describe("the hiring desk", () => {
+  test("'call again' arranges a screening call with the role's last candidate (10 November)", async () => {
+    const desk = await import("../src/server/desk/desk.server");
+    const { orgMembers, userRoles } = await import("../drizzle/schema");
+    // Only TA, the HR head or the CBO may arrange a call — as the "Call now" button.
+    await db
+      .insert(orgMembers)
+      .values({ orgId, userId, email: `sc-${stamp}@test.local`, status: "active" } as never)
+      .onConflictDoNothing();
+    await db.insert(userRoles).values({ userId, orgId, role: "recruiter" }).onConflictDoNothing();
+    const { appId } = await seedCall({ status: "completed", attempt: 1 });
+    const [app] = await db
+      .select({ requisitionId: applications.requisitionId })
+      .from(applications)
+      .where(eq(applications.id, appId));
+    const [conv] = await db
+      .insert(hiringConversations)
+      .values({
+        orgId,
+        requisitionId: app!.requisitionId,
+        createdBy: userId,
+        title: "Platform SRE",
+      } as never)
+      .returning();
+    await desk.callCandidateFromDesk(conv as never, userId, {});
+    const said = await db
+      .select({ body: hiringMessages.body })
+      .from(hiringMessages)
+      .where(eq(hiringMessages.conversationId, conv!.id));
+    expect(said.at(-1)?.body).toMatch(/^Arranged an AI screening call with /);
+    const calls = await db
+      .select({ status: screeningCalls.status, requestedBy: screeningCalls.requestedBy })
+      .from(screeningCalls)
+      .where(and(eq(screeningCalls.applicationId, appId), eq(screeningCalls.status, "approved")));
+    expect(calls).toEqual([{ status: "approved", requestedBy: userId }]);
+    // Asked again while that call is waiting: said plainly, no second call.
+    await desk.callCandidateFromDesk(conv as never, userId, {});
+    const again = await db
+      .select({ body: hiringMessages.body })
+      .from(hiringMessages)
+      .where(eq(hiringMessages.conversationId, conv!.id));
+    expect(again.at(-1)?.body).toMatch(/already arranged/);
+  });
+});
+
 describe("who is never called", () => {
   test("a candidate who asked not to be called: waiting calls cancelled, never requested or dialled", async () => {
     const optOut = await import("../src/server/voice/opt-out.server");
