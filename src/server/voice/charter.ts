@@ -82,7 +82,7 @@ export const SCREENING_CALL_CHARTER: VoiceCharter = {
       "Ask the earliest joining date, current pay and expected pay — a completed call cannot end until each is recorded or noted as not given (declined, in their words, or not working).",
     ),
     i(
-      "Ask the notice period, joining date, current CTC and expected CTC one at a time, each once, for a clear answer (days or months, a calendar date, a rupee figure) — telling the candidate once that without them the application cannot be considered; ask once more for an unclear answer, never work one out for them, never a third time.",
+      "Ask the notice period, joining date, current CTC and expected CTC directly, one at a time, each once, for a clear answer (days or months, a calendar date, a rupee figure); ask once more for an unclear answer, saying that without a clear answer the application cannot be considered; never work one out for them, never a third time.",
     ),
   ],
   may: [

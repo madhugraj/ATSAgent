@@ -1658,6 +1658,8 @@ export type VoiceSessionEvents = {
   onInterrupted?: () => void;
   /** A finished transcript line (either side). */
   onTurn?: (turn: VoiceTurn) => void;
+  /** The model has started transcribing a new utterance of the caller's — it heard them. */
+  onHeard?: () => void;
   /**
    * The assistant's words so far in its current turn, as they are transcribed —
    * before the turn ends (a live guard can stop a line while it is spoken).
@@ -1936,7 +1938,10 @@ export async function openVoiceSession(opts: {
       if (sc) {
         if (sc.inputTranscription?.text) {
           // When the model first heard this utterance of the caller's (timing only).
-          if (!heard) voiceDebug({ kind: "heard_text" });
+          if (!heard) {
+            voiceDebug({ kind: "heard_text" });
+            opts.events.onHeard?.();
+          }
           if (!heard) heardSince = Date.now();
           heard += sc.inputTranscription.text;
         }

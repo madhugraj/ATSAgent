@@ -407,7 +407,7 @@ describe("the call brief", () => {
 
   test("9 November call: consent after a concern, no insisting, questions back answered", () => {
     const p = brief.callSystemPrompt(facts());
-    expect(p).toContain('an earlier "yes, it\'s a good time" does not count');
+    expect(p).toContain('an earlier "yes" does not count once they have raised a concern');
     expect(p).toContain(brief.SOURCE_LINE);
     expect(p).toContain("record open_to_relocate only if they then say yes or no");
     expect(p).toContain("one open follow-up");
@@ -424,7 +424,7 @@ describe("the call brief", () => {
     );
     // The source is never mentioned (the organisation's rule, 10 November).
     expect(p).toContain(
-      "I'm calling about our Platform SRE role, for a short call — about 3 minutes.",
+      "calling about our Platform SRE role. I'll make notes of our conversation for the hiring team, and the call is checked for quality. Is now a good time for a quick 3 minutes call?",
     );
     expect(p).not.toContain("Naukri");
     expect(p).not.toContain("20 October");
@@ -440,7 +440,7 @@ describe("the call brief", () => {
     expect(p).not.toContain("Do you have any questions for me?");
     expect(p).toContain("please reply to our e-mail and the hiring team will answer");
     expect(p).toMatch(
-      /Ask where they live now[\s\S]*Then one question each, each once:[\s\S]*a\. their notice period;[\s\S]*b\. "Which date could you join\?"[\s\S]*c\. their current CTC per year[\s\S]*d\. their expected CTC per year\./,
+      /2\. Once they confirm, in one turn[\s\S]*3\. The role in one sentence[\s\S]*4\. Ask directly, one question each[\s\S]*a\. "What is your notice period\?"[\s\S]*b\. "Which date could you join\?"[\s\S]*c\. "What is your current CTC per year\?"[\s\S]*d\. "And your expected CTC per year\?"[\s\S]*5\. Ask where they live now[\s\S]*6\. "One question about your experience/,
     );
     // Each required detail is its own question (a real call stacked the paired items).
     // Title, company and years are on the CV: not asked.
@@ -470,7 +470,9 @@ describe("the call brief", () => {
       }),
     );
     // The required details: one at a time, a clear answer, told why, never a third time.
-    expect(p).toContain(brief.REQUIRED_LINE);
+    // 1.9.0: asked directly — no list read out first; the reason with the second ask.
+    expect(p).toContain("never read out a list of them first");
+    expect(p).toContain(brief.CONSEQUENCE_LINE);
     expect(p).toContain("Never work out a date or a figure for them");
     expect(p).toContain("Never ask for the same detail a third time");
     expect(p).toContain('ask only "Shall we go ahead?"');
@@ -478,7 +480,7 @@ describe("the call brief", () => {
     expect(p).toContain('Pay is always asked afresh ("so our notes are up to date")');
     expect(p).toContain("never tell them a detail is not needed");
     expect(p).toContain("at most once in the whole call");
-    expect(p).toContain("I'm calling at the time we agreed");
+    expect(p).toContain("calling at the time we agreed");
     expect(p).toContain("on behalf of a client");
   });
 

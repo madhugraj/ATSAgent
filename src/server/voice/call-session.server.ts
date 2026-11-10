@@ -461,6 +461,8 @@ async function placeCall(
   });
   const events: VoiceSessionEvents = {
     onAudio: (pcm) => greeting.audio(pcm),
+    // The model heard them: the turn manager waits its usual time before a reply cue.
+    onHeard: () => keeper?.heard(),
     onInterrupted: () => {
       stats.bargeIn();
       line.clear();

@@ -110,7 +110,14 @@ export function registerPhase1Agents(): void {
     // they stop, as on the quick calls) — a test call played the greeting at once, then
     // waited 10 s to answer "yes, speaking". The trace now records caller speech, the
     // model's first transcript of each caller utterance and every text sent (timing only).
-    version: "1.8.2",
+    // 1.9.0 (the organisation's review of a test call): who it is, the disclosure and the
+    // consent question in one turn once they confirm; the four required details asked
+    // directly (no list read out first; the "cannot be considered" reason with the second
+    // ask); location last before the technical question, and "I'll think about it" taken
+    // as an answer — never asked again, never a mention of support. Shared:
+    // the turn manager cues a reply 3 s after the candidate stops when the model has not
+    // even started transcribing them (it missed a 0.6 s "Okay" and waited 7 s).
+    version: "1.9.0",
     owner: "hr_head",
     responsibility:
       "Turns a hiring need into a complete, evidence-backed draft requisition and walks it through the DH → HR → CBO approval chain.",
@@ -788,7 +795,9 @@ export function registerPhase3Agents(): void {
     // they stop, as on the quick calls) — a test call played the greeting at once, then
     // waited 10 s to answer "yes, speaking". The trace now records caller speech, the
     // model's first transcript of each caller utterance and every text sent (timing only).
-    version: "1.8.5",
+    // 1.8.6: shared the turn manager cues a reply 3 s after the candidate stops when the model has not
+    // even started transcribing them (it missed a 0.6 s "Okay" and waited 7 s).
+    version: "1.8.6",
     owner: "hr_head",
     responsibility:
       "Holds one short AI phone call to help a candidate and the interview panel agree a time the candidate was already e-mailed: says it is an AI, tells them where they stand in the process, books one of the offered or pre-checked times (free for the whole panel), or notes when they are free — nothing else.",
@@ -912,7 +921,9 @@ export function registerPhase3Agents(): void {
     // they stop, as on the quick calls) — a test call played the greeting at once, then
     // waited 10 s to answer "yes, speaking". The trace now records caller speech, the
     // model's first transcript of each caller utterance and every text sent (timing only).
-    version: "0.8.5",
+    // 0.8.6: shared the turn manager cues a reply 3 s after the candidate stops when the model has not
+    // even started transcribing them (it missed a 0.6 s "Okay" and waited 7 s).
+    version: "0.8.6",
     owner: "hr_head",
     responsibility:
       "Holds one AI phone call with a candidate about the pay for their offer: says it is an AI, tells them which role and organisation and where they stand, wins their interest from approved facts, frames the approved figure and extras around what matters to them, may offer one pre-approved improved figure, and brings a clear answer back to the people who decide.",
