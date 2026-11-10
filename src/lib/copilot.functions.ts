@@ -1,17 +1,9 @@
-import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { createServerFn } from "@tanstack/react-start";
+import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../server/db";
-import {
-  applications,
-  candidates,
-  copilotMessages,
-  departments,
-  interviews,
-  offers,
-  requisitions,
-} from "@db/schema";
+import { copilotMessages } from "@db/schema";
 import { requireOrg } from "./auth.middleware";
 import { MANUAL_TEXT } from "@/lib/user-manual";
 
@@ -19,6 +11,8 @@ export type CopilotMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  /** Work the copilot proposed handing to the agents, until it is started. */
+  handoff: { goal: string; summary: string } | null;
   createdAt: string;
 };
 
@@ -31,6 +25,7 @@ export const copilotHistory = createServerFn({ method: "GET" })
         id: copilotMessages.id,
         role: copilotMessages.role,
         content: copilotMessages.content,
+        handoff: copilotMessages.handoff,
         createdAt: copilotMessages.createdAt,
       })
       .from(copilotMessages)
@@ -43,6 +38,7 @@ export const copilotHistory = createServerFn({ method: "GET" })
       id: r.id,
       role: r.role as "user" | "assistant",
       content: r.content,
+      handoff: r.handoff ?? null,
       createdAt: r.createdAt.toISOString(),
     }));
   });
@@ -58,103 +54,16 @@ export const clearCopilot = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-/** Live, org-scoped facts handed to the model so answers are grounded in real data. */
-const snapshot = createServerOnlyFn(async function snapshot(orgId: string) {
-  // Column aliases keep the snake_case snapshot payload the prompt has always used.
-  const [reqs, cands, apps, ivs, offerRows, depts] = await Promise.all([
-    db
-      .select({
-        code: requisitions.code,
-        title: requisitions.title,
-        status: requisitions.status,
-        openings: requisitions.openings,
-        location: requisitions.location,
-        budget_ctc: requisitions.budgetCtc,
-        experience_min: requisitions.experienceMin,
-        experience_max: requisitions.experienceMax,
-        must_have_skills: requisitions.mustHaveSkills,
-      })
-      .from(requisitions)
-      .where(eq(requisitions.orgId, orgId))
-      .orderBy(desc(requisitions.createdAt))
-      .limit(60),
-    db
-      .select({
-        id: candidates.id,
-        skills: candidates.skills,
-        experience_years: candidates.experienceYears,
-        created_at: candidates.createdAt,
-        last_synced_at: candidates.lastSyncedAt,
-      })
-      .from(candidates)
-      .where(eq(candidates.orgId, orgId)),
-    db
-      .select({
-        stage: applications.stage,
-        requisition_id: applications.requisitionId,
-        last_activity_at: applications.lastActivityAt,
-      })
-      .from(applications)
-      .where(eq(applications.orgId, orgId)),
-    db
-      .select({
-        level: interviews.level,
-        status: interviews.status,
-        scheduled_at: interviews.scheduledAt,
-        interviewer: interviews.interviewer,
-      })
-      .from(interviews)
-      .where(eq(interviews.orgId, orgId))
-      .orderBy(asc(interviews.scheduledAt))
-      .limit(60),
-    db
-      .select({
-        status: offers.status,
-        offered_ctc: offers.offeredCtc,
-        joining_date: offers.joiningDate,
-      })
-      .from(offers)
-      .where(eq(offers.orgId, orgId)),
-    db
-      .select({
-        name: departments.name,
-        budgeted_headcount: departments.budgetedHeadcount,
-        budgeted_cost: departments.budgetedCost,
-      })
-      .from(departments)
-      .where(eq(departments.orgId, orgId)),
-  ]);
-
-  const stageCounts: Record<string, number> = {};
-  for (const a of apps) stageCounts[a.stage] = (stageCounts[a.stage] ?? 0) + 1;
-
-  const skillCounts: Record<string, number> = {};
-  for (const c of cands) for (const s of c.skills ?? []) skillCounts[s] = (skillCounts[s] ?? 0) + 1;
-  const topSkills = Object.entries(skillCounts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 20);
-
-  return {
-    requisitions: reqs,
-    departments: depts,
-    candidateCount: cands.length,
-    stageCounts,
-    topSkills,
-    interviews: ivs,
-    offers: offerRows,
-  };
-});
-
 const SYSTEM = `You are the HR copilot inside a talent-acquisition system (ATS).
-You help recruiters, HR heads and the CHRO understand their own live hiring data and
-advise on process: requisition approvals, JD quality, JD↔CV matching weights,
-interview scheduling, offers and pipeline risk.
+You help recruiters, hiring managers, department heads, HR heads and the CBO understand
+their own live hiring data and advise on process: requisition status and approvals, the
+skill and role ontology, talent-pool coverage, future role demand, governance, JD quality,
+matching weights, interview scheduling, offers and pipeline risk.
 
 Rules:
-- Answer ONLY from the DATA SNAPSHOT provided plus general HR expertise. Never invent
-  candidate names, numbers or requisitions that are not in the snapshot.
-- If the snapshot has no data for the question, say so plainly and suggest the page to use.
-- Be concise: short paragraphs or tight bullet lists. Numbers over adjectives.
+- Answer ONLY from what your tools return plus general HR expertise. Never invent
+  candidate names, numbers or requisitions that the tools did not return.
+- If the tools have no data for the question, say so plainly and suggest the page to use.
 - Never invent navigation. These are the ONLY pages that exist, use their exact names:
   Dashboard (/), Requisitions (/requisitions), Talent pool (/candidates),
   Matching engine (/matching), Interviews (/interviews), My interviews (/interviews/mine),
@@ -172,16 +81,18 @@ Rules:
   can restore it, and they also see every registered organisation's statistics.
 - For "how do I ..." questions, answer strictly from the USER MANUAL below, quoting the
   real page names and the actual order of steps. Never invent a setting that is not in it.
-- Return JSON: { "answer": "markdown-free plain text answer" }.
 
 USER MANUAL (authoritative product documentation):
 ${MANUAL_TEXT}`;
 
+export type CopilotAnswer = { answer: string; handoff: { goal: string; summary: string } | null };
+
 export const askCopilot = createServerFn({ method: "POST" })
   .middleware([requireOrg])
   .validator((data: unknown) => z.object({ message: z.string().min(1).max(2000) }).parse(data))
-  .handler(async ({ data, context }): Promise<{ answer: string }> => {
-    const { aiJson } = await import("@/lib/ai-gateway.server");
+  .handler(async ({ data, context }): Promise<CopilotAnswer> => {
+    const { loadCopilotCtx } = await import("../server/copilot/data.server");
+    const { runCopilotTurn, historyMessages } = await import("../server/copilot/copilot.server");
 
     await db.insert(copilotMessages).values({
       userId: context.userId,
@@ -199,30 +110,146 @@ export const askCopilot = createServerFn({ method: "POST" })
       .orderBy(desc(copilotMessages.createdAt))
       .limit(12);
 
-    const transcript = prior
-      .reverse()
-      .map((m) => `${m.role === "user" ? "HR" : "Copilot"}: ${m.content}`)
-      .join("\n");
-
-    const facts = await snapshot(context.orgId);
-
-    const result = await aiJson<{ answer?: string }>({
-      orgId: context.orgId,
-      feature: "copilot",
+    const ctx = await loadCopilotCtx(context.orgId, context.userId, context.isOwner);
+    const result = await runCopilotTurn({
+      ctx,
       system: SYSTEM,
-      prompt: `DATA SNAPSHOT (live, this organisation only):\n${JSON.stringify(facts).slice(0, 24000)}\n\nCONVERSATION SO FAR:\n${transcript}\n\nAnswer the latest HR message.`,
+      history: historyMessages(prior.reverse()),
     });
 
-    const answer = result.ok
-      ? (result.data.answer ?? "").trim() || "I could not produce an answer for that."
-      : `I could not reach the AI model: ${result.message}`;
+    const answer = result.failed
+      ? `I could not complete that: ${result.failed}`
+      : result.answer || "I could not produce an answer for that.";
 
     await db.insert(copilotMessages).values({
       userId: context.userId,
       orgId: context.orgId,
       role: "assistant",
       content: answer,
+      handoff: result.handoff,
     });
 
-    return { answer };
+    return { answer, handoff: result.handoff };
+  });
+
+/**
+ * Start the agent Copilot with the goal the HR copilot proposed on one of its
+ * answers. The goal is read from the stored message (never from the client),
+ * so the person confirms exactly what was shown; the hand-off is used once.
+ */
+export const startCopilotHandoff = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ messageId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<{ runId: string }> => {
+    const mine = and(
+      eq(copilotMessages.id, data.messageId),
+      eq(copilotMessages.orgId, context.orgId),
+      eq(copilotMessages.userId, context.userId),
+      eq(copilotMessages.role, "assistant"),
+    );
+    const { ensureAgentsRegistered } = await import("../server/agents");
+    ensureAgentsRegistered();
+    const { loadPolicy } = await import("../server/agents/policy");
+    const policy = await loadPolicy(context.orgId, "copilot");
+    if (!policy.enabled) throw new Error("Switch on the Copilot in Agent settings first.");
+    const [msg] = await db
+      .select({ handoff: copilotMessages.handoff })
+      .from(copilotMessages)
+      .where(mine)
+      .limit(1);
+    if (!msg?.handoff) throw new Error("That suggestion is no longer available.");
+    // Claim it atomically: a double click starts the agents once.
+    const claimed = await db
+      .update(copilotMessages)
+      .set({ handoff: null })
+      .where(and(mine, isNotNull(copilotMessages.handoff)))
+      .returning({ id: copilotMessages.id });
+    if (!claimed.length) throw new Error("Those agents were already started.");
+    const { startRun } = await import("../server/agents/runtime.server");
+    let runId: string;
+    try {
+      ({ runId } = await startRun({
+        orgId: context.orgId,
+        agentType: "copilot",
+        principalUserId: context.userId,
+        goal: msg.handoff.goal,
+      }));
+    } catch (e) {
+      await db.update(copilotMessages).set({ handoff: msg.handoff }).where(mine);
+      throw e;
+    }
+    const { kickAgents } = await import("../server/agents/orchestrator.server");
+    kickAgents(context.orgId);
+    return { runId };
+  });
+
+/* ------------------------------------------------ pool coverage and outlook */
+
+async function poolCtx(orgId: string, userId: string, isOwner: boolean) {
+  const { loadCopilotCtx } = await import("../server/copilot/data.server");
+  const ctx = await loadCopilotCtx(orgId, userId, isOwner);
+  if (!ctx.scope.pool) throw new Error("Your role does not include the talent pool.");
+  return ctx;
+}
+
+/**
+ * Talent-pool coverage and the cached demand outlook for the Talent pool page.
+ * Never calls the AI model: the outlook is only built on request.
+ */
+export const poolInsights = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .handler(async ({ context }) => {
+    const ctx = await poolCtx(context.orgId, context.userId, context.isOwner);
+    const { poolCoverage } = await import("../server/copilot/data.server");
+    const { demandOutlooks } = await import("@db/schema");
+    const [coverage, cached] = await Promise.all([
+      poolCoverage(ctx),
+      db
+        .select({ payload: demandOutlooks.payload })
+        .from(demandOutlooks)
+        .where(eq(demandOutlooks.orgId, context.orgId))
+        .limit(1),
+    ]);
+    return {
+      coverage,
+      outlook: cached[0]?.payload ?? null,
+      canRefresh: ctx.scope.tier === "leadership",
+    };
+  });
+
+/** Build (or rebuild) the demand outlook. Leadership may refresh; anyone with pool access may build the first. */
+export const refreshDemandOutlook = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .handler(async ({ context }) => {
+    const ctx = await poolCtx(context.orgId, context.userId, context.isOwner);
+    const { demandOutlook } = await import("../server/copilot/data.server");
+    return demandOutlook(ctx, ctx.scope.tier === "leadership");
+  });
+
+/** A person judges one outlook row useful or not — training feedback, behind consent. */
+export const rateDemandOutlook = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) =>
+    z.object({ role: z.string().min(1).max(120), useful: z.boolean() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const ctx = await poolCtx(context.orgId, context.userId, context.isOwner);
+    const { demandOutlooks } = await import("@db/schema");
+    const [cached] = await db
+      .select({ payload: demandOutlooks.payload })
+      .from(demandOutlooks)
+      .where(eq(demandOutlooks.orgId, ctx.orgId))
+      .limit(1);
+    const row = cached?.payload.rows.find((r) => r.role === data.role);
+    if (!row) throw new Error("That role is not in the current outlook.");
+    const { captureFeedback } = await import("../server/training/capture.server");
+    await captureFeedback({
+      orgId: ctx.orgId,
+      source: "demand_outlook",
+      label: data.useful ? "useful" : "not_useful",
+      rating: data.useful ? 1 : 0,
+      original: { ...row, generatedAt: cached!.payload.generatedAt },
+      actorUserId: ctx.userId,
+    });
+    return { ok: true };
   });

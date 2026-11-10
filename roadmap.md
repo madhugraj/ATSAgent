@@ -335,6 +335,14 @@ Study in `docs/hrms-integrations-study.md`: vendor API landscape (Keka, greytHR,
 - [ ] P4: Workday read via OAuth + RaaS/REST with a per-customer ISU setup guide; partnership track in parallel
 - [ ] P5: CSV import/export templates for partnership-gated HRMS (Darwinbox, ZingHR, Adrenalin); direct adapters as vendor specs arrive; evaluate a unified-API aggregator behind a DPIA
 
+## Copilot intelligence (2026-11-09)
+
+- [x] Role-aware HR copilot: tool-calling turns through the gateway (`copilot` feature) replace the fixed 60-row snapshot; every lookup is filtered server-side by the person's roles (leadership / recruiter / manager / member — `src/lib/copilot-scope.ts`), tools outside a scope are never offered, recruiters never receive pay figures
+- [x] Requisition status, approval trail and "waiting on whom, for how long", approvals waiting on the person (requisitions and offers), pipeline and stalled applications, department budgets (leadership), ontology overview and role profiles, governance summary (audit log, open agent issues, AI usage by feature — no vendor or model names)
+- [x] Pool coverage (`src/lib/pool-coverage.ts`): strong fits per opening for every open role and ontology role, internal share, profile freshness, scarce skills — deterministic; card on Talent pool
+- [x] Demand outlook (`src/lib/demand-outlook.ts`, migration 0070): eight quarters of requisitions per ontology role, a market signal (`demand_outlook` feature, zod-checked), emerging roles and coverage, ranked with evidence and confidence; thin history said plainly; cached weekly, refreshed by leadership; useful / not useful captured as training feedback
+- [x] Hand-off: work the copilot proposes is stored on its answer and starts the agent Copilot only on the person's click (claimed once); health rule `skills.copilot_errors`
+
 ## AI governance and spend visibility (2026-09-28)
 
 - [x] AI usage ledger (`ai_usage_events`): one row per provider request — organisation, module, provider, model, prompt/completion/total tokens, retry attempt, latency, outcome — written fire-and-forget from the gateway; OpenAI/Anthropic/Gemini usage frames harvested, transcription included, missing frames recorded as zero (never estimated)

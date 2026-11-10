@@ -1340,7 +1340,28 @@ export const copilotMessages = pgTable("copilot_messages", {
   userId: uuid("user_id").notNull(),
   role: text("role").notNull(),
   content: text("content").notNull(),
+  /**
+   * Work the copilot proposes handing to the agents (migration 0070): the goal
+   * the agent Copilot starts with once the person clicks to confirm. Null for
+   * plain answers.
+   */
+  handoff: jsonb("handoff").$type<{ goal: string; summary: string }>(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * The organisation's demand outlook (migration 0070): internal requisition
+ * trends per ontology role, the market signal and the ranked roles likely to
+ * grow (src/lib/demand-outlook.ts). One row per organisation, refreshed weekly
+ * or on request by leadership; the copilot and the Talent pool card read it.
+ */
+export const demandOutlooks = pgTable("demand_outlooks", {
+  orgId: uuid("org_id")
+    .primaryKey()
+    .references(() => organizations.id, { onDelete: "cascade" }),
+  payload: jsonb("payload").$type<import("../src/lib/demand-outlook").DemandOutlook>().notNull(),
+  generatedBy: uuid("generated_by").references(() => users.id, { onDelete: "set null" }),
+  generatedAt: timestamp("generated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const captureEvents = pgTable(

@@ -50,56 +50,73 @@ export function registerOntologyTools(): void {
     // candidate names and CV-derived reasons are third-party text
     untrustedOutput: true,
     skills: ["talent_search"],
-    run: async (ctx, i) => {
-      const res = await searchPoolBySkills(
-        ctx.orgId,
-        {
-          title: i.title,
-          mustHave: i.skills,
-          location: i.location ?? null,
-          experienceMin: i.experienceMin ?? 0,
-          experienceMax: i.experienceMax ?? 40,
-        },
-        50,
-      );
-      const total = Math.max(res.searchedFor.length, 1);
-      const scored = res.matches.map((m) => ({
-        ...m,
-        coverage: (m.skillHits.length + m.textHits.length) / total,
-      }));
-      const fitting = scored.filter((m) => m.coverage >= 0.5);
-      const internal = fitting.length
-        ? await db
-            .select({ id: candidates.id })
-            .from(candidates)
-            .where(
-              and(
-                eq(candidates.orgId, ctx.orgId),
-                eq(candidates.isInternal, true),
-                inArray(
-                  candidates.id,
-                  fitting.map((m) => m.candidateId),
-                ),
-              ),
-            )
-        : [];
-      const internalIds = new Set(internal.map((r) => r.id));
-      return {
-        searchedFor: res.searchedFor.map((g) => g.skill),
-        strong: scored.filter((m) => m.coverage >= 0.8).length,
-        partial: scored.filter((m) => m.coverage >= 0.5 && m.coverage < 0.8).length,
-        internal: fitting.filter((m) => internalIds.has(m.candidateId)).length,
-        best: fitting
-          .sort((a, b) => b.coverage - a.coverage || b.score - a.score)
-          .slice(0, 5)
-          .map((m) => ({
-            candidateId: m.candidateId,
-            name: m.name,
-            coverage: `${Math.round(m.coverage * 100)}%`,
-            internal: internalIds.has(m.candidateId),
-            why: m.why,
-          })),
-      };
-    },
+    run: async (ctx, i) => talentAvailability(ctx.orgId, i),
   });
+}
+
+/**
+ * Strong and partial fits for a role in the talent pool, how many are
+ * internal and the best five. Shared by the agent tool above and the HR
+ * copilot. Candidate names and reasons are third-party text: callers must
+ * fence them as untrusted before they reach a prompt.
+ */
+export async function talentAvailability(
+  orgId: string,
+  i: {
+    title: string;
+    skills: string[];
+    experienceMin?: number | undefined;
+    experienceMax?: number | undefined;
+    location?: string | undefined;
+  },
+) {
+  const res = await searchPoolBySkills(
+    orgId,
+    {
+      title: i.title,
+      mustHave: i.skills,
+      location: i.location ?? null,
+      experienceMin: i.experienceMin ?? 0,
+      experienceMax: i.experienceMax ?? 40,
+    },
+    50,
+  );
+  const total = Math.max(res.searchedFor.length, 1);
+  const scored = res.matches.map((m) => ({
+    ...m,
+    coverage: (m.skillHits.length + m.textHits.length) / total,
+  }));
+  const fitting = scored.filter((m) => m.coverage >= 0.5);
+  const internal = fitting.length
+    ? await db
+        .select({ id: candidates.id })
+        .from(candidates)
+        .where(
+          and(
+            eq(candidates.orgId, orgId),
+            eq(candidates.isInternal, true),
+            inArray(
+              candidates.id,
+              fitting.map((m) => m.candidateId),
+            ),
+          ),
+        )
+    : [];
+  const internalIds = new Set(internal.map((r) => r.id));
+  return {
+    searchedFor: res.searchedFor.map((g) => g.skill),
+    strong: scored.filter((m) => m.coverage >= 0.8).length,
+    partial: scored.filter((m) => m.coverage >= 0.5 && m.coverage < 0.8).length,
+    internal: fitting.filter((m) => internalIds.has(m.candidateId)).length,
+    best: fitting
+      .sort((a, b) => b.coverage - a.coverage || b.score - a.score)
+      .slice(0, 5)
+      .map((m) => ({
+        candidateId: m.candidateId,
+        name: m.name,
+        coverage: `${Math.round(m.coverage * 100)}%`,
+        internal: internalIds.has(m.candidateId),
+        why: m.why,
+      })),
+  };
 }

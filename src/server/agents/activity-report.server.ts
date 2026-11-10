@@ -10,6 +10,8 @@ import { and, eq, gte, inArray, lte } from "drizzle-orm";
 
 import { db } from "../db";
 import { agentEvents, agentRuns, agentSteps, agentTasks } from "@db/schema";
+import type { ModalityFilter } from "../../lib/agent-modality";
+import { modalityWhere } from "./modality.server";
 import { CEILING_MESSAGE, LEG_LIMIT_MESSAGE, OLD_LIMIT_MESSAGE } from "./run-messages";
 
 export type ActivityRun = {
@@ -50,13 +52,14 @@ const KNOWN_ERRORS = new Set([LEG_LIMIT_MESSAGE, CEILING_MESSAGE, OLD_LIMIT_MESS
 
 export async function computeActivity(
   orgId: string,
-  win: { from: Date; to: Date; agent: string | null },
+  win: { from: Date; to: Date; agent: string | null; modality?: ModalityFilter },
 ): Promise<ActivityReport> {
   const inRun = and(
     eq(agentRuns.orgId, orgId),
     gte(agentRuns.createdAt, win.from),
     lte(agentRuns.createdAt, win.to),
     ...(win.agent ? [eq(agentRuns.agentType, win.agent as never)] : []),
+    ...modalityWhere(agentRuns.agentType, win.modality),
   );
   const [runs, events, failedSteps, tasks, delegations] = await Promise.all([
     db

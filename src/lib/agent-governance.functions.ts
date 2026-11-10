@@ -8,6 +8,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { computeActivity, type ActivityReport } from "../server/agents/activity-report.server";
 import { computeHarness, type Harness } from "../server/agents/governance.server";
 import { assertRole, requireOrg } from "./auth.middleware";
+import type { ModalityFilter } from "./agent-modality";
 import { reportWindowSchema, resolveWindow } from "./report-window";
 
 export type * from "../server/agents/governance.server";
@@ -22,14 +23,19 @@ export const agentGovernance = createServerFn({ method: "POST" })
       data,
     }): Promise<{
       generatedAt: string;
-      window: { from: string; to: string; agent: string | null };
+      window: { from: string; to: string; agent: string | null; modality: ModalityFilter };
       harness: Harness;
     }> => {
       await assertRole(context.userId, context.orgId, ["hr_head", "president_cbo"]);
       const win = resolveWindow(data);
       return {
         generatedAt: new Date().toISOString(),
-        window: { from: win.from.toISOString(), to: win.to.toISOString(), agent: win.agent },
+        window: {
+          from: win.from.toISOString(),
+          to: win.to.toISOString(),
+          agent: win.agent,
+          modality: win.modality,
+        },
         harness: await computeHarness(context.orgId, win),
       };
     },

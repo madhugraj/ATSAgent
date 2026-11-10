@@ -9,6 +9,7 @@ import {
   askCopilot,
   clearCopilot,
   copilotHistory,
+  startCopilotHandoff,
   type CopilotMessage,
 } from "@/lib/copilot.functions";
 import { FIRST_RUN_JOURNEY } from "@/lib/user-manual";
@@ -18,10 +19,10 @@ import { useOrg } from "@/hooks/useOrg";
 import { Button } from "@/components/ui/button";
 
 const PROMPTS = [
-  "Which open requisitions are at risk this week?",
-  "Where is my pipeline leaking the most?",
-  "Which skills are scarce in my talent pool?",
-  "What should I fix in my offer stage?",
+  "What is waiting on my approval?",
+  "Do we have enough people in the pool for our open roles?",
+  "Which roles are likely to be in demand next quarter?",
+  "Which roles are emerging in our ontology?",
 ];
 
 /** Always-available HR copilot: one ongoing conversation, stored in the database. */
@@ -30,6 +31,7 @@ export function Copilot() {
   const fetchHistory = useServerFn(copilotHistory);
   const ask = useServerFn(askCopilot);
   const reset = useServerFn(clearCopilot);
+  const handoff = useServerFn(startCopilotHandoff);
 
   const [open, setOpen] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
@@ -67,12 +69,22 @@ export function Copilot() {
           id: `tmp-${Date.now()}`,
           role: "user",
           content: message,
+          handoff: null,
           createdAt: new Date().toISOString(),
         },
       ]);
     },
     onSettled: () => qc.invalidateQueries({ queryKey: ["copilot"] }),
     onError: (e) => toast.error(e instanceof Error ? e.message : "Copilot failed"),
+  });
+
+  const startAgents = useMutation({
+    mutationFn: (messageId: string) => handoff({ data: { messageId } }),
+    onSuccess: () => {
+      toast.success("The agents have started — follow them in Agents.");
+      qc.invalidateQueries({ queryKey: ["copilot"] });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Could not start the agents"),
   });
 
   const messages = history.data ?? [];
@@ -240,8 +252,9 @@ export function Copilot() {
         {messages.length === 0 ? (
           <div className="space-y-4">
             <p className="text-[13px] leading-relaxed text-muted-foreground">
-              Ask about your live pipeline, pool health, interviews or offers — every answer is
-              grounded in your organisation's own data.
+              Ask about requisitions and approvals, your pipeline, the role ontology, pool coverage
+              or future demand — answers use your organisation's live data, limited to what your
+              role can see.
             </p>
             <div className="space-y-2">
               {PROMPTS.map((p) => (
@@ -268,11 +281,25 @@ export function Copilot() {
               {m.content}
             </div>
           ) : (
-            <div
-              key={m.id}
-              className="max-w-[94%] whitespace-pre-wrap leading-relaxed text-foreground"
-            >
-              {m.content}
+            <div key={m.id} className="max-w-[94%] space-y-2">
+              <div className="whitespace-pre-wrap leading-relaxed text-foreground">{m.content}</div>
+              {m.handoff ? (
+                <div className="rounded-xl border border-primary/30 bg-primary/5 p-2.5">
+                  <p className="text-xs font-medium text-foreground">{m.handoff.summary}</p>
+                  <p className="mt-1 line-clamp-4 text-[11px] leading-snug text-muted-foreground">
+                    {m.handoff.goal}
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="mt-2 h-7 text-xs"
+                    disabled={startAgents.isPending}
+                    onClick={() => startAgents.mutate(m.id)}
+                  >
+                    Hand to the agents
+                  </Button>
+                </div>
+              ) : null}
             </div>
           ),
         )}

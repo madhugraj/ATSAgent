@@ -383,6 +383,28 @@ export const RULES: Rule[] = [
     },
   },
   {
+    id: "skills.copilot_errors",
+    element: "skills",
+    severity: "serious",
+    description: `More than ${HEALTH.aiErrorRate * 100}% of the HR copilot's AI requests (chat answers and the demand outlook) failed in 24 hours — people asking the copilot get "I could not complete that" instead of an answer (key, quota or provider problems).`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number; errors: number }>(sql`
+        select count(*)::int n, count(*) filter (where status = 'error')::int errors
+        from ai_usage_events
+        where org_id = ${orgId} and agent_run_id is null
+          and feature in ('copilot', 'demand_outlook')
+          and created_at >= now() - interval '24 hours'
+        having count(*) >= ${HEALTH.minAiRequests}`);
+      return r
+        .filter((x) => x.errors / x.n > HEALTH.aiErrorRate)
+        .map((x) => ({
+          agentType: "copilot",
+          title: `${x.errors} of ${x.n} copilot AI requests failed in 24 h`,
+          detail: { requests: x.n, errors: x.errors },
+        }));
+    },
+  },
+  {
     id: "skills.latency",
     element: "skills",
     severity: "warning",
@@ -974,7 +996,11 @@ export const RULES: Rule[] = [
         where c.org_id = ${orgId} and c.purpose = 'screening'
           and c.updated_at >= now() - interval '7 days'`);
       const x = r[0];
-      if (!x || x.total < HEALTH.minCallAnswers7d || x.prompted / x.total < HEALTH.callPromptedShare)
+      if (
+        !x ||
+        x.total < HEALTH.minCallAnswers7d ||
+        x.prompted / x.total < HEALTH.callPromptedShare
+      )
         return [];
       return [
         {

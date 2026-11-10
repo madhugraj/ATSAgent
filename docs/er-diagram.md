@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-100 tables across 9 domains.
+101 tables across 9 domains.
 
 ## Identity & access
 
@@ -970,6 +970,7 @@ erDiagram
     uuid user_id
     text role
     text content
+    jsonb handoff "nullable"
     timestamptz created_at
   }
   skill_nodes {
@@ -1213,6 +1214,8 @@ erDiagram
 | `compensation_requests` | `org_id` | `organizations` | cascade |
 | `content_templates` | `org_id` | `organizations` | cascade |
 | `copilot_messages` | `org_id` | `organizations` | cascade |
+| `demand_outlooks` | `generated_by` | `users` | no action |
+| `demand_outlooks` | `org_id` | `organizations` | cascade |
 | `departments` | `org_id` | `organizations` | cascade |
 | `email_outbox` | `application_id` | `applications` | cascade |
 | `email_outbox` | `org_id` | `organizations` | cascade |
@@ -1408,7 +1411,8 @@ erDiagram
 | `compensation_details` | — | 19 | — |
 | `compensation_requests` | — | 12 | (token) |
 | `content_templates` | Requisitions & job content | 16 | — |
-| `copilot_messages` | Intelligence | 6 | — |
+| `copilot_messages` | Intelligence | 7 | — |
+| `demand_outlooks` | — | 4 | — |
 | `departments` | Organisations & masters | 8 | (orgId+name) |
 | `email_outbox` | Communications & AI settings | 16 | (idempotency_key) |
 | `email_settings` | Communications & AI settings | 11 | (org_id) |

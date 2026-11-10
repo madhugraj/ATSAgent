@@ -15,7 +15,9 @@ import { and, eq, gte, inArray, lte, or } from "drizzle-orm";
 
 import { db } from "../db";
 import { agentEvents, agentPolicies, agentRuns, agentSteps, agentTasks } from "@db/schema";
+import { matchesModality, type ModalityFilter } from "../../lib/agent-modality";
 import { ensureAgentsRegistered } from "./index";
+import { modalityWhere } from "./modality.server";
 import { SUBMISSION_TOOLS, getTool, isGateToolName, listAgents } from "./registry";
 import { CEILING_MESSAGE, LEG_LIMIT_MESSAGE, OLD_LIMIT_MESSAGE } from "./run-messages";
 
@@ -142,14 +144,16 @@ const ACTIVE = new Set(["queued", "running", "awaiting_human"]);
 
 export async function computeHarness(
   orgId: string,
-  win: { from: Date; to: Date; agent: string | null } = {
+  win: { from: Date; to: Date; agent: string | null; modality?: ModalityFilter } = {
     from: new Date(0),
     to: new Date(),
     agent: null,
   },
 ): Promise<Harness> {
   ensureAgentsRegistered();
-  const defs = listAgents().filter((d) => !win.agent || d.type === win.agent);
+  const defs = listAgents().filter(
+    (d) => (!win.agent || d.type === win.agent) && matchesModality(d.type, win.modality),
+  );
   const monthStart = new Date();
   monthStart.setUTCDate(1);
   monthStart.setUTCHours(0, 0, 0, 0);
@@ -159,6 +163,7 @@ export async function computeHarness(
     gte(agentRuns.createdAt, win.from),
     lte(agentRuns.createdAt, win.to),
     ...(win.agent ? [eq(agentRuns.agentType, win.agent as never)] : []),
+    ...modalityWhere(agentRuns.agentType, win.modality),
   );
 
   const [runs, events, policies, toolSteps, delegSteps, approvals, monthTokens] = await Promise.all(
