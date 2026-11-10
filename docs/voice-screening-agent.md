@@ -303,6 +303,23 @@ brief, so a per-answer "thank you" or "noted" on these calls is a low finding.
 - **Why:** before this, the desk had no such command, and a real thread on
   10 November sent "call again" to a waiting job-feed listing as a change
   request.
+- **Going back a step needs a reason** (the organisation's rule). Calling again
+  after a completed screen is going back a step, so the desk asks why and
+  judges the answer (`judgeGoingBack`, through the AI gateway, with the reason
+  passed as untrusted text and the verdict zod-checked).
+  - **Valid:** something went wrong with the call (dropped, misheard, a fault),
+    new information, or the candidate's own request with a reason.
+  - **Not valid:** no reason, the request repeated, or only wanting a different
+    result ("the score is low"). Repeating a step to change its outcome is
+    unfair to the other candidates.
+  - **Audited:** both verdicts, as `desk.go_back_allowed` or
+    `desk.go_back_refused`, with the reason. An allowed call's
+    `screening_call.requested` entry also carries the reason.
+- **Feedback names its request.** When more than one request is waiting, desk
+  feedback goes only to the one it names. Otherwise the desk asks which request
+  it is about and sends nothing.
+- **Not yet built:** other going-back steps — re-score, back to screening,
+  reopen a job description, undo a rejection — would use the same reason check.
 
 A completed call must leave with the earliest joining date, current pay and
 expected pay (Screening call agent 1.3.0): after consent, `end_call` with

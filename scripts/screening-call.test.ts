@@ -31,6 +31,22 @@ mock.module("../src/lib/ai-gateway.server", () => ({
   aiJson: async (opts: { feature: string; system?: string; prompt?: string }) => {
     if (opts.feature === "screening_grade")
       Object.assign(lastGrade, { system: opts.system, prompt: opts.prompt });
+    // The desk's judgement of a reason to go back a step: a dropped call is one.
+    if (opts.feature === "hiring_desk") {
+      const valid = /dropped/i.test(opts.prompt ?? "");
+      return {
+        ok: true,
+        data: {
+          valid,
+          why: valid
+            ? "The last call dropped, so it was not a complete screen."
+            : "Wanting a better score is not a reason to repeat a completed screen.",
+        },
+        model: "m",
+        provider: "google",
+        usage: null,
+      };
+    }
     return opts.feature === "screening_grade"
       ? {
           ok: true,
@@ -1401,19 +1417,51 @@ describe("the hiring desk", () => {
         title: "Platform SRE",
       } as never)
       .returning();
+    const last = async () =>
+      (
+        await db
+          .select({ body: hiringMessages.body })
+          .from(hiringMessages)
+          .where(eq(hiringMessages.conversationId, conv!.id))
+      ).at(-1)?.body;
+    const approved = () =>
+      db
+        .select({ id: screeningCalls.id })
+        .from(screeningCalls)
+        .where(and(eq(screeningCalls.applicationId, appId), eq(screeningCalls.status, "approved")));
+    // Going back a step (a completed screen) needs a reason — asked for, then judged.
     await desk.callCandidateFromDesk(conv as never, userId, {});
-    const said = await db
-      .select({ body: hiringMessages.body })
-      .from(hiringMessages)
-      .where(eq(hiringMessages.conversationId, conv!.id));
-    expect(said.at(-1)?.body).toMatch(/^Arranged an AI screening call with /);
+    expect(await last()).toMatch(/needs a reason — why should .* be called again\?/);
+    await desk.callCandidateFromDesk(conv as never, userId, { reason: "the score is low" });
+    expect(await last()).toMatch(/^I won't repeat .*Wanting a better score/);
+    expect(await approved()).toEqual([]);
+    const refused = await db
+      .select({ detail: auditLog.detail })
+      .from(auditLog)
+      .where(and(eq(auditLog.orgId, orgId), eq(auditLog.action, "desk.go_back_refused")));
+    expect(refused.at(-1)?.detail).toMatchObject({ reason: "the score is low" });
+    // A real reason: arranged, and the reason is on the call's audit entry.
+    await desk.callCandidateFromDesk(conv as never, userId, {
+      reason: "the call dropped halfway through",
+    });
+    expect(await last()).toMatch(
+      /^Arranged an AI screening call with .*Reason accepted: The last call dropped/,
+    );
+    const requested = await db
+      .select({ detail: auditLog.detail })
+      .from(auditLog)
+      .where(and(eq(auditLog.orgId, orgId), eq(auditLog.action, "screening_call.requested")));
+    expect(requested.at(-1)?.detail).toMatchObject({
+      again: true,
+      reason: "the call dropped halfway through",
+    });
     const calls = await db
       .select({ status: screeningCalls.status, requestedBy: screeningCalls.requestedBy })
       .from(screeningCalls)
       .where(and(eq(screeningCalls.applicationId, appId), eq(screeningCalls.status, "approved")));
     expect(calls).toEqual([{ status: "approved", requestedBy: userId }]);
     // Asked again while that call is waiting: said plainly, no second call.
-    await desk.callCandidateFromDesk(conv as never, userId, {});
+    await desk.callCandidateFromDesk(conv as never, userId, { reason: "the call dropped again" });
     const again = await db
       .select({ body: hiringMessages.body })
       .from(hiringMessages)

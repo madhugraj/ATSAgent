@@ -332,6 +332,8 @@ const Command = z.discriminatedUnion("type", [
     type: z.literal("call_candidate"),
     name: z.string().trim().max(120).optional(),
     ranks: z.array(z.number().int().min(1).max(50)).max(1).optional(),
+    /** Why, in their words — needed to repeat a completed call. */
+    reason: z.string().trim().max(500).optional(),
   }),
   z.object({ type: z.literal("new_role") }),
   z.object({ type: z.literal("use_existing"), code: z.string().max(40).optional() }),
@@ -354,6 +356,8 @@ const Command = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("feedback"),
     text: z.string().min(1).max(1000),
+    /** The OPEN REQUEST it is about, by its title — the desk never guesses which. */
+    request: z.string().min(1).max(300).optional(),
     /** A template the person asked for by name ("use the Yavar template"). */
     template: z.string().min(1).max(200).optional(),
   }),
@@ -395,12 +399,12 @@ const SYSTEM = [
   '- JD details (only when the person gives them): responsibilities (their key responsibilities, as text), reportingTo, successMeasures (what success looks like), education. If they ask you to fill these from the market / research / "you decide", set researchRole true.',
   '- "command": {"type":"none"} unless the person asks to act: "talk to / screen / call the first 5" → {"type":"screen","top":5}; "screen 1, 3 and 4" → {"type":"screen","ranks":[1,3,4]}; "create a new role" → {"type":"new_role"}; "use REQ-2026-014" → {"type":"use_existing","code":"REQ-2026-014"}.',
   '- "command" also: "close / cancel / delete / withdraw this role" → {"type":"close_role"}.',
-  '- "call again", "do the screening call again", "redo the AI call", "phone Meera", "call candidate 2" → {"type":"call_candidate"} with "name" when they name the candidate (as they said it) or "ranks":[n] for a rank — never feedback, even when OPEN REQUESTS lists something: the system arranges an AI phone screening call.',
+  '- "call again", "do the screening call again", "redo the AI call", "phone Meera", "call candidate 2" → {"type":"call_candidate"} with "name" when they name the candidate (as they said it) or "ranks":[n] for a rank — never feedback, even when OPEN REQUESTS lists something: the system arranges an AI phone screening call. Add "reason":"<their words>" when they say why. When the desk has just asked why a call should be repeated and they answer, that is the same command with "reason" (and the name from the conversation).',
   '- When the person delegates a detail to you or to the market ("as per market needs", "you decide", "what does the market say?", "pick it up from research") → {"type":"research","fields":[...]} with the fields they delegated: "skills", "experience" and/or "budget". (JD details are not a research command — for those set researchRole true as above.) When OPEN PROPOSAL is yes and they agree ("ok", "yes", "use these", "go ahead") → {"type":"accept"}.',
   '- "show / see / open / read the JD (job description)" → {"type":"show_jd"}; the system posts the full text. Never summarise the JD instead or send the person elsewhere to read it.',
   '- "show / change the interview plan, the rounds, the panel size, what a round rates, or who the hiring manager is" → {"type":"show_interview_plan"}; the system posts the plan, which the person edits right in the card. Never describe or change the plan yourself.',
   '- Templates: whenever the person names or asks about a template ("use the Yavar template", "which template did you use?"), return {"type":"feedback","text":"<their words>","template":"<the name as they said it>"} — even when no request is open. The system checks the templates (by name and by content) and answers. Never state from memory or from earlier messages which templates exist; FACTS lists them.',
-  '- When OPEN REQUESTS lists a request and the person comments on it, objects to it or asks for a change ("give more weight to experience", "budget is too high", "use Pune instead") — or answers an agent\'s question — → {"type":"feedback","text":"<what they want, faithfully, in their words>"}. The system sends it to the agent, which revises and asks again. This includes a job description waiting for approval: "use the X template", "make it shorter", "add a section on Y" are feedback (changes to the JD), not an approval decision; when they name a template add "template":"<the name as they said it>".',
+  '- When OPEN REQUESTS lists a request and the person comments on it, objects to it or asks for a change ("give more weight to experience", "budget is too high", "use Pune instead") — or answers an agent\'s question — → {"type":"feedback","text":"<what they want, faithfully, in their words>","request":"<the title of the OPEN REQUEST it is about, copied exactly>"}. Only when the message is clearly about that request; otherwise use another command or none. The system sends it to the agent, which revises and asks again. This includes a job description waiting for approval: "use the X template", "make it shorter", "add a section on Y" are feedback (changes to the JD), not an approval decision; when they name a template add "template":"<the name as they said it>".',
   '- The reply must never promise an action ("I\'ll benchmark…", "I\'ll check…"): the desk acts only through commands, and the system reports what it did. With a research command the reply can be empty.',
   '- When the LATEST message names 2–3 distinct hiring needs, each with its own role ("I have 3 requirements: Head of AI, Intern, Data Scientist"), the desk runs them in PARALLEL: return needs: [{title, slots}] — one entry per need, its title and the details said for it in slots — and command {"type":"split_needs"}. Each need becomes its own thread with its own questions and its own approvals. Only for genuinely distinct needs in the LATEST message; one role with extra context is not a split. The first need\'s details also go in "slots" as usual.',
   '- "understood": one short line stating what the LATEST message adds or asks, in the person\'s terms ("Three roles named — Head of AI, Intern, Data Scientist; asking which to start with"). Fill it even when no slot could be set yet; leave it empty only when the message truly added nothing.',
@@ -1221,7 +1225,7 @@ async function handleUserMessageInner(
     return;
   }
   if (cmd.type === "feedback") {
-    await sendFeedback(conv, userId, cmd.text, understood, cmd.template);
+    await sendFeedback(conv, userId, cmd.text, understood, cmd.template, cmd.request);
     return;
   }
   if (cmd.type === "accept" && (await latestProposal(conv))) {
@@ -3441,6 +3445,8 @@ export async function sendFeedback(
   text: string,
   understood: { label: string; value: string }[] = [],
   template?: string,
+  /** The open request it is about, by title (the desk's reading of the message). */
+  requestTitle?: string,
 ): Promise<void> {
   // "the Yavar template" → "Yavar", so replies don't read "Yavar template template".
   template =
@@ -3449,8 +3455,25 @@ export async function sendFeedback(
       .replace(/\s+/g, " ")
       .trim() || undefined;
   understood = [...understood, { label: "Your change", value: text }];
-  const requests = await openRequests(conv);
+  const allRequests = await openRequests(conv);
   const asksTemplate = Boolean(template?.trim());
+  // Which request it is about is never guessed: a real thread sent "call again" to a
+  // waiting job-feed listing because it was the first open request.
+  const named = requestTitle?.trim().toLowerCase();
+  const requests =
+    named && !asksTemplate
+      ? allRequests.filter((r) => r.title.trim().toLowerCase() === named)
+      : allRequests;
+  if (!asksTemplate && allRequests.length > 1 && requests.length !== 1) {
+    await postMessage(conv, {
+      role: "desk",
+      body: `Which request is that about — ${allRequests
+        .slice(0, 5)
+        .map((r) => `"${r.title}" (${AGENT_TITLE[r.agentType] ?? r.agentType})`)
+        .join(", ")} — or something else? Nothing was sent yet.`,
+    });
+    return;
+  }
   const target =
     requests.find((r) =>
       // A template request is about the job description: only the JD agent's
@@ -4352,7 +4375,11 @@ export async function announceNewApplicants(orgId?: string): Promise<number> {
 export async function callCandidateFromDesk(
   conv: Conversation,
   userId: string,
-  cmd: { name?: string | undefined; ranks?: number[] | undefined },
+  cmd: {
+    name?: string | undefined;
+    ranks?: number[] | undefined;
+    reason?: string | undefined;
+  },
 ): Promise<void> {
   const say = (body: string) => postMessage(conv, { role: "desk", body });
   if (!conv.requisitionId) {
@@ -4419,6 +4446,62 @@ export async function callCandidateFromDesk(
     return;
   }
   const app = picked[0]!;
+  // Going back a step — a completed screen done again — needs a reason, judged here.
+  const { screeningCalls } = await import("@db/schema");
+  const [last] = await db
+    .select({ status: screeningCalls.status })
+    .from(screeningCalls)
+    .where(
+      and(
+        eq(screeningCalls.orgId, conv.orgId),
+        eq(screeningCalls.applicationId, app.id),
+        eq(screeningCalls.purpose, "screening"),
+      ),
+    )
+    .orderBy(desc(screeningCalls.createdAt))
+    .limit(1);
+  const goingBack = last?.status === "completed";
+  let accepted: { reason: string; why: string } | null = null;
+  if (goingBack) {
+    const reason = cmd.reason?.trim();
+    if (!reason) {
+      await say(
+        `${app.name} has already had a screening call. Repeating a completed step needs a reason — why should ${app.name} be called again? (For example: the call dropped, an answer was misheard, or there is new information.)`,
+      );
+      return;
+    }
+    const verdict = await judgeGoingBack(conv.orgId, {
+      step: `repeat the AI phone screening call with ${app.name}, who has already completed one`,
+      reason,
+    });
+    await writeAudit({
+      actor: `user:${userId}`,
+      actorUserId: userId,
+      orgId: conv.orgId,
+      action: verdict?.valid ? "desk.go_back_allowed" : "desk.go_back_refused",
+      entityType: "application",
+      entityId: app.id,
+      detail: {
+        conversation_id: conv.id,
+        step: "screening_call_again",
+        reason: reason.slice(0, 500),
+        why: verdict?.why ?? "the reason could not be checked",
+      },
+    });
+    if (!verdict) {
+      await say(
+        "I couldn't check that reason just now, so nothing was arranged. Please try again.",
+      );
+      return;
+    }
+    if (!verdict.valid) {
+      await say(
+        `I won't repeat ${app.name}'s screening call for that reason: ${verdict.why} If there is a concrete problem with the last call or new information, tell me what it is.`,
+      );
+      return;
+    }
+    accepted = { reason, why: verdict.why };
+  }
   const { requestScreeningCall } = await import("../voice/request.server");
   try {
     const r = await requestScreeningCall({
@@ -4427,16 +4510,18 @@ export async function callCandidateFromDesk(
       requestedBy: userId,
       requestedRunId: null,
       actor: `user:${userId}`,
-      // They asked for it: a completed screen may be done again (never while one is open).
-      again: true,
+      // A completed screen is done again only for a reason judged valid above.
+      again: goingBack,
+      ...(accepted ? { reason: accepted.reason } : {}),
     });
     const tz = await orgTimeZone(conv.orgId);
     const soon = r.dueAt.getTime() - Date.now() < 2 * 60_000;
+    const because = accepted ? ` Reason accepted: ${accepted.why}` : "";
     await postMessage(conv, {
       role: "desk",
       body: soon
-        ? `Arranged an AI screening call with ${app.name} — it rings in a minute or two.`
-        : `Arranged an AI screening call with ${app.name} — it rings ${localWhen(r.dueAt, tz)}, the next time inside your calling hours.`,
+        ? `Arranged an AI screening call with ${app.name} — it rings in a minute or two.${because}`
+        : `Arranged an AI screening call with ${app.name} — it rings ${localWhen(r.dueAt, tz)}, the next time inside your calling hours.${because}`,
       card: {
         type: "reasoning",
         understood: [{ label: "Call", value: app.name }],
@@ -4449,6 +4534,46 @@ export async function callCandidateFromDesk(
       `I couldn't arrange the call: ${e instanceof Error ? e.message : "it could not be arranged."}`,
     );
   }
+}
+
+/** The desk's judgement of a reason to go back a step (model JSON, zod-checked). */
+const GoingBackVerdict = z.object({
+  valid: z.boolean(),
+  /** One plain sentence, said to the person. */
+  why: z.string().trim().min(1).max(300),
+});
+
+/**
+ * Is there a real reason to go back a step in hiring? The organisation's rule
+ * (10 November): a completed step is repeated only for a strong reason, which
+ * the hiring desk asks for and judges. Valid: something went wrong with the
+ * step (a dropped or cut-off call, answers misheard or wrongly recorded, a
+ * technical fault), new information that changes it, or the candidate's own
+ * request with a reason. Not valid: no reason, the request said again, or only
+ * wanting a different result (a low score) — repeating a step to change its
+ * outcome is unfair to the other candidates. Null when it could not be checked.
+ */
+export async function judgeGoingBack(
+  orgId: string,
+  input: { step: string; reason: string },
+): Promise<z.infer<typeof GoingBackVerdict> | null> {
+  const res = await aiJson({
+    system: [
+      'You check whether a recruiter\'s reason to go back a step in hiring is a real reason. Reply with JSON {"valid": boolean, "why": "one plain sentence to the recruiter"}.',
+      "Valid: something went wrong with the step (the call dropped or was cut off, answers were misheard or recorded wrongly, a technical fault, the candidate could not hear), new information that changes the step, or the candidate's own request with a reason.",
+      'Not valid: no reason; the request repeated ("call again", "just do it"); only wanting a different result ("the score is low", "I think they can do better") — repeating a step to change its outcome is unfair to the other candidates.',
+      "Judge only the reason given; never invent facts about the call. Be brief and neutral; never mention the candidate's protected characteristics.",
+      INJECTION_RULES,
+    ].join("\n"),
+    prompt: [
+      `STEP TO REPEAT: ${input.step}`,
+      `REASON GIVEN: ${untrusted("recruiter_reason", input.reason)}`,
+    ].join("\n"),
+    orgId,
+    feature: "hiring_desk",
+    schema: GoingBackVerdict,
+  });
+  return res.ok ? res.data : null;
 }
 
 async function orgTimeZone(orgId: string): Promise<string> {

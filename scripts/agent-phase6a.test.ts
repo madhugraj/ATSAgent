@@ -1175,6 +1175,44 @@ describe("the person talks to the agents through the desk", () => {
     expect(runId).toBeTruthy();
   });
 
+  test("with two requests waiting, feedback goes only to the one it names (10 November)", async () => {
+    const { conv, runId, taskId } = await threadWithRequest("approval");
+    const [listing] = await db
+      .insert(agentTasks)
+      .values({
+        orgId,
+        runId,
+        kind: "approval",
+        status: "open",
+        title: "List the role on the Jooble job feed",
+        assigneeUserId: recruiter,
+      })
+      .returning();
+    // A real thread sent "call again" to the first waiting request: now it asks.
+    deskScript.push({ command: { type: "feedback", text: "call again" } });
+    await desk.handleUserMessage(conv, recruiter, "call again");
+    expect((await messages(conv.id)).at(-1)!.body).toMatch(
+      /^Which request is that about — .*Jooble.* — or something else\? Nothing was sent yet\./,
+    );
+    for (const id of [taskId, listing!.id]) {
+      const [t] = await db.select().from(agentTasks).where(eq(agentTasks.id, id));
+      expect(t!.status).toBe("open");
+    }
+    // Named: only that one is sent back.
+    deskScript.push({
+      command: {
+        type: "feedback",
+        text: "more weight for experience",
+        request: "Save candidate-scoring weights",
+      },
+    });
+    await desk.handleUserMessage(await reload(conv.id), recruiter, "more weight for experience");
+    const [w] = await db.select().from(agentTasks).where(eq(agentTasks.id, taskId));
+    const [j] = await db.select().from(agentTasks).where(eq(agentTasks.id, listing!.id));
+    expect(w!.status).toBe("rejected");
+    expect(j!.status).toBe("open");
+  });
+
   test("an agent's question can be answered in chat", async () => {
     const { conv, taskId } = await threadWithRequest("clarification");
     deskScript.push({ command: { type: "feedback", text: "Yes, remote is fine" } });

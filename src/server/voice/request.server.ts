@@ -148,6 +148,8 @@ export async function requestScreeningCall(input: {
   now?: number;
   /** A person asked to call them again after a completed screen (audited as such). */
   again?: boolean;
+  /** Why, when it is done again (the reason the hiring desk accepted). */
+  reason?: string;
 }): Promise<{ callId: string; dueAt: Date }> {
   const check = await checkScreeningCall(input.orgId, input.applicationId, {
     again: input.again === true && input.requestedRunId === null,
@@ -196,6 +198,7 @@ export async function requestScreeningCall(input: {
       applicationId: check.app.id,
       dueAt: dueAt.toISOString(),
       ...(input.again ? { again: true } : {}),
+      ...(input.reason ? { reason: input.reason.slice(0, 500) } : {}),
     },
   });
   return { callId: row!.id, dueAt };
