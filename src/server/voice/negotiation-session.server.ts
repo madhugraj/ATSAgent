@@ -40,6 +40,7 @@ import {
 import { disclosureMissing } from "./call-tools";
 import { loadNegotiationBrief, type NegotiationBrief } from "./negotiation-brief.server";
 import { CallStatsTracker } from "./call-stats";
+import { voiceDebug } from "./debug";
 import { GREETING_WAIT_MS, greetingCue, ReadyGreeting } from "./greeting";
 import { TURN_TIMING, TurnKeeper } from "./turns";
 import { Vad } from "./vad";
@@ -196,6 +197,8 @@ async function place(
   let lastHeardAt: number | null = null;
   /** When the line's voice detection last heard the candidate (not the transcript). */
   let lineHeardAt: number | null = null;
+  /** When the line last heard them after the greeting finished — their reply to it. */
+  let answerHeardAt: number | null = null;
   // The assistant's own lines: the go-ahead counts only after the disclosure.
   let aiSaid = "";
   // Turn-taking on the line, kept on the call for the Voice Guard (no words).
@@ -362,6 +365,7 @@ async function place(
   const vad = new Vad();
   line.onAudio((pcm) => {
     const heard = vad.process(pcm);
+    if (heard) voiceDebug({ kind: "caller", vad: heard });
     stats.caller(heard);
     keeper?.caller(heard, vad.isActive());
     if (heard === "start") candidateSpoke = true;
@@ -373,6 +377,8 @@ async function place(
     // Their hello ended: the greeting plays; the hello itself never reaches the model.
     if (heard === "end") greeting.release("hello");
     if (!greeting.isReleased) return;
+    if (greeting.played && vad.isActive() && line.pendingSeconds() === 0)
+      answerHeardAt = Date.now();
     // While the assistant is playing, upstream gets only real speech — noise and
     // echo read as an interruption and cut the assistant off mid-word.
     if (line.pendingSeconds() > 0 && !vad.isActive()) return;
@@ -382,11 +388,14 @@ async function place(
   const stopOpening = openingWatch({
     session,
     // The line's voice detection only — the hello's late transcript restarted the wait.
-    lastHeard: () => lineHeardAt,
-    aiSpoke: () => aiSpoke,
+    // After the greeting, the watch is on their reply to it (a test call waited 10 s).
+    lastHeard: () => (greeting.played ? answerHeardAt : lineHeardAt),
+    aiSpoke: () => (greeting.played ? greeting.repliedSince : aiSpoke),
     callerFirstMs: limits.callerFirstMs,
     replyNudgeMs: NEGOTIATION_REPLY_CUE_MS,
-    wait: () => !greeting.isReleased || greeting.preparing(),
+    // Nothing while the greeting is held or prepared; after it, nothing until they reply.
+    wait: () =>
+      !greeting.isReleased || greeting.preparing() || (greeting.played && answerHeardAt === null),
     tag: "negotiation_call",
     callId: call.id,
   });

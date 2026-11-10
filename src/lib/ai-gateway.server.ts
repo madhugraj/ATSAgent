@@ -1891,7 +1891,11 @@ export async function openVoiceSession(opts: {
       send({
         realtimeInput: { audio: { data: pcm16ToBase64(pcm), mimeType: "audio/pcm;rate=16000" } },
       }),
-    sendText: (text) => send({ realtimeInput: { text } }),
+    sendText: (text) => {
+      // Timing only — never the words (VOICE_DEBUG_FILE).
+      voiceDebug({ kind: "client_text", chars: text.length });
+      send({ realtimeInput: { text } });
+    },
     close: async () => {
       closedBy = "client";
       ws.close(1000);
@@ -1923,6 +1927,7 @@ export async function openVoiceSession(opts: {
         return;
       }
       if (msg.setupComplete !== undefined && !isReady) {
+        voiceDebug({ kind: "setup_complete" });
         isReady = true;
         opts.ready(session);
       }
@@ -1930,6 +1935,8 @@ export async function openVoiceSession(opts: {
       const sc = msg.serverContent;
       if (sc) {
         if (sc.inputTranscription?.text) {
+          // When the model first heard this utterance of the caller's (timing only).
+          if (!heard) voiceDebug({ kind: "heard_text" });
           if (!heard) heardSince = Date.now();
           heard += sc.inputTranscription.text;
         }
