@@ -32,8 +32,8 @@
     "hash": "177d0ba26269ffad05e895b243c1dc03ab8196fe330a6865af840f54e6484732"
   },
   "negotiation_call": {
-    "version": "0.8.2",
-    "hash": "5baada243d0be7facafd94c9d7e150aa37b27a832b5b33f3add2323eea27fd17"
+    "version": "0.8.3",
+    "hash": "f5b3b1cc3042cb4b90a630e7c9630f04d426570674b8bb4153d64c42ebd9d618"
   },
   "offer": {
     "version": "1.6.4",
@@ -68,16 +68,16 @@
     "hash": "60d8f7898fcc4192f6bb0900bbe732269455399dae50bcdfa663e3b523c5e657"
   },
   "scheduling_call": {
-    "version": "1.8.2",
-    "hash": "e814f49f55af62f031ff9f529e149ed2309dfb1eb1c25d3fb878cce543a1da6c"
+    "version": "1.8.3",
+    "hash": "2618ca9d0f054a6d4139a0dde9017becd742a2ce635c1fcfd2a54a2914ba1104"
   },
   "screening": {
     "version": "1.11.0",
     "hash": "15cfc3682026b5429282abf1aaa21071c77dcdccd6af59d3814212307224a89d"
   },
   "screening_call": {
-    "version": "1.6.2",
-    "hash": "b058df60c5bca8225a9c6c823990735f60f04d8870fa994fdabc3ad7ea3ba6bb"
+    "version": "1.7.0",
+    "hash": "a7917d89958ee4f63accd679c43ddc8a9bbc2f243d450df3a81e85560fdacb08"
   },
   "sourcing": {
     "version": "1.0.5",

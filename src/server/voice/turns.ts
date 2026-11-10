@@ -55,9 +55,11 @@ export const TURN_TIMING = {
   /**
    * The candidate has been answering this long (from their first word since the
    * assistant last spoke): at their next pause it is told to move on. A test call
-   * on 10 November let answers run on while it kept listening.
+   * on 10 November let answers run on while it kept listening. 60 s, not 90: the
+   * candidate is asked for about a minute, and every second of an answer is read
+   * again by the voice model on each later turn of the call.
    */
-  longAnswerMs: 90_000,
+  longAnswerMs: 60_000,
 };
 
 const CUE_TEXT: Record<CueReason, string> = {

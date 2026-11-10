@@ -414,18 +414,21 @@ describe("the call brief", () => {
       "You are Saranya, an AI recruiting assistant with Yavar's talent acquisition team",
     );
     expect(p).toContain("Let them speak first");
-    expect(p).toContain('Then your first words: "Hello, am I speaking with Meera?"');
+    expect(p).toContain('Then: "Hello, am I speaking with Meera?"');
     // The source is never mentioned (the organisation's rule, 10 November).
     expect(p).toContain("I'm calling about our Platform SRE role, for a short first conversation");
     expect(p).not.toContain("Naukri");
     expect(p).not.toContain("20 October");
-    expect(p).toContain(checks.SOURCE_RULE);
+    expect(p.toLowerCase()).toContain(checks.SOURCE_RULE);
     expect(p).toContain("written assessment by e-mail, or a call from a person");
     expect(p).toContain("Keep the payments platform reliable as it grows.");
     expect(p).toContain("What their CV mentions that the role works with: Kubernetes, Go");
     expect(p).toContain("never say they are a fit, a good or great fit");
+    // 1.7.0: answers kept to about a minute; a follow-up only for a short answer.
+    expect(p).toContain("about a minute each, please");
+    expect(p).toContain("never after a full answer");
     expect(p).toMatch(
-      /Practical details, before anything technical[\s\S]*The four required details[\s\S]*a\. their notice period;[\s\S]*b\. the date they could join[\s\S]*c\. their current CTC per year[\s\S]*d\. their expected CTC per year\./,
+      /Now a few practical details[\s\S]*Then one question each, each once:[\s\S]*a\. their notice period;[\s\S]*b\. "Which date could you join\?"[\s\S]*c\. their current CTC per year[\s\S]*d\. their expected CTC per year\./,
     );
     // Each required detail is its own question (a real call stacked the paired items).
     expect(p).toContain("their current job title and company (their CV says Acme");
@@ -440,8 +443,8 @@ describe("the call brief", () => {
     expect(p).toContain("do not answer from general knowledge");
     expect(p).toContain('not "great", "good", "impressive", "very comprehensive"');
     expect(p).toContain('Pay is always asked afresh ("so our notes are up to date")');
-    expect(p).toContain("Whenever they mention a detail at any point in the call");
-    expect(p).toContain("Discuss, judge or negotiate pay");
+    expect(p).toContain("Whenever they mention or correct a detail at any point in the call");
+    expect(p).toContain("Discuss pay, the role's budget or band, or any offer.");
     expect(p).toContain("within two working days");
   });
 

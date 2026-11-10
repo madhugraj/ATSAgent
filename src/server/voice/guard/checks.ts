@@ -503,7 +503,12 @@ const SAYS_SOURCE =
 
 /** It said how the profile came to us, on a call whose brief told it not to (by the system). */
 function sourceCheck(i: GuardInput, out: CodeResult): void {
-  if (i.scope !== "full" || i.purpose !== "screening" || !i.brief?.includes(SOURCE_RULE)) return;
+  if (
+    i.scope !== "full" ||
+    i.purpose !== "screening" ||
+    !i.brief?.toLowerCase().includes(SOURCE_RULE)
+  )
+    return;
   const turn = i.transcript.findIndex((t) => t.who === "ai" && SAYS_SOURCE.test(t.text));
   if (turn >= 0)
     out.findings.push(
