@@ -126,8 +126,8 @@ const CAPABILITIES = [
   },
   {
     icon: MessageSquare,
-    title: "Embedded HR copilot",
-    body: "An assistant grounded in your own live data and the product manual, so the team can configure and operate the system without a services engagement.",
+    title: "Aditi, the embedded HR copilot",
+    body: "An AI assistant grounded in your own live data and the product manual, so the team can configure and operate the system without a services engagement.",
   },
   {
     icon: CircleDollarSign,

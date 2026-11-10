@@ -358,18 +358,18 @@ export const MANUAL_SECTIONS: ManualSection[] = [
   },
   {
     id: "copilot",
-    title: "17. HR copilot",
+    title: "17. Aditi, the HR copilot",
     summary:
       "An embedded assistant that looks up your live data within what your role can see, and knows this manual.",
     steps: [
-      "Open the copilot from any page and ask about requisition status and approvals (who it is waiting on and for how long), your pipeline, the role ontology and emerging roles, whether your talent pool has enough people for your open roles, which roles are likely to be in demand next, or how to perform any task in the platform.",
+      "Aditi is the AI copilot. Open it from any page with Ask Aditi (bottom right; the sun icon) and ask about requisition status and approvals (who it is waiting on and for how long), your pipeline, the role ontology and emerging roles, whether your talent pool has enough people for your open roles, which roles are likely to be in demand next, or how to perform any task in the platform.",
       "It answers only from your organisation's data and this manual — it never invents candidates or numbers.",
       "Answers follow your role. Recruiters see every requisition and the pipeline but no pay or budget figures. Hiring managers and department heads see the roles they raised or manage, approvals waiting at their stage and those roles' budgets. HR heads, the CBO and the owner see everything, including offer pay, department budgets and governance (audit log, agent health, AI usage this month).",
       "Answers are short: a one-line answer, then a few bullets or a small table, with links to the page to use. Ask for more detail when you want it. It names a cause only when your data shows it; otherwise it says the cause is unknown and where to look.",
       "\"Do we have enough people?\" uses pool coverage: for each open role, how many people in the pool cover 80% of its must-haves per opening (green 3 or more, amber 1–3, red under 1), how many are internal, how fresh their profiles are, and the skills almost nobody has. The same view is on Talent pool (/candidates), above the table.",
       "\"Which roles will be in demand?\" uses the demand outlook: your own requisitions per role over the last eight quarters (the last two against the two before), a market outlook from live research, emerging roles and pool coverage — each role with its evidence and a confidence. With under four quarters of history it says the read is low-confidence. It is rebuilt weekly; HR heads, the CBO and the owner can refresh it on Talent pool, and anyone can mark a role useful or not.",
-      "When you ask for something to be done (open a requisition, shortlist people), the copilot proposes it with a \"Hand to the agents\" button. Nothing starts until you click it; the agent Copilot then takes it from there under your name.",
-      "The copilot uses the organisation's selected AI provider and encrypted organisation-owned key. If no key is configured, it stops and asks an authorised owner or HR head to configure one.",
+      "When you ask for something to be done (open a requisition, shortlist people), Aditi proposes it with a \"Hand to the agents\" button. Nothing starts until you click it; the agent Copilot then takes it from there under your name.",
+      "Aditi uses the organisation's selected AI provider and encrypted organisation-owned key. If no key is configured, it stops and asks an authorised owner or HR head to configure one.",
       "The conversation is stored per user and can be cleared at any time.",
     ],
   },
