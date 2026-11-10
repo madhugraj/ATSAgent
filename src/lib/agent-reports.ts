@@ -15,6 +15,7 @@ import type { AgentIntelligence } from "@/lib/agent-intelligence.functions";
 import type { ActivityReport, Harness } from "@/lib/agent-governance.functions";
 import type { TalentBrain } from "@/lib/ontology.functions";
 import type { OrgOntology } from "@/lib/org-ontology.functions";
+import { modalityLabel } from "@/lib/agent-modality";
 import { windowLabel } from "@/lib/report-window";
 
 type Cell = string | number;
@@ -69,10 +70,14 @@ function fixSection(fixes: FixRow[]): Section {
   };
 }
 
+function agentScope(w: Window): string {
+  return w.agent ? nice(w.agent) : (modalityLabel(w.modality) ?? "All agents");
+}
+
 function windowRows(w: Window): [string, Cell][] {
   return [
     ["Period", windowLabel(w.from, w.to)],
-    ["Agent", w.agent ? nice(w.agent) : "All agents"],
+    ["Agent", agentScope(w)],
     ["Generated", new Date().toUTCString()],
   ];
 }
@@ -95,7 +100,7 @@ function toPdf(r: Report) {
     pdfText(
       r.agents === false
         ? windowLabel(r.window.from, r.window.to)
-        : `${windowLabel(r.window.from, r.window.to)} · ${r.window.agent ? nice(r.window.agent) : "All agents"}`,
+        : `${windowLabel(r.window.from, r.window.to)} · ${agentScope(r.window)}`,
     ),
     margin,
     58,

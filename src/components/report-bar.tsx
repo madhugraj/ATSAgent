@@ -7,10 +7,16 @@ import { useState } from "react";
 import { Download, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { MODALITY_OPTIONS, matchesModality, type ModalityFilter } from "@/lib/agent-modality";
 import { PERIODS, periodBounds, windowLabel, type PeriodKey } from "@/lib/report-window";
 
 export type ReportKind = "pdf" | "xlsx";
-export type Window = { from: string; to: string; agent: string | null };
+export type Window = {
+  from: string;
+  to: string;
+  agent: string | null;
+  modality?: ModalityFilter;
+};
 
 export function useReportWindow({ withAgent }: { withAgent: boolean }) {
   const [period, setPeriodKey] = useState<PeriodKey>("30d");
@@ -22,6 +28,7 @@ export function useReportWindow({ withAgent }: { withAgent: boolean }) {
   // bounds are frozen when the period changes, so the query key is stable between renders
   const [bounds, setBounds] = useState(() => periodBounds("30d"));
   const [agent, setAgent] = useState<string | null>(null);
+  const [modality, setModality] = useState<ModalityFilter>("all");
   const setPeriod = (k: PeriodKey) => {
     setPeriodKey(k);
     setBounds(periodBounds(k, custom));
@@ -30,7 +37,11 @@ export function useReportWindow({ withAgent }: { withAgent: boolean }) {
     setCustom(c);
     if (c.from && c.to && c.from <= c.to) setBounds(periodBounds("custom", c));
   };
-  const window: Window = { ...bounds, agent: withAgent ? agent : null };
+  const window: Window = {
+    ...bounds,
+    agent: withAgent ? agent : null,
+    modality: withAgent ? modality : "all",
+  };
   return {
     period,
     setPeriod,
@@ -38,6 +49,11 @@ export function useReportWindow({ withAgent }: { withAgent: boolean }) {
     setCustomDates,
     agent,
     setAgent,
+    modality,
+    setModality: (m: ModalityFilter) => {
+      setModality(m);
+      setAgent(null);
+    },
     withAgent,
     window,
     label: windowLabel(bounds.from, bounds.to),
@@ -104,6 +120,7 @@ export function ReportBar({
           />
         </span>
       )}
+      {rw.withAgent && <ModalityToggle value={rw.modality} onChange={rw.setModality} />}
       {rw.withAgent && (
         <select
           aria-label="Agent"
@@ -112,11 +129,13 @@ export function ReportBar({
           onChange={(e) => rw.setAgent(e.target.value || null)}
         >
           <option value="">All agents</option>
-          {agents.map((a) => (
-            <option key={a} value={a}>
-              {nice(a)}
-            </option>
-          ))}
+          {agents
+            .filter((a) => matchesModality(a, rw.modality))
+            .map((a) => (
+              <option key={a} value={a}>
+                {nice(a)}
+              </option>
+            ))}
         </select>
       )}
       <Button
@@ -145,6 +164,40 @@ export function ReportBar({
         )}
         Excel
       </Button>
+    </div>
+  );
+}
+
+/** Voice / Text / All segmented toggle for the agent pages. */
+export function ModalityToggle({
+  value,
+  onChange,
+}: {
+  value: ModalityFilter;
+  onChange: (m: ModalityFilter) => void;
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Agent type"
+      className="inline-flex h-8 items-center rounded-md border border-border bg-card p-0.5 text-[13px]"
+    >
+      {MODALITY_OPTIONS.map((o) => (
+        <button
+          key={o.key}
+          type="button"
+          role="radio"
+          aria-checked={value === o.key}
+          onClick={() => onChange(o.key)}
+          className={
+            value === o.key
+              ? "h-full rounded px-2.5 bg-primary text-primary-foreground"
+              : "h-full rounded px-2.5 text-muted-foreground hover:text-foreground"
+          }
+        >
+          {o.label}
+        </button>
+      ))}
     </div>
   );
 }

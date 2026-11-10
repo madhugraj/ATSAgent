@@ -21,7 +21,9 @@ import {
   stageEvents,
 } from "@db/schema";
 import { assertRole, requireOrg } from "./auth.middleware";
+import { matchesModality, type ModalityFilter } from "./agent-modality";
 import { reportWindowSchema, resolveWindow } from "./report-window";
+import { modalityWhere } from "../server/agents/modality.server";
 
 const GOVERNANCE_ROLES = ["hr_head", "president_cbo"] as const;
 
@@ -109,7 +111,7 @@ export type RejectRow = {
 
 export type AgentIntelligence = {
   generatedAt: string;
-  window: { from: string; to: string; agent: string | null };
+  window: { from: string; to: string; agent: string | null; modality: ModalityFilter };
   views: {
     behavior: {
       tiles: [string, string, string][];
@@ -149,6 +151,7 @@ export const agentIntelligence = createServerFn({ method: "POST" })
       gte(agentRuns.createdAt, win.from),
       lte(agentRuns.createdAt, win.to),
       ...(win.agent ? [eq(agentRuns.agentType, win.agent as never)] : []),
+      ...modalityWhere(agentRuns.agentType, win.modality),
     );
 
     const [
@@ -312,7 +315,7 @@ export const agentIntelligence = createServerFn({ method: "POST" })
         defVersions.set(r.agentType, r.version);
     }
     const registered = [...new Set(definitions.map((d) => d.agentType))]
-      .filter((a) => !win.agent || a === win.agent)
+      .filter((a) => (!win.agent || a === win.agent) && matchesModality(a, win.modality))
       .sort();
     const taskStatus = { cancelled: 0, answered: 0, open: 0 };
     for (const r of taskTotals)
@@ -698,7 +701,12 @@ export const agentIntelligence = createServerFn({ method: "POST" })
 
     return {
       generatedAt: new Date().toISOString(),
-      window: { from: win.from.toISOString(), to: win.to.toISOString(), agent: win.agent },
+      window: {
+        from: win.from.toISOString(),
+        to: win.to.toISOString(),
+        agent: win.agent,
+        modality: win.modality,
+      },
       views: {
         behavior: {
           tiles: [

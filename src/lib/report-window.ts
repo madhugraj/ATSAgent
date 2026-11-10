@@ -1,18 +1,27 @@
 /**
  * The reporting window shared by Agent intelligence, Agent governance and
- * Skill ontology: a period (from/to, inclusive) and an optional agent. One
+ * Skill ontology: a period (from/to, inclusive), an optional agent and a
+ * voice/text filter. One
  * window drives both what the page shows and what its downloadable report
  * contains, so the two always agree.
  */
 import { z } from "zod";
 
+import { modalityFilterSchema, type ModalityFilter } from "./agent-modality";
+
 export const reportWindowSchema = z.object({
   from: z.string().datetime().optional(),
   to: z.string().datetime().optional(),
   agent: z.string().min(1).max(64).nullable().optional(),
+  modality: modalityFilterSchema.optional(),
 });
 export type ReportWindowInput = z.infer<typeof reportWindowSchema>;
-export type ReportWindow = { from: Date; to: Date; agent: string | null };
+export type ReportWindow = {
+  from: Date;
+  to: Date;
+  agent: string | null;
+  modality: ModalityFilter;
+};
 
 export const DEFAULT_DAYS = 30;
 
@@ -20,7 +29,7 @@ export const DEFAULT_DAYS = 30;
 export function resolveWindow(input: ReportWindowInput | undefined): ReportWindow {
   const to = input?.to ? new Date(input.to) : new Date();
   const from = input?.from ? new Date(input.from) : new Date(to.getTime() - DEFAULT_DAYS * 864e5);
-  return { from, to, agent: input?.agent ?? null };
+  return { from, to, agent: input?.agent ?? null, modality: input?.modality ?? "all" };
 }
 
 export type PeriodKey = "7d" | "30d" | "90d" | "month" | "all" | "custom";

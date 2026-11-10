@@ -38,7 +38,7 @@ function GovernancePage() {
   });
   // the agent list stays complete while one agent is selected
   const allAgents = useRef<string[]>([]);
-  if (q.data && !q.data.window.agent)
+  if (q.data && !q.data.window.agent && q.data.window.modality === "all")
     allAgents.current = q.data.harness.agents.map((a) => a.agent).sort();
 
   return (
