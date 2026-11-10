@@ -1168,7 +1168,7 @@ describe("a whole call with a fake line", () => {
     expect((await endedEvents(appId))[0]!.payload).toMatchObject({ status: "completed" });
   });
 
-  test("while the assistant is playing, only speech goes upstream (VAD gate)", async () => {
+  test("while the assistant is playing, its echo is held and a real interruption passes whole", async () => {
     const { callId } = await seedCall();
     const seen: { opts?: VoiceOpts; results: unknown[]; sent?: number[] } = {
       results: [],
@@ -1186,11 +1186,16 @@ describe("a whole call with a fake line", () => {
     const quiet = new Int16Array(160); // a 20 ms frame of line silence
     for (let i = 0; i < 10; i++) line.deliver(quiet);
     expect(seen.sent).toEqual([]);
+    // 1.9.2: our line decides the turns (turn-detector.ts). While the assistant is
+    // playing, 200 ms of speech is held — it may be the line echoing it back.
     const loud = new Int16Array(160).fill(2000); // the caller starts talking
     for (let i = 0; i < 10; i++) line.deliver(loud);
-    // Two frames warm the VAD up (60 ms of speech to open a segment); speech then
-    // passes upstream, resampled 8 → 16 kHz (doubled).
-    expect(seen.sent).toEqual([320, 320, 320, 320, 320, 320, 320, 320]);
+    expect(seen.sent).toEqual([]);
+    // Sustained, clearly louder speech is them cutting in: passed on whole — the held
+    // start and the 140 ms before it — resampled 8 → 16 kHz (doubled).
+    for (let i = 0; i < 30; i++) line.deliver(loud);
+    expect(seen.sent!.length).toBe(7 + 40);
+    expect(new Set(seen.sent)).toEqual(new Set([320]));
     line.candidateHangsUp();
     await done;
   });

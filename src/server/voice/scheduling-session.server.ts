@@ -38,10 +38,11 @@ import { dialNumber } from "./phone";
 import { Resampler } from "./resample";
 import { CallStatsTracker } from "./call-stats";
 import { voiceDebug } from "./debug";
+import { ECHO_TAIL_MS, TurnDetector } from "./turn-detector";
 import { readsOutWorkings, WORKINGS_CORRECTION } from "./spoken-guard";
 import { GREETING_WAIT_MS, greetingCue, ReadyGreeting } from "./greeting";
-import { TurnKeeper } from "./turns";
-import { Vad } from "./vad";
+import { TURN_TIMING, TurnKeeper } from "./turns";
+import { rms, Vad } from "./vad";
 import { localNow, retryAt } from "./schedule";
 import {
   applySchedulingTool,
@@ -70,6 +71,8 @@ export const SCHEDULING_REPLY_CUE_MS = OPENING_REPLY_CUE_MS;
 
 /** Turn-taking for a scheduling call: end of speech after half a second, high sensitivity. */
 export const SCHEDULING_TURN_TAKING = {
+  // Our line decides the turns (turn-detector.ts); the rest is kept for the record.
+  manual: true,
   silenceMs: 500,
   endOfSpeech: "high" as const,
   prefixPaddingMs: 300,
@@ -304,6 +307,8 @@ async function place(
     onCue: (reason) => log.warn("scheduling_call.cue", { call_id: call.id, reason }),
     recordTools: new Set(["record_availability", "record_permission"]),
     endTools: new Set(["end_scheduling_call"]),
+    // Manual turns: the model always gets the end of their words, so no early cue.
+    timing: { unheardMs: TURN_TIMING.replyMs },
   });
   await setCall(call.id, orgId, { phoneLast4: number.last4 });
   // Ready while it rings: played the moment their hello ends.
@@ -333,11 +338,24 @@ async function place(
   });
   // The caller's line through a debounced VAD (see call-session.server.ts).
   const vad = new Vad();
+  let assistantUntil = 0;
+  const detector = new TurnDetector({
+    start: () => {
+      session.activityStart?.();
+      keeper?.caller("start", true);
+    },
+    audio: (p) => session.sendAudio(up.process(p)),
+    end: () => {
+      session.activityEnd?.();
+      keeper?.caller("end", false);
+    },
+    // They cut in: the rest of the assistant's line is dropped.
+    bargeIn: () => line.clear(),
+  });
   line.onAudio((pcm) => {
     const heard = vad.process(pcm);
     if (heard) voiceDebug({ kind: "caller", vad: heard });
     stats.caller(heard);
-    keeper?.caller(heard, vad.isActive());
     if (heard === "start") candidateSpoke = true;
     if (vad.isActive()) {
       lineHeardAt = Date.now();
@@ -349,10 +367,11 @@ async function place(
     if (!greeting.isReleased) return;
     if (greeting.played && vad.isActive() && line.pendingSeconds() === 0)
       answerHeardAt = Date.now();
-    // While the assistant is playing, upstream gets only real speech — noise and
-    // echo read as an interruption and cut the assistant off mid-word.
-    if (line.pendingSeconds() > 0 && !vad.isActive()) return;
-    session.sendAudio(up.process(pcm));
+    // Our line decides the turns (src/server/voice/turn-detector.ts): the model gets
+    // each utterance marked start and end, and echo of its own voice never cuts it off.
+    const playing = line.pendingSeconds() > 0;
+    if (playing) assistantUntil = Date.now() + ECHO_TAIL_MS;
+    detector.frame(pcm, rms(pcm), playing || Date.now() < assistantUntil);
   });
   lastActivity = now();
   // They speak first; the assistant answers (or greets them if they stay quiet).
@@ -365,7 +384,9 @@ async function place(
     callerFirstMs: limits.callerFirstMs,
     // Real calls: the model often did not answer a plain "hello" on its own —
     // cue it soon after they stop (its own turn-taking ends a turn after 0.5 s).
-    replyNudgeMs: SCHEDULING_REPLY_CUE_MS,
+    // Manual turns: the end of their reply makes the model answer — no cue unless
+    // the greeting never played.
+    replyNudgeMs: () => (greeting.played ? 60_000 : SCHEDULING_REPLY_CUE_MS),
     // Nothing while the greeting is held or prepared; after it, nothing until they reply.
     wait: () =>
       !greeting.isReleased || greeting.preparing() || (greeting.played && answerHeardAt === null),
