@@ -429,6 +429,8 @@ async function placeCall(
   let lastHeardAt: number | null = null;
   /** When the line's voice detection last heard the candidate (not the transcript). */
   let lineHeardAt: number | null = null;
+  /** When the line last heard them after the greeting finished — their reply to it. */
+  let answerHeardAt: number | null = null;
   // Transcript lines so far, and how many there were when the practical
   // details were last recorded: grading reads only what came after.
   let turns = 0;
@@ -579,6 +581,7 @@ async function placeCall(
   line.onAudio((pcm) => {
     // The candidate talking counts as activity even before a transcript line arrives.
     const heard = vad.process(pcm);
+    if (heard) voiceDebug({ kind: "caller", vad: heard });
     stats.caller(heard);
     keeper?.caller(heard, vad.isActive());
     if (heard === "start") candidateSpoke = true;
@@ -591,6 +594,8 @@ async function placeCall(
     // which already said its first words — so it does not greet them twice.
     if (heard === "end") greeting.release("hello");
     if (!greeting.isReleased) return;
+    if (greeting.played && vad.isActive() && line.pendingSeconds() === 0)
+      answerHeardAt = Date.now();
     // While the assistant's audio is queued or playing, pass upstream only what
     // the VAD calls speech: a loud speakerphone carried the assistant's own voice
     // back up the line, the model read it as an interruption and cut itself off
@@ -603,14 +608,17 @@ async function placeCall(
   const stopOpening = openingWatch({
     session,
     // The line's voice detection only — the hello's late transcript restarted the wait.
-    lastHeard: () => lineHeardAt,
-    aiSpoke: () => aiSpoke,
+    // After the greeting, the watch is on their reply to it (a test call waited 10 s).
+    lastHeard: () => (greeting.played ? answerHeardAt : lineHeardAt),
+    aiSpoke: () => (greeting.played ? greeting.repliedSince : aiSpoke),
     callerFirstMs: limits.callerFirstMs,
     // As the scheduling and negotiation calls: two real calls on 2 November waited the
     // default 4 s after the hello, the candidate said "Hello? Hello?" over the late
     // greeting, and that cut it off.
     replyNudgeMs: SCREENING_REPLY_CUE_MS,
-    wait: () => !greeting.isReleased || greeting.preparing(),
+    // Nothing while the greeting is held or prepared; after it, nothing until they reply.
+    wait: () =>
+      !greeting.isReleased || greeting.preparing() || (greeting.played && answerHeardAt === null),
     tag: "screening_call",
     callId: call.id,
   });

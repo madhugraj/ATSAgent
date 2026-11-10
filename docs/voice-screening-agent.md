@@ -214,6 +214,15 @@ negotiation 0.8.4; `src/server/voice/greeting.ts`).
   prepared (up to 8 s).
 - **Tracing:** `VOICE_DEBUG_FILE` now traces the greeting (asked, ready, played)
   and each opening cue.
+- **The reply to the greeting is watched too** (screening 1.8.2, scheduling 1.8.5,
+  negotiation 0.8.5). Once the greeting has played, the opening cue waits for
+  the candidate's reply and cues the assistant 0.5 s after they stop. A test call
+  had played the greeting at once, then waited 10 s to answer "yes, speaking".
+- **More tracing, timing only:** the trace also records:
+  - the candidate's speech starting and stopping on the line (`caller`);
+  - when the voice model first transcribed each of their utterances
+    (`heard_text`);
+  - every text sent to the model (`client_text`).
 
 A completed call must leave with the earliest joining date, current pay and
 expected pay (Screening call agent 1.3.0): after consent, `end_call` with

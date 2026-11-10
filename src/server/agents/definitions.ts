@@ -106,7 +106,11 @@ export function registerPhase1Agents(): void {
     // candidate's hello ends (src/server/voice/greeting.ts); the hello itself is not
     // passed to the model, and the opening cue holds off while the greeting is pending.
     // Test calls on 10 November first spoke 12–14 s after pickup and were hung up on.
-    version: "1.8.1",
+    // 1.8.2: after the greeting the opening cue watches their reply to it (a cue 0.5 s after
+    // they stop, as on the quick calls) — a test call played the greeting at once, then
+    // waited 10 s to answer "yes, speaking". The trace now records caller speech, the
+    // model's first transcript of each caller utterance and every text sent (timing only).
+    version: "1.8.2",
     owner: "hr_head",
     responsibility:
       "Turns a hiring need into a complete, evidence-backed draft requisition and walks it through the DH → HR → CBO approval chain.",
@@ -780,7 +784,11 @@ export function registerPhase3Agents(): void {
     // candidate's hello ends (src/server/voice/greeting.ts); the hello itself is not
     // passed to the model, and the opening cue holds off while the greeting is pending.
     // Test calls on 10 November first spoke 12–14 s after pickup and were hung up on.
-    version: "1.8.4",
+    // 1.8.5: after the greeting the opening cue watches their reply to it (a cue 0.5 s after
+    // they stop, as on the quick calls) — a test call played the greeting at once, then
+    // waited 10 s to answer "yes, speaking". The trace now records caller speech, the
+    // model's first transcript of each caller utterance and every text sent (timing only).
+    version: "1.8.5",
     owner: "hr_head",
     responsibility:
       "Holds one short AI phone call to help a candidate and the interview panel agree a time the candidate was already e-mailed: says it is an AI, tells them where they stand in the process, books one of the offered or pre-checked times (free for the whole panel), or notes when they are free — nothing else.",
@@ -900,7 +908,11 @@ export function registerPhase3Agents(): void {
     // candidate's hello ends (src/server/voice/greeting.ts); the hello itself is not
     // passed to the model, and the opening cue holds off while the greeting is pending.
     // Test calls on 10 November first spoke 12–14 s after pickup and were hung up on.
-    version: "0.8.4",
+    // 0.8.5: after the greeting the opening cue watches their reply to it (a cue 0.5 s after
+    // they stop, as on the quick calls) — a test call played the greeting at once, then
+    // waited 10 s to answer "yes, speaking". The trace now records caller speech, the
+    // model's first transcript of each caller utterance and every text sent (timing only).
+    version: "0.8.5",
     owner: "hr_head",
     responsibility:
       "Holds one AI phone call with a candidate about the pay for their offer: says it is an AI, tells them which role and organisation and where they stand, wins their interest from approved facts, frames the approved figure and extras around what matters to them, may offer one pre-approved improved figure, and brings a clear answer back to the people who decide.",

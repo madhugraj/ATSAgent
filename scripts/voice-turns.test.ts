@@ -253,6 +253,26 @@ describe("the first words, ready before pickup (greeting.ts)", () => {
     expect(h.preparing()).toBe(false);
   });
 
+  test("played, and whether it has spoken since — the reply to the greeting is watched", () => {
+    const g = new ReadyGreeting({ play: () => {}, now: () => 0 });
+    g.asked();
+    g.audio(chunk(1));
+    expect(g.played).toBe(false);
+    g.turnDone(); // the greeting's transcript arrived
+    g.release("hello");
+    expect(g.played).toBe(true);
+    expect(g.repliedSince).toBe(false);
+    g.audio(chunk(2)); // its answer to their "yes, speaking"
+    expect(g.repliedSince).toBe(true);
+    // Released before it was ready: streamed live, and still not a reply until its turn ends.
+    const h = new ReadyGreeting({ play: () => {}, now: () => 0 });
+    h.asked();
+    h.release("hello");
+    h.audio(chunk(1));
+    expect(h.played).toBe(true);
+    expect(h.repliedSince).toBe(false);
+  });
+
   test("the cue asks for the exact words and nothing more", () => {
     expect(greetingCue("Hello, am I speaking with Meera?")).toContain(
       'exactly: "Hello, am I speaking with Meera?" — nothing more',

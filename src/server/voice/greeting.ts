@@ -28,6 +28,8 @@ export class ReadyGreeting {
   private released = false;
   private askedAt: number | null = null;
   private done = false;
+  private playedAny = false;
+  private spokeSince = false;
 
   constructor(
     private readonly o: {
@@ -49,7 +51,10 @@ export class ReadyGreeting {
 
   /** The assistant's audio: held until the greeting is released, then played. */
   audio(pcm: Int16Array): void {
+    // Audio after the greeting's turn finished is the assistant's next words.
+    if (this.done) this.spokeSince = true;
     if (this.released) {
+      this.playedAny = true;
       this.o.play(pcm);
       return;
     }
@@ -80,6 +85,20 @@ export class ReadyGreeting {
     return this.askedAt !== null && !this.done && this.now() - this.askedAt < GREETING_WAIT_MS;
   }
 
+  /** The greeting was heard on the line (held audio played, or streamed after release). */
+  get played(): boolean {
+    return this.playedAny;
+  }
+
+  /**
+   * The assistant has spoken again since its greeting — it answered their reply.
+   * Until then the opening cue still watches: a test call on 10 November played the
+   * greeting at once, then waited 10 s to answer "yes, speaking".
+   */
+  get repliedSince(): boolean {
+    return this.spokeSince;
+  }
+
   /** Play what is held, and pass everything after it straight through. */
   release(why: "hello" | "silence"): void {
     if (this.released) return;
@@ -87,6 +106,7 @@ export class ReadyGreeting {
     const held = this.held;
     this.held = [];
     voiceDebug({ kind: "greeting_played", why, chunks: held.length });
+    if (held.length) this.playedAny = true;
     for (const pcm of held) this.o.play(pcm);
   }
 }
