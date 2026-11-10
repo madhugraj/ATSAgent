@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { ArrowUp, BookOpen, BrainCircuit, ChevronRight, Compass, RotateCcw, X } from "lucide-react";
-import { Link } from "@tanstack/react-router";
+import { Link, useRouter } from "@tanstack/react-router";
 import { toast } from "sonner";
 
 import {
@@ -16,6 +16,7 @@ import { FIRST_RUN_JOURNEY } from "@/lib/user-manual";
 import { useMe } from "@/hooks/useMe";
 import { useNavCtx } from "@/hooks/useNavCtx";
 import { useOrg } from "@/hooks/useOrg";
+import { AgentMarkdown } from "@/components/AgentMarkdown";
 import { Button } from "@/components/ui/button";
 
 const PROMPTS = [
@@ -34,6 +35,15 @@ export function Copilot() {
   const handoff = useServerFn(startCopilotHandoff);
 
   const [open, setOpen] = useState(false);
+  const router = useRouter();
+  /** In-app links in an answer navigate inside the app and close the panel. */
+  const followAppLink = (e: MouseEvent) => {
+    const a = (e.target as HTMLElement).closest("a[data-internal]");
+    if (!a || e.metaKey || e.ctrlKey || e.shiftKey) return;
+    e.preventDefault();
+    setOpen(false);
+    void router.navigate({ href: a.getAttribute("href")! });
+  };
   const [guideOpen, setGuideOpen] = useState(false);
   const [showWelcome, setShowWelcome] = useState(false);
   const [draft, setDraft] = useState("");
@@ -282,7 +292,9 @@ export function Copilot() {
             </div>
           ) : (
             <div key={m.id} className="max-w-[94%] space-y-2">
-              <div className="whitespace-pre-wrap leading-relaxed text-foreground">{m.content}</div>
+              <div className="leading-relaxed text-foreground" onClick={followAppLink}>
+                <AgentMarkdown text={m.content} />
+              </div>
               {m.handoff ? (
                 <div className="rounded-xl border border-primary/30 bg-primary/5 p-2.5">
                   <p className="text-xs font-medium text-foreground">{m.handoff.summary}</p>

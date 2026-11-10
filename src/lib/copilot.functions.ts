@@ -6,6 +6,17 @@ import { db } from "../server/db";
 import { copilotMessages } from "@db/schema";
 import { requireOrg } from "./auth.middleware";
 import { MANUAL_TEXT } from "@/lib/user-manual";
+import { NAV_GROUPS } from "@/components/nav-config";
+
+/** Every page in the menu, from the same source as the sidebar so the list cannot drift. */
+const PAGE_LIST = [
+  ...new Map(
+    NAV_GROUPS.flatMap((g) => g.items).map((i) => {
+      const path = i.search ? `${i.to}?${new URLSearchParams(i.search)}` : i.to;
+      return [path, `  ${i.label} (${path})`] as const;
+    }),
+  ).values(),
+].join("\n");
 
 export type CopilotMessage = {
   id: string;
@@ -54,7 +65,7 @@ export const clearCopilot = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-const SYSTEM = `You are the HR copilot inside a talent-acquisition system (ATS).
+export const COPILOT_SYSTEM = `You are the HR copilot inside a talent-acquisition system (ATS).
 You help recruiters, hiring managers, department heads, HR heads and the CBO understand
 their own live hiring data and advise on process: requisition status and approvals, the
 skill and role ontology, talent-pool coverage, future role demand, governance, JD quality,
@@ -64,15 +75,11 @@ Rules:
 - Answer ONLY from what your tools return plus general HR expertise. Never invent
   candidate names, numbers or requisitions that the tools did not return.
 - If the tools have no data for the question, say so plainly and suggest the page to use.
-- Never invent navigation. These are the ONLY pages that exist, use their exact names:
-  Dashboard (/), Requisitions (/requisitions), Talent pool (/candidates),
-  Matching engine (/matching), Interviews (/interviews), My interviews (/interviews/mine),
-  Offers (/offers), IJP (/ijp), Reports (/reports), Users & roles (/team),
-  Integrations (/integrations), Master data (/masters), Organisation (/organisation),
-  Organisation profile (/org-profile), Hiring desk (/desk), Agent decisions (/agents),
-  Agent observability (/agents/observability), Agent settings (/agents/settings),
-  Agent register (/agents/register), Hiring cost (/hiring-cost),
-  Platform console (/platform, product-owner super users only).
+- Never invent navigation. These are the ONLY pages that exist, use their exact names
+  (some are limited to certain roles):
+${PAGE_LIST}
+  Name a tab, section or setting inside a page only if the USER MANUAL below names it;
+  otherwise name just the page.
 - Questions about agents — speed, AI latency, failures, phone calls, health warnings —
   answer from the agent_health tool: name the feature or voice agent and the day behind a
   change, and quote the numbers. Live phone calls never count as AI latency. If it has
@@ -119,7 +126,7 @@ export const askCopilot = createServerFn({ method: "POST" })
     const ctx = await loadCopilotCtx(context.orgId, context.userId, context.isOwner);
     const result = await runCopilotTurn({
       ctx,
-      system: SYSTEM,
+      system: COPILOT_SYSTEM,
       history: historyMessages(prior.reverse()),
     });
 
