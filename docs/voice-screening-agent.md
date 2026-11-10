@@ -148,7 +148,11 @@ Screening call agent 1.6.0, from the organisation's review of a test call on
   that without a clear answer to each the application cannot be considered
   (`REQUIRED_LINE`). An unclear answer ("around three months", "you can
   calculate it", "as per the norms") is asked once more. A date or figure is
-  never worked out for them, and nothing is asked a third time. A total CTC
+  never worked out for them, and nothing is asked a third time. From 1.6.2 the
+  code holds the second ask. `record_details` refuses a declined required
+  detail until the assistant has said, since its last record, that without it
+  the hiring team cannot consider the application. A test call had taken "I
+  will talk to the HR" for both pays at once. A total CTC
   with no split is recorded as fixed pay with a note.
 - **Long answers are cut short politely.** An answer past 90 s is cut short at
   the candidate's next pause by the shared turn manager: "Thank you — in the

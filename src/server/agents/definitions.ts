@@ -501,7 +501,11 @@ export function registerPhase2Agents(): void {
     // 0.5 s after the hello (the line's own voice detection, not the late transcript).
     // 1.6.1: repeat cues 6 s apart, not 3 — a cue interrupts the reply being prepared
     // (a test call on 10 November stayed silent 11 s after the hello under 3-s cues).
-    version: "1.6.1",
+    // 1.6.2: a required detail is recorded as declined only once the assistant has
+    // said, since its last record_details, that without it the hiring team cannot
+    // consider the application (checked in code; the refusal tells it to ask once more
+    // with that sentence) — a test call took "I will talk to the HR" for both pays.
+    version: "1.6.2",
     owner: "hr_head",
     responsibility:
       "Holds one AI screening phone call with a shortlisted candidate the way an HR recruiter does: says who it is and why it is calling, asks consent, explains the role and why it called them, records their practical details (including the pay they state, for HR only) and their answers to the role's screening questions, or agrees a better time — nothing else.",

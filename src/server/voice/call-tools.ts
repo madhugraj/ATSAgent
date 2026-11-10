@@ -30,6 +30,14 @@ const rupees = z.number().min(0).max(500_000_000);
  */
 export const MANDATORY_DETAILS = ["joining_date", "current_pay", "expected_pay"] as const;
 export type MandatoryDetail = (typeof MANDATORY_DETAILS)[number];
+const MANDATORY_WORDS: Record<MandatoryDetail, string> = {
+  joining_date: "joining date",
+  current_pay: "current CTC",
+  expected_pay: "expected CTC",
+};
+/** "…the hiring team cannot consider your application" / "…cannot be considered". */
+export const SAYS_CONSEQUENCE =
+  /\b(cannot|can't|can not|won't be able to|will not be able to|is unable to|are unable to)\s+(be\s+)?consider(ed)?\b/i;
 
 export const CALL_TOOL_INPUTS = {
   record_consent: z.object({
@@ -95,7 +103,7 @@ export const CALL_TOOL_DESCRIPTIONS: Record<CallToolName, string> = {
   record_consent:
     "Record whether the candidate agreed to the screening call now (and to notes for the hiring team and the quality check): granted true only if they clearly agreed in their answer to your latest question; their_words is exactly what they said. Refused when that answer raised a concern (they did not apply, how you got their details, not sure…): answer it, ask again, and record their answer to that.",
   record_details:
-    "Record the practical details the candidate told you, as they said them: current job title and company, total years of experience, where they live now, whether they are open to relocating (only a yes or no they actually said — a question back is not an answer), notice period in days, earliest joining date (YYYY-MM-DD), and current fixed pay, current variable pay and expected pay as rupees per year (e.g. 18 lakhs = 1800000) — only figures they actually stated; never calculate one. Anything about pay that is not a figure (a percentage hike, shares, bonuses) goes in pay_note in their words; anything else the hiring team should know (a time limit they set, skills they said are new to them) in candidate_note. Call it again as more details come; leave out anything they did not say. Never comment on the figures. The earliest joining date, current pay and expected pay are required before the call can end as completed: if they would rather not say one, list it in not_given with why 'declined' (their words in pay_note, or in candidate_note for the joining date); if they are not working now, list current_pay with why 'not_working'.",
+    "Record the practical details the candidate told you, as they said them: current job title and company, total years of experience, where they live now, whether they are open to relocating (only a yes or no they actually said — a question back is not an answer), notice period in days, earliest joining date (YYYY-MM-DD), and current fixed pay, current variable pay and expected pay as rupees per year (e.g. 18 lakhs = 1800000) — only figures they actually stated; never calculate one. Anything about pay that is not a figure (a percentage hike, shares, bonuses) goes in pay_note in their words; anything else the hiring team should know (a time limit they set, skills they said are new to them) in candidate_note. Call it again as more details come; leave out anything they did not say. Never comment on the figures. The earliest joining date, current pay and expected pay are required before the call can end as completed: if they would rather not say one, list it in not_given with why 'declined' (their words in pay_note, or in candidate_note for the joining date); if they are not working now, list current_pay with why 'not_working'. A decline is taken only after you have told them, since your last record_details, that without it the hiring team cannot consider their application — otherwise it is refused and you ask once more with that sentence.",
   record_answer:
     'After you ask one of the listed screening questions: the question\'s id and a faithful one or two sentence summary of what the candidate said. If they chose not to answer it, set declined true and say so in the summary — it is never held against them. Saying they have not done it or lack the experience is an answer: declined false. The summary holds only what the candidate said in their own words — never a tool, method or detail that you said first. If they only agreed with or repeated something you said ("yes, I used that") and gave no specifics of their own, set prompted true and say so in the summary.',
   book_slot:
@@ -136,6 +144,8 @@ export type CallState = {
   endReason: EndReason | null;
   /** How many more times the call may be moved to another time (undefined: no limit known). */
   reschedulesLeft?: number;
+  /** Length of the assistant's spoken lines at the last record_details (live call). */
+  saidAtDetails?: number;
 };
 
 export const freshCallState = (): CallState => ({
@@ -279,7 +289,28 @@ export function applyCallTool(
       return { ok: true };
     }
     case "record_details": {
-      const input = parsed.data as CallDetailsInput;
+      const input = { ...(parsed.data as CallDetailsInput) };
+      // A required detail is taken as declined only once the candidate has been told,
+      // since the last record_details, that without it the application cannot be
+      // considered — that is the second ask (live call; screening 1.6.2). A test call
+      // on 10 November skipped that sentence and took "I will talk to the HR" for both
+      // pays at once.
+      let refusedDecline: MandatoryDetail[] = [];
+      if (aiSaid !== undefined) {
+        const since = aiSaid.slice(state.saidAtDetails ?? 0);
+        state.saidAtDetails = aiSaid.length;
+        const already = new Set(
+          (state.details?.not_given ?? []).filter((n) => n.why === "declined").map((n) => n.item),
+        );
+        if (!SAYS_CONSEQUENCE.test(since))
+          refusedDecline = (input.not_given ?? [])
+            .filter((n) => n.why === "declined" && !already.has(n.item))
+            .map((n) => n.item);
+        if (refusedDecline.length) {
+          input.not_given = input.not_given!.filter((n) => !refusedDecline.includes(n.item));
+          if (!input.not_given.length) delete input.not_given;
+        }
+      }
       // not_given merges by item (the latest word wins), and a value recorded
       // later clears its not_given entry.
       const merged = { ...state.details, ...input };
@@ -292,6 +323,12 @@ export function applyCallTool(
       if (notGiven.size) merged.not_given = [...notGiven.values()];
       else delete merged.not_given;
       state.details = merged;
+      if (refusedDecline.length)
+        return {
+          ok: false,
+          recorded: Object.keys(input).filter((k) => k !== "not_given"),
+          error: `Not yet recorded as declined: ${refusedDecline.map((i) => MANDATORY_WORDS[i]).join(", ")}. Ask once more, and in the same breath tell them plainly: "Without your ${refusedDecline.map((i) => MANDATORY_WORDS[i]).join(" and ")}, the hiring team cannot consider your application." If they still will not give it, call record_details again with it in not_given — then move on, and never ask a third time.`,
+        };
       return { ok: true, recorded: Object.keys(parsed.data as object) };
     }
     case "record_answer": {
