@@ -15,7 +15,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { randomBytes } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 process.env["SECRET_ENCRYPTION_KEY"] ??= randomBytes(32).toString("base64");
 process.env["SIP_SERVER"] ??= "127.0.0.1";
@@ -33,7 +33,7 @@ mock.module("../src/lib/ai-gateway.server", () => ({
       Object.assign(lastGrade, { system: opts.system, prompt: opts.prompt });
     // The desk's judgement of a reason to go back a step: a dropped call is one.
     if (opts.feature === "hiring_desk") {
-      const valid = /dropped/i.test(opts.prompt ?? "");
+      const valid = /dropped|by mistake/i.test(opts.prompt ?? "");
       return {
         ok: true,
         data: {
@@ -1467,6 +1467,108 @@ describe("the hiring desk", () => {
       .from(hiringMessages)
       .where(eq(hiringMessages.conversationId, conv!.id));
     expect(again.at(-1)?.body).toMatch(/already arranged/);
+  });
+});
+
+describe("going back a step on the desk (the organisation's rule)", () => {
+  test("moving a candidate back needs a reason judged valid; forward moves are not this", async () => {
+    const desk = await import("../src/server/desk/desk.server");
+    const { orgMembers, userRoles } = await import("../drizzle/schema");
+    await db
+      .insert(orgMembers)
+      .values({ orgId, userId, email: `sc-${stamp}@test.local`, status: "active" } as never)
+      .onConflictDoNothing();
+    await db.insert(userRoles).values({ userId, orgId, role: "recruiter" }).onConflictDoNothing();
+    const { appId } = await seedCall({ status: "completed", attempt: 1 });
+    await db.update(applications).set({ stage: "rejected" }).where(eq(applications.id, appId));
+    const [app] = await db
+      .select({ requisitionId: applications.requisitionId })
+      .from(applications)
+      .where(eq(applications.id, appId));
+    const [conv] = await db
+      .insert(hiringConversations)
+      .values({
+        orgId,
+        requisitionId: app!.requisitionId,
+        createdBy: userId,
+        title: "SRE",
+      } as never)
+      .returning();
+    const last = async () =>
+      (
+        await db
+          .select({ body: hiringMessages.body })
+          .from(hiringMessages)
+          .where(eq(hiringMessages.conversationId, conv!.id))
+      ).at(-1)?.body;
+    const stage = async () =>
+      (
+        await db
+          .select({ s: applications.stage })
+          .from(applications)
+          .where(eq(applications.id, appId))
+      )[0]!.s;
+    const back = {
+      step: "move_candidate" as const,
+      name: "Meera",
+      toStage: "shortlisted" as const,
+    };
+    await desk.goBackFromDesk(conv as never, userId, back);
+    expect(await last()).toMatch(/needs a reason — why\?/);
+    await desk.goBackFromDesk(conv as never, userId, {
+      ...back,
+      reason: "she might do better now",
+    });
+    expect(await last()).toMatch(/^I won't move .* back for that reason:/);
+    expect(await stage()).toBe("rejected");
+    await desk.goBackFromDesk(conv as never, userId, {
+      ...back,
+      reason: "she was rejected by mistake",
+    });
+    expect(await last()).toMatch(/^Moved .* back from Rejected to Shortlisted\. Reason accepted:/);
+    expect(await stage()).toBe("shortlisted");
+    // A move forward is not going back: refused here, nothing judged.
+    await desk.goBackFromDesk(conv as never, userId, {
+      ...back,
+      toStage: "l1",
+      reason: "by mistake",
+    });
+    expect(await last()).toMatch(/is not going back a step/);
+    expect(await stage()).toBe("shortlisted");
+    // Mid-funnel back (L1 → screening): the flow allows it only from On hold — so through it.
+    await db.update(applications).set({ stage: "l1" }).where(eq(applications.id, appId));
+    await desk.goBackFromDesk(conv as never, userId, {
+      ...back,
+      toStage: "applied",
+      reason: "her L1 was scheduled by mistake",
+    });
+    expect(await last()).toMatch(
+      /^Moved .* back from Interview L1 to Applied \(through On hold, as the flow requires\)/,
+    );
+    expect(await stage()).toBe("applied");
+    // Re-scoring replaces every score: a reason first, judged.
+    await desk.goBackFromDesk(conv as never, userId, { step: "rescore" });
+    expect(await last()).toMatch(
+      /^Re-scoring replaces every candidate's current score, so it needs a reason/,
+    );
+    await desk.goBackFromDesk(conv as never, userId, {
+      step: "rescore",
+      reason: "scores look low",
+    });
+    expect(await last()).toMatch(/^I won't re-score the candidates for that reason:/);
+    const audits = await db
+      .select({ action: auditLog.action, detail: auditLog.detail })
+      .from(auditLog)
+      .where(
+        and(
+          eq(auditLog.orgId, orgId),
+          inArray(auditLog.action, ["desk.go_back_allowed", "desk.go_back_refused"]),
+        ),
+      );
+    expect(audits.filter((a) => (a.detail as { step: string }).step === "move_back")).toHaveLength(
+      3,
+    );
+    expect(audits.filter((a) => (a.detail as { step: string }).step === "rescore")).toHaveLength(1);
   });
 });
 

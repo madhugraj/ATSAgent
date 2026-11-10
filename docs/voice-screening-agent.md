@@ -318,8 +318,19 @@ brief, so a per-answer "thank you" or "noted" on these calls is a low finding.
 - **Feedback names its request.** When more than one request is waiting, desk
   feedback goes only to the one it names. Otherwise the desk asks which request
   it is about and sends nothing.
-- **Not yet built:** other going-back steps — re-score, back to screening,
-  reopen a job description, undo a rejection — would use the same reason check.
+- **The other going-back steps on the desk** use the same reason check (a
+  shared `reasonGate`; `goBackFromDesk`):
+  - **Re-score the role's candidates** (`rescoreThread`). It replaces every
+    current score.
+  - **Move a candidate back a stage**, through `moveStageCore` with its
+    transition rules, role checks and stage events. Examples: back to
+    screening, back to Shortlisted, back to an earlier interview round, or out
+    of Rejected or Withdrawn ("undo a rejection").
+  - **Moves the flow only allows from On hold** go through On hold, and both
+    moves are recorded. Moves forward are refused here; they use the pipeline
+    as usual.
+  - **Not included:** an approved job description cannot be reopened. Approval
+    is final, and changes are asked for before approval.
 
 A completed call must leave with the earliest joining date, current pay and
 expected pay (Screening call agent 1.3.0): after consent, `end_call` with

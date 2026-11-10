@@ -15,6 +15,7 @@
 import { CEILING_MESSAGE, LEG_LIMIT_MESSAGE } from "../agents/run-messages";
 import { localWhen } from "@/lib/local-time";
 import { placeLabel } from "@/lib/work-mode";
+import type { Stage } from "@/lib/lifecycle";
 import { sourceLabel as channelSourceLabel } from "@/lib/job-channels";
 import { and, asc, desc, eq, ilike, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -335,6 +336,17 @@ const Command = z.discriminatedUnion("type", [
     /** Why, in their words — needed to repeat a completed call. */
     reason: z.string().trim().max(500).optional(),
   }),
+  z.object({
+    // Going back a step (the organisation's rule: only for a reason the desk judges).
+    type: z.literal("go_back"),
+    step: z.enum(["rescore", "move_candidate"]),
+    name: z.string().trim().max(120).optional(),
+    ranks: z.array(z.number().int().min(1).max(50)).max(1).optional(),
+    toStage: z
+      .enum(["sourced", "applied", "ai_screened", "shortlisted", "l1", "l2", "l3", "reserve"])
+      .optional(),
+    reason: z.string().trim().max(500).optional(),
+  }),
   z.object({ type: z.literal("new_role") }),
   z.object({ type: z.literal("use_existing"), code: z.string().max(40).optional() }),
   z.object({ type: z.literal("close_role") }),
@@ -399,6 +411,7 @@ const SYSTEM = [
   '- JD details (only when the person gives them): responsibilities (their key responsibilities, as text), reportingTo, successMeasures (what success looks like), education. If they ask you to fill these from the market / research / "you decide", set researchRole true.',
   '- "command": {"type":"none"} unless the person asks to act: "talk to / screen / call the first 5" → {"type":"screen","top":5}; "screen 1, 3 and 4" → {"type":"screen","ranks":[1,3,4]}; "create a new role" → {"type":"new_role"}; "use REQ-2026-014" → {"type":"use_existing","code":"REQ-2026-014"}.',
   '- "command" also: "close / cancel / delete / withdraw this role" → {"type":"close_role"}.',
+  '- Going back a step: "re-score the candidates" → {"type":"go_back","step":"rescore"}; "send Meera back to screening", "move candidate 2 back to shortlisted", "undo the rejection of Ravi", "bring her back to L1" → {"type":"go_back","step":"move_candidate"} with "name" or "ranks":[n] and "toStage" (one of sourced, applied, ai_screened, shortlisted, l1, l2, l3, reserve — "screening" is "applied", undoing a rejection is "shortlisted" unless they say otherwise). Add "reason":"<their words>" when they say why; when the desk has just asked why and they answer, it is the same go_back command with "reason" and the details from the conversation. Never feedback.',
   '- "call again", "do the screening call again", "redo the AI call", "phone Meera", "call candidate 2" → {"type":"call_candidate"} with "name" when they name the candidate (as they said it) or "ranks":[n] for a rank — never feedback, even when OPEN REQUESTS lists something: the system arranges an AI phone screening call. Add "reason":"<their words>" when they say why. When the desk has just asked why a call should be repeated and they answer, that is the same command with "reason" (and the name from the conversation).',
   '- When the person delegates a detail to you or to the market ("as per market needs", "you decide", "what does the market say?", "pick it up from research") → {"type":"research","fields":[...]} with the fields they delegated: "skills", "experience" and/or "budget". (JD details are not a research command — for those set researchRole true as above.) When OPEN PROPOSAL is yes and they agree ("ok", "yes", "use these", "go ahead") → {"type":"accept"}.',
   '- "show / see / open / read the JD (job description)" → {"type":"show_jd"}; the system posts the full text. Never summarise the JD instead or send the person elsewhere to read it.',
@@ -1202,6 +1215,10 @@ async function handleUserMessageInner(
       return;
     }
     await screenCandidates(conv, userId, ids);
+    return;
+  }
+  if (cmd.type === "go_back") {
+    await goBackFromDesk(conv, userId, cmd);
     return;
   }
   if (cmd.type === "call_candidate") {
@@ -4366,6 +4383,75 @@ export async function announceNewApplicants(orgId?: string): Promise<number> {
 }
 
 /**
+ * The candidate a desk command is about, in this role: named or ranked, else (when
+ * asked) the one the role's latest screening call was with. Says why when none or
+ * several match, and returns null.
+ */
+async function pickCandidate(
+  conv: Conversation,
+  cmd: { name?: string | undefined; ranks?: number[] | undefined },
+  say: (body: string) => Promise<unknown>,
+  opts: { lastCalled?: boolean } = {},
+): Promise<{ id: string; name: string } | null> {
+  if (!conv.requisitionId) return null;
+  const inRole = and(
+    eq(applications.orgId, conv.orgId),
+    eq(applications.requisitionId, conv.requisitionId),
+  );
+  let picked: { id: string; name: string }[] = [];
+  if (cmd.ranks?.length) {
+    const [id] = await resolveRanks(conv, { ranks: cmd.ranks });
+    if (id)
+      picked = await db
+        .select({ id: applications.id, name: candidates.fullName })
+        .from(applications)
+        .innerJoin(candidates, eq(candidates.id, applications.candidateId))
+        .where(and(inRole, eq(applications.id, id)))
+        .limit(1);
+  } else if (cmd.name?.trim()) {
+    const words = cmd.name
+      .trim()
+      .split(/\s+/)
+      .filter((w) => w.length > 1);
+    picked = await db
+      .select({ id: applications.id, name: candidates.fullName })
+      .from(applications)
+      .innerJoin(candidates, eq(candidates.id, applications.candidateId))
+      .where(and(inRole, ...words.map((w) => ilike(candidates.fullName, `%${w}%`))))
+      .limit(5);
+  } else if (opts.lastCalled) {
+    const { screeningCalls } = await import("@db/schema");
+    picked = await db
+      .select({ id: applications.id, name: candidates.fullName })
+      .from(screeningCalls)
+      .innerJoin(applications, eq(applications.id, screeningCalls.applicationId))
+      .innerJoin(candidates, eq(candidates.id, applications.candidateId))
+      .where(
+        and(inRole, eq(screeningCalls.orgId, conv.orgId), eq(screeningCalls.purpose, "screening")),
+      )
+      .orderBy(desc(screeningCalls.createdAt))
+      .limit(1);
+  }
+  if (!picked.length) {
+    await say(
+      cmd.name
+        ? `I couldn't find "${cmd.name}" in this role's pipeline. Which candidate do you mean?`
+        : opts.lastCalled
+          ? "Who should I call? Name the candidate, or say their rank."
+          : "Which candidate? Name them, or say their rank.",
+    );
+    return null;
+  }
+  if (picked.length > 1) {
+    await say(
+      `More than one candidate matches: ${picked.map((p) => p.name).join(", ")}. Which one?`,
+    );
+    return null;
+  }
+  return picked[0]!;
+}
+
+/**
  * "Call again" in the chat: arrange an AI phone screening call — the same core
  * and role check as the "Call now" button (requestScreeningCall, audited
  * screening_call.requested). The candidate: the one they named or ranked, else
@@ -4393,59 +4479,8 @@ export async function callCandidateFromDesk(
     await say("Only TA, the HR head or the CBO can arrange a screening call.");
     return;
   }
-  const inRole = and(
-    eq(applications.orgId, conv.orgId),
-    eq(applications.requisitionId, conv.requisitionId),
-  );
-  let picked: { id: string; name: string }[] = [];
-  if (cmd.ranks?.length) {
-    const [id] = await resolveRanks(conv, { ranks: cmd.ranks });
-    if (id)
-      picked = await db
-        .select({ id: applications.id, name: candidates.fullName })
-        .from(applications)
-        .innerJoin(candidates, eq(candidates.id, applications.candidateId))
-        .where(and(inRole, eq(applications.id, id)))
-        .limit(1);
-  } else if (cmd.name?.trim()) {
-    const words = cmd.name
-      .trim()
-      .split(/\s+/)
-      .filter((w) => w.length > 1);
-    picked = await db
-      .select({ id: applications.id, name: candidates.fullName })
-      .from(applications)
-      .innerJoin(candidates, eq(candidates.id, applications.candidateId))
-      .where(and(inRole, ...words.map((w) => ilike(candidates.fullName, `%${w}%`))))
-      .limit(5);
-  } else {
-    const { screeningCalls } = await import("@db/schema");
-    picked = await db
-      .select({ id: applications.id, name: candidates.fullName })
-      .from(screeningCalls)
-      .innerJoin(applications, eq(applications.id, screeningCalls.applicationId))
-      .innerJoin(candidates, eq(candidates.id, applications.candidateId))
-      .where(
-        and(inRole, eq(screeningCalls.orgId, conv.orgId), eq(screeningCalls.purpose, "screening")),
-      )
-      .orderBy(desc(screeningCalls.createdAt))
-      .limit(1);
-  }
-  if (!picked.length) {
-    await say(
-      cmd.name
-        ? `I couldn't find "${cmd.name}" in this role's pipeline. Who should I call?`
-        : "Who should I call? Name the candidate, or say their rank.",
-    );
-    return;
-  }
-  if (picked.length > 1) {
-    await say(
-      `More than one candidate matches: ${picked.map((p) => p.name).join(", ")}. Which one?`,
-    );
-    return;
-  }
-  const app = picked[0]!;
+  const app = await pickCandidate(conv, cmd, say, { lastCalled: true });
+  if (!app) return;
   // Going back a step — a completed screen done again — needs a reason, judged here.
   const { screeningCalls } = await import("@db/schema");
   const [last] = await db
@@ -4463,44 +4498,15 @@ export async function callCandidateFromDesk(
   const goingBack = last?.status === "completed";
   let accepted: { reason: string; why: string } | null = null;
   if (goingBack) {
-    const reason = cmd.reason?.trim();
-    if (!reason) {
-      await say(
-        `${app.name} has already had a screening call. Repeating a completed step needs a reason — why should ${app.name} be called again? (For example: the call dropped, an answer was misheard, or there is new information.)`,
-      );
-      return;
-    }
-    const verdict = await judgeGoingBack(conv.orgId, {
+    accepted = await reasonGate(conv, userId, {
+      stepKey: "screening_call_again",
       step: `repeat the AI phone screening call with ${app.name}, who has already completed one`,
-      reason,
+      entity: { type: "application", id: app.id },
+      reason: cmd.reason,
+      ask: `${app.name} has already had a screening call. Repeating a completed step needs a reason — why should ${app.name} be called again? (For example: the call dropped, an answer was misheard, or there is new information.)`,
+      refuse: `I won't repeat ${app.name}'s screening call for that reason:`,
     });
-    await writeAudit({
-      actor: `user:${userId}`,
-      actorUserId: userId,
-      orgId: conv.orgId,
-      action: verdict?.valid ? "desk.go_back_allowed" : "desk.go_back_refused",
-      entityType: "application",
-      entityId: app.id,
-      detail: {
-        conversation_id: conv.id,
-        step: "screening_call_again",
-        reason: reason.slice(0, 500),
-        why: verdict?.why ?? "the reason could not be checked",
-      },
-    });
-    if (!verdict) {
-      await say(
-        "I couldn't check that reason just now, so nothing was arranged. Please try again.",
-      );
-      return;
-    }
-    if (!verdict.valid) {
-      await say(
-        `I won't repeat ${app.name}'s screening call for that reason: ${verdict.why} If there is a concrete problem with the last call or new information, tell me what it is.`,
-      );
-      return;
-    }
-    accepted = { reason, why: verdict.why };
+    if (!accepted) return;
   }
   const { requestScreeningCall } = await import("../voice/request.server");
   try {
@@ -4533,6 +4539,178 @@ export async function callCandidateFromDesk(
     await say(
       `I couldn't arrange the call: ${e instanceof Error ? e.message : "it could not be arranged."}`,
     );
+  }
+}
+
+/**
+ * The organisation's rule for going back a step: a stated reason, judged by the
+ * desk (judgeGoingBack), before anything is redone. Asks when there is none;
+ * audits every verdict (desk.go_back_allowed / desk.go_back_refused) with the
+ * reason; says why when refused. Returns the accepted reason, or null (already said).
+ */
+async function reasonGate(
+  conv: Conversation,
+  userId: string,
+  g: {
+    stepKey: string;
+    /** What would be redone, for the judge ("re-score this role's candidates"). */
+    step: string;
+    entity: { type: string; id: string };
+    reason: string | undefined;
+    /** Said when no reason was given. */
+    ask: string;
+    /** Opens the refusal; the judge's why follows. */
+    refuse: string;
+  },
+): Promise<{ reason: string; why: string } | null> {
+  const say = (body: string) => postMessage(conv, { role: "desk", body });
+  const reason = g.reason?.trim();
+  if (!reason) {
+    await say(g.ask);
+    return null;
+  }
+  const verdict = await judgeGoingBack(conv.orgId, { step: g.step, reason });
+  await writeAudit({
+    actor: `user:${userId}`,
+    actorUserId: userId,
+    orgId: conv.orgId,
+    action: verdict?.valid ? "desk.go_back_allowed" : "desk.go_back_refused",
+    entityType: g.entity.type,
+    entityId: g.entity.id,
+    detail: {
+      conversation_id: conv.id,
+      step: g.stepKey,
+      reason: reason.slice(0, 500),
+      why: verdict?.why ?? "the reason could not be checked",
+    },
+  });
+  if (!verdict) {
+    await say("I couldn't check that reason just now, so nothing was changed. Please try again.");
+    return null;
+  }
+  if (!verdict.valid) {
+    await say(
+      `${g.refuse} ${verdict.why} If there is a concrete problem or new information, tell me what it is.`,
+    );
+    return null;
+  }
+  return { reason, why: verdict.why };
+}
+
+/** Stages a candidate may be sent back to from the desk (offer stages are HR's, not here). */
+const BACK_STAGES = [
+  "sourced",
+  "applied",
+  "ai_screened",
+  "shortlisted",
+  "l1",
+  "l2",
+  "l3",
+  "reserve",
+] as const;
+
+/**
+ * Going back a step on the desk (the organisation's rule: only for a reason the
+ * desk judges valid): re-score the role's candidates (rescoreThread), or move a
+ * candidate back a stage — including out of rejected or withdrawn — through
+ * moveStageCore (its transition rules, role checks and stage events; a move the
+ * flow allows only from on hold goes through on hold, both recorded).
+ */
+export async function goBackFromDesk(
+  conv: Conversation,
+  userId: string,
+  cmd: {
+    step: "rescore" | "move_candidate";
+    name?: string | undefined;
+    ranks?: number[] | undefined;
+    toStage?: (typeof BACK_STAGES)[number] | undefined;
+    reason?: string | undefined;
+  },
+): Promise<void> {
+  const say = (body: string) => postMessage(conv, { role: "desk", body });
+  if (!conv.requisitionId) {
+    await say("Choose or create the role first.");
+    return;
+  }
+  if (cmd.step === "rescore") {
+    const accepted = await reasonGate(conv, userId, {
+      stepKey: "rescore",
+      step: "re-score all of this role's active candidates against its job description, replacing their current scores",
+      entity: { type: "requisition", id: conv.requisitionId },
+      reason: cmd.reason,
+      ask: "Re-scoring replaces every candidate's current score, so it needs a reason — why should they be scored again? (For example: the job description changed, or the scores used the wrong requirements.)",
+      refuse: "I won't re-score the candidates for that reason:",
+    });
+    if (!accepted) return;
+    try {
+      const n = await rescoreThread(conv, userId);
+      await say(
+        `Re-scoring ${n} candidate${n === 1 ? "" : "s"} against the current job description. Reason accepted: ${accepted.why}`,
+      );
+    } catch (e) {
+      await say(`I couldn't re-score: ${e instanceof Error ? e.message : "it failed."}`);
+    }
+    return;
+  }
+  const app = await pickCandidate(conv, cmd, say);
+  if (!app) return;
+  const [row] = await db
+    .select({ stage: applications.stage })
+    .from(applications)
+    .where(and(eq(applications.id, app.id), eq(applications.orgId, conv.orgId)))
+    .limit(1);
+  const { FLOW, STAGE_LABEL, canMove, canonical } = await import("@/lib/lifecycle");
+  const from = canonical(row!.stage as Stage);
+  const to = cmd.toStage;
+  if (!to) {
+    await say(`Which stage should ${app.name} go back to? They are at ${STAGE_LABEL[from]} now.`);
+    return;
+  }
+  const closed = !FLOW.includes(from) && !["on_hold", "reserve"].includes(from);
+  const back = closed || (FLOW.includes(to) && FLOW.indexOf(to) < FLOW.indexOf(from));
+  if (!back) {
+    await say(
+      `${STAGE_LABEL[from]} → ${STAGE_LABEL[to]} is not going back a step. Move ${app.name} forward from the pipeline as usual.`,
+    );
+    return;
+  }
+  const accepted = await reasonGate(conv, userId, {
+    stepKey: "move_back",
+    step: `move ${app.name} back from ${STAGE_LABEL[from]} to ${STAGE_LABEL[to]}${closed ? " (undoing a closed outcome)" : ""}`,
+    entity: { type: "application", id: app.id },
+    reason: cmd.reason,
+    ask: `Moving ${app.name} back from ${STAGE_LABEL[from]} to ${STAGE_LABEL[to]} needs a reason — why? (For example: they were rejected by mistake, or new information about them.)`,
+    refuse: `I won't move ${app.name} back for that reason:`,
+  });
+  if (!accepted) return;
+  const { activeOrgOf } = await import("@/lib/auth.middleware");
+  const org = await activeOrgOf(userId);
+  if (!org || org.orgId !== conv.orgId) {
+    await say("You are not a member of this organisation any more.");
+    return;
+  }
+  const actor = { orgId: conv.orgId, userId, memberEmail: org.memberEmail };
+  const { moveStageCore } = await import("@/lib/pipeline.server");
+  const why = `Back a step: ${accepted.reason}`.slice(0, 500);
+  try {
+    let via = "";
+    if (canMove(from, to)) {
+      await moveStageCore(actor, { applicationId: app.id, toStage: to, reason: why });
+    } else if (canMove(from, "on_hold") && canMove("on_hold", to)) {
+      await moveStageCore(actor, { applicationId: app.id, toStage: "on_hold", reason: why });
+      await moveStageCore(actor, { applicationId: app.id, toStage: to, reason: why });
+      via = " (through On hold, as the flow requires)";
+    } else {
+      await say(
+        `${STAGE_LABEL[from]} → ${STAGE_LABEL[to]} is not an allowed move. A closed candidate can go back to the reserve pool, Sourced or Shortlisted.`,
+      );
+      return;
+    }
+    await say(
+      `Moved ${app.name} back from ${STAGE_LABEL[from]} to ${STAGE_LABEL[to]}${via}. Reason accepted: ${accepted.why}`,
+    );
+  } catch (e) {
+    await say(`I couldn't move ${app.name}: ${e instanceof Error ? e.message : "it failed."}`);
   }
 }
 
