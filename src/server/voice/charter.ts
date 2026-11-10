@@ -101,7 +101,7 @@ export const SCREENING_CALL_CHARTER: VoiceCharter = {
     ),
     i("Tell the candidate they are a fit (a good or great fit, strong, suited) or praise them."),
     i(
-      "Summarise, reflect or repeat the candidate's answers back to them — a short acknowledgement only.",
+      'Summarise, reflect or repeat the candidate\'s answers back to them, or acknowledge each one ("thank you", "noted") — it goes straight to the next question.',
     ),
     c("Grade, advance or reject anyone — the grade goes to people."),
   ],

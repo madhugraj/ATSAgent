@@ -56,7 +56,7 @@ contact given is the organisation's mailbox.
 | Answer a screening question itself, or record its own words as the candidate's answer. | instruction + evals |
 | Say how the candidate's profile came to the organisation — where, when or whether they applied, or that they were referred. | instruction + evals |
 | Tell the candidate they are a fit (a good or great fit, strong, suited) or praise them. | instruction + evals |
-| Summarise, reflect or repeat the candidate's answers back to them — a short acknowledgement only. | instruction + evals |
+| Summarise, reflect or repeat the candidate's answers back to them, or acknowledge each one ("thank you", "noted") — it goes straight to the next question. | instruction + evals |
 | Grade, advance or reject anyone — the grade goes to people. | code |
 
 **Hands to a person**

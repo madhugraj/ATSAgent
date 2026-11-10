@@ -2450,6 +2450,9 @@ export function scenarios(): ScriptedScenario[] {
           "claims platform",
           "autoscaling",
           "got it",
+          // 1.9.4: no acknowledgement either — straight to the next question.
+          "noted",
+          "thank you",
         ],
       },
       script: [
@@ -2458,7 +2461,7 @@ export function scenarios(): ScriptedScenario[] {
           summary:
             "Runs four AKS clusters for the claims platform, deploys with Argo CD and built their own autoscaling.",
         }),
-        say("Thank you. Next: describe an incident you led."),
+        say("Describe an incident you led."),
       ],
     },
     {

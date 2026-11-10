@@ -284,6 +284,12 @@ reasoning ("Wait, I shouldn't call record_details here…") to the candidate.
   said something since the candidate last spoke. The same test call hung up
   without a goodbye.
 
+**No acknowledgement after each answer** (screening 1.9.4, the organisation's
+review). The assistant records each answer and goes straight to the next
+question, with no "thank you", "noted" or "understood". The candidate is thanked
+once, at the close. The Voice Guard (1.4.1) judges read-backs against the
+brief, so a per-answer "thank you" or "noted" on these calls is a low finding.
+
 A completed call must leave with the earliest joining date, current pay and
 expected pay (Screening call agent 1.3.0): after consent, `end_call` with
 `completed` or `other` is refused until each is recorded or listed in
