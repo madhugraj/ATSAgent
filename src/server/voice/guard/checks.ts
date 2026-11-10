@@ -38,6 +38,8 @@ export type GuardCheck = {
   purposes?: VoiceCallPurpose[];
   /** Checked from the call's stats alone — also when no transcript was kept. */
   timing?: boolean;
+  /** A rule the call agents got with the Voice Guard (0071): not held against older calls. */
+  since0071?: boolean;
 };
 
 export const GUARD_CHECKS: GuardCheck[] = [
@@ -92,6 +94,7 @@ export const GUARD_CHECKS: GuardCheck[] = [
       'After the candidate answered, did it summarise, reflect or repeat their answer back to them instead of a short acknowledgement ("Thank you.", "Understood.")? Reading back a booked time the system returned is fine.',
     by: "review",
     purposes: ["screening"],
+    since0071: true,
   },
   {
     id: "commitments",
@@ -141,9 +144,17 @@ export const GUARD_CHECKS: GuardCheck[] = [
 export const CHECK_BY_ID = new Map(GUARD_CHECKS.map((c) => [c.id, c]));
 
 /** The checks that apply to a call of this purpose (and scope). */
-export function checksFor(purpose: VoiceCallPurpose, scope: "full" | "timing_only"): GuardCheck[] {
+export function checksFor(
+  purpose: VoiceCallPurpose,
+  scope: "full" | "timing_only",
+  /** The call ran before the Voice Guard (no brief kept): held to the rules it had then. */
+  legacy = false,
+): GuardCheck[] {
   return GUARD_CHECKS.filter(
-    (c) => (!c.purposes || c.purposes.includes(purpose)) && (scope === "full" || c.timing),
+    (c) =>
+      (!c.purposes || c.purposes.includes(purpose)) &&
+      (scope === "full" || c.timing) &&
+      !(legacy && c.since0071),
   );
 }
 
@@ -408,8 +419,9 @@ export function mergeReview(
   code: CodeResult,
   agent: AgentReview | null,
   transcript: ScreeningCallTurn[],
+  legacy = false,
 ): MergedReview {
-  const applicable = checksFor(purpose, scope);
+  const applicable = checksFor(purpose, scope, legacy);
   const findings: CallReviewFinding[] = [...code.findings];
   let dropped = 0;
   for (const f of agent?.findings ?? []) {
