@@ -15,7 +15,7 @@ export type AgentInfo = {
 export const AGENT_CATALOG: AgentInfo[] = [
   {
     type: "copilot",
-    label: "Copilot",
+    label: "Arjun",
     phase: 1,
     description:
       "Turns a chat request into a plan and hands it to the orchestrator once you confirm.",
