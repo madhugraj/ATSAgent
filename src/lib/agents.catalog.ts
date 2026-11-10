@@ -124,6 +124,13 @@ export const AGENT_CATALOG: AgentInfo[] = [
     description:
       "Phones a candidate about the pay for their offer, when the Offer agent or TA asks and the HR head approves: says it is an AI, reads out the approved figure and extras, may offer one pre-approved improved figure after a no, and brings their answer back — never says the ceiling, never agrees anything; a person confirms.",
   },
+  {
+    type: "voice_guard",
+    label: "Voice Guard",
+    phase: 3,
+    description:
+      "Silently reviews every answered AI phone call after it ends — what was said against the call's rules and facts, what was recorded against what the candidate said, and how the call went on the line — and lists its findings, with the words quoted, under Call reviews. It never takes part in a call and changes nothing: a person decides what to do. On whenever an AI phone agent is on.",
+  },
 
   {
     type: "followup",

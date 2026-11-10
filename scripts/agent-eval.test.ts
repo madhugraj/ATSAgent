@@ -119,6 +119,7 @@ const { registerOrgTools } = await import("../src/server/agents/tools-org");
 const { registerExpertTools } = await import("../src/server/agents/tools-expert");
 const { registerPanelTools } = await import("../src/server/agents/tools-panel");
 const { registerOntologyTools } = await import("../src/server/agents/tools-ontology");
+const { registerVoiceGuardTools } = await import("../src/server/agents/tools-voice-guard");
 const {
   registerPhase1Agents,
   registerPhase2Agents,
@@ -128,6 +129,7 @@ const {
   registerOrgAgents,
   registerExpertAgents,
   registerPanelAgents,
+  registerVoiceGuardAgent,
 } = await import("../src/server/agents/definitions");
 const { runScenario } = await import("../src/server/agents/eval.server");
 const { scenarios } = await import("./evals/scenarios");
@@ -144,6 +146,7 @@ const registerReal = () => {
   registerExpertTools();
   registerPanelTools();
   registerOntologyTools();
+  registerVoiceGuardTools();
   registerPhase1Agents();
   registerPhase2Agents();
   registerPhase3Agents();
@@ -152,6 +155,7 @@ const registerReal = () => {
   registerOrgAgents();
   registerExpertAgents();
   registerPanelAgents();
+  registerVoiceGuardAgent();
 };
 
 beforeAll(() => {

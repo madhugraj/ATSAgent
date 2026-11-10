@@ -17,7 +17,7 @@ const FIG = {
   levers: { joiningBonus: 100_000, reviewMonths: 6, other: null },
 };
 const DISCLOSED =
-  "Hello, this is Saranya, an AI recruiting assistant calling for Acme. I make notes for the hiring team.";
+  "Hello, this is Saranya, an AI recruiting assistant calling for Acme. I make notes for the hiring team, and the call is checked for quality.";
 
 /** Turned the proposal down, then said they would go ahead if it improved (the trade). */
 function earnMove(s: ReturnType<typeof t.freshNegotiationState>, f = FIG) {

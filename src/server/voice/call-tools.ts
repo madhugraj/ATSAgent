@@ -23,6 +23,14 @@ export type EndReason = (typeof END_REASONS)[number];
 
 const rupees = z.number().min(0).max(500_000_000);
 
+/**
+ * The details every completed screening call must leave with: recorded, or
+ * noted as not given (they would rather not say; current pay only — they are
+ * not working now). Checked in code when the call ends.
+ */
+export const MANDATORY_DETAILS = ["joining_date", "current_pay", "expected_pay"] as const;
+export type MandatoryDetail = (typeof MANDATORY_DETAILS)[number];
+
 export const CALL_TOOL_INPUTS = {
   record_consent: z.object({
     granted: z.boolean(),
@@ -49,6 +57,19 @@ export const CALL_TOOL_INPUTS = {
     pay_note: z.string().trim().max(300).optional(),
     /** Anything else the hiring team should know, in their words ("the core skills are new to me"). */
     candidate_note: z.string().trim().max(300).optional(),
+    /**
+     * A required detail they did not give: "declined" (they would rather not say —
+     * their words in pay_note or candidate_note) or "not_working" (current pay only).
+     */
+    not_given: z
+      .array(
+        z.object({
+          item: z.enum(MANDATORY_DETAILS),
+          why: z.enum(["declined", "not_working"]),
+        }),
+      )
+      .max(3)
+      .optional(),
   }),
   record_answer: z.object({
     question_id: z.string().min(1).max(20),
@@ -74,13 +95,13 @@ export const CALL_TOOL_DESCRIPTIONS: Record<CallToolName, string> = {
   record_consent:
     "Record whether the candidate agreed to the screening call now (and to notes for the hiring team): granted true only if they clearly agreed; their_words is exactly what they said.",
   record_details:
-    "Record the practical details the candidate told you, as they said them: current job title and company, total years of experience, where they live now, whether they are open to relocating (only a yes or no they actually said — a question back is not an answer), notice period in days, earliest joining date (YYYY-MM-DD), and current fixed pay, current variable pay and expected pay as rupees per year (e.g. 18 lakhs = 1800000) — only figures they actually stated; never calculate one. Anything about pay that is not a figure (a percentage hike, shares, bonuses) goes in pay_note in their words; anything else the hiring team should know (a time limit they set, skills they said are new to them) in candidate_note. Call it again as more details come; leave out anything they did not say. Never comment on the figures.",
+    "Record the practical details the candidate told you, as they said them: current job title and company, total years of experience, where they live now, whether they are open to relocating (only a yes or no they actually said — a question back is not an answer), notice period in days, earliest joining date (YYYY-MM-DD), and current fixed pay, current variable pay and expected pay as rupees per year (e.g. 18 lakhs = 1800000) — only figures they actually stated; never calculate one. Anything about pay that is not a figure (a percentage hike, shares, bonuses) goes in pay_note in their words; anything else the hiring team should know (a time limit they set, skills they said are new to them) in candidate_note. Call it again as more details come; leave out anything they did not say. Never comment on the figures. The earliest joining date, current pay and expected pay are required before the call can end as completed: if they would rather not say one, list it in not_given with why 'declined' (their words in pay_note, or in candidate_note for the joining date); if they are not working now, list current_pay with why 'not_working'.",
   record_answer:
     'After you ask one of the listed screening questions: the question\'s id and a faithful one or two sentence summary of what the candidate said. If they chose not to answer it, set declined true and say so in the summary — it is never held against them. Saying they have not done it or lack the experience is an answer: declined false. The summary holds only what the candidate said in their own words — never a tool, method or detail that you said first. If they only agreed with or repeated something you said ("yes, I used that") and gave no specifics of their own, set prompted true and say so in the summary.',
   book_slot:
     "The candidate cannot talk now and agreed a time for the call: when_local is that time as YYYY-MM-DDTHH:mm in the organisation's local time (see the current local time and the calling hours). A confirmation is e-mailed to them.",
   end_call:
-    "Hang up after saying goodbye out loud, with why the call ended: completed, booked (a later time was agreed), declined, prefers_written (they chose the written assessment), prefers_human (they want a person to call), not_interested (in the role), wrong_person, voicemail, candidate_left, other.",
+    "Hang up after saying goodbye out loud, with why the call ended: completed (refused until the earliest joining date, current pay and expected pay are each recorded or listed in not_given), booked (a later time was agreed), declined, prefers_written (they chose the written assessment), prefers_human (they want a person to call), not_interested (in the role), wrong_person, voicemail, candidate_left, other.",
 };
 
 /** JSON Schema of a tool's arguments, as providers want it (no `$schema`). */
@@ -127,10 +148,15 @@ export const freshCallState = (): CallState => ({
 
 /**
  * What the assistant must have said out loud before a "yes" counts as
- * consent: that it is an AI, and that it makes notes for the hiring team.
+ * consent: that it is an AI, that it makes notes for the hiring team, and that
+ * the call is checked for quality (the Voice Guard reviews it afterwards).
  * Checked against its own spoken lines on a live call (pure; unit-tested).
  */
-export function disclosureMissing(aiSaid: string): string | null {
+export function disclosureMissing(
+  aiSaid: string,
+  /** false: AI and notes only — graders of calls made before the quality line (pay before disclosure). */
+  opts: { quality?: boolean } = {},
+): string | null {
   const missing = [
     /\bAI\b|artificial intelligence/i.test(aiSaid)
       ? null
@@ -138,8 +164,63 @@ export function disclosureMissing(aiSaid: string): string | null {
     /\bnotes?\b|transcri/i.test(aiSaid)
       ? null
       : "that you make notes of the conversation for the hiring team",
+    opts.quality === false || /\bquality\b/i.test(aiSaid)
+      ? null
+      : "that the call is checked for quality",
   ].filter(Boolean);
   return missing.length ? missing.join(" and ") : null;
+}
+
+/** Spoken names of the required details, for the refusal the model hears. */
+const MANDATORY_SPOKEN: Record<MandatoryDetail, string> = {
+  joining_date: "the earliest date they could join",
+  current_pay: "their current pay (fixed and variable)",
+  expected_pay: "their expected pay",
+};
+
+/**
+ * The required details a completed call still lacks (pure; unit-tested): each
+ * is a recorded value or a not_given entry. "not_working" excuses current pay
+ * only; "declined" for pay needs their words in pay_note, and for the joining
+ * date in candidate_note — the hiring team sees what was said.
+ */
+export function mandatoryMissing(d: CallDetailsInput | null): MandatoryDetail[] {
+  const notGiven = new Map((d?.not_given ?? []).map((n) => [n.item, n.why]));
+  const excused = (item: MandatoryDetail): boolean => {
+    const why = notGiven.get(item);
+    if (why === "not_working") return item === "current_pay";
+    if (why === "declined")
+      return Boolean(item === "joining_date" ? d?.candidate_note : d?.pay_note);
+    return false;
+  };
+  const has: Record<MandatoryDetail, boolean> = {
+    joining_date: Boolean(d?.earliest_joining),
+    current_pay: d?.current_ctc_fixed != null,
+    expected_pay: d?.expected_ctc != null,
+  };
+  return MANDATORY_DETAILS.filter((item) => !has[item] && !excused(item));
+}
+
+export type RequiredStatus = "recorded" | "declined" | "not_working" | "missing";
+
+/** Where each required detail stands (pure; stored on the call, no figures). */
+export function requiredDetailStatus(
+  d: CallDetailsInput | null,
+): Record<MandatoryDetail, RequiredStatus> {
+  const missing = new Set(mandatoryMissing(d));
+  const why = new Map((d?.not_given ?? []).map((n) => [n.item, n.why]));
+  const has: Record<MandatoryDetail, boolean> = {
+    joining_date: Boolean(d?.earliest_joining),
+    current_pay: d?.current_ctc_fixed != null,
+    expected_pay: d?.expected_ctc != null,
+  };
+  const of = (item: MandatoryDetail): RequiredStatus =>
+    has[item] ? "recorded" : missing.has(item) ? "missing" : (why.get(item) ?? "missing");
+  return {
+    joining_date: of("joining_date"),
+    current_pay: of("current_pay"),
+    expected_pay: of("expected_pay"),
+  };
 }
 
 /**
@@ -177,7 +258,19 @@ export function applyCallTool(
       return { ok: true };
     }
     case "record_details": {
-      state.details = { ...state.details, ...(parsed.data as CallDetailsInput) };
+      const input = parsed.data as CallDetailsInput;
+      // not_given merges by item (the latest word wins), and a value recorded
+      // later clears its not_given entry.
+      const merged = { ...state.details, ...input };
+      const notGiven = new Map(
+        [...(state.details?.not_given ?? []), ...(input.not_given ?? [])].map((n) => [n.item, n]),
+      );
+      if (merged.earliest_joining) notGiven.delete("joining_date");
+      if (merged.current_ctc_fixed != null) notGiven.delete("current_pay");
+      if (merged.expected_ctc != null) notGiven.delete("expected_pay");
+      if (notGiven.size) merged.not_given = [...notGiven.values()];
+      else delete merged.not_given;
+      state.details = merged;
       return { ok: true, recorded: Object.keys(parsed.data as object) };
     }
     case "record_answer": {
@@ -210,7 +303,20 @@ export function applyCallTool(
       return { ok: true };
     }
     case "end_call": {
-      state.endReason = (parsed.data as { reason: EndReason }).reason;
+      const reason = (parsed.data as { reason: EndReason }).reason;
+      // A completed screen must leave with the joining date and pay (checked in
+      // code): recorded, or noted as not given. Ending early for another reason
+      // (a later time, a person, not interested) is unaffected.
+      if (state.consent === true && (reason === "completed" || reason === "other")) {
+        const missing = mandatoryMissing(state.details);
+        if (missing.length)
+          return {
+            ok: false,
+            error: `Not ended: before you close, ask ${missing.map((m) => MANDATORY_SPOKEN[m]).join(", ")} — one at a time, plainly — and call record_details with what they say. If they would rather not say, reply "Of course", put their words in pay_note (candidate_note for the joining date) and list it in not_given with why "declined"; if they are not working now, list current_pay with why "not_working". Then say goodbye and end the call.`,
+            missing,
+          };
+      }
+      state.endReason = reason;
       return { ok: true };
     }
   }

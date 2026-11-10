@@ -21,6 +21,7 @@ import {
   Megaphone,
   MessagesSquare,
   PhoneCall,
+  Headphones,
   Scale,
   Plug,
   ShieldCheck,
@@ -99,6 +100,14 @@ export const NAV_GROUPS: NavGroup[] = [
         label: "Agent observability",
         icon: Activity,
         show: (c) => c.governance,
+        mode: "agent",
+      },
+      {
+        to: "/agents/call-reviews",
+        label: "Call reviews",
+        icon: Headphones,
+        // Reviews quote call transcripts (pay included): the people who may read them.
+        show: (c) => c.recruiterView,
         mode: "agent",
       },
       {

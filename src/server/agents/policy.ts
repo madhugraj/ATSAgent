@@ -71,17 +71,57 @@ export function decideToolCall(
   return policy.autonomy === "autonomous" || preApproved ? "run" : "approve";
 }
 
+/** The AI phone agents whose calls the Voice Guard reviews. */
+export const VOICE_CALL_AGENTS = ["screening_call", "scheduling_call", "negotiation_call"] as const;
+
+/**
+ * The Voice Guard is mandatory, not opt-in: it is on whenever any AI phone
+ * agent is on (and cannot be switched off while one is), and its only write —
+ * its own review — never waits for Suggest-level approval. The org-wide pause
+ * still stops it. (A run whose transcript tripped the injection tripwire is
+ * still held for a person, like any agent.)
+ */
+export function voiceGuardPolicy(
+  base: Pick<EffectivePolicy, "enabled" | "autonomy">,
+  o: { orgPaused: boolean; voiceAgentOn: boolean },
+): Pick<EffectivePolicy, "enabled" | "autonomy"> {
+  return {
+    enabled: !o.orgPaused && (base.enabled || o.voiceAgentOn),
+    autonomy: base.autonomy === "suggest" ? "act_and_notify" : base.autonomy,
+  };
+}
+
 /** The org-wide switch ('*') and the agent's own row (opt-in), merged over the defaults. */
 export async function loadPolicy(orgId: string, agentType: AgentType): Promise<EffectivePolicy> {
+  const guard = agentType === "voice_guard";
   const rows = await db
     .select()
     .from(agentPolicies)
-    .where(and(eq(agentPolicies.orgId, orgId), inArray(agentPolicies.agentType, ["*", agentType])));
+    .where(
+      and(
+        eq(agentPolicies.orgId, orgId),
+        inArray(agentPolicies.agentType, ["*", agentType, ...(guard ? VOICE_CALL_AGENTS : [])]),
+      ),
+    );
   const orgWide = rows.find((r) => r.agentType === "*");
   const own = rows.find((r) => r.agentType === agentType);
+  const mandatory = guard
+    ? voiceGuardPolicy(
+        {
+          enabled: own?.enabled === true,
+          autonomy: own?.autonomy ?? DEFAULT_POLICY.autonomy,
+        },
+        {
+          orgPaused: orgWide?.enabled === false,
+          voiceAgentOn: rows.some(
+            (r) => (VOICE_CALL_AGENTS as readonly string[]).includes(r.agentType) && r.enabled,
+          ),
+        },
+      )
+    : null;
   return {
-    enabled: orgWide?.enabled !== false && own?.enabled === true,
-    autonomy: own?.autonomy ?? DEFAULT_POLICY.autonomy,
+    enabled: mandatory?.enabled ?? (orgWide?.enabled !== false && own?.enabled === true),
+    autonomy: mandatory?.autonomy ?? own?.autonomy ?? DEFAULT_POLICY.autonomy,
     whitelistedTemplates: own?.whitelistedTemplates ?? [],
     monthlyTokenBudget: own?.monthlyTokenBudget ?? null,
     maxStepsPerLeg: own?.maxStepsPerLeg ?? null,

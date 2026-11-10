@@ -47,6 +47,7 @@ import { AGENT_CATALOG, AGENT_LABEL, AUTONOMY_OPTIONS } from "@/lib/agents.catal
 import { AgentDetailDrawer, type DrawerTab } from "@/components/AgentDetailDrawer";
 import { AgentUtilisation } from "@/components/AgentUtilisation";
 import { VoiceObservability } from "@/components/VoiceObservability";
+import { CallReviewsSummary } from "@/components/CallReviewsSummary";
 import { ModalityToggle } from "@/components/report-bar";
 import { modalityLabel, type ModalityFilter } from "@/lib/agent-modality";
 
@@ -266,6 +267,7 @@ function ObservabilityPage() {
           <Trends d={d} />
           <VoiceObservability />
           <AgentUtilisation />
+          <CallReviewsSummary />
           <IssuesPanel
             issues={[...d.orgIssues, ...d.agents.flatMap((a) => a.issues)]}
             rules={d.rules}

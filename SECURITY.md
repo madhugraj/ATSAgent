@@ -84,6 +84,17 @@ We credit reporters in release notes on request.
   and the only contact given is the organisation's mailbox. Each voice agent's dos and don'ts are
   one charter (`src/server/voice/charter.ts`, `docs/voice-agents-charter.md`), printed into every
   call and the source of its must-never list.
+- Voice Guard (docs/voice-guard.md): every answered AI phone call is reviewed after it ends,
+  observe-and-report only. The agent has two tools: read one call, and file its review. It has no
+  tool that touches a call, a candidate or a decision. Candidates are told the call "is checked
+  for quality", and their consent is refused in code until that was said. Without consent nothing
+  they said is kept, and only the call's line stats (no words) are reviewed, by the system. The
+  transcript reaches the Voice Guard as untrusted data. Its findings must quote the transcript; a
+  quote not in the named turn is dropped. Reviews quote transcripts that carry stated pay, so
+  Call reviews is for TA, the HR head, the CBO and owners only. Marking a review is audited
+  (`call_review.acknowledged`, `call_review.requeued`). Reviews and the call's stored brief and
+  line stats are erased with the call. The Voice Guard cannot be switched off while an AI phone
+  agent is on.
 - Rate limiting on all public HTTP routes and server-function RPCs (`src/server.ts`), a tighter
   budget on `/api/auth` mutations (sign-in, registration, password reset), shared across
   instances through Postgres when `RATE_LIMIT_STORE=postgres` (production).
