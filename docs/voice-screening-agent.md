@@ -156,7 +156,9 @@ Screening call agent 1.6.0, from the organisation's review of a test call on
 - **The opening reply comes sooner.** The opening cue now comes 0.5 s after the
   candidate's hello ends, timed from the line's own voice detection. The hello's
   late transcript had restarted the wait, and the test call took 3.9 s to answer
-  "Hello". This applies to all three calls.
+  "Hello". This applies to all three calls. A repeated cue now waits 6 s, not 3 s, for all three
+  calls and mid-call. A cue interrupts the reply the model is preparing, and a
+  later test call cued at 3, 6 and 9 s stayed silent for 11 s.
 
 A completed call must leave with the earliest joining date, current pay and
 expected pay (Screening call agent 1.3.0): after consent, `end_call` with

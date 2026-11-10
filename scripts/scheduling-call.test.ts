@@ -1203,12 +1203,13 @@ describe("who speaks first", () => {
       () => false,
       60_000,
     );
-    await wait(4_000 + 3_000 * 3 + 600);
+    // 6 s apart: a cue interrupts the reply the model is preparing (REPEAT_NUDGE_MS).
+    await wait(4_000 + 6_000 * 2 + 600);
     w.stop();
     expect(w.sent).toEqual([
       "(The person has answered the phone. Reply to them now.)",
       "(The person is on the line and waiting. Speak now.)",
       "(The person is on the line and waiting. Speak now.)",
     ]);
-  }, 20_000);
+  }, 25_000);
 });
