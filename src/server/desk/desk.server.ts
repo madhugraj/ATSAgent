@@ -327,6 +327,12 @@ const Command = z.discriminatedUnion("type", [
     top: z.number().int().min(1).max(20).optional(),
     ranks: z.array(z.number().int().min(1).max(50)).max(20).optional(),
   }),
+  z.object({
+    // "call again", "do the screening call again", "phone Meera": an AI phone screening call.
+    type: z.literal("call_candidate"),
+    name: z.string().trim().max(120).optional(),
+    ranks: z.array(z.number().int().min(1).max(50)).max(1).optional(),
+  }),
   z.object({ type: z.literal("new_role") }),
   z.object({ type: z.literal("use_existing"), code: z.string().max(40).optional() }),
   z.object({ type: z.literal("close_role") }),
@@ -389,6 +395,7 @@ const SYSTEM = [
   '- JD details (only when the person gives them): responsibilities (their key responsibilities, as text), reportingTo, successMeasures (what success looks like), education. If they ask you to fill these from the market / research / "you decide", set researchRole true.',
   '- "command": {"type":"none"} unless the person asks to act: "talk to / screen / call the first 5" → {"type":"screen","top":5}; "screen 1, 3 and 4" → {"type":"screen","ranks":[1,3,4]}; "create a new role" → {"type":"new_role"}; "use REQ-2026-014" → {"type":"use_existing","code":"REQ-2026-014"}.',
   '- "command" also: "close / cancel / delete / withdraw this role" → {"type":"close_role"}.',
+  '- "call again", "do the screening call again", "redo the AI call", "phone Meera", "call candidate 2" → {"type":"call_candidate"} with "name" when they name the candidate (as they said it) or "ranks":[n] for a rank — never feedback, even when OPEN REQUESTS lists something: the system arranges an AI phone screening call.',
   '- When the person delegates a detail to you or to the market ("as per market needs", "you decide", "what does the market say?", "pick it up from research") → {"type":"research","fields":[...]} with the fields they delegated: "skills", "experience" and/or "budget". (JD details are not a research command — for those set researchRole true as above.) When OPEN PROPOSAL is yes and they agree ("ok", "yes", "use these", "go ahead") → {"type":"accept"}.',
   '- "show / see / open / read the JD (job description)" → {"type":"show_jd"}; the system posts the full text. Never summarise the JD instead or send the person elsewhere to read it.',
   '- "show / change the interview plan, the rounds, the panel size, what a round rates, or who the hiring manager is" → {"type":"show_interview_plan"}; the system posts the plan, which the person edits right in the card. Never describe or change the plan yourself.',
@@ -1191,6 +1198,10 @@ async function handleUserMessageInner(
       return;
     }
     await screenCandidates(conv, userId, ids);
+    return;
+  }
+  if (cmd.type === "call_candidate") {
+    await callCandidateFromDesk(conv, userId, cmd);
     return;
   }
   if (cmd.type === "show_jd") {
@@ -4329,6 +4340,115 @@ export async function announceNewApplicants(orgId?: string): Promise<number> {
     posted++;
   }
   return posted;
+}
+
+/**
+ * "Call again" in the chat: arrange an AI phone screening call — the same core
+ * and role check as the "Call now" button (requestScreeningCall, audited
+ * screening_call.requested). The candidate: the one they named or ranked, else
+ * the one this role's latest screening call was with. A real thread on
+ * 10 November sent "call again" to a waiting job-feed listing as a change.
+ */
+export async function callCandidateFromDesk(
+  conv: Conversation,
+  userId: string,
+  cmd: { name?: string | undefined; ranks?: number[] | undefined },
+): Promise<void> {
+  const say = (body: string) => postMessage(conv, { role: "desk", body });
+  if (!conv.requisitionId) {
+    await say("Choose or create the role first, then I can arrange a screening call.");
+    return;
+  }
+  const { assertRole } = await import("@/lib/auth.middleware");
+  try {
+    await assertRole(userId, conv.orgId, ["recruiter", "hr_head", "president_cbo"]);
+  } catch {
+    await say("Only TA, the HR head or the CBO can arrange a screening call.");
+    return;
+  }
+  const inRole = and(
+    eq(applications.orgId, conv.orgId),
+    eq(applications.requisitionId, conv.requisitionId),
+  );
+  let picked: { id: string; name: string }[] = [];
+  if (cmd.ranks?.length) {
+    const [id] = await resolveRanks(conv, { ranks: cmd.ranks });
+    if (id)
+      picked = await db
+        .select({ id: applications.id, name: candidates.fullName })
+        .from(applications)
+        .innerJoin(candidates, eq(candidates.id, applications.candidateId))
+        .where(and(inRole, eq(applications.id, id)))
+        .limit(1);
+  } else if (cmd.name?.trim()) {
+    const words = cmd.name
+      .trim()
+      .split(/\s+/)
+      .filter((w) => w.length > 1);
+    picked = await db
+      .select({ id: applications.id, name: candidates.fullName })
+      .from(applications)
+      .innerJoin(candidates, eq(candidates.id, applications.candidateId))
+      .where(and(inRole, ...words.map((w) => ilike(candidates.fullName, `%${w}%`))))
+      .limit(5);
+  } else {
+    const { screeningCalls } = await import("@db/schema");
+    picked = await db
+      .select({ id: applications.id, name: candidates.fullName })
+      .from(screeningCalls)
+      .innerJoin(applications, eq(applications.id, screeningCalls.applicationId))
+      .innerJoin(candidates, eq(candidates.id, applications.candidateId))
+      .where(
+        and(inRole, eq(screeningCalls.orgId, conv.orgId), eq(screeningCalls.purpose, "screening")),
+      )
+      .orderBy(desc(screeningCalls.createdAt))
+      .limit(1);
+  }
+  if (!picked.length) {
+    await say(
+      cmd.name
+        ? `I couldn't find "${cmd.name}" in this role's pipeline. Who should I call?`
+        : "Who should I call? Name the candidate, or say their rank.",
+    );
+    return;
+  }
+  if (picked.length > 1) {
+    await say(
+      `More than one candidate matches: ${picked.map((p) => p.name).join(", ")}. Which one?`,
+    );
+    return;
+  }
+  const app = picked[0]!;
+  const { requestScreeningCall } = await import("../voice/request.server");
+  try {
+    const r = await requestScreeningCall({
+      orgId: conv.orgId,
+      applicationId: app.id,
+      requestedBy: userId,
+      requestedRunId: null,
+      actor: `user:${userId}`,
+      // They asked for it: a completed screen may be done again (never while one is open).
+      again: true,
+    });
+    const tz = await orgTimeZone(conv.orgId);
+    const soon = r.dueAt.getTime() - Date.now() < 2 * 60_000;
+    await postMessage(conv, {
+      role: "desk",
+      body: soon
+        ? `Arranged an AI screening call with ${app.name} — it rings in a minute or two.`
+        : `Arranged an AI screening call with ${app.name} — it rings ${localWhen(r.dueAt, tz)}, the next time inside your calling hours.`,
+      card: {
+        type: "reasoning",
+        understood: [{ label: "Call", value: app.name }],
+        missing: [],
+        next: "The call's result and its Voice Guard review come back here and under Agents → Call reviews.",
+      },
+    });
+  } catch (e) {
+    await say(
+      `I couldn't arrange the call: ${e instanceof Error ? e.message : "it could not be arranged."}`,
+    );
+  }
 }
 
 async function orgTimeZone(orgId: string): Promise<string> {

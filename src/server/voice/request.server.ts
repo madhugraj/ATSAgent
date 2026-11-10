@@ -36,7 +36,15 @@ export type CallCheck =
   | { ok: false; reason: string };
 
 /** Whether a screening call may be asked for this application now — and why not. */
-export async function checkScreeningCall(orgId: string, applicationId: string): Promise<CallCheck> {
+export async function checkScreeningCall(
+  orgId: string,
+  applicationId: string,
+  /**
+   * A person asked for another call ("call again" on the hiring desk): one after a
+   * completed screen is allowed — the person is the approval. Never an agent's request.
+   */
+  opts: { again?: boolean } = {},
+): Promise<CallCheck> {
   const ready = await phoneScreeningReadiness(orgId);
   if (!ready.enabled)
     return { ok: false, reason: "Phone screening is switched off for this organisation." };
@@ -106,7 +114,7 @@ export async function checkScreeningCall(orgId: string, applicationId: string): 
     .limit(1);
   if (last && (OPEN_CALL as readonly string[]).includes(last.status))
     return { ok: false, reason: "A screening call is already arranged for this candidate." };
-  if (last?.status === "completed")
+  if (last?.status === "completed" && !opts.again)
     return { ok: false, reason: "This candidate was already screened by phone." };
   if (last?.status === "consent_declined")
     return {
@@ -138,8 +146,12 @@ export async function requestScreeningCall(input: {
   requestedRunId: string | null;
   actor: string;
   now?: number;
+  /** A person asked to call them again after a completed screen (audited as such). */
+  again?: boolean;
 }): Promise<{ callId: string; dueAt: Date }> {
-  const check = await checkScreeningCall(input.orgId, input.applicationId);
+  const check = await checkScreeningCall(input.orgId, input.applicationId, {
+    again: input.again === true && input.requestedRunId === null,
+  });
   if (!check.ok) throw new Error(check.reason);
   const policy = await phoneScreeningPolicyOf(input.orgId);
   const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
@@ -180,7 +192,11 @@ export async function requestScreeningCall(input: {
     action: "screening_call.requested",
     entityType: "screening_call",
     entityId: row!.id,
-    detail: { applicationId: check.app.id, dueAt: dueAt.toISOString() },
+    detail: {
+      applicationId: check.app.id,
+      dueAt: dueAt.toISOString(),
+      ...(input.again ? { again: true } : {}),
+    },
   });
   return { callId: row!.id, dueAt };
 }
