@@ -1691,7 +1691,7 @@ const AGENT_TITLE: Record<string, string> = {
   sourcing: "Sourcing agent",
   distribution: "Distribution agent",
   org_context: "Organisation context agent",
-  copilot: "Copilot",
+  copilot: "Arjun",
 };
 
 /** Agents that work alongside the journey rather than being a step of it. */

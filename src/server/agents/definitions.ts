@@ -19,7 +19,7 @@ import { registerAgent } from "./registry";
 export function registerPhase1Agents(): void {
   registerAgent({
     type: "copilot",
-    name: "Copilot",
+    name: "Arjun",
     // 1.2.1: shared rules — plain language for people (no tool or field names,
     // IDs or flags) and times in the organisation's time zone.
     // 1.2.2: can hand an approved role to the Distribution agent.
@@ -28,7 +28,9 @@ export function registerPhase1Agents(): void {
     // 1.2.5: the request_approval subject gained the organisation profile; no behaviour change for this agent.
     // 1.3.0: answers "I need a <role>" from the organisation's ontology (get_role_profile) and the
     // talent pool (check_talent_availability) before offering to open a requisition.
-    version: "1.3.0",
+    // 1.3.1: shown to people as "Arjun" (the doer, paired with Aditi who answers); the type
+    // stays "copilot" so runs, settings and the audit trail keep their links. No behaviour change.
+    version: "1.3.1",
     owner: "hr_head",
     responsibility:
       "Turns a person's request into work for the specialist agents and starts them only after the person confirms.",

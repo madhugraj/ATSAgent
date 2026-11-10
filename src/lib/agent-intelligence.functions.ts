@@ -575,9 +575,9 @@ export const agentIntelligence = createServerFn({ method: "POST" })
         pri: "medium",
         title: `◈ The front door never opened — copilot has 0 runs`,
         short: `copilot never invoked — routing untested`,
-        cause: `All ${totalRuns} runs started directly from a page; nobody has asked the Copilot to hand work to an agent yet.`,
-        effect: `The Copilot's hand-off to agents is untried in your organisation.`,
-        action: `Try one task through the Copilot so you know it works — or ignore this if your team prefers starting agents from each page.`,
+        cause: `All ${totalRuns} runs started directly from a page; nobody has asked Arjun to hand work to an agent yet.`,
+        effect: `Arjun's hand-off to agents is untried in your organisation.`,
+        action: `Try one task through Arjun so you know it works — or ignore this if your team prefers starting agents from each page.`,
       });
     if (gapAgents.length)
       behaviorChips.push({

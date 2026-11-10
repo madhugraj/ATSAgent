@@ -201,7 +201,7 @@ function AskAgents() {
           <p className="text-xs text-muted-foreground">
             {settings.data.allPaused
               ? "Agents are paused for this organisation."
-              : "Switch on the Copilot (and the agents it should use) in"}{" "}
+              : "Switch on Arjun (and the agents it should use) in"}{" "}
             {!settings.data.allPaused ? (
               <Link to="/agents/settings" className="underline">
                 Agent settings

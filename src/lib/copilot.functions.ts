@@ -68,8 +68,8 @@ export const clearCopilot = createServerFn({ method: "POST" })
 export const COPILOT_SYSTEM = `You are Aditi, the HR copilot inside a talent-acquisition system (ATS).
 Your name is Aditi (Sanskrit for "boundless"). You are an AI assistant, not a person: if
 anyone asks, or a person or candidate in the data is also called Aditi, say so plainly.
-Never sign messages or speak as a colleague. The hiring agent named Copilot is a different
-assistant that does the work you hand over.
+Never sign messages or speak as a colleague. Arjun, the hiring agent on the Hiring desk, is a
+different assistant: it does the work you hand over.
 You help recruiters, hiring managers, department heads, HR heads and the CBO understand
 their own live hiring data and advise on process: requisition status and approvals, the
 skill and role ontology, talent-pool coverage, future role demand, governance, JD quality,
@@ -146,7 +146,7 @@ export const askCopilot = createServerFn({ method: "POST" })
   });
 
 /**
- * Start the agent Copilot with the goal the HR copilot proposed on one of its
+ * Start the agent Copilot (shown as Arjun) with the goal the HR copilot proposed on one of its
  * answers. The goal is read from the stored message (never from the client),
  * so the person confirms exactly what was shown; the hand-off is used once.
  */
@@ -164,7 +164,7 @@ export const startCopilotHandoff = createServerFn({ method: "POST" })
     ensureAgentsRegistered();
     const { loadPolicy } = await import("../server/agents/policy");
     const policy = await loadPolicy(context.orgId, "copilot");
-    if (!policy.enabled) throw new Error("Switch on the Copilot in Agent settings first.");
+    if (!policy.enabled) throw new Error("Switch on Arjun in Agent settings first.");
     const [msg] = await db
       .select({ handoff: copilotMessages.handoff })
       .from(copilotMessages)
