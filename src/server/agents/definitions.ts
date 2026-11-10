@@ -486,7 +486,10 @@ export function registerPhase2Agents(): void {
     // ("I never applied") — checked in code; record_details before saying "noted". The
     // shared turn manager (src/server/voice/turns.ts) cues it when it goes quiet after a
     // tool result or a statement, or says it noted something it did not record.
-    version: "1.5.0",
+    // 1.5.1: notice period, joining date, current pay and expected pay are four separate
+    // questions in its steps (they were two paired items, and it asked each pair in one
+    // breath); the Voice Guard flags a stacked one in code.
+    version: "1.5.1",
     owner: "hr_head",
     responsibility:
       "Holds one AI screening phone call with a shortlisted candidate the way an HR recruiter does: says who it is and why it is calling, asks consent, explains the role and why it called them, records their practical details (including the pay they state, for HR only) and their answers to the role's screening questions, or agrees a better time — nothing else.",

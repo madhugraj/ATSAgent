@@ -57,7 +57,7 @@ person to approve before it is saved.
 | Agreed to something: a figure, date, condition or fact; on a pay call, a figure it was not given or less than a clear yes                               | Voice Guard | all                      |
 | Records match what was said: every "I'll note" has a record; consent from the right reply; asked-and-answered details kept (relocation, notice: system) | both        | all                      |
 | Other charter rules: praise, staff, pay, protected questions, results, posing as a person                                                               | Voice Guard | all                      |
-| Call steps: one question at a time, a date for a vague answer, every question, their questions, a close                                                 | Voice Guard | calls from 1.1.0 on      |
+| Call steps: one question at a time (two required details in one question: system), a date for a vague answer, every question, their questions, a close  | both        | calls from 1.1.0 on      |
 | Turn-taking: spoke before hello, talked over, slow replies, voice breaking up, cues it needed, "Are you there?", cut off without a close                | system      | all, including line-only |
 | Transcription: lines in another language or script                                                                                                      | system      | all                      |
 
@@ -140,6 +140,14 @@ root rather than per call:
    record is cued to record it; and every ending — silence and hang-ups too —
    tells the hiring desk and the Screening agent which required details are
    still to get.
+
+The two flaws the review still missed were **stacked questions** ("your notice
+period and the earliest date you could join?", "your current … as well as your
+expected pay?"). The cause was the prompt: its "one at a time" list paired
+those details, so the model asked each pair in one breath. They are now four
+separate questions (screening call 1.5.1), and the system flags any question
+that asks for two required details, counting what is asked rather than
+question marks (`stackedQuestions`). The re-review found 11 of 11.
 
 Set `VOICE_DEBUG_FILE` on the voice worker to trace each call's audio, turn,
 tool and cue timings (names only — never words or arguments).

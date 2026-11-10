@@ -419,8 +419,11 @@ describe("the call brief", () => {
     expect(p).toContain("Keep the payments platform reliable as it grows.");
     expect(p).toContain("What fits from their CV: Kubernetes, Go");
     expect(p).toMatch(
-      /Practical details, before anything technical[\s\S]*expected pay — ask afresh/,
+      /Practical details, before anything technical[\s\S]*current pay, fixed and variable, per year — ask afresh[\s\S]*then, as its own question, their expected pay/,
     );
+    // Each required detail is its own question (a real call stacked the paired items).
+    expect(p).toContain("their notice period — ask plainly");
+    expect(p).toContain("then, as its own question, the earliest date they could join");
     expect(p).toContain("or skip the consent, politely");
     expect(p).toContain("(their CV says Acme, about 7 years — confirm it rather than read it out)");
     expect(p).toContain("the one ending in gmail.com");
