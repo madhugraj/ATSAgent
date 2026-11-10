@@ -423,6 +423,59 @@ function recordChecks(i: GuardInput, out: CodeResult): void {
   }
 }
 
+/** How a question about each required detail sounds (screening asks them one at a time). */
+const REQUIRED_ASKED: { what: string; asked: RegExp }[] = [
+  { what: "notice period", asked: /\bnotice\b/i },
+  {
+    what: "joining date",
+    asked:
+      /\b(join(ing)?|start(ing)? date|(could|can) start|available to start|date of joining|doj)\b/i,
+  },
+  {
+    what: "current pay",
+    asked:
+      /\b(current|present|existing)\b[^?.]*?\b(pay|ctc|salary|compensation|package|fixed|variable)\b|\bfixed and variable\b/i,
+  },
+  {
+    what: "expected pay",
+    asked: /\bexpect(ed|ing|ation|ations)?\b[^?.]*?\b(pay|ctc|salary|compensation|package)\b/i,
+  },
+];
+
+/**
+ * Required details asked for together in one question ("your notice period and
+ * the earliest date you could join?", "your current and expected pay?"). One
+ * "?" can still ask two things, so it counts what each question asks for, not
+ * question marks. Calls from 0071 only (the rule was not in older briefs).
+ */
+export function stackedQuestions(
+  transcript: ScreeningCallTurn[],
+): { turn: number; sentence: string; asks: string[] }[] {
+  const out: { turn: number; sentence: string; asks: string[] }[] = [];
+  transcript.forEach((t, turn) => {
+    if (t.who !== "ai") return;
+    for (const raw of t.text.split(/(?<=[.?!])\s+/)) {
+      if (!/\?\s*$/.test(raw.trim())) continue;
+      const asks = REQUIRED_ASKED.filter((r) => r.asked.test(raw)).map((r) => r.what);
+      if (asks.length > 1) out.push({ turn, sentence: raw.trim(), asks });
+    }
+  });
+  return out;
+}
+
+function stackedCheck(i: GuardInput, out: CodeResult): void {
+  if (i.scope !== "full" || i.purpose !== "screening" || !i.qualityDisclosed) return;
+  for (const s of stackedQuestions(i.transcript))
+    out.findings.push(
+      finding(
+        "call_steps",
+        "high",
+        `It asked for ${s.asks.join(" and ")} in one question instead of one at a time.`,
+        [{ turn: s.turn, quote: s.sentence.slice(0, 200) }],
+      ),
+    );
+}
+
 const norm = (t: string) =>
   t
     .toLowerCase()
@@ -499,6 +552,7 @@ export function codeChecks(i: GuardInput): CodeResult {
   repetitionCode(i, out);
   transcriptionCheck(i, out);
   recordChecks(i, out);
+  stackedCheck(i, out);
   // A timing-only review covers the line alone.
   if (i.scope === "timing_only")
     out.checks = out.checks.filter((c) => CHECK_BY_ID.get(c.check)?.timing);

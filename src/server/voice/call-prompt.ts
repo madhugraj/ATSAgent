@@ -112,9 +112,14 @@ export function callSystemPrompt(f: BriefFacts): string {
     // Always asked afresh, never "we have it on record": a real candidate asked how we
     // knew, and "I cannot disclose the figure I have" sounded evasive.
     // A real call asked for the date "in a YYYY-MM-DD format": the format is the tool's, never the candidate's.
-    'their notice period and the earliest date they could join — ask plainly; never say you have it on record. If they give a month or a rough time ("by March", "the first week of January", "in two months"), ask once, in plain words, which date that would be, before you move on; never mention a date format — you put what they say into the record yourself',
+    // Each its own question: a real call (10 Nov) asked "your notice period and the
+    // earliest date you could join" and "your current … as well as your expected pay"
+    // in one breath because the two were one item here.
+    "their notice period — ask plainly; never say you have it on record",
+    'then, as its own question, the earliest date they could join. If they give a month or a rough time ("by March", "the first week of January", "in two months", "three months"), ask once, in plain words, which date that would be, before you move on; never mention a date format — you put what they say into the record yourself',
     // Pay is always asked afresh: confirming figures the assistant cannot see does not work.
-    'their current pay (fixed and variable, per year) and their expected pay — ask afresh even if it was given before ("so our notes are up to date"); you never know or state any figure',
+    'their current pay, fixed and variable, per year — ask afresh even if it was given before ("so our notes are up to date"); you never know or state any figure',
+    "then, as its own question, their expected pay",
   ].filter(Boolean) as string[];
   const questions = f.questions.map((q) => `- [${q.id}] ${q.question}`).join("\n");
 

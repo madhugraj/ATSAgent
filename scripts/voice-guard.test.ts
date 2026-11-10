@@ -276,6 +276,53 @@ describe("what the 10 November test call showed", () => {
     );
   });
 
+  test("required details asked together in one question", () => {
+    expect(r.findings).toContainEqual(
+      expect.objectContaining({
+        check: "call_steps",
+        severity: "high",
+        summary:
+          "It asked for notice period and joining date in one question instead of one at a time.",
+        evidence: [
+          {
+            turn: 9,
+            quote:
+              "Regarding your notice period and the earliest date you could join, could you tell me?",
+          },
+        ],
+      }),
+    );
+  });
+
+  test("stacked: counts what each question asks for, not question marks", () => {
+    const s = (text: string) => checks.stackedQuestions(turns(["ai", text])).map((x) => x.asks);
+    expect(
+      s(
+        "Thank you. I have noted that. Now, to ensure our records are up to date, could you please share your current fixed and variable pay, as well as your expected pay?",
+      ),
+    ).toEqual([["current pay", "expected pay"]]);
+    expect(s("What is your current and expected CTC?")).toEqual([["current pay", "expected pay"]]);
+    expect(s("When could you join, and what is your expected salary?")).toEqual([
+      ["joining date", "expected pay"],
+    ]);
+    // One detail per question is fine, even in one turn.
+    expect(s("What is your notice period?")).toEqual([]);
+    expect(s("Thank you. And what is your expected pay?")).toEqual([]);
+    expect(s("You mentioned a notice period of 90 days. Which date could you join?")).toEqual([]);
+    // Statements are not questions.
+    expect(s("Now for your notice period and your expected pay.")).toEqual([]);
+  });
+
+  test("not held against calls made before the rule", () => {
+    const old = checks.codeChecks(
+      base({
+        qualityDisclosed: false,
+        transcript: turns(["ai", "What is your notice period and the date you could join?"]),
+      }),
+    );
+    expect(old.findings.filter((f) => f.check === "call_steps")).toEqual([]);
+  });
+
   test("the call's own steps are a check for calls made under them", () => {
     expect(checks.checksFor("screening", "full").map((c) => c.id)).toContain("call_steps");
     expect(checks.checksFor("screening", "full", true).map((c) => c.id)).not.toContain(
