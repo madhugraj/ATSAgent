@@ -40,8 +40,12 @@ export const TURN_TIMING = {
   midTurnMs: 3_500,
   /** Quiet after the candidate stopped speaking (the model waits ~1.6 s, then thinks). */
   replyMs: 7_000,
-  /** Quiet after a cue before it is repeated. */
-  repeatMs: 3_000,
+  /**
+   * Quiet after a cue before it is repeated. A cue interrupts the reply the model
+   * is preparing, so it must outlast its slowest reply (a test call on 10 November:
+   * cues 3 s apart kept it silent for 11 s).
+   */
+  repeatMs: 6_000,
   /** Cues per silence. */
   maxCues: 3,
   /** A record tool this close before "I've noted…" covers it. */

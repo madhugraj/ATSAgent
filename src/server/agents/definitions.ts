@@ -499,7 +499,9 @@ export function registerPhase2Agents(): void {
     // figure is never worked out for them, never a third time. Shared turn manager: an
     // answer past 90 s is cut short politely at the next pause; the opening cue comes
     // 0.5 s after the hello (the line's own voice detection, not the late transcript).
-    version: "1.6.0",
+    // 1.6.1: repeat cues 6 s apart, not 3 — a cue interrupts the reply being prepared
+    // (a test call on 10 November stayed silent 11 s after the hello under 3-s cues).
+    version: "1.6.1",
     owner: "hr_head",
     responsibility:
       "Holds one AI screening phone call with a shortlisted candidate the way an HR recruiter does: says who it is and why it is calling, asks consent, explains the role and why it called them, records their practical details (including the pay they state, for HR only) and their answers to the role's screening questions, or agrees a better time — nothing else.",
@@ -752,7 +754,9 @@ export function registerPhase3Agents(): void {
     // 1.8.1: shared turn manager — an answer past 90 s is cut short politely at the next
     // pause; the opening cue comes 0.5 s after the hello (the line's own voice
     // detection; the hello's late transcript had restarted the wait).
-    version: "1.8.1",
+    // 1.8.2: repeat cues 6 s apart, not 3 — a cue interrupts the reply being prepared
+    // (a test call on 10 November stayed silent 11 s after the hello under 3-s cues).
+    version: "1.8.2",
     owner: "hr_head",
     responsibility:
       "Holds one short AI phone call to help a candidate and the interview panel agree a time the candidate was already e-mailed: says it is an AI, tells them where they stand in the process, books one of the offered or pre-checked times (free for the whole panel), or notes when they are free — nothing else.",
@@ -865,7 +869,9 @@ export function registerPhase3Agents(): void {
     // 0.8.1: shared turn manager — an answer past 90 s is cut short politely at the next
     // pause; the opening cue comes 0.5 s after the hello (the line's own voice
     // detection; the hello's late transcript had restarted the wait).
-    version: "0.8.1",
+    // 0.8.2: repeat cues 6 s apart, not 3 — a cue interrupts the reply being prepared
+    // (a test call on 10 November stayed silent 11 s after the hello under 3-s cues).
+    version: "0.8.2",
     owner: "hr_head",
     responsibility:
       "Holds one AI phone call with a candidate about the pay for their offer: says it is an AI, tells them which role and organisation and where they stand, wins their interest from approved facts, frames the approved figure and extras around what matters to them, may offer one pre-approved improved figure, and brings a clear answer back to the people who decide.",

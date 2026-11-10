@@ -32,8 +32,8 @@
     "hash": "177d0ba26269ffad05e895b243c1dc03ab8196fe330a6865af840f54e6484732"
   },
   "negotiation_call": {
-    "version": "0.8.1",
-    "hash": "c3cd30e35b204efbcdcc05c16751e5b70eed01210ae84a655882c848435046f6"
+    "version": "0.8.2",
+    "hash": "5baada243d0be7facafd94c9d7e150aa37b27a832b5b33f3add2323eea27fd17"
   },
   "offer": {
     "version": "1.6.4",
@@ -68,16 +68,16 @@
     "hash": "60d8f7898fcc4192f6bb0900bbe732269455399dae50bcdfa663e3b523c5e657"
   },
   "scheduling_call": {
-    "version": "1.8.1",
-    "hash": "af2e206305197bd1420fde59243d8ddd4e49d39eddede96e3abb25c1d1f990f9"
+    "version": "1.8.2",
+    "hash": "e814f49f55af62f031ff9f529e149ed2309dfb1eb1c25d3fb878cce543a1da6c"
   },
   "screening": {
     "version": "1.11.0",
     "hash": "15cfc3682026b5429282abf1aaa21071c77dcdccd6af59d3814212307224a89d"
   },
   "screening_call": {
-    "version": "1.6.0",
-    "hash": "f674f87c09ddfbf5f3dbe51b1c812ff965e0e53b7a4400a8cc45d796891f87e9"
+    "version": "1.6.1",
+    "hash": "499e8406bdb56558423e60450eb297fe4813126597f0a1ced031b751d8f17ad3"
   },
   "sourcing": {
     "version": "1.0.5",

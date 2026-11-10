@@ -107,8 +107,14 @@ export const REPLY_NUDGE_MS = 4_000;
 export const OPENING_REPLY_CUE_MS = 500;
 export const SCREENING_REPLY_CUE_MS = OPENING_REPLY_CUE_MS;
 
-/** Still silent this long after a cue → cue again, at most MAX_REPEAT_NUDGES more times. */
-export const REPEAT_NUDGE_MS = 3_000;
+/**
+ * Still silent this long after a cue → cue again, at most MAX_REPEAT_NUDGES more
+ * times. 6 s, not 3: a cue interrupts the reply the model is preparing and it
+ * starts over — a test call on 10 November was cued at 3, 6 and 9 s after the
+ * hello and first spoke at 13.9 s (the candidate hung up); one cue had it
+ * speaking 2.4 s later.
+ */
+export const REPEAT_NUDGE_MS = 6_000;
 export const MAX_REPEAT_NUDGES = 2;
 
 /**
