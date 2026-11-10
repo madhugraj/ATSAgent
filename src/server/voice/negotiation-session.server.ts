@@ -41,6 +41,7 @@ import { disclosureMissing } from "./call-tools";
 import { loadNegotiationBrief, type NegotiationBrief } from "./negotiation-brief.server";
 import { CallStatsTracker } from "./call-stats";
 import { voiceDebug } from "./debug";
+import { readsOutWorkings, WORKINGS_CORRECTION } from "./spoken-guard";
 import { GREETING_WAIT_MS, greetingCue, ReadyGreeting } from "./greeting";
 import { TURN_TIMING, TurnKeeper } from "./turns";
 import { Vad } from "./vad";
@@ -224,6 +225,10 @@ async function place(
       line.play(down.process(pcm));
     },
   });
+  // The assistant reading out a tool call, code or its reasoning is stopped mid-line
+  // (src/server/voice/spoken-guard.ts) — set once the session is open.
+  let stopWorkings: (() => void) | null = null;
+  let workingsStopped = false;
   const events: VoiceSessionEvents = {
     onAudio: (pcm) => greeting.audio(pcm),
     // The model heard them: the turn manager waits its usual time before a reply cue.
@@ -233,6 +238,11 @@ async function place(
       line.clear();
     },
     onSaying: (soFar) => {
+      if (!workingsStopped && readsOutWorkings(soFar)) {
+        workingsStopped = true;
+        stopWorkings?.();
+        return;
+      }
       if (state.halted) return;
       const bad = unapprovedFigure(
         soFar,
@@ -253,6 +263,7 @@ async function place(
     onTurn: (t) => {
       if (t.who === "ai") {
         greeting.turnDone();
+        workingsStopped = false;
         aiSaid += ` ${t.text}`;
         keeper?.aiTurn(t.text);
         if (t.text.includes("?") && !disclosureMissing(aiSaid)) heardAfterAsk = "";
@@ -317,6 +328,13 @@ async function place(
       lastError: opened.message,
     });
   const session: VoiceSession = opened.session;
+  stopWorkings = () => {
+    // Drop what is queued: the rest of the line never reaches the candidate.
+    line.clear();
+    log.error("negotiation_call.read_out_workings", { call_id: call.id });
+    voiceDebug({ kind: "workings_stopped" });
+    session.sendText(WORKINGS_CORRECTION);
+  };
   guard = (amount) => {
     state.halted = true;
     // Drop what is queued to play: the rest of the line never reaches the candidate.

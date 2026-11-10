@@ -64,6 +64,7 @@ person to approve before it is saved.
 | Turn-taking: spoke before hello, talked over, slow replies, voice breaking up, cues it needed, "Are you there?", cut off without a close                | system      | all, including line-only |
 | Said how the profile came to us (calls whose brief forbids it)                                                                                          | system      | screening                |
 | Asked again: a required detail a third time, or a question word for word after an answer                                                                | system      | all                      |
+| Read out a tool call, code or its own reasoning to the candidate (critical)                                                                             | system      | all                      |
 | Transcription: lines in another language or script                                                                                                      | system      | all                      |
 
 The Voice Guard reads:
@@ -175,6 +176,8 @@ tool and cue timings (names only — never words or arguments).
 
 - `voice_guard.unreviewed`: an answered call has had no review for over
   2 hours.
+- `voice_guard.read_out_workings` (serious): an AI phone agent read out a tool
+  call, code or its own reasoning on a call in the last 7 days.
 - `voice_guard.breaches`: 2 or more of one phone agent's calls in 7 days had a
   breach (serious from 5). Raised on that phone agent, with the checks that
   failed most.
