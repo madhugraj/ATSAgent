@@ -81,10 +81,24 @@ describe("the assistant owes the line", () => {
     k.caller("start", true);
     quiet(1_000, false);
     k.caller("end", false);
+    k.heard(); // the model transcribed them: it waits its usual time
     quiet(TURN_TIMING.replyMs - 500);
     expect(sent).toHaveLength(0);
     quiet(750);
     expect(sent).toEqual([expect.stringMatching(/silence on the line/)]);
+  });
+
+  test("the model never heard them (a short 'okay'): cued after 3 s, not 7 (10 November)", () => {
+    const { k, sent, quiet } = keeper();
+    k.aiAudio();
+    k.aiTurn("Is now a good time for a quick 3 minute call?");
+    k.caller("start", true);
+    quiet(500, false);
+    k.caller("end", false);
+    quiet(TURN_TIMING.unheardMs - 500);
+    expect(sent).toHaveLength(0);
+    quiet(750);
+    expect(sent).toEqual([expect.stringMatching(/say it again/)]);
   });
 
   test("nothing is owed after the call-ending tool, or before the assistant began", () => {

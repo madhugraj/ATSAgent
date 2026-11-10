@@ -42,6 +42,13 @@ export const TURN_TIMING = {
   /** Quiet after the candidate stopped speaking (the model waits ~1.6 s, then thinks). */
   replyMs: 7_000,
   /**
+   * …but this soon when the model has not even started transcribing what they said:
+   * it missed it. A test call on 10 November lost a 0.6 s "Okay" that way and sat
+   * silent until the 7 s cue. Heard words were transcribed 1.8–2.4 s after the
+   * candidate stopped on that call.
+   */
+  unheardMs: 3_000,
+  /**
    * Quiet after a cue before it is repeated. A cue interrupts the reply the model
    * is preparing, so it must outlast its slowest reply (a test call on 10 November:
    * cues 3 s apart kept it silent for 11 s).
@@ -69,7 +76,7 @@ const CUE_TEXT: Record<CueReason, string> = {
   mid_turn:
     "(You stopped speaking and the candidate is waiting. Continue now with what you were about to say or ask.)",
   reply:
-    "(There is silence on the line. If the candidate has answered, reply now; if not, ask simply whether they can hear you.)",
+    "(There is silence on the line. If the candidate has answered, reply now; if you did not catch what they said, ask them briefly to say it again.)",
   unrecorded_note:
     "(You told the candidate you noted something, but nothing was recorded. Call the record tool now with what they said — in their words — then carry on.)",
   close:
@@ -110,6 +117,8 @@ export class TurnKeeper {
   private closeCued = false;
   /** The candidate is speaking now (their VAD). */
   private callerSpeaking = false;
+  /** The model transcribed something of theirs since they last stopped speaking. */
+  private heardSinceEnd = true;
 
   constructor(
     private readonly o: {
@@ -190,6 +199,7 @@ export class TurnKeeper {
     if (event === "end") {
       // Timed from when they stopped, not from their first word.
       this.lastSound = t;
+      this.heardSinceEnd = false;
       if (this.started && !this.ended) {
         this.owe("reply");
         // Talked past the limit: at this pause it is told to move on (once per answer).
@@ -203,6 +213,11 @@ export class TurnKeeper {
         }
       }
     }
+  }
+
+  /** The model started transcribing the candidate's words: it heard them. */
+  heard(): void {
+    this.heardSinceEnd = true;
   }
 
   /** A tool ran (whether or not it went through). */
@@ -264,7 +279,9 @@ export class TurnKeeper {
           ? this.t.afterToolMs
           : this.owed === "mid_turn"
             ? this.t.midTurnMs
-            : this.t.replyMs;
+            : this.heardSinceEnd
+              ? this.t.replyMs
+              : this.t.unheardMs;
     if (t - this.lastSound < wait) return;
     this.cues++;
     this.lastSound = t;

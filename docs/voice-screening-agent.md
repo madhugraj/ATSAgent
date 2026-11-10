@@ -181,14 +181,14 @@ Screening call agent 1.8.0: **the call is about 3 minutes** (the organisation's
 rule). The setting `max_minutes` is now the call's planned length: 2–5 minutes,
 default 3, migration 0072. A value saved earlier is planned at most 5.
 
-| Time      | Part                                                      |
-| --------- | --------------------------------------------------------- |
-| 0:00–0:25 | Hello, who it is, consent                                 |
-| 0:25–0:40 | The role in one sentence; "Would you like to explore it?" |
-| 0:40–1:00 | Location and relocation                                   |
-| 1:00–1:50 | Notice period, joining date, current CTC, expected CTC    |
-| 1:50–2:40 | One screening question, about 45 s (cut short at 45 s)    |
-| 2:40–3:00 | Close: their questions go to the hiring team by e-mail    |
+| Time      | Part (1.9.0 order)                                                          |
+| --------- | --------------------------------------------------------------------------- |
+| 0:00–0:20 | Greeting (ready before pickup); once they confirm, who, disclosure, consent |
+| 0:20–0:35 | The role in one sentence; "Would you like to explore it?"                   |
+| 0:35–1:30 | Notice period, joining date, current CTC, expected CTC — asked directly     |
+| 1:30–1:50 | Location and relocation ("I'll think about it" is an answer)                |
+| 1:50–2:40 | One screening question, about 45 s (cut short at 45 s)                      |
+| 2:40–3:00 | Close: their questions go to the hiring team by e-mail                      |
 
 - **Not asked any more:** title, company and years (they are on the CV), "why
   them", the second question, and "Do you have any questions for me?".
@@ -223,6 +223,20 @@ negotiation 0.8.4; `src/server/voice/greeting.ts`).
   - when the voice model first transcribed each of their utterances
     (`heard_text`);
   - every text sent to the model (`client_text`).
+
+Screening call 1.9.0, from the organisation's review of a 3-minute test call:
+
+- **Who, the disclosure and consent come in one turn** as soon as the candidate
+  confirms who they are. It had waited for an "okay" in between.
+- **The four required details are asked directly.** No list is read out first.
+  The "cannot be considered" reason is said with the second ask for an unclear
+  answer, and `record_details` still refuses a decline until it has been said.
+- **Location is the last question before the technical one.** "I'll think about
+  it" is recorded as an answer, never asked again, and support is never offered.
+- **Missed answers get a quicker cue.** When the voice model has not started
+  transcribing within 3 s of the candidate stopping, the shared turn manager cues
+  a reply, asking them to say it again if it was missed. It used to wait 7 s. A
+  0.6 s "Okay" had been lost that way.
 
 A completed call must leave with the earliest joining date, current pay and
 expected pay (Screening call agent 1.3.0): after consent, `end_call` with
