@@ -174,7 +174,17 @@ export const organizations = pgTable(
     hqCountry: text("hq_country"),
     hqCity: text("hq_city"),
     employeeBand: text("employee_band"),
+    /** Reporting currency: what pay is normalised to across zones (docs/pay-terms-plan.md). */
     currency: text("currency").notNull().default("INR"),
+    /** How pay is usually quoted when a role has no pay zone (0073). */
+    payBasisDefault: text("pay_basis_default").notNull().default("annual"),
+    hoursPerWeekDefault: numeric("hours_per_week_default", { precision: 5, scale: 2 })
+      .notNull()
+      .default("40"),
+    kindsOfWork: text("kinds_of_work")
+      .array()
+      .notNull()
+      .default(sql`'{permanent}'::text[]`),
     fiscalYearStartMonth: smallint("fiscal_year_start_month").notNull().default(4),
     careersEmail: text("careers_email"),
     onboardingStep: text("onboarding_step").notNull().default("profile"),
@@ -458,8 +468,32 @@ export const requisitions = pgTable(
       .default(sql`'{}'::jsonb`),
     maxNoticePeriodDays: integer("max_notice_period_days"),
     workAuthorizationRequired: text("work_authorization_required"),
+    /* Pay terms (0073, docs/pay-terms-plan.md): the band above is in this currency and basis. */
+    kindOfWork: text("kind_of_work").notNull().default("permanent"),
+    payBasis: text("pay_basis").notNull().default("annual"),
+    payCurrency: text("pay_currency").notNull().default("INR"),
+    payZoneId: uuid("pay_zone_id").references(() => payZones.id, { onDelete: "set null" }),
+    hoursPerWeek: numeric("hours_per_week", { precision: 5, scale: 2 }),
+    daysPerWeek: numeric("days_per_week", { precision: 3, scale: 1 }),
+    contractMonths: integer("contract_months"),
+    extendable: boolean("extendable"),
+    contractType: text("contract_type"),
+    paysByLocation: boolean("pays_by_location").notNull().default(false),
+    /** The date the role must be filled by — its urgency (joining after it is checked). */
+    neededBy: date("needed_by"),
   },
-  (t) => [uniqueIndex("requisitions_org_code_key").on(t.orgId, t.code)],
+  (t) => [
+    uniqueIndex("requisitions_org_code_key").on(t.orgId, t.code),
+    check("requisitions_pay_currency_check", sql`${t.payCurrency} ~ '^[A-Z]{3}$'`),
+    check(
+      "requisitions_pay_basis_check",
+      sql`${t.payBasis} in ('annual','monthly','daily','hourly')`,
+    ),
+    check(
+      "requisitions_kind_of_work_check",
+      sql`${t.kindOfWork} in ('permanent','fixed_term','contract_hourly','part_time','intern')`,
+    ),
+  ],
 );
 
 /**
@@ -3795,5 +3829,150 @@ export const orgContextSources = pgTable(
       .on(t.orgId, t.url)
       .where(sql`${t.kind} = 'website_page' and ${t.deletedAt} is null`),
     index("org_context_sources_org_idx").on(t.orgId, t.kind, t.createdAt),
+  ],
+);
+
+/* ------------------------------------------------------------ pay terms */
+// docs/pay-terms-plan.md — migration 0073. Conventions only: no pay figures
+// live in a zone; figures live in pay_figures with their currency and basis.
+
+/** One place with one way of paying (organisation-defined, versioned via the org agent). */
+export const payZones = pgTable(
+  "pay_zones",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    countries: text("countries").array().notNull(),
+    cities: text("cities")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    currency: text("currency").notNull(),
+    payBasis: text("pay_basis").notNull().default("annual"),
+    paymentsPerYear: integer("payments_per_year").notNull().default(12),
+    includes: text("includes")
+      .array()
+      .notNull()
+      .default(sql`'{base}'::text[]`),
+    hoursPerWeek: numeric("hours_per_week", { precision: 5, scale: 2 }).notNull().default("40"),
+    workingDaysPerYear: integer("working_days_per_year").notNull().default(250),
+    kinds: text("kinds")
+      .array()
+      .notNull()
+      .default(sql`'{permanent}'::text[]`),
+    contractTypes: text("contract_types")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    entity: text("entity"),
+    geoFactor: numeric("geo_factor", { precision: 6, scale: 3 }),
+    /** Pooling region this zone belongs to (EMEA, South Europe…). */
+    regionId: uuid("region_id").references(() => poolingRegions.id, { onDelete: "set null" }),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("pay_zones_org_name_key").on(t.orgId, t.name),
+    check("pay_zones_currency_check", sql`${t.currency} ~ '^[A-Z]{3}$'`),
+    check("pay_zones_basis_check", sql`${t.payBasis} in ('annual','monthly','daily','hourly')`),
+    check("pay_zones_payments_check", sql`${t.paymentsPerYear} between 12 and 16`),
+  ],
+);
+
+/** Named groups of pay zones a role's candidate pool is drawn from. */
+export const poolingRegions = pgTable(
+  "pooling_regions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** same_zone | same_region | entity_countries | global_remote */
+    defaultRule: text("default_rule").notNull().default("same_region"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("pooling_regions_org_name_key").on(t.orgId, t.name),
+    check(
+      "pooling_regions_rule_check",
+      sql`${t.defaultRule} in ('same_zone','same_region','entity_countries','global_remote')`,
+    ),
+  ],
+);
+
+/** Dated exchange rates the organisation uses (1 from = rate to). */
+export const exchangeRates = pgTable(
+  "exchange_rates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    fromCurrency: text("from_currency").notNull(),
+    toCurrency: text("to_currency").notNull(),
+    rate: numeric("rate", { precision: 20, scale: 10 }).notNull(),
+    source: text("source").notNull(),
+    rateAt: timestamp("rate_at", { withTimezone: true }).notNull(),
+    enteredBy: uuid("entered_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("exchange_rates_org_pair_idx").on(t.orgId, t.fromCurrency, t.toCurrency, t.rateAt),
+    check("exchange_rates_rate_check", sql`${t.rate} > 0`),
+    check(
+      "exchange_rates_codes_check",
+      sql`${t.fromCurrency} ~ '^[A-Z]{3}$' and ${t.toCurrency} ~ '^[A-Z]{3}$'`,
+    ),
+  ],
+);
+
+/**
+ * Every pay figure as said, with its currency and basis, and the derived pay
+ * and reporting values with the rate they used. HR-only, like
+ * compensation_details. Originals are never edited; a re-derivation is a new row.
+ */
+export const payFigures = pgTable(
+  "pay_figures",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** requisition | application | offer */
+    ownerType: text("owner_type").notNull(),
+    ownerId: uuid("owner_id").notNull(),
+    /** band_min | band_max | current_fixed | current_variable | expected | offer */
+    figure: text("figure").notNull(),
+    amount: numeric("amount", { precision: 16, scale: 2 }).notNull(),
+    currency: text("currency").notNull(),
+    payBasis: text("pay_basis").notNull(),
+    gross: boolean("gross"),
+    paymentsPerYear: integer("payments_per_year"),
+    includes: text("includes").array(),
+    saidAs: text("said_as"),
+    currencyAssumed: boolean("currency_assumed").notNull().default(false),
+    /** cv | form | screening_call | negotiation_call | ta | requisition | offer */
+    source: text("source").notNull(),
+    payAmount: numeric("pay_amount", { precision: 16, scale: 2 }),
+    payCurrency: text("pay_currency"),
+    reportingAmount: numeric("reporting_amount", { precision: 16, scale: 2 }),
+    reportingCurrency: text("reporting_currency"),
+    rate: jsonb("rate").$type<{ rate: number; source: string; at: string } | null>(),
+    /** Why it could not be derived (net_figure, stale_rate…), when it could not. */
+    refusal: text("refusal"),
+    candidateId: uuid("candidate_id").references(() => candidates.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("pay_figures_owner_idx").on(t.orgId, t.ownerType, t.ownerId, t.figure, t.createdAt),
+    check("pay_figures_currency_check", sql`${t.currency} ~ '^[A-Z]{3}$'`),
+    check("pay_figures_basis_check", sql`${t.payBasis} in ('annual','monthly','daily','hourly')`),
+    check("pay_figures_owner_check", sql`${t.ownerType} in ('requisition','application','offer')`),
+    check("pay_figures_amount_check", sql`${t.amount} >= 0`),
   ],
 );

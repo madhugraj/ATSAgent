@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-102 tables across 9 domains.
+106 tables across 9 domains.
 
 ## Identity & access
 
@@ -88,6 +88,9 @@ erDiagram
     text hq_city "nullable"
     text employee_band "nullable"
     text currency
+    text pay_basis_default
+    numeric hours_per_week_default
+    text kinds_of_work
     smallint fiscal_year_start_month
     text careers_email "nullable"
     text onboarding_step
@@ -313,6 +316,17 @@ erDiagram
     jsonb job_card_overrides
     integer max_notice_period_days "nullable"
     text work_authorization_required "nullable"
+    text kind_of_work
+    text pay_basis
+    text pay_currency
+    uuid pay_zone_id FK
+    numeric hours_per_week "nullable"
+    numeric days_per_week "nullable"
+    integer contract_months "nullable"
+    boolean extendable "nullable"
+    text contract_type "nullable"
+    boolean pays_by_location
+    date needed_by "nullable"
   }
   job_descriptions {
     uuid id PK
@@ -356,6 +370,7 @@ erDiagram
   requisitions }o--o| departments : "department_id"
   requisitions }o--o| org_members : "hiring_manager_member_id"
   requisitions }o--o| users : "created_by"
+  requisitions }o--o| pay_zones : "pay_zone_id"
   job_descriptions }o--|| requisitions : "requisition_id · cascade"
   job_descriptions }o--o| organizations : "org_id · cascade"
   content_templates }o--|| organizations : "org_id · cascade"
@@ -1229,6 +1244,8 @@ erDiagram
 | `evaluations` | `application_id` | `applications` | cascade |
 | `evaluations` | `interview_id` | `interviews` | no action |
 | `evaluations` | `org_id` | `organizations` | cascade |
+| `exchange_rates` | `entered_by` | `users` | no action |
+| `exchange_rates` | `org_id` | `organizations` | cascade |
 | `hiring_conversations` | `created_by` | `users` | cascade |
 | `hiring_conversations` | `deleted_by` | `users` | no action |
 | `hiring_conversations` | `org_id` | `organizations` | cascade |
@@ -1305,14 +1322,21 @@ erDiagram
 | `panel_assessments` | `interview_id` | `interviews` | cascade |
 | `panel_assessments` | `org_id` | `organizations` | cascade |
 | `panel_assessments` | `reviewed_by` | `users` | no action |
+| `pay_figures` | `candidate_id` | `candidates` | cascade |
+| `pay_figures` | `org_id` | `organizations` | cascade |
+| `pay_zones` | `org_id` | `organizations` | cascade |
+| `pay_zones` | `region_id` | `pooling_regions` | no action |
+| `pay_zones` | `updated_by` | `users` | no action |
 | `phone_screening_settings` | `org_id` | `organizations` | cascade |
 | `phone_screening_settings` | `updated_by` | `users` | no action |
+| `pooling_regions` | `org_id` | `organizations` | cascade |
 | `requisition_board_postings` | `org_id` | `organizations` | cascade |
 | `requisition_board_postings` | `requisition_id` | `requisitions` | cascade |
 | `requisitions` | `created_by` | `users` | no action |
 | `requisitions` | `department_id` | `departments` | no action |
 | `requisitions` | `hiring_manager_member_id` | `org_members` | no action |
 | `requisitions` | `org_id` | `organizations` | cascade |
+| `requisitions` | `pay_zone_id` | `pay_zones` | no action |
 | `role_panels` | `approved_by` | `users` | no action |
 | `role_panels` | `org_id` | `organizations` | cascade |
 | `role_panels` | `requisition_id` | `requisitions` | cascade |
@@ -1424,6 +1448,7 @@ erDiagram
 | `email_outbox` | Communications & AI settings | 16 | (idempotency_key) |
 | `email_settings` | Communications & AI settings | 11 | (org_id) |
 | `evaluations` | Candidates & pipeline | 15 | — |
+| `exchange_rates` | — | 9 | — |
 | `hiring_conversations` | — | 15 | — |
 | `hiring_messages` | — | 8 | — |
 | `hr_incentive_schemes` | Offers & onboarding | 9 | — |
@@ -1453,15 +1478,18 @@ erDiagram
 | `org_pool_shares` | Organisations & masters | 10 | (ownerOrg+partnerOrg) |
 | `org_profile_versions` | Organisations & masters | 16 | (orgId+version) |
 | `org_profiles` | Organisations & masters | 12 | — |
-| `organizations` | Organisations & masters | 27 | (slug), (capture_token), (capture_token_hash), (distribution_token_hash) |
+| `organizations` | Organisations & masters | 30 | (slug), (capture_token), (capture_token_hash), (distribution_token_hash) |
 | `panel_agent_settings` | — | 5 | — |
 | `panel_assessments` | — | 23 | (interview_id) |
+| `pay_figures` | — | 22 | — |
+| `pay_zones` | — | 19 | (orgId+name) |
 | `phone_screening_settings` | Screening & interviews | 16 | — |
 | `platform_admins` | Identity & access | 6 | (email) |
+| `pooling_regions` | — | 5 | (orgId+name) |
 | `product_catalogue_commercials` | Organisations & masters | 8 | — |
 | `rate_limit_hits` | — | 3 | — |
 | `requisition_board_postings` | — | 16 | (requisitionId+provider) |
-| `requisitions` | Requisitions & job content | 44 | (orgId+code) |
+| `requisitions` | Requisitions & job content | 55 | (orgId+code) |
 | `role_panels` | — | 8 | (requisitionId+level) |
 | `round_substitutes` | — | 9 | — |
 | `salary_benchmarks` | Intelligence | 15 | — |
