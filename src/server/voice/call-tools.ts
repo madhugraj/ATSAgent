@@ -7,6 +7,8 @@
  */
 import { z } from "zod";
 
+import { isCurrencyCode } from "@/lib/iso";
+
 export const END_REASONS = [
   "completed",
   "booked",
@@ -66,6 +68,7 @@ export const CALL_TOOL_INPUTS = {
     pay_currency: z
       .string()
       .regex(/^[A-Za-z]{3}$/)
+      .refine(isCurrencyCode, "a real ISO currency code")
       .optional(),
     /** Per year, month, day or hour, when not the role's. */
     pay_basis: z.enum(["annual", "monthly", "daily", "hourly"]).optional(),

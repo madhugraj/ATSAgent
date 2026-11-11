@@ -7,8 +7,10 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { CodeSelect, CountryMultiSelect, CURRENCY_OPTIONS } from "@/components/code-select";
 import { addExchangeRate, getPaySettings, savePayConventions } from "@/lib/pay-settings.functions";
 import type { ConventionZone, PayConventions } from "@/lib/pay-settings";
+import { isCurrencyCode } from "@/lib/iso";
 
 const BASIS_WORDS: Record<string, string> = {
   annual: "a year",
@@ -19,7 +21,7 @@ const BASIS_WORDS: Record<string, string> = {
 
 const EMPTY_ZONE = {
   name: "",
-  countries: "",
+  countries: [] as string[],
   cities: "",
   currency: "",
   basis: "annual",
@@ -70,10 +72,7 @@ export function PayConventionsCard() {
   async function saveZone() {
     const z: ConventionZone = {
       name: zone.name.trim(),
-      countries: zone.countries
-        .split(/[,\s]+/)
-        .map((x) => x.trim().toUpperCase())
-        .filter(Boolean),
+      countries: zone.countries.map((x) => x.trim().toUpperCase()).filter(Boolean),
       cities: zone.cities
         .split(",")
         .map((x) => x.trim())
@@ -121,14 +120,14 @@ export function PayConventionsCard() {
 
   const zoneValid =
     zone.name.trim() &&
-    /^[A-Za-z]{3}$/.test(zone.currency.trim()) &&
-    zone.countries.trim() &&
+    isCurrencyCode(zone.currency.trim()) &&
+    zone.countries.length > 0 &&
     Number(zone.paymentsPerYear) >= 12 &&
     Number(zone.paymentsPerYear) <= 16 &&
     Number(zone.hoursPerWeek) > 0;
   const rateValid =
-    /^[A-Za-z]{3}$/.test(rate.from) &&
-    /^[A-Za-z]{3}$/.test(rate.to) &&
+    isCurrencyCode(rate.from.trim()) &&
+    isCurrencyCode(rate.to.trim()) &&
     Number(rate.rate) > 0 &&
     rate.source.trim().length >= 2;
 
@@ -163,12 +162,13 @@ export function PayConventionsCard() {
           <Label htmlFor="pc-reporting" className="text-xs">
             Reporting currency
           </Label>
-          <Input
+          <CodeSelect
             id="pc-reporting"
-            maxLength={3}
+            options={CURRENCY_OPTIONS}
             disabled={!canDecide}
             value={head.reporting ?? c.reportingCurrency}
-            onChange={(e) => setHead({ ...head, reporting: e.target.value.toUpperCase() })}
+            onChange={(code) => setHead({ ...head, reporting: code })}
+            placeholder="Pick the reporting currency"
           />
         </div>
         <div className="space-y-1">
@@ -252,12 +252,50 @@ export function PayConventionsCard() {
         <div className="space-y-2 rounded-md border p-3">
           <p className="text-xs font-semibold">Add a zone, or change one by its name</p>
           <div className="grid gap-2 sm:grid-cols-4">
+            <div className="space-y-1">
+              <Label htmlFor="pz-name" className="text-xs">
+                Name (e.g. Milan)
+              </Label>
+              <Input
+                id="pz-name"
+                value={zone.name}
+                onChange={(e) => setZone({ ...zone, name: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="pz-countries" className="text-xs">
+                Countries
+              </Label>
+              <CountryMultiSelect
+                id="pz-countries"
+                value={zone.countries}
+                onChange={(codes) => setZone({ ...zone, countries: codes })}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="pz-cities" className="text-xs">
+                Cities, if only some (e.g. Milan, Milano)
+              </Label>
+              <Input
+                id="pz-cities"
+                value={zone.cities}
+                onChange={(e) => setZone({ ...zone, cities: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="pz-currency" className="text-xs">
+                Currency
+              </Label>
+              <CodeSelect
+                id="pz-currency"
+                options={CURRENCY_OPTIONS}
+                value={zone.currency}
+                onChange={(code) => setZone({ ...zone, currency: code })}
+                placeholder="Pick the currency"
+              />
+            </div>
             {(
               [
-                ["name", "Name (e.g. Milan)"],
-                ["countries", "Country codes (e.g. IT)"],
-                ["cities", "Cities, if only some (e.g. Milan, Milano)"],
-                ["currency", "Currency (e.g. EUR)"],
                 ["paymentsPerYear", "Payments a year (12–16)"],
                 ["hoursPerWeek", "Hours a week"],
                 ["region", "Pooling region (e.g. South Europe)"],
@@ -320,10 +358,32 @@ export function PayConventionsCard() {
         )}
         {canDecide ? (
           <div className="mt-2 grid items-end gap-2 sm:grid-cols-5">
+            <div className="space-y-1">
+              <Label htmlFor="xr-from" className="text-xs">
+                From
+              </Label>
+              <CodeSelect
+                id="xr-from"
+                options={CURRENCY_OPTIONS}
+                value={rate.from}
+                onChange={(code) => setRate({ ...rate, from: code })}
+                placeholder="Pick a currency"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="xr-to" className="text-xs">
+                To
+              </Label>
+              <CodeSelect
+                id="xr-to"
+                options={CURRENCY_OPTIONS}
+                value={rate.to}
+                onChange={(code) => setRate({ ...rate, to: code })}
+                placeholder="Pick a currency"
+              />
+            </div>
             {(
               [
-                ["from", "From (e.g. EUR)"],
-                ["to", "To (e.g. USD)"],
                 ["rate", "Rate"],
                 ["source", "Source (e.g. Finance table)"],
               ] as const

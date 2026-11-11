@@ -34,6 +34,7 @@ import { getTrainingStatus } from "@/lib/training.functions";
 import { useOrg } from "@/hooks/useOrg";
 import { useNavCtx } from "@/hooks/useNavCtx";
 import { PageHeader } from "@/components/ats";
+import { CodeSelect, CURRENCY_OPTIONS } from "@/components/code-select";
 import { TrainingDataCard } from "@/components/TrainingDataCard";
 import { AssessmentPolicyCard } from "@/components/AssessmentPolicyCard";
 import { PhoneScreeningCard } from "@/components/PhoneScreeningCard";
@@ -344,12 +345,23 @@ function OrganisationSettings() {
                     <Label htmlFor={key} className="text-xs">
                       {label}
                     </Label>
-                    <Input
-                      id={key}
-                      disabled={!isOwner}
-                      value={String(form[key])}
-                      onChange={(e) => setForm({ ...form, [key]: e.target.value })}
-                    />
+                    {key === "currency" ? (
+                      <CodeSelect
+                        id={key}
+                        options={CURRENCY_OPTIONS}
+                        disabled={!isOwner}
+                        value={String(form[key])}
+                        onChange={(code) => setForm({ ...form, currency: code })}
+                        placeholder="Pick the currency"
+                      />
+                    ) : (
+                      <Input
+                        id={key}
+                        disabled={!isOwner}
+                        value={String(form[key])}
+                        onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+                      />
+                    )}
                   </div>
                 ))}
                 <div className="space-y-1.5">
