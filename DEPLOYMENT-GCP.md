@@ -1,5 +1,10 @@
 # ATSIQ — GCP deployment handoff (z-atsiq.yavar.ai)
 
+> **New production (www.scouts.yavar.ai): follow [docs/deployment-scouts-gcp.md](docs/deployment-scouts-gcp.md)** —
+> GKE Autopilot, private Cloud SQL, Cloud NAT for SIP, keyless CI/CD
+> (`.github/workflows/deploy-gke.yml`, manifests in `infra/gke/`). This document
+> describes the earlier z-atsiq setup and stays as reference.
+
 Instructions for DevOps to deploy the ATSIQ ATS to a GCP cluster under the domain **z-atsiq.yavar.ai** (DNS labels are case-insensitive; lowercase used throughout).
 
 ## 1. Source

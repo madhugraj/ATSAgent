@@ -1,0 +1,50 @@
+# Sandboxed document parser (docs/guardrails.md P2-1): same image, different
+# command. No secrets except PARSER_TOKEN, no database, no egress at all, and
+# reachable only from the app pods.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scouts-parser
+  namespace: scouts
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: scouts-parser } }
+  template:
+    metadata:
+      labels: { app: scouts-parser }
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: parser
+          image: IMAGE_PLACEHOLDER
+          command: ["node", ".output/parser-worker/index.mjs"]
+          ports: [{ containerPort: 8080, name: http }]
+          env:
+            - { name: PORT, value: "8080" }
+            - name: PARSER_TOKEN
+              valueFrom: { secretKeyRef: { name: scouts-parser, key: PARSER_TOKEN } }
+          resources:
+            requests: { cpu: "500m", memory: "1Gi" }
+            limits: { memory: "1Gi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: scouts-parser
+  namespace: scouts
+spec:
+  selector: { app: scouts-parser }
+  ports: [{ port: 8080, targetPort: http }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: scouts-parser-sandbox
+  namespace: scouts
+spec:
+  podSelector: { matchLabels: { app: scouts-parser } }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{ podSelector: { matchLabels: { app: scouts-app } } }]
+      ports: [{ port: 8080 }]
+  egress: [] # deny all: the parser never reaches the network

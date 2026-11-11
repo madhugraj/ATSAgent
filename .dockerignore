@@ -3,11 +3,22 @@ node_modules
 .output
 dist
 .local-storage
+# Secrets anywhere in the tree (not only the top level)
 .env
 .env.*
+**/.env
+**/.env.*
 !.env.example
+!**/.env.example
 test_data
-scripts
-SECURITY_AUDIT_REPORT.md
+# scripts/ is needed: the build runs scripts/build-*-worker.mjs and the
+# migrate stage runs scripts/migrate-pg.mjs. Tests and evals are not.
+scripts/**/*.test.ts
+scripts/evals
+SECURITY_AUDIT_REPORT*.md
+# Local-only folders (git-ignored; never part of a clean clone)
+ai_interviewer
+demo-video
+.tanstack
 *.log
 .DS_Store

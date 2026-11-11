@@ -1,0 +1,5 @@
+# Scouts (ATSAgent) on GKE — namespace. See docs/deployment-scouts-gcp.md.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: scouts

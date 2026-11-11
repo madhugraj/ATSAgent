@@ -12,6 +12,13 @@ COPY . .
 
 RUN bun run build
 
+# Database migrations and one-off admin scripts (docs/deployment-scouts-gcp.md):
+# `docker build --target migrate`. Has Bun, node_modules, scripts/ and
+# drizzle/pg-migrations; runs inside the cluster where Cloud SQL is reachable.
+# Listed before the runtime stage so a plain `docker build` still ends there.
+FROM build AS migrate
+CMD ["bun", "scripts/migrate-pg.mjs"]
+
 FROM node:22-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da
 WORKDIR /app
 ENV NODE_ENV=production \

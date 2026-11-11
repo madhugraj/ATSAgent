@@ -1,0 +1,122 @@
+# Deploys Scouts (ATSAgent) to GKE after CI passes on main.
+# Runbook: docs/deployment-scouts-gcp.md (§10). Off until the repository
+# variable GKE_DEPLOY_ENABLED is "true". Keyless auth (Workload Identity
+# Federation); production deploys wait for the `production` environment's reviewers.
+name: Deploy (GKE)
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-gke-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    if: >-
+      vars.GKE_DEPLOY_ENABLED == 'true' &&
+      (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      PROJECT: ${{ vars.GCP_PROJECT }}
+      REGION: ${{ vars.GCP_REGION }}
+      CLUSTER: ${{ vars.GKE_CLUSTER }}
+      IMG: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT }}/${{ vars.GAR_REPOSITORY }}/scouts
+      NS: scouts
+      SITE: https://www.scouts.yavar.ai
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - id: auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+        with:
+          install_components: gke-gcloud-auth-plugin,kubectl
+
+      - name: Cluster credentials
+        run: gcloud container clusters get-credentials "$CLUSTER" --region "$REGION" --project "$PROJECT" --dns-endpoint
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Browser companion download
+        run: (cd extension && zip -qr ../public/atsiq-capture.zip manifest.json background.js popup.js popup.html portal-fill.js)
+
+      - name: Build and push images (SBOM + provenance)
+        run: |
+          gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+          TAG=$(git rev-parse --short HEAD)
+          docker buildx build --sbom=true --provenance=mode=max \
+            --metadata-file /tmp/app.json --push -t "$IMG:$TAG" .
+          docker buildx build --target migrate --push -t "$IMG-migrate:$TAG" \
+            --metadata-file /tmp/migrate.json .
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "APP_IMAGE=$IMG@$(jq -r '."containerimage.digest"' /tmp/app.json)" >> "$GITHUB_ENV"
+          echo "MIGRATE_IMAGE=$IMG-migrate@$(jq -r '."containerimage.digest"' /tmp/migrate.json)" >> "$GITHUB_ENV"
+
+      - name: Sync secrets (Secret Manager → Kubernetes)
+        run: |
+          umask 077
+          gcloud secrets versions access latest --project "$PROJECT" --secret scouts-env > /tmp/s.env
+          TOKEN=$(gcloud secrets versions access latest --project "$PROJECT" --secret scouts-parser-token)
+          printf '\nPARSER_TOKEN=%s\n' "$TOKEN" >> /tmp/s.env
+          kubectl apply -f infra/gke/00-namespace.yaml
+          kubectl -n "$NS" create secret generic scouts-env --from-env-file /tmp/s.env --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n "$NS" create secret generic scouts-parser --from-literal PARSER_TOKEN="$TOKEN" --dry-run=client -o yaml | kubectl apply -f -
+          if gcloud secrets describe scouts-voice --project "$PROJECT" >/dev/null 2>&1; then
+            gcloud secrets versions access latest --project "$PROJECT" --secret scouts-voice > /tmp/v.env
+            kubectl -n "$NS" create secret generic scouts-voice --from-env-file /tmp/v.env --dry-run=client -o yaml | kubectl apply -f -
+          fi
+          rm -f /tmp/s.env /tmp/v.env
+
+      - name: Migrate the database
+        run: |
+          sed -e "s#MIGRATE_IMAGE_PLACEHOLDER#$MIGRATE_IMAGE#" -e "s#RELEASE_PLACEHOLDER#$TAG-$GITHUB_RUN_ATTEMPT#" \
+            infra/gke/50-migrate-job.yaml | kubectl apply -f -
+          JOB="scouts-migrate-$TAG-$GITHUB_RUN_ATTEMPT"
+          if ! kubectl -n "$NS" wait --for=condition=complete "job/$JOB" --timeout=600s; then
+            kubectl -n "$NS" logs "job/$JOB" | tail -50
+            exit 1
+          fi
+          kubectl -n "$NS" logs "job/$JOB" | tail -5
+
+      - name: Roll out
+        run: |
+          PREV=$(kubectl -n "$NS" get deploy scouts-app -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)
+          echo "PREV=$PREV" >> "$GITHUB_ENV"
+          for f in 10-app 20-ingress 30-parser; do
+            sed "s#IMAGE_PLACEHOLDER#$APP_IMAGE#" "infra/gke/$f.yaml" | kubectl apply -f -
+          done
+          if kubectl -n "$NS" get secret scouts-voice >/dev/null 2>&1; then
+            sed "s#IMAGE_PLACEHOLDER#$APP_IMAGE#" infra/gke/40-voice-worker.yaml | kubectl apply -f -
+          fi
+          kubectl -n "$NS" rollout status deploy/scouts-parser --timeout=300s
+          kubectl -n "$NS" rollout status deploy/scouts-app --timeout=300s
+
+      - name: Smoke checks
+        run: |
+          for i in $(seq 1 12); do curl -sf -o /dev/null "$SITE/" && break; sleep 10; done
+          curl -sf -o /dev/null "$SITE/" || { echo "site not serving"; exit 1; }
+          curl -sf -o /dev/null "$SITE/privacy"
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$SITE/api/public/agent-tick")
+          [ "$code" = "401" ] || { echo "agent-tick answered $code without the secret"; exit 1; }
+
+      - name: Roll back the app on failure
+        if: failure() && env.PREV != ''
+        run: |
+          kubectl -n "$NS" set image deploy/scouts-app app="$PREV"
+          kubectl -n "$NS" rollout status deploy/scouts-app --timeout=300s

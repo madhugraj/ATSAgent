@@ -74,7 +74,8 @@ ATSIQ by Yavar AI is an enterprise recruiting intelligence platform. It combines
 - `docs/pay-terms-plan.md` — currency, pay basis, kinds of work, pay zones and regional pooling for organisations hiring across countries (built: schema, the pay converter, pay conventions approved by the HR head, requisition pay terms, the screening call and matching in each role's currency, pool and needed-by date, offers with a rate fixed at approval, the negotiation call, JD and job postings, reports in the reporting currency)
 - `docs/labour-policy-agent-plan.md` — the Labour law & policy agent: official sources per pay zone, HR-approved updates to the organisation profile, and the offer check before every offer letter (built: sources, quoted findings approved by the HR head, rules in the organisation context, the offer check before approval, the screening call following the rules where the job is)
 - `docs/er-diagram.md` — entity-relationship diagram for all tables, generated from `drizzle/schema.ts` (`node scripts/gen-er-diagram.mjs`)
-- `DEPLOYMENT-GCP.md` and `infra/DEPLOYMENT-HANDOFF.md` — deployment runbooks
+- `docs/deployment-scouts-gcp.md` — DevOps runbook for production on GCP (www.scouts.yavar.ai): infrastructure, secrets, Kubernetes manifests (`infra/gke/`), scheduler jobs and CI/CD (`.github/workflows/deploy-gke.yml`)
+- `DEPLOYMENT-GCP.md` and `infra/DEPLOYMENT-HANDOFF.md` — deployment runbooks (earlier z-atsiq setup)
 - `SECURITY.md` — security policy and secure-development baseline
 - `VERIFICATION_REPORT.md` — release validation evidence
 - `roadmap.md` — shipped work and open items

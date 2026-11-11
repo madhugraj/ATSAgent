@@ -1,0 +1,27 @@
+# Voice worker (AI phone calls): dials out over SIP (UDP 5060) and RTP to the
+# organisation's PBX through Cloud NAT. No Service, no Ingress. A call in
+# progress finishes before the pod stops (calls are at most 30 minutes).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scouts-voice-worker
+  namespace: scouts
+spec:
+  replicas: 1 # calls are claimed atomically; more replicas = more calls at once
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: scouts-voice-worker } }
+  template:
+    metadata:
+      labels: { app: scouts-voice-worker }
+    spec:
+      terminationGracePeriodSeconds: 1900
+      containers:
+        - name: voice-worker
+          image: IMAGE_PLACEHOLDER
+          command: ["node", ".output/voice-worker/index.mjs"]
+          envFrom:
+            - secretRef: { name: scouts-env }
+            - secretRef: { name: scouts-voice }
+          resources:
+            requests: { cpu: "500m", memory: "512Mi" }
+            limits: { memory: "1Gi" }

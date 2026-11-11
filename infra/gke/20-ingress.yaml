@@ -1,0 +1,33 @@
+# Public entry: www.scouts.yavar.ai (TLS by a Google-managed certificate) and
+# scouts.yavar.ai, both on one global static IP. HTTP is redirected to HTTPS.
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: scouts-cert
+  namespace: scouts
+spec:
+  domains:
+    - www.scouts.yavar.ai
+    - scouts.yavar.ai
+---
+apiVersion: networking.gke.io/v1beta1
+kind: FrontendConfig
+metadata:
+  name: scouts-frontend
+  namespace: scouts
+spec:
+  redirectToHttps: { enabled: true, responseCodeName: MOVED_PERMANENTLY_DEFAULT }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: scouts
+  namespace: scouts
+  annotations:
+    kubernetes.io/ingress.class: gce
+    kubernetes.io/ingress.global-static-ip-name: scouts-ip
+    networking.gke.io/managed-certificates: scouts-cert
+    networking.gke.io/v1beta1.FrontendConfig: scouts-frontend
+spec:
+  defaultBackend:
+    service: { name: scouts-app, port: { number: 80 } }
