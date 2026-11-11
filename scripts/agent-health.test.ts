@@ -625,6 +625,47 @@ describe("an agent re-reading instead of working", () => {
       severity: "warning",
     });
   });
+
+  test("searching a document for different sections is not re-reading", async () => {
+    const id = await run("labour_policy");
+    await db.insert(agentSteps).values(
+      Array.from({ length: HEALTH.repeatedReadsPerRun + 3 }, (_, n) => ({
+        runId: id,
+        orgId,
+        seq: 500 + n,
+        kind: "tool",
+        toolName: "read_policy_document",
+        input: { documentUrl: "https://x.gov.in/a.pdf", search: [`section ${n}`] },
+        status: "ok",
+      })) as never,
+    );
+    await evaluate();
+    expect(
+      (await open()).find(
+        (i) => i.rule === "tools.repeated_reads" && i.agentType === "labour_policy",
+      ),
+    ).toBeUndefined();
+  });
+
+  test("a live phone call's length is not AI latency", async () => {
+    const { aiUsageEvents } = await import("../drizzle/schema");
+    const id = await run("screening_call");
+    await db.insert(aiUsageEvents).values(
+      Array.from({ length: HEALTH.minAiRequests + 1 }, () => ({
+        orgId,
+        agentRunId: id,
+        feature: "screening_call",
+        provider: "google",
+        model: "m",
+        status: "ok",
+        durationMs: 240_000,
+      })) as never,
+    );
+    await evaluate();
+    expect(
+      (await open()).find((i) => i.rule === "skills.latency" && i.agentType === "screening_call"),
+    ).toBeUndefined();
+  });
 });
 
 describe("a hiring manager who never answers the expert interview", () => {
@@ -1427,7 +1468,12 @@ describe("organisation context rules", () => {
       .returning({ id: candidates.id });
     const [app] = await db
       .insert(applications)
-      .values({ orgId, requisitionId: req!.id, candidateId: cand!.id, stage: "shortlisted" } as never)
+      .values({
+        orgId,
+        requisitionId: req!.id,
+        candidateId: cand!.id,
+        stage: "shortlisted",
+      } as never)
       .returning({ id: applications.id });
     await db.insert(payFigures).values({
       orgId,
