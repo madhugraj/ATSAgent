@@ -55,7 +55,7 @@ export const COST_STAGES: { stage: string; features: string[] }[] = [
   { stage: "Evaluation", features: ["agent_evaluation"] },
   {
     stage: "Offer",
-    features: ["agent_offer", "offer_letter", "salary_research", "market_benchmark"],
+    features: ["agent_offer", "offer_letter", "offer_policy_check", "salary_research", "market_benchmark"],
   },
   { stage: "Pre-onboarding", features: ["agent_onboarding", "doc_extract"] },
 ];

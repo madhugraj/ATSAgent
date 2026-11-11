@@ -422,7 +422,8 @@ export function registerPhase4Tools(): void {
         .optional(),
     }),
     risk: "write",
-    describe: (i) => `Draft an offer at ${i.offeredCtc.toLocaleString("en")} in the role's pay currency`,
+    describe: (i) =>
+      `Draft an offer at ${i.offeredCtc.toLocaleString("en")} in the role's pay currency`,
     precheck: (ctx, i) => offerReadiness(ctx, i.applicationId),
     run: async (ctx, i) => {
       const app = await loadApplication(ctx.orgId, i.applicationId);
@@ -507,7 +508,8 @@ export function registerPhase4Tools(): void {
       rationale: z.string().min(10).max(1500),
     }),
     risk: "write",
-    describe: (i) => `Revise the offer to ${i.offeredCtc.toLocaleString("en")} in the role's pay currency`,
+    describe: (i) =>
+      `Revise the offer to ${i.offeredCtc.toLocaleString("en")} in the role's pay currency`,
     // An offer sent back is revised only once the candidate's expectation is
     // known (a countered offer carries the candidate's own ask).
     precheck: async (ctx, i) => {
@@ -536,6 +538,20 @@ export function registerPhase4Tools(): void {
         rationale: i.rationale,
       });
       return { offerId: i.offerId, status: "draft", revision: r.revision };
+    },
+  });
+
+  registerTool({
+    name: "check_offer_against_policy",
+    description:
+      "Check the offer's letter and terms against the organisation's approved labour rules for the role's pay zone (pay floor, mandatory components, contract and probation limits, required clauses, prohibited terms, pay transparency). Returns each item as pass, fix_needed (with suggested wording) or needs_counsel. Run it after generate_offer_letter; a fix_needed blocks submit_offer_for_approval until the letter is fixed (or the HR head overrides it).",
+    input: OfferId,
+    risk: "read",
+    skills: ["offer_policy_check"],
+    run: async (ctx, i) => {
+      const { runOfferCheckCore } = await import("@/lib/offer-check.server");
+      const c = await runOfferCheckCore(ctx.orgId, i.offerId, { agentRunId: ctx.runId });
+      return { verdict: c.verdict, zone: c.zone, items: c.items };
     },
   });
 

@@ -1481,6 +1481,25 @@ export const RULES: Rule[] = [
     },
   },
   {
+    id: "offer.policy_check_overridden",
+    element: "context",
+    severity: "warning",
+    description:
+      "An offer went ahead after the offer check found it breaks an approved labour rule — the HR head overrode it with a reason in the last 30 days. Each one is listed so it can be reviewed with counsel.",
+    evaluate: async (orgId) => {
+      const r = await rows<{ id: string; reason: string; by: string }>(sql`
+        select id, policy_override->>'reason' reason, policy_override->>'by' by from offers
+        where org_id = ${orgId} and policy_override is not null
+          and (policy_override->>'at')::timestamptz >= now() - interval '30 days'
+        order by (policy_override->>'at') desc limit 10`);
+      return r.map((x) => ({
+        agentType: "offer" as const,
+        title: `Offer check overridden by ${x.by}: “${x.reason.slice(0, 80)}”`,
+        detail: { offerId: x.id },
+      }));
+    },
+  },
+  {
     id: "context.profile_stale",
     element: "context",
     severity: "warning",

@@ -566,7 +566,11 @@ export function registerPhase2Agents(): void {
     // or day rate for those contracts); a contract asks when they could start and the
     // length they want instead of the notice period; figures said in another currency or
     // period are recorded as said (record_details pay_currency / pay_basis).
-    version: "1.10.0",
+    // 1.11.0 (labour policy L3): follows the approved labour rules where the job is
+    // (what may not be asked, AI calls and recording, data), given in its brief; where a
+    // rule forbids asking current or past pay it never asks and records current_pay as
+    // "not_allowed" — accepted in code only when such a rule is in force.
+    version: "1.11.0",
     owner: "hr_head",
     responsibility:
       "Holds one AI screening phone call with a shortlisted candidate the way an HR recruiter does: says who it is and why it is calling, asks consent, explains the role and why it called them, records their practical details (including the pay they state, for HR only) and their answers to the role's screening questions, or agrees a better time — nothing else.",
@@ -1090,7 +1094,11 @@ export function registerPhase4Agents(): void {
     // 1.7.0 (pay terms, docs/pay-terms-plan.md Phase 4): an offer is written in its role's
     // pay currency and basis (bands, ceilings and briefs in that currency), carries its kind of
     // work and a contract's end date, and its exchange rate is fixed when it is approved.
-    version: "1.7.0",
+    // 1.8.0 (labour policy L3, docs/labour-policy-agent-plan.md): check_offer_against_policy
+    // after the letter — the letter and terms against the approved labour rules for the
+    // role's pay zone; a "fix needed" blocks the offer from approval unless the HR head
+    // overrides it with a reason, and the result is on the approval card.
+    version: "1.8.0",
     owner: "hr_head",
     responsibility:
       "Turns a hiring decision into a draft offer inside the approved band — built on the candidate's stated expectation and notice period — with its letter and an approval brief, and walks it through HR head and CBO approval.",
@@ -1142,6 +1150,7 @@ export function registerPhase4Agents(): void {
       "draft_offer",
       "revise_offer",
       "generate_offer_letter",
+      "check_offer_against_policy",
       "submit_offer_for_approval",
     ],
     system: [
@@ -1154,7 +1163,7 @@ export function registerPhase4Agents(): void {
       "1f. When negotiation.status is countered, call_requested or expired (the candidate replied with another figure, asked for a call, or did not answer): request_negotiation_call with the negotiationId, a brief (the proposal's fixed / variable split if you know it — the two must add up to the proposal — and up to three short reasons, in words, why the team wants them, from the hiring decision and interview notes; never scores) and improvedCtc — one figure above the proposal and at or under the ceiling that the assistant may offer once if they turn the proposal down (between the proposal and the ceiling, keeping room for TA; null to hold at the proposal). The HR head approves it. If it is refused (calls off, no mobile, already called), finish — a person is handling it. Never ask for a second call.",
       "2. Propose a CTC inside the requisition's band: anchor on the candidate's expected CTC, the internal parity median and the band midpoint; use research_compensation if the band is missing. Never exceed the band unless the CBO answered 1c(b).",
       "3. draft_offer with a joining date, always: the candidate's earliest joining date if given, otherwise notice period from today, rounded to the next Monday. An offer without a joining date cannot go for approval. When revising a sent-back offer, set the joining date the same way.",
-      "4. generate_offer_letter, then submit_offer_for_approval.",
+      "4. generate_offer_letter, then check_offer_against_policy. Fix needed: the letter breaks an approved labour rule — tell the person what and the suggested wording (ask_human), never submit around it; needs counsel: say so in the approval brief. Then submit_offer_for_approval.",
       "5. request_approval with subject {type: 'offer', id: <offerId>} and a brief: CTC and where it sits in the band, internal parity, the candidate's expectation and hike, competing offers, risks (the system adds the expectation and gap itself). When the HR head approves, request the CBO's approval the same way.",
       "If an approver sent the offer back (an existing offer is draft with sentBack): read their reason. If it can be met inside the band (pay, joining date), revise_offer with your reasoning, generate_offer_letter, submit_offer_for_approval and request approval again with a brief that states what was asked and what changed. If it cannot be met inside the band or is not about the offer's terms, ask_human. Never resubmit an unchanged offer.",
       "When the candidate asked for changes (an existing offer is countered): read their counter (expected CTC, joining date, note). Meet the ask if it sits inside the band and within reason of internal parity; otherwise propose the highest defensible figure inside the band and say why. revise_offer with that CTC and your reasoning, then generate_offer_letter, submit_offer_for_approval, and request the HR head's (then the CBO's) approval with a brief that states what the candidate asked for, what you propose and why. Never exceed the band — ask_human instead.",

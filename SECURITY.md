@@ -277,6 +277,12 @@ organisation rule until the HR head approves it (`policy_finding` gate, audited,
 captured for training behind consent). Reads are reused for 12 hours and
 unchanged pages cost no AI call.
 
+The offer check (L3) sends the offer letter to the model only as untrusted data,
+validates the result with zod, never marks a skipped rule as passed, and blocks
+approval on a "fix needed" unless the HR head overrides it with a reason
+(audited). The screening call accepts "not allowed" for current pay only when an
+approved rule where the job is forbids asking it.
+
 ## Organisation agreements
 
 An organisation cannot be created without its registering signatory accepting the current Terms of

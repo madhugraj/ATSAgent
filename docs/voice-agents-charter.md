@@ -58,6 +58,7 @@ contact given is the organisation's mailbox.
 | Tell the candidate they are a fit (a good or great fit, strong, suited) or praise them. | instruction + evals |
 | Summarise, reflect or repeat the candidate's answers back to them, or acknowledge each one ("thank you", "noted") — it goes straight to the next question. | instruction + evals |
 | Grade, advance or reject anyone — the grade goes to people. | code |
+| Ask anything an approved labour rule where the job is forbids (for example current or past pay where a salary-history ban applies). | code |
 
 **Hands to a person**
 

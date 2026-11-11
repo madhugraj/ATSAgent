@@ -425,6 +425,8 @@ async function placeCall(
   const state: CallState = {
     ...freshCallState(),
     reschedulesLeft: Math.max(0, policy.maxReschedules - call.reschedules),
+    // An approved rule where the job is forbids asking current pay (labour policy L3).
+    payHistoryBanned: Boolean(facts.payHistoryBanned),
   };
   const line = deps.line();
   const up = new Resampler(2, 1); // 8 kHz phone → 16 kHz model

@@ -29,6 +29,7 @@ export const AI_FEATURES = [
   "template_import",
   "jobcard_qa",
   "offer_letter",
+  "offer_policy_check",
   "copilot",
   "talent_brain",
   // Copilot: market signal for the demand outlook (src/lib/demand-outlook.ts).

@@ -451,6 +451,8 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
         bandMax: requisitions.ctcBandMax,
         currency: offers.currency,
         payBasis: offers.payBasis,
+        policyCheck: offers.policyCheck,
+        policyOverride: offers.policyOverride,
       })
       .from(offers)
       .innerJoin(applications, eq(applications.id, offers.applicationId))
@@ -490,7 +492,7 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
       return {
         role,
         status: o.status,
-        detail: `Offer for ${o.name} (${o.title}): ${money(ctc, cur, o.payBasis)} — ${o.status}.${vsBudget}${vsBand}${expectationLine(ctc, await detailsFor(orgId, o.applicationId), cur)}${agreedLine(ctc, await (await import("@/lib/negotiation.server")).agreedTerms(orgId, o.applicationId), cur)}${
+        detail: `Offer for ${o.name} (${o.title}): ${money(ctc, cur, o.payBasis)} — ${o.status}.${vsBudget}${vsBand}${(await import("@/lib/offer-check.server")).checkWords(o.policyCheck, o.policyOverride)}${expectationLine(ctc, await detailsFor(orgId, o.applicationId), cur)}${agreedLine(ctc, await (await import("@/lib/negotiation.server")).agreedTerms(orgId, o.applicationId), cur)}${
           missing.length
             ? `\n\nThis offer cannot be approved yet: ${listWords(missing)} ${missing.length > 1 ? "are" : "is"} missing. Decline it with that reason — it goes back to draft and the Offer agent collects them.`
             : ""

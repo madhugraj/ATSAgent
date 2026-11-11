@@ -1045,16 +1045,22 @@ export const offers = pgTable(
     reportingCurrency: text("reporting_currency"),
     rate: jsonb("rate").$type<{ rate: number; source: string; at: string } | null>(),
     rateLockedAt: timestamp("rate_locked_at", { withTimezone: true }),
+    /** The offer check against the approved labour rules (0077; src/lib/offer-check.server.ts). */
+    policyCheck: jsonb("policy_check").$type<import("../src/lib/offer-check").OfferCheck | null>(),
+    /** The HR head's override of a "fix needed" result, with the reason (audited). */
+    policyOverride: jsonb("policy_override").$type<{
+      by: string;
+      reason: string;
+      at: string;
+      checkKey: string;
+    } | null>(),
   },
   (t) => [
     uniqueIndex("offers_response_token_key")
       .on(t.responseToken)
       .where(sql`${t.responseToken} is not null`),
     check("offers_currency_check", sql`${t.currency} ~ '^[A-Z]{3}$'`),
-    check(
-      "offers_pay_basis_check",
-      sql`${t.payBasis} in ('annual','monthly','daily','hourly')`,
-    ),
+    check("offers_pay_basis_check", sql`${t.payBasis} in ('annual','monthly','daily','hourly')`),
   ],
 );
 
@@ -3370,7 +3376,7 @@ export type ScreeningCallDetails = {
    */
   required?: Record<
     "joining_date" | "current_pay" | "expected_pay",
-    "recorded" | "declined" | "not_working" | "missing"
+    "recorded" | "declined" | "not_working" | "not_allowed" | "missing"
   >;
 };
 
