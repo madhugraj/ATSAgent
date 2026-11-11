@@ -166,6 +166,10 @@ export function seedsFor(zones: { id: string; countries: string[] }[]) {
   return out;
 }
 
+/** The same site, with or without "www." (pure): a redirect between them stays on it. */
+export const sameSite = (a: string, b: string) =>
+  a.toLowerCase().replace(/^www\./, "") === b.toLowerCase().replace(/^www\./, "");
+
 function hostOf(url: string): string {
   const u = new URL(url);
   if (u.protocol !== "https:") throw new Error("Sources must be https.");
@@ -401,7 +405,7 @@ export async function readSourceCore(
       const { safeFetchText } = await import("../server/safe-fetch");
       const { htmlToText } = await import("./org-context.server");
       const res = await safeFetchText(s.url, { timeoutMs: 15_000, maxBytes: 1_500_000, hops: 2 });
-      if (new URL(res.finalUrl).hostname.toLowerCase() !== s.host)
+      if (!sameSite(new URL(res.finalUrl).hostname, s.host))
         throw new Error("The page redirected off the source's own host.");
       text = /html/i.test(res.contentType) ? htmlToText(res.text) : res.text;
     }
@@ -747,6 +751,9 @@ export async function checkNowCore(actor: PolicyActor): Promise<{ runId: string 
     .where(and(eq(policySources.orgId, actor.orgId), eq(policySources.active, true)))
     .limit(1);
   if (!active) throw new Error("Add at least one active source first.");
+  // Started from a page: the agents may not be registered in this process yet.
+  const { ensureAgentsRegistered } = await import("../server/agents");
+  ensureAgentsRegistered();
   const { startRun } = await import("../server/agents/runtime.server");
   const run = await startRun({
     orgId: actor.orgId,

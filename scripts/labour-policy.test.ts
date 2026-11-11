@@ -300,6 +300,13 @@ describe("health rules", () => {
 });
 
 describe("seeding without zones, and checking now", () => {
+  test("www and the bare host are the same site; another host is not", () => {
+    expect(lp.sameSite("esic.gov.in", "www.esic.gov.in")).toBe(true);
+    expect(lp.sameSite("WWW.Esic.gov.in", "esic.gov.in")).toBe(true);
+    expect(lp.sameSite("evil.example", "esic.gov.in")).toBe(false);
+    expect(lp.sameSite("esic.gov.in.evil.example", "esic.gov.in")).toBe(false);
+  });
+
   test("no pay zones: the headquarters country's sources; check now refuses while the agent is off", async () => {
     const { organizations: orgs, payZones: zones } = await import("../drizzle/schema");
     const [solo] = await db
