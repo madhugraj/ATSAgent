@@ -32,8 +32,8 @@
     "hash": "190551f6ad1cfb31b16af21753071ea93cf3815489a78a0f83fcdd2e588910ae"
   },
   "labour_policy": {
-    "version": "1.0.0",
-    "hash": "e0b34c1a839fa07bc542573811bba3f28c02cf9bcd660aff92ef4ba19819e958"
+    "version": "1.1.0",
+    "hash": "c7e1ecfe8d35122a491750754d40b0410315c3ba96e79a3e8973f8705ee3cec4"
   },
   "negotiation_call": {
     "version": "0.9.0",

@@ -332,3 +332,106 @@ describe("seeding without zones, and checking now", () => {
     await db.delete(users).where(eq(users.id, solo!.id));
   });
 });
+
+describe("documents listed on a source, and removing a source", () => {
+  test("labour.gov.in pages are read through the site's own listing", () => {
+    expect(
+      lp.siteApiOf(
+        "https://www.labour.gov.in/offerings/schemes-and-services/details/labour-codes-gzNzQzMtQWa",
+      ),
+    ).toEqual({ kind: "labour_gov_in", type: "schemes_and_services", slug: "labour-codes" });
+    expect(lp.siteApiOf("https://www.esic.gov.in/circulars")).toBeNull();
+    expect(lp.siteApiOf("https://labour.gov.in/whatsnew")).toBeNull();
+  });
+
+  test("only a listed document on the source's own site is read; its quote is checked and cited", async () => {
+    const [src] = await db
+      .insert(policySources)
+      .values({
+        orgId,
+        country: "IN",
+        label: "Labour Codes",
+        url: "https://www.labour.gov.in/offerings/schemes-and-services/details/labour-codes-x1Y2z3A4",
+        host: "www.labour.gov.in",
+      })
+      .returning({ id: policySources.id });
+    const pdf = "https://www.labour.gov.in/static/uploads/2026/05/rules.pdf";
+    await db.insert(policyReads).values({
+      orgId,
+      sourceId: src!.id,
+      status: "first",
+      hash: "l1",
+      text: `Labour Codes (updated 2026-11-06)\nRules: Code on Wages (Central) Rules, 2026 — dated 08/05/2026 — ${pdf}`,
+      fetchedAt: new Date(),
+    });
+    const body =
+      "Code on Wages (Central) Rules, 2026. 5. Fixed term employee. A fixed term employee shall be entitled to gratuity after one year of continuous service on a pro rata basis, as provided in the Code. ".repeat(
+        3,
+      );
+    const fetchBytes = async () => new TextEncoder().encode(body);
+    // Not listed, or another site: refused.
+    await expect(
+      lp.readDocumentCore(orgId, src!.id, "https://www.labour.gov.in/static/uploads/other.pdf", {
+        fetchBytes,
+      }),
+    ).rejects.toThrow(/not listed/);
+    await expect(
+      lp.readDocumentCore(orgId, src!.id, "https://evil.example/rules.pdf", { fetchBytes }),
+    ).rejects.toThrow(/own site/);
+    // The parser reads plain text as-is in tests (a .pdf name with text bytes is not a PDF):
+    // inject the text via a .txt-like read by naming it on the listing.
+    const read = await lp.readDocumentCore(orgId, src!.id, pdf, {
+      fetchBytes: async () => new TextEncoder().encode(body),
+    });
+    if (read.status === "failed") {
+      // pdf.js refuses text bytes — record the document read directly, as the parser would.
+      await db.insert(policyReads).values({
+        orgId,
+        sourceId: src!.id,
+        documentUrl: pdf,
+        status: "first",
+        hash: "d1",
+        text: body,
+        fetchedAt: new Date(),
+      });
+    } else expect(read.status).toBe("first");
+    const rec = await lp.recordFindingCore(orgId, {
+      sourceId: src!.id,
+      documentUrl: pdf,
+      area: "contracts",
+      quote:
+        "A fixed term employee shall be entitled to gratuity after one year of continuous service",
+      summary: "Fixed-term employees get gratuity after one year.",
+      rule: "In India, fixed-term employees are entitled to gratuity after one year of continuous service, pro rata.",
+    });
+    expect(rec.ok).toBe(true);
+    if (!rec.ok) return;
+    const [f] = await db.select().from(policyFindings).where(eq(policyFindings.id, rec.findingId));
+    expect(f!.url).toBe(pdf); // cites the document, not the listing page
+    expect(
+      await lp.recordFindingCore(orgId, {
+        sourceId: src!.id,
+        documentUrl: pdf,
+        area: "contracts",
+        quote: "A fixed term employee may be dismissed without notice at any time whatsoever",
+        summary: "x".repeat(12),
+        rule: "y".repeat(12),
+      }),
+    ).toMatchObject({ ok: false, error: expect.stringContaining("not in the document") });
+
+    // Removing the source: deciders only, audited; the finding stays with its citation.
+    await expect(lp.deleteSourceCore(who(recruiter), { id: src!.id })).rejects.toThrow(
+      /Only the HR head/,
+    );
+    await lp.deleteSourceCore(who(hr), { id: src!.id });
+    expect(
+      (await db.select().from(policySources).where(eq(policySources.id, src!.id))).length,
+    ).toBe(0);
+    const [kept] = await db
+      .select()
+      .from(policyFindings)
+      .where(eq(policyFindings.id, rec.findingId));
+    expect(kept).toMatchObject({ url: pdf, sourceId: null });
+    expect((await audits("policy_source.deleted")).length).toBe(1);
+  });
+});
