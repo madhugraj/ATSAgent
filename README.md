@@ -72,7 +72,7 @@ ATSIQ by Yavar AI is an enterprise recruiting intelligence platform. It combines
 - `docs/org-context-agent-plan.md` — the organisation profile and the Organisation context agent that keeps it (O0 built)
 - `docs/parallel-hiring-desk-plan.md` — the plan for handling multiple hiring needs in parallel (fan-out threads, shared questions, split-screen supervision)
 - `docs/pay-terms-plan.md` — currency, pay basis, kinds of work, pay zones and regional pooling for organisations hiring across countries (built: schema, the pay converter, pay conventions approved by the HR head, requisition pay terms, the screening call and matching in each role's currency, pool and needed-by date, offers with a rate fixed at approval, the negotiation call, JD and job postings, reports in the reporting currency)
-- `docs/labour-policy-agent-plan.md` — the Labour law & policy agent: official sources per pay zone, HR-approved updates to the organisation profile, and the offer check before every offer letter (approved, not built)
+- `docs/labour-policy-agent-plan.md` — the Labour law & policy agent: official sources per pay zone, HR-approved updates to the organisation profile, and the offer check before every offer letter (L0–L2 built: sources, quoted findings approved by the HR head, rules in the organisation context; the offer check is next)
 - `docs/er-diagram.md` — entity-relationship diagram for all tables, generated from `drizzle/schema.ts` (`node scripts/gen-er-diagram.mjs`)
 - `DEPLOYMENT-GCP.md` and `infra/DEPLOYMENT-HANDOFF.md` — deployment runbooks
 - `SECURITY.md` — security policy and secure-development baseline

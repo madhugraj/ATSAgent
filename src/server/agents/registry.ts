@@ -75,6 +75,7 @@ export type GateKind =
   | "panel_review"
   | "org_profile"
   | "pay_conventions"
+  | "policy_finding"
   | "expert_brief"
   | "general";
 

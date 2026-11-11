@@ -56,8 +56,26 @@
   pay); job postings carry the schema.org employment type. Hiring reports sum
   cost in the reporting currency only. Health rule: approved offers left out
   of reports for want of a rate.
-- Pay terms plan complete (P1–P4). Next: the labour law & policy agent
-  (`docs/labour-policy-agent-plan.md`), starting with sources per pay zone.
+- Pay terms plan complete (P1–P4).
+
+## Labour law & policy agent — L0–L2 (2026-11-11)
+
+- Migration 0076: `policy_sources` (the organisation's approved official pages,
+  seeded per pay zone: ILO NATLEX, EUR-Lex for EU countries, and each country's
+  labour ministry / gazette pages), `policy_reads` (hashed; unchanged pages
+  cost no AI call; a read under 12 hours old is reused), `policy_findings`.
+- Labour law & policy agent 1.0.0 (high risk, owner HR head): reads only the
+  approved sources, records each change that matters to hiring with the
+  source's exact quote (refused in code when it is not on the page) and asks
+  the HR head through the new `policy_finding` gate. Approved rules (one per
+  zone and area; a newer one supersedes) appear under "Rules" in the
+  organisation context every agent reads. Weekly run per organisation.
+- Organisation page: "Labour & hiring policy" (sources: seed, add, pause;
+  what it found). Health rules: a source failing 3 reads in a row; a zone with
+  an open role and no read for 14 days; a change in effect still waiting.
+  Eval: a quoted change approved, a planted instruction on the page ignored.
+- Next: L3 — the offer check before every offer letter, and per-zone rules for
+  the calls, JD pay disclosure and requisition limits.
 
 ## Agent intelligence (2026-11-06)
 

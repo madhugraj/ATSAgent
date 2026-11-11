@@ -2271,7 +2271,8 @@ export type AgentType =
   | "panel_l1"
   | "panel_l2"
   | "panel_l3"
-  | "voice_guard";
+  | "voice_guard"
+  | "labour_policy";
 export type AgentAutonomy = "suggest" | "act_and_notify" | "autonomous";
 export type AgentRunStatus =
   "queued" | "running" | "awaiting_human" | "done" | "failed" | "cancelled";
@@ -4024,6 +4025,122 @@ export const payConventionDrafts = pgTable(
     check(
       "pay_convention_drafts_status_check",
       sql`${t.status} in ('pending','approved','sent_back','declined','superseded')`,
+    ),
+  ],
+);
+
+/* ------------------------------------------------------- labour policy */
+// docs/labour-policy-agent-plan.md — migration 0076.
+
+export const POLICY_AREAS = [
+  "notice",
+  "probation",
+  "minimum_wage",
+  "hours",
+  "contracts",
+  "pay_transparency",
+  "questions",
+  "data",
+  "ai_and_recording",
+  "mandatory_pay",
+  "leave",
+  "other",
+] as const;
+export type PolicyArea = (typeof POLICY_AREAS)[number];
+
+/** Official sources the Labour law & policy agent may read — nothing else is ever fetched. */
+export const policySources = pgTable(
+  "policy_sources",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    zoneId: uuid("zone_id").references(() => payZones.id, { onDelete: "cascade" }),
+    /** ISO alpha-2, or null for global / regional sources. */
+    country: text("country"),
+    level: text("level").notNull().default("country"),
+    label: text("label").notNull(),
+    url: text("url").notNull(),
+    host: text("host").notNull(),
+    active: boolean("active").notNull().default(true),
+    seeded: boolean("seeded").notNull().default(false),
+    addedBy: uuid("added_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("policy_sources_org_url_key").on(t.orgId, t.url),
+    check(
+      "policy_sources_level_check",
+      sql`${t.level} in ('global','regional','country','state','domain','organisation')`,
+    ),
+    check("policy_sources_url_check", sql`${t.url} ~ '^https://'`),
+  ],
+);
+
+/** Each read of a source: unchanged reads cost no AI call. */
+export const policyReads = pgTable(
+  "policy_reads",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    sourceId: uuid("source_id")
+      .notNull()
+      .references(() => policySources.id, { onDelete: "cascade" }),
+    status: text("status").notNull(),
+    hash: text("hash"),
+    text: text("text"),
+    error: text("error"),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+    agentRunId: uuid("agent_run_id"),
+  },
+  (t) => [
+    index("policy_reads_source_idx").on(t.orgId, t.sourceId, t.fetchedAt),
+    check(
+      "policy_reads_status_check",
+      sql`${t.status} in ('changed','unchanged','first','failed')`,
+    ),
+  ],
+);
+
+/** A change found on a source, with its exact quote; the HR head approves it into the rules. */
+export const policyFindings = pgTable(
+  "policy_findings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    sourceId: uuid("source_id").references(() => policySources.id, { onDelete: "set null" }),
+    zoneId: uuid("zone_id").references(() => payZones.id, { onDelete: "set null" }),
+    url: text("url").notNull(),
+    quote: text("quote").notNull(),
+    area: text("area").$type<PolicyArea>().notNull(),
+    summary: text("summary").notNull(),
+    /** What the organisation's rules should now say (applies once approved). */
+    rule: text("rule").notNull(),
+    /** What it changes in hiring: open roles, kits, calls, offers. */
+    impact: text("impact").notNull().default(""),
+    effectiveDate: date("effective_date"),
+    status: text("status").notNull().default("new"),
+    agentRunId: uuid("agent_run_id"),
+    decidedBy: uuid("decided_by").references(() => users.id, { onDelete: "set null" }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decisionNote: text("decision_note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("policy_findings_org_idx").on(t.orgId, t.status, t.createdAt),
+    uniqueIndex("policy_findings_source_quote_key").on(t.orgId, t.sourceId, sql`md5(${t.quote})`),
+    check(
+      "policy_findings_status_check",
+      sql`${t.status} in ('new','proposed','approved','rejected','dismissed','superseded')`,
+    ),
+    check(
+      "policy_findings_area_check",
+      sql`${t.area} in ('notice','probation','minimum_wage','hours','contracts','pay_transparency','questions','data','ai_and_recording','mandatory_pay','leave','other')`,
     ),
   ],
 );

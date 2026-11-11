@@ -53,6 +53,7 @@ const { registerPhase4Tools } = await import("../src/server/agents/tools-phase4"
 const { registerSourcingTools } = await import("../src/server/agents/tools-sourcing");
 const { registerDistributionTools } = await import("../src/server/agents/tools-distribution");
 const { registerOrgTools } = await import("../src/server/agents/tools-org");
+const { registerLabourTools } = await import("../src/server/agents/tools-labour");
 const { registerExpertTools } = await import("../src/server/agents/tools-expert");
 const { registerPanelTools } = await import("../src/server/agents/tools-panel");
 const { registerOntologyTools } = await import("../src/server/agents/tools-ontology");
@@ -64,6 +65,7 @@ const {
   registerPhase4Agents,
   registerPhase6Agents,
   registerOrgAgents,
+  registerLabourAgents,
   registerExpertAgents,
   registerPanelAgents,
   registerVoiceGuardAgent,
@@ -169,6 +171,7 @@ describe("change control", () => {
     registerSourcingTools();
     registerDistributionTools();
     registerOrgTools();
+    registerLabourTools();
     registerExpertTools();
     registerPanelTools();
     registerOntologyTools();
@@ -179,6 +182,7 @@ describe("change control", () => {
     registerPhase4Agents();
     registerPhase6Agents();
     registerOrgAgents();
+    registerLabourAgents();
     registerExpertAgents();
     registerPanelAgents();
   registerVoiceGuardAgent();

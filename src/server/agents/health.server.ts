@@ -122,6 +122,9 @@ export const HEALTH = {
   profileStaleDays: 180,
   /** A pay conventions proposal waiting this long for the HR head (docs/pay-terms-plan.md). */
   payConventionsWaitDays: 7,
+  /** Labour policy: a source failing this many reads in a row; a zone unread this long. */
+  policySourceFailures: 3,
+  policyStaleDays: 14,
   /** A submitted profile version waiting longer than this for a decision (days). */
   reviewWaitingDays: 7,
   /** Website re-read failures before the warning becomes serious. */
@@ -1412,6 +1415,69 @@ export const RULES: Rule[] = [
           detail: { offers: r[0].n, currencies: r[0].currencies },
         },
       ];
+    },
+  },
+  {
+    id: "context.policy_source_failing",
+    element: "context",
+    severity: "warning",
+    description: `An approved labour policy source has failed its last ${HEALTH.policySourceFailures} reads — changes published there are not being seen. Check its address on the Organisation page, or pause it.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ id: string; label: string }>(sql`
+        select s.id, s.label from policy_sources s
+        where s.org_id = ${orgId} and s.active
+          and (select count(*) from (
+                select status from policy_reads where source_id = s.id and org_id = s.org_id
+                order by fetched_at desc limit ${HEALTH.policySourceFailures}) last
+               where last.status = 'failed') = ${HEALTH.policySourceFailures}
+        order by s.label limit 10`);
+      return r.map((x) => ({
+        agentType: "labour_policy" as const,
+        title: `Policy source failing: ${x.label}`,
+        detail: { sourceId: x.id },
+      }));
+    },
+  },
+  {
+    id: "context.policy_zone_unread",
+    element: "context",
+    severity: "warning",
+    description: `A place the organisation is hiring in right now has had no successful read of its labour policy sources for ${HEALTH.policyStaleDays} days (or has no sources) — rule changes there would be missed. Seed or add its official sources, and switch the Labour law & policy agent on.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ zone: string }>(sql`
+        select distinct z.name zone from requisitions r
+        join pay_zones z on z.id = r.pay_zone_id and z.org_id = r.org_id
+        where r.org_id = ${orgId} and r.status in ('approved','pending_dh','pending_hr','pending_cbo')
+          and not exists (
+            select 1 from policy_reads pr join policy_sources s on s.id = pr.source_id
+            where pr.org_id = r.org_id and pr.status <> 'failed'
+              and pr.fetched_at >= now() - make_interval(days => ${HEALTH.policyStaleDays})
+              and (s.zone_id = z.id or s.country = any(z.countries)))
+        order by 1 limit 10`);
+      return r.map((x) => ({
+        agentType: "labour_policy" as const,
+        title: `No current labour policy read for ${x.zone}, where a role is open`,
+        detail: { zone: x.zone },
+      }));
+    },
+  },
+  {
+    id: "context.policy_waiting_past_effective",
+    element: "context",
+    severity: "serious",
+    description:
+      "A labour policy change is already in effect but still waiting for the HR head — agents are working to the old rule. Decide it in the approvals inbox.",
+    evaluate: async (orgId) => {
+      const r = await rows<{ id: string; area: string; effective: string }>(sql`
+        select id, area, effective_date::text effective from policy_findings
+        where org_id = ${orgId} and status in ('new','proposed')
+          and effective_date is not null and effective_date <= current_date
+        order by effective_date limit 10`);
+      return r.map((x) => ({
+        agentType: "labour_policy" as const,
+        title: `A ${x.area.replace(/_/g, " ")} change effective ${x.effective} is still waiting for a decision`,
+        detail: { findingId: x.id },
+      }));
     },
   },
   {

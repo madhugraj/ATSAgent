@@ -264,6 +264,19 @@ alert webhooks are signed with HMAC-SHA256 (`X-ATSAgent-Signature: sha256=<hex>`
 and alerts carry ids, rule names, statuses, timings and token counts only — no goals, prompts,
 candidate content or model names.
 
+## Labour law & policy sources
+
+The Labour law & policy agent (docs/labour-policy-agent-plan.md) fetches only the
+organisation's approved policy sources (`policy_sources`, https only): each read
+goes through `safeFetchText`, must stay on the source's own host (a redirect off
+it fails the read), and never follows links or searches. Adding, seeding or
+pausing a source is limited to the HR head, the CBO or an owner and is audited.
+Page text reaches the model only as the tool's untrusted output; a finding is
+refused unless its quote is on the page that was read, and nothing becomes an
+organisation rule until the HR head approves it (`policy_finding` gate, audited,
+captured for training behind consent). Reads are reused for 12 hours and
+unchanged pages cost no AI call.
+
 ## Organisation agreements
 
 An organisation cannot be created without its registering signatory accepting the current Terms of

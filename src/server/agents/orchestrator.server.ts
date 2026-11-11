@@ -867,6 +867,41 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
       started++;
     }
   }
+  // The Labour law & policy agent's weekly read of the organisation's approved
+  // official sources (docs/labour-policy-agent-plan.md): unchanged pages cost no AI call.
+  if (getAgent("labour_policy")) {
+    for (const orgId of await enabledOrgs("labour_policy", opts.orgId)) {
+      const { policySources } = await import("@db/schema");
+      const [src] = await db
+        .select({ id: policySources.id })
+        .from(policySources)
+        .where(and(eq(policySources.orgId, orgId), eq(policySources.active, true)))
+        .limit(1);
+      if (!src) continue;
+      const [recent] = await db
+        .select({ id: agentRuns.id })
+        .from(agentRuns)
+        .where(
+          and(
+            eq(agentRuns.orgId, orgId),
+            eq(agentRuns.agentType, "labour_policy"),
+            eq(agentRuns.mode, "live"),
+            sql`(${agentRuns.status} in ('queued','running','awaiting_human') or ${agentRuns.createdAt} >= now() - interval '7 days')`,
+          ),
+        )
+        .limit(1);
+      if (recent) continue;
+      const principal = await ownerOf(orgId);
+      if (!principal) continue;
+      await startRun({
+        orgId,
+        agentType: "labour_policy",
+        principalUserId: principal,
+        goal: "Weekly policy check: read each approved source, record every change that matters to hiring where the organisation hires with the source's exact words, and ask the HR head about each. If nothing changed, say so.",
+      });
+      started++;
+    }
+  }
   // Interview times nobody chose in time close, and the team hears about it.
   try {
     const { expireOffers } = await import("@/lib/slot-offers.server");

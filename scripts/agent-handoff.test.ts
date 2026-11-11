@@ -70,6 +70,7 @@ const SPECIALISTS = [
   "sourcing",
   "distribution",
   "org_context",
+  "labour_policy",
   "expert_interview",
   "screening",
   "screening_call",
@@ -224,7 +225,7 @@ afterAll(async () => {
 });
 
 describe("registry", () => {
-  test("22 agents are registered: Arjun (the Copilot agent) and the 21 specialists", () => {
+  test("23 agents are registered: Arjun (the Copilot agent) and the 22 specialists", () => {
     const types = listAgents()
       .map((a) => a.type)
       .sort();

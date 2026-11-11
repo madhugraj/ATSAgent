@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-107 tables across 9 domains.
+110 tables across 9 domains.
 
 ## Identity & access
 
@@ -1341,6 +1341,15 @@ erDiagram
 | `pay_zones` | `updated_by` | `users` | no action |
 | `phone_screening_settings` | `org_id` | `organizations` | cascade |
 | `phone_screening_settings` | `updated_by` | `users` | no action |
+| `policy_findings` | `decided_by` | `users` | no action |
+| `policy_findings` | `org_id` | `organizations` | cascade |
+| `policy_findings` | `source_id` | `policy_sources` | no action |
+| `policy_findings` | `zone_id` | `pay_zones` | no action |
+| `policy_reads` | `org_id` | `organizations` | cascade |
+| `policy_reads` | `source_id` | `policy_sources` | cascade |
+| `policy_sources` | `added_by` | `users` | no action |
+| `policy_sources` | `org_id` | `organizations` | cascade |
+| `policy_sources` | `zone_id` | `pay_zones` | cascade |
 | `pooling_regions` | `org_id` | `organizations` | cascade |
 | `requisition_board_postings` | `org_id` | `organizations` | cascade |
 | `requisition_board_postings` | `requisition_id` | `requisitions` | cascade |
@@ -1498,6 +1507,9 @@ erDiagram
 | `pay_zones` | — | 19 | (orgId+name) |
 | `phone_screening_settings` | Screening & interviews | 16 | — |
 | `platform_admins` | Identity & access | 6 | (email) |
+| `policy_findings` | — | 17 | — |
+| `policy_reads` | — | 9 | — |
+| `policy_sources` | — | 12 | (orgId+url) |
 | `pooling_regions` | — | 5 | (orgId+name) |
 | `product_catalogue_commercials` | Organisations & masters | 8 | — |
 | `rate_limit_hits` | — | 3 | — |

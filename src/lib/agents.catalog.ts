@@ -125,6 +125,13 @@ export const AGENT_CATALOG: AgentInfo[] = [
       "Phones a candidate about the pay for their offer, when the Offer agent or TA asks and the HR head approves: says it is an AI, reads out the approved figure and extras, may offer one pre-approved improved figure after a no, and brings their answer back — never says the ceiling, never agrees anything; a person confirms.",
   },
   {
+    type: "labour_policy",
+    label: "Labour law & policy agent",
+    phase: 4,
+    description:
+      "Every week reads the organisation's approved official sources (government, regulator and gazette pages) for each place it hires, and brings each change that matters to hiring — notice and probation limits, minimum wage, contract rules, pay transparency, what may not be asked, data and AI-call rules — to the HR head with the source's exact words. Only an approved change becomes a rule every agent works within. Not legal advice.",
+  },
+  {
     type: "voice_guard",
     label: "Voice Guard",
     phase: 3,

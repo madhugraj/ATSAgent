@@ -14,6 +14,7 @@ import { TrainingDataCard } from "@/components/TrainingDataCard";
 import { AssessmentPolicyCard } from "@/components/AssessmentPolicyCard";
 import { PhoneScreeningCard } from "@/components/PhoneScreeningCard";
 import { PayConventionsCard } from "@/components/PayConventionsCard";
+import { LabourPolicyCard } from "@/components/LabourPolicyCard";
 import { SilentPanelCard } from "@/components/SilentPanelCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -182,6 +183,7 @@ function OrganisationSettings() {
       <AssessmentPolicyCard canEdit={navCtx.governance} />
 
       <PayConventionsCard />
+      <LabourPolicyCard />
       <PhoneScreeningCard canEdit={navCtx.governance} />
 
       <SilentPanelCard canEdit={navCtx.governance} />

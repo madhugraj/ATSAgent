@@ -226,11 +226,14 @@ type DocumentValidationSubject = {
 type OrgProfileSubject = { type: "org_profile"; versionId: string; expects?: string };
 /** Pay conventions the organisation agent proposed (docs/pay-terms-plan.md, Phase 2). */
 type PayConventionsSubject = { type: "pay_conventions"; draftId: string; expects?: string };
+/** A labour policy finding (docs/labour-policy-agent-plan.md). */
+type PolicyFindingSubject = { type: "policy_finding"; findingId: string; expects?: string };
 type GateSubject =
   | ExpertBriefSubject
   | import("../panel/review.server").PanelReviewSubject
   | OrgProfileSubject
   | PayConventionsSubject
+  | PolicyFindingSubject
   | PanelApprovalSubject
   | PanelSubstituteSubject
   | RecordSubject
@@ -382,6 +385,30 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
       status: "pending",
       detail: orgProfileDetail(found.approved?.sections ?? null, found.version),
       subject: { type: "org_profile", versionId: subject.versionId, expects: "pending" },
+    };
+  }
+  if (subject.type === "policy_finding") {
+    const { findingFor, markProposed } = await import("@/lib/labour-policy.server");
+    const f = await findingFor(orgId, subject.findingId);
+    if (!f) return { error: "Policy finding not found." };
+    if (f.status !== "new" && f.status !== "proposed")
+      return { error: `This finding is ${f.status}, not waiting for a decision.` };
+    await markProposed(orgId, f.id);
+    return {
+      role: "hr_head",
+      status: "proposed",
+      detail: [
+        `What changed (${f.area.replace(/_/g, " ")}${f.effectiveDate ? `, effective ${f.effectiveDate}` : ""}): ${f.summary}`,
+        `The source says: "${f.quote}"`,
+        `Source: ${f.url}`,
+        `The rule if approved: ${f.rule}`,
+        f.impact ? `What it changes in hiring: ${f.impact}` : "",
+        "",
+        "Approve to make it one of the organisation's rules every agent works within; decline with why it does not apply. This is not legal advice — check with counsel where it matters.",
+      ]
+        .filter((l) => l !== "")
+        .join("\n"),
+      subject: { type: "policy_finding", findingId: f.id, expects: "proposed" },
     };
   }
   if (subject.type === "pay_conventions") {
@@ -710,6 +737,22 @@ async function performGate(
         note: note ?? "",
       });
     }
+    return;
+  }
+  if (subject.type === "policy_finding") {
+    const { decideFindingCore } = await import("@/lib/labour-policy.server");
+    if (decision.status === "approved")
+      await decideFindingCore(actor, {
+        findingId: subject.findingId,
+        decision: "approve",
+        note: decision.comment ?? null,
+      });
+    else if (decision.status === "rejected")
+      await decideFindingCore(actor, {
+        findingId: subject.findingId,
+        decision: "reject",
+        note: decision.reason?.trim() || "Declined without a reason.",
+      });
     return;
   }
   if (subject.type === "pay_conventions") {

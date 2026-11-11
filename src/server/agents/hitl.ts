@@ -69,10 +69,14 @@ export const HITL_TOOLS = {
             type: z.literal("pay_conventions"),
             draftId: z.string().uuid(),
           }),
+          z.object({
+            type: z.literal("policy_finding"),
+            findingId: z.string().uuid(),
+          }),
         ])
         .optional()
         .describe(
-          "What the approval is for. An offer, requisition or JD version: approving or declining in the inbox performs the real approval step, and the approver role comes from where the item is in its chain. A rejection batch: the listed candidates are rejected with their reasons only if the person approves. A screening decision (one candidate whose screening is graded): approving moves them to the first interview round (proceed) or on hold (hold); declining keeps them in screening. An organisation profile version: approving performs the real approval by the HR head or an owner. Pay conventions (a proposal of the organisation's pay zones, regions, reporting currency and tolerance): approving applies them.",
+          "What the approval is for. An offer, requisition or JD version: approving or declining in the inbox performs the real approval step, and the approver role comes from where the item is in its chain. A rejection batch: the listed candidates are rejected with their reasons only if the person approves. A screening decision (one candidate whose screening is graded): approving moves them to the first interview round (proceed) or on hold (hold); declining keeps them in screening. An organisation profile version: approving performs the real approval by the HR head or an owner. Pay conventions (a proposal of the organisation's pay zones, regions, reporting currency and tolerance): approving applies them. A labour policy finding (a change found on an official source, with its quote): approving makes its rule one of the organisation's rules.",
         ),
     }),
   },
