@@ -1,5 +1,25 @@
 # Roadmap
 
+## Pay terms — Phase 1 foundation (2026-11-11)
+
+- Plan: `docs/pay-terms-plan.md` (currency, pay basis, kinds of work, pay zones,
+  regional pooling) and `docs/labour-policy-agent-plan.md` (labour law & policy
+  agent, offer check) — approved 11 November.
+- Shipped (P1): migration 0073 — `pay_zones`, `pooling_regions`,
+  `exchange_rates`, `pay_figures` (figures stored as said, with derived pay and
+  reporting values and the rate used); requisition pay terms (kind of work, pay
+  basis, pay currency, pay zone, hours, contract length, contract type, pays by
+  location, needed by); organisation pay defaults. Existing rows behave as
+  before (organisation currency, annual, permanent).
+- `src/lib/pay-terms.ts` (shapes, zone lookup) and `src/lib/pay-convert.ts` (the
+  only converter: payments a year, hours, dated rates with per-currency
+  validity, net never turned into gross, band check in pay currency, hike only
+  across one currency, money spoken per currency, amounts parsed as said).
+  `scripts/pay-terms.test.ts`: one test per scenario in the plan.
+- Next: P2 — organisation agent records zones, regions, rates and tolerances;
+  requisition agent sets pay terms and "needed by". Nothing reads the new
+  columns yet.
+
 ## Agent intelligence (2026-11-06)
 
 - [x] `/agents/intelligence` (governance roles): the knowledge-graph view of the hiring fleet, computed live from this organisation's telemetry — three views, each with descriptive and prescriptive layers: agent behavior (agents × person gates × failure clusters, candidates folded into edge counts, per-agent action plan), governance (every person decision chained to the norm it acted under, overturn chains, autonomy check over `stage_events` actor attribution), and vocabulary (skills/role families seeded in-memory by the production `buildOntology()` + `deriveInsights()` — prescriptive sourcing/coverage insights, nothing persisted until Phase 1)
