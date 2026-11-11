@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { CodeSelect, CountryMultiSelect, CURRENCY_OPTIONS } from "@/components/code-select";
 import { addExchangeRate, getPaySettings, savePayConventions } from "@/lib/pay-settings.functions";
 import type { ConventionZone, PayConventions } from "@/lib/pay-settings";
-import { isCurrencyCode } from "@/lib/iso";
+import { currencyForCountries, isCurrencyCode } from "@/lib/iso";
 
 const BASIS_WORDS: Record<string, string> = {
   annual: "a year",
@@ -251,15 +251,36 @@ export function PayConventionsCard() {
       {canDecide ? (
         <div className="space-y-2 rounded-md border p-3">
           <p className="text-xs font-semibold">Add a zone, or change one by its name</p>
+          <p className="text-xs text-muted-foreground">
+            A pay zone is one place&apos;s way of paying: a country (or a few cities inside one),
+            its currency and how pay is quoted. One country-wide zone per country.
+          </p>
           <div className="grid gap-2 sm:grid-cols-4">
             <div className="space-y-1">
               <Label htmlFor="pz-name" className="text-xs">
-                Name (e.g. Milan)
+                Zone name
               </Label>
               <Input
                 id="pz-name"
+                placeholder="Italy, or Milan office"
                 value={zone.name}
-                onChange={(e) => setZone({ ...zone, name: e.target.value })}
+                onChange={(e) => {
+                  const name = e.target.value;
+                  const match = c.zones.find((x) => x.name.toLowerCase() === name.trim().toLowerCase());
+                  if (match)
+                    setZone({
+                      ...zone,
+                      name,
+                      countries: match.countries,
+                      cities: match.cities.join(", "),
+                      currency: match.currency,
+                      basis: match.basis,
+                      paymentsPerYear: String(match.paymentsPerYear),
+                      hoursPerWeek: String(match.hoursPerWeek),
+                      region: match.region ?? "",
+                    });
+                  else setZone({ ...zone, name });
+                }}
               />
             </div>
             <div className="space-y-1">
@@ -269,15 +290,23 @@ export function PayConventionsCard() {
               <CountryMultiSelect
                 id="pz-countries"
                 value={zone.countries}
-                onChange={(codes) => setZone({ ...zone, countries: codes })}
+                onChange={(codes) => {
+                  const auto = currencyForCountries(codes);
+                  setZone((z) => ({
+                    ...z,
+                    countries: codes,
+                    currency: auto ?? (isCurrencyCode(z.currency) ? z.currency : ""),
+                  }));
+                }}
               />
             </div>
             <div className="space-y-1">
               <Label htmlFor="pz-cities" className="text-xs">
-                Cities, if only some (e.g. Milan, Milano)
+                Only these cities (optional)
               </Label>
               <Input
                 id="pz-cities"
+                placeholder="Leave empty for the whole country"
                 value={zone.cities}
                 onChange={(e) => setZone({ ...zone, cities: e.target.value })}
               />
@@ -291,7 +320,7 @@ export function PayConventionsCard() {
                 options={CURRENCY_OPTIONS}
                 value={zone.currency}
                 onChange={(code) => setZone({ ...zone, currency: code })}
-                placeholder="Pick the currency"
+                placeholder="Follows the country; change if you pay differently"
               />
             </div>
             {(
