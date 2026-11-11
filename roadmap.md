@@ -88,6 +88,15 @@
   asks current pay (`not_allowed`, accepted only when such a rule is in
   force). JDs and requisitions already read the approved rules through the
   organisation context. Health rule: offer checks overridden in 30 days.
+- 11 November: labour.gov.in pages (built in the browser) are read through the
+  site's own public listing — the Labour Codes page gives 126 documents with
+  title, date and PDF. Agent 1.1.0 reads PDFs a source lists
+  (`read_policy_document`, same site only, through the document parser; quotes
+  checked against the document and cited), and on a source's first read sets
+  up the rules already in force from the core Codes and Rules. Empty pages and
+  scanned PDFs fail with the reason. Sources can be removed (audited). Seeds
+  replaced with pages verified readable. First real finding: minimum wages,
+  from the Code on Wages, 2019, section 5.
 
 ## Agent intelligence (2026-11-06)
 
