@@ -15,4 +15,9 @@ const inert: unknown = new Proxy(function noop() {} as unknown as object, {
 });
 
 export default inert as never;
+// Named imports of three's add-ons (src/components/OrgOntology3D.tsx): the
+// production server build fails on a missing export otherwise.
+export const OrbitControls = inert as never;
+export const CSS2DObject = inert as never;
+export const CSS2DRenderer = inert as never;
 export const __browser3dStub = true;

@@ -1,5 +1,7 @@
 # ATSIQ — GCP deployment handoff for DevOps
 
+> For the new production at www.scouts.yavar.ai use [docs/deployment-scouts-gcp.md](../docs/deployment-scouts-gcp.md).
+
 **Goal:** deploy ATSIQ (the ATS web app) to Google Cloud Run under **https://atsiq.yavar.ai**, backed by Cloud SQL PostgreSQL. The application is fully portable — a plain Node server + ordinary PostgreSQL + S3-compatible storage + SMTP. It has **no runtime dependency on Lovable or Supabase** (verified: the production build boots with only `DATABASE_URL` and `SESSION_SECRET` set).
 
 | | |
