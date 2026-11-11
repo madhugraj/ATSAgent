@@ -52,6 +52,7 @@ export const AI_FEATURES = [
   "agent_negotiation_call",
   "agent_followup",
   "agent_org_context",
+  "agent_labour_policy",
   "agent_expert_interview",
   "agent_panel_l1",
   "agent_panel_l2",

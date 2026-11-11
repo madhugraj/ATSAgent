@@ -10,6 +10,7 @@ import {
   registerPhase4Agents,
   registerPhase6Agents,
   registerOrgAgents,
+  registerLabourAgents,
   registerExpertAgents,
   registerPanelAgents,
   registerVoiceGuardAgent,
@@ -21,6 +22,7 @@ import { registerPhase4Tools } from "./tools-phase4";
 import { registerSourcingTools } from "./tools-sourcing";
 import { registerDistributionTools } from "./tools-distribution";
 import { registerOrgTools } from "./tools-org";
+import { registerLabourTools } from "./tools-labour";
 import { registerExpertTools } from "./tools-expert";
 import { registerPanelTools } from "./tools-panel";
 import { registerOntologyTools } from "./tools-ontology";
@@ -40,6 +42,7 @@ export function ensureAgentsRegistered(): void {
   registerSourcingTools();
   registerDistributionTools();
   registerOrgTools();
+  registerLabourTools();
   registerExpertTools();
   registerPanelTools();
   registerOntologyTools();
@@ -50,6 +53,7 @@ export function ensureAgentsRegistered(): void {
   registerPhase4Agents();
   registerPhase6Agents();
   registerOrgAgents();
+  registerLabourAgents();
   registerExpertAgents();
   registerPanelAgents();
   registerVoiceGuardAgent();
