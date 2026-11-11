@@ -1408,6 +1408,47 @@ describe("organisation context rules", () => {
     expect(after.find((i) => i.rule === "context.pay_conventions_waiting")).toBeUndefined();
   });
 
+  test("pay recorded in a currency with no current rate is flagged", async () => {
+    const { applications, candidates, payFigures, requisitions } =
+      await import("../drizzle/schema");
+    const [req] = await db
+      .insert(requisitions)
+      .values({
+        orgId,
+        code: `REQ-NR-${Math.random().toString(36).slice(2, 7)}`,
+        title: "Engineer",
+        status: "approved",
+        payCurrency: "EUR",
+      } as never)
+      .returning({ id: requisitions.id });
+    const [cand] = await db
+      .insert(candidates)
+      .values({ orgId, fullName: "Ana", email: `ana-${stamp}@cand.local` } as never)
+      .returning({ id: candidates.id });
+    const [app] = await db
+      .insert(applications)
+      .values({ orgId, requisitionId: req!.id, candidateId: cand!.id, stage: "shortlisted" } as never)
+      .returning({ id: applications.id });
+    await db.insert(payFigures).values({
+      orgId,
+      ownerType: "application",
+      ownerId: app!.id,
+      figure: "expected",
+      amount: "70000",
+      currency: "USD",
+      payBasis: "annual",
+      source: "screening_call",
+      refusal: "no_rate",
+      candidateId: cand!.id,
+    });
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "context.pay_not_comparable")).toMatchObject({
+      agentType: "org_context",
+      severity: "warning",
+      title: expect.stringContaining("USD → EUR"),
+    });
+  });
+
   test("an Autonomous agent without a passed model safety check is flagged", async () => {
     const { agentPolicies, aiRedteamChecks, aiSettings } = await import("../drizzle/schema");
     await db.insert(agentPolicies).values({

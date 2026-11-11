@@ -290,6 +290,15 @@ question, with no "thank you", "noted" or "understood". The candidate is thanked
 once, at the close. The Voice Guard (1.4.1) judges read-backs against the
 brief, so a per-answer "thank you" or "noted" on these calls is a low finding.
 
+**Pay in the role's own terms** (screening 1.10.0, docs/pay-terms-plan.md
+Phase 3). The four details follow the requisition's pay terms: "CTC per year"
+in rupees for Indian roles (unchanged), "gross yearly salary" in the zone's
+currency elsewhere, an hourly or day rate for those contracts. A contract asks
+"When could you start?" and "How long a contract are you looking for?" instead
+of the notice period. A figure said in another currency or per another period
+is recorded as said (`pay_currency`, `pay_basis`) and stored in `pay_figures`
+with what it comes to in the role's currency and the reporting currency.
+
 **Consent is the answer to the consent question; a pay range is a figure**
 (screening 1.9.5, test call of 11 November). `record_consent` counts only a
 reply to a question asked after the disclosure, and refuses while that question

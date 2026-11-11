@@ -56,11 +56,19 @@ export const CALL_TOOL_INPUTS = {
       .string()
       .regex(/^\d{4}-\d{2}-\d{2}$/)
       .optional(),
-    // Pay, in rupees per year, only as the candidate stated it — recorded for the
-    // HR team only, never discussed and never calculated.
+    // Pay, only as the candidate stated it — recorded for the HR team only, never
+    // discussed and never calculated. In the role's currency and basis unless
+    // pay_currency / pay_basis say otherwise (docs/pay-terms-plan.md, Phase 3).
     current_ctc_fixed: rupees.optional(),
     current_ctc_variable: rupees.optional(),
     expected_ctc: rupees.optional(),
+    /** The currency the candidate's figures were said in, when not the role's (ISO: EUR, USD). */
+    pay_currency: z
+      .string()
+      .regex(/^[A-Za-z]{3}$/)
+      .optional(),
+    /** Per year, month, day or hour, when not the role's. */
+    pay_basis: z.enum(["annual", "monthly", "daily", "hourly"]).optional(),
     /** Anything about pay not stated as a figure, in their words ("a 30% hike", "plus ₹10L in shares"). */
     pay_note: z.string().trim().max(300).optional(),
     /** Anything else the hiring team should know, in their words ("the core skills are new to me"). */
@@ -103,7 +111,7 @@ export const CALL_TOOL_DESCRIPTIONS: Record<CallToolName, string> = {
   record_consent:
     "Record whether the candidate agreed to the screening call now (and to notes for the hiring team and the quality check): granted true only if they clearly agreed in their answer to your latest question; their_words is exactly what they said. Refused when that answer raised a concern (they did not apply, how you got their details, not sure…): answer it, ask again, and record their answer to that.",
   record_details:
-    "Record the practical details the candidate told you, as they said them: current job title and company, total years of experience, where they live now, whether they are open to relocating (only a yes or no they actually said — a question back is not an answer), notice period in days, earliest joining date (YYYY-MM-DD), and current fixed pay, current variable pay and expected pay as rupees per year (e.g. 18 lakhs = 1800000; a range such as \"95 lakhs to 1 crore\" is its lower end, with the range in pay_note) — only figures they actually stated; never calculate one. Anything about pay that is not a figure (a percentage hike, shares, bonuses) goes in pay_note in their words; anything else the hiring team should know (a time limit they set, skills they said are new to them) in candidate_note. Call it again as more details come; leave out anything they did not say. Never comment on the figures. The earliest joining date, current pay and expected pay are required before the call can end as completed: if they would rather not say one, list it in not_given with why 'declined' (their words in pay_note, or in candidate_note for the joining date); if they are not working now, list current_pay with why 'not_working'. A decline is taken only after you have told them, since your last record_details, that without it the hiring team cannot consider their application — otherwise it is refused and you ask once more with that sentence.",
+    "Record the practical details the candidate told you, as they said them: current job title and company, total years of experience, where they live now, whether they are open to relocating (only a yes or no they actually said — a question back is not an answer), notice period in days, earliest joining date (YYYY-MM-DD), and current fixed pay, current variable pay and expected pay as plain numbers in the role's currency and pay basis (e.g. 18 lakhs = 1800000, €52k = 52000; a range such as \"95 lakhs to 1 crore\" is its lower end, with the range in pay_note) — when they said them in another currency or per another period, record the numbers as said and set pay_currency and pay_basis — only figures they actually stated; never calculate one. Anything about pay that is not a figure (a percentage hike, shares, bonuses) goes in pay_note in their words; anything else the hiring team should know (a time limit they set, skills they said are new to them) in candidate_note. Call it again as more details come; leave out anything they did not say. Never comment on the figures. The earliest joining date, current pay and expected pay are required before the call can end as completed: if they would rather not say one, list it in not_given with why 'declined' (their words in pay_note, or in candidate_note for the joining date); if they are not working now, list current_pay with why 'not_working'. A decline is taken only after you have told them, since your last record_details, that without it the hiring team cannot consider their application — otherwise it is refused and you ask once more with that sentence.",
   record_answer:
     'After you ask one of the listed screening questions: the question\'s id and a faithful one or two sentence summary of what the candidate said. If they chose not to answer it, set declined true and say so in the summary — it is never held against them. Saying they have not done it or lack the experience is an answer: declined false. The summary holds only what the candidate said in their own words — never a tool, method or detail that you said first. If they only agreed with or repeated something you said ("yes, I used that") and gave no specifics of their own, set prompted true and say so in the summary.',
   book_slot:
@@ -245,7 +253,7 @@ export function requiredDetailStatus(
  * and kept "declined": a range had no field (pure; unit-tested).
  */
 export const STATES_AMOUNT =
-  /\b\d[\d,.]*\s*(lakhs?|lacs?|lpa|crores?|cr|k|thousand|million)\b|\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|[a-z]+teen|[a-z]+ty|hundred)\b[\w\s-]{0,30}\b(lakhs?|lacs?|crores?)\b|₹\s*\d/i;
+  /\b\d[\d,.]*\s*(lakhs?|lacs?|lpa|crores?|cr|k|thousand|million|euros?|dollars?|pounds?|usd|eur|gbp|an hour|per hour|a day|per day)\b|[$€£]\s*\d|\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|[a-z]+teen|[a-z]+ty|hundred)\b[\w\s-]{0,30}\b(lakhs?|lacs?|crores?)\b|₹\s*\d/i;
 
 export const RAISES_CONCERN =
   /\b(never|not|didn'?t|did not|haven'?t|have not)\s+(applied|apply)\b|\bhow did you (get|find|have)\b|\bwhere did you get\b|\bwho (gave|are you|is this)\b|\bwhat is this (about|for)\b|\bnot interested\b|\bdon'?t want\b|\bwrong (number|person)\b|\bnot sure\b/i;

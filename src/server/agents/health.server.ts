@@ -1366,6 +1366,32 @@ export const RULES: Rule[] = [
     },
   },
   {
+    id: "context.pay_not_comparable",
+    element: "context",
+    severity: "warning",
+    description:
+      "Candidates' pay was recorded in a currency the organisation has no current exchange rate for (none on record, or out of date), so it could not be compared with the role's band. Add the rate on the Organisation page (Pay, currency and pay zones).",
+    evaluate: async (orgId) => {
+      const r = await rows<{ pair: string; n: number }>(sql`
+        select f.currency || ' → ' || r.pay_currency pair, count(*)::int n
+        from pay_figures f
+        join applications a on a.id = f.owner_id and a.org_id = f.org_id
+        join requisitions r on r.id = a.requisition_id and r.org_id = f.org_id
+        where f.org_id = ${orgId} and f.owner_type = 'application'
+          and f.refusal in ('no_rate','stale_rate')
+          and f.created_at >= now() - interval '14 days'
+        group by 1 order by 2 desc limit 5`);
+      if (!r.length) return [];
+      return [
+        {
+          agentType: "org_context",
+          title: `Pay not compared — no current exchange rate for ${r.map((x) => x.pair).join(", ")}`,
+          detail: { pairs: r },
+        },
+      ];
+    },
+  },
+  {
     id: "context.profile_stale",
     element: "context",
     severity: "warning",

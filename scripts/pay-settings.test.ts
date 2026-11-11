@@ -9,8 +9,11 @@ import { and, eq } from "drizzle-orm";
 
 const { db } = await import("../src/server/db");
 const {
+  applications,
   auditLog,
+  candidates,
   organizations,
+  payFigures,
   orgMembers,
   payConventionDrafts,
   payZones,
@@ -274,5 +277,91 @@ describe("a requisition's pay terms", () => {
         terms: {},
       }),
     ).rejects.toThrow(/only on a draft/);
+  });
+});
+
+describe("the call's figures reach matching (Phase 3)", () => {
+  test("€52k said on a Milan call is kept as said, derived to USD, and read back with the pool", async () => {
+    const [req] = await db
+      .insert(requisitions)
+      .values({
+        orgId,
+        code: `REQ-PS-${Math.random().toString(36).slice(2, 7)}`,
+        title: "Data Engineer",
+        status: "draft",
+        location: "Milan",
+      } as never)
+      .returning();
+    await pay.updateRequisitionPayTermsCore(who(hr), {
+      id: req!.id,
+      zone: "Milan",
+      terms: { neededBy: "2027-02-01" },
+    });
+    const [cand] = await db
+      .insert(candidates)
+      .values({
+        orgId,
+        fullName: "Giulia Rossi",
+        email: `giulia-${Math.random().toString(36).slice(2, 7)}@cand.local`,
+        location: "Bengaluru, India",
+      } as never)
+      .returning({ id: candidates.id });
+    const [app] = await db
+      .insert(applications)
+      .values({
+        orgId,
+        requisitionId: req!.id,
+        candidateId: cand!.id,
+        stage: "shortlisted",
+      } as never)
+      .returning({ id: applications.id });
+
+    const { recordCallDetails } = await import("../src/lib/compensation.server");
+    await recordCallDetails(orgId, app!.id, {
+      expectedCtc: 52_000,
+      earliestJoining: "2027-03-01",
+      currentLocation: "Milano",
+      currency: "EUR",
+      payBasis: "annual",
+      note: "€52k RAL",
+    });
+    const [fig] = await db
+      .select()
+      .from(payFigures)
+      .where(and(eq(payFigures.orgId, orgId), eq(payFigures.ownerId, app!.id)));
+    expect(fig).toMatchObject({
+      figure: "expected",
+      currency: "EUR",
+      payBasis: "annual",
+      payCurrency: "EUR",
+      reportingCurrency: "USD",
+      source: "screening_call",
+      candidateId: cand!.id,
+    });
+    expect(Number(fig!.amount)).toBe(52_000);
+    expect(Number(fig!.reportingAmount)).toBeCloseTo(56_160, 0); // the EUR→USD rate entered above
+
+    const { roleLogistics, candidateLogistics } = await import("../src/lib/pay-context.server");
+    const [r] = await db.select().from(requisitions).where(eq(requisitions.id, req!.id));
+    const role = await roleLogistics(orgId, r!);
+    expect(role.constraints.pool).toEqual({
+      rule: "same_region",
+      zone: "Milan",
+      region: "South Europe",
+    });
+    const stated = await candidateLogistics(orgId, app!.id, "Bengaluru, India", role.ctx);
+    // The call's place (Milano) is newer than the CV's (Bengaluru).
+    expect(stated.place).toEqual({ zone: "Milan", region: "South Europe" });
+    expect(stated.earliestJoining).toBe("2027-03-01");
+    expect(stated.expectedPay).toMatchObject({ amount: 52_000, currency: "EUR" });
+
+    const { logisticsCheck, JOIN_AFTER_NEEDED_BLOCKER } = await import("../src/lib/logistics");
+    const check = logisticsCheck(stated, {
+      ctcBandMin: 45_000,
+      ctcBandMax: 60_000,
+      ...role.constraints,
+    });
+    expect(check.blockers).toHaveLength(1);
+    expect(check.blockers[0]).toStartWith(JOIN_AFTER_NEEDED_BLOCKER);
   });
 });

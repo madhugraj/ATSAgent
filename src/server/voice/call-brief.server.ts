@@ -5,6 +5,7 @@
  * the rules. Facts come from the organisation's own records; the candidate's
  * words on the call are the only untrusted input, and the rules say so.
  */
+import { callPayWords, type KindOfWork, type PayBasis } from "@/lib/pay-terms";
 import { and, desc, eq } from "drizzle-orm";
 
 import {
@@ -57,6 +58,10 @@ export async function loadBriefFacts(input: {
       candidateYears: candidates.experienceYears,
       candidateSkills: candidates.skills,
       requisitionId: requisitions.id,
+      kindOfWork: requisitions.kindOfWork,
+      payBasis: requisitions.payBasis,
+      payCurrency: requisitions.payCurrency,
+      contractMonths: requisitions.contractMonths,
       roleTitle: requisitions.title,
       roleCode: requisitions.code,
       location: requisitions.location,
@@ -138,6 +143,12 @@ export async function loadBriefFacts(input: {
       currentPay: pay.currentTotal != null,
       expectedPay: pay.expectedCtc != null,
     },
+    pay: callPayWords({
+      kind: row.kindOfWork as KindOfWork,
+      basis: row.payBasis as PayBasis,
+      currency: row.payCurrency,
+      contractMonths: row.contractMonths,
+    }),
     emailDomain: row.candidateEmail?.split("@")[1]?.toLowerCase() || null,
     questions: questionsForCall(kitQuestions, input.policy.maxMinutes),
     maxMinutes: input.policy.maxMinutes,

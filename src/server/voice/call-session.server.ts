@@ -750,6 +750,9 @@ async function placeCall(
       currentLocation: d.current_location ?? null,
       openToRelocate: d.open_to_relocate ?? null,
       note: d.pay_note ?? null,
+      // As said: the candidate's own currency and basis when they gave one, else the role's.
+      currency: (d.pay_currency ?? facts.pay?.currency ?? "INR").toUpperCase(),
+      payBasis: d.pay_basis ?? facts.pay?.basis ?? null,
     }).catch((e) =>
       log.warn("screening_call.details_failed", { call_id: call.id, error: e as Error }),
     );

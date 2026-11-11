@@ -23,7 +23,7 @@ import {
   harvestProfileLinks,
   scoreCandidate,
 } from "./matching.server";
-import { CTC_CEILING_BLOCKER } from "./logistics";
+import { CTC_CEILING_BLOCKER, JOIN_AFTER_NEEDED_BLOCKER, OUTSIDE_POOL_BLOCKER } from "./logistics";
 import { recordStageTransition } from "./stage-events.server";
 
 export type AutoScoreOutcome = {
@@ -138,6 +138,11 @@ export async function scoreUnscored(opts: {
             .orderBy(desc(jobDescriptions.version))
             .limit(1);
 
+          // Pay terms, needed-by and pool for the role; the candidate's latest
+          // stated details for this application (the call or TA, newer than the CV).
+          const { roleLogistics, candidateLogistics } = await import("./pay-context.server");
+          const role = await roleLogistics(opts.orgId, req);
+          const stated = await candidateLogistics(opts.orgId, app.id, cand.location, role.ctx);
           const links = harvestProfileLinks(cand.resumeText);
           const result = await scoreCandidate({
             jd: {
@@ -155,6 +160,7 @@ export async function scoreUnscored(opts: {
                 ctcBandMax: req.ctcBandMax != null ? Number(req.ctcBandMax) : null,
                 maxNoticePeriodDays: req.maxNoticePeriodDays,
                 workAuthorizationRequired: req.workAuthorizationRequired,
+                ...role.constraints,
               },
             },
             candidate: {
@@ -174,6 +180,7 @@ export async function scoreUnscored(opts: {
               preferredLocations: cand.preferredLocations,
               willingToRelocate: cand.willingToRelocate,
               workAuthorization: cand.workAuthorization,
+              ...stated,
             },
             weights: {
               skills: req.weightSkills ?? DEFAULT_WEIGHTS.skills,
@@ -277,9 +284,15 @@ export async function scoreUnscored(opts: {
                   ? " — the CV points at a different kind of role, held at ai_screened"
                   : result.logistics?.blockers.includes(CTC_CEILING_BLOCKER)
                     ? " — expected CTC above the approved band, held at ai_screened"
-                    : result.experience_score <= EXPERIENCE_BAND_GATE
-                      ? " — far outside the experience band, held at ai_screened"
-                      : ""
+                    : result.logistics?.blockers.some((b) =>
+                          b.startsWith(JOIN_AFTER_NEEDED_BLOCKER),
+                        )
+                      ? " — can join only after the role is needed by, held at ai_screened"
+                      : result.logistics?.blockers.some((b) => b.startsWith(OUTSIDE_POOL_BLOCKER))
+                        ? " — outside the role's candidate pool, held at ai_screened"
+                        : result.experience_score <= EXPERIENCE_BAND_GATE
+                          ? " — far outside the experience band, held at ai_screened"
+                          : ""
               : injection
                 ? " — prompt-injection flag held at ai_screened"
                 : "";

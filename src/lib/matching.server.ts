@@ -11,6 +11,7 @@ import {
 } from "./career";
 import {
   CTC_CEILING_BLOCKER,
+  holdingBlockers,
   logisticsCheck,
   type LogisticsCheck,
   type LogisticsRequisition,
@@ -527,6 +528,13 @@ export async function scoreCandidate(opts: {
     riskFlags.push(
       "Expected CTC above the approved band — held at ai_screened; a person decides before any advance",
     );
+  // Joining after the role is needed by, or outside its candidate pool: a
+  // person decides (Phase 3, docs/pay-terms-plan.md) — never the score.
+  const otherHolds = (logistics ? holdingBlockers(logistics.blockers) : []).filter(
+    (b) => b !== CTC_CEILING_BLOCKER,
+  );
+  for (const b of otherHolds)
+    riskFlags.push(`${b} — held at ai_screened; a person decides before any advance`);
   if (opts.includeSocial && !signals.some((s) => s.status === "ok"))
     riskFlags.push("No verifiable public profile signal — social score defaulted to 0");
 
@@ -554,7 +562,7 @@ export async function scoreCandidate(opts: {
       experienceScore: experience,
       levelMismatch,
       directionMismatch,
-      ctcOverBand,
+      ctcOverBand: ctcOverBand || otherHolds.length > 0,
     }),
     experience_fit: ai.data.experience_fit,
     experience_fit_reason: ai.data.experience_fit_reason || null,

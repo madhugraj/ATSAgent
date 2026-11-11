@@ -30,7 +30,7 @@ contact given is the organisation's mailbox.
 | Why it is calling and what happens next, from the facts it is given. | instruction + evals |
 | Take consent only from the candidate's answer to its latest question, in their words — never from a reply that raised a concern before the concern is answered. | code |
 | Ask the earliest joining date, current pay and expected pay — a completed call cannot end until each is recorded or noted as not given (declined, in their words, or not working). | code |
-| Ask the notice period, joining date, current CTC and expected CTC directly, one at a time, each once, for a clear answer (days or months, a calendar date, a rupee figure); ask once more for an unclear answer, saying that without a clear answer the application cannot be considered; never work one out for them, never a third time. | instruction + evals |
+| Ask the notice period (for a contract: when they could start and the contract length they want), joining date, current pay and expected pay directly — pay in the role's own terms and currency (CTC per year in India, gross yearly salary elsewhere, an hourly or day rate for those contracts) — one at a time, each once, for a clear answer (days or months, a calendar date, a figure; a figure in another currency or period is recorded as said); ask once more for an unclear answer, saying that without a clear answer the application cannot be considered; never work one out for them, never a third time. | instruction + evals |
 
 **May talk about only**
 

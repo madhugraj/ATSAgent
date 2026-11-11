@@ -40,6 +40,12 @@ export type BriefFacts = {
   strengths: string[];
   /** Which practical details are already on record (never the values). */
   known: { notice: boolean; currentPay: boolean; expectedPay: boolean };
+  /**
+   * How pay is asked for this role (docs/pay-terms-plan.md, Phase 3): its term,
+   * currency and whether it is a contract. Absent: the India default (CTC per year,
+   * rupees, permanent) — calls before pay terms behave exactly as before.
+   */
+  pay?: import("@/lib/pay-terms").CallPayWords;
   /** The domain of the e-mail on their CV ("gmail.com"), to say where a confirmation goes. */
   emailDomain: string | null;
   questions: CallQuestion[];
@@ -107,6 +113,14 @@ export function screeningFirstWords(f: Pick<BriefFacts, "candidateFirstName">): 
 export function callSystemPrompt(f: BriefFacts): string {
   const n = f.candidateFirstName;
   const org = f.orgName;
+  const pay = f.pay ?? {
+    term: "CTC per year",
+    currency: "INR",
+    currencyName: "rupees",
+    basis: "annual" as const,
+    contract: false,
+    contractMonths: null,
+  };
   const role = f.forClient
     ? `the ${f.roleTitle} role that ${org} is hiring for on behalf of a client`
     : `the ${f.roleTitle} role at ${org}`;
@@ -135,6 +149,9 @@ export function callSystemPrompt(f: BriefFacts): string {
     `- They can check the call is genuine by writing to ${f.contactEmail ?? `${org}'s HR team`} (never a person's address).`,
     `- Calling hours: ${f.callingHours}.`,
     `- Next steps you may promise: ${f.nextSteps}`,
+    pay.currency !== "INR" || pay.contract
+      ? `- Pay for this role is asked as the ${pay.term} in ${pay.currencyName}${pay.contract ? `; it is a contract${pay.contractMonths ? ` of ${pay.contractMonths} months` : ""}` : ""}. The role's own pay is never discussed.`
+      : null,
     "",
     `## The call (about ${minutes} — short and to the point)`,
     // 1.8.1: the first words are prepared while the phone rings and played when their
@@ -160,11 +177,16 @@ export function callSystemPrompt(f: BriefFacts): string {
     // "you can calculate it" and "as per the norms"). 1.9.0: asked directly — no list of
     // the four read out first.
     `4. Ask directly, one question each, each once — never read out a list of them first:
-   a. "What is your notice period?";
-   b. "Which date could you join?" — the date only, never the joining date again in other words;
-   c. "What is your current CTC per year?" (a total is fine: record it as current fixed pay, "total CTC; split not given" in pay_note);
-   d. "And your expected CTC per year?"
-   Clear means days or months, a calendar date, a rupee figure. Unclear ("around three months", "you can calculate it", "negotiable", "as per the norms", "after the interviews", a percentage or a range): ask once more for the specific date or figure, saying in the same breath: "${CONSEQUENCE_LINE}" Never work out a date or a figure for them, even when asked. Still not given: record_details with their words and the item in not_given ("declined"), move on (record_details refuses a decline until you have said that sentence for it). Never ask for the same detail a third time. Not working now: skip notice and current CTC (current_pay in not_given, "not_working"). Pay is always asked afresh ("so our notes are up to date"); never state, react to or compare a figure. Salary for the role: the HR team will discuss pay separately.
+${
+  pay.contract
+    ? `   a. "When could you start?" — a calendar date (record it as earliest_joining);
+   b. "How long a contract are you looking for?" — record their words in candidate_note;`
+    : `   a. "What is your notice period?";
+   b. "Which date could you join?" — the date only, never the joining date again in other words;`
+}
+   c. "What is your current ${pay.term}?" (a total is fine: record it as current fixed pay, "total; split not given" in pay_note);
+   d. "And your expected ${pay.term}?"
+   Clear means ${pay.contract ? "a calendar date" : "days or months, a calendar date"}, a figure${pay.currency === "INR" ? " in rupees" : ""}. A figure in another currency or per another period is an answer: record it as said, with pay_currency and pay_basis. Unclear ("around three months", "you can calculate it", "negotiable", "as per the norms", "after the interviews", a percentage or a range): ask once more for the specific date or figure, saying in the same breath: "${CONSEQUENCE_LINE}" Never work out a date or a figure for them, even when asked. Still not given: record_details with their words and the item in not_given ("declined"), move on (record_details refuses a decline until you have said that sentence for it). Never ask for the same detail a third time. Not working now: skip notice and current CTC (current_pay in not_given, "not_working"). Pay is always asked afresh ("so our notes are up to date"); never state, react to or compare a figure. Salary for the role: the HR team will discuss pay separately.
    Throughout: never tell them a detail is not needed. After an answer, no "thank you", "noted" or "understood": record it and go straight to the next question. Whenever they mention or correct a detail at any point in the call, call record_details with it.`,
     // 1.9.0: location is the last question before the technical one. A test call asked
     // about relocation twice after "I can think about it" and added a promise of support.
