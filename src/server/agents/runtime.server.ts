@@ -1187,7 +1187,14 @@ export async function startRun(input: {
         subjectId: input.subjectId ?? null,
         triggerEventId: input.triggerEventId ?? null,
         maxSteps: input.maxSteps ?? startPolicy.maxStepsPerLeg ?? def.maxSteps ?? 20,
-        ...(startPolicy.maxTokensPerLeg ? { maxTokens: startPolicy.maxTokensPerLeg } : {}),
+        ...(startPolicy.maxTokensPerLeg || def.maxTokens
+          ? {
+              maxTokens: Math.min(
+                startPolicy.maxTokensPerLeg ?? def.maxTokens!,
+                RUN_LIMITS.maxTokensPerLeg,
+              ),
+            }
+          : {}),
         conversationId,
         transcript: [{ role: "user", content: input.goal } satisfies AgentMessage],
         // Started from an HTTP request: join its trace, so the request ID finds the run.
