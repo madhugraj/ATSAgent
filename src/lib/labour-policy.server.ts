@@ -74,37 +74,30 @@ const EU = new Set([
   "SE",
 ]);
 
-/** Official update pages per country (the organisation edits the list). */
+/**
+ * Official update pages per country (the organisation edits the list). Each one was
+ * checked on 11 November 2026 to return readable text to a plain fetch: pages built
+ * in the browser (labour.gov.in, legislation.gov.uk), and sites that refuse automated
+ * reads (ILO NATLEX, dol.gov) or fail TLS checks (egazette.gov.in, mites.gob.es) were
+ * left out — they would read as nothing and hide every change.
+ */
 export const SEED_SOURCES: Record<string, Seed[]> = {
-  "*": [
-    { level: "global", label: "ILO NATLEX — labour legislation", url: "https://natlex.ilo.org/" },
-  ],
-  EU: [
-    {
-      level: "regional",
-      label: "EUR-Lex — Official Journal of the EU",
-      url: "https://eur-lex.europa.eu/oj/direct-access.html",
-    },
-  ],
+  "*": [],
+  EU: [],
   IN: [
+    { level: "country", label: "ESIC — circulars", url: "https://www.esic.gov.in/circulars" },
     {
       level: "country",
-      label: "Ministry of Labour & Employment — what's new",
-      url: "https://labour.gov.in/whatsnew",
+      label: "ESIC — press releases",
+      url: "https://www.esic.gov.in/press-release",
     },
-    { level: "country", label: "The Gazette of India", url: "https://egazette.gov.in/" },
     {
       level: "country",
-      label: "EPFO — what's new",
-      url: "https://www.epfindia.gov.in/site_en/WhatsNew.php",
+      label: "DGT — orders and circulars",
+      url: "https://dgt.gov.in/order-circular",
     },
   ],
   GB: [
-    {
-      level: "country",
-      label: "legislation.gov.uk — new legislation",
-      url: "https://www.legislation.gov.uk/new",
-    },
     {
       level: "country",
       label: "GOV.UK — employing people",
@@ -112,12 +105,12 @@ export const SEED_SOURCES: Record<string, Seed[]> = {
     },
   ],
   US: [
+    { level: "country", label: "EEOC — newsroom", url: "https://www.eeoc.gov/newsroom" },
     {
       level: "country",
-      label: "US Department of Labor — news releases",
-      url: "https://www.dol.gov/newsroom/releases",
+      label: "Federal Register — Department of Labor documents",
+      url: "https://www.federalregister.gov/api/v1/documents.rss?conditions%5Bagencies%5D%5B%5D=labor-department",
     },
-    { level: "country", label: "EEOC — newsroom", url: "https://www.eeoc.gov/newsroom" },
   ],
   IT: [
     {
@@ -134,32 +127,11 @@ export const SEED_SOURCES: Record<string, Seed[]> = {
       url: "https://www.bmas.de/DE/Service/Presse/Pressemitteilungen/pressemitteilungen.html",
     },
   ],
-  FR: [
-    {
-      level: "country",
-      label: "Ministère du Travail — actualités",
-      url: "https://travail-emploi.gouv.fr/actualites",
-    },
-  ],
-  ES: [
-    {
-      level: "country",
-      label: "Ministerio de Trabajo — notas de prensa",
-      url: "https://www.mites.gob.es/es/prensa/notas/index.htm",
-    },
-  ],
   PL: [
     {
       level: "country",
       label: "Ministerstwo Rodziny, Pracy — wiadomości",
       url: "https://www.gov.pl/web/rodzina/wiadomosci",
-    },
-  ],
-  AE: [
-    {
-      level: "country",
-      label: "MOHRE — news",
-      url: "https://www.mohre.gov.ae/en/media-centre/news.aspx",
     },
   ],
   SG: [
@@ -176,6 +148,7 @@ export const SEED_SOURCES: Record<string, Seed[]> = {
       url: "https://www.gov.br/trabalho-e-emprego/pt-br/noticias-e-conteudo",
     },
   ],
+  /** Indian states: added by hand (e.g. Tamil Nadu's press releases, https://labour.tn.gov.in/Press-Release.php?mode=). */
 };
 
 /** The seed sources for a set of zones (pure; unit-tested). */
@@ -188,7 +161,7 @@ export function seedsFor(zones: { id: string; countries: string[] }[]) {
   for (const z of zones)
     for (const c of z.countries) {
       if (EU.has(c)) for (const s of SEED_SOURCES["EU"]!) add(s, null, null);
-      for (const s of SEED_SOURCES[c] ?? []) add(s, c, z.id);
+      for (const s of SEED_SOURCES[c] ?? []) add(s, c, z.id || null);
     }
   return out;
 }
@@ -202,10 +175,22 @@ function hostOf(url: string): string {
 /** Seed the official sources for the organisation's pay zones (missing ones only). */
 export async function seedSourcesCore(actor: PolicyActor): Promise<{ added: number }> {
   await assertDecider(actor, "change the policy sources");
-  const zones = await db
+  let zones = await db
     .select({ id: payZones.id, countries: payZones.countries })
     .from(payZones)
     .where(eq(payZones.orgId, actor.orgId));
+  // No pay zones yet: the organisation's headquarters country stands in.
+  if (!zones.length) {
+    const { organizations } = await import("../../drizzle/schema");
+    const { countryCode } = await import("../server/distribution/content");
+    const [org] = await db
+      .select({ hq: organizations.hqCountry })
+      .from(organizations)
+      .where(eq(organizations.id, actor.orgId))
+      .limit(1);
+    const code = countryCode(org?.hq);
+    if (code) zones = [{ id: "", countries: [code] }];
+  }
   let added = 0;
   for (const s of seedsFor(zones)) {
     const rows = await db
@@ -358,6 +343,10 @@ export function newLines(prev: string | null, next: string): string[] {
 
 const REUSE_MS = 12 * 3_600_000;
 
+/** Fewer letters than this is not a page of text (pure). */
+export const MIN_READABLE = 200;
+export const readableChars = (t: string) => (t.match(/\p{L}/gu) ?? []).length;
+
 /**
  * Read one source: its own URL only, through the safe fetcher. Returns the new
  * lines since the last read (all lines on the first read), capped for the prompt.
@@ -429,6 +418,21 @@ export async function readSourceCore(
     return { source, status: "failed", newText: "", error };
   }
   text = text.slice(0, 200_000);
+  // A page with no readable text (built in the browser, or a login or captcha wall)
+  // is not a read: it would hide every change, so it fails with the reason.
+  if (readableChars(text) < MIN_READABLE) {
+    const error =
+      "No readable text on the page — it is probably built in the browser, or behind a login. Use a page that lists notices or press releases.";
+    await db.insert(policyReads).values({
+      orgId,
+      sourceId: s.id,
+      status: "failed",
+      error,
+      fetchedAt: now,
+      agentRunId: opts.agentRunId ?? null,
+    });
+    return { source, status: "failed", newText: "", error };
+  }
   const hash = createHash("sha256").update(text).digest("hex");
   const status = !lastOk ? "first" : lastOk.hash === hash ? "unchanged" : "changed";
   await db.insert(policyReads).values({
@@ -713,4 +717,51 @@ export async function callRulesFor(orgId: string, zoneId: string | null) {
     lines: rules.map((r) => r.rule),
     payHistoryBanned: rules.some((r) => r.area === "questions" && PAY_HISTORY_BAN.test(r.rule)),
   };
+}
+
+/**
+ * Start a policy check now (HR head, CBO or owner): the same run as the weekly one,
+ * as the person asking. Refused when the agent is off or a check is already running.
+ */
+export async function checkNowCore(actor: PolicyActor): Promise<{ runId: string }> {
+  await assertDecider(actor, "start a policy check");
+  const { loadPolicy } = await import("../server/agents/policy");
+  if (!(await loadPolicy(actor.orgId, "labour_policy")).enabled)
+    throw new Error("The Labour law & policy agent is off — switch it on under Agent settings.");
+  const { agentRuns } = await import("../../drizzle/schema");
+  const [busy] = await db
+    .select({ id: agentRuns.id })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.orgId, actor.orgId),
+        eq(agentRuns.agentType, "labour_policy"),
+        inArray(agentRuns.status, ["queued", "running", "awaiting_human"]),
+      ),
+    )
+    .limit(1);
+  if (busy) throw new Error("A policy check is already running.");
+  const [active] = await db
+    .select({ id: policySources.id })
+    .from(policySources)
+    .where(and(eq(policySources.orgId, actor.orgId), eq(policySources.active, true)))
+    .limit(1);
+  if (!active) throw new Error("Add at least one active source first.");
+  const { startRun } = await import("../server/agents/runtime.server");
+  const run = await startRun({
+    orgId: actor.orgId,
+    agentType: "labour_policy",
+    principalUserId: actor.userId,
+    goal: "Policy check asked for now: read each approved source, record every change that matters to hiring where the organisation hires with the source's exact words, and ask the HR head about each. If nothing changed, say so.",
+  });
+  await writeAudit({
+    actor: actor.memberEmail,
+    actorUserId: actor.userId,
+    orgId: actor.orgId,
+    action: "policy_check.started",
+    entityType: "organization",
+    entityId: actor.orgId,
+    detail: { runId: run.runId },
+  });
+  return run;
 }

@@ -24,8 +24,26 @@ export const getLabourPolicy = createServerFn({ method: "GET" })
       .then(() => true)
       .catch(() => false);
     const findings = await listFindings(context.orgId);
+    const { loadPolicy } = await import("../server/agents/policy");
+    const { db } = await import("../server/db");
+    const { agentRuns } = await import("../../drizzle/schema");
+    const { and, desc, eq } = await import("drizzle-orm");
+    const [lastRun] = await db
+      .select({ status: agentRuns.status, at: agentRuns.createdAt, result: agentRuns.result })
+      .from(agentRuns)
+      .where(and(eq(agentRuns.orgId, context.orgId), eq(agentRuns.agentType, "labour_policy")))
+      .orderBy(desc(agentRuns.createdAt))
+      .limit(1);
     return {
       canDecide,
+      agentOn: (await loadPolicy(context.orgId, "labour_policy")).enabled,
+      lastRun: lastRun
+        ? {
+            status: lastRun.status,
+            at: lastRun.at.toISOString(),
+            result: typeof lastRun.result === "string" ? lastRun.result : null,
+          }
+        : null,
       sources: await listSources(context.orgId),
       findings: findings.map((f) => ({
         ...f,
@@ -67,4 +85,12 @@ export const setPolicySourceActive = createServerFn({ method: "POST" })
     const { setSourceActiveCore } = await import("./labour-policy.server");
     await setSourceActiveCore(actorOf(context), data);
     return { ok: true };
+  });
+
+/** Start a policy check now (HR head, CBO or owner; audited). */
+export const checkPolicyNow = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .handler(async ({ context }) => {
+    const { checkNowCore } = await import("./labour-policy.server");
+    return checkNowCore(actorOf(context));
   });
