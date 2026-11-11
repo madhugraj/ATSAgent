@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -35,6 +35,7 @@ import { useOrg } from "@/hooks/useOrg";
 import { useNavCtx } from "@/hooks/useNavCtx";
 import { PageHeader } from "@/components/ats";
 import { CodeSelect, CURRENCY_OPTIONS } from "@/components/code-select";
+import { OrgProfilePanel } from "@/components/OrgProfilePanel";
 import { TrainingDataCard } from "@/components/TrainingDataCard";
 import { AssessmentPolicyCard } from "@/components/AssessmentPolicyCard";
 import { PhoneScreeningCard } from "@/components/PhoneScreeningCard";
@@ -82,6 +83,7 @@ export const Route = createFileRoute("/organisation")({
 
 const TABS = [
   { id: "identity", label: "Identity", icon: Building2 },
+  { id: "profile", label: "Profile", icon: ScrollText },
   { id: "pay", label: "Pay", icon: Coins },
   { id: "rules", label: "Rules & policy", icon: Scale },
   { id: "ai", label: "AI & calls", icon: Bot },
@@ -218,7 +220,7 @@ function OrganisationSettings() {
       label: "Describe your organisation (profile approved)",
       done: gate.data?.approved === true,
       loading: gate.isLoading,
-      go: () => navigate({ to: "/org-profile", search: {} }),
+      go: () => setTab("profile"),
     },
     {
       id: "team",
@@ -322,7 +324,7 @@ function OrganisationSettings() {
         <div className="space-y-3">
           <SettingsRow
             icon={<Building2 className="size-4" />}
-            title="Profile"
+            title="Identity details"
             summary={`${form.name || "…"} · ${form.currency}${form.careersEmail ? "" : " · careers inbox not set"}`}
             open={openRows["profile"] ?? false}
             onToggle={() => toggleRow("profile")}
@@ -400,32 +402,10 @@ function OrganisationSettings() {
               ) : null}
             </div>
           </SettingsRow>
-
-          <SettingsRow
-            icon={<ScrollText className="size-4" />}
-            title="How you hire — the organisation profile"
-            summary={
-              gate.data?.approved
-                ? "Approved — agents write from it"
-                : gate.data?.required
-                  ? "Required, not approved yet"
-                  : "Not written yet"
-            }
-            open={openRows["org-profile"] ?? false}
-            onToggle={() => toggleRow("org-profile")}
-          >
-            <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">
-                What your organisation does and how it hires — written with the Organisation context
-                agent, approved by the HR head, and the context every hiring agent works from.
-              </p>
-              <Button asChild size="sm" variant="outline">
-                <Link to="/org-profile">Open the organisation profile</Link>
-              </Button>
-            </div>
-          </SettingsRow>
         </div>
       )}
+
+      {tab === "profile" && <OrgProfilePanel />}
 
       {tab === "pay" && (
         <SettingsRow
