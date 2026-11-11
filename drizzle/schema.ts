@@ -1034,11 +1034,27 @@ export const offers = pgTable(
     revision: integer("revision").notNull().default(1),
     respondedAt: timestamp("responded_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /* Pay terms (0075, docs/pay-terms-plan.md Phase 4): offered_ctc is in this currency and basis. */
+    currency: text("currency").notNull().default("INR"),
+    payBasis: text("pay_basis").notNull().default("annual"),
+    kindOfWork: text("kind_of_work").notNull().default("permanent"),
+    /** A contract's last day (joining date + the role's contract length). */
+    contractEnd: date("contract_end"),
+    /** The offer in the reporting currency at the rate fixed on approval. */
+    reportingAmount: numeric("reporting_amount", { precision: 16, scale: 2 }),
+    reportingCurrency: text("reporting_currency"),
+    rate: jsonb("rate").$type<{ rate: number; source: string; at: string } | null>(),
+    rateLockedAt: timestamp("rate_locked_at", { withTimezone: true }),
   },
   (t) => [
     uniqueIndex("offers_response_token_key")
       .on(t.responseToken)
       .where(sql`${t.responseToken} is not null`),
+    check("offers_currency_check", sql`${t.currency} ~ '^[A-Z]{3}$'`),
+    check(
+      "offers_pay_basis_check",
+      sql`${t.payBasis} in ('annual','monthly','daily','hourly')`,
+    ),
   ],
 );
 

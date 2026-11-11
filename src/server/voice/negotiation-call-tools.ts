@@ -1,3 +1,4 @@
+import { spokenMoney } from "@/lib/pay-convert";
 /**
  * The Negotiation call agent's in-call tools (docs/negotiator-voice-agent.md):
  * one contract (zod v4) used three ways — the live call's function
@@ -138,6 +139,8 @@ export type NegotiationFigures = {
   levers: NegotiationLevers;
   /** What the person arranging the call approved it to explain. */
   brief?: NegotiationCallBrief | null;
+  /** The offer's currency (docs/pay-terms-plan.md, Phase 4); absent = INR. */
+  currency?: string;
 };
 
 /** Every amount the call may say right now (pure): the guard allows only these. */
@@ -207,10 +210,10 @@ export function explainOffer(
   const b = f.brief ?? {};
   const split =
     b.fixedCtc != null && b.variableCtc != null
-      ? `Of the ${spokenRupees(f.proposalCtc)} a year, ${spokenRupees(b.fixedCtc)} is fixed pay and ${spokenRupees(b.variableCtc)} is variable pay.${improved ? " That split is for the first figure; the hiring team will confirm the split for the improved one." : ""}`
+      ? `Of the ${spokenRupees(f.proposalCtc, f.currency)} a year, ${spokenRupees(b.fixedCtc, f.currency)} is fixed pay and ${spokenRupees(b.variableCtc, f.currency)} is variable pay.${improved ? " That split is for the first figure; the hiring team will confirm the split for the improved one." : ""}`
       : null;
   const bonus = f.levers.joiningBonus
-    ? `There is a one-time joining bonus of ${spokenRupees(f.levers.joiningBonus)}.`
+    ? `There is a one-time joining bonus of ${spokenRupees(f.levers.joiningBonus, f.currency)}.`
     : null;
   const review =
     b.review?.trim() ||
@@ -218,7 +221,7 @@ export function explainOffer(
       ? `Your pay is reviewed after ${f.levers.reviewMonths} months, as part of the hiring team's review process.`
       : null);
   const esop = b.esop?.trim()
-    ? `${b.esop.trim().replace(/\.$/, "")}${b.esopValue ? `, valued at ${spokenRupees(b.esopValue)}` : ""}.`
+    ? `${b.esop.trim().replace(/\.$/, "")}${b.esopValue ? `, valued at ${spokenRupees(b.esopValue, f.currency)}` : ""}.`
     : null;
   const benefits = b.benefits?.trim() || null;
   const whyYou = b.whyYou?.length ? b.whyYou.join(" ") : null;
@@ -226,7 +229,7 @@ export function explainOffer(
     package:
       [
         split ??
-          `The annual cost to company is ${spokenRupees(improved && f.stepCtc ? f.stepCtc : f.proposalCtc)}.`,
+          `${costWords(f.currency).replace(/^\w/, (c) => c.toUpperCase())} is ${spokenRupees(improved && f.stepCtc ? f.stepCtc : f.proposalCtc, f.currency)}.`,
         bonus,
         review,
         esop,
@@ -249,8 +252,13 @@ export function explainOffer(
   return by[topic] ?? NOT_SHARED;
 }
 
-/** A yearly rupee amount as it is spoken in India: "18 lakh 50 thousand rupees a year" (pure). */
-export function spokenRupees(n: number): string {
+/**
+ * An amount as it is spoken: rupees the Indian way ("18 lakh 50 thousand rupees"),
+ * other currencies in thousands and millions ("52 thousand euros") (pure).
+ */
+export function spokenRupees(n: number, currency = "INR"): string {
+  if (currency !== "INR")
+    return spokenMoney({ amount: n, currency, basis: "annual" }).replace(/ a year$/, "");
   const r = Math.round(n);
   const crore = Math.floor(r / 1e7);
   const lakh = Math.floor((r % 1e7) / 1e5);
@@ -263,10 +271,14 @@ export function spokenRupees(n: number): string {
   return `${parts.join(" ") || r} rupees`;
 }
 
+/** What the yearly figure is called: CTC in India, gross annual pay elsewhere (pure). */
+const costWords = (currency = "INR") =>
+  currency === "INR" ? "the annual cost to company" : "your gross annual pay";
+
 /** The approved extras as one spoken sentence, or "" (pure). */
-export function leverSentence(l: NegotiationLevers): string {
+export function leverSentence(l: NegotiationLevers, currency = "INR"): string {
   const items = [
-    l.joiningBonus ? `a one-time joining bonus of ${spokenRupees(l.joiningBonus)}` : "",
+    l.joiningBonus ? `a one-time joining bonus of ${spokenRupees(l.joiningBonus, currency)}` : "",
     l.reviewMonths ? `a pay review after ${l.reviewMonths} months` : "",
     l.other?.trim() ? l.other.trim().replace(/\.$/, "") : "",
   ].filter(Boolean);
@@ -281,7 +293,7 @@ function packageExtras(f: NegotiationFigures): string {
   const b = f.brief ?? {};
   const items = [
     b.esop?.trim()
-      ? `${b.esop.trim().replace(/\.$/, "")}${b.esopValue ? ` valued at ${spokenRupees(b.esopValue)}` : ""}`
+      ? `${b.esop.trim().replace(/\.$/, "")}${b.esopValue ? ` valued at ${spokenRupees(b.esopValue, f.currency)}` : ""}`
       : "",
     b.benefits?.trim() ? b.benefits.trim().replace(/\.$/, "") : "",
   ].filter(Boolean);
@@ -298,15 +310,15 @@ export function offerSentence(which: Which, f: NegotiationFigures): string {
   const b = f.brief ?? {};
   const split =
     which === "proposal" && b.fixedCtc != null && b.variableCtc != null
-      ? ` — ${spokenRupees(b.fixedCtc)} fixed and ${spokenRupees(b.variableCtc)} variable`
+      ? ` — ${spokenRupees(b.fixedCtc, f.currency)} fixed and ${spokenRupees(b.variableCtc, f.currency)} variable`
       : "";
   const lead =
     which === "improved"
-      ? `Having heard you, the hiring team can offer ${spokenRupees(ctc)} a year as the annual cost to company.`
-      : `The hiring team would like to offer you ${spokenRupees(ctc)} a year as the annual cost to company${split}.`;
+      ? `Having heard you, the hiring team can offer ${spokenRupees(ctc, f.currency)} a year as ${costWords(f.currency)}.`
+      : `The hiring team would like to offer you ${spokenRupees(ctc, f.currency)} a year as ${costWords(f.currency)}${split}.`;
   // The proposal invites how they feel; the improved figure asks for their answer.
   const ask = which === "proposal" ? "How do you feel about it?" : "Would that work for you?";
-  return `${lead}${leverSentence(f.levers)}${packageExtras(f)} ${ask}`;
+  return `${lead}${leverSentence(f.levers, f.currency)}${packageExtras(f)} ${ask}`;
 }
 
 /** A clear yes: yes-like words and no "no / but / not" (pure; unit-tested). */
@@ -319,8 +331,8 @@ export const clearYes = (s: string): boolean =>
   AFFIRM.test(s) && !NEGATE.test(s.replace(NOT_A_NO, ""));
 
 /** A yes that names a number other than the figure read out ("yes, 40") is not a yes to it (pure). */
-export function namesOtherFigure(words: string, ctc: number): boolean {
-  const said = new Set(spokenRupees(ctc).match(/\d+/g) ?? []);
+export function namesOtherFigure(words: string, ctc: number, currency = "INR"): boolean {
+  const said = new Set(spokenRupees(ctc, currency).match(/\d+/g) ?? []);
   return (words.match(/\d+(?:\.\d+)?/g) ?? []).some((n) => !said.has(n));
 }
 
@@ -564,7 +576,7 @@ export function applyNegotiationTool(
           error: "Not recorded: ask whether the figure works for them and wait for their answer.",
         };
       const ctc = which === "improved" ? figures.stepCtc! : figures.proposalCtc;
-      if (!clearYes(heard ?? their_words) || namesOtherFigure(heard ?? their_words, ctc))
+      if (!clearYes(heard ?? their_words) || namesOtherFigure(heard ?? their_words, ctc, figures.currency))
         return {
           ok: false,
           error:

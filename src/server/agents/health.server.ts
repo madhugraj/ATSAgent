@@ -1392,6 +1392,29 @@ export const RULES: Rule[] = [
     },
   },
   {
+    id: "context.offer_not_in_reports",
+    element: "context",
+    severity: "warning",
+    description:
+      "An approved offer in a currency other than the organisation's reporting currency had no current exchange rate when it was approved, so its cost is left out of hiring reports. Add the rate on the Organisation page; offers approved afterwards are counted.",
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number; currencies: string }>(sql`
+        select count(*)::int n, string_agg(distinct o.currency, ', ') currencies
+        from offers o join organizations g on g.id = o.org_id
+        where o.org_id = ${orgId} and o.rate_locked_at is not null
+          and o.reporting_amount is null and o.currency <> g.currency
+          and o.rate_locked_at >= now() - interval '90 days'`);
+      if (!r[0]?.n) return [];
+      return [
+        {
+          agentType: "offer",
+          title: `${r[0].n} approved offer${r[0].n > 1 ? "s" : ""} in ${r[0].currencies} left out of reports — no exchange rate at approval`,
+          detail: { offers: r[0].n, currencies: r[0].currencies },
+        },
+      ];
+    },
+  },
+  {
     id: "context.profile_stale",
     element: "context",
     severity: "warning",

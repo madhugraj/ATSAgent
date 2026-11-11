@@ -29,6 +29,18 @@ export type DistributableJob = {
   postedAt: Date;
   /** Hired for a client rather than by the organisation itself. */
   forClient: boolean;
+  /** Kind of work and a contract's length (docs/pay-terms-plan.md, Phase 4); pay never goes out. */
+  kindOfWork?: string;
+  contractMonths?: number | null;
+};
+
+/** schema.org employmentType for a kind of work (pure). */
+export const EMPLOYMENT_TYPE: Record<string, string[]> = {
+  permanent: ["FULL_TIME"],
+  fixed_term: ["FULL_TIME", "TEMPORARY"],
+  contract_hourly: ["CONTRACTOR"],
+  part_time: ["PART_TIME"],
+  intern: ["INTERN"],
 };
 
 /* ------------------------------------------------------------ description */
@@ -228,6 +240,8 @@ export function jobPostingJsonLd(job: DistributableJob): Record<string, unknown>
     directApply: true,
     totalJobOpenings: job.openings,
   };
+  if (job.kindOfWork && EMPLOYMENT_TYPE[job.kindOfWork])
+    ld["employmentType"] = EMPLOYMENT_TYPE[job.kindOfWork];
   if (job.experienceMin > 0)
     ld["experienceRequirements"] = {
       "@type": "OccupationalExperienceRequirements",

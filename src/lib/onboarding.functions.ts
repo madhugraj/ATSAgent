@@ -472,6 +472,12 @@ export const listPreOnboardingQueue = createServerFn({ method: "GET" })
         offerStatus: offers.status,
         offeredCtc: offers.offeredCtc,
         joiningDate: offers.joiningDate,
+        // Pay terms (docs/pay-terms-plan.md, Phase 4): the amount's currency and
+        // basis, the kind of work and a contract's last day.
+        currency: offers.currency,
+        payBasis: offers.payBasis,
+        kindOfWork: offers.kindOfWork,
+        contractEnd: offers.contractEnd,
         candidateId: candidates.id,
         candidateName: candidates.fullName,
         candidateEmail: candidates.email,
@@ -487,6 +493,7 @@ export const listPreOnboardingQueue = createServerFn({ method: "GET" })
       ...r,
       offeredCtc: String(r.offeredCtc ?? "0"),
       joiningDate: r.joiningDate ?? null,
+      contractEnd: r.contractEnd ?? null,
     }));
   });
 

@@ -185,7 +185,9 @@ export function registerPhase1Agents(): void {
     // 1.4.0: writes “About us” only from the approved organisation profile's candidate-visible lines; the save refuses a JD that repeats an internal-only profile line; request_approval gained the organisation profile subject.
     // 1.4.1: the scope records what the run-time already injects — the approved
     // organisation profile (version-tracked on the run); no behaviour change.
-    version: "1.4.1",
+    // 1.5.0 (pay terms, Phase 4): states the kind of work and a contract's length once near
+    // the top, exactly as the requisition gives it — never pay.
+    version: "1.5.0",
     owner: "department_head",
     responsibility:
       "Drafts and revises the job description for an approved requisition and gets it reviewed by the department head.",
@@ -974,7 +976,10 @@ export function registerPhase3Agents(): void {
     // end — the model replies ~0.9 s after the end (it waited 1.6 s and missed short
     // replies); a short answer ends after 0.6 s of silence, a long one gets room for a
     // pause; while it speaks, only sustained louder speech cuts in (echo no longer does).
-    version: "0.8.8",
+    // 0.9.0 (pay terms, Phase 4): figures are spoken in the offer's currency ("52 thousand
+    // euros"; rupees still the Indian way) and the yearly figure is "your gross annual pay"
+    // outside India; the amount guard understands thousands, millions and €/$/£.
+    version: "0.9.0",
     owner: "hr_head",
     responsibility:
       "Holds one AI phone call with a candidate about the pay for their offer: says it is an AI, tells them which role and organisation and where they stand, wins their interest from approved facts, frames the approved figure and extras around what matters to them, may offer one pre-approved improved figure, and brings a clear answer back to the people who decide.",
@@ -1082,7 +1087,10 @@ export function registerPhase4Agents(): void {
     // 1.6.2: the call request can carry how the figure was set (rationale).
     // 1.6.3: the call request can carry the reporting line by job title.
     // 1.6.4: the call request can carry up to three reasons to join.
-    version: "1.6.4",
+    // 1.7.0 (pay terms, docs/pay-terms-plan.md Phase 4): an offer is written in its role's
+    // pay currency and basis (bands, ceilings and briefs in that currency), carries its kind of
+    // work and a contract's end date, and its exchange rate is fixed when it is approved.
+    version: "1.7.0",
     owner: "hr_head",
     responsibility:
       "Turns a hiring decision into a draft offer inside the approved band — built on the candidate's stated expectation and notice period — with its letter and an approval brief, and walks it through HR head and CBO approval.",

@@ -1,6 +1,6 @@
 # Pay terms — currency, pay basis, kinds of work and joining dates
 
-Status: **approved** (11 November 2026). **Phases 1–3 built** (migrations 0073–0074; `src/lib/pay-terms.ts`, `pay-convert.ts`, `pay-settings*.ts`; the `pay_conventions` gate; Organisation context agent 1.2.0 and Requisition agent 1.10.0; `scripts/pay-terms.test.ts`, `scripts/pay-settings.test.ts`, `scripts/pay-logistics.test.ts`; screening call 1.10.0 and matching in Phase 3); Phase 4 to come.
+Status: **approved** (11 November 2026). **All four phases built** (migrations 0073–0074; `src/lib/pay-terms.ts`, `pay-convert.ts`, `pay-settings*.ts`; the `pay_conventions` gate; Organisation context agent 1.2.0 and Requisition agent 1.10.0; `scripts/pay-terms.test.ts`, `scripts/pay-settings.test.ts`, `scripts/pay-logistics.test.ts`; screening call 1.10.0 and matching in Phase 3; offers, negotiation, JD, job postings and reports in Phase 4 — `scripts/pay-offers.test.ts`).
 
 ## Why
 

@@ -14,7 +14,7 @@
  *  - third-party text in tool output is fenced with untrusted();
  *  - every write/external action and every human decision is audited.
  */
-import { rupees } from "@/lib/money";
+import { money } from "@/lib/money";
 import { candidateVisible, diffSections } from "@/lib/org-profile";
 import type { OrgProfileItemRow } from "@db/schema";
 import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
@@ -277,13 +277,15 @@ type GateInfo = {
 export function agreedLine(
   ctc: number,
   agreed: { agreedCtc: number; joiningBonus: number | null; cboApproved: boolean } | null,
+  currency = "INR",
 ): string {
   if (!agreed) return "";
+  const amount = (n: number) => money(n, currency);
   const match =
     ctc === agreed.agreedCtc
       ? "this offer matches it"
-      : `this offer is ${rupees(Math.abs(ctc - agreed.agreedCtc))} ${ctc > agreed.agreedCtc ? "above" : "below"} it`;
-  return ` Agreed with the candidate in a pay discussion: ${rupees(agreed.agreedCtc)}${agreed.joiningBonus ? ` plus a ${rupees(agreed.joiningBonus)} joining bonus` : ""}${agreed.cboApproved ? " (ceiling approved by the CBO)" : ""}; ${match}.`;
+      : `this offer is ${amount(Math.abs(ctc - agreed.agreedCtc))} ${ctc > agreed.agreedCtc ? "above" : "below"} it`;
+  return ` Agreed with the candidate in a pay discussion: ${amount(agreed.agreedCtc)}${agreed.joiningBonus ? ` plus a ${amount(agreed.joiningBonus)} joining bonus` : ""}${agreed.cboApproved ? " (ceiling approved by the CBO)" : ""}; ${match}.`;
 }
 
 export function expectationLine(
@@ -295,7 +297,9 @@ export function expectationLine(
     competingOffers: boolean | null;
     source: string | null;
   },
+  currency = "INR",
 ): string {
+  const amount = (n: number | null) => money(n, currency);
   if (pay.expectedCtc == null)
     return "\n\nThe candidate's expected CTC is not on record — this offer was not checked against what they asked for.";
   const gap = ctc - pay.expectedCtc;
@@ -303,8 +307,8 @@ export function expectationLine(
     gap === 0
       ? "meets it exactly"
       : gap > 0
-        ? `is ${rupees(gap)} (${Math.round((gap / pay.expectedCtc) * 100)}%) above it`
-        : `is ${rupees(-gap)} (${Math.round((-gap / pay.expectedCtc) * 100)}%) below it`;
+        ? `is ${amount(gap)} (${Math.round((gap / pay.expectedCtc) * 100)}%) above it`
+        : `is ${amount(-gap)} (${Math.round((-gap / pay.expectedCtc) * 100)}%) below it`;
   const from =
     pay.source === "candidate_form"
       ? "the candidate's form"
@@ -315,9 +319,9 @@ export function expectationLine(
           : "the candidate profile";
   const hike =
     pay.currentTotal && pay.currentTotal > 0
-      ? ` Current CTC ${rupees(pay.currentTotal)}; this offer is a ${Math.round(((ctc - pay.currentTotal) / pay.currentTotal) * 100)}% change.`
+      ? ` Current CTC ${amount(pay.currentTotal)}; this offer is a ${Math.round(((ctc - pay.currentTotal) / pay.currentTotal) * 100)}% change.`
       : " Current CTC not on record.";
-  return `\n\nThe candidate expects ${rupees(pay.expectedCtc)} (from ${from}); this offer ${where}.${hike}${pay.noticePeriodDays != null ? ` Notice period ${pay.noticePeriodDays} days.` : ""}${pay.competingOffers ? " They have other offers in hand." : ""}`;
+  return `\n\nThe candidate expects ${amount(pay.expectedCtc)} (from ${from}); this offer ${where}.${hike}${pay.noticePeriodDays != null ? ` Notice period ${pay.noticePeriodDays} days.` : ""}${pay.competingOffers ? " They have other offers in hand." : ""}`;
 }
 
 /**
@@ -418,6 +422,8 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
         budget: requisitions.budgetCtc,
         bandMin: requisitions.ctcBandMin,
         bandMax: requisitions.ctcBandMax,
+        currency: offers.currency,
+        payBasis: offers.payBasis,
       })
       .from(offers)
       .innerJoin(applications, eq(applications.id, offers.applicationId))
@@ -432,19 +438,20 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
       // Stated by the system, not left to the agent: where the CTC sits
       // against the role's approved budget and band.
       const ctc = Number(o.ctc);
+      const cur = o.currency;
       const budget = Number(o.budget ?? 0);
       const [lo, hi] = [Number(o.bandMin ?? 0), Number(o.bandMax ?? 0)];
       const vsBudget =
         budget > 0
           ? ctc > budget
-            ? ` Above the role's budget of ${rupees(budget)} by ${rupees(ctc - budget)} (${Math.round(((ctc - budget) / budget) * 100)}%).`
-            : ` Within the role's budget of ${rupees(budget)}.`
+            ? ` Above the role's budget of ${money(budget, cur)} by ${money(ctc - budget, cur)} (${Math.round(((ctc - budget) / budget) * 100)}%).`
+            : ` Within the role's budget of ${money(budget, cur)}.`
           : "";
       const vsBand =
         hi > 0
           ? ctc > hi || ctc < lo
-            ? ` Outside the approved band ${rupees(lo)}–${rupees(hi)}.`
-            : ` Inside the approved band ${rupees(lo)}–${rupees(hi)}.`
+            ? ` Outside the approved band ${money(lo, cur)}–${money(hi, cur)}.`
+            : ` Inside the approved band ${money(lo, cur)}–${money(hi, cur)}.`
           : "";
       const { detailsFor, offerTermsMissing, listWords } =
         await import("@/lib/compensation.server");
@@ -456,7 +463,7 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
       return {
         role,
         status: o.status,
-        detail: `Offer for ${o.name} (${o.title}): ${rupees(ctc)} CTC — ${o.status}.${vsBudget}${vsBand}${expectationLine(ctc, await detailsFor(orgId, o.applicationId))}${agreedLine(ctc, await (await import("@/lib/negotiation.server")).agreedTerms(orgId, o.applicationId))}${
+        detail: `Offer for ${o.name} (${o.title}): ${money(ctc, cur, o.payBasis)} — ${o.status}.${vsBudget}${vsBand}${expectationLine(ctc, await detailsFor(orgId, o.applicationId), cur)}${agreedLine(ctc, await (await import("@/lib/negotiation.server")).agreedTerms(orgId, o.applicationId), cur)}${
           missing.length
             ? `\n\nThis offer cannot be approved yet: ${listWords(missing)} ${missing.length > 1 ? "are" : "is"} missing. Decline it with that reason — it goes back to draft and the Offer agent collects them.`
             : ""

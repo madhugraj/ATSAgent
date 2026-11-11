@@ -99,6 +99,7 @@ export async function loadNegotiationBrief(
       roleTitle: requisitions.title,
       applicationId: applications.id,
       requisitionId: requisitions.id,
+      payCurrency: requisitions.payCurrency,
       orgName: organizations.name,
     })
     .from(screeningCalls)
@@ -145,6 +146,7 @@ export async function loadNegotiationBrief(
       stepCtc: row.callStepCtc == null ? null : Number(row.callStepCtc),
       levers: row.levers ?? {},
       brief: row.callBrief ?? null,
+      currency: row.payCurrency,
     },
   };
 }

@@ -841,6 +841,14 @@ erDiagram
     integer revision
     timestamptz responded_at "nullable"
     timestamptz created_at
+    text currency
+    text pay_basis
+    text kind_of_work
+    date contract_end "nullable"
+    numeric reporting_amount "nullable"
+    text reporting_currency "nullable"
+    jsonb rate "nullable"
+    timestamptz rate_locked_at "nullable"
   }
   hr_incentive_schemes {
     uuid org_id PK,FK
@@ -1471,7 +1479,7 @@ erDiagram
 | `member_interviewer_profiles` | — | 9 | (member_id) |
 | `notification_states` | — | 7 | — |
 | `offer_negotiations` | — | 24 | — |
-| `offers` | Offers & onboarding | 14 | — |
+| `offers` | Offers & onboarding | 22 | — |
 | `onboarding_documents` | Offers & onboarding | 23 | — |
 | `ontology_snapshots` | Intelligence | 11 | — |
 | `org_agreements` | Organisations & masters | 10 | — |

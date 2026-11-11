@@ -273,3 +273,13 @@ off by default). While it is off, no negotiation call can be asked for (the Offe
 request and "Call to negotiate" are refused with the reason) and the dispatcher dials none.
 Like the other voice agents, the agent's entry in the Agent register is governed by this
 switch, not by the background agents' on/off.
+
+## Currencies (0.9.0, 11 November 2026)
+
+The call speaks the offer's own currency (docs/pay-terms-plan.md, Phase 4):
+rupees the Indian way ("18 lakh 50 thousand rupees … the annual cost to
+company"), other currencies in thousands and millions ("52 thousand euros …
+your gross annual pay"). Every amount from a thousand up is said with its scale
+word, because the amount guard (`amountsIn`) reads amounts by their scale; it
+now also reads "million", "k" and the €, $ and £ symbols. A "yes" that names
+another figure is still not a yes to the one read out.

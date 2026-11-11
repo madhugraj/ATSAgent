@@ -98,6 +98,7 @@ const SCALE: Record<string, number> = {
   l: 1e5,
   lpa: 1e5,
   thousand: 1e3,
+  million: 1e6,
   k: 1e3,
 };
 
@@ -144,7 +145,7 @@ export function amountsIn(text: string): number[] {
   const tk =
     text
       .toLowerCase()
-      .replace(/₹|rs\.?/g, " ")
+      .replace(/₹|rs\.?|[$€£]/g, " ")
       .replace(/(\d),(?=\d)/g, "$1")
       .replace(/-/g, " ")
       .match(/\d+(?:\.\d+)?|[a-z]+/g) ?? [];

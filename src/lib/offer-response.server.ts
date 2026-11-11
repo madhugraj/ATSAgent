@@ -41,6 +41,9 @@ export type PublicOfferView = {
   jobTitle: string;
   candidateFirstName: string;
   offeredCtc: number;
+  /** The offer's currency and basis (docs/pay-terms-plan.md, Phase 4). */
+  currency: string;
+  payBasis: string;
   joiningDate: string | null;
   revision: number;
   status: "released" | "accepted" | "declined" | "countered" | "closed";
@@ -65,6 +68,8 @@ export async function publicOfferView(token: string): Promise<PublicOfferView | 
     jobTitle: o.jobTitle,
     candidateFirstName: o.candidateName.split(/\s+/)[0] ?? o.candidateName,
     offeredCtc: Number(o.offer.offeredCtc),
+    currency: o.offer.currency,
+    payBasis: o.offer.payBasis,
     joiningDate: o.offer.joiningDate ? String(o.offer.joiningDate) : null,
     revision: o.offer.revision,
     status:
@@ -213,7 +218,8 @@ export async function respondToOffer(
     actorUserId: null,
     payload: { from: "released", to, applicationId: o.offer.applicationId, via: "candidate" },
   });
-  const money = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+  const { money: inCurrency } = await import("./money");
+  const money = (n: number) => inCurrency(n, o.offer.currency, o.offer.payBasis);
   const told =
     answer.action === "accept"
       ? `${o.candidateName} accepted the offer (${money(Number(o.offer.offeredCtc))}${o.offer.joiningDate ? `, joining ${o.offer.joiningDate}` : ""}).`

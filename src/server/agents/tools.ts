@@ -524,6 +524,7 @@ export function registerPhase1Tools(): void {
           .join("\n\n"),
         education: r.educationRequirement,
         reportingTo: r.hiringManager,
+        employment: employmentWords(r.kindOfWork, r.contractMonths, r.extendable),
       });
       const { saveJobDescriptionCore } = await import("@/lib/requisitions.server");
       const saved = await saveJobDescriptionCore(await actor(ctx), {
@@ -646,4 +647,23 @@ export async function activeRunFor(
     )
     .limit(1);
   return Boolean(row);
+}
+
+/** The kind of work as a JD states it (pure): never pay, which stays inside the organisation. */
+export function employmentWords(
+  kind: string,
+  months: number | null,
+  extendable: boolean | null,
+): string {
+  const words: Record<string, string> = {
+    permanent: "Permanent, full-time",
+    fixed_term: "Fixed-term contract",
+    contract_hourly: "Contract",
+    part_time: "Part-time",
+    intern: "Internship",
+  };
+  const base = words[kind] ?? "Permanent, full-time";
+  if (!months || (kind !== "fixed_term" && kind !== "contract_hourly" && kind !== "intern"))
+    return base;
+  return `${base}, ${months} months${extendable ? ", can be extended" : ""}`;
 }
