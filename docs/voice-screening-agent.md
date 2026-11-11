@@ -290,6 +290,15 @@ question, with no "thank you", "noted" or "understood". The candidate is thanked
 once, at the close. The Voice Guard (1.4.1) judges read-backs against the
 brief, so a per-answer "thank you" or "noted" on these calls is a low finding.
 
+**Consent is the answer to the consent question; a pay range is a figure**
+(screening 1.9.5, test call of 11 November). `record_consent` counts only a
+reply to a question asked after the disclosure, and refuses while that question
+is still unanswered: the call had taken the "Yes" to "am I speaking with …?" as
+consent. When the candidate states a pay figure for a detail on record as
+declined, `record_details` refuses to leave the decline standing and asks for
+the figure; a range ("95 lakhs to 1 crore") is recorded as its lower end, with
+the range in the pay note.
+
 **"Call again" on the hiring desk** arranges another AI screening call
 (`callCandidateFromDesk`, `src/server/desk/desk.server.ts`).
 

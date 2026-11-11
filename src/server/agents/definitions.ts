@@ -132,7 +132,7 @@ export function registerPhase1Agents(): void {
     // has said something since the candidate last spoke (it hung up without a goodbye).
     // 1.9.4 (the organisation's review): no "thank you" or "noted" after each answer — it
     // records the answer and goes straight to the next question; thanked once at the close.
-    version: "1.9.4",
+    version: "1.9.5",
     owner: "hr_head",
     responsibility:
       "Turns a hiring need into a complete, evidence-backed draft requisition and walks it through the DH → HR → CBO approval chain.",

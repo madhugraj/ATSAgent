@@ -219,6 +219,7 @@ export {
   freshCallState,
   mandatoryMissing,
   RAISES_CONCERN,
+  STATES_AMOUNT,
   requiredDetailStatus,
   type CallToolName,
   type EndReason,
@@ -460,6 +461,8 @@ async function placeCall(
   // What the candidate said since the assistant's latest question: consent is their
   // answer to it (null until it asked one).
   let reply: string | null = null;
+  /** The assistant's words up to the question `reply` answers. */
+  let saidBeforeReply: string | undefined;
   // Turn-taking on the line, kept on the call for the Voice Guard (no words).
   const stats = new CallStatsTracker(now);
   // Who owes the next words (src/server/voice/turns.ts): set once the session is open.
@@ -507,7 +510,10 @@ async function placeCall(
         workingsStopped = false;
         aiSaid += ` ${t.text}`;
         keeper?.aiTurn(t.text);
-        if (t.text.includes("?")) reply = "";
+        if (t.text.includes("?")) {
+          reply = "";
+          saidBeforeReply = aiSaid;
+        }
       } else if (reply !== null) reply += ` ${t.text}`;
       lastActivity = now();
       if (t.who === "caller") {
@@ -534,6 +540,7 @@ async function placeCall(
         now(),
         aiSaid,
         reply ?? undefined,
+        saidBeforeReply,
       );
       keeper?.tool(c.name, out["ok"] === true);
       if (c.name === "record_details" && out["ok"]) detailsUpToTurn = turns;
