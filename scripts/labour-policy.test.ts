@@ -435,3 +435,145 @@ describe("documents listed on a source, and removing a source", () => {
     expect((await audits("policy_source.deleted")).length).toBe(1);
   });
 });
+
+describe("briefings: one law, a checked timeline and quoted provisions, one decision", () => {
+  test("dates and links come from the listing; quotes from the document; nothing half-stored", async () => {
+    const [src] = await db
+      .insert(policySources)
+      .values({
+        orgId,
+        country: "IN",
+        label: "Labour Codes (briefing)",
+        url: "https://www.labour.gov.in/offerings/schemes-and-services/details/labour-codes-b1R2i3E4",
+        host: "www.labour.gov.in",
+      })
+      .returning({ id: policySources.id });
+    const act = "https://www.labour.gov.in/static/uploads/2025/06/wages-act.pdf";
+    const faq = "https://www.labour.gov.in/static/uploads/2026/03/faq-16-03-2026.pdf";
+    await db.insert(policyReads).values([
+      {
+        orgId,
+        sourceId: src!.id,
+        status: "first",
+        hash: "b1",
+        text: [
+          "Labour Codes (updated 2026-11-06)",
+          `Codes: The Code on Wages, 2019 (No. 29 of 2019) — dated 08/08/2019 — ${act}`,
+          `FAQs: FAQs on Labour Codes dated 16-03-2026 — dated 16/03/2026 — ${faq}`,
+        ].join("\n"),
+        fetchedAt: new Date(),
+      },
+      {
+        orgId,
+        sourceId: src!.id,
+        documentUrl: act,
+        status: "first",
+        hash: "b2",
+        text: '2. (y) "wages" means all remuneration ... Provided that if payments made by the employer to the employee under clauses (a) to (i) exceeds one-half, or such other per cent. as may be notified by the Central Government, of the all remuneration calculated under this clause, the amount which exceeds such one-half, or the per cent. so notified, shall be deemed as remuneration.',
+        fetchedAt: new Date(),
+      },
+      {
+        orgId,
+        sourceId: src!.id,
+        documentUrl: faq,
+        status: "first",
+        hash: "b3",
+        text: "Q. Is overtime included in the 50% calculation? A. Yes, overtime allowance forms part of the excluded components for the purpose of the 50% ceiling.",
+        fetchedAt: new Date(),
+      },
+    ]);
+    const good = {
+      topic: "Code on Wages, 2019",
+      hrImpact:
+        "Allowances excluded from wages may not exceed half of total pay; any excess counts as wages for PF, gratuity and bonus — salary structures with a low basic need review.",
+      timeline: [
+        {
+          sourceId: src!.id,
+          date: "2026-03-16",
+          development: "Further FAQs on the 50% rule and overtime",
+          documentUrl: faq,
+        },
+        {
+          sourceId: src!.id,
+          date: "2019-08-08",
+          development: "Code on Wages enacted (Act No. 29 of 2019)",
+          documentUrl: act,
+        },
+      ],
+      provisions: [
+        {
+          sourceId: src!.id,
+          documentUrl: act,
+          ref: "Section 2(y)",
+          quote:
+            "the amount which exceeds such one-half, or the per cent. so notified, shall be deemed as remuneration",
+          summary: "Exclusions above half of total remuneration are added back to wages.",
+          area: "mandatory_pay" as const,
+          rule: "In India, excluded allowances may not exceed 50% of total remuneration; the excess counts as wages.",
+          impact: "Keep basic pay, DA and retaining allowance at least half of CTC in offers.",
+        },
+        {
+          sourceId: src!.id,
+          documentUrl: faq,
+          ref: "FAQ 16-03-2026",
+          quote:
+            "overtime allowance forms part of the excluded components for the purpose of the 50% ceiling",
+          summary: "Overtime counts in the 50% calculation.",
+          area: "mandatory_pay" as const,
+          rule: "Overtime allowance counts among the excluded components for the 50% ceiling.",
+        },
+      ],
+    };
+    // A wrong date, a made-up quote: refused, and nothing is stored.
+    const bad = await lp.submitBriefingCore(orgId, {
+      ...good,
+      timeline: [{ ...good.timeline[0]!, date: "2026-03-30" }],
+    });
+    expect(bad).toMatchObject({ ok: false, errors: [expect.stringContaining("dates")] });
+    const badQuote = await lp.submitBriefingCore(orgId, {
+      ...good,
+      provisions: [
+        {
+          ...good.provisions[0]!,
+          quote: "allowances may never exceed ten per cent of pay in any case",
+        },
+      ],
+    });
+    expect(badQuote).toMatchObject({
+      ok: false,
+      errors: [expect.stringContaining("not in the document")],
+    });
+    const before = await db.select().from(policyFindings).where(eq(policyFindings.orgId, orgId));
+
+    const ok = await lp.submitBriefingCore(orgId, good);
+    expect(ok.ok).toBe(true);
+    if (!ok.ok) return;
+    const b = await lp.briefingFor(orgId, ok.briefingId);
+    expect(b!.timeline.map((t) => t.date)).toEqual(["2019-08-08", "2026-03-16"]); // in order
+    expect(b!.timeline[0]!.title).toBe("The Code on Wages, 2019 (No. 29 of 2019)");
+    expect(b!.provisions).toHaveLength(2);
+    const after = await db.select().from(policyFindings).where(eq(policyFindings.orgId, orgId));
+    expect(after.length - before.length).toBe(2);
+    expect(
+      after.filter((f) => f.briefingId === ok.briefingId).every((f) => f.status === "proposed"),
+    ).toBe(true);
+    const words = lp.briefingWords(b!);
+    expect(words).toContain("08/08/2019 — Code on Wages enacted");
+    expect(words).toContain("Section 2(y)");
+    expect(words).toContain("What it means for HR:");
+
+    // One decision: every provision with it.
+    await expect(
+      lp.decideBriefingCore(who(recruiter), { briefingId: ok.briefingId, decision: "approve" }),
+    ).rejects.toThrow(/Only the HR head/);
+    await lp.decideBriefingCore(who(hr), { briefingId: ok.briefingId, decision: "approve" });
+    const decided = await db
+      .select()
+      .from(policyFindings)
+      .where(eq(policyFindings.briefingId, ok.briefingId));
+    // Two rules in the same area are both in force — a law has many.
+    expect(decided.map((f) => f.status)).toEqual(["approved", "approved"]);
+    expect((await lp.briefingFor(orgId, ok.briefingId))!.status).toBe("approved");
+    expect((await audits("policy_briefing.approved")).length).toBe(1);
+  });
+});

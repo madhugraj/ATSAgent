@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-112 tables across 9 domains.
+113 tables across 9 domains.
 
 ## Identity & access
 
@@ -1351,6 +1351,9 @@ erDiagram
 | `pay_zones` | `updated_by` | `users` | no action |
 | `phone_screening_settings` | `org_id` | `organizations` | cascade |
 | `phone_screening_settings` | `updated_by` | `users` | no action |
+| `policy_briefings` | `decided_by` | `users` | no action |
+| `policy_briefings` | `org_id` | `organizations` | cascade |
+| `policy_findings` | `briefing_id` | `policy_briefings` | no action |
 | `policy_findings` | `decided_by` | `users` | no action |
 | `policy_findings` | `org_id` | `organizations` | cascade |
 | `policy_findings` | `source_id` | `policy_sources` | no action |
@@ -1521,7 +1524,8 @@ erDiagram
 | `pay_zones` | — | 19 | (orgId+name) |
 | `phone_screening_settings` | Screening & interviews | 16 | — |
 | `platform_admins` | Identity & access | 6 | (email) |
-| `policy_findings` | — | 17 | — |
+| `policy_briefings` | — | 12 | — |
+| `policy_findings` | — | 18 | — |
 | `policy_reads` | — | 10 | — |
 | `policy_sources` | — | 12 | (orgId+url) |
 | `pooling_regions` | — | 5 | (orgId+name) |

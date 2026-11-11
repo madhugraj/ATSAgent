@@ -12,14 +12,17 @@
  * Every query carries the organisation predicate; every decision is audited.
  */
 import { createHash } from "node:crypto";
-import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 
 import {
   payZones,
+  policyBriefings,
   policyFindings,
   policyReads,
   policySources,
   POLICY_AREAS,
+  type BriefingProvision,
+  type BriefingTimelineItem,
   type PolicyArea,
 } from "../../drizzle/schema";
 import { db } from "../server/db";
@@ -733,6 +736,15 @@ export async function decideFindingCore(
             eq(policyFindings.status, "approved"),
             eq(policyFindings.area, f.area),
             f.zoneId ? eq(policyFindings.zoneId, f.zoneId) : isNull(policyFindings.zoneId),
+            // A law has many rules in one area: a briefing's provision replaces only an
+            // earlier provision with the same reference ("Section 2(y): …"); a single
+            // change replaces only earlier single changes for that place and area.
+            f.briefingId
+              ? and(
+                  sql`${policyFindings.briefingId} is not null`,
+                  sql`split_part(${policyFindings.summary}, ':', 1) = ${f.summary.split(":")[0]!}`,
+                )
+              : isNull(policyFindings.briefingId),
           ),
         );
     await tx
@@ -1032,4 +1044,290 @@ export async function deleteSourceCore(actor: PolicyActor, input: { id: string }
     entityId: input.id,
     detail: { url: gone[0]!.url, label: gone[0]!.label },
   });
+}
+
+/* ------------------------------------------------------------- briefings */
+
+export type BriefingInput = {
+  topic: string;
+  hrImpact: string;
+  timeline: { sourceId: string; date: string; development: string; documentUrl: string }[];
+  provisions: {
+    sourceId: string;
+    documentUrl?: string | null | undefined;
+    ref: string;
+    quote: string;
+    summary: string;
+    area: PolicyArea;
+    rule: string;
+    impact?: string | undefined;
+    effectiveDate?: string | null | undefined;
+  }[];
+};
+
+const ddmmyyyy = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
+
+/**
+ * A briefing on one law, checked line by line: each timeline entry must be a
+ * document on the source's listing, with the date the listing gives it; each
+ * provision's quote must be in the document it cites. Nothing is stored unless
+ * every line checks out — the errors say which to fix. One HR-head decision then
+ * approves or declines the whole briefing.
+ */
+export async function submitBriefingCore(
+  orgId: string,
+  input: BriefingInput,
+  opts: { agentRunId?: string | null } = {},
+): Promise<{ ok: true; briefingId: string } | { ok: false; errors: string[] }> {
+  const errors: string[] = [];
+  if (input.topic.trim().length < 3) errors.push("Name the law the briefing is about.");
+  if (!input.timeline.length && !input.provisions.length) errors.push("The briefing is empty.");
+  // Timeline: listed on the source, with the listing's own date.
+  const listings = new Map<string, string>();
+  const listingOf = async (sourceId: string) => {
+    if (!listings.has(sourceId)) {
+      const [r] = await db
+        .select({ text: policyReads.text })
+        .from(policyReads)
+        .where(
+          and(
+            eq(policyReads.orgId, orgId),
+            eq(policyReads.sourceId, sourceId),
+            isNull(policyReads.documentUrl),
+            inArray(policyReads.status, ["first", "changed", "unchanged"]),
+          ),
+        )
+        .orderBy(desc(policyReads.fetchedAt))
+        .limit(1);
+      listings.set(sourceId, r?.text ?? "");
+    }
+    return listings.get(sourceId)!;
+  };
+  const timeline: BriefingTimelineItem[] = [];
+  for (const [n, t] of input.timeline.entries()) {
+    const line = (await listingOf(t.sourceId)).split("\n").find((l) => l.includes(t.documentUrl));
+    if (!line) {
+      errors.push(`Timeline ${n + 1}: that document is not on the source's listing.`);
+      continue;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(t.date) || !line.includes(`dated ${ddmmyyyy(t.date)}`)) {
+      errors.push(
+        `Timeline ${n + 1}: the listing dates "${line.split(" — ")[0]}" differently — use the listing's date.`,
+      );
+      continue;
+    }
+    const title = line
+      .replace(/^[^:]*:\s*/, "")
+      .split(" — ")[0]!
+      .trim();
+    timeline.push({
+      date: t.date,
+      development: t.development.trim().slice(0, 300),
+      url: t.documentUrl,
+      title,
+    });
+  }
+  timeline.sort((a, b) => a.date.localeCompare(b.date));
+  if (errors.length) return { ok: false, errors };
+
+  // Provisions: each a finding, its quote checked against its document.
+  const provisions: BriefingProvision[] = [];
+  for (const [n, p] of input.provisions.entries()) {
+    const rec = await recordFindingCore(
+      orgId,
+      {
+        sourceId: p.sourceId,
+        documentUrl: p.documentUrl ?? null,
+        quote: p.quote,
+        area: p.area,
+        summary: `${p.ref}: ${p.summary}`,
+        rule: p.rule,
+        impact: p.impact,
+        effectiveDate: p.effectiveDate ?? null,
+      },
+      opts,
+    );
+    let findingId: string | null = rec.ok ? rec.findingId : null;
+    if (!rec.ok && /already recorded/.test(rec.error)) {
+      const [f] = await db
+        .select({ id: policyFindings.id, status: policyFindings.status })
+        .from(policyFindings)
+        .where(
+          and(
+            eq(policyFindings.orgId, orgId),
+            eq(policyFindings.sourceId, p.sourceId),
+            sql`md5(${policyFindings.quote}) = md5(${p.quote.trim().slice(0, 2_000)})`,
+          ),
+        )
+        .limit(1);
+      if (f && (f.status === "new" || f.status === "proposed")) findingId = f.id;
+    }
+    if (!findingId) {
+      errors.push(`Provision ${n + 1} (${p.ref}): ${rec.ok ? "could not be recorded" : rec.error}`);
+      continue;
+    }
+    const [f] = await db.select().from(policyFindings).where(eq(policyFindings.id, findingId));
+    provisions.push({
+      ref: p.ref.trim().slice(0, 80),
+      summary: p.summary.trim().slice(0, 600),
+      quote: f!.quote,
+      url: f!.url,
+      area: p.area,
+      rule: p.rule.trim().slice(0, 1_000),
+      impact: (p.impact ?? "").trim().slice(0, 1_000),
+      findingId,
+    });
+  }
+  if (errors.length) {
+    // Nothing half-stored: the provisions recorded in this attempt are removed again.
+    const made = provisions.map((p) => p.findingId);
+    if (made.length)
+      await db
+        .delete(policyFindings)
+        .where(
+          and(
+            eq(policyFindings.orgId, orgId),
+            inArray(policyFindings.id, made),
+            eq(policyFindings.status, "new"),
+            isNull(policyFindings.briefingId),
+          ),
+        );
+    return { ok: false, errors };
+  }
+  const topic = input.topic.trim().slice(0, 200);
+  const id = await db.transaction(async (tx) => {
+    await tx
+      .update(policyBriefings)
+      .set({ status: "superseded" })
+      .where(
+        and(
+          eq(policyBriefings.orgId, orgId),
+          eq(policyBriefings.topic, topic),
+          eq(policyBriefings.status, "pending"),
+        ),
+      );
+    const [b] = await tx
+      .insert(policyBriefings)
+      .values({
+        orgId,
+        topic,
+        hrImpact: input.hrImpact.trim().slice(0, 4_000),
+        timeline,
+        provisions,
+        agentRunId: opts.agentRunId ?? null,
+      })
+      .returning({ id: policyBriefings.id });
+    if (provisions.length)
+      await tx
+        .update(policyFindings)
+        .set({ briefingId: b!.id, status: "proposed" })
+        .where(
+          and(
+            eq(policyFindings.orgId, orgId),
+            inArray(
+              policyFindings.id,
+              provisions.map((p) => p.findingId),
+            ),
+          ),
+        );
+    return b!.id;
+  });
+  await writeAudit({
+    actor: "agent:labour_policy",
+    actorUserId: null,
+    orgId,
+    action: "policy_briefing.submitted",
+    entityType: "policy_briefing",
+    entityId: id,
+    detail: { topic, timeline: timeline.length, provisions: provisions.length },
+  });
+  return { ok: true, briefingId: id };
+}
+
+export async function briefingFor(orgId: string, id: string) {
+  const [b] = await db
+    .select()
+    .from(policyBriefings)
+    .where(and(eq(policyBriefings.id, id), eq(policyBriefings.orgId, orgId)))
+    .limit(1);
+  return b ?? null;
+}
+
+/** The briefing as the HR head reads it on the approval card (pure). */
+export function briefingWords(b: {
+  topic: string;
+  hrImpact: string;
+  timeline: BriefingTimelineItem[];
+  provisions: BriefingProvision[];
+}): string {
+  const lines = [`Briefing: ${b.topic}`, ""];
+  if (b.timeline.length) {
+    lines.push("Timeline (from the official listing):");
+    for (const t of b.timeline)
+      lines.push(`• ${ddmmyyyy(t.date)} — ${t.development} — ${t.title} (${t.url})`);
+    lines.push("");
+  }
+  if (b.provisions.length) {
+    lines.push("Key provisions:");
+    for (const p of b.provisions) {
+      lines.push(`• ${p.ref} — ${p.summary}`);
+      lines.push(`  The document says: "${p.quote}" (${p.url})`);
+      lines.push(`  Rule if approved: ${p.rule}`);
+      if (p.impact) lines.push(`  For HR: ${p.impact}`);
+    }
+    lines.push("");
+  }
+  if (b.hrImpact) lines.push(`What it means for HR: ${b.hrImpact}`, "");
+  lines.push(
+    "Approve to make every provision above one of the organisation's rules; decline with why. Not legal advice — check with counsel where it matters.",
+  );
+  return lines.join("\n");
+}
+
+/** The HR head's one decision on a briefing: every provision in it with it (audited). */
+export async function decideBriefingCore(
+  actor: PolicyActor,
+  input: { briefingId: string; decision: "approve" | "reject"; note?: string | null },
+): Promise<{ status: string }> {
+  await assertDecider(actor, "decide labour and hiring policy");
+  const b = await briefingFor(actor.orgId, input.briefingId);
+  if (!b) throw new Error("Briefing not found.");
+  if (b.status !== "pending")
+    throw new Error(`This briefing is ${b.status}, not waiting for a decision.`);
+  const note = input.note?.trim() || null;
+  if (input.decision === "reject" && !note) throw new Error("Say why it does not apply.");
+  for (const p of b.provisions) {
+    const f = await findingFor(actor.orgId, p.findingId);
+    if (f && (f.status === "new" || f.status === "proposed"))
+      await decideFindingCore(actor, { findingId: f.id, decision: input.decision, note });
+  }
+  const status = input.decision === "approve" ? "approved" : "rejected";
+  await db
+    .update(policyBriefings)
+    .set({ status, decidedBy: actor.userId, decidedAt: new Date(), decisionNote: note })
+    .where(and(eq(policyBriefings.id, b.id), eq(policyBriefings.orgId, actor.orgId)));
+  await writeAudit({
+    actor: actor.memberEmail,
+    actorUserId: actor.userId,
+    orgId: actor.orgId,
+    action: `policy_briefing.${status}`,
+    entityType: "policy_briefing",
+    entityId: b.id,
+    detail: { topic: b.topic, provisions: b.provisions.length, note },
+  });
+  return { status };
+}
+
+export async function listBriefings(orgId: string, limit = 10) {
+  return db
+    .select()
+    .from(policyBriefings)
+    .where(
+      and(
+        eq(policyBriefings.orgId, orgId),
+        inArray(policyBriefings.status, ["pending", "approved", "rejected"]),
+      ),
+    )
+    .orderBy(desc(policyBriefings.createdAt))
+    .limit(limit);
 }

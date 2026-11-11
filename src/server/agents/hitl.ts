@@ -73,6 +73,10 @@ export const HITL_TOOLS = {
             type: z.literal("policy_finding"),
             findingId: z.string().uuid(),
           }),
+          z.object({
+            type: z.literal("policy_briefing"),
+            briefingId: z.string().uuid(),
+          }),
         ])
         .optional()
         .describe(

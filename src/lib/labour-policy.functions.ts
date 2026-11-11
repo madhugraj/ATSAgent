@@ -45,6 +45,18 @@ export const getLabourPolicy = createServerFn({ method: "GET" })
           }
         : null,
       sources: await listSources(context.orgId),
+      briefings: (await (await import("./labour-policy.server")).listBriefings(context.orgId)).map(
+        (b) => ({
+          id: b.id,
+          topic: b.topic,
+          status: b.status,
+          hrImpact: b.hrImpact,
+          timeline: b.timeline,
+          provisions: b.provisions,
+          decisionNote: b.decisionNote,
+          createdAt: b.createdAt.toISOString(),
+        }),
+      ),
       findings: findings.map((f) => ({
         ...f,
         createdAt: f.createdAt.toISOString(),
