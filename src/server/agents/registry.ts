@@ -74,6 +74,7 @@ export type GateKind =
   | "panel_substitute"
   | "panel_review"
   | "org_profile"
+  | "pay_conventions"
   | "expert_brief"
   | "general";
 
@@ -140,6 +141,9 @@ export const SUBMISSION_TOOLS: ReadonlySet<string> = new Set([
   "submit_offer_for_approval",
   "submit_profile_version",
   "propose_profile_items",
+  // Stores pay conventions as a pending proposal; applied only when the HR head
+  // approves the pay_conventions gate (src/lib/pay-settings.server.ts).
+  "propose_pay_conventions",
   // In-call negotiation tool: passes the candidate's spoken yes to the hiring
   // team, who confirm it with them — it does not agree anything itself.
   "submit_agreed_terms",

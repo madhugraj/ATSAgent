@@ -41,6 +41,7 @@ import {
 import { balanceWeights, extractResumeText } from "@/lib/cv-extract";
 import { InterviewPlanCard } from "@/components/InterviewPlanCard";
 import { HiringManagerPicker } from "@/components/HiringManagerPicker";
+import { RequisitionPayTermsCard } from "@/components/RequisitionPayTermsCard";
 import { RoleCostCard } from "@/components/HiringCost";
 import { intakeCvs, type IntakeStatus } from "@/lib/cv-intake";
 import { rankPool } from "@/lib/shortlist";
@@ -1609,6 +1610,15 @@ function RequisitionDetail() {
         </div>
 
         <div className="space-y-6">
+          <section className="panel p-5">
+            <h2 className="font-semibold">Pay terms</h2>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Where the job is decides its pay zone, currency and how pay is quoted; the band above
+              is in these terms. Contracts carry their length; the needed-by date is the role&apos;s
+              urgency.
+            </p>
+            <RequisitionPayTermsCard requisitionId={r.id} />
+          </section>
           <section className="panel p-5">
             <h2 className="font-semibold">Hiring cost</h2>
             <p className="mb-3 text-xs text-muted-foreground">

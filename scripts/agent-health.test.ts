@@ -1364,6 +1364,50 @@ describe("organisation context rules", () => {
     });
   });
 
+  test("pay conventions: a proposal left waiting, and a role paying in a currency its zone does not", async () => {
+    const { payConventionDrafts, payZones, requisitions } = await import("../drizzle/schema");
+    const old = new Date(Date.now() - (HEALTH.payConventionsWaitDays + 1) * 86_400_000);
+    await db.insert(payConventionDrafts).values({
+      orgId,
+      conventions: { reportingCurrency: "USD" } as never,
+      summary: "Reporting currency: INR → USD",
+      createdAt: old,
+    });
+    const [zone] = await db
+      .insert(payZones)
+      .values({ orgId, name: "Milan", countries: ["IT"], currency: "EUR" })
+      .returning({ id: payZones.id });
+    const code = `REQ-PAY-${Math.random().toString(36).slice(2, 7)}`;
+    await db.insert(requisitions).values({
+      orgId,
+      code,
+      title: "Engineer",
+      status: "pending_hr",
+      payCurrency: "INR",
+      payZoneId: zone!.id,
+    } as never);
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "context.pay_conventions_waiting")).toMatchObject({
+      agentType: "org_context",
+      severity: "warning",
+    });
+    expect((await open()).find((i) => i.rule === "context.pay_currency_mismatch")).toMatchObject({
+      agentType: "requisition",
+      severity: "serious",
+      title: expect.stringContaining(`${code} pays in INR`),
+    });
+    // Paying by the candidate's location is not a mismatch; a decided proposal is not waiting.
+    await db.update(requisitions).set({ paysByLocation: true }).where(eq(requisitions.code, code));
+    await db
+      .update(payConventionDrafts)
+      .set({ status: "approved" })
+      .where(eq(payConventionDrafts.orgId, orgId));
+    await evaluate();
+    const after = await open();
+    expect(after.find((i) => i.rule === "context.pay_currency_mismatch")).toBeUndefined();
+    expect(after.find((i) => i.rule === "context.pay_conventions_waiting")).toBeUndefined();
+  });
+
   test("an Autonomous agent without a passed model safety check is flagged", async () => {
     const { agentPolicies, aiRedteamChecks, aiSettings } = await import("../drizzle/schema");
     await db.insert(agentPolicies).values({

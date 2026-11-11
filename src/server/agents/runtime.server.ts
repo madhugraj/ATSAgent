@@ -224,10 +224,13 @@ type DocumentValidationSubject = {
 };
 /** An organisation profile version waiting for the HR head or owner (docs/org-context-agent-plan.md). */
 type OrgProfileSubject = { type: "org_profile"; versionId: string; expects?: string };
+/** Pay conventions the organisation agent proposed (docs/pay-terms-plan.md, Phase 2). */
+type PayConventionsSubject = { type: "pay_conventions"; draftId: string; expects?: string };
 type GateSubject =
   | ExpertBriefSubject
   | import("../panel/review.server").PanelReviewSubject
   | OrgProfileSubject
+  | PayConventionsSubject
   | PanelApprovalSubject
   | PanelSubstituteSubject
   | RecordSubject
@@ -375,6 +378,24 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
       status: "pending",
       detail: orgProfileDetail(found.approved?.sections ?? null, found.version),
       subject: { type: "org_profile", versionId: subject.versionId, expects: "pending" },
+    };
+  }
+  if (subject.type === "pay_conventions") {
+    const { pendingConventions } = await import("@/lib/pay-settings.server");
+    const d = await pendingConventions(orgId, subject.draftId);
+    if (!d) return { error: "Pay conventions proposal not found." };
+    if (d.status !== "pending")
+      return { error: `This proposal is ${d.status.replace("_", " ")}, not waiting for approval.` };
+    return {
+      role: "hr_head",
+      status: "pending",
+      detail: [
+        "What changes if approved:",
+        ...d.summary.split("\n").map((l) => `• ${l}`),
+        "",
+        "Approve to apply these pay conventions; send back with what to change; or decline.",
+      ].join("\n"),
+      subject: { type: "pay_conventions", draftId: subject.draftId, expects: "pending" },
     };
   }
   if (subject.type === "panel_approval") return panelGateFor(orgId, subject);
@@ -682,6 +703,22 @@ async function performGate(
         note: note ?? "",
       });
     }
+    return;
+  }
+  if (subject.type === "pay_conventions") {
+    const { decideConventionsCore } = await import("@/lib/pay-settings.server");
+    if (decision.status === "approved")
+      await decideConventionsCore(actor, {
+        draftId: subject.draftId,
+        decision: "approve",
+        note: decision.comment ?? null,
+      });
+    else if (decision.status === "rejected")
+      await decideConventionsCore(actor, {
+        draftId: subject.draftId,
+        decision: decision.changes ? "send_back" : "decline",
+        note: decision.reason?.trim() || "No reason given.",
+      });
     return;
   }
   if (subject.type === "panel_approval") return performPanelGate(orgId, userId, subject, decision);

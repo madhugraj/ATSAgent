@@ -185,6 +185,8 @@ export const organizations = pgTable(
       .array()
       .notNull()
       .default(sql`'{permanent}'::text[]`),
+    /** Over a band's ceiling by more than this % is a blocker; less is a flag (0074). */
+    payFarAbovePct: integer("pay_far_above_pct").notNull().default(20),
     fiscalYearStartMonth: smallint("fiscal_year_start_month").notNull().default(4),
     careersEmail: text("careers_email"),
     onboardingStep: text("onboarding_step").notNull().default("profile"),
@@ -221,6 +223,7 @@ export const organizations = pgTable(
       .on(sql`lower(${t.careersEmail})`)
       .where(sql`${t.careersEmail} is not null`),
     index("organizations_status_idx").on(t.status),
+    check("organizations_pay_far_above_pct_check", sql`${t.payFarAbovePct} between 0 and 100`),
     index("organizations_email_domain_idx")
       .on(t.emailDomain)
       .where(sql`${t.emailDomain} is not null`),
@@ -3974,5 +3977,37 @@ export const payFigures = pgTable(
     check("pay_figures_basis_check", sql`${t.payBasis} in ('annual','monthly','daily','hourly')`),
     check("pay_figures_owner_check", sql`${t.ownerType} in ('requisition','application','offer')`),
     check("pay_figures_amount_check", sql`${t.amount} >= 0`),
+  ],
+);
+
+/**
+ * Pay conventions the organisation agent proposed (0074): applied to pay_zones,
+ * pooling_regions and the organisation's defaults only when the HR head approves.
+ */
+export const payConventionDrafts = pgTable(
+  "pay_convention_drafts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    status: text("status").notNull().default("pending"),
+    conventions: jsonb("conventions")
+      .$type<import("../src/lib/pay-settings").PayConventions>()
+      .notNull(),
+    summary: text("summary").notNull().default(""),
+    agentRunId: uuid("agent_run_id"),
+    proposedBy: uuid("proposed_by").references(() => users.id, { onDelete: "set null" }),
+    decidedBy: uuid("decided_by").references(() => users.id, { onDelete: "set null" }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decisionNote: text("decision_note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("pay_convention_drafts_org_idx").on(t.orgId, t.status, t.createdAt),
+    check(
+      "pay_convention_drafts_status_check",
+      sql`${t.status} in ('pending','approved','sent_back','declined','superseded')`,
+    ),
   ],
 );

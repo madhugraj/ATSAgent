@@ -597,6 +597,16 @@ export const EVAL_CATALOG: Record<string, EvalExplainer> = {
       "It asks the HR head again, and only a person's approval makes it the profile.",
     ],
   },
+  "org_context: proposes pay conventions; applied only once the HR head approves": {
+    title: "Sets up pay zones and currencies, and waits for the HR head",
+    situation:
+      "The admin says the organisation reports in US dollars and hires in Milan (euros, 14 payments a year) and across India (rupees, CTC per year), with Milan candidates pooled within South Europe.",
+    checks: [
+      "It reads what is in force before proposing, and proposes conventions only — never a pay figure or band.",
+      "Nothing changes until the HR head approves; then the zones, the region and the reporting currency are applied together.",
+      "Milan pays in euros over 14 payments and sits in the South Europe pool, exactly as the admin said.",
+    ],
+  },
   "expert_interview: interviews the hiring manager and proposes the brief for their approval": {
     title: "Asks the hiring manager what the role really needs and writes it down",
     situation:

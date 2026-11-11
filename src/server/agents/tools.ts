@@ -48,6 +48,20 @@ function requisitionView(r: typeof requisitions.$inferSelect) {
     budgetCtc: num(r.budgetCtc),
     ctcBandMin: num(r.ctcBandMin),
     ctcBandMax: num(r.ctcBandMax),
+    /** The budget and band are in this currency and basis (docs/pay-terms-plan.md). */
+    payTerms: {
+      kind: r.kindOfWork,
+      basis: r.payBasis,
+      currency: r.payCurrency,
+      payZoneId: r.payZoneId,
+      hoursPerWeek: num(r.hoursPerWeek),
+      daysPerWeek: num(r.daysPerWeek),
+      contractMonths: r.contractMonths,
+      extendable: r.extendable,
+      contractType: r.contractType,
+      paysByLocation: r.paysByLocation,
+      neededBy: r.neededBy,
+    },
     mustHaveSkills: r.mustHaveSkills,
     goodToHaveSkills: r.goodToHaveSkills,
     responsibilities: r.responsibilities,
@@ -174,7 +188,13 @@ export function registerPhase1Tools(): void {
     name: "research_compensation",
     description:
       "Live market pay research for the requisition's role, location and experience, with cited sources and a recommended budget and band. Slow; call once per requisition.",
-    input: RequisitionId.extend({ currency: z.string().length(3).default("INR") }),
+    input: RequisitionId.extend({
+      currency: z
+        .string()
+        .length(3)
+        .optional()
+        .describe("Defaults to the requisition's pay currency."),
+    }),
     risk: "read",
     skills: ["market_benchmark"],
     untrustedOutput: true,
@@ -185,7 +205,7 @@ export function registerPhase1Tools(): void {
         orgId: ctx.orgId,
         role: r.title,
         location: r.location || "India",
-        currency: i.currency,
+        currency: i.currency ?? r.payCurrency,
         experienceMin: r.experienceMin,
         experienceMax: r.experienceMax,
         skills: r.mustHaveSkills,
@@ -329,7 +349,8 @@ export function registerPhase1Tools(): void {
 
   registerTool({
     name: "set_compensation",
-    description: "Set the requisition's budget CTC and pay band (annual, in the org currency).",
+    description:
+      "Set the requisition's budget and pay band, in the requisition's pay currency and pay basis (set_pay_terms first when they differ from the organisation's defaults — an hourly role's band is an hourly rate).",
     input: RequisitionId.extend({
       budgetCtc: z.number().positive(),
       bandMin: z.number().positive(),
@@ -337,7 +358,7 @@ export function registerPhase1Tools(): void {
     }),
     risk: "write",
     describe: (i) =>
-      `Set budget ${rupees(i.budgetCtc)} (band ${rupees(i.bandMin)}–${rupees(i.bandMax)})`,
+      `Set budget ${i.budgetCtc.toLocaleString("en")} (band ${i.bandMin.toLocaleString("en")}–${i.bandMax.toLocaleString("en")}) in the role's pay currency`,
     run: async (ctx, i) => {
       if (i.bandMin > i.bandMax) throw new Error("bandMin must not exceed bandMax.");
       const { updateRequisitionCompensationCore } = await import("@/lib/requisitions.server");
@@ -348,6 +369,53 @@ export function registerPhase1Tools(): void {
         ctcBandMax: i.bandMax,
       });
       return { ok: true };
+    },
+  });
+
+  registerTool({
+    name: "set_pay_terms",
+    description:
+      "Set a draft requisition's pay terms: the pay zone (by name, from read_pay_conventions — the job's location decides it, not where the request came from), the kind of work (permanent, fixed_term, contract_hourly, part_time, intern), the pay basis (annual, monthly, daily, hourly), the pay currency (defaults to the zone's), hours and days per week, contract length in months and whether it can be extended (contracts), the contract type when the zone uses them (w2, 1099, ir35_outside…), whether a remote role pays by the candidate's location, and the date the role is needed by (YYYY-MM-DD). Only what the person said or the organisation's conventions state; ask about what is unclear.",
+    input: RequisitionId.extend({
+      zone: z.string().max(60).nullable().optional(),
+      kind: z
+        .enum(["permanent", "fixed_term", "contract_hourly", "part_time", "intern"])
+        .optional(),
+      basis: z.enum(["annual", "monthly", "daily", "hourly"]).optional(),
+      currency: z
+        .string()
+        .regex(/^[A-Za-z]{3}$/)
+        .optional(),
+      hoursPerWeek: z.number().min(1).max(80).nullable().optional(),
+      daysPerWeek: z.number().min(1).max(7).nullable().optional(),
+      contractMonths: z.number().int().min(1).max(120).nullable().optional(),
+      extendable: z.boolean().nullable().optional(),
+      contractType: z.string().max(30).nullable().optional(),
+      paysByLocation: z.boolean().optional(),
+      neededBy: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/)
+        .nullable()
+        .optional(),
+    }),
+    risk: "write",
+    describe: (i) =>
+      `Set pay terms${i.zone ? ` (${i.zone})` : ""}${i.kind ? `: ${i.kind.replace(/_/g, " ")}` : ""}${i.basis ? `, ${i.basis}` : ""}${i.currency ? `, ${i.currency.toUpperCase()}` : ""}${i.neededBy ? `, needed by ${i.neededBy}` : ""}`,
+    run: async (ctx, i) => {
+      const { updateRequisitionPayTermsCore } = await import("@/lib/pay-settings.server");
+      const { requisitionId, zone, currency, ...rest } = i;
+      const terms = Object.fromEntries(
+        Object.entries({
+          ...rest,
+          ...(currency ? { currency: currency.toUpperCase() } : {}),
+        }).filter(([, v]) => v !== undefined),
+      );
+      const out = await updateRequisitionPayTermsCore(await actor(ctx), {
+        id: requisitionId,
+        ...(zone !== undefined ? { zone } : {}),
+        terms,
+      });
+      return { ok: true, ...out };
     },
   });
 

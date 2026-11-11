@@ -120,6 +120,8 @@ export const HEALTH = {
   evaluateEveryMinutes: 5,
   /** An approved organisation profile older than this is stale (days). */
   profileStaleDays: 180,
+  /** A pay conventions proposal waiting this long for the HR head (docs/pay-terms-plan.md). */
+  payConventionsWaitDays: 7,
   /** A submitted profile version waiting longer than this for a decision (days). */
   reviewWaitingDays: 7,
   /** Website re-read failures before the warning becomes serious. */
@@ -1314,6 +1316,53 @@ export const RULES: Rule[] = [
           ...(serious ? { severity: "serious" as const } : {}),
         },
       ];
+    },
+  },
+  {
+    id: "context.pay_conventions_waiting",
+    element: "context",
+    severity: "warning",
+    description: `A proposal of the organisation's pay conventions (currency, pay zones, regions) has waited more than ${HEALTH.payConventionsWaitDays} days for the HR head — roles raised meanwhile use the conventions in force. Decide it in the approvals inbox.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ id: string; days: number }>(sql`
+        select id, extract(day from now() - created_at)::int days from pay_convention_drafts
+        where org_id = ${orgId} and status = 'pending'
+          and created_at < now() - make_interval(days => ${HEALTH.payConventionsWaitDays})
+        order by created_at limit 1`);
+      if (!r[0]) return [];
+      return [
+        {
+          agentType: "org_context",
+          title: `Pay conventions proposal waiting ${r[0].days} days for a decision`,
+          detail: { draftId: r[0].id, days: r[0].days },
+        },
+      ];
+    },
+  },
+  {
+    id: "context.pay_currency_mismatch",
+    element: "context",
+    severity: "serious",
+    description:
+      "A role's pay currency is not its pay zone's currency (the zone changed after the role was set up, or the currency was typed over it) — its band would be compared with candidates' pay in the wrong currency. Set the role's pay terms again.",
+    evaluate: async (orgId) => {
+      const r = await rows<{
+        id: string;
+        code: string;
+        pay: string;
+        zone: string;
+        name: string;
+      }>(sql`
+        select r.id, r.code, r.pay_currency pay, z.currency zone, z.name
+        from requisitions r join pay_zones z on z.id = r.pay_zone_id and z.org_id = r.org_id
+        where r.org_id = ${orgId} and r.status not in ('closed','rejected')
+          and r.pay_currency <> z.currency and not r.pays_by_location
+        order by r.code limit 20`);
+      return r.map((x) => ({
+        agentType: "requisition" as const,
+        title: `${x.code} pays in ${x.pay}, but its zone ${x.name} pays in ${x.zone}`,
+        detail: { requisitionId: x.id, payCurrency: x.pay, zoneCurrency: x.zone },
+      }));
     },
   },
   {

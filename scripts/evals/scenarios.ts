@@ -2967,6 +2967,72 @@ export function scenarios(): ScriptedScenario[] {
       ],
     },
     {
+      name: "org_context: proposes pay conventions; applied only once the HR head approves",
+      agentType: "org_context",
+      autonomy: "act_and_notify",
+      goal: () =>
+        "Set up the organisation's pay conventions. The admin said: we report in US dollars; we hire in Milan (euros, quoted as gross yearly pay over 14 payments) and across India (rupees, CTC per year, 12 payments, 45 hours a week); Milan candidates are pooled within South Europe.",
+      decide: () => ({ status: "approved" }),
+      expect: {
+        status: "done",
+        calls: ["read_pay_conventions", "propose_pay_conventions", "request_approval"],
+        gateRole: "hr_head",
+        verify: async ({ orgId }) => {
+          const { currentConventions } = await import("../../src/lib/pay-settings.server");
+          const c = await currentConventions(orgId);
+          if (c.reportingCurrency !== "USD") return `reporting currency ${c.reportingCurrency}`;
+          const milan = c.zones.find((z) => z.name === "Milan");
+          if (!milan || milan.currency !== "EUR" || milan.paymentsPerYear !== 14)
+            return "the Milan zone was not applied as proposed";
+          if (milan.region !== "South Europe") return "Milan is not in the South Europe region";
+          return null;
+        },
+      },
+      script: [
+        () => call("r", "read_pay_conventions", {}),
+        () =>
+          call("p", "propose_pay_conventions", {
+            conventions: {
+              reportingCurrency: "USD",
+              regions: [{ name: "South Europe", rule: "same_region" }],
+              zones: [
+                {
+                  name: "Milan",
+                  countries: ["IT"],
+                  cities: ["Milan", "Milano"],
+                  currency: "EUR",
+                  basis: "annual",
+                  paymentsPerYear: 14,
+                  region: "South Europe",
+                },
+                {
+                  name: "India",
+                  countries: ["IN"],
+                  currency: "INR",
+                  basis: "annual",
+                  paymentsPerYear: 12,
+                  hoursPerWeek: 45,
+                  includes: ["base", "variable", "employer_pf", "gratuity"],
+                },
+              ],
+            },
+          }),
+        (m) => {
+          const proposed = toolResult(m, "propose_pay_conventions") as { draftId: string };
+          return call("g", "request_approval", {
+            title: "Approve the organisation's pay conventions",
+            summary:
+              "Report in USD; Milan pays in EUR over 14 payments (South Europe pool); India pays in INR, CTC per year.",
+            assignee_role: "hr_head",
+            subject: { type: "pay_conventions", draftId: proposed.draftId },
+          });
+        },
+        say(
+          "Pay conventions approved and applied: USD reporting, Milan (EUR, 14 payments) and India (INR).",
+        ),
+      ],
+    },
+    {
       name: "jd: writes About us from the approved profile and keeps internal lines out",
       agentType: "jd",
       autonomy: "act_and_notify",
