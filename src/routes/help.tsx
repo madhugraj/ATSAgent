@@ -5,7 +5,6 @@ import { ArrowLeft, ArrowRight, BookOpen, List, Search } from "lucide-react";
 import { MANUAL_SECTIONS, type ManualSection } from "@/lib/user-manual";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/help")({
   head: () => ({
@@ -313,22 +312,11 @@ function Help() {
                   aria-hidden="true"
                   className="mx-1 min-w-6 flex-1 border-b border-dotted border-border"
                 />
-                <span className="font-book text-sm tabular-nums text-muted-foreground">
-                  {i + 1}
-                </span>
               </button>
             </li>
           ))}
         </ol>
       </nav>
-
-      <p
-        className={cn(
-          "font-book mt-12 text-center text-sm italic text-muted-foreground",
-        )}
-      >
-        Pick a chapter to read it as a page; search above to find a step.
-      </p>
     </div>
   );
 }
