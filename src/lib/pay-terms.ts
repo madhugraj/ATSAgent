@@ -146,3 +146,57 @@ export function zoneFor(
     : undefined;
   return byCity ?? inCountry.find((z) => z.cities.length === 0) ?? null;
 }
+
+/* ------------------------------------------------- how pay is asked on a call */
+
+const CURRENCY_NAMES: Record<string, string> = {
+  INR: "rupees",
+  USD: "US dollars",
+  EUR: "euros",
+  GBP: "pounds",
+  AED: "dirhams",
+  SGD: "Singapore dollars",
+  AUD: "Australian dollars",
+  CAD: "Canadian dollars",
+  JPY: "yen",
+  CHF: "Swiss francs",
+  BRL: "reais",
+  PLN: "zloty",
+};
+
+/** What the screening call asks pay as, for a role's terms (pure; unit-tested). */
+export type CallPayWords = {
+  /** "CTC per year", "gross yearly salary", "hourly rate", "day rate", "gross monthly salary". */
+  term: string;
+  currency: string;
+  currencyName: string;
+  basis: PayBasis;
+  /** A contract: start date and length are asked instead of the notice period. */
+  contract: boolean;
+  contractMonths: number | null;
+};
+
+export function callPayWords(
+  terms: Pick<PayTerms, "kind" | "basis" | "currency" | "contractMonths">,
+): CallPayWords {
+  const term =
+    terms.basis === "hourly"
+      ? "hourly rate"
+      : terms.basis === "daily"
+        ? "day rate"
+        : terms.basis === "monthly"
+          ? terms.currency === "INR"
+            ? "CTC per month"
+            : "gross monthly salary"
+          : terms.currency === "INR"
+            ? "CTC per year"
+            : "gross yearly salary";
+  return {
+    term,
+    currency: terms.currency,
+    currencyName: CURRENCY_NAMES[terms.currency] ?? terms.currency,
+    basis: terms.basis,
+    contract: terms.kind === "fixed_term" || terms.kind === "contract_hourly",
+    contractMonths: terms.contractMonths ?? null,
+  };
+}

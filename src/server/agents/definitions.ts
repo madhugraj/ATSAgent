@@ -559,7 +559,12 @@ export function registerPhase2Agents(): void {
     // 1.9.5 (test call of 11 November): consent counts only as the answer to the consent
     // question asked after the disclosure, never the "yes" to "am I speaking with …?"; a pay
     // figure stated after a decline is recorded (a range: its lower end, the range in the note).
-    version: "1.9.5",
+    // 1.10.0 (pay terms, docs/pay-terms-plan.md Phase 3): pay is asked in the role's own
+    // terms and currency (CTC per year in India, gross yearly salary elsewhere, an hourly
+    // or day rate for those contracts); a contract asks when they could start and the
+    // length they want instead of the notice period; figures said in another currency or
+    // period are recorded as said (record_details pay_currency / pay_basis).
+    version: "1.10.0",
     owner: "hr_head",
     responsibility:
       "Holds one AI screening phone call with a shortlisted candidate the way an HR recruiter does: says who it is and why it is calling, asks consent, explains the role and why it called them, records their practical details (including the pay they state, for HR only) and their answers to the role's screening questions, or agrees a better time — nothing else.",

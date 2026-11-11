@@ -29,9 +29,21 @@
   Eval: org_context proposes conventions, applied only once approved.
   Governance fix: screening-call versions 1.8.0–1.9.5 had been recorded on the
   requisition agent's manifest; moved to the Screening call agent (now 1.9.5).
-- Next: P3 — the screening call asks in the role's terms; pooling before
-  matching; the call's answers reach the match check; joining after "needed
-  by" checked.
+- Shipped (P3, 11 November): matching compares expected pay in the role's
+  own currency and basis (`checkAgainstBand`, the organisation's tolerance),
+  reads the candidate's latest stated details for the application (the call
+  or TA, newer than the CV: joining date, notice, place, pay with its
+  currency), holds a candidate whose joining date is after the role's
+  needed-by date or who is outside the role's pool (same zone / same region,
+  unless relocating) for a person — never the score; a notice-based estimate
+  only flags. Screening call 1.10.0 asks pay in the role's terms (CTC per year
+  in India, gross yearly salary elsewhere, hourly or day rate for those
+  contracts), asks a contract's start date and length instead of the notice
+  period, and records figures said in another currency or period as said;
+  they are stored in `pay_figures` with the derived pay and reporting values.
+  Health rule: pay not compared for want of a current exchange rate.
+- Next: P4 — negotiation, offers, JD and job boards, onboarding and reports in
+  each zone's currency and form.
 
 ## Agent intelligence (2026-11-06)
 
