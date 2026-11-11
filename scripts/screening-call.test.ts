@@ -903,6 +903,70 @@ describe("in-call tools", () => {
     ).toMatchObject({ ok: true });
   });
 
+  test("consent is an answer to the consent question, after the disclosure (11 November)", () => {
+    const s = fresh();
+    const yes = { granted: true, their_words: "Yes" };
+    const greeting = "Hello, am I speaking with Madhumathi?";
+    const said =
+      greeting +
+      " This is Saranya, an AI recruiting assistant. I'll make notes for the hiring team, and the call is checked for quality. Is now a good time?";
+    // The "Yes" was to "am I speaking with …?" — the disclosure came after it.
+    expect(
+      session.applyCallTool(s as never, "record_consent", yes, ids, 0, said, " Yes.", greeting),
+    ).toMatchObject({ ok: false });
+    // Asked, not yet answered.
+    expect(
+      session.applyCallTool(s as never, "record_consent", yes, ids, 0, said, "", said),
+    ).toMatchObject({ ok: false, error: expect.stringContaining("not answered yet") });
+    expect(s.consent).toBeNull();
+    // Their answer to the consent question.
+    expect(
+      session.applyCallTool(
+        s as never,
+        "record_consent",
+        yes,
+        ids,
+        0,
+        said,
+        " Yes, go ahead.",
+        said,
+      ),
+    ).toEqual({ ok: true });
+  });
+
+  test("a pay range after a decline is recorded, never left declined (11 November)", () => {
+    const s = { ...fresh(), consent: true };
+    let said =
+      "And your expected CTC per year? Without a clear expected CTC figure, the hiring team cannot consider your application.";
+    const details = (args: object, reply: string) =>
+      session.applyCallTool(s as never, "record_details", args, ids, 0, said, reply);
+    expect(
+      details(
+        {
+          pay_note: "would negotiate with HR",
+          not_given: [{ item: "expected_pay", why: "declined" }],
+        },
+        " That I would negotiate it with the HR.",
+      ),
+    ).toMatchObject({ ok: true });
+    said += " Would you like to provide a specific amount?";
+    // The range only as a note: refused, told to record the figure.
+    expect(
+      details({ pay_note: "95 lakhs to 1 crore" }, " Between 95 lakhs to 1 crore."),
+    ).toMatchObject({ ok: false, error: expect.stringContaining("expected_ctc") });
+    expect(
+      details(
+        { expected_ctc: 9_500_000, pay_note: "95 lakhs to 1 crore" },
+        " Between 95 lakhs to 1 crore.",
+      ),
+    ).toMatchObject({ ok: true });
+    expect(session.requiredDetailStatus(s.details as never).expected_pay).toBe("recorded");
+    for (const r of ["It's 67 lakhs.", "Between 95 lakhs to 1 crore", "eighteen lakhs", "22 LPA"])
+      expect(session.STATES_AMOUNT.test(r)).toBe(true);
+    for (const r of ["I would negotiate with HR", "three months", "1st of March"])
+      expect(session.STATES_AMOUNT.test(r)).toBe(false);
+  });
+
   test("outcomes", () => {
     const o = session.callOutcome;
     const answered = {

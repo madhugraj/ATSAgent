@@ -103,7 +103,7 @@ export const CALL_TOOL_DESCRIPTIONS: Record<CallToolName, string> = {
   record_consent:
     "Record whether the candidate agreed to the screening call now (and to notes for the hiring team and the quality check): granted true only if they clearly agreed in their answer to your latest question; their_words is exactly what they said. Refused when that answer raised a concern (they did not apply, how you got their details, not sure…): answer it, ask again, and record their answer to that.",
   record_details:
-    "Record the practical details the candidate told you, as they said them: current job title and company, total years of experience, where they live now, whether they are open to relocating (only a yes or no they actually said — a question back is not an answer), notice period in days, earliest joining date (YYYY-MM-DD), and current fixed pay, current variable pay and expected pay as rupees per year (e.g. 18 lakhs = 1800000) — only figures they actually stated; never calculate one. Anything about pay that is not a figure (a percentage hike, shares, bonuses) goes in pay_note in their words; anything else the hiring team should know (a time limit they set, skills they said are new to them) in candidate_note. Call it again as more details come; leave out anything they did not say. Never comment on the figures. The earliest joining date, current pay and expected pay are required before the call can end as completed: if they would rather not say one, list it in not_given with why 'declined' (their words in pay_note, or in candidate_note for the joining date); if they are not working now, list current_pay with why 'not_working'. A decline is taken only after you have told them, since your last record_details, that without it the hiring team cannot consider their application — otherwise it is refused and you ask once more with that sentence.",
+    "Record the practical details the candidate told you, as they said them: current job title and company, total years of experience, where they live now, whether they are open to relocating (only a yes or no they actually said — a question back is not an answer), notice period in days, earliest joining date (YYYY-MM-DD), and current fixed pay, current variable pay and expected pay as rupees per year (e.g. 18 lakhs = 1800000; a range such as \"95 lakhs to 1 crore\" is its lower end, with the range in pay_note) — only figures they actually stated; never calculate one. Anything about pay that is not a figure (a percentage hike, shares, bonuses) goes in pay_note in their words; anything else the hiring team should know (a time limit they set, skills they said are new to them) in candidate_note. Call it again as more details come; leave out anything they did not say. Never comment on the figures. The earliest joining date, current pay and expected pay are required before the call can end as completed: if they would rather not say one, list it in not_given with why 'declined' (their words in pay_note, or in candidate_note for the joining date); if they are not working now, list current_pay with why 'not_working'. A decline is taken only after you have told them, since your last record_details, that without it the hiring team cannot consider their application — otherwise it is refused and you ask once more with that sentence.",
   record_answer:
     'After you ask one of the listed screening questions: the question\'s id and a faithful one or two sentence summary of what the candidate said. If they chose not to answer it, set declined true and say so in the summary — it is never held against them. Saying they have not done it or lack the experience is an answer: declined false. The summary holds only what the candidate said in their own words — never a tool, method or detail that you said first. If they only agreed with or repeated something you said ("yes, I used that") and gave no specifics of their own, set prompted true and say so in the summary.',
   book_slot:
@@ -239,6 +239,14 @@ export function requiredDetailStatus(
  * 10 November took "It is okay, but I have never applied for this post" as
  * consent before the concern was answered.
  */
+/**
+ * A pay figure in the candidate's words ("67 lakhs", "95 lakhs to 1 crore", "18 LPA").
+ * A test call on 11 November heard "between 95 lakhs to 1 crore" after a decline
+ * and kept "declined": a range had no field (pure; unit-tested).
+ */
+export const STATES_AMOUNT =
+  /\b\d[\d,.]*\s*(lakhs?|lacs?|lpa|crores?|cr|k|thousand|million)\b|\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|[a-z]+teen|[a-z]+ty|hundred)\b[\w\s-]{0,30}\b(lakhs?|lacs?|crores?)\b|₹\s*\d/i;
+
 export const RAISES_CONCERN =
   /\b(never|not|didn'?t|did not|haven'?t|have not)\s+(applied|apply)\b|\bhow did you (get|find|have)\b|\bwhere did you get\b|\bwho (gave|are you|is this)\b|\bwhat is this (about|for)\b|\bnot interested\b|\bdon'?t want\b|\bwrong (number|person)\b|\bnot sure\b/i;
 
@@ -261,6 +269,13 @@ export function applyCallTool(
    * raised a concern.
    */
   reply?: string,
+  /**
+   * What the assistant had said when it asked the question `reply` answers (live
+   * call). Consent counts only if the disclosure came before that question: a test
+   * call on 11 November recorded the "Yes" to "am I speaking with …?" as consent and
+   * went on without waiting for an answer to "is now a good time?".
+   */
+  saidBeforeReply?: string,
 ): Record<string, unknown> {
   if (!(name in CALL_TOOL_INPUTS)) return { ok: false, error: "Unknown tool." };
   const parsed = CALL_TOOL_INPUTS[name as CallToolName].safeParse(args);
@@ -271,7 +286,14 @@ export function applyCallTool(
   switch (name as CallToolName) {
     case "record_consent": {
       const { granted, their_words } = parsed.data as { granted: boolean; their_words: string };
-      const missing = granted && aiSaid !== undefined ? disclosureMissing(aiSaid) : null;
+      if (granted && reply !== undefined && !reply.trim())
+        return {
+          ok: false,
+          error:
+            "Not recorded: they have not answered yet. Stop and wait for their answer to whether they are happy to continue; record that.",
+        };
+      const heardBefore = saidBeforeReply ?? aiSaid;
+      const missing = granted && heardBefore !== undefined ? disclosureMissing(heardBefore) : null;
       if (missing)
         return {
           ok: false,
@@ -309,6 +331,26 @@ export function applyCallTool(
         if (refusedDecline.length) {
           input.not_given = input.not_given!.filter((n) => !refusedDecline.includes(n.item));
           if (!input.not_given.length) delete input.not_given;
+        }
+      }
+      // They just stated a figure for a pay detail on record as declined: record it,
+      // never leave the decline standing.
+      const payFields = { current_pay: "current_ctc_fixed", expected_pay: "expected_ctc" } as const;
+      if (reply !== undefined && STATES_AMOUNT.test(reply)) {
+        const stillDeclined = (["current_pay", "expected_pay"] as const).filter(
+          (item) =>
+            (input as Record<string, unknown>)[payFields[item]] == null &&
+            [...(state.details?.not_given ?? []), ...(input.not_given ?? [])].some(
+              (n) => n.item === item && n.why === "declined",
+            ),
+        );
+        if (stillDeclined.length) {
+          state.details = { ...state.details, ...input, not_given: state.details?.not_given };
+          if (!state.details.not_given) delete state.details.not_given;
+          return {
+            ok: false,
+            error: `They just gave a figure ("${reply.trim().slice(0, 80)}"). Call record_details again with ${stillDeclined.map((i) => payFields[i]).join(" and ")} as rupees per year — for a range, the lower end, with the whole range in pay_note in their words. Do not ask again.`,
+          };
         }
       }
       // not_given merges by item (the latest word wins), and a value recorded
