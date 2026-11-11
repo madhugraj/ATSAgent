@@ -42,8 +42,22 @@
   period, and records figures said in another currency or period as said;
   they are stored in `pay_figures` with the derived pay and reporting values.
   Health rule: pay not compared for want of a current exchange rate.
-- Next: P4 — negotiation, offers, JD and job boards, onboarding and reports in
-  each zone's currency and form.
+- Shipped (P4, 11 November): migration 0075 — an offer carries its currency,
+  pay basis, kind of work and a contract's end date (from its requisition), and
+  its exchange rate to the reporting currency is fixed when it is approved
+  (`lockOfferRate`; no rate → left out of reports, never guessed). Offer agent
+  1.7.0: bands, ceilings and approval briefs in the role's currency; the offer
+  letter states pay with its currency code and basis ("EUR 52,000 per annum"),
+  the kind of work and a contract's end date; the candidate's offer page and
+  the accept / counter notices show the offer's own currency. Negotiation call
+  0.9.0 speaks the offer's currency ("52 thousand euros … your gross annual
+  pay"; rupees unchanged) and its amount guard reads thousands, millions and
+  €/$/£. JD agent 1.5.0 states the kind of work and a contract's length (never
+  pay); job postings carry the schema.org employment type. Hiring reports sum
+  cost in the reporting currency only. Health rule: approved offers left out
+  of reports for want of a rate.
+- Pay terms plan complete (P1–P4). Next: the labour law & policy agent
+  (`docs/labour-policy-agent-plan.md`), starting with sources per pay zone.
 
 ## Agent intelligence (2026-11-06)
 

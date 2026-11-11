@@ -5,7 +5,7 @@
  * (request_approval with an offer / document_validation / offer_release
  * subject) — never tools.
  */
-import { rupees } from "@/lib/money";
+import { money } from "@/lib/money";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 
@@ -107,6 +107,8 @@ async function loadApplication(orgId: string, id: string) {
       bandMin: requisitions.ctcBandMin,
       bandMax: requisitions.ctcBandMax,
       budget: requisitions.budgetCtc,
+      payCurrency: requisitions.payCurrency,
+      payBasis: requisitions.payBasis,
     })
     .from(applications)
     .innerJoin(candidates, eq(candidates.id, applications.candidateId))
@@ -168,7 +170,7 @@ export async function offerReadiness(
     const waiting = r?.status === "sent" && (r.closesAt?.getTime() ?? Infinity) > Date.now();
     return waiting
       ? "The pay figures on file come from the candidate's talent-pool profile, not from this application. The pay & availability form was already sent and is open — do not draft and do not send it again. Finish: you will be started again when the candidate answers (or TA enters it from a call)."
-      : `The pay figures on file (expects ${rupees(pay.expectedCtc)}) come from the candidate's talent-pool profile, possibly from an earlier process, and were never confirmed for this role. send_compensation_form so the candidate confirms them, then finish: you will be started again when they answer (or TA enters it from a call).`;
+      : `The pay figures on file (expects ${money(pay.expectedCtc, app.payCurrency)}) come from the candidate's talent-pool profile, possibly from an earlier process, and were never confirmed for this role. send_compensation_form so the candidate confirms them, then finish: you will be started again when they answer (or TA enters it from a call).`;
   }
   if (!pay.complete) {
     const missing = [
@@ -193,7 +195,7 @@ export async function offerReadiness(
     pay.expectedCtc! > max &&
     !(await answeredInRun(ctx.runId, ["hr_head", "president_cbo"]))
   ) {
-    return `The candidate expects ${rupees(pay.expectedCtc)}, ${rupees(pay.expectedCtc! - max)} (${pct(pay.expectedCtc!, max)}%) above the band maximum ${rupees(max)}. Before drafting, ask_human with assignee_role hr_head: offer at the band maximum, seek a CBO exception above the band, or stop. Draft only after they answer, and follow their answer.`;
+    return `The candidate expects ${money(pay.expectedCtc, app.payCurrency)}, ${money(pay.expectedCtc! - max, app.payCurrency)} (${pct(pay.expectedCtc!, max)}%) above the band maximum ${money(max, app.payCurrency)}. Before drafting, ask_human with assignee_role hr_head: offer at the band maximum, seek a CBO exception above the band, or stop. Draft only after they answer, and follow their answer.`;
   }
   return null;
 }
@@ -368,7 +370,7 @@ export function registerPhase4Tools(): void {
     }),
     risk: "write",
     describe: (i) =>
-      `Prepare a pay discussion: propose ${rupees(i.proposedCtc)} (ceiling ${rupees(i.ceiling)})`,
+      `Prepare a pay discussion: propose ${i.proposedCtc.toLocaleString("en")} (ceiling ${i.ceiling.toLocaleString("en")}) in the role's pay currency`,
     run: async (ctx, i) => {
       const { prepareNegotiation } = await import("@/lib/negotiation.server");
       return prepareNegotiation(ctx, i);
@@ -411,7 +413,7 @@ export function registerPhase4Tools(): void {
   registerTool({
     name: "draft_offer",
     description:
-      "Create a DRAFT offer for a selected candidate. The CTC must sit inside the requisition's approved band; if it cannot, ask a person instead. The person the agent works for must be on the recruiting team.",
+      "Create a DRAFT offer for a selected candidate. The amount (in the role's pay currency and basis) must sit inside the requisition's approved band; if it cannot, ask a person instead. The person the agent works for must be on the recruiting team.",
     input: AppId.extend({
       offeredCtc: z.number().positive(),
       joiningDate: z
@@ -420,7 +422,7 @@ export function registerPhase4Tools(): void {
         .optional(),
     }),
     risk: "write",
-    describe: (i) => `Draft an offer at ${rupees(i.offeredCtc)} CTC`,
+    describe: (i) => `Draft an offer at ${i.offeredCtc.toLocaleString("en")} in the role's pay currency`,
     precheck: (ctx, i) => offerReadiness(ctx, i.applicationId),
     run: async (ctx, i) => {
       const app = await loadApplication(ctx.orgId, i.applicationId);
@@ -443,7 +445,7 @@ export function registerPhase4Tools(): void {
       ).agreedTerms(ctx.orgId, app.id);
       if (agreed && i.offeredCtc > agreed.ceiling)
         throw new Error(
-          `${rupees(i.offeredCtc)} is above the ceiling ${rupees(agreed.ceiling)} agreed for this candidate. Draft at the agreed ${rupees(agreed.agreedCtc)}.`,
+          `${money(i.offeredCtc, app.payCurrency)} is above the ceiling ${money(agreed.ceiling, app.payCurrency)} agreed for this candidate. Draft at the agreed ${money(agreed.agreedCtc, app.payCurrency)}.`,
         );
       const cboException =
         max != null &&
@@ -456,7 +458,7 @@ export function registerPhase4Tools(): void {
         !cboException
       ) {
         throw new Error(
-          `${rupees(i.offeredCtc)} is outside the approved band ${rupees(min)}–${rupees(max)}. Ask a person (ask_human) before going outside the band; above it needs the CBO's answer (assignee_role president_cbo).`,
+          `${money(i.offeredCtc, app.payCurrency)} is outside the approved band ${money(min, app.payCurrency)}–${money(max, app.payCurrency)}. Ask a person (ask_human) before going outside the band; above it needs the CBO's answer (assignee_role president_cbo).`,
         );
       }
       const open = await db
@@ -495,7 +497,7 @@ export function registerPhase4Tools(): void {
   registerTool({
     name: "revise_offer",
     description:
-      "Revise an offer the candidate asked to change (status countered) or an approver sent back (draft with sentBack): set the new CTC (inside the requisition's approved band — if the ask is above it, offer the band maximum or ask a person) and joining date, with the reasoning. The offer goes back to draft as the next revision; then generate_offer_letter and submit_offer_for_approval so it is approved again before release.",
+      "Revise an offer the candidate asked to change (status countered) or an approver sent back (draft with sentBack): set the new amount in the role's pay currency and basis (inside the requisition's approved band — if the ask is above it, offer the band maximum or ask a person) and joining date, with the reasoning. The offer goes back to draft as the next revision; then generate_offer_letter and submit_offer_for_approval so it is approved again before release.",
     input: OfferId.extend({
       offeredCtc: z.number().positive(),
       joiningDate: z
@@ -505,7 +507,7 @@ export function registerPhase4Tools(): void {
       rationale: z.string().min(10).max(1500),
     }),
     risk: "write",
-    describe: (i) => `Revise the offer to ${rupees(i.offeredCtc)} CTC`,
+    describe: (i) => `Revise the offer to ${i.offeredCtc.toLocaleString("en")} in the role's pay currency`,
     // An offer sent back is revised only once the candidate's expectation is
     // known (a countered offer carries the candidate's own ask).
     precheck: async (ctx, i) => {
@@ -523,7 +525,7 @@ export function registerPhase4Tools(): void {
       const max = num(app.bandMax);
       if (min != null && max != null && (i.offeredCtc < min || i.offeredCtc > max)) {
         throw new Error(
-          `${rupees(i.offeredCtc)} is outside the approved band ${rupees(min)}–${rupees(max)}. Offer within the band, or ask a person (ask_human) before going outside it.`,
+          `${money(i.offeredCtc, app.payCurrency)} is outside the approved band ${money(min, app.payCurrency)}–${money(max, app.payCurrency)}. Offer within the band, or ask a person (ask_human) before going outside it.`,
         );
       }
       const { reviseOfferCore } = await import("@/lib/offers.functions");

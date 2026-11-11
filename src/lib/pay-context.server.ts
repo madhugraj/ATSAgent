@@ -298,3 +298,102 @@ export async function recordPayFigures(
     });
   }
 }
+
+/* ------------------------------------------------------------ offers (Phase 4) */
+
+/** A contract's last day: the joining date plus its length in months (pure). */
+export function contractEndOf(joiningDate: string | null, months: number | null): string | null {
+  if (!joiningDate || !months) return null;
+  const d = new Date(`${joiningDate}T00:00:00Z`);
+  const day = d.getUTCDate();
+  d.setUTCMonth(d.getUTCMonth() + months, 1);
+  // Same day of month where it exists, else the month's last day; the day before.
+  const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+  d.setUTCDate(Math.min(day, last));
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/** The terms an offer for this application is written in (from its requisition). */
+export async function offerTermsFor(
+  orgId: string,
+  applicationId: string,
+  joiningDate: string | null,
+): Promise<{
+  currency: string;
+  payBasis: string;
+  kindOfWork: string;
+  contractEnd: string | null;
+}> {
+  const { applications } = await import("../../drizzle/schema");
+  const [r] = await db
+    .select({
+      currency: requisitions.payCurrency,
+      basis: requisitions.payBasis,
+      kind: requisitions.kindOfWork,
+      months: requisitions.contractMonths,
+    })
+    .from(applications)
+    .innerJoin(requisitions, eq(requisitions.id, applications.requisitionId))
+    .where(and(eq(applications.id, applicationId), eq(applications.orgId, orgId)))
+    .limit(1);
+  if (!r) throw new Error("Application not found");
+  const contract = r.kind === "fixed_term" || r.kind === "contract_hourly";
+  return {
+    currency: r.currency,
+    payBasis: r.basis,
+    kindOfWork: r.kind,
+    contractEnd: contract ? contractEndOf(joiningDate, r.months) : null,
+  };
+}
+
+/**
+ * Fix the offer's exchange rate to the reporting currency at approval: the
+ * reporting view of this offer never moves afterwards. Same currency: the
+ * amount itself. No usable rate: left empty (reports say so) — never guessed.
+ */
+export async function lockOfferRate(orgId: string, offerId: string, now = new Date()) {
+  const { offers } = await import("../../drizzle/schema");
+  const [o] = await db
+    .select()
+    .from(offers)
+    .where(and(eq(offers.id, offerId), eq(offers.orgId, orgId)))
+    .limit(1);
+  if (!o || o.rateLockedAt) return;
+  const [org] = await db
+    .select({ currency: organizations.currency })
+    .from(organizations)
+    .where(eq(organizations.id, orgId))
+    .limit(1);
+  const reporting = org?.currency && /^[A-Z]{3}$/.test(org.currency) ? org.currency : "INR";
+  // The role's own hours and zone convert an hourly or monthly offer to a year.
+  const { applications } = await import("../../drizzle/schema");
+  const [r] = await db
+    .select()
+    .from(applications)
+    .innerJoin(requisitions, eq(requisitions.id, applications.requisitionId))
+    .where(and(eq(applications.id, o.applicationId), eq(applications.orgId, orgId)))
+    .limit(1);
+  const ctx = r ? await roleContext(orgId, r.requisitions) : null;
+  const out = convert(
+    Money.parse({
+      amount: Number(o.offeredCtc),
+      currency: o.currency,
+      basis: o.payBasis,
+      gross: true,
+    }),
+    { currency: reporting, basis: "annual" },
+    conventionsOf(ctx?.terms ?? null, ctx?.zone ?? null),
+    ctx?.rates ?? (await ratesOf(orgId)),
+    now,
+  );
+  await db
+    .update(offers)
+    .set({
+      reportingCurrency: reporting,
+      reportingAmount: out.ok ? String(out.money.amount) : null,
+      rate: out.ok ? (out.rate ? { rate: out.rate.rate, source: out.rate.source, at: out.rate.at } : null) : null,
+      rateLockedAt: now,
+    })
+    .where(and(eq(offers.id, offerId), eq(offers.orgId, orgId)));
+}

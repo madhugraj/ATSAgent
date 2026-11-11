@@ -71,6 +71,9 @@ export const createOfferCore = createServerOnlyFn(async function createOfferCore
     .limit(1);
   if (!application) throw new Error("Application not found");
 
+  // Written in the role's pay terms (docs/pay-terms-plan.md, Phase 4).
+  const { offerTermsFor } = await import("./pay-context.server");
+  const terms = await offerTermsFor(actor.orgId, data.applicationId, data.joiningDate || null);
   const [created] = await db
     .insert(offers)
     .values({
@@ -78,6 +81,7 @@ export const createOfferCore = createServerOnlyFn(async function createOfferCore
       orgId: actor.orgId,
       offeredCtc: String(Number(data.offeredCtc) || 0),
       joiningDate: data.joiningDate || null,
+      ...terms,
       status,
     })
     .returning({ id: offers.id });
@@ -293,6 +297,11 @@ export const advanceOfferCore = createServerOnlyFn(async function advanceOfferCo
       ...(responseToken ? { responseToken, respondedAt: null } : {}),
     })
     .where(and(eq(offers.id, data.id), eq(offers.orgId, actor.orgId)));
+  // Approved: its exchange rate to the reporting currency is fixed now (Phase 4).
+  if (data.status === "approved") {
+    const { lockOfferRate } = await import("./pay-context.server");
+    await lockOfferRate(actor.orgId, data.id);
+  }
 
   if (data.applicationStage) {
     const [offer] = await db
@@ -771,7 +780,8 @@ export const generateOfferLetterCore = createServerOnlyFn(async function generat
       "paragraphs or a plain-text list; separate paragraphs and list items with a single newline " +
       'character and start list lines with "- ".\n' +
       "Never invent numbers, dates, names or salary figures beyond the data and the brief; when " +
-      "stating compensation use annualCtcFormatted exactly. No markdown syntax, no emojis, no " +
+      "stating compensation use compensation.formatted exactly, and for a contract its kind and end " +
+      "date as supplied. No markdown syntax, no emojis, no " +
       "{{placeholder}} tokens — replace each placeholder with the real value or drop the sentence. " +
       "The letterhead address block, reference number, page footer and signature block are fixed " +
       "furniture rendered by the system — never write company addresses, ref numbers or a " +
@@ -782,8 +792,9 @@ export const generateOfferLetterCore = createServerOnlyFn(async function generat
       "using ONLY the supplied JSON data. Return ONLY a JSON object with keys subject, greeting, " +
       "opening, sections, closing. sections is an array of {heading, body} — use EXACTLY these " +
       `headings, in this order: ${headings.join(" | ")}. Each heading's body is 1-3 plain-text ` +
-      "sentences; when stating compensation use the supplied annualCtcFormatted figure exactly " +
-      '(e.g. "INR 20,00,000 per annum"), never the raw annualCtcInr digits. Never invent numbers, ' +
+      "sentences; when stating compensation use the supplied compensation.formatted figure exactly " +
+      '(e.g. "INR 20,00,000 per annum" or "EUR 52,000 per annum"), never the raw amount digits; for a ' +
+      "contract, state its kind and its end date (compensation.contractEndFormatted) as supplied. Never invent numbers, " +
       "dates or names beyond the data. No markdown, no emojis, no {{placeholder}} tokens. " +
       'closing is a short sign-off line such as "Sincerely," — do not repeat the organisation ' +
       "name there, the signature block already carries it. Do not add legal clauses or " +
@@ -811,10 +822,14 @@ export const generateOfferLetterCore = createServerOnlyFn(async function generat
         legalName: row.org.legalName,
         city: row.org.hqCity,
       },
-      compensation: {
-        annualCtcInr: row.offer.offeredCtc,
-        annualCtcFormatted: Number(row.offer.offeredCtc || 0).toLocaleString("en-IN"),
-      },
+      // In the offer's own currency and basis (docs/pay-terms-plan.md, Phase 4).
+      compensation: offerCompensationWords({
+        amount: Number(row.offer.offeredCtc || 0),
+        currency: row.offer.currency,
+        payBasis: row.offer.payBasis,
+        kindOfWork: row.offer.kindOfWork,
+        contractEnd: row.offer.contractEnd,
+      }),
       joiningDate: row.offer.joiningDate,
       joiningDateFormatted: fmtLetterDate(row.offer.joiningDate),
       templateInstructions: template?.instructions ?? null,
@@ -921,6 +936,7 @@ export const reviseOfferCore = createServerOnlyFn(async function reviseOfferCore
       approvalTrail: offers.approvalTrail,
       offeredCtc: offers.offeredCtc,
       counter: offers.counter,
+      applicationId: offers.applicationId,
     })
     .from(offers)
     .where(and(eq(offers.id, input.offerId), eq(offers.orgId, actor.orgId)))
@@ -953,6 +969,15 @@ export const reviseOfferCore = createServerOnlyFn(async function reviseOfferCore
       revision,
       offeredCtc: String(input.offeredCtc),
       ...(input.joiningDate ? { joiningDate: input.joiningDate } : {}),
+      ...(input.joiningDate
+        ? {
+            contractEnd: (
+              await (
+                await import("./pay-context.server")
+              ).offerTermsFor(actor.orgId, o.applicationId, input.joiningDate)
+            ).contractEnd,
+          }
+        : {}),
       letter: null,
       responseToken: null,
       approvalTrail: trail as never,
@@ -970,3 +995,50 @@ export const reviseOfferCore = createServerOnlyFn(async function reviseOfferCore
   });
   return { revision };
 });
+
+const BASIS_LETTER: Record<string, string> = {
+  annual: "per annum",
+  monthly: "per month",
+  daily: "per day",
+  hourly: "per hour",
+};
+const KIND_LETTER: Record<string, string> = {
+  permanent: "permanent employment",
+  fixed_term: "fixed-term contract",
+  contract_hourly: "contract",
+  part_time: "part-time employment",
+  intern: "internship",
+};
+
+/**
+ * What the offer letter says about pay (pure; unit-tested): the amount in the
+ * offer's own currency with its code ("INR 20,00,000 per annum", "EUR 52,000 per
+ * annum", "USD 65 per hour"), the kind of work, and a contract's end date.
+ */
+export function offerCompensationWords(o: {
+  amount: number;
+  currency: string;
+  payBasis: string;
+  kindOfWork: string;
+  contractEnd: string | null;
+}) {
+  const digits =
+    o.currency === "INR"
+      ? o.amount.toLocaleString("en-IN", { maximumFractionDigits: 0 })
+      : o.amount.toLocaleString("en-GB", {
+          maximumFractionDigits: Number.isInteger(o.amount) ? 0 : 2,
+          minimumFractionDigits: Number.isInteger(o.amount) ? 0 : 2,
+        });
+  return {
+    amount: o.amount,
+    currency: o.currency,
+    basis: o.payBasis,
+    formatted: `${o.currency} ${digits} ${BASIS_LETTER[o.payBasis] ?? "per annum"}`,
+    // Kept for templates written before pay terms (INR, annual roles read the same).
+    annualCtcInr: o.currency === "INR" && o.payBasis === "annual" ? o.amount : null,
+    annualCtcFormatted: o.currency === "INR" && o.payBasis === "annual" ? digits : null,
+    kind: KIND_LETTER[o.kindOfWork] ?? o.kindOfWork,
+    contractEnd: o.contractEnd,
+    contractEndFormatted: o.contractEnd ? fmtLetterDate(o.contractEnd) : null,
+  };
+}

@@ -41,6 +41,8 @@ const JdInput = z.object({
   education: z.string().optional().nullable(),
   reportingTo: z.string().optional().nullable(),
   templateId: z.string().uuid().optional().nullable(),
+  /** "Fixed-term contract, 12 months, can be extended" — never pay (docs/pay-terms-plan.md). */
+  employment: z.string().max(120).optional().nullable(),
 });
 
 const BASE_JD_SYSTEM =
@@ -51,7 +53,8 @@ const BASE_JD_SYSTEM =
   "focus on the work, the stack and the standards. Build on the responsibilities, reporting line, success " +
   "measures and education given in the data — keep their substance, make them concrete; where the data asks " +
   "you to draft them from typical market practice, do so for this exact role and seniority. Never invent " +
-  "company facts (products, revenue, team names) or a salary. " +
+  "company facts (products, revenue, team names) or a salary. When the data gives employment (the kind of " +
+  "work, e.g. a fixed-term contract and its length), state it once near the top exactly as given. " +
   "The data may carry organisation_context: the employer's approved profile. Write the “About us” section " +
   "only from its candidate-visible lines — never from your own knowledge and never from an internal-only " +
   "line — and keep its never-say rules. When it says there is no approved profile, write no company " +

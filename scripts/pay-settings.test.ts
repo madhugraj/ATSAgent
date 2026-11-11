@@ -13,6 +13,7 @@ const {
   auditLog,
   candidates,
   organizations,
+  offers,
   payFigures,
   orgMembers,
   payConventionDrafts,
@@ -363,5 +364,101 @@ describe("the call's figures reach matching (Phase 3)", () => {
     });
     expect(check.blockers).toHaveLength(1);
     expect(check.blockers[0]).toStartWith(JOIN_AFTER_NEEDED_BLOCKER);
+  });
+});
+
+describe("offers in the role's terms (Phase 4)", () => {
+  async function contractApplication() {
+    const [req] = await db
+      .insert(requisitions)
+      .values({
+        orgId,
+        code: `REQ-PS-${Math.random().toString(36).slice(2, 7)}`,
+        title: "Data Engineer",
+        status: "draft",
+        location: "Milan",
+      } as never)
+      .returning();
+    await pay.updateRequisitionPayTermsCore(who(hr), {
+      id: req!.id,
+      zone: "Milan",
+      terms: { kind: "fixed_term", contractMonths: 12 },
+    });
+    const [cand] = await db
+      .insert(candidates)
+      .values({
+        orgId,
+        fullName: "Luca Bianchi",
+        email: `luca-${Math.random().toString(36).slice(2, 7)}@cand.local`,
+      } as never)
+      .returning({ id: candidates.id });
+    const [app] = await db
+      .insert(applications)
+      .values({ orgId, requisitionId: req!.id, candidateId: cand!.id, stage: "shortlisted" } as never)
+      .returning({ id: applications.id });
+    return app!.id;
+  }
+
+  test("an offer takes its currency, basis, kind and contract end from the role", async () => {
+    const appId = await contractApplication();
+    const { createOfferCore } = await import("../src/lib/offers.functions");
+    const { id } = await createOfferCore(
+      who(hr),
+      { applicationId: appId, offeredCtc: "52000", joiningDate: "2027-01-01" },
+      "draft",
+    );
+    const [o] = await db.select().from(offers).where(eq(offers.id, id));
+    expect(o).toMatchObject({
+      currency: "EUR",
+      payBasis: "annual",
+      kindOfWork: "fixed_term",
+      contractEnd: "2027-12-31",
+      rateLockedAt: null,
+    });
+
+    // Approval fixes the rate: €52k at the EUR→USD rate entered earlier.
+    const { lockOfferRate } = await import("../src/lib/pay-context.server");
+    await lockOfferRate(orgId, id);
+    const [locked] = await db.select().from(offers).where(eq(offers.id, id));
+    expect(locked!.reportingCurrency).toBe("USD");
+    expect(Number(locked!.reportingAmount)).toBeCloseTo(56_160, 0);
+    expect(locked!.rate).toMatchObject({ rate: 1.08, source: "Finance table" });
+    // Fixed once: a later rate does not move it.
+    await pay.addExchangeRateCore(who(hr), {
+      from: "EUR",
+      to: "USD",
+      rate: 1.2,
+      source: "Finance table",
+    });
+    await lockOfferRate(orgId, id);
+    const [again] = await db.select().from(offers).where(eq(offers.id, id));
+    expect(Number(again!.reportingAmount)).toBeCloseTo(56_160, 0);
+  });
+
+  test("no rate at approval: left out of reports, never guessed — and the health rule says so", async () => {
+    const appId = await contractApplication();
+    const [o] = await db
+      .insert(offers)
+      .values({
+        orgId,
+        applicationId: appId,
+        offeredCtc: "9000000",
+        currency: "JPY",
+        status: "approved",
+      } as never)
+      .returning({ id: offers.id });
+    const { lockOfferRate } = await import("../src/lib/pay-context.server");
+    await lockOfferRate(orgId, o!.id);
+    const [locked] = await db.select().from(offers).where(eq(offers.id, o!.id));
+    expect(locked!.reportingAmount).toBeNull();
+    expect(locked!.rateLockedAt).not.toBeNull();
+    const { evaluateAgentHealth } = await import("../src/server/agents/health.server");
+    const { agentIssues } = await import("../drizzle/schema");
+    await evaluateAgentHealth({ orgId });
+    const issues = await db.select().from(agentIssues).where(eq(agentIssues.orgId, orgId));
+    expect(issues.find((i) => i.rule === "context.offer_not_in_reports")).toMatchObject({
+      agentType: "offer",
+      title: expect.stringContaining("JPY"),
+    });
   });
 });

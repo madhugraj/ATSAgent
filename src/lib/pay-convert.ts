@@ -325,7 +325,9 @@ function indian(n: number): string {
 /** International grouping: "1.2 million", "90 thousand", "65.50". */
 function international(n: number): string {
   if (n >= 1e6) return `${round(n / 1e6, 2)} million`;
-  if (n >= 1e4) return `${round(n / 1e3, 1)} thousand`;
+  // From a thousand up, said with its scale ("3 thousand"): the negotiation call's
+  // amount guard reads amounts by their scale words.
+  if (n >= 1e3) return `${round(n / 1e3, 1)} thousand`;
   return Number.isInteger(n) ? String(n) : n.toFixed(2);
 }
 
