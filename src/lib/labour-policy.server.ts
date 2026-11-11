@@ -678,3 +678,39 @@ export async function listFindings(orgId: string, limit = 50) {
     .orderBy(desc(policyFindings.createdAt))
     .limit(limit);
 }
+
+/** The approved rules that apply to a pay zone: its own and those for all locations. */
+export async function approvedRulesFor(orgId: string, zoneId: string | null) {
+  const rows = await db
+    .select({
+      id: policyFindings.id,
+      area: policyFindings.area,
+      rule: policyFindings.rule,
+      url: policyFindings.url,
+      quote: policyFindings.quote,
+      zoneId: policyFindings.zoneId,
+      decidedAt: policyFindings.decidedAt,
+    })
+    .from(policyFindings)
+    .where(and(eq(policyFindings.orgId, orgId), eq(policyFindings.status, "approved")))
+    .orderBy(policyFindings.area, policyFindings.id);
+  return rows.filter((r) => r.zoneId === null || r.zoneId === zoneId);
+}
+
+/** A rule forbidding questions about current or past pay (salary-history bans) (pure). */
+export const PAY_HISTORY_BAN =
+  /\b(salary|pay|compensation|wage)\s+history\b|\b(current|past|previous|prior|former)\s+(pay|salary|salaries|compensation|wages?|ctc)\b/i;
+
+/**
+ * The approved rules a phone call must follow where the job is: what may not be
+ * asked, AI calls and recording, candidate data — and whether pay history is banned.
+ */
+export async function callRulesFor(orgId: string, zoneId: string | null) {
+  const rules = (await approvedRulesFor(orgId, zoneId)).filter((r) =>
+    ["questions", "ai_and_recording", "data"].includes(r.area),
+  );
+  return {
+    lines: rules.map((r) => r.rule),
+    payHistoryBanned: rules.some((r) => r.area === "questions" && PAY_HISTORY_BAN.test(r.rule)),
+  };
+}

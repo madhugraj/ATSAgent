@@ -850,6 +850,8 @@ erDiagram
     text reporting_currency "nullable"
     jsonb rate "nullable"
     timestamptz rate_locked_at "nullable"
+    jsonb policy_check "nullable"
+    jsonb policy_override "nullable"
   }
   hr_incentive_schemes {
     uuid org_id PK,FK
@@ -1498,7 +1500,7 @@ erDiagram
 | `member_interviewer_profiles` | — | 9 | (member_id) |
 | `notification_states` | — | 7 | — |
 | `offer_negotiations` | — | 24 | — |
-| `offers` | Offers & onboarding | 22 | — |
+| `offers` | Offers & onboarding | 24 | — |
 | `onboarding_documents` | Offers & onboarding | 23 | — |
 | `ontology_snapshots` | Intelligence | 11 | — |
 | `org_agreements` | Organisations & masters | 10 | — |

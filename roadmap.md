@@ -74,8 +74,20 @@
   what it found). Health rules: a source failing 3 reads in a row; a zone with
   an open role and no read for 14 days; a change in effect still waiting.
   Eval: a quoted change approved, a planted instruction on the page ignored.
-- Next: L3 — the offer check before every offer letter, and per-zone rules for
-  the calls, JD pay disclosure and requisition limits.
+- Shipped L3 (11 November): migration 0077. The offer check — the letter and
+  terms against the approved labour rules for the role's pay zone, each item
+  pass / fix needed (with suggested wording) / needs counsel, through the
+  gateway (feature `offer_policy_check`, the letter as untrusted data). It runs
+  when an offer is sent for approval (or from the letter dialog / the Offer
+  agent's `check_offer_against_policy`, offer agent 1.8.0); a fix needed
+  blocks approval unless the HR head overrides with a reason (audited,
+  captured for training); the result is on the approval card; any change to
+  the rules, letter or terms makes it stale. No rules for the place: needs
+  counsel, no AI call. Screening call 1.11.0 follows the approved rules where
+  the job is (questions, AI calls, data); under a salary-history ban it never
+  asks current pay (`not_allowed`, accepted only when such a rule is in
+  force). JDs and requisitions already read the approved rules through the
+  organisation context. Health rule: offer checks overridden in 30 days.
 
 ## Agent intelligence (2026-11-06)
 

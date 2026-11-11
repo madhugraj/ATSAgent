@@ -81,7 +81,7 @@ export const CALL_TOOL_INPUTS = {
       .array(
         z.object({
           item: z.enum(MANDATORY_DETAILS),
-          why: z.enum(["declined", "not_working"]),
+          why: z.enum(["declined", "not_working", "not_allowed"]),
         }),
       )
       .max(3)
@@ -154,6 +154,11 @@ export type CallState = {
   reschedulesLeft?: number;
   /** Length of the assistant's spoken lines at the last record_details (live call). */
   saidAtDetails?: number;
+  /**
+   * An approved labour rule where the job is forbids asking current or past pay
+   * (docs/labour-policy-agent-plan.md, L3): current pay may be "not_allowed".
+   */
+  payHistoryBanned?: boolean;
 };
 
 export const freshCallState = (): CallState => ({
@@ -207,6 +212,8 @@ export function mandatoryMissing(d: CallDetailsInput | null): MandatoryDetail[] 
   const excused = (item: MandatoryDetail): boolean => {
     const why = notGiven.get(item);
     if (why === "not_working") return item === "current_pay";
+    // Accepted by record_details only where an approved rule forbids asking it.
+    if (why === "not_allowed") return item === "current_pay";
     if (why === "declined")
       return Boolean(item === "joining_date" ? d?.candidate_note : d?.pay_note);
     return false;
@@ -219,7 +226,7 @@ export function mandatoryMissing(d: CallDetailsInput | null): MandatoryDetail[] 
   return MANDATORY_DETAILS.filter((item) => !has[item] && !excused(item));
 }
 
-export type RequiredStatus = "recorded" | "declined" | "not_working" | "missing";
+export type RequiredStatus = "recorded" | "declined" | "not_working" | "not_allowed" | "missing";
 
 /** Where each required detail stands (pure; stored on the call, no figures). */
 export function requiredDetailStatus(
@@ -320,6 +327,15 @@ export function applyCallTool(
     }
     case "record_details": {
       const input = { ...(parsed.data as CallDetailsInput) };
+      // "Not allowed" only where an approved labour rule forbids asking current pay.
+      const notAllowed = (input.not_given ?? []).filter((n) => n.why === "not_allowed");
+      if (notAllowed.length && (!state.payHistoryBanned || notAllowed.some((n) => n.item !== "current_pay")))
+        return {
+          ok: false,
+          error: state.payHistoryBanned
+            ? "Only current pay may be listed as not allowed."
+            : "No rule here forbids asking that — ask it as usual.",
+        };
       // A required detail is taken as declined only once the candidate has been told,
       // since the last record_details, that without it the application cannot be
       // considered — that is the second ask (live call; screening 1.6.2). A test call

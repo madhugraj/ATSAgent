@@ -104,6 +104,9 @@ export const SCREENING_CALL_CHARTER: VoiceCharter = {
       'Summarise, reflect or repeat the candidate\'s answers back to them, or acknowledge each one ("thank you", "noted") — it goes straight to the next question.',
     ),
     c("Grade, advance or reject anyone — the grade goes to people."),
+    c(
+      "Ask anything an approved labour rule where the job is forbids (for example current or past pay where a salary-history ban applies).",
+    ),
   ],
   handOff: [
     ...COMMON_HAND_OFF,

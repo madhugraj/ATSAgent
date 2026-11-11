@@ -242,6 +242,16 @@ export const advanceOfferCore = createServerOnlyFn(async function advanceOfferCo
           : `This offer cannot be ${data.status === "released" ? "released" : "approved"} yet: ${listWords(missing)} ${missing.length > 1 ? "are" : "is"} missing. Send it back with that reason — the Offer agent collects them and redrafts.`,
       );
   }
+  // The offer check against the approved labour rules (docs/labour-policy-agent-plan.md,
+  // L3): current, and no fix left unless the HR head overrode it with a reason.
+  if (data.status === "pending_hr") {
+    const { offerCheckBlock } = await import("./offer-check.server");
+    const block = await offerCheckBlock(actor.orgId, data.id, {
+      autoRun: true,
+      actor: actor.memberEmail,
+    });
+    if (block) throw new Error(block);
+  }
   // Release gate: pre-onboarding documents must be collected and validated
   // before the letter goes out. The checklist is evaluated server-side.
   if (data.status === "released") {

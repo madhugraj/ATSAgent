@@ -1,6 +1,6 @@
 # Labour law & policy agent — plan
 
-Status: **approved** (11 November 2026). **L0–L2 built** (migration 0076; `src/lib/labour-policy.server.ts`, `src/server/agents/tools-labour.ts`, the `policy_finding` gate, `scripts/labour-policy.test.ts`); L3 (offer check, per-zone overlays) next. As built, approved findings are the organisation's labour rules directly (read into the organisation context) rather than items in a new profile version, so one HR-head approval suffices.
+Status: **approved** (11 November 2026). **L0–L2 built** (migration 0076; `src/lib/labour-policy.server.ts`, `src/server/agents/tools-labour.ts`, the `policy_finding` gate, `scripts/labour-policy.test.ts`); L3 built too (migration 0077; `src/lib/offer-check.server.ts`, the screening call's place rules; `scripts/offer-check.test.ts`). As built, approved findings are the organisation's labour rules directly (read into the organisation context) rather than items in a new profile version, so one HR-head approval suffices.
 Companion to `docs/pay-terms-plan.md` (pay zones, regions) and
 `docs/org-context-agent-plan.md` (the organisation profile it updates).
 

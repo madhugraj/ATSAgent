@@ -46,6 +46,13 @@ export type BriefFacts = {
    * rupees, permanent) — calls before pay terms behave exactly as before.
    */
   pay?: import("@/lib/pay-terms").CallPayWords;
+  /**
+   * Approved labour rules where the job is that a call must follow (what may not be
+   * asked, AI calls and recording, data) — docs/labour-policy-agent-plan.md, L3.
+   */
+  placeRules?: string[];
+  /** An approved rule there forbids asking current or past pay. */
+  payHistoryBanned?: boolean;
   /** The domain of the e-mail on their CV ("gmail.com"), to say where a confirmation goes. */
   emailDomain: string | null;
   questions: CallQuestion[];
@@ -149,6 +156,9 @@ export function callSystemPrompt(f: BriefFacts): string {
     `- They can check the call is genuine by writing to ${f.contactEmail ?? `${org}'s HR team`} (never a person's address).`,
     `- Calling hours: ${f.callingHours}.`,
     `- Next steps you may promise: ${f.nextSteps}`,
+    f.placeRules?.length
+      ? `- Rules where this job is (approved by the HR head; they come before the steps below): ${f.placeRules.join(" ")}`
+      : null,
     pay.currency !== "INR" || pay.contract
       ? `- Pay for this role is asked as the ${pay.term} in ${pay.currencyName}${pay.contract ? `; it is a contract${pay.contractMonths ? ` of ${pay.contractMonths} months` : ""}` : ""}. The role's own pay is never discussed.`
       : null,
@@ -184,7 +194,11 @@ ${
     : `   a. "What is your notice period?";
    b. "Which date could you join?" — the date only, never the joining date again in other words;`
 }
-   c. "What is your current ${pay.term}?" (a total is fine: record it as current fixed pay, "total; split not given" in pay_note);
+${
+  f.payHistoryBanned
+    ? `   c. Never ask their current or past pay — a rule where this job is forbids it. Record current_pay in not_given with why "not_allowed". If they offer it unasked, do not record it.`
+    : `   c. "What is your current ${pay.term}?" (a total is fine: record it as current fixed pay, "total; split not given" in pay_note);`
+}
    d. "And your expected ${pay.term}?"
    Clear means ${pay.contract ? "a calendar date" : "days or months, a calendar date"}, a figure${pay.currency === "INR" ? " in rupees" : ""}. A figure in another currency or per another period is an answer: record it as said, with pay_currency and pay_basis. Unclear ("around three months", "you can calculate it", "negotiable", "as per the norms", "after the interviews", a percentage or a range): ask once more for the specific date or figure, saying in the same breath: "${CONSEQUENCE_LINE}" Never work out a date or a figure for them, even when asked. Still not given: record_details with their words and the item in not_given ("declined"), move on (record_details refuses a decline until you have said that sentence for it). Never ask for the same detail a third time. Not working now: skip notice and current CTC (current_pay in not_given, "not_working"). Pay is always asked afresh ("so our notes are up to date"); never state, react to or compare a figure. Salary for the role: the HR team will discuss pay separately.
    Throughout: never tell them a detail is not needed. After an answer, no "thank you", "noted" or "understood": record it and go straight to the next question. Whenever they mention or correct a detail at any point in the call, call record_details with it.`,

@@ -59,6 +59,7 @@ export async function loadBriefFacts(input: {
       candidateSkills: candidates.skills,
       requisitionId: requisitions.id,
       kindOfWork: requisitions.kindOfWork,
+      payZoneId: requisitions.payZoneId,
       payBasis: requisitions.payBasis,
       payCurrency: requisitions.payCurrency,
       contractMonths: requisitions.contractMonths,
@@ -111,9 +112,11 @@ export async function loadBriefFacts(input: {
 
   const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
   const { detailsFor } = await import("@/lib/compensation.server");
-  const [email, pay] = await Promise.all([
+  const { callRulesFor } = await import("@/lib/labour-policy.server");
+  const [email, pay, rules] = await Promise.all([
     getOrgEmailSettings(input.orgId),
     detailsFor(input.orgId, input.applicationId),
+    callRulesFor(input.orgId, row.payZoneId),
   ]);
 
   return {
@@ -149,6 +152,8 @@ export async function loadBriefFacts(input: {
       currency: row.payCurrency,
       contractMonths: row.contractMonths,
     }),
+    placeRules: rules.lines,
+    payHistoryBanned: rules.payHistoryBanned,
     emailDomain: row.candidateEmail?.split("@")[1]?.toLowerCase() || null,
     questions: questionsForCall(kitQuestions, input.policy.maxMinutes),
     maxMinutes: input.policy.maxMinutes,
