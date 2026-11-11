@@ -1,4 +1,4 @@
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -198,6 +198,29 @@ function OrganisationSettings() {
   }, [org]);
 
   if (isLoading) return <p className="text-sm text-muted-foreground">Loading organisation…</p>;
+
+  // Owner-only page: the sidebar hides it from everyone else, and this gate
+  // keeps a pasted link from opening it. The server fns behind each control
+  // assert their own roles; this is the page-level mirror.
+  if (!isOwner)
+    return (
+      <>
+        <PageHeader
+          eyebrow="Organisation"
+          title="Organisation"
+          description="Owner settings for this tenant."
+        />
+        <p className="panel p-4 text-sm text-muted-foreground">
+          Only the organisation owner can open these settings. Ask {org?.name}&apos;s owner for
+          changes to the organisation&apos;s details, pay zones, rules or call settings — and for
+          the organisation profile, the HR head or the CBO can open{" "}
+          <Link to="/org-profile" className="underline">
+            Organisation profile
+          </Link>
+          .
+        </p>
+      </>
+    );
 
   const aiKeyConnected = Object.values(ai.data?.keys ?? {}).some(Boolean);
   const zones = pay.data?.conventions?.zones ?? [];
