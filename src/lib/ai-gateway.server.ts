@@ -1107,6 +1107,8 @@ type Loose = any;
 
 const AGENT_STEP_TIMEOUT_MS = 120_000;
 const AGENT_MAX_OUTPUT_TOKENS = 8192;
+/** Agent turns on models whose thinking shares the output budget: room to think and answer. */
+const GEMINI_AGENT_MAX_OUTPUT_TOKENS = 24_576;
 
 /**
  * JSON Schema for a tool's input, from a zod schema.
@@ -1334,7 +1336,9 @@ function googleAgentBody(
   return {
     systemInstruction: { parts: [{ text: system }] },
     contents,
-    generationConfig: { maxOutputTokens: maxOutputTokens ?? AGENT_MAX_OUTPUT_TOKENS },
+    // Thinking counts against maxOutputTokens on these models: at 8k an agent turn
+    // (Voice Guard reviewing a call) spent all of it thinking and returned nothing.
+    generationConfig: { maxOutputTokens: maxOutputTokens ?? GEMINI_AGENT_MAX_OUTPUT_TOKENS },
     ...(tools.length
       ? {
           tools: [

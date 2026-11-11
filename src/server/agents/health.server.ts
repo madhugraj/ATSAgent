@@ -1237,14 +1237,17 @@ export const RULES: Rule[] = [
     id: "tools.repeated_reads",
     element: "tools",
     severity: "warning",
-    description: `A run called the same read tool ${HEALTH.repeatedReadsPerRun} or more times in 24 hours — the agent is re-reading (or trying guessed addresses) instead of working from what it read, and spends its budget before it finishes.`,
+    description: `A run called the same read tool with the same arguments ${HEALTH.repeatedReadsPerRun} or more times in 24 hours — the agent is re-reading (or trying guessed addresses) instead of working from what it read, and spends its budget before it finishes.`,
     evaluate: async (orgId) => {
       const r = await rows<{ agent_type: string; runs: number; most: number; tool: string }>(sql`
         select r.agent_type, count(*)::int runs, max(q.n)::int most, min(q.tool_name) tool from (
           select s.run_id, s.tool_name, count(*) n from agent_steps s
           where s.org_id = ${orgId} and s.kind = 'tool' and s.tool_name like 'read_%'
             and s.created_at >= now() - interval '24 hours'
-          group by s.run_id, s.tool_name having count(*) >= ${HEALTH.repeatedReadsPerRun}) q
+          -- The same read with the same arguments: searching a document for different
+          -- sections, or reading different documents, is work, not re-reading.
+          group by s.run_id, s.tool_name, s.input::text
+          having count(*) >= ${HEALTH.repeatedReadsPerRun}) q
         join agent_runs r on r.id = q.run_id
         group by r.agent_type`);
       return r.map((x) => ({
