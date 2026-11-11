@@ -27,7 +27,7 @@ export function OrgProfileNotice() {
           ? "No approved organisation profile — your organisation requires one before a role is raised."
           : "No organisation profile — agents are working without your organisation's context."}
       </span>
-      <Link to="/organisation" search={{ tab: "profile" }} className="ml-auto text-xs text-primary underline">
+      <Link to="/org-profile" className="ml-auto text-xs text-primary underline">
         Organisation profile
       </Link>
     </div>

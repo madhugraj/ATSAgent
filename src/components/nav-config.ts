@@ -4,6 +4,7 @@ import {
   Bot,
   BookMarked,
   BookOpen,
+  BookOpenText,
   Brain,
   Briefcase,
   Building2,
@@ -254,7 +255,15 @@ export const NAV_GROUPS: NavGroup[] = [
         to: "/organisation",
         label: "Organisation",
         icon: Building2,
-        show: (c) => c.isOwner || c.governance,
+        show: (c) => c.isOwner,
+      },
+      {
+        to: "/org-profile",
+        label: "Organisation profile",
+        icon: BookOpenText,
+        // Owners work on the profile as the Organisation page's Profile tab;
+        // the HR head and the CBO keep this page.
+        show: (c) => c.governance && !c.isOwner,
       },
       { to: "/integrations", label: "Integrations", icon: Plug, show: (c) => c.governance },
       { to: "/masters", label: "Master data", icon: Database, show: (c) => c.governance },
