@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   addPolicySource,
+  checkPolicyNow,
   getLabourPolicy,
   seedPolicySources,
   setPolicySourceActive,
@@ -22,9 +23,9 @@ const STATUS_WORDS: Record<string, string> = {
 };
 const READ_WORDS: Record<string, string> = {
   first: "read",
-  changed: "changed",
-  unchanged: "no change",
-  failed: "failed",
+  changed: "read — something changed",
+  unchanged: "read — no change",
+  failed: "could not be read",
 };
 
 /**
@@ -39,7 +40,8 @@ export function LabourPolicyCard() {
   const [busy, setBusy] = useState(false);
   const [src, setSrc] = useState({ url: "", label: "", country: "" });
   if (!q.data) return null;
-  const { sources, findings, canDecide } = q.data;
+  const { sources, findings, canDecide, agentOn, lastRun } = q.data;
+  const running = lastRun?.status === "queued" || lastRun?.status === "running";
 
   async function act(fn: () => Promise<unknown>, done: string) {
     setBusy(true);
@@ -67,9 +69,34 @@ export function LabourPolicyCard() {
         Each week the Labour law &amp; policy agent reads these official sources for the places you
         hire — only these, never a search — and brings each change that matters to hiring to the HR
         head with the source&apos;s exact words. An approved change becomes a rule every agent works
-        within. It is not legal advice; check with counsel where it matters. Switch the agent on
-        under Agent settings.
+        within. It is not legal advice; check with counsel where it matters.
       </p>
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <span>
+          Agent:{" "}
+          <strong>
+            {agentOn ? "on — checks weekly" : "off — switch it on under Agent settings"}
+          </strong>
+          {lastRun
+            ? ` · last check ${lastRun.at.slice(0, 10)}${running ? " (running now)" : ""}`
+            : " · not checked yet"}
+        </span>
+        {canDecide ? (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy || !agentOn || running || !sources.some((s) => s.active)}
+            onClick={() =>
+              act(() => checkPolicyNow(), "Checking now — results appear here in a few minutes.")
+            }
+          >
+            {running ? "Checking…" : "Check now"}
+          </Button>
+        ) : null}
+      </div>
+      {lastRun?.result && !running ? (
+        <p className="text-xs text-muted-foreground">Last check: {lastRun.result}</p>
+      ) : null}
 
       <div>
         <h3 className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Sources</h3>
@@ -86,12 +113,19 @@ export function LabourPolicyCard() {
                   {s.label}
                 </a>
                 <span className="text-xs text-muted-foreground">
-                  {s.country ?? s.level}
+                  {s.country ?? s.level} ·{" "}
+                  <strong className={s.active ? "" : "text-amber-700 dark:text-amber-400"}>
+                    {s.active ? "Active" : "Paused"}
+                  </strong>
                   {s.lastRead
                     ? ` · ${READ_WORDS[s.lastRead.status] ?? s.lastRead.status} ${s.lastRead.at.slice(0, 10)}`
                     : " · not read yet"}
-                  {s.active ? "" : " · paused"}
                 </span>
+                {s.lastRead?.status === "failed" && s.lastRead.error ? (
+                  <span className="basis-full text-xs text-red-700 dark:text-red-400">
+                    {s.lastRead.error}
+                  </span>
+                ) : null}
                 {canDecide ? (
                   <Button
                     size="sm"
@@ -104,7 +138,7 @@ export function LabourPolicyCard() {
                       )
                     }
                   >
-                    {s.active ? "Pause" : "Resume"}
+                    {s.active ? "Pause reading" : "Resume reading"}
                   </Button>
                 ) : null}
               </li>

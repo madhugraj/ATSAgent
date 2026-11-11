@@ -35,7 +35,12 @@ const audits = (action: string) =>
     .from(auditLog)
     .where(and(eq(auditLog.orgId, orgId), eq(auditLog.action, action)));
 
-const PAGE_1 = ["Ministero del Lavoro", "Notizie", "Bando per la formazione 2026"].join("\n");
+const PAGE_1 = [
+  "Ministero del Lavoro e delle Politiche Sociali — Notizie e comunicati",
+  "Bando per la formazione 2026: domande entro il 31 gennaio per le imprese e i lavoratori.",
+  "Comunicato stampa: incontro con le parti sociali sul rinnovo dei contratti collettivi nazionali.",
+  "Avviso pubblico per il finanziamento di progetti di inclusione lavorativa delle persone fragili.",
+].join("\n");
 const PAGE_2 = [
   PAGE_1,
   "Fixed-term contracts longer than twelve months must state the specific reason for the term, from 1 January 2027.",
@@ -86,18 +91,20 @@ afterAll(async () => {
 describe("sources", () => {
   test("seeds follow the zones: global, the EU journal, and Italy's own pages", () => {
     const urls = lp.seedsFor([{ id: "z", countries: ["IT"] }]).map((s) => s.url);
-    expect(urls).toContain("https://natlex.ilo.org/");
-    expect(urls).toContain("https://eur-lex.europa.eu/oj/direct-access.html");
-    expect(urls).toContain("https://www.lavoro.gov.it/notizie");
-    expect(lp.seedsFor([{ id: "z", countries: ["IN"] }]).map((s) => s.url)).not.toContain(
-      "https://eur-lex.europa.eu/oj/direct-access.html",
-    );
+    expect(urls).toEqual([
+      "https://www.lavoro.gov.it/notizie",
+      "https://www.gazzettaufficiale.it/",
+    ]);
+    // Only pages a plain fetch can read: no ILO (refuses), no labour.gov.in (built in the browser).
+    const india = lp.seedsFor([{ id: "z", countries: ["IN"] }]).map((s) => s.url);
+    expect(india).toContain("https://www.esic.gov.in/circulars");
+    expect(india.some((u) => /natlex|labour\.gov\.in|egazette/.test(u))).toBe(false);
   });
 
   test("seeding and adding: deciders only, https only, audited, no duplicates", async () => {
     await expect(lp.seedSourcesCore(who(recruiter))).rejects.toThrow(/Only the HR head/);
     const first = await lp.seedSourcesCore(who(hr));
-    expect(first.added).toBeGreaterThanOrEqual(3);
+    expect(first.added).toBe(2);
     expect((await lp.seedSourcesCore(who(hr))).added).toBe(0);
     await expect(
       lp.addSourceCore(who(hr), { url: "http://example.gov/x", label: "Plain http" }),
@@ -145,6 +152,10 @@ describe("reads and findings", () => {
     expect(changed.status).toBe("changed");
     expect(changed.newText).toContain("Fixed-term contracts longer than twelve months");
     expect(changed.newText).not.toContain("Bando per la formazione");
+    // A page with no readable text fails with the reason, never reads as "no change".
+    const empty = await read("<div id=root></div> 2026 · 1 · 2 · 3", 72);
+    expect(empty.status).toBe("failed");
+    expect(empty.error).toContain("No readable text");
     const failed = await lp.readSourceCore(orgId, sourceId, {
       now: at(200),
       fetchText: async () => {
@@ -285,5 +296,32 @@ describe("health rules", () => {
     expect(rule("context.policy_waiting_past_effective")).toMatchObject({ severity: "serious" });
     // Italy was read this run: not flagged as unread.
     expect(issues.some((i) => i.title.includes("for Italy"))).toBe(false);
+  });
+});
+
+describe("seeding without zones, and checking now", () => {
+  test("no pay zones: the headquarters country's sources; check now refuses while the agent is off", async () => {
+    const { organizations: orgs, payZones: zones } = await import("../drizzle/schema");
+    const [solo] = await db
+      .insert(users)
+      .values({ email: `lp-hq-${stamp}@test.local` })
+      .returning({ id: users.id });
+    const [o2] = await db
+      .insert(orgs)
+      .values({ name: "HQ Only Org", slug: `hq-${stamp}`, status: "active", hqCountry: "India" })
+      .returning({ id: orgs.id });
+    await db.insert(orgMembers).values({
+      orgId: o2!.id,
+      userId: solo!.id,
+      email: `${solo!.id}@x.local`,
+      status: "active",
+      isOwner: true,
+    } as never);
+    const as = { orgId: o2!.id, userId: solo!.id, memberEmail: `${solo!.id}@x.local` };
+    expect((await db.select().from(zones).where(eq(zones.orgId, o2!.id))).length).toBe(0);
+    expect((await lp.seedSourcesCore(as)).added).toBe(3);
+    await expect(lp.checkNowCore(as)).rejects.toThrow(/agent is off/);
+    await db.delete(orgs).where(eq(orgs.id, o2!.id));
+    await db.delete(users).where(eq(users.id, solo!.id));
   });
 });
