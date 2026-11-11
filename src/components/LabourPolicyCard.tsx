@@ -43,7 +43,7 @@ export function LabourPolicyCard() {
   /** The source waiting for "Yes, remove" (one at a time). */
   const [removing, setRemoving] = useState<string | null>(null);
   if (!q.data) return null;
-  const { sources, findings, canDecide, agentOn, lastRun } = q.data;
+  const { sources, findings, canDecide, agentOn, lastRun, briefings } = q.data;
   const running = lastRun?.status === "queued" || lastRun?.status === "running";
 
   async function act(fn: () => Promise<unknown>, done: string) {
@@ -253,6 +253,86 @@ export function LabourPolicyCard() {
           </div>
         ) : null}
       </div>
+
+      {briefings.length ? (
+        <div className="space-y-3">
+          <h3 className="text-xs font-semibold uppercase text-muted-foreground">Briefings</h3>
+          {briefings.map((b) => (
+            <article key={b.id} className="space-y-2 rounded-md border p-3 text-sm">
+              <p className="font-medium">
+                {b.topic} —{" "}
+                {b.status === "pending"
+                  ? "waiting for the HR head"
+                  : b.status === "approved"
+                    ? "approved: in force"
+                    : `declined${b.decisionNote ? ` (${b.decisionNote})` : ""}`}
+              </p>
+              {b.timeline.length ? (
+                <table className="w-full text-xs">
+                  <thead className="text-left text-muted-foreground">
+                    <tr>
+                      <th className="py-1 font-medium">Date</th>
+                      <th className="font-medium">Development</th>
+                      <th className="font-medium">Official reference</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {b.timeline.map((t) => (
+                      <tr key={t.url + t.date} className="border-t align-top">
+                        <td className="py-1 pr-2 whitespace-nowrap">{t.date}</td>
+                        <td className="pr-2">{t.development}</td>
+                        <td>
+                          <a
+                            href={t.url}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            className="underline"
+                          >
+                            {t.title}
+                          </a>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : null}
+              {b.provisions.length ? (
+                <ul className="space-y-2">
+                  {b.provisions.map((p) => (
+                    <li key={p.findingId}>
+                      <p className="font-medium">
+                        {p.ref} — {p.summary}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        “{p.quote}” —{" "}
+                        <a
+                          href={p.url}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          className="underline"
+                        >
+                          document
+                        </a>
+                      </p>
+                      {p.impact ? <p className="text-xs">For HR: {p.impact}</p> : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {b.hrImpact ? (
+                <p className="text-xs">
+                  <span className="font-medium">What it means for HR:</span> {b.hrImpact}
+                </p>
+              ) : null}
+            </article>
+          ))}
+          {briefings.some((b) => b.status === "pending") ? (
+            <Link to="/inbox" className="inline-block text-sm underline">
+              Decide waiting briefings in the approvals inbox
+            </Link>
+          ) : null}
+        </div>
+      ) : null}
 
       <div>
         <h3 className="mb-1 text-xs font-semibold uppercase text-muted-foreground">

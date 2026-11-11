@@ -228,12 +228,14 @@ type OrgProfileSubject = { type: "org_profile"; versionId: string; expects?: str
 type PayConventionsSubject = { type: "pay_conventions"; draftId: string; expects?: string };
 /** A labour policy finding (docs/labour-policy-agent-plan.md). */
 type PolicyFindingSubject = { type: "policy_finding"; findingId: string; expects?: string };
+type PolicyBriefingSubject = { type: "policy_briefing"; briefingId: string; expects?: string };
 type GateSubject =
   | ExpertBriefSubject
   | import("../panel/review.server").PanelReviewSubject
   | OrgProfileSubject
   | PayConventionsSubject
   | PolicyFindingSubject
+  | PolicyBriefingSubject
   | PanelApprovalSubject
   | PanelSubstituteSubject
   | RecordSubject
@@ -385,6 +387,19 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
       status: "pending",
       detail: orgProfileDetail(found.approved?.sections ?? null, found.version),
       subject: { type: "org_profile", versionId: subject.versionId, expects: "pending" },
+    };
+  }
+  if (subject.type === "policy_briefing") {
+    const { briefingFor, briefingWords } = await import("@/lib/labour-policy.server");
+    const b = await briefingFor(orgId, subject.briefingId);
+    if (!b) return { error: "Policy briefing not found." };
+    if (b.status !== "pending")
+      return { error: `This briefing is ${b.status}, not waiting for a decision.` };
+    return {
+      role: "hr_head",
+      status: "pending",
+      detail: briefingWords(b),
+      subject: { type: "policy_briefing", briefingId: b.id, expects: "pending" },
     };
   }
   if (subject.type === "policy_finding") {
@@ -739,6 +754,22 @@ async function performGate(
         note: note ?? "",
       });
     }
+    return;
+  }
+  if (subject.type === "policy_briefing") {
+    const { decideBriefingCore } = await import("@/lib/labour-policy.server");
+    if (decision.status === "approved")
+      await decideBriefingCore(actor, {
+        briefingId: subject.briefingId,
+        decision: "approve",
+        note: decision.comment ?? null,
+      });
+    else if (decision.status === "rejected")
+      await decideBriefingCore(actor, {
+        briefingId: subject.briefingId,
+        decision: "reject",
+        note: decision.reason?.trim() || "Declined without a reason.",
+      });
     return;
   }
   if (subject.type === "policy_finding") {

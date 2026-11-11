@@ -65,6 +65,57 @@ export function registerLabourTools(): void {
   });
 
   registerTool({
+    name: "submit_policy_briefing",
+    description:
+      "File a briefing on one law for the HR head: a dated timeline of what the government published about it (each entry a document on a source's listing, with the date the listing gives — checked), the key provisions (each with its section reference, the exact words from the document it cites — checked — a plain summary, the rule the organisation should follow and what it means for HR), and what the law means for HR overall (e.g. how salaries are structured). Nothing is stored unless every line checks out: the errors say which to fix. Then request_approval with subject {type: 'policy_briefing', briefingId} and assignee_role 'hr_head' — one decision for the whole briefing.",
+    input: z.object({
+      topic: z.string().min(3).max(200),
+      hrImpact: z.string().min(20).max(4000),
+      timeline: z
+        .array(
+          z.object({
+            sourceId: z.string().uuid(),
+            date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+            development: z.string().min(5).max(300),
+            documentUrl: z.string().url().max(1000),
+          }),
+        )
+        .max(30),
+      provisions: z
+        .array(
+          z.object({
+            sourceId: z.string().uuid(),
+            documentUrl: z.string().url().max(1000).optional(),
+            ref: z.string().min(2).max(80),
+            quote: z.string().min(15).max(2000),
+            summary: z.string().min(10).max(600),
+            area: z.enum(POLICY_AREAS),
+            rule: z.string().min(10).max(1000),
+            impact: z.string().max(1000).optional(),
+            effectiveDate: z
+              .string()
+              .regex(/^\d{4}-\d{2}-\d{2}$/)
+              .optional(),
+          }),
+        )
+        .max(20),
+    }),
+    // Inert until approved: the briefing gate is the human decision.
+    risk: "read",
+    describe: (i) => `File a briefing on ${i.topic} for the HR head`,
+    run: async (ctx, i) => {
+      const { submitBriefingCore } = await import("@/lib/labour-policy.server");
+      const out = await submitBriefingCore(ctx.orgId, i, { agentRunId: ctx.runId });
+      return out.ok
+        ? {
+            ...out,
+            next: 'REQUIRED next call: request_approval with assignee_role "hr_head" and subject { type: "policy_briefing", briefingId: "<the briefingId above>" }.',
+          }
+        : out;
+    },
+  });
+
+  registerTool({
     name: "record_policy_finding",
     description:
       "Record one change on a source that matters to hiring where the organisation hires: the exact quote from the page you read (the code checks it is there), the area, a plain summary, the rule the organisation should follow from now on, what it changes in hiring (roles, questions, calls, offers) and the effective date when the source gives one. Nothing changes until the HR head approves it: then request_approval with subject {type: 'policy_finding', findingId} and assignee_role 'hr_head'.",

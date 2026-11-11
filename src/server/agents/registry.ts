@@ -76,6 +76,7 @@ export type GateKind =
   | "org_profile"
   | "pay_conventions"
   | "policy_finding"
+  | "policy_briefing"
   | "expert_brief"
   | "general";
 
@@ -145,6 +146,9 @@ export const SUBMISSION_TOOLS: ReadonlySet<string> = new Set([
   // Stores pay conventions as a pending proposal; applied only when the HR head
   // approves the pay_conventions gate (src/lib/pay-settings.server.ts).
   "propose_pay_conventions",
+  // Files a labour-law briefing (verified timeline and quoted provisions) for the
+  // HR head; nothing applies until the policy_briefing gate is approved.
+  "submit_policy_briefing",
   // In-call negotiation tool: passes the candidate's spoken yes to the hiring
   // team, who confirm it with them — it does not agree anything itself.
   "submit_agreed_terms",

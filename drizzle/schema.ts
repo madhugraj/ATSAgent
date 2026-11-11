@@ -4135,6 +4135,8 @@ export const policyFindings = pgTable(
     effectiveDate: date("effective_date"),
     status: text("status").notNull().default("new"),
     agentRunId: uuid("agent_run_id"),
+    /** The briefing this provision belongs to, decided with it (0079). */
+    briefingId: uuid("briefing_id").references(() => policyBriefings.id, { onDelete: "set null" }),
     decidedBy: uuid("decided_by").references(() => users.id, { onDelete: "set null" }),
     decidedAt: timestamp("decided_at", { withTimezone: true }),
     decisionNote: text("decision_note"),
@@ -4150,6 +4152,57 @@ export const policyFindings = pgTable(
     check(
       "policy_findings_area_check",
       sql`${t.area} in ('notice','probation','minimum_wage','hours','contracts','pay_transparency','questions','data','ai_and_recording','mandatory_pay','leave','other')`,
+    ),
+  ],
+);
+
+export type BriefingTimelineItem = {
+  date: string;
+  development: string;
+  url: string;
+  title: string;
+};
+export type BriefingProvision = {
+  ref: string;
+  summary: string;
+  quote: string;
+  url: string;
+  area: string;
+  rule: string;
+  impact: string;
+  findingId: string;
+};
+
+/** Per law: a verified timeline, the key provisions (each a finding) and what it means for HR (0079). */
+export const policyBriefings = pgTable(
+  "policy_briefings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    topic: text("topic").notNull(),
+    hrImpact: text("hr_impact").notNull().default(""),
+    timeline: jsonb("timeline")
+      .$type<BriefingTimelineItem[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    provisions: jsonb("provisions")
+      .$type<BriefingProvision[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    status: text("status").notNull().default("pending"),
+    agentRunId: uuid("agent_run_id"),
+    decidedBy: uuid("decided_by").references(() => users.id, { onDelete: "set null" }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decisionNote: text("decision_note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("policy_briefings_org_idx").on(t.orgId, t.status, t.createdAt),
+    check(
+      "policy_briefings_status_check",
+      sql`${t.status} in ('pending','approved','rejected','superseded')`,
     ),
   ],
 );
