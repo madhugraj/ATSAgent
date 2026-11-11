@@ -302,9 +302,6 @@ function Help() {
                 onClick={() => setOpen(i)}
                 className="group flex w-full items-baseline gap-2 rounded-md px-2 py-2 text-left hover:bg-accent/40"
               >
-                <span className="font-book text-sm tabular-nums text-muted-foreground">
-                  {chapterNo(s.title) ?? "·"}
-                </span>
                 <span className="font-book text-[0.98rem] font-medium group-hover:text-primary">
                   {s.title}
                 </span>
