@@ -7,6 +7,7 @@
  */
 import { z } from "zod";
 import { KINDS_OF_WORK, PAY_BASES, PAY_COMPONENTS } from "./pay-terms";
+import { isCountryCode, isCurrencyCode } from "./iso";
 
 export const POOLING_RULES = [
   "same_zone",
@@ -16,8 +17,14 @@ export const POOLING_RULES = [
 ] as const;
 export type PoolingRule = (typeof POOLING_RULES)[number];
 
-const Iso4217 = z.string().regex(/^[A-Z]{3}$/, "a three-letter currency code such as USD");
-const Country = z.string().regex(/^[A-Z]{2}$/, "a two-letter country code such as IT");
+const Iso4217 = z
+  .string()
+  .regex(/^[A-Z]{3}$/, "a three-letter currency code such as USD")
+  .refine(isCurrencyCode, "a real ISO currency code (the dropdowns offer every one)");
+const Country = z
+  .string()
+  .regex(/^[A-Z]{2}$/, "a two-letter country code such as IT")
+  .refine(isCountryCode, "a real ISO country code (the dropdown offers every one)");
 
 export const ConventionZone = z.object({
   name: z.string().trim().min(1).max(60),

@@ -9,6 +9,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { requireOrg } from "./auth.middleware";
+import { isCurrencyCode } from "./iso";
 import { PayConventions } from "./pay-settings";
 import { KINDS_OF_WORK, PAY_BASES } from "./pay-terms";
 
@@ -84,8 +85,14 @@ export const addExchangeRate = createServerFn({ method: "POST" })
   .validator((d: unknown) =>
     z
       .object({
-        from: z.string().regex(/^[A-Za-z]{3}$/),
-        to: z.string().regex(/^[A-Za-z]{3}$/),
+        from: z
+          .string()
+          .regex(/^[A-Za-z]{3}$/)
+          .refine(isCurrencyCode, "a real ISO currency code"),
+        to: z
+          .string()
+          .regex(/^[A-Za-z]{3}$/)
+          .refine(isCurrencyCode, "a real ISO currency code"),
         rate: z.number().positive(),
         source: z.string().trim().min(2).max(120),
       })
@@ -147,7 +154,10 @@ export const setRequisitionPayTerms = createServerFn({ method: "POST" })
         zone: z.string().max(60).nullable(),
         kind: z.enum(KINDS_OF_WORK),
         basis: z.enum(PAY_BASES),
-        currency: z.string().regex(/^[A-Za-z]{3}$/),
+        currency: z
+          .string()
+          .regex(/^[A-Za-z]{3}$/)
+          .refine(isCurrencyCode, "a real ISO currency code"),
         hoursPerWeek: z.number().min(1).max(80).nullable(),
         contractMonths: z.number().int().min(1).max(120).nullable(),
         extendable: z.boolean().nullable(),

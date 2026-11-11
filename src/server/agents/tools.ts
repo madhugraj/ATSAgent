@@ -8,6 +8,7 @@
  * for them with request_approval (registry gate guard).
  */
 import { rupees } from "@/lib/money";
+import { isCurrencyCode } from "@/lib/iso";
 import { and, desc, eq, ilike, inArray, or } from "drizzle-orm";
 import { z } from "zod";
 
@@ -385,6 +386,7 @@ export function registerPhase1Tools(): void {
       currency: z
         .string()
         .regex(/^[A-Za-z]{3}$/)
+        .refine(isCurrencyCode, "a real ISO currency code")
         .optional(),
       hoursPerWeek: z.number().min(1).max(80).nullable().optional(),
       daysPerWeek: z.number().min(1).max(7).nullable().optional(),
