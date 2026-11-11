@@ -1510,7 +1510,7 @@ erDiagram
 | `phone_screening_settings` | Screening & interviews | 16 | — |
 | `platform_admins` | Identity & access | 6 | (email) |
 | `policy_findings` | — | 17 | — |
-| `policy_reads` | — | 9 | — |
+| `policy_reads` | — | 10 | — |
 | `policy_sources` | — | 12 | (orgId+url) |
 | `pooling_regions` | — | 5 | (orgId+name) |
 | `product_catalogue_commercials` | Organisations & masters | 8 | — |

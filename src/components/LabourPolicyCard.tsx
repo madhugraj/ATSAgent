@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import {
   addPolicySource,
   checkPolicyNow,
+  deletePolicySource,
   getLabourPolicy,
   seedPolicySources,
   setPolicySourceActive,
@@ -39,6 +40,8 @@ export function LabourPolicyCard() {
   const q = useQuery({ queryKey: ["labour_policy"], queryFn: () => getLabourPolicy() });
   const [busy, setBusy] = useState(false);
   const [src, setSrc] = useState({ url: "", label: "", country: "" });
+  /** The source waiting for "Yes, remove" (one at a time). */
+  const [removing, setRemoving] = useState<string | null>(null);
   if (!q.data) return null;
   const { sources, findings, canDecide, agentOn, lastRun } = q.data;
   const running = lastRun?.status === "queued" || lastRun?.status === "running";
@@ -140,6 +143,42 @@ export function LabourPolicyCard() {
                   >
                     {s.active ? "Pause reading" : "Resume reading"}
                   </Button>
+                ) : null}
+                {canDecide ? (
+                  removing === s.id ? (
+                    <span className="flex items-center gap-1 text-xs">
+                      Remove it? Its reads go; findings from it stay.
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        disabled={busy}
+                        onClick={async () => {
+                          if (
+                            await act(
+                              () => deletePolicySource({ data: { id: s.id } }),
+                              "Source removed — recorded in the audit log.",
+                            )
+                          )
+                            setRemoving(null);
+                        }}
+                      >
+                        Yes, remove
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setRemoving(null)}>
+                        Keep
+                      </Button>
+                    </span>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      aria-label={`Remove ${s.label}`}
+                      disabled={busy}
+                      onClick={() => setRemoving(s.id)}
+                    >
+                      Remove
+                    </Button>
+                  )
                 ) : null}
               </li>
             ))}

@@ -94,3 +94,13 @@ export const checkPolicyNow = createServerFn({ method: "POST" })
     const { checkNowCore } = await import("./labour-policy.server");
     return checkNowCore(actorOf(context));
   });
+
+/** Remove a source added by mistake (HR head, CBO or owner; audited). */
+export const deletePolicySource = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { deleteSourceCore } = await import("./labour-policy.server");
+    await deleteSourceCore(actorOf(context), data);
+    return { ok: true };
+  });

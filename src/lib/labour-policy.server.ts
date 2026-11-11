@@ -347,6 +347,103 @@ export function newLines(prev: string | null, next: string): string[] {
 
 const REUSE_MS = 12 * 3_600_000;
 
+/** How the reader names itself to the sites it reads. */
+const READER_HEADERS = {
+  "User-Agent": "ATSIQ-PolicyReader/1.0 (reads approved official sources weekly)",
+  Accept: "text/html,application/json;q=0.9,*/*;q=0.8",
+};
+
+/**
+ * Sites whose pages are built in the browser but publish the same content through
+ * their own public API: the listing is read from that API instead (pure dispatch).
+ * labour.gov.in: /offerings/<type>/details/<slug>-<code> → its WordPress API.
+ */
+export function siteApiOf(
+  url: string,
+): { kind: "labour_gov_in"; type: string; slug: string } | null {
+  const u = new URL(url);
+  if (!sameSite(u.hostname, "labour.gov.in")) return null;
+  const m = u.pathname.match(/^\/offerings\/([a-z0-9-]+)\/details\/([A-Za-z0-9-]+)\/?$/);
+  if (!m) return null;
+  // "labour-codes-gzNzQzMtQWa": the trailing code is the site's own, not the slug.
+  const slug = m[2]!.replace(/-(?=[A-Za-z0-9]*[A-Z])[A-Za-z0-9]{6,}$/, "");
+  return { kind: "labour_gov_in", type: m[1]!.replace(/-/g, "_"), slug };
+}
+
+async function apiJson(url: string): Promise<unknown> {
+  const { safeFetchText } = await import("../server/safe-fetch");
+  const res = await safeFetchText(url, {
+    timeoutMs: 15_000,
+    maxBytes: 3_000_000,
+    hops: 1,
+    headers: { ...READER_HEADERS, Accept: "application/json" },
+  });
+  if (!sameSite(new URL(res.finalUrl).hostname, new URL(url).hostname))
+    throw new Error("The site's API redirected off its own host.");
+  return JSON.parse(res.text);
+}
+
+type LgDoc = {
+  post_title?: string;
+  acf_data?: {
+    title?: string;
+    file_date?: string;
+    pdf?: { url?: string } | false;
+    pdf_both?: { url?: string } | false;
+    pdf_english?: { url?: string } | false;
+  };
+};
+
+/**
+ * The source's documents as readable lines, from the site's own API — or null when
+ * the source is a plain page. One line per document: "Group: Title — dated … — link".
+ */
+export async function siteListing(url: string): Promise<string | null> {
+  const api = siteApiOf(url);
+  if (!api) return null;
+  const base = "https://www.labour.gov.in/cms/wp-json";
+  const found = (await apiJson(
+    `${base}/wp/v2/${api.type}?slug=${encodeURIComponent(api.slug)}&_fields=id`,
+  )) as { id: number }[];
+  const id = Array.isArray(found) ? found[0]?.id : undefined;
+  if (!id) throw new Error("The page was not found in the site's listing.");
+  const page = (await apiJson(`${base}/post-page/post?id=${id}`)) as {
+    posts?: {
+      post_title?: string;
+      post_modified?: string;
+      acf_data?: { detailed_documents?: { document_title?: string; file?: number[] | false }[] };
+    };
+  };
+  const p = page.posts;
+  const lines = [
+    `${p?.post_title ?? "Documents"} (updated ${p?.post_modified?.slice(0, 10) ?? "—"})`,
+  ];
+  for (const g of p?.acf_data?.detailed_documents ?? []) {
+    const ids = Array.isArray(g.file) ? g.file : [];
+    for (let i = 0; i < ids.length; i += 40) {
+      const docs = (await apiJson(
+        `${base}/post-page/post?id=${ids.slice(i, i + 40).join(",")}`,
+      )) as {
+        posts?: LgDoc[] | LgDoc;
+      };
+      const list = Array.isArray(docs.posts) ? docs.posts : docs.posts ? [docs.posts] : [];
+      for (const d of list) {
+        // English, bilingual, or separate-language files: the first one with a link.
+        const pdf =
+          [d.acf_data?.pdf, d.acf_data?.pdf_both, d.acf_data?.pdf_english]
+            .map((f) => (f && typeof f === "object" ? f.url : null))
+            .find(Boolean) ?? null;
+        const title = (d.acf_data?.title || d.post_title || "").replace(/\s+/g, " ").trim();
+        if (!title) continue;
+        lines.push(
+          `${g.document_title ?? "Documents"}: ${title}${d.acf_data?.file_date ? ` — dated ${d.acf_data.file_date}` : ""}${pdf ? ` — ${pdf}` : ""}`,
+        );
+      }
+    }
+  }
+  return lines.join("\n");
+}
+
 /** Fewer letters than this is not a page of text (pure). */
 export const MIN_READABLE = 200;
 export const readableChars = (t: string) => (t.match(/\p{L}/gu) ?? []).length;
@@ -381,7 +478,13 @@ export async function readSourceCore(
   const history = await db
     .select()
     .from(policyReads)
-    .where(and(eq(policyReads.orgId, orgId), eq(policyReads.sourceId, s.id)))
+    .where(
+      and(
+        eq(policyReads.orgId, orgId),
+        eq(policyReads.sourceId, s.id),
+        isNull(policyReads.documentUrl),
+      ),
+    )
     .orderBy(desc(policyReads.fetchedAt))
     .limit(5);
   const lastOk = history.find((h) => h.status !== "failed" && h.text != null) ?? null;
@@ -402,12 +505,21 @@ export async function readSourceCore(
       throw new Error("The source's address no longer matches its host.");
     if (opts.fetchText) text = await opts.fetchText(s.url);
     else {
-      const { safeFetchText } = await import("../server/safe-fetch");
-      const { htmlToText } = await import("./org-context.server");
-      const res = await safeFetchText(s.url, { timeoutMs: 15_000, maxBytes: 1_500_000, hops: 2 });
-      if (!sameSite(new URL(res.finalUrl).hostname, s.host))
-        throw new Error("The page redirected off the source's own host.");
-      text = /html/i.test(res.contentType) ? htmlToText(res.text) : res.text;
+      const listing = await siteListing(s.url);
+      if (listing !== null) text = listing;
+      else {
+        const { safeFetchText } = await import("../server/safe-fetch");
+        const { htmlToText } = await import("./org-context.server");
+        const res = await safeFetchText(s.url, {
+          timeoutMs: 15_000,
+          maxBytes: 1_500_000,
+          hops: 2,
+          headers: READER_HEADERS,
+        });
+        if (!sameSite(new URL(res.finalUrl).hostname, s.host))
+          throw new Error("The page redirected off the source's own host.");
+        text = /html/i.test(res.contentType) ? htmlToText(res.text) : res.text;
+      }
     }
   } catch (e) {
     const error = e instanceof Error ? e.message.slice(0, 300) : "Read failed";
@@ -479,6 +591,8 @@ export async function recordFindingCore(
     rule: string;
     impact?: string | undefined;
     effectiveDate?: string | null | undefined;
+    /** The document on the source the quote is from (read with readDocumentCore). */
+    documentUrl?: string | null | undefined;
   },
   opts: { agentRunId?: string | null } = {},
 ): Promise<{ ok: true; findingId: string } | { ok: false; error: string }> {
@@ -490,8 +604,8 @@ export async function recordFindingCore(
     .where(and(eq(policySources.id, input.sourceId), eq(policySources.orgId, orgId)))
     .limit(1);
   if (!s) return { ok: false, error: "Source not found." };
-  const [read] = await db
-    .select({ text: policyReads.text })
+  const reads = await db
+    .select({ text: policyReads.text, documentUrl: policyReads.documentUrl })
     .from(policyReads)
     .where(
       and(
@@ -501,16 +615,32 @@ export async function recordFindingCore(
       ),
     )
     .orderBy(desc(policyReads.fetchedAt))
-    .limit(1);
+    .limit(40);
   const quote = input.quote.trim();
   if (quote.length < 15)
     return { ok: false, error: "Quote the source's own words — at least a full phrase." };
-  if (!read?.text || !squash(read.text).includes(squash(quote)))
+  // The latest read of the page, and of each document read from it.
+  const latest = new Map<string, string>();
+  for (const r of reads) {
+    const key = r.documentUrl ?? "";
+    if (r.text && !latest.has(key)) latest.set(key, r.text);
+  }
+  const found = input.documentUrl
+    ? latest.has(input.documentUrl) &&
+      squash(latest.get(input.documentUrl)!).includes(squash(quote))
+    : [...latest.values()].some((t) => squash(t).includes(squash(quote)));
+  if (!found)
     return {
       ok: false,
-      error:
-        "That quote is not on the page read from this source. Quote its exact words, or record nothing.",
+      error: input.documentUrl
+        ? "That quote is not in the document read from this source. Quote its exact words, or record nothing."
+        : "That quote is not on the page read from this source. Quote its exact words, or record nothing.",
     };
+  // Cite the document it came from when it came from one.
+  const citedUrl =
+    input.documentUrl ??
+    [...latest.entries()].find(([k, t]) => k && squash(t).includes(squash(quote)))?.[0] ??
+    s.url;
   // The zone this source belongs to (a country source covers that country's zones).
   const zone = s.zoneId
     ? s.zoneId
@@ -528,7 +658,7 @@ export async function recordFindingCore(
       orgId,
       sourceId: s.id,
       zoneId: zone,
-      url: s.url,
+      url: citedUrl,
       quote: quote.slice(0, 2_000),
       area: input.area,
       summary: input.summary.trim().slice(0, 1_000),
@@ -771,4 +901,135 @@ export async function checkNowCore(actor: PolicyActor): Promise<{ runId: string 
     detail: { runId: run.runId },
   });
   return run;
+}
+
+/** Cap on a document's text handed to the agent (the read keeps all of it). */
+const DOC_TEXT_CAP = 30_000;
+
+/**
+ * Read one document listed on an approved source (its PDF), on that source's own
+ * site only, through the safe fetcher and the document parser. Kept with its address
+ * so a finding's quote is checked against it. An unchanged document says so.
+ */
+export async function readDocumentCore(
+  orgId: string,
+  sourceId: string,
+  documentUrl: string,
+  opts: {
+    agentRunId?: string | null;
+    now?: Date;
+    fetchBytes?: (url: string) => Promise<Uint8Array>;
+  } = {},
+): Promise<{ status: "first" | "unchanged" | "changed" | "failed"; text: string; error?: string }> {
+  const now = opts.now ?? new Date();
+  const [s] = await db
+    .select()
+    .from(policySources)
+    .where(and(eq(policySources.id, sourceId), eq(policySources.orgId, orgId)))
+    .limit(1);
+  if (!s) throw new Error("Source not found.");
+  let u: URL;
+  try {
+    u = new URL(documentUrl);
+  } catch {
+    throw new Error("Not a document address.");
+  }
+  if (u.protocol !== "https:" || !sameSite(u.hostname, s.host))
+    throw new Error("Only a document on the source's own site can be read.");
+  // Listed on the source's latest read: never a document the agent made up.
+  const [page] = await db
+    .select({ text: policyReads.text })
+    .from(policyReads)
+    .where(
+      and(
+        eq(policyReads.orgId, orgId),
+        eq(policyReads.sourceId, s.id),
+        isNull(policyReads.documentUrl),
+        inArray(policyReads.status, ["first", "changed", "unchanged"]),
+      ),
+    )
+    .orderBy(desc(policyReads.fetchedAt))
+    .limit(1);
+  if (!page?.text?.includes(documentUrl))
+    throw new Error("That document is not listed on this source's latest read.");
+  const [prev] = await db
+    .select()
+    .from(policyReads)
+    .where(
+      and(
+        eq(policyReads.orgId, orgId),
+        eq(policyReads.sourceId, s.id),
+        eq(policyReads.documentUrl, documentUrl),
+        inArray(policyReads.status, ["first", "changed", "unchanged"]),
+      ),
+    )
+    .orderBy(desc(policyReads.fetchedAt))
+    .limit(1);
+  let text: string;
+  try {
+    let bytes: Uint8Array;
+    if (opts.fetchBytes) bytes = await opts.fetchBytes(documentUrl);
+    else {
+      const { safeFetch } = await import("../server/safe-fetch");
+      const res = await safeFetch(documentUrl, { timeoutMs: 30_000, headers: READER_HEADERS });
+      if (res.status !== 200) throw new Error(`The site answered ${res.status}.`);
+      if (Number(res.headers.get("content-length") ?? 0) > 15_000_000)
+        throw new Error("The document is too large to read (over 15 MB).");
+      bytes = new Uint8Array(await res.arrayBuffer());
+      if (bytes.byteLength > 15_000_000)
+        throw new Error("The document is too large to read (over 15 MB).");
+    }
+    const { attachmentText } = await import("./cv-text.server");
+    text = (await attachmentText(u.pathname.split("/").pop() || "document.pdf", bytes)).trim();
+    if (readableChars(text) < MIN_READABLE)
+      throw new Error("No readable text in the document (it may be a scanned image).");
+  } catch (e) {
+    const error = e instanceof Error ? e.message.slice(0, 300) : "Read failed";
+    await db.insert(policyReads).values({
+      orgId,
+      sourceId: s.id,
+      documentUrl,
+      status: "failed",
+      error,
+      fetchedAt: now,
+      agentRunId: opts.agentRunId ?? null,
+    });
+    return { status: "failed", text: "", error };
+  }
+  text = text.slice(0, 400_000);
+  const hash = createHash("sha256").update(text).digest("hex");
+  const status = !prev ? "first" : prev.hash === hash ? "unchanged" : "changed";
+  await db.insert(policyReads).values({
+    orgId,
+    sourceId: s.id,
+    documentUrl,
+    status,
+    hash,
+    text,
+    fetchedAt: now,
+    agentRunId: opts.agentRunId ?? null,
+  });
+  return { status, text: status === "unchanged" ? "" : text.slice(0, DOC_TEXT_CAP) };
+}
+
+/**
+ * Remove a source added by mistake (HR head, CBO or owner; audited). Its reads go
+ * with it; findings already made from it stay, citing its address.
+ */
+export async function deleteSourceCore(actor: PolicyActor, input: { id: string }): Promise<void> {
+  await assertDecider(actor, "change the policy sources");
+  const gone = await db
+    .delete(policySources)
+    .where(and(eq(policySources.id, input.id), eq(policySources.orgId, actor.orgId)))
+    .returning({ id: policySources.id, url: policySources.url, label: policySources.label });
+  if (!gone.length) throw new Error("Source not found.");
+  await writeAudit({
+    actor: actor.memberEmail,
+    actorUserId: actor.userId,
+    orgId: actor.orgId,
+    action: "policy_source.deleted",
+    entityType: "policy_source",
+    entityId: input.id,
+    detail: { url: gone[0]!.url, label: gone[0]!.label },
+  });
 }

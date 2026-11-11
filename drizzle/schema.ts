@@ -4101,9 +4101,12 @@ export const policyReads = pgTable(
     error: text("error"),
     fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
     agentRunId: uuid("agent_run_id"),
+    /** A document (PDF) listed on the source that was read; null for the source page itself (0078). */
+    documentUrl: text("document_url"),
   },
   (t) => [
     index("policy_reads_source_idx").on(t.orgId, t.sourceId, t.fetchedAt),
+    index("policy_reads_document_idx").on(t.orgId, t.sourceId, t.documentUrl, t.fetchedAt),
     check(
       "policy_reads_status_check",
       sql`${t.status} in ('changed','unchanged','first','failed')`,
