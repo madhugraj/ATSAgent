@@ -114,6 +114,8 @@ export type AgentDefinition = {
   /** Tool names this agent may call (the HITL tools are always available). */
   tools: string[];
   maxSteps?: number;
+  /** Default token budget per leg when the organisation has not set one (document-heavy agents). */
+  maxTokens?: number;
 };
 
 const tools = new Map<string, AgentTool<never>>();

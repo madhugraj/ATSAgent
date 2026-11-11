@@ -147,6 +147,9 @@ describe("reads and findings", () => {
       });
     expect((await read(PAGE_1, 0)).status).toBe("first");
     expect((await read(PAGE_2, 1)).status).toBe("recent"); // not fetched again inside 12 h
+    // Read in full (a never-briefed source): the whole page even when nothing is new.
+    const full = await lp.readSourceCore(orgId, sourceId, { now: at(2), full: true });
+    expect(full.newText).toContain("Bando per la formazione 2026");
     expect((await read(PAGE_1, 24)).status).toBe("unchanged");
     const changed = await read(PAGE_2, 48);
     expect(changed.status).toBe("changed");
@@ -575,5 +578,36 @@ describe("briefings: one law, a checked timeline and quoted provisions, one deci
     expect(decided.map((f) => f.status)).toEqual(["approved", "approved"]);
     expect((await lp.briefingFor(orgId, ok.briefingId))!.status).toBe("approved");
     expect((await audits("policy_briefing.approved")).length).toBe(1);
+  });
+});
+
+describe("searching inside a long document", () => {
+  test("passages around each term; the opening and a hint without terms", () => {
+    const doc = `${"Preamble. ".repeat(900)}2. (y) "wages" means all remuneration ... exceeds one-half ... deemed as remuneration. ${"Schedule. ".repeat(900)}`;
+    const v = lp.documentView(doc, ["2(y)", "one-half"]);
+    expect(v).toContain('"wages" means all remuneration');
+    expect(v.length).toBeLessThan(4_000);
+    expect(lp.documentView(doc)).toContain("read_policy_document again with search terms");
+    expect(lp.documentView(doc, ["gratuity"])).toContain('None of "gratuity" appears');
+  });
+});
+
+describe("what a listing shows a first briefing", () => {
+  test("core groups in full, notification groups as counts, search lists matching lines", () => {
+    const listing = [
+      "Labour Codes (updated 2026-11-06)",
+      "Codes: The Code on Wages, 2019 — dated 08/08/2019 — https://x.gov.in/a.pdf",
+      "Notification Under The Code on Wages, 2019: S.O. 1 — dated 01/01/2026 — https://x.gov.in/n1.pdf",
+      "Notification Under The Code on Wages, 2019: S.O. 2 floor wage — dated 02/01/2026 — https://x.gov.in/n2.pdf",
+      "FAQs: FAQs on Labour Codes dated 16-03-2026 — dated 16/03/2026 — https://x.gov.in/f.pdf",
+    ].join("\n");
+    const v = lp.listingView(listing);
+    expect(v).toContain("Codes: The Code on Wages, 2019");
+    expect(v).toContain("FAQs: FAQs on Labour Codes");
+    expect(v).toContain("Notification Under The Code on Wages, 2019: 2 documents");
+    expect(v).not.toContain("S.O. 1");
+    expect(lp.listingView(listing, ["floor wage"])).toBe(
+      "Notification Under The Code on Wages, 2019: S.O. 2 floor wage — dated 02/01/2026 — https://x.gov.in/n2.pdf",
+    );
   });
 });
