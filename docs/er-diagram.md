@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-108 tables across 9 domains.
+109 tables across 9 domains.
 
 ## Identity & access
 
@@ -91,6 +91,7 @@ erDiagram
     text pay_basis_default
     numeric hours_per_week_default
     text kinds_of_work
+    integer pay_far_above_pct
     smallint fiscal_year_start_month
     text careers_email "nullable"
     text onboarding_step
@@ -1330,6 +1331,9 @@ erDiagram
 | `panelists` | `approved_by` | `users` | no action |
 | `panelists` | `member_id` | `org_members` | cascade |
 | `panelists` | `org_id` | `organizations` | cascade |
+| `pay_convention_drafts` | `decided_by` | `users` | no action |
+| `pay_convention_drafts` | `org_id` | `organizations` | cascade |
+| `pay_convention_drafts` | `proposed_by` | `users` | no action |
 | `pay_figures` | `candidate_id` | `candidates` | cascade |
 | `pay_figures` | `org_id` | `organizations` | cascade |
 | `pay_zones` | `org_id` | `organizations` | cascade |
@@ -1488,11 +1492,12 @@ erDiagram
 | `org_pool_shares` | Organisations & masters | 10 | (ownerOrg+partnerOrg) |
 | `org_profile_versions` | Organisations & masters | 16 | (orgId+version) |
 | `org_profiles` | Organisations & masters | 12 | — |
-| `organizations` | Organisations & masters | 30 | (slug), (capture_token), (capture_token_hash), (distribution_token_hash) |
+| `organizations` | Organisations & masters | 31 | (slug), (capture_token), (capture_token_hash), (distribution_token_hash) |
 | `panel_agent_settings` | — | 5 | — |
 | `panel_assessments` | — | 23 | (interview_id) |
 | `panelist_scorecard_links` | — | 8 | (interviewId+panelistId), (token_hash) |
 | `panelists` | — | 18 | — |
+| `pay_convention_drafts` | — | 11 | — |
 | `pay_figures` | — | 22 | — |
 | `pay_zones` | — | 19 | (orgId+name) |
 | `phone_screening_settings` | Screening & interviews | 16 | — |

@@ -16,9 +16,22 @@
   validity, net never turned into gross, band check in pay currency, hike only
   across one currency, money spoken per currency, amounts parsed as said).
   `scripts/pay-terms.test.ts`: one test per scenario in the plan.
-- Next: P2 — organisation agent records zones, regions, rates and tolerances;
-  requisition agent sets pay terms and "needed by". Nothing reads the new
-  columns yet.
+- Shipped (P2, 11 November): migration 0074 (`pay_convention_drafts`, the
+  organisation's tolerance over a band). Organisation context agent 1.2.0 reads
+  and proposes the organisation's pay conventions (reporting currency, pay
+  zones, pooling regions, tolerance) — applied only when the HR head approves
+  the new `pay_conventions` gate, in one transaction, audited. Requisition
+  agent 1.10.0 sets a draft's pay terms (`set_pay_terms`: zone from where the
+  job is, kind of work, basis, currency, contract, needed-by) and researches pay
+  in the role's currency. Organisation page: "Pay, currency and pay zones"
+  (zones, rates, tolerance); requisition page: "Pay terms". Health rules:
+  a proposal waiting over 7 days; a role paying in a currency its zone does not.
+  Eval: org_context proposes conventions, applied only once approved.
+  Governance fix: screening-call versions 1.8.0–1.9.5 had been recorded on the
+  requisition agent's manifest; moved to the Screening call agent (now 1.9.5).
+- Next: P3 — the screening call asks in the role's terms; pooling before
+  matching; the call's answers reach the match check; joining after "needed
+  by" checked.
 
 ## Agent intelligence (2026-11-06)
 
