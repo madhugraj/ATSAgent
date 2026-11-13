@@ -26,17 +26,29 @@ export const LINK_DAYS_AFTER = 7;
 
 export const hashToken = (token: string) => createHash("sha256").update(token).digest("hex");
 
-/** The external panelist with this e-mail, or null (internal people score signed in). */
-export async function externalPanelist(orgId: string, email: string) {
+/**
+ * The directory panelist with this e-mail who scores through a private link,
+ * or null: an external panelist, or an internal one without a login (no active
+ * org member with that e-mail). Org members score signed in.
+ */
+export async function linkPanelist(orgId: string, email: string) {
+  const e = email.trim().toLowerCase();
   const [p] = await db
-    .select({ id: panelists.id, name: panelists.fullName, email: panelists.email })
+    .select({
+      id: panelists.id,
+      name: panelists.fullName,
+      email: panelists.email,
+      kind: panelists.kind,
+    })
     .from(panelists)
     .where(
       and(
         eq(panelists.orgId, orgId),
-        eq(panelists.kind, "external"),
         eq(panelists.active, true),
-        sql`lower(${panelists.email}) = ${email.trim().toLowerCase()}`,
+        sql`lower(${panelists.email}) = ${e}`,
+        sql`(${panelists.kind} = 'external' or not exists (
+          select 1 from org_members m
+          where m.org_id = ${orgId} and m.status = 'active' and lower(m.email) = ${e}))`,
       ),
     )
     .limit(1);

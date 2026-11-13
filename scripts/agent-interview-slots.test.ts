@@ -409,6 +409,30 @@ describe("the candidate chooses the time", () => {
     });
   });
 
+  test("an online offer uses the connected meeting provider when none is named", async () => {
+    const { sourceIntegrations } = await import("../drizzle/schema");
+    expect(await offers.connectedMeetingProvider(orgId)).toBeNull();
+    await db.insert(sourceIntegrations).values({
+      orgId,
+      provider: "teams",
+      label: "Microsoft Teams",
+      category: "meetings",
+      enabled: true,
+      hasCredentials: true,
+    } as never);
+    try {
+      expect(await offers.connectedMeetingProvider(orgId)).toBe("teams");
+      const o = await offer();
+      const [row] = await db
+        .select({ provider: interviewSlotOffers.meetingProvider })
+        .from(interviewSlotOffers)
+        .where(eq(interviewSlotOffers.id, o.offerId));
+      expect(row!.provider).toBe("teams");
+    } finally {
+      await db.delete(sourceIntegrations).where(eq(sourceIntegrations.orgId, orgId));
+    }
+  });
+
   test("the public view shows the round and times, nothing about the candidate", async () => {
     const o = await offer();
     const p = (await offers.publicOffer(o.token))!;

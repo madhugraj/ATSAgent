@@ -322,6 +322,42 @@ describe("an external panellist's scorecard link", () => {
     expect(link!.tokenHash).not.toBe(token);
   });
 
+  test("an internal panellist without a login also gets a private link (they cannot sign in to score)", async () => {
+    const colleague = `colleague@${domain}`;
+    await dir.addPanelist(
+      orgId,
+      hrId,
+      { fullName: "Madhan Gopal", email: colleague, kind: "internal", areas: [], rounds: [1] },
+      { via: "team_page" },
+    );
+    expect(await links.linkPanelist(orgId, colleague)).toMatchObject({ kind: "internal" });
+    // An org member never scores by link.
+    expect(await links.linkPanelist(orgId, `hr@${domain}`)).toBeNull();
+    const { sendInterviewerBrief } = await import("../src/lib/interviewer-brief.server");
+    const [iv] = await db.select().from(interviews).where(eq(interviews.id, interviewId));
+    const [app] = await db.select().from(applications).where(eq(applications.id, appId));
+    await sendInterviewerBrief(orgId, {
+      interviewId,
+      applicationId: appId,
+      candidateId: app!.candidateId,
+      level: 1,
+      interviewerName: "Madhan Gopal",
+      interviewerEmail: colleague,
+      scheduledAt: iv!.scheduledAt!,
+      durationMins: 60,
+      mode: "online",
+      meetingLink: null,
+      agenda: null,
+    });
+    const [mail] = await db
+      .select()
+      .from(emailOutbox)
+      .where(and(eq(emailOutbox.orgId, orgId), eq(emailOutbox.toEmail, colleague)));
+    const data = mail!.templateData as Record<string, string>;
+    expect(data["scorecardUrl"]).toMatch(/\/scorecard\/[a-f0-9]{64}$/);
+    expect(data["candidateUrl"]).toBeUndefined();
+  });
+
   test("it opens only after the interview starts, scores once, and never opens an offer", async () => {
     const token = await links.issueScorecardLink(
       orgId,

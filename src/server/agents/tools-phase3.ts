@@ -370,6 +370,12 @@ export function registerPhase3Tools(): void {
       await assertAfterEarlierRounds(ctx.orgId, i.applicationId, i.level, [when]);
 
       let meetingLink: string | null = null;
+      // An online round gets a link from the connected provider unless one was named.
+      if (i.mode === "online" && !i.meetingProvider) {
+        const { connectedMeetingProvider } = await import("@/lib/slot-offers.server");
+        const p = await connectedMeetingProvider(ctx.orgId);
+        if (p) i = { ...i, meetingProvider: p };
+      }
       if (i.mode === "online" && i.meetingProvider) {
         const [integration] = await db
           .select({ enabled: sourceIntegrations.enabled, ready: sourceIntegrations.hasCredentials })
@@ -392,7 +398,7 @@ export function registerPhase3Tools(): void {
           topic: `L${i.level} interview: ${app.jobTitle}`,
           startIso: when.toISOString(),
           durationMins: i.durationMins,
-          attendees: [member.email],
+          attendees: [member.email, ...(i.panelEmails ?? [])],
           agenda: i.agenda ?? null,
         });
         meetingLink = meeting.joinUrl;

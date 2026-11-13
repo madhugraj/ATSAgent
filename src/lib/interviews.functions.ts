@@ -445,10 +445,11 @@ export const submitScorecardCore = createServerOnlyFn(async function submitScore
     ? `On hold for the HR head: the L${data.level} panel agent's independent view of the call disagrees with the panel.`
     : null;
   const reason = data.reason?.trim() || `L${data.level} verdict: ${verdict}`;
-  // An external panelist's scorecard never moves anyone into the offer pipeline.
+  // A scorecard sent through a private link (no account) never moves anyone
+  // into the offer pipeline — the HR head does.
   const external = !ctx.userId && Boolean(target && HR_CONTROLLED_TARGETS.has(target));
   if (external)
-    blocked = "Waiting for the HR head: an external panelist's verdict cannot open an offer.";
+    blocked = "Waiting for the HR head: a verdict sent through a private scorecard link cannot open an offer.";
   if (target && HR_CONTROLLED_TARGETS.has(target) && ctx.userId) {
     await assertRole(
       ctx.userId,

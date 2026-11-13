@@ -74,13 +74,15 @@ export async function sendInterviewerBrief(
     .orderBy(desc(screeningRuns.createdAt))
     .limit(1);
 
-  // An external panelist (no account) scores through a private link, and their
-  // brief leaves out internal-only material: match score, screening result and
-  // the candidate page, which needs a sign-in.
-  const { externalPanelist, issueScorecardLink } = await import("./panelist-links.server");
-  const external = await externalPanelist(orgId, r.interviewerEmail);
-  const scorecardToken = external
-    ? await issueScorecardLink(orgId, r.interviewId, external.id, r.scheduledAt)
+  // A panelist without an account (external, or internal with no login) scores
+  // through a private link. An external one's brief also leaves out
+  // internal-only material: match score and screening result. The candidate
+  // page needs a sign-in, so neither gets that link.
+  const { linkPanelist, issueScorecardLink } = await import("./panelist-links.server");
+  const byLink = await linkPanelist(orgId, r.interviewerEmail);
+  const external = byLink?.kind === "external" ? byLink : null;
+  const scorecardToken = byLink
+    ? await issueScorecardLink(orgId, r.interviewId, byLink.id, r.scheduledAt)
     : null;
   const { enqueueEmail, formatInOrgTZ, getOrgEmailSettings } =
     await import("./email-outbox.server");
