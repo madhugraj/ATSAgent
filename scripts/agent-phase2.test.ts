@@ -247,7 +247,7 @@ const openTasks = (runId: string) =>
 describe("intake & matching agent", () => {
   async function intakeRun() {
     await enable("intake");
-    await application("Asha Strong", "ai_screened", 68, ["Kubernetes"]);
+    await application("Asha Strong", "ai_screened", 76, ["Kubernetes"]);
     await application("Ben Weak", "ai_screened", 40, ["PHP"]);
     await application("Cara Weak", "ai_screened", 35, ["Excel"]);
     const { runId } = await startRun({
@@ -266,12 +266,21 @@ describe("intake & matching agent", () => {
         args: { requisitionId: reqId, stage: "ai_screened" },
       }),
       call({
+        id: "m0",
+        name: "move_candidate",
+        args: {
+          applicationId: apps["Ben Weak"]!.appId,
+          toStage: "shortlisted",
+          reason: "Could learn the stack",
+        },
+      }),
+      call({
         id: "m",
         name: "move_candidate",
         args: {
           applicationId: apps["Asha Strong"]!.appId,
           toStage: "shortlisted",
-          reason: "68/100; Kubernetes present, Go learnable",
+          reason: "76/100; Kubernetes present, Go learnable",
         },
       }),
       call({
@@ -304,6 +313,9 @@ describe("intake & matching agent", () => {
   test("summarises, shortlists with a reason as the principal, and proposes rejections to the principal", async () => {
     const runId = await intakeRun();
     expect(await stageOf(apps["Asha Strong"]!.appId)).toBe("shortlisted");
+    // A held candidate (scorer recommendation: hold/reject at ai_screened) is
+    // never shortlisted by the agent — the move is refused, stage unchanged.
+    expect(await stageOf(apps["Ben Weak"]!.appId)).toBe("ai_screened");
     const [ev] = await db
       .select()
       .from(stageEvents)

@@ -196,6 +196,23 @@ export function registerPhase2Tools(): void {
           `${app.candidateName ?? "This candidate"} is at ${app.stage}, which a person decided — agents never move candidates out of an interview round, an offer or a closed stage. Do not try another route: report it and stop.`,
         );
       }
+      // A candidate the scorer held at ai_screened (recommendation: hold) is
+      // waiting for a person's shortlisting decision. Agents never override
+      // that hold by moving directly — they propose, and the person decides
+      // on the review card. Only scorer-selected candidates may be moved.
+      if (i.toStage === "shortlisted" && app.stage === "ai_screened") {
+        const [score] = await db
+          .select({ recommendation: matchScores.recommendation, overallScore: matchScores.overallScore })
+          .from(matchScores)
+          .where(eq(matchScores.applicationId, i.applicationId))
+          .orderBy(desc(matchScores.computedAt))
+          .limit(1);
+        if (score && score.recommendation !== "select") {
+          throw new Error(
+            `${app.candidateName ?? "This candidate"} is held at ai_screened — the scorer recommended "${score.recommendation}" (${score.overallScore}/100) for a person to decide. Never shortlist directly: leave them at ai_screened and, if you believe they should still be considered, propose it with request_approval (subject {type: "shortlist", items: [{applicationId, reason}]}, addressed to the recruiter role) so a person decides on the review card.`,
+          );
+        }
+      }
       const { moveStageCore } = await import("@/lib/pipeline.server");
       return moveStageCore(await actor(ctx), {
         applicationId: i.applicationId,
