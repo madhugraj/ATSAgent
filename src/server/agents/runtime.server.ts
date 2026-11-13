@@ -646,6 +646,21 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
       .limit(1);
     if (waiting)
       return { error: "A screening decision for this candidate is already waiting for a person." };
+    // Practical blockers from what they said (relocation, notice, pay): stated
+    // by the system, and no recommendation to proceed past them — a person may.
+    const { screeningLogistics } = await import("@/lib/screening-logistics.server");
+    const logistics = await screeningLogistics(orgId, subject.applicationId);
+    const blockerText = logistics.blockers
+      .map((b) =>
+        b === "Location mismatch and candidate will not relocate" && logistics.location
+          ? `${row.name} ${logistics.location}`
+          : b,
+      )
+      .join("; ");
+    if (subject.recommendation === "proceed" && logistics.blockers.length)
+      return {
+        error: `Do not recommend proceeding: ${blockerText}. Recommend hold and state this in the rationale — a person may still move them on.`,
+      };
     const { coverageWords } = await import("@/lib/screening-coverage");
     const rests = graded.coverage
       ? ` (${coverageWords(graded.coverage)}; ${graded.coverage.confidence} confidence)`
@@ -654,7 +669,7 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
       role: null,
       status: row.stage,
       toPrincipal: true,
-      detail: `Screening decision for ${row.name} (${row.code} ${row.title}).\nRecommendation: ${subject.recommendation === "proceed" ? "PROCEED to the first interview round" : "HOLD"}\nScreening score: ${graded.score}/100${rests}\nWhy: ${subject.rationale}\n\n${
+      detail: `Screening decision for ${row.name} (${row.code} ${row.title}).\nRecommendation: ${subject.recommendation === "proceed" ? "PROCEED to the first interview round" : "HOLD"}\nScreening score: ${graded.score}/100${rests}\n${blockerText ? `Blocker: ${blockerText}\n` : ""}Why: ${subject.rationale}\n\n${
         subject.recommendation === "proceed"
           ? "Approve to move them to the first interview round — the Interview coordinator then books it."
           : "Approve to put them on hold."

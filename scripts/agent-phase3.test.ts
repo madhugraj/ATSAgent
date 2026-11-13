@@ -629,6 +629,39 @@ describe("the screening decision in the hiring desk", () => {
     expect(ev).toBeTruthy();
   });
 
+  test("a candidate who said on the call they will not relocate: no proceed; the card states the blocker", async () => {
+    await db.delete(agentRuns).where(eq(agentRuns.orgId, orgId));
+    await db
+      .update(requisitions)
+      .set({ location: "Coimbatore", workMode: "hybrid" } as never)
+      .where(eq(requisitions.id, reqId));
+    try {
+      const { appId, candidateId } = await graded("Prakash");
+      const { compensationDetails } = await import("../drizzle/schema");
+      await db.insert(compensationDetails).values({
+        orgId,
+        applicationId: appId,
+        candidateId,
+        source: "screening_call",
+        currentLocation: "Chennai",
+        openToRelocate: false,
+      } as never);
+      const refused = await propose(appId, "proceed");
+      expect(refused.tasks).toHaveLength(0);
+      await db.delete(agentRuns).where(eq(agentRuns.orgId, orgId));
+      const { tasks } = await propose(appId, "hold");
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0]!.body).toContain(
+        "Blocker: Prakash lives in Chennai and is not open to relocating to Coimbatore (hybrid)",
+      );
+    } finally {
+      await db
+        .update(requisitions)
+        .set({ location: null, workMode: null } as never)
+        .where(eq(requisitions.id, reqId));
+    }
+  });
+
   test("a hold recommendation can be decided the other way: to L1, with why on record", async () => {
     await db.delete(agentRuns).where(eq(agentRuns.orgId, orgId));
     const { appId } = await graded("Praveen");
