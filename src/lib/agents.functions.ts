@@ -129,6 +129,8 @@ const Decision = z.discriminatedUnion("status", [
     status: z.literal("approved"),
     args: z.record(z.string(), z.unknown()).optional(),
     comment: z.string().max(2000).optional(),
+    /** A screening decision decided the other way: the person's call, with a comment. */
+    outcome: z.enum(["proceed", "hold"]).optional(),
   }),
   z.object({
     status: z.literal("rejected"),

@@ -31,6 +31,11 @@ export async function dueCalls(now: Date, limit = 50) {
       and (c.purpose <> 'negotiation' or coalesce(s.negotiation_enabled, false))
       -- Never a candidate who asked not to be called by the AI assistant.
       and cand.ai_call_opt_out_at is null
+      -- A screening call only while the candidate is still before the interviews:
+      -- never one who has since moved into a round, or was closed.
+      and (c.purpose <> 'screening' or c.application_id is null or exists (
+        select 1 from applications a where a.id = c.application_id and a.org_id = c.org_id
+          and a.stage in ('sourced', 'applied', 'ai_screened', 'shortlisted', 'on_hold', 'reserve')))
       and c.due_at is not null and c.due_at <= ${now.toISOString()}::timestamptz
       -- A pay discussion call only while the discussion is unsettled (CALLABLE_NEGOTIATION).
       and (c.purpose <> 'negotiation' or exists (

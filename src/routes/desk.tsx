@@ -1462,6 +1462,8 @@ function TaskCard({
     (Array.isArray(card["details"]) ? (card["details"] as { label: string; value: string }[]) : []);
   const [answer, setAnswer] = useState("");
   const [declining, setDeclining] = useState(false);
+  // A screening decision decided the other way from the recommendation.
+  const [overruling, setOverruling] = useState(false);
   const [why, setWhy] = useState("");
   const [busy, setBusy] = useState(false);
   async function decide(decision: AgentDecisionInput) {
@@ -1640,6 +1642,39 @@ function TaskCard({
               </div>
             )}
           </div>
+        ) : overruling ? (
+          <div className="mt-2 space-y-2">
+            <Textarea
+              value={why}
+              rows={2}
+              maxLength={1000}
+              placeholder="Why? (required — kept on record with the candidate)"
+              onChange={(e) => setWhy(e.target.value)}
+            />
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                disabled={busy || why.trim().length < 3}
+                onClick={() =>
+                  decide({
+                    status: "approved",
+                    outcome: proceed ? "hold" : "proceed",
+                    comment: why.trim(),
+                  })
+                }
+              >
+                {proceed ? "Put on hold" : "Move to interview (L1)"}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => setOverruling(false)}
+              >
+                Back
+              </Button>
+            </div>
+          </div>
         ) : changing ? (
           <PanelChange
             requisitionId={String(card["requisitionId"])}
@@ -1665,6 +1700,16 @@ function TaskCard({
             {panel ? (
               <Button size="sm" variant="outline" disabled={busy} onClick={() => setChanging(true)}>
                 Change the people
+              </Button>
+            ) : null}
+            {screening ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => setOverruling(true)}
+              >
+                {proceed ? "Put on hold instead" : "Move to L1 instead"}
               </Button>
             ) : null}
             {sendable ? (
