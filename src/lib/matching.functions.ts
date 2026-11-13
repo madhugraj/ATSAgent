@@ -267,7 +267,9 @@ export const suggestWeightsCore = createServerOnlyFn(async function suggestWeigh
   const { orgContextFor } = await import("./org-context.server");
   const org = await orgContextFor({ orgId, audience: "internal", purpose: "scoring" });
   basis.push(
-    org.version ? `Organisation profile (version ${org.version})` : "No approved organisation profile yet",
+    org.version
+      ? `Organisation profile (version ${org.version})`
+      : "No approved organisation profile yet",
   );
 
   let demand = "No matching role in the organisation's ontology.";
@@ -279,9 +281,15 @@ export const suggestWeightsCore = createServerOnlyFn(async function suggestWeigh
     const ont = await loadOntology(orgId);
     const found = findRoleProfile(ont, data.title);
     // A shared generic word ("engineer", "manager") is not the same role.
-    const GENERIC = /^(senior|junior|lead|engineer|manager|specialist|executive|associate|analyst|officer|technician|developer|consultant|head|staff|and|of)$/;
+    const GENERIC =
+      /^(senior|junior|lead|engineer|manager|specialist|executive|associate|analyst|officer|technician|developer|consultant|head|staff|and|of)$/;
     const words = (t: string) =>
-      new Set(t.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1 && !GENERIC.test(w)));
+      new Set(
+        t
+          .toLowerCase()
+          .split(/[^a-z0-9]+/)
+          .filter((w) => w.length > 1 && !GENERIC.test(w)),
+      );
     const mine = words(data.title);
     const role =
       found && [found.name, ...found.titles].some((t) => [...words(t)].some((w) => mine.has(w)))
@@ -302,11 +310,12 @@ export const suggestWeightsCore = createServerOnlyFn(async function suggestWeigh
     // The ontology is advisory: advice still works from the role and profile.
   }
 
-  const where = data.workMode === "remote"
-    ? "Remote role."
-    : data.location
-      ? `${data.location}${data.workMode ? `, ${data.workMode}` : ""}.`
-      : "No location stated.";
+  const where =
+    data.workMode === "remote"
+      ? "Remote role."
+      : data.location
+        ? `${data.location}${data.workMode ? `, ${data.workMode}` : ""}.`
+        : "No location stated.";
   basis.push(`Location: ${where.replace(/\.$/, "")}`);
 
   const result = await aiJson<z.infer<typeof WeightAdviceSchema>>({

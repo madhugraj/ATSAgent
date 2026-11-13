@@ -933,11 +933,19 @@ async function performGate(
     if (decision.status === "approved") {
       // A person's decision, made as that person: into L1 raises
       // application.advanced and the Interview coordinator books the round.
+      // They may decide the other way from the recommendation — with why.
+      const outcome = decision.outcome ?? subject.recommendation;
+      const overruled = outcome !== subject.recommendation;
+      const comment = decision.comment?.trim() || null;
+      if (overruled && !comment)
+        throw new Error("Say why you are deciding differently from the recommendation.");
       await pipeline.moveStageCore(actor, {
         applicationId: subject.applicationId,
-        toStage: subject.recommendation === "proceed" ? "l1" : "on_hold",
-        reason: subject.rationale,
-        note: decision.comment?.trim() || null,
+        toStage: outcome === "proceed" ? "l1" : "on_hold",
+        reason: overruled
+          ? `${outcome === "proceed" ? "Moved to L1" : "Put on hold"} against the ${subject.recommendation} recommendation: ${comment}`
+          : subject.rationale,
+        note: comment,
       });
       return;
     }
@@ -1317,7 +1325,13 @@ export async function startReplay(input: {
 }
 
 export type TaskDecision =
-  | { status: "approved"; args?: unknown; comment?: string | undefined }
+  | {
+      status: "approved";
+      args?: unknown;
+      comment?: string | undefined;
+      /** A screening decision decided the other way (proceed instead of hold, or the reverse). */
+      outcome?: "proceed" | "hold" | undefined;
+    }
   | {
       status: "rejected";
       reason?: string | undefined;
@@ -1438,6 +1452,7 @@ export async function resolveTask(input: {
       run_id: task.runId,
       kind: task.kind,
       edited: decision.status === "approved" && decision.args !== undefined,
+      ...(decision.status === "approved" && decision.outcome ? { outcome: decision.outcome } : {}),
     },
   });
 
@@ -1458,7 +1473,7 @@ export async function resolveTask(input: {
         decision.status === "answered"
           ? "answered"
           : decision.status === "approved"
-            ? decision.args !== undefined
+            ? decision.args !== undefined || decision.outcome !== undefined
               ? "edited"
               : "approved"
             : decision.changes
@@ -1474,9 +1489,11 @@ export async function resolveTask(input: {
       corrected:
         decision.status === "answered"
           ? { answer: decision.answer }
-          : decision.status === "approved" && decision.args !== undefined
-            ? { args: decision.args }
-            : undefined,
+          : decision.status === "approved" && decision.outcome !== undefined
+            ? { recommendation: decision.outcome }
+            : decision.status === "approved" && decision.args !== undefined
+              ? { args: decision.args }
+              : undefined,
       agentRunId: task.runId,
       agentTaskId: task.id,
       proposedAt: task.createdAt,

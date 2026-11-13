@@ -629,6 +629,35 @@ describe("the screening decision in the hiring desk", () => {
     expect(ev).toBeTruthy();
   });
 
+  test("a hold recommendation can be decided the other way: to L1, with why on record", async () => {
+    await db.delete(agentRuns).where(eq(agentRuns.orgId, orgId));
+    const { appId } = await graded("Praveen");
+    const { tasks } = await propose(appId, "hold");
+    await expect(
+      resolveTask({
+        orgId,
+        taskId: tasks[0]!.id,
+        userId: recruiter,
+        decision: { status: "approved", outcome: "proceed" },
+      }),
+    ).rejects.toThrow(/Say why you are deciding differently/);
+    expect(await stageOf(appId)).toBe("shortlisted");
+    await resolveTask({
+      orgId,
+      taskId: tasks[0]!.id,
+      userId: recruiter,
+      decision: { status: "approved", outcome: "proceed", comment: "Probe PostgreSQL in L1" },
+    });
+    expect(await stageOf(appId)).toBe("l1");
+    expect(await taskStatus(tasks[0]!.id)).toBe("approved");
+    const { stageEvents } = await import("../drizzle/schema");
+    const [ev] = await db
+      .select()
+      .from(stageEvents)
+      .where(and(eq(stageEvents.applicationId, appId), eq(stageEvents.toStage, "l1")));
+    expect(ev!.reason).toBe("Moved to L1 against the hold recommendation: Probe PostgreSQL in L1");
+  });
+
   test("declining keeps them in screening with the reason; rejecting is the person's, with a reason", async () => {
     const a = await graded("Ravi");
     const first = await propose(a.appId, "proceed");

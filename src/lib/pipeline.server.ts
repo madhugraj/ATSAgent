@@ -5,10 +5,10 @@
  * predicates on the organisation and applies the same role rules as the UI.
  */
 import { sourceLabel } from "./job-channels";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "../server/db";
-import { applications, candidateNotes, candidates, requisitions } from "@db/schema";
+import { applications, candidateNotes, candidates, requisitions, screeningCalls } from "@db/schema";
 import { assertRole } from "./auth.middleware";
 import { canMove, REASON_REQUIRED, STAGE_LABEL, type Stage } from "./lifecycle";
 import type { LifecycleActor } from "./requisitions.server";
@@ -44,6 +44,13 @@ export async function moveStageCore(
   }
   if (REASON_REQUIRED.includes(input.toStage) && !input.reason?.trim()) {
     throw new Error(`A reason is required to move a candidate to ${STAGE_LABEL[input.toStage]}.`);
+  }
+  // Into an interview round while their screening call is still arranged (a
+  // callback they asked for, a retry, a call under way): refused, saying where
+  // it stands — the call would otherwise still ring after the move.
+  if (INTERVIEW_STAGES.includes(input.toStage) && PRE_INTERVIEW.includes(from)) {
+    const waiting = await openScreeningCall(actor.orgId, app.id);
+    if (waiting) throw new Error(waiting);
   }
   // Into an interview round with no screening on record: allowed, but only with
   // a written reason — it is recorded as "Screening skipped".
@@ -180,6 +187,53 @@ const PRE_INTERVIEW: Stage[] = [
   "on_hold",
   "reserve",
 ];
+
+const CALL_WAITING = {
+  requested: "a screening call is waiting for approval",
+  approved: "a screening call is booked",
+  dialling: "the screening call is being placed right now",
+  in_progress: "the screening call is under way right now",
+  callback: "they asked to be called back",
+  no_answer: "the screening call went unanswered and will be retried",
+  failed: "the screening call did not connect and will be retried",
+} as const;
+type WaitingStatus = keyof typeof CALL_WAITING;
+
+/**
+ * Why the candidate cannot move into an interview yet because their screening
+ * call is still arranged — or null. Says when it is due, in the org's time zone.
+ */
+export async function openScreeningCall(
+  orgId: string,
+  applicationId: string,
+): Promise<string | null> {
+  const [call] = await db
+    .select({
+      status: screeningCalls.status,
+      dueAt: screeningCalls.dueAt,
+      name: candidates.fullName,
+    })
+    .from(screeningCalls)
+    .innerJoin(candidates, eq(candidates.id, screeningCalls.candidateId))
+    .where(
+      and(
+        eq(screeningCalls.orgId, orgId),
+        eq(screeningCalls.applicationId, applicationId),
+        eq(screeningCalls.purpose, "screening"),
+        inArray(screeningCalls.status, Object.keys(CALL_WAITING) as WaitingStatus[]),
+      ),
+    )
+    .orderBy(desc(screeningCalls.createdAt))
+    .limit(1);
+  if (!call) return null;
+  let when = "";
+  if (call.dueAt) {
+    const { getOrgEmailSettings, formatInOrgTZ } = await import("./email-outbox.server");
+    when = ` — due ${formatInOrgTZ(call.dueAt, (await getOrgEmailSettings(orgId)).timezone)}`;
+  }
+  const who = call.name?.split(" ")[0] || "The candidate";
+  return `Not moved: ${who}'s screening is not finished — ${CALL_WAITING[call.status as WaitingStatus]}${when}. Wait for the call, or cancel it on their Phone screening card first.`;
+}
 
 /** Screening evidence for an application: a screening call, a completed assessment or an AI screen. */
 export async function screeningOnRecord(orgId: string, applicationId: string): Promise<boolean> {
