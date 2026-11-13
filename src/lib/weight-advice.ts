@@ -44,21 +44,23 @@ export function dimensionKey(label: string): string {
 }
 
 /** Raw model output → advice that validates under `weightsProblem`. */
-export function normaliseAdvice(
-  raw: Record<string, unknown>,
-  basis: string[] = [],
-): WeightAdvice {
+export function normaliseAdvice(raw: Record<string, unknown>, basis: string[] = []): WeightAdvice {
   const rawDims = Array.isArray(raw["custom_dimensions"]) ? raw["custom_dimensions"] : [];
   const seen = new Set<string>();
   const dims: ProposedDimension[] = [];
   for (const d of rawDims as Record<string, unknown>[]) {
     if (dims.length >= MAX_PROPOSED_DIMENSIONS || !d || typeof d !== "object") continue;
-    const label = String(d["label"] ?? "").trim().slice(0, 60);
-    const hint = String(d["hint"] ?? "").trim().slice(0, 300);
+    const label = String(d["label"] ?? "")
+      .trim()
+      .slice(0, 60);
+    const hint = String(d["hint"] ?? "")
+      .trim()
+      .slice(0, 300);
     const weight = toInt(d["weight"]);
     if (!label || hint.length < 10 || weight === 0) continue;
     let key = dimensionKey(label);
-    if (seen.has(key) || (WEIGHT_KEYS as readonly string[]).includes(key)) key = `${key}_2`.slice(0, 40);
+    if (seen.has(key) || (WEIGHT_KEYS as readonly string[]).includes(key))
+      key = `${key}_2`.slice(0, 40);
     if (seen.has(key)) continue;
     seen.add(key);
     dims.push({ key, label, hint, weight });
@@ -72,7 +74,14 @@ export function normaliseAdvice(
     WEIGHT_KEYS.reduce((s, k) => s + builtIn[k], 0) + dims.reduce((s, d) => s + d.weight, 0);
   if (total === 0) {
     // Nothing usable: fall back to an even-handed split.
-    Object.assign(builtIn, { skills: 35, experience: 25, career: 10, impact: 10, education: 10, social: 10 });
+    Object.assign(builtIn, {
+      skills: 35,
+      experience: 25,
+      career: 10,
+      impact: 10,
+      education: 10,
+      social: 10,
+    });
     dims.length = 0;
   } else {
     for (const k of WEIGHT_KEYS) builtIn[k] = Math.round((builtIn[k] / total) * 100);
