@@ -23,6 +23,7 @@ import {
   orgMembers,
   organizations,
   requisitions,
+  sourceIntegrations,
 } from "@db/schema";
 import { env } from "../server/env";
 import { writeAudit } from "../server/audit";
@@ -52,6 +53,32 @@ export type OfferInput = {
 };
 
 const site = () => env.PUBLIC_SITE_URL.replace(/\/$/, "");
+
+type MeetingProvider = "zoom" | "google_meet" | "teams";
+
+/**
+ * The meeting provider an online round uses when none was named: the one the
+ * organisation has connected (Teams first, then Google Meet, then Zoom), or
+ * null when none is — then the round is booked without a link.
+ */
+export async function connectedMeetingProvider(orgId: string): Promise<MeetingProvider | null> {
+  const rows = await db
+    .select({
+      provider: sourceIntegrations.provider,
+      enabled: sourceIntegrations.enabled,
+      ready: sourceIntegrations.hasCredentials,
+    })
+    .from(sourceIntegrations)
+    .where(
+      and(
+        eq(sourceIntegrations.orgId, orgId),
+        inArray(sourceIntegrations.provider, ["teams", "google_meet", "zoom"]),
+      ),
+    );
+  for (const p of ["teams", "google_meet", "zoom"] as const)
+    if (rows.some((r) => r.provider === p && r.enabled && r.ready)) return p;
+  return null;
+}
 
 /** Offer interview times to the candidate and email them the private link. */
 export async function offerSlotsCore(
@@ -185,7 +212,9 @@ export async function offerSlotsCore(
       interviewerEmail: member.email.toLowerCase(),
       durationMins: input.durationMins,
       mode: input.mode,
-      meetingProvider: input.meetingProvider ?? null,
+      meetingProvider:
+        input.meetingProvider ??
+        (input.mode === "online" ? await connectedMeetingProvider(orgId) : null),
       agenda: input.agenda?.trim() || null,
       panel,
       slots: slots.map((d) => d.toISOString()),
@@ -457,8 +486,16 @@ async function bookOfferSlot(
             agenda: offer.agenda,
           })
         ).joinUrl;
-      } catch {
-        meetingLink = null; // the round is booked; the team adds a link if it failed
+      } catch (e) {
+        // The round is booked; the team adds a link — but never silently.
+        meetingLink = null;
+        const { log } = await import("../server/log");
+        log.warn("slot_offer.meeting_link_failed", {
+          org_id: offer.orgId,
+          offer_id: offer.id,
+          provider: offer.meetingProvider,
+          error: e as Error,
+        });
       }
     }
     const { scheduleInterviewCore } = await import("./interviews.functions");
