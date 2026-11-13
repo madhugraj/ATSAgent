@@ -47,7 +47,7 @@ export type OfferInput = {
   mode: "online" | "onsite" | "phone";
   meetingProvider?: "zoom" | "google_meet" | "teams" | undefined;
   agenda?: string | undefined;
-  /** Further interviewers on the panel (active members). */
+  /** Further interviewers on the panel (active members or directory panelists). */
   panelEmails?: string[] | undefined;
 };
 
@@ -76,34 +76,21 @@ export async function offerSlotsCore(
     throw new Error(`Every time must be at least ${SLOT_OFFER.leadHours} hours ahead.`);
   if (slots.some((d) => d.getTime() > now + 60 * 864e5))
     throw new Error("Offer times within the next 60 days.");
-  const [member] = await db
-    .select({ name: orgMembers.fullName, email: orgMembers.email })
-    .from(orgMembers)
-    .where(
-      and(
-        eq(orgMembers.orgId, orgId),
-        eq(orgMembers.status, "active"),
-        sql`lower(${orgMembers.email}) = ${input.interviewerEmail.toLowerCase()}`,
-      ),
-    )
-    .limit(1);
-  if (!member) throw new Error("Interviewers must be active members of the organisation.");
+  const { activeInterviewer } = await import("./panelists.server");
+  const member = await activeInterviewer(orgId, input.interviewerEmail);
+  if (!member)
+    throw new Error(
+      `${input.interviewerEmail} is not an active member of the organisation or in its panel directory — add them on the Team page (Panel directory) first.`,
+    );
   const panel: { name: string | null; email: string }[] = [];
   for (const e of [...new Set((input.panelEmails ?? []).map((x) => x.trim().toLowerCase()))]) {
-    if (e === member.email.toLowerCase()) continue;
-    const [m] = await db
-      .select({ name: orgMembers.fullName, email: orgMembers.email })
-      .from(orgMembers)
-      .where(
-        and(
-          eq(orgMembers.orgId, orgId),
-          eq(orgMembers.status, "active"),
-          sql`lower(${orgMembers.email}) = ${e}`,
-        ),
-      )
-      .limit(1);
-    if (!m) throw new Error(`Panel members must be active members of the organisation: ${e}.`);
-    panel.push({ name: m.name ?? null, email: m.email.toLowerCase() });
+    if (e === member.email) continue;
+    const m = await activeInterviewer(orgId, e);
+    if (!m)
+      throw new Error(
+        `Panel members must be active members of the organisation or in its panel directory: ${e}.`,
+      );
+    panel.push(m);
   }
   if (panel.length > 2) throw new Error("A panel has at most three interviewers.");
   const [app] = await db
