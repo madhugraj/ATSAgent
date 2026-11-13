@@ -19,6 +19,9 @@ import {
   candidateOwnershipEvents,
   applications,
   candidateAssessments,
+  agentRuns,
+  agentTasks,
+  aiUsageEvents,
   candidateVerifications,
   candidates,
   departments,
@@ -604,4 +607,148 @@ export const listOwnershipEvents = createServerFn({ method: "POST" })
       )
       .orderBy(desc(candidateOwnershipEvents.createdAt));
     return snakeRows(rows);
+  });
+
+/**
+ * Candidate-wise agent activity (the candidate dossier's agent tab): every
+ * agent run about this candidate — type, version, goal, steps, status — with
+ * its HITL gate decisions and the AI calls (tokens, feature, outcome) it
+ * consumed. Org-scoped; metadata only, never transcript or CV content.
+ */
+export type CandidateAgentActivityRun = {
+  id: string;
+  agentType: string;
+  status: string;
+  definitionVersion: string | null;
+  goal: string;
+  stepCount: number;
+  createdAt: string;
+  applicationId: string | null;
+  tokens: number;
+  aiCalls: number;
+  aiErrors: number;
+  tasks: { id: string; kind: string; status: string; title: string; createdAt: string }[];
+};
+
+export type CandidateAgentActivity = {
+  applications: { id: string; requisitionId: string | null; stage: string | null }[];
+  runs: CandidateAgentActivityRun[];
+  usageByFeature: { feature: string; requests: number; errors: number; tokens: number }[];
+};
+
+export const listCandidateAgentActivity = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((data: unknown) => z.object({ candidateId: z.string().uuid() }).parse(data))
+  .handler(async ({ data, context }) => {
+    const [candidate] = await db
+      .select({ id: candidates.id })
+      .from(candidates)
+      .where(and(eq(candidates.id, data.candidateId), eq(candidates.orgId, context.orgId)))
+      .limit(1);
+    if (!candidate) throw new Error("Candidate not found.");
+
+    const apps = await db
+      .select({ id: applications.id, requisitionId: applications.requisitionId, stage: applications.stage })
+      .from(applications)
+      .where(and(eq(applications.candidateId, data.candidateId), eq(applications.orgId, context.orgId)));
+    const appIds = apps.map((a) => a.id);
+
+    const runs = appIds.length
+      ? await db
+          .select({
+            id: agentRuns.id,
+            agentType: agentRuns.agentType,
+            status: agentRuns.status,
+            definitionVersion: agentRuns.definitionVersion,
+            goal: agentRuns.goal,
+            stepCount: agentRuns.stepCount,
+            subjectId: agentRuns.subjectId,
+            createdAt: agentRuns.createdAt,
+          })
+          .from(agentRuns)
+          .where(
+            and(
+              eq(agentRuns.orgId, context.orgId),
+              eq(agentRuns.subjectType, "application"),
+              inArray(agentRuns.subjectId, appIds),
+            ),
+          )
+          .orderBy(desc(agentRuns.createdAt))
+          .limit(50)
+      : [];
+    const runIds = runs.map((r) => r.id);
+
+    const usageRows = await db
+      .select({
+        agentRunId: aiUsageEvents.agentRunId,
+        feature: aiUsageEvents.feature,
+        status: aiUsageEvents.status,
+        totalTokens: aiUsageEvents.totalTokens,
+      })
+      .from(aiUsageEvents)
+      .where(
+        and(
+          eq(aiUsageEvents.orgId, context.orgId),
+          appIds.length
+            ? or(
+                eq(aiUsageEvents.candidateId, data.candidateId),
+                inArray(aiUsageEvents.applicationId, appIds),
+              )
+            : eq(aiUsageEvents.candidateId, data.candidateId),
+        ),
+      )
+      .limit(400);
+
+    const tasks = runIds.length
+      ? await db
+          .select({
+            id: agentTasks.id,
+            runId: agentTasks.runId,
+            kind: agentTasks.kind,
+            status: agentTasks.status,
+            title: agentTasks.title,
+            createdAt: agentTasks.createdAt,
+          })
+          .from(agentTasks)
+          .where(inArray(agentTasks.runId, runIds))
+          .orderBy(desc(agentTasks.createdAt))
+      : [];
+
+    const usageByFeatureMap = new Map<string, { feature: string; requests: number; errors: number; tokens: number }>();
+    const tokensByRun = new Map<string, { tokens: number; calls: number; errors: number }>();
+    for (const u of usageRows) {
+      const f = usageByFeatureMap.get(u.feature) ?? { feature: u.feature, requests: 0, errors: 0, tokens: 0 };
+      f.requests += 1;
+      f.tokens += u.totalTokens ?? 0;
+      if (u.status === "error") f.errors += 1;
+      usageByFeatureMap.set(u.feature, f);
+      const key = u.agentRunId ?? "";
+      const r = tokensByRun.get(key) ?? { tokens: 0, calls: 0, errors: 0 };
+      r.tokens += u.totalTokens ?? 0;
+      r.calls += 1;
+      if (u.status === "error") r.errors += 1;
+      tokensByRun.set(key, r);
+    }
+
+    const activity: CandidateAgentActivity = {
+      applications: apps.map((a) => ({ id: a.id, requisitionId: a.requisitionId, stage: a.stage ?? null })),
+      runs: runs.map((r) => ({
+        id: r.id,
+        agentType: r.agentType,
+        status: r.status,
+        definitionVersion: r.definitionVersion ?? null,
+        goal: r.goal,
+        stepCount: r.stepCount,
+        createdAt: r.createdAt.toISOString(),
+        applicationId: r.subjectId ?? null,
+        tokens: tokensByRun.get(r.id)?.tokens ?? 0,
+        aiCalls: tokensByRun.get(r.id)?.calls ?? 0,
+        aiErrors: tokensByRun.get(r.id)?.errors ?? 0,
+        tasks: tasks
+          .filter((t) => t.runId === r.id)
+          .map((t) => ({ id: t.id, kind: t.kind, status: t.status, title: t.title, createdAt: t.createdAt.toISOString() })),
+      })),
+      usageByFeature: [...usageByFeatureMap.values()].sort((x, y) => y.tokens - x.tokens),
+    };
+    return activity;
   });

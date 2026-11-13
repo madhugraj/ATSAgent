@@ -9,6 +9,7 @@ import {
   listAiInterviews,
   listAllScreeningRuns,
   listApplications,
+  listCandidateAgentActivity,
   listCandidateAssessments,
   listCandidates,
   listCandidateNotes,
@@ -185,6 +186,8 @@ export const aiInterviewsQuery = queryOptions({
 });
 
 export type StageEvent = Tables<"stage_events">;
+export type { CandidateAgentActivity, CandidateAgentActivityRun } from "./queries.functions";
+import type { CandidateAgentActivity, CandidateAgentActivityRun } from "./queries.functions";
 export type CandidateVerification = Tables<"candidate_verifications">;
 
 export const stageEventsQuery = (applicationIds: string[]) =>
@@ -192,6 +195,15 @@ export const stageEventsQuery = (applicationIds: string[]) =>
     queryKey: ["stage_events", [...applicationIds].sort().join(",")],
     enabled: applicationIds.length > 0,
     queryFn: async () => (await listStageEvents({ data: { applicationIds } })) as StageEvent[],
+  });
+
+/** Candidate-wise agent activity: runs, gate decisions and AI spend for one candidate. */
+export const candidateAgentActivityQuery = (candidateId: string) =>
+  queryOptions({
+    queryKey: ["candidate_agent_activity", candidateId],
+    enabled: Boolean(candidateId),
+    queryFn: async () =>
+      (await listCandidateAgentActivity({ data: { candidateId } })) as CandidateAgentActivity,
   });
 
 /** Every verification run; newest first, so the head of each candidate group is current. */
