@@ -618,7 +618,11 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
       return { error: "The candidate is already on hold." };
     // Stated by the system, not left to the agent: the graded result it rests on.
     const [graded] = await db
-      .select({ score: screeningRuns.screeningScore, coverage: screeningRuns.coverage })
+      .select({
+        score: screeningRuns.screeningScore,
+        coverage: screeningRuns.coverage,
+        inputKind: screeningRuns.inputKind,
+      })
       .from(screeningRuns)
       .where(
         and(eq(screeningRuns.orgId, orgId), eq(screeningRuns.applicationId, subject.applicationId)),
@@ -657,11 +661,25 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
           : b,
       )
       .join("; ");
+    // A phone screen with too little evidence never holds anyone: one or two
+    // answered questions cannot carry a hold — proceed and probe, or ask for
+    // the written assessment. A practical blocker (above) may still hold.
+    const { phoneScreenTooThin, coverageWords } = await import("@/lib/screening-coverage");
+    if (
+      subject.recommendation === "hold" &&
+      !logistics.blockers.length &&
+      graded.inputKind === "phone_ai" &&
+      phoneScreenTooThin(graded.coverage)
+    )
+      return {
+        error: `The phone screen rests on too little to hold anyone (${
+          graded.coverage ? coverageWords(graded.coverage) : "coverage not recorded"
+        }). Recommend proceed and name what L1 should probe, or send the written assessment first.`,
+      };
     if (subject.recommendation === "proceed" && logistics.blockers.length)
       return {
         error: `Do not recommend proceeding: ${blockerText}. Recommend hold and state this in the rationale — a person may still move them on.`,
       };
-    const { coverageWords } = await import("@/lib/screening-coverage");
     const rests = graded.coverage
       ? ` (${coverageWords(graded.coverage)}; ${graded.coverage.confidence} confidence)`
       : "";

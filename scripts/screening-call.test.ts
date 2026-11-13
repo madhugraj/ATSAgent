@@ -535,6 +535,11 @@ describe("the call brief", () => {
     expect(session.callCoverage(four, ["q1", "q2"], 2)).toMatchObject({ confidence: "medium" });
     expect(session.callCoverage(four, ["q1"], 1)).toMatchObject({ confidence: "low" });
     expect(session.callCoverage([], [], 0)).toMatchObject({ confidence: "low" });
+    // Too few answers in absolute terms, however small the plan: one answer of one is low.
+    expect(session.callCoverage(["q1"], ["q1"], 1)).toMatchObject({ confidence: "low" });
+    expect(session.callCoverage(["q1", "q2"], ["q1", "q2"], 2)).toMatchObject({
+      confidence: "medium",
+    });
   });
 
   test("coverage in words: asked versus planned, skips and questions not reached", () => {
@@ -1210,7 +1215,7 @@ describe("a whole call with a fake line", () => {
       planned: 1,
       asked: 1,
       answered: 1,
-      confidence: "high",
+      confidence: "low",
     });
     // The desk thread hears how it went.
     const posted = await db
@@ -1219,7 +1224,7 @@ describe("a whole call with a fake line", () => {
       .where(eq(hiringMessages.conversationId, conv!.id));
     const fromCall = posted.filter((m) => m.agentType === "screening_call");
     expect(fromCall).toHaveLength(1);
-    expect(fromCall[0]!.body).toContain("(1 asked of 1 planned · answered; high confidence)");
+    expect(fromCall[0]!.body).toContain("(1 asked of 1 planned · answered; low confidence)");
     // …with the result card that opens "Why this score".
     const card = (
       await db

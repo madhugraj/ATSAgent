@@ -529,7 +529,8 @@ describe("evaluation and the hiring decision", () => {
 });
 
 describe("the screening decision in the hiring desk", () => {
-  async function graded(name: string) {
+  /** A phone screen: 2 of 4 answered (medium) by default; `full`: all 4 answered (high). */
+  async function graded(name: string, full = false) {
     const { appId, candidateId } = await application(name, "shortlisted");
     const [kit] = await db
       .insert(screeningKits)
@@ -551,14 +552,23 @@ describe("the screening decision in the hiring desk", () => {
       inputKind: "phone_ai",
       screeningScore: 63,
       recommendation: "hold",
-      coverage: {
-        planned: 4,
-        asked: 2,
-        answered: 2,
-        plannedIds: ["q3", "q5", "q2", "q4"],
-        askedIds: ["q3", "q5"],
-        confidence: "medium",
-      },
+      coverage: full
+        ? {
+            planned: 4,
+            asked: 4,
+            answered: 4,
+            plannedIds: ["q3", "q5", "q2", "q4"],
+            askedIds: ["q3", "q5", "q2", "q4"],
+            confidence: "high",
+          }
+        : {
+            planned: 4,
+            asked: 2,
+            answered: 2,
+            plannedIds: ["q3", "q5", "q2", "q4"],
+            askedIds: ["q3", "q5"],
+            confidence: "medium",
+          },
     });
     return { appId, candidateId };
   }
@@ -629,6 +639,18 @@ describe("the screening decision in the hiring desk", () => {
     expect(ev).toBeTruthy();
   });
 
+  test("a thin phone screen (2 of 4 answered) cannot hold anyone; a full one can", async () => {
+    await db.delete(agentRuns).where(eq(agentRuns.orgId, orgId));
+    const thin = await graded("Tara");
+    expect((await propose(thin.appId, "hold")).tasks).toHaveLength(0);
+    expect(await stageOf(thin.appId)).toBe("shortlisted");
+    await db.delete(agentRuns).where(eq(agentRuns.orgId, orgId));
+    const full = await graded("Uma", true);
+    const { tasks } = await propose(full.appId, "hold");
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]!.body).toContain("Recommendation: HOLD");
+  });
+
   test("a candidate who said on the call they will not relocate: no proceed; the card states the blocker", async () => {
     await db.delete(agentRuns).where(eq(agentRuns.orgId, orgId));
     await db
@@ -664,7 +686,7 @@ describe("the screening decision in the hiring desk", () => {
 
   test("a hold recommendation can be decided the other way: to L1, with why on record", async () => {
     await db.delete(agentRuns).where(eq(agentRuns.orgId, orgId));
-    const { appId } = await graded("Praveen");
+    const { appId } = await graded("Praveen", true);
     const { tasks } = await propose(appId, "hold");
     await expect(
       resolveTask({
@@ -709,7 +731,7 @@ describe("the screening decision in the hiring desk", () => {
     expect(note!.body).toContain("Want the written assessment too");
 
     await db.delete(agentRuns).where(eq(agentRuns.orgId, orgId));
-    const b = await graded("Kiran");
+    const b = await graded("Kiran", true);
     const second = await propose(b.appId, "hold");
     await expect(
       resolveTask({

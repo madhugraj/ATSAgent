@@ -30,3 +30,16 @@ export function notReached(c: ScreeningCoverage): string[] {
   const asked = new Set(c.askedIds);
   return (c.plannedIds ?? []).filter((id) => !asked.has(id));
 }
+
+/** Fewest answered questions a phone screen needs before it may hold anyone. */
+export const MIN_ANSWERS_TO_HOLD = 3;
+
+/**
+ * Whether a phone screen is too thin to hold a candidate on its score: fewer
+ * than three questions answered, or anything short of high confidence. Older
+ * runs were rated on share alone, so the count is checked too (pure).
+ */
+export function phoneScreenTooThin(c: ScreeningCoverage | null | undefined): boolean {
+  if (!c) return true;
+  return c.answered < MIN_ANSWERS_TO_HOLD || c.confidence !== "high";
+}

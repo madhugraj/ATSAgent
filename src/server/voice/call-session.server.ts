@@ -831,7 +831,9 @@ async function placeCall(
 
 /**
  * How much a phone screen's grade rests on (pure; unit-tested): planned, asked
- * and answered. Confidence is answered / planned — high ≥ 75 %, medium ≥ 50 %.
+ * and answered. Confidence needs both the share of the plan answered and
+ * enough answers in absolute terms — high: ≥ 75 % and at least 3; medium:
+ * ≥ 50 % and at least 2. One answer is never more than low, however small the plan.
  * Questions not reached or declined are never graded, so they never lower the
  * score; they only mean there is less evidence.
  */
@@ -847,7 +849,8 @@ export function callCoverage(
     answered,
     plannedIds: planned,
     askedIds: asked,
-    confidence: share >= 0.75 ? "high" : share >= 0.5 ? "medium" : "low",
+    confidence:
+      share >= 0.75 && answered >= 3 ? "high" : share >= 0.5 && answered >= 2 ? "medium" : "low",
   };
 }
 
