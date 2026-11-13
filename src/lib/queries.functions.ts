@@ -653,29 +653,46 @@ export const listCandidateAgentActivity = createServerFn({ method: "POST" })
       .where(and(eq(applications.candidateId, data.candidateId), eq(applications.orgId, context.orgId)));
     const appIds = apps.map((a) => a.id);
 
-    const runs = appIds.length
-      ? await db
-          .select({
-            id: agentRuns.id,
-            agentType: agentRuns.agentType,
-            status: agentRuns.status,
-            definitionVersion: agentRuns.definitionVersion,
-            goal: agentRuns.goal,
-            stepCount: agentRuns.stepCount,
-            subjectId: agentRuns.subjectId,
-            createdAt: agentRuns.createdAt,
-          })
-          .from(agentRuns)
-          .where(
-            and(
-              eq(agentRuns.orgId, context.orgId),
-              eq(agentRuns.subjectType, "application"),
-              inArray(agentRuns.subjectId, appIds),
-            ),
-          )
-          .orderBy(desc(agentRuns.createdAt))
-          .limit(50)
-      : [];
+    // Runs reach a candidate through two doors: application subjects, and the
+    // AI ledger's candidate stamp (batch scorers run at requisition level).
+    const usageRunIds = (
+      await db
+        .selectDistinct({ runId: aiUsageEvents.agentRunId })
+        .from(aiUsageEvents)
+        .where(
+          and(
+            eq(aiUsageEvents.orgId, context.orgId),
+            eq(aiUsageEvents.candidateId, data.candidateId),
+          ),
+        )
+    )
+      .map((r) => r.runId)
+      .filter((r): r is string => Boolean(r));
+
+    const runLink = appIds.length
+      ? or(
+          and(eq(agentRuns.subjectType, "application"), inArray(agentRuns.subjectId, appIds)),
+          usageRunIds.length ? inArray(agentRuns.id, usageRunIds) : sql`false`,
+        )
+      : usageRunIds.length
+        ? inArray(agentRuns.id, usageRunIds)
+        : sql`false`;
+
+    const runs = await db
+      .select({
+        id: agentRuns.id,
+        agentType: agentRuns.agentType,
+        status: agentRuns.status,
+        definitionVersion: agentRuns.definitionVersion,
+        goal: agentRuns.goal,
+        stepCount: agentRuns.stepCount,
+        subjectId: agentRuns.subjectId,
+        createdAt: agentRuns.createdAt,
+      })
+      .from(agentRuns)
+      .where(and(eq(agentRuns.orgId, context.orgId), runLink))
+      .orderBy(desc(agentRuns.createdAt))
+      .limit(50);
     const runIds = runs.map((r) => r.id);
 
     const usageRows = await db
