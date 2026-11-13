@@ -174,6 +174,23 @@ describe("the panel directory", () => {
       external.email.toLowerCase(),
     ]);
   });
+
+  test("an approved panellist without a login may interview; an unknown or inactive one may not", async () => {
+    // Slot offers and agent bookings check the interviewer with this — a
+    // directory panellist on the approved panel must not be refused there.
+    expect(await dir.activeInterviewer(orgId, external.email.toUpperCase())).toEqual({
+      name: external.fullName,
+      email: external.email.toLowerCase(),
+    });
+    expect(await dir.activeInterviewer(orgId, `HR@${domain}`)).toMatchObject({
+      email: `hr@${domain}`,
+    });
+    expect(await dir.activeInterviewer(orgId, `nobody@${domain}`)).toBeNull();
+    const mine = and(eq(panelists.orgId, orgId), eq(panelists.email, external.email.toLowerCase()));
+    await db.update(panelists).set({ active: false }).where(mine);
+    expect(await dir.activeInterviewer(orgId, external.email)).toBeNull();
+    await db.update(panelists).set({ active: true }).where(mine);
+  });
 });
 
 describe("the coordinator asks; HR types someone in", () => {

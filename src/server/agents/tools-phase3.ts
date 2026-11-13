@@ -345,7 +345,7 @@ export function registerPhase3Tools(): void {
       mode: z.enum(["online", "onsite", "phone"]).default("online"),
       meetingProvider: z.enum(["zoom", "google_meet", "teams"]).optional(),
       agenda: z.string().max(2000).optional(),
-      /** Further interviewers on the panel (active members). */
+      /** Further interviewers on the panel (active members or directory panelists). */
       panelEmails: z.array(z.string().email()).max(2).optional(),
     }),
     risk: "external",
@@ -359,18 +359,12 @@ export function registerPhase3Tools(): void {
         throw new Error("Schedule at least 12 hours ahead.");
       if (when.getTime() > Date.now() + 60 * 864e5)
         throw new Error("Schedule within the next 60 days.");
-      const [member] = await db
-        .select({ name: orgMembers.fullName, email: orgMembers.email })
-        .from(orgMembers)
-        .where(
-          and(
-            eq(orgMembers.orgId, ctx.orgId),
-            eq(orgMembers.status, "active"),
-            sql`lower(${orgMembers.email}) = ${i.interviewerEmail.toLowerCase()}`,
-          ),
-        )
-        .limit(1);
-      if (!member) throw new Error("Interviewers must be active members of the organisation.");
+      const { activeInterviewer } = await import("@/lib/panelists.server");
+      const member = await activeInterviewer(ctx.orgId, i.interviewerEmail);
+      if (!member)
+        throw new Error(
+          `${i.interviewerEmail} is not an active member of the organisation or in its panel directory.`,
+        );
       const app = await loadApplication(ctx.orgId, i.applicationId);
       const { assertAfterEarlierRounds } = await import("@/lib/calendar-availability.server");
       await assertAfterEarlierRounds(ctx.orgId, i.applicationId, i.level, [when]);

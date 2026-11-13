@@ -39,6 +39,43 @@ export type PanelistRow = {
 };
 
 /**
+ * Who may interview: an active org member, else an active entry of the panel
+ * directory (internal without a login, or external). Null when neither — the
+ * one check slot offers, agent bookings and manual scheduling share.
+ */
+export async function activeInterviewer(
+  orgId: string,
+  email: string,
+): Promise<{ name: string | null; email: string } | null> {
+  const e = email.trim().toLowerCase();
+  if (!e) return null;
+  const [member] = await db
+    .select({ name: orgMembers.fullName, email: orgMembers.email })
+    .from(orgMembers)
+    .where(
+      and(
+        eq(orgMembers.orgId, orgId),
+        eq(orgMembers.status, "active"),
+        sql`lower(${orgMembers.email}) = ${e}`,
+      ),
+    )
+    .limit(1);
+  if (member) return { name: member.name ?? null, email: member.email.toLowerCase() };
+  const [listed] = await db
+    .select({ name: panelists.fullName, email: panelists.email })
+    .from(panelists)
+    .where(
+      and(
+        eq(panelists.orgId, orgId),
+        eq(panelists.active, true),
+        sql`lower(${panelists.email}) = ${e}`,
+      ),
+    )
+    .limit(1);
+  return listed ? { name: listed.name ?? null, email: listed.email.toLowerCase() } : null;
+}
+
+/**
  * Add a person to the directory. An e-mail that belongs to an org member makes
  * them that member's internal entry (their details are updated, not duplicated);
  * an e-mail already in the directory for someone else is refused.
