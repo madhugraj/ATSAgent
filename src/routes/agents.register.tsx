@@ -268,11 +268,11 @@ function AgentTile({
       <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{m.responsibility}</p>
 
       <div className="mt-auto pt-4">
-        <div className="num flex items-center justify-between text-[11px] text-muted-foreground">
-          <span>
+        <div className="num flex items-center gap-3 whitespace-nowrap text-[11px] text-muted-foreground">
+          <span className="min-w-0 truncate">
             {a.last30.runs} runs · {a.last30.done} done · {a.last30.failed} stopped
           </span>
-          <span>{m.tools.length} tools</span>
+          <span className="ml-auto shrink-0">{m.tools.length} tools</span>
         </div>
         <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden>
           {used !== null ? (
