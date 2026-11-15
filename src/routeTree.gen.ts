@@ -46,6 +46,7 @@ import { Route as AgentsIntelligenceRouteImport } from './routes/agents.intellig
 import { Route as AgentsObservabilityRouteImport } from './routes/agents.observability'
 import { Route as AgentsRegisterRouteImport } from './routes/agents.register'
 import { Route as AgentsSettingsRouteImport } from './routes/agents.settings'
+import { Route as AgentsStudioRouteImport } from './routes/agents.studio'
 import { Route as ApplyIdRouteImport } from './routes/apply.$id'
 import { Route as AssessTokenRouteImport } from './routes/assess.$token'
 import { Route as AuthResetRouteImport } from './routes/auth.reset'
@@ -268,6 +269,11 @@ const AgentsRegisterRoute = AgentsRegisterRouteImport.update({
 const AgentsSettingsRoute = AgentsSettingsRouteImport.update({
   id: '/agents/settings',
   path: '/agents/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentsStudioRoute = AgentsStudioRouteImport.update({
+  id: '/agents/studio',
+  path: '/agents/studio',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApplyIdRoute = ApplyIdRouteImport.update({
@@ -505,6 +511,7 @@ export interface FileRoutesByFullPath {
   '/agents/observability': typeof AgentsObservabilityRoute
   '/agents/register': typeof AgentsRegisterRoute
   '/agents/settings': typeof AgentsSettingsRoute
+  '/agents/studio': typeof AgentsStudioRoute
   '/apply/$id': typeof ApplyIdRoute
   '/assess/$token': typeof AssessTokenRoute
   '/auth/reset': typeof AuthResetRoute
@@ -582,6 +589,7 @@ export interface FileRoutesByTo {
   '/agents/observability': typeof AgentsObservabilityRoute
   '/agents/register': typeof AgentsRegisterRoute
   '/agents/settings': typeof AgentsSettingsRoute
+  '/agents/studio': typeof AgentsStudioRoute
   '/apply/$id': typeof ApplyIdRoute
   '/assess/$token': typeof AssessTokenRoute
   '/auth/reset': typeof AuthResetRoute
@@ -660,6 +668,7 @@ export interface FileRoutesById {
   '/agents/observability': typeof AgentsObservabilityRoute
   '/agents/register': typeof AgentsRegisterRoute
   '/agents/settings': typeof AgentsSettingsRoute
+  '/agents/studio': typeof AgentsStudioRoute
   '/apply/$id': typeof ApplyIdRoute
   '/assess/$token': typeof AssessTokenRoute
   '/auth/reset': typeof AuthResetRoute
@@ -739,6 +748,7 @@ export interface FileRouteTypes {
     | '/agents/observability'
     | '/agents/register'
     | '/agents/settings'
+    | '/agents/studio'
     | '/apply/$id'
     | '/assess/$token'
     | '/auth/reset'
@@ -816,6 +826,7 @@ export interface FileRouteTypes {
     | '/agents/observability'
     | '/agents/register'
     | '/agents/settings'
+    | '/agents/studio'
     | '/apply/$id'
     | '/assess/$token'
     | '/auth/reset'
@@ -893,6 +904,7 @@ export interface FileRouteTypes {
     | '/agents/observability'
     | '/agents/register'
     | '/agents/settings'
+    | '/agents/studio'
     | '/apply/$id'
     | '/assess/$token'
     | '/auth/reset'
@@ -971,6 +983,7 @@ export interface RootRouteChildren {
   AgentsObservabilityRoute: typeof AgentsObservabilityRoute
   AgentsRegisterRoute: typeof AgentsRegisterRoute
   AgentsSettingsRoute: typeof AgentsSettingsRoute
+  AgentsStudioRoute: typeof AgentsStudioRoute
   ApplyIdRoute: typeof ApplyIdRoute
   AssessTokenRoute: typeof AssessTokenRoute
   AuthResetRoute: typeof AuthResetRoute
@@ -1271,6 +1284,13 @@ declare module '@tanstack/react-router' {
       path: '/agents/settings'
       fullPath: '/agents/settings'
       preLoaderRoute: typeof AgentsSettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agents/studio': {
+      id: '/agents/studio'
+      path: '/agents/studio'
+      fullPath: '/agents/studio'
+      preLoaderRoute: typeof AgentsStudioRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/apply/$id': {
@@ -1579,6 +1599,7 @@ const rootRouteChildren: RootRouteChildren = {
   AgentsObservabilityRoute: AgentsObservabilityRoute,
   AgentsRegisterRoute: AgentsRegisterRoute,
   AgentsSettingsRoute: AgentsSettingsRoute,
+  AgentsStudioRoute: AgentsStudioRoute,
   ApplyIdRoute: ApplyIdRoute,
   AssessTokenRoute: AssessTokenRoute,
   AuthResetRoute: AuthResetRoute,

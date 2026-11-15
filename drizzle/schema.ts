@@ -2463,6 +2463,80 @@ export const agentEvents = pgTable(
   ],
 );
 
+export type AgentExportStatus = "draft" | "published" | "archived";
+
+/**
+ * A customised copy of a stock agent for use outside this app (Agent studio,
+ * migration 0080): downloaded as a portable package or run here through the
+ * hosted API. Customisations only narrow the stock agent and never apply to
+ * in-app runs.
+ */
+export const agentExports = pgTable(
+  "agent_exports",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    agentType: text("agent_type").$type<AgentType>().notNull(),
+    /** The stock manifest it was customised from. */
+    baseVersion: text("base_version").notNull(),
+    baseHash: text("base_hash").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    extraInstructions: text("extra_instructions").notNull().default(""),
+    /** A subset of the stock agent's tools. */
+    tools: jsonb("tools")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    extraMustNever: jsonb("extra_must_never")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    maxSteps: integer("max_steps"),
+    maxTokens: integer("max_tokens"),
+    status: text("status").$type<AgentExportStatus>().notNull().default("draft"),
+    /** Bumped on every save so runs record exactly what they executed. */
+    version: integer("version").notNull().default(1),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("agent_exports_org_idx").on(t.orgId, t.status)],
+);
+
+/**
+ * Hosted-API keys for a published export. Only the SHA-256 of the key is
+ * stored; the key is shown once. Runs act as `principalUserId`.
+ */
+export const agentExportKeys = pgTable(
+  "agent_export_keys",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    exportId: uuid("export_id")
+      .notNull()
+      .references(() => agentExports.id, { onDelete: "cascade" }),
+    label: text("label").notNull().default(""),
+    keyPrefix: text("key_prefix").notNull(),
+    keyHash: text("key_hash").notNull(),
+    principalUserId: uuid("principal_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("agent_export_keys_hash_key").on(t.keyHash),
+    index("agent_export_keys_export_idx").on(t.orgId, t.exportId),
+  ],
+);
+
 /** Immutable snapshot of each agent manifest version, keyed by content hash. */
 export const agentDefinitions = pgTable(
   "agent_definitions",
@@ -2548,6 +2622,14 @@ export const agentRuns = pgTable(
       (): AnyPgColumn => orgProfileVersions.id,
       { onDelete: "set null" },
     ),
+    /**
+     * The customised export a hosted-API run executes under (migration 0080);
+     * null for in-app runs, which never see export customisations.
+     */
+    exportId: uuid("export_id").references((): AnyPgColumn => agentExports.id, {
+      onDelete: "set null",
+    }),
+    exportVersion: integer("export_version"),
   },
   (t) => [
     index("agent_runs_queue_idx").on(t.status, t.updatedAt),

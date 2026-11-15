@@ -125,6 +125,13 @@ The counters live in the UNLOGGED table `rate_limit_hits` (migration 0066). If
 the database cannot be reached the limiter falls back to the per-instance
 window rather than blocking traffic.
 
+### Hosted agent API (Agent studio)
+
+`/api/agents/*` and `/api/mcp` are served by the app itself and authenticated with organisation keys
+created on Agent administration → Agent studio; no deployment configuration is needed. They are
+rate-limited per caller (60/min, the shared limiter above) and per key (30/min). Apply migration
+`0080_agent_exports.sql` before deploying.
+
 ### Sandboxed document parser (recommended)
 
 CVs and documents arriving by mail, Capture or upload are parsed in a separate

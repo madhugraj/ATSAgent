@@ -86,6 +86,36 @@ function isH3SwallowedErrorBody(body: string): boolean {
 // Rate limiting: 60/min per caller per path, shared across instances when
 // RATE_LIMIT_STORE=postgres (src/server/rate-limit.ts).
 
+/**
+ * Hosted agent API and MCP (Agent studio): authenticated by org keys, limited
+ * per caller per path and, tighter, per key (src/server/agents/hosted-api.server.ts).
+ */
+const AGENT_API_KEY_LIMIT = 30;
+
+function isAgentApiPath(path: string): boolean {
+  return path.startsWith("/api/agents/") || path === "/api/mcp";
+}
+
+async function agentApiResponse(request: Request, url: URL): Promise<Response> {
+  const api = await import("./server/agents/hosted-api.server");
+  const key = api.bearerKey(request);
+  if (!key) return api.unauthorized();
+  const { hashKey } = await import("./server/agents/exports.server");
+  if (!(await allowRequest(`agent-key:${hashKey(key)}`, Date.now(), AGENT_API_KEY_LIMIT)))
+    return tooManyRequests();
+  try {
+    return url.pathname === "/api/mcp"
+      ? await api.handleMcp(request)
+      : await api.handleAgentApi(request, url);
+  } catch (error) {
+    log.error("agent_api.unhandled", { error: error instanceof Error ? error : String(error) });
+    return new Response(JSON.stringify({ error: "Internal error." }), {
+      status: 500,
+      headers: { "content-type": "application/json" },
+    });
+  }
+}
+
 function isPublicApiPath(path: string): boolean {
   return path === "/api/public" || path.startsWith("/api/public/");
 }
@@ -335,6 +365,10 @@ export default {
       const csrf = request.method !== "OPTIONS" ? csrfGuard(request, url.pathname) : null;
       if (csrf) {
         response = csrf;
+      } else if (request.method !== "OPTIONS" && isAgentApiPath(url.pathname)) {
+        response = (await allowRequest(`${clientIp(request)}:${url.pathname}`))
+          ? await agentApiResponse(request, url)
+          : tooManyRequests();
       } else if (
         request.method !== "OPTIONS" &&
         (isPublicApiPath(url.pathname) || isServerFnPath(url.pathname) || group === "metrics")
