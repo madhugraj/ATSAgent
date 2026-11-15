@@ -133,9 +133,9 @@ function AgentStudioPage() {
 
       <Sheet open={Boolean(open)} onOpenChange={(o) => (!o ? setOpen(null) : undefined)}>
         <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
-          {open && data ? (
+          {open && data && (!open.exportId || editing) ? (
             <ExportEditor
-              key={open.exportId ?? "new"}
+              key={editing ? `${editing.id}:${editing.version}` : "new"}
               agents={data.agents}
               existing={editing}
               canEdit={data.canEdit}
