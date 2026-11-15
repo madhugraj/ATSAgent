@@ -2627,6 +2627,18 @@ async function recordStep(
   });
 }
 
+/** A JSON value with every NUL character removed from its strings. */
+export function withoutNul<T>(value: T): T {
+  if (typeof value === "string")
+    return (value.includes("\0") ? value.replaceAll("\0", "") : value) as T;
+  if (Array.isArray(value)) return value.map(withoutNul) as T;
+  if (value && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, withoutNul(v)]),
+    ) as T;
+  return value;
+}
+
 async function save(
   run: AgentRun,
   transcript: AgentMessage[],
@@ -2637,7 +2649,9 @@ async function save(
   await db
     .update(agentRuns)
     .set({
-      transcript: transcript as never,
+      // A NUL anywhere (a tool's output, an error quoting one) makes Postgres refuse
+      // the whole JSON row and fail the run: store the transcript without them.
+      transcript: withoutNul(transcript) as never,
       pending: pending as never,
       stepCount,
       tokensUsed,

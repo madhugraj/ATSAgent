@@ -103,6 +103,9 @@
   instead of nothing, and `search` works on any page — e.g. ESIC circulars can now be briefed on
   the first read. Pages are never shown whole (the 1.3.2 budget lesson). `safeFetch` also falls
   back to a host's next vetted address when one is dead (esic.gov.in publishes one).
+  Extracted document text drops NUL and control characters (a Hindi ESIC circular's PDF
+  text broke the read), and run transcripts are saved without NULs, so no tool output can
+  fail a run that way.
 
 ## Agent intelligence (2026-11-06)
 
