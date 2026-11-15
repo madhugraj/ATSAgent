@@ -268,12 +268,10 @@ function AgentTile({
       <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{m.responsibility}</p>
 
       <div className="mt-auto pt-4">
-        <div className="num flex items-center gap-3 whitespace-nowrap text-[11px] text-muted-foreground">
-          <span className="min-w-0 truncate">
-            {a.last30.runs} runs · {a.last30.done} done · {a.last30.failed} stopped
-          </span>
-          <span className="ml-auto shrink-0">{m.tools.length} tools</span>
-        </div>
+        <p className="text-[11px] text-muted-foreground">
+          <span className="font-medium text-foreground">{a.last30.runs}</span> runs ·{" "}
+          {a.last30.done} done · {a.last30.failed} stopped
+        </p>
         <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden>
           {used !== null ? (
             <div
@@ -282,10 +280,13 @@ function AgentTile({
             />
           ) : null}
         </div>
-        <p className="num mt-1 text-[11px] text-muted-foreground">
-          {a.monthTokens.toLocaleString()}
-          {budget != null ? ` / ${budget.toLocaleString()}` : ""} tokens this month
-        </p>
+        <div className="mt-1 flex items-baseline gap-2 text-[11px] text-muted-foreground">
+          <span className="num min-w-0 truncate">
+            {a.monthTokens.toLocaleString()}
+            {budget != null ? ` / ${budget.toLocaleString()}` : ""} tokens
+          </span>
+          <span className="ml-auto shrink-0">{m.tools.length} tools</span>
+        </div>
 
         <div className="mt-5 flex items-center gap-2 border-t border-foreground/5 pt-4">
           <span className="flex size-7 items-center justify-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary">
