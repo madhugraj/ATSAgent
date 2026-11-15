@@ -596,7 +596,7 @@ export const askAgents = createServerFn({ method: "POST" })
     const { loadPolicy } = await import("../server/agents/policy");
     const policy = await loadPolicy(context.orgId, "copilot");
     if (!policy.enabled) {
-      throw new Error("Switch on Arjun in Agent settings first.");
+      throw new Error("Switch on Aditi in Agent settings first.");
     }
     const { resolveAiConfig } = await import("./ai-gateway.server");
     const cfg = await resolveAiConfig(context.orgId);

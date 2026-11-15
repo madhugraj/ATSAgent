@@ -61,7 +61,7 @@ let hmMemberId: string;
 let reqId: string;
 let convId: string;
 
-/** Every agent the organisation can switch on (the Copilot agent, shown as Arjun, is the front door). */
+/** Every agent the organisation can switch on (the Copilot agent, shown as Aditi, is the front door). */
 const SPECIALISTS = [
   "requisition",
   "jd",
@@ -225,7 +225,7 @@ afterAll(async () => {
 });
 
 describe("registry", () => {
-  test("23 agents are registered: Arjun (the Copilot agent) and the 22 specialists", () => {
+  test("23 agents are registered: Aditi (the Copilot agent) and the 22 specialists", () => {
     const types = listAgents()
       .map((a) => a.type)
       .sort();

@@ -183,7 +183,7 @@ function RegisterBody({ agents }: { agents: AgentRegisterEntry[] }) {
       </div>
 
       {shown.length ? (
-        <div className="mt-4 grid gap-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {shown.map((a) => (
             <AgentTile
               key={a.type}
@@ -232,7 +232,7 @@ function AgentTile({
     <article
       id={anchorOf(a.type)}
       onClick={onOpen}
-      className={`glass-card group flex cursor-pointer flex-col overflow-hidden p-5 pb-6 ${
+      className={`glass-card group flex cursor-pointer flex-col overflow-hidden p-3.5 pb-4 ${
         selected ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : ""
       }`}
     >
@@ -253,7 +253,7 @@ function AgentTile({
         </span>
       </div>
 
-      <h3 className="mt-3 font-semibold leading-snug">
+      <h3 className="mt-2.5 text-sm font-semibold leading-snug">
         <button
           type="button"
           onClick={(e) => {
@@ -265,9 +265,9 @@ function AgentTile({
           {m.name}
         </button>
       </h3>
-      <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{m.responsibility}</p>
+      <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{m.responsibility}</p>
 
-      <div className="mt-auto pt-4">
+      <div className="mt-auto pt-3">
         <p className="text-[11px] text-muted-foreground">
           <span className="font-medium text-foreground">{a.last30.runs}</span> runs ·{" "}
           {a.last30.done} done · {a.last30.failed} stopped
@@ -288,8 +288,8 @@ function AgentTile({
           <span className="ml-auto shrink-0">{m.tools.length} tools</span>
         </div>
 
-        <div className="mt-5 flex items-center gap-2 border-t border-foreground/5 pt-4">
-          <span className="flex size-7 items-center justify-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary">
+        <div className="mt-3 flex items-center gap-2 border-t border-foreground/5 pt-3">
+          <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">
             {owner
               .split(/[\s/]+/)
               .filter(Boolean)
@@ -303,7 +303,7 @@ function AgentTile({
           </div>
           <Button
             size="icon"
-            className="ml-auto size-7 rounded-full"
+            className="ml-auto size-6 shrink-0 rounded-full"
             aria-label={`Open ${m.name}`}
             onClick={(e) => {
               e.stopPropagation();
@@ -314,7 +314,7 @@ function AgentTile({
           </Button>
         </div>
       </div>
-      <span className={`absolute inset-x-5 bottom-0 h-1 rounded-t-full ${style.bar}`} />
+      <span className={`absolute inset-x-3.5 bottom-0 h-1 rounded-t-full ${style.bar}`} />
     </article>
   );
 }

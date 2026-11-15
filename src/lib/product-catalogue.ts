@@ -295,7 +295,7 @@ export const CATALOGUE_MODULES: CatalogueModule[] = [
       "Role ontology lookups and emerging roles",
       "Short formatted answers with links to the right page; a cause is named only when the data shows it",
       "Guided first-login journey and answers grounded in the built-in user manual",
-      "Hands work to the hiring agent Arjun only when the person clicks",
+      "Hands work to the hiring agents only when the person clicks",
       "Organisation-scoped conversation persisted per user, available on every screen",
     ],
     defaultTier: "Growth",
@@ -306,10 +306,10 @@ export const CATALOGUE_MODULES: CatalogueModule[] = [
     category: "Agents",
     audience: "Recruiter, hiring manager, HR head, CBO",
     summary:
-      "Opt-in hiring agents that draft, match, screen, schedule and chase across the lifecycle, led by Arjun on the Hiring desk, while every approval, rejection, offer and hire stays with a person.",
+      "Opt-in hiring agents that draft, match, screen, schedule and chase across the lifecycle, led by Aditi on the Hiring desk, while every approval, rejection, offer and hire stays with a person.",
     outcome: "Recruiters supervise the pipeline instead of pushing every step by hand.",
     capabilities: [
-      "Hiring desk: describe a need in chat; Arjun gathers the details, reuses or creates the role, ranks candidates and lines up screening",
+      "Hiring desk: describe a need in chat; Aditi gathers the details, reuses or creates the role, ranks candidates and lines up screening",
       "Specialist agents: requisition, JD, publishing, intake and matching, sourcing, distribution, organisation context, role expert interview, screening, follow-up, interview coordination, L1–L3 silent panel, evaluation, offer and pre-onboarding",
       "Per-agent autonomy: Suggest, Act and notify or Autonomous, with measured recommendations",
       "Agents never approve, reject, release, hire or accept — they propose and a person decides in Waiting for you or the thread",

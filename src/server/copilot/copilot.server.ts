@@ -4,7 +4,7 @@
  * the server by the person's scope (src/lib/copilot-scope.ts); tools a scope
  * does not allow are never offered to the model. Doing work (opening a
  * requisition, shortlisting) is proposed as a hand-off the person confirms,
- * which then starts the agent Copilot (shown as Arjun) — Aditi never acts on her own.
+ * which then starts the agent Copilot (also shown as Aditi) — the copilot never acts on its own.
  */
 import { z } from "zod";
 
