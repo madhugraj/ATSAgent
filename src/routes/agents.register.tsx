@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { explainEval } from "@/lib/eval-catalog";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { ArrowRight, Search, ShieldCheck } from "lucide-react";
+import { Search, ShieldCheck } from "lucide-react";
 
 import { EmptyState, PageHeader } from "@/components/ats";
 import { Badge } from "@/components/ui/badge";
@@ -100,24 +100,10 @@ const riskLabel = (r: string) => `${r.charAt(0).toUpperCase()}${r.slice(1)} risk
 const RISK_FILTERS = ["all", "low", "medium", "high"] as const;
 type RiskFilter = (typeof RISK_FILTERS)[number];
 
-type RiskStyle = { chip: string; dot: string; bar: string };
-const LOW_RISK: RiskStyle = {
-  chip: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-  dot: "bg-emerald-500",
-  bar: "bg-emerald-500",
-};
-const RISK_STYLE: Record<string, RiskStyle> = {
-  low: LOW_RISK,
-  medium: {
-    chip: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-    dot: "bg-amber-500",
-    bar: "bg-amber-500",
-  },
-  high: {
-    chip: "bg-destructive/10 text-destructive",
-    dot: "bg-destructive",
-    bar: "bg-destructive",
-  },
+const RISK_DOT: Record<string, string> = {
+  low: "bg-emerald-500",
+  medium: "bg-amber-500",
+  high: "bg-destructive",
 };
 
 /** Every agent as a card in a grid; a card opens its full register entry in a side panel. */
@@ -147,11 +133,7 @@ function RegisterBody({ agents }: { agents: AgentRegisterEntry[] }) {
     <>
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <h2 className="text-base font-semibold">Agents</h2>
-        <div
-          role="radiogroup"
-          aria-label="Show agents by risk"
-          className="inline-flex rounded-full border bg-muted/40 p-0.5"
-        >
+        <div role="radiogroup" aria-label="Show agents by risk" className="flex items-center gap-4">
           {RISK_FILTERS.map((r) => (
             <button
               key={r}
@@ -159,9 +141,9 @@ function RegisterBody({ agents }: { agents: AgentRegisterEntry[] }) {
               role="radio"
               aria-checked={risk === r}
               onClick={() => setRisk(r)}
-              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+              className={`text-xs transition-colors ${
                 risk === r
-                  ? "bg-background text-foreground shadow-sm"
+                  ? "font-medium text-foreground"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -183,7 +165,7 @@ function RegisterBody({ agents }: { agents: AgentRegisterEntry[] }) {
       </div>
 
       {shown.length ? (
-        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
           {shown.map((a) => (
             <AgentTile
               key={a.type}
@@ -224,96 +206,43 @@ function AgentTile({
   onOpen: () => void;
 }) {
   const m = a.manifest;
-  const style = RISK_STYLE[m.riskTier] ?? LOW_RISK;
-  const owner = ROLE_NAME[m.owner] ?? m.owner;
-  const budget = a.policy.monthlyTokenBudget;
-  const used = budget ? Math.min(100, Math.round((a.monthTokens / budget) * 100)) : null;
   return (
     <article
       id={anchorOf(a.type)}
       onClick={onOpen}
-      className={`group relative flex cursor-pointer flex-col overflow-hidden rounded-xl border bg-card p-4 pb-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
-        selected ? "ring-2 ring-primary" : ""
+      className={`flex cursor-pointer flex-col rounded-lg border bg-card p-4 transition-colors hover:border-foreground/20 ${
+        selected ? "border-foreground/40" : ""
       }`}
     >
-      <div className="flex items-center gap-2 text-[11px]">
-        <span className="num font-medium text-muted-foreground">v{a.version}</span>
-        <span
-          className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-medium ${style.chip}`}
-        >
-          <span className={`size-1.5 rounded-full ${style.dot}`} />
-          {riskLabel(m.riskTier)}
-        </span>
-        <span
-          className={`ml-auto rounded-full px-2 py-0.5 font-medium ${
-            a.policy.enabled ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"
-          }`}
-        >
-          {a.policy.enabled ? "On" : "Off"}
-        </span>
-      </div>
-
-      <h3 className="mt-3 font-semibold leading-snug">
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onOpen();
-          }}
-          className="rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          {m.name}
-        </button>
-      </h3>
-      <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{m.responsibility}</p>
-
-      <div className="mt-auto pt-4">
-        <div className="num flex items-center justify-between text-[11px] text-muted-foreground">
-          <span>
-            {a.last30.runs} runs · {a.last30.done} done · {a.last30.failed} stopped
-          </span>
-          <span>{m.tools.length} tools</span>
-        </div>
-        <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden>
-          {used !== null ? (
-            <div
-              className={`h-full rounded-full ${used >= 90 ? "bg-destructive" : "bg-foreground"}`}
-              style={{ width: `${used}%` }}
-            />
-          ) : null}
-        </div>
-        <p className="num mt-1 text-[11px] text-muted-foreground">
-          {a.monthTokens.toLocaleString()}
-          {budget != null ? ` / ${budget.toLocaleString()}` : ""} tokens this month
-        </p>
-
-        <div className="mt-4 flex items-center gap-2 border-t pt-3">
-          <span className="flex size-7 items-center justify-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary">
-            {owner
-              .split(/[\s/]+/)
-              .filter(Boolean)
-              .slice(0, 2)
-              .map((w) => w[0]?.toUpperCase())
-              .join("")}
-          </span>
-          <div className="min-w-0 leading-tight">
-            <p className="truncate text-xs font-medium">{owner}</p>
-            <p className="text-[10px] text-muted-foreground">Accountable owner</p>
-          </div>
-          <Button
-            size="icon"
-            className="ml-auto size-7 rounded-full"
-            aria-label={`Open ${m.name}`}
+      <div className="flex items-center gap-2">
+        <h3 className="min-w-0 flex-1 truncate text-sm font-semibold">
+          <button
+            type="button"
             onClick={(e) => {
               e.stopPropagation();
               onOpen();
             }}
+            className="rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <ArrowRight className="size-3.5" />
-          </Button>
-        </div>
+            {m.name}
+          </button>
+        </h3>
+        <span
+          role="img"
+          aria-label={riskLabel(m.riskTier)}
+          title={riskLabel(m.riskTier)}
+          className={`size-2 shrink-0 rounded-full ${RISK_DOT[m.riskTier] ?? "bg-emerald-500"}`}
+        />
       </div>
-      <span className={`absolute inset-x-0 bottom-0 h-1 ${style.bar}`} />
+      <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">{m.responsibility}</p>
+      <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
+        <span className="num">v{a.version}</span>
+        <span>·</span>
+        <span className="truncate">{ROLE_NAME[m.owner] ?? m.owner}</span>
+        <span className={`ml-auto ${a.policy.enabled ? "text-foreground" : ""}`}>
+          {a.policy.enabled ? "On" : "Off"}
+        </span>
+      </div>
     </article>
   );
 }
