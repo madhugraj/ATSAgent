@@ -98,6 +98,12 @@
   replaced with pages verified readable. First real finding: minimum wages,
   from the Code on Wages, 2019, section 5.
 
+- Labour law & policy agent 1.4.0 (2026-11-16): plain source pages (news, circulars) keep the
+  own-site PDFs they link to; a page never briefed shows those documents (title and address)
+  instead of nothing, and `search` works on any page — e.g. ESIC circulars can now be briefed on
+  the first read. Pages are never shown whole (the 1.3.2 budget lesson). `safeFetch` also falls
+  back to a host's next vetted address when one is dead (esic.gov.in publishes one).
+
 ## Agent intelligence (2026-11-06)
 
 - [x] `/agents/intelligence` (governance roles): the knowledge-graph view of the hiring fleet, computed live from this organisation's telemetry — three views, each with descriptive and prescriptive layers: agent behavior (agents × person gates × failure clusters, candidates folded into edge counts, per-agent action plan), governance (every person decision chained to the norm it acted under, overturn chains, autonomy check over `stage_events` actor attribution), and vocabulary (skills/role families seeded in-memory by the production `buildOntology()` + `deriveInsights()` — prescriptive sourcing/coverage insights, nothing persisted until Phase 1)

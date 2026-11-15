@@ -611,3 +611,41 @@ describe("what a listing shows a first briefing", () => {
     );
   });
 });
+
+describe("plain source pages", () => {
+  const html = `<html><body><h1>Circulars</h1>
+    <a href="/attachments/circularfile/Wage_ceiling_2026.pdf" target="_blank">Revision of wage ceiling for coverage- PDF size:(246.40 KB) .</a>
+    <a href="/attachments/files/esic at a glance.pdf">ESIC at a Glance . size:(170 KB)</a>
+    <a href="https://evil.example.com/x.pdf">Off-site</a>
+    <a href="/circulars">Instructions/Circular/Orders</a>
+    <a href="/attachments/circularfile/Wage_ceiling_2026.pdf">Duplicate</a>
+  </body></html>`;
+  const docs = lp.pageDocuments(html, "https://esic.gov.in/circulars", "www.esic.gov.in");
+
+  test("lists own-site PDFs once, with clean titles and absolute addresses", () => {
+    expect(docs).toEqual([
+      "Document: Revision of wage ceiling for coverage — https://esic.gov.in/attachments/circularfile/Wage_ceiling_2026.pdf",
+      "Document: ESIC at a Glance — https://esic.gov.in/attachments/files/esic%20at%20a%20glance.pdf",
+    ]);
+  });
+
+  test("a never-briefed page shows its documents, never the whole page", () => {
+    const text = lp.withPageDocuments("Circulars\n" + "news line\n".repeat(5000), docs);
+    const view = lp.pageView(text);
+    expect(view).toContain("2 documents listed");
+    expect(view).toContain("Wage_ceiling_2026.pdf");
+    expect(view).not.toContain("news line");
+    expect(view.length).toBeLessThan(8_001);
+  });
+
+  test("search returns the matching lines of any page", () => {
+    const text = lp.withPageDocuments("Circulars\nContribution rates revised", docs);
+    expect(lp.pageView(text, ["wage ceiling"])).toContain("Wage_ceiling_2026.pdf");
+    expect(lp.pageView(text, ["contribution"])).toBe("Contribution rates revised");
+    expect(lp.pageView(text, ["maternity"])).toContain("Nothing on the page mentions");
+  });
+
+  test("a page without documents says so", () => {
+    expect(lp.pageView("Just news")).toContain("lists no documents");
+  });
+});

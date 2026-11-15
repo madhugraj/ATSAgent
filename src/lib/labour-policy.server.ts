@@ -530,7 +530,9 @@ export async function readSourceCore(
         });
         if (!sameSite(new URL(res.finalUrl).hostname, s.host))
           throw new Error("The page redirected off the source's own host.");
-        text = /html/i.test(res.contentType) ? htmlToText(res.text) : res.text;
+        text = /html/i.test(res.contentType)
+          ? withPageDocuments(htmlToText(res.text), pageDocuments(res.text, res.finalUrl, s.host))
+          : res.text;
       }
     }
   } catch (e) {
@@ -1461,6 +1463,84 @@ export function documentView(text: string, search?: string[]): string {
  * groups (Codes, Rules, FAQs, booklets) in full, the long notification groups as
  * counts — searchable with \`search\`, which returns the matching lines of any group.
  */
+/** Heading of the documents block appended to a page's text (see withPageDocuments). */
+export const PAGE_DOCUMENTS_HEADING = "Documents listed on this page:";
+const MAX_PAGE_DOCUMENTS = 60;
+
+/**
+ * The PDFs a plain HTML source page links to on its own site, one line each
+ * ("Document: <title> — <address>"), newest-first as the page orders them.
+ * Kept with the page's text so the agent can see them and read_policy_document
+ * can check a document is listed on the source.
+ */
+export function pageDocuments(html: string, pageUrl: string, host: string): string[] {
+  const out = new Map<string, string>();
+  for (const m of html.matchAll(/<a\b[^>]*?\bhref\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+    let u: URL;
+    try {
+      u = new URL(m[1]!.trim(), pageUrl);
+    } catch {
+      continue;
+    }
+    if (u.protocol !== "https:" || !sameSite(u.hostname, host)) continue;
+    if (!/\.pdf$/i.test(u.pathname)) continue;
+    u.hash = "";
+    const title =
+      htmlToTextInline(m[2] ?? "")
+        .replace(/\s*size\s*:\s*\([^)]*\)/gi, "")
+        .replace(/[\s.]*-?\s*PDF[\s.]*$/i, "")
+        .replace(/[\s.]+$/, "")
+        .trim()
+        .slice(0, 200) || u.pathname.split("/").pop()!;
+    if (!out.has(u.toString())) out.set(u.toString(), title);
+    if (out.size >= MAX_PAGE_DOCUMENTS) break;
+  }
+  return [...out].map(([url, title]) => `Document: ${title} — ${url}`);
+}
+
+function htmlToTextInline(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&ndash;/gi, "–")
+    .replace(/&mdash;/gi, "—")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0?39;|&apos;/gi, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function withPageDocuments(text: string, documents: string[]): string {
+  return documents.length ? `${text}\n\n${PAGE_DOCUMENTS_HEADING}\n${documents.join("\n")}` : text;
+}
+
+const PAGE_VIEW_MAX = 8_000;
+
+/**
+ * What the agent sees of a plain page (never the whole page — a briefing run
+ * ran out of budget carrying pages): with search terms, the matching lines;
+ * without, the documents the page lists.
+ */
+export function pageView(text: string, search?: string[]): string {
+  const terms = (search ?? []).map((t) => t.toLowerCase().trim()).filter((t) => t.length >= 2);
+  const lines = text.split("\n");
+  if (terms.length) {
+    const hits = lines.filter((l) => terms.some((t) => l.toLowerCase().includes(t)));
+    return hits.length
+      ? hits.join("\n").slice(0, PAGE_VIEW_MAX)
+      : `Nothing on the page mentions ${terms.map((t) => `"${t}"`).join(", ")}.`;
+  }
+  const at = lines.indexOf(PAGE_DOCUMENTS_HEADING);
+  const docs = at >= 0 ? lines.slice(at + 1).filter((l) => l.startsWith("Document: ")) : [];
+  return docs.length
+    ? `${docs.length} documents listed, newest first as the page orders them:\n${docs.join("\n")}`.slice(
+        0,
+        PAGE_VIEW_MAX,
+      )
+    : "The page lists no documents. Read it again with search terms to see the lines you need.";
+}
+
 export function listingView(text: string, search?: string[]): string {
   const lines = text.split("\n");
   const terms = (search ?? []).map((t) => t.toLowerCase().trim()).filter((t) => t.length >= 2);
