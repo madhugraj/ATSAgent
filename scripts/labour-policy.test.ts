@@ -649,3 +649,19 @@ describe("plain source pages", () => {
     expect(lp.pageView("Just news")).toContain("lists no documents");
   });
 });
+
+describe("text Postgres can store", () => {
+  test("extracted document text loses NUL and control characters, keeps line breaks", async () => {
+    const { storableText } = await import("../src/lib/cv-text.server");
+    expect(storableText("सं\u0000या\u0003 सं\u000eया\nline\ttab")).toBe("सं या  सं या\nline\ttab");
+  });
+  test("a run transcript is saved without NULs anywhere in it", async () => {
+    const { withoutNul } = await import("../src/server/agents/runtime.server");
+    const t = [{ role: "tool", content: "a\u0000b", meta: { list: ["x\u0000"], n: 1, ok: true } }];
+    expect(withoutNul(t)).toEqual([
+      { role: "tool", content: "ab", meta: { list: ["x"], n: 1, ok: true } },
+    ]);
+    expect(JSON.stringify(withoutNul(t))).not.toContain("\\u0000");
+    expect(withoutNul("plain \\u0000 text")).toBe("plain \\u0000 text");
+  });
+});
