@@ -203,17 +203,44 @@ export const WHITELISTABLE_TEMPLATES: {
   id: string;
   label: string;
   group: "email" | "board";
-  /** Shown only for these agents (default: every agent). */
-  agents?: AgentType[];
+  /** The agents whose tools send it; the setting shows only for them. */
+  agents: AgentType[];
 }[] = [
-  { id: "application_ack", label: "Application acknowledgement", group: "email" },
-  { id: "stage_update", label: "Stage update", group: "email" },
-  { id: "interview_invite", label: "Interview invitation", group: "email" },
-  { id: "interview_slots", label: "Interview time choice (candidate picks)", group: "email" },
-  { id: "assessment_invite", label: "Assessment invitation (and reminder)", group: "email" },
-  { id: "compensation_form", label: "Pay & availability form (and reminder)", group: "email" },
-  { id: "document_request", label: "Pre-onboarding document request", group: "email" },
-  { id: "role_invite", label: "Invitation to apply (past candidates)", group: "email" },
+  // Sent by the system on stage events, not by an agent: kept so saved
+  // settings still validate, shown for no agent.
+  { id: "application_ack", label: "Application acknowledgement", group: "email", agents: [] },
+  { id: "stage_update", label: "Stage update", group: "email", agents: [] },
+  { id: "interview_invite", label: "Interview invitation", group: "email", agents: ["interview"] },
+  {
+    id: "interview_slots",
+    label: "Interview time choice (candidate picks)",
+    group: "email",
+    agents: ["interview"],
+  },
+  {
+    id: "assessment_invite",
+    label: "Assessment invitation (and reminder)",
+    group: "email",
+    agents: ["screening"],
+  },
+  {
+    id: "compensation_form",
+    label: "Pay & availability form (and reminder)",
+    group: "email",
+    agents: ["screening", "offer"],
+  },
+  {
+    id: "document_request",
+    label: "Pre-onboarding document request",
+    group: "email",
+    agents: ["onboarding"],
+  },
+  {
+    id: "role_invite",
+    label: "Invitation to apply (past candidates)",
+    group: "email",
+    agents: ["sourcing"],
+  },
   // Internal: the silent panel agent's factual summary to the round's panel.
   {
     id: "panel_summary",
@@ -221,13 +248,20 @@ export const WHITELISTABLE_TEMPLATES: {
     group: "email",
     agents: ["panel_l1", "panel_l2", "panel_l3"],
   },
-  { id: "job_board:linkedin", label: "LinkedIn post", group: "board" },
-  { id: "job_board:naukri", label: "Naukri posting", group: "board" },
-  { id: "job_board:indeed", label: "Indeed posting", group: "board" },
-  { id: "job_board:jooble", label: "Jooble job feed", group: "board" },
-  { id: "job_board:adzuna", label: "Adzuna job feed", group: "board" },
-  { id: "job_board:jora", label: "Jora job feed", group: "board" },
+  { id: "job_board:linkedin", label: "LinkedIn post", group: "board", agents: ["publishing"] },
+  { id: "job_board:naukri", label: "Naukri posting", group: "board", agents: ["publishing"] },
+  { id: "job_board:indeed", label: "Indeed posting", group: "board", agents: ["publishing"] },
+  { id: "job_board:jooble", label: "Jooble job feed", group: "board", agents: ["distribution"] },
+  { id: "job_board:adzuna", label: "Adzuna job feed", group: "board", agents: ["distribution"] },
+  { id: "job_board:jora", label: "Jora job feed", group: "board", agents: ["distribution"] },
 ];
+
+/** The pre-approvable templates and boards an agent can actually send. */
+export function whitelistableFor(agent: string, group: "email" | "board") {
+  return WHITELISTABLE_TEMPLATES.filter(
+    (t) => t.group === group && t.agents.includes(agent as AgentType),
+  );
+}
 
 export const AGENT_LABEL: Record<string, string> = Object.fromEntries(
   AGENT_CATALOG.map((a) => [a.type, a.label]),
