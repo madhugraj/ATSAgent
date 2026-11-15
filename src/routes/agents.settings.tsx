@@ -5,7 +5,6 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   ArrowDownRight,
-  ArrowRight,
   ArrowUpRight,
   Loader2,
   Search,
@@ -145,7 +144,6 @@ const FILTER_LABEL: Record<AgentFilter, string> = {
   off: "Off",
   not_live: "Not live",
 };
-const LEVELS = AUTONOMY_OPTIONS.map((o) => o.value);
 
 type Item = { info: (typeof AGENT_CATALOG)[number]; row: Row };
 
@@ -200,11 +198,7 @@ function AgentList({
     <>
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <h2 className="text-base font-semibold">Agents</h2>
-        <div
-          role="radiogroup"
-          aria-label="Show agents"
-          className="inline-flex rounded-full border bg-muted/40 p-0.5"
-        >
+        <div role="radiogroup" aria-label="Show agents" className="flex items-center gap-4">
           {FILTERS.map((f) => (
             <button
               key={f}
@@ -212,9 +206,9 @@ function AgentList({
               role="radio"
               aria-checked={filter === f}
               onClick={() => setFilter(f)}
-              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+              className={`text-xs transition-colors ${
                 filter === f
-                  ? "bg-background text-foreground shadow-sm"
+                  ? "font-medium text-foreground"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -235,7 +229,7 @@ function AgentList({
       </div>
 
       {shown.length ? (
-        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
           {shown.map((item) => (
             <AgentCard
               key={item.row.type}
@@ -276,35 +270,13 @@ function AgentList({
   );
 }
 
-const STATE_STYLE: Record<
-  Exclude<AgentFilter, "all"> | "paused",
-  { label: string; dot: string; bar: string; chip: string }
-> = {
-  on: {
-    label: "On",
-    dot: "bg-emerald-500",
-    bar: "bg-emerald-500",
-    chip: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-  },
-  paused: {
-    label: "Paused",
-    dot: "bg-amber-500",
-    bar: "bg-amber-500",
-    chip: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-  },
-  off: {
-    label: "Off",
-    dot: "bg-muted-foreground/50",
-    bar: "bg-muted-foreground/30",
-    chip: "bg-muted text-muted-foreground",
-  },
-  not_live: {
-    label: "Not live",
-    dot: "bg-sky-500",
-    bar: "bg-sky-500/60",
-    chip: "bg-sky-500/10 text-sky-700 dark:text-sky-400",
-  },
-};
+const STATE_STYLE: Record<Exclude<AgentFilter, "all"> | "paused", { label: string; dot: string }> =
+  {
+    on: { label: "On", dot: "bg-emerald-500" },
+    paused: { label: "Paused", dot: "bg-amber-500" },
+    off: { label: "Off", dot: "bg-muted-foreground/40" },
+    not_live: { label: "Not live", dot: "border border-muted-foreground/50" },
+  };
 
 function AgentCard({
   info,
@@ -323,107 +295,70 @@ function AgentCard({
 }) {
   const state = stateOf(row);
   const style = STATE_STYLE[state === "on" && allPaused ? "paused" : state];
-  const level = LEVELS.indexOf(row.autonomy);
   const rec = row.enabled ? row.recommendation : null;
-  const active = row.live && row.enabled;
   return (
     <article
       id={anchorOf(row.type)}
       onClick={onOpen}
-      className={`group relative flex cursor-pointer flex-col overflow-hidden rounded-xl border bg-card p-4 pb-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
-        selected ? "ring-2 ring-primary" : ""
+      className={`flex cursor-pointer flex-col rounded-lg border bg-card p-4 transition-colors hover:border-foreground/20 ${
+        selected ? "border-foreground/40" : ""
       }`}
     >
-      <div className="flex items-center gap-2 text-[11px]">
-        <span className="num font-medium text-muted-foreground">Phase {info.phase}</span>
-        <span
-          className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-medium ${style.chip}`}
-        >
-          <span className={`size-1.5 rounded-full ${style.dot}`} />
-          {style.label}
-        </span>
-        {rec?.to ? (
-          <span
-            className={`ml-auto inline-flex items-center gap-0.5 font-medium ${
-              rec.action === "lower" ? "text-destructive" : "text-primary"
-            }`}
-            title={`Recommended: ${rec.action} to ${LEVEL_LABEL[rec.to]}`}
-          >
-            {rec.action === "lower" ? (
-              <ArrowDownRight className="size-3.5" />
-            ) : (
-              <ArrowUpRight className="size-3.5" />
-            )}
-            {LEVEL_LABEL[rec.to]}
-          </span>
-        ) : null}
-      </div>
-
-      <h3 className="mt-3 font-semibold leading-snug">
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onOpen();
-          }}
-          className="text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
-        >
-          {info.label}
-        </button>
-      </h3>
-      <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{info.description}</p>
-
-      <div className="mt-auto pt-4">
-        <div className="flex items-center justify-between text-[11px]">
-          <span className="text-muted-foreground">Autonomy</span>
-          <span className={active ? "font-medium" : "text-muted-foreground"}>
-            {LEVEL_LABEL[row.autonomy] ?? row.autonomy}
-          </span>
-        </div>
-        <div className="mt-1.5 grid grid-cols-3 gap-1" aria-hidden>
-          {LEVELS.map((l, i) => (
-            <span
-              key={l}
-              className={`h-1.5 rounded-full ${
-                i <= level ? (active ? "bg-foreground" : "bg-muted-foreground/40") : "bg-muted"
-              }`}
-            />
-          ))}
-        </div>
-
-        <div className="mt-4 flex items-center gap-2 border-t pt-3">
-          <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-            <Switch
-              id={`en-${row.type}`}
-              checked={row.enabled}
-              disabled={!canEdit || !row.live}
-              onCheckedChange={(enabled) =>
-                onSave({
-                  agentType: row.type,
-                  enabled,
-                  autonomy: row.autonomy,
-                  whitelistedTemplates: row.whitelistedTemplates,
-                })
-              }
-            />
-            <Label htmlFor={`en-${row.type}`} className="text-xs text-muted-foreground">
-              Enabled
-            </Label>
-          </div>
-          <Button
-            size="icon"
-            className="ml-auto size-7 rounded-full"
-            aria-label={`Open ${info.label} settings`}
+      <div className="flex items-center gap-2">
+        <h3 className="min-w-0 flex-1 truncate text-sm font-semibold">
+          <button
+            type="button"
             onClick={(e) => {
               e.stopPropagation();
               onOpen();
             }}
+            className="rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <ArrowRight className="size-3.5" />
-          </Button>
-        </div>
+            {info.label}
+          </button>
+        </h3>
+        <span
+          role="img"
+          aria-label={style.label}
+          title={style.label}
+          className={`size-2 shrink-0 rounded-full ${style.dot}`}
+        />
       </div>
-      <span className={`absolute inset-x-0 bottom-0 h-1 ${style.bar}`} />
+      <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">{info.description}</p>
+
+      <div className="mt-4 flex items-center gap-1.5">
+        <span className="text-xs text-muted-foreground">
+          {LEVEL_LABEL[row.autonomy] ?? row.autonomy}
+        </span>
+        {rec?.to ? (
+          rec.action === "lower" ? (
+            <ArrowDownRight
+              className="size-3.5 text-destructive"
+              aria-label={`Recommended: lower to ${LEVEL_LABEL[rec.to]}`}
+            />
+          ) : (
+            <ArrowUpRight
+              className="size-3.5 text-primary"
+              aria-label={`Recommended: raise to ${LEVEL_LABEL[rec.to]}`}
+            />
+          )
+        ) : null}
+        <Switch
+          className="ml-auto"
+          aria-label={`${info.label} enabled`}
+          checked={row.enabled}
+          disabled={!canEdit || !row.live}
+          onClick={(e) => e.stopPropagation()}
+          onCheckedChange={(enabled) =>
+            onSave({
+              agentType: row.type,
+              enabled,
+              autonomy: row.autonomy,
+              whitelistedTemplates: row.whitelistedTemplates,
+            })
+          }
+        />
+      </div>
     </article>
   );
 }
