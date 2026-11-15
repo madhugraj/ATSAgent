@@ -1,15 +1,16 @@
 import type { AgentType } from "@db/schema";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
   ArrowDownRight,
   ArrowRight,
   ArrowUpRight,
+  ChevronRight,
   Loader2,
+  Pause,
   Search,
-  PauseCircle,
   Radio,
   ShieldCheck,
 } from "lucide-react";
@@ -18,6 +19,7 @@ import { PageHeader } from "@/components/ats";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -103,22 +105,6 @@ function AgentSettingsPage() {
             </p>
           ) : null}
 
-          <section className="panel mt-4 flex flex-wrap items-center gap-3 p-5">
-            <PauseCircle className="size-5 text-muted-foreground" />
-            <div className="min-w-0 flex-1">
-              <p className="font-medium">Pause all agents</p>
-              <p className="text-sm text-muted-foreground">
-                Stops every agent in this organisation from picking up work. Runs already waiting
-                for a person stay where they are.
-              </p>
-            </div>
-            <Switch
-              checked={data.allPaused}
-              disabled={!data.canEdit}
-              onCheckedChange={(paused) => save({ agentType: "*", enabled: !paused })}
-            />
-          </section>
-
           <SafetyCheckSection check={data.safetyCheck} canEdit={data.canEdit} />
 
           <AgentList
@@ -126,6 +112,7 @@ function AgentSettingsPage() {
             allPaused={data.allPaused}
             canEdit={data.canEdit}
             onSave={save}
+            onPause={(paused) => save({ agentType: "*", enabled: !paused })}
           />
 
           <TelemetrySection />
@@ -161,11 +148,13 @@ function AgentList({
   allPaused,
   canEdit,
   onSave,
+  onPause,
 }: {
   agents: Row[];
   allPaused: boolean;
   canEdit: boolean;
   onSave: (input: AgentPolicyInput) => Promise<void>;
+  onPause: (paused: boolean) => void;
 }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<AgentFilter>("all");
@@ -222,7 +211,25 @@ function AgentList({
             </button>
           ))}
         </div>
-        <div className="relative ml-auto w-full sm:w-72">
+        <label
+          title="Stops every agent from picking up work. Runs already waiting for a person stay where they are."
+          className={`ml-auto flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+            allPaused
+              ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <Pause className="size-3.5" />
+          {allPaused ? "All agents paused" : "Pause all"}
+          <Switch
+            className="scale-75"
+            aria-label="Pause all agents"
+            checked={allPaused}
+            disabled={!canEdit}
+            onCheckedChange={onPause}
+          />
+        </label>
+        <div className="relative w-full sm:w-72">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             aria-label="Search agents"
@@ -784,12 +791,18 @@ function TelemetryForm({ t, onSaved }: { t: AgentTelemetryView; onSaved: () => v
 
   const disabled = !t.canEdit || busy;
   return (
-    <section className="panel mt-6 p-5">
-      <div className="flex items-center gap-2">
-        <Radio className="size-4 text-primary" />
-        <h3 className="font-semibold">Trace export and alerts</h3>
-      </div>
-      <p className="mt-1 text-sm text-muted-foreground">
+    <Fold
+      className="mt-6"
+      icon={<Radio className="size-4 text-primary" />}
+      title="Trace export and alerts"
+      summary={
+        <span className="text-xs text-muted-foreground">
+          Traces {t.otlpEnabled ? "on" : "off"} · Alert e-mail {t.alertEmailEnabled ? "on" : "off"}
+          {t.alertWebhookUrl ? " · Webhook" : ""}
+        </span>
+      }
+    >
+      <p className="text-sm text-muted-foreground">
         Send each finished agent run to your own OpenTelemetry collector as a trace (ids, steps,
         timings and token counts only — no candidate content or prompts), and choose how serious and
         critical agent health issues reach you besides the notification bell.
@@ -921,7 +934,44 @@ function TelemetryForm({ t, onSaved }: { t: AgentTelemetryView; onSaved: () => v
           </Button>
         </div>
       ) : null}
-    </section>
+    </Fold>
+  );
+}
+
+/** A settings panel that opens on its header; the summary and actions stay visible when closed. */
+function Fold({
+  icon,
+  title,
+  summary,
+  actions,
+  className = "",
+  children,
+}: {
+  icon: ReactNode;
+  title: string;
+  summary?: ReactNode;
+  actions?: ReactNode;
+  className?: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} asChild>
+      <section className={`panel ${className}`}>
+        <div className="flex flex-wrap items-center gap-3 px-5 py-3.5">
+          <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-2.5 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <ChevronRight
+              className={`size-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
+            />
+            {icon}
+            <span className="font-medium">{title}</span>
+            {summary}
+          </CollapsibleTrigger>
+          {actions}
+        </div>
+        <CollapsibleContent className="border-t px-5 pb-5 pt-4">{children}</CollapsibleContent>
+      </section>
+    </Collapsible>
   );
 }
 
@@ -964,27 +1014,29 @@ function SafetyCheckSection({
   }
 
   return (
-    <section className="panel mt-4 p-5">
-      <div className="flex flex-wrap items-center gap-3">
-        <ShieldCheck className="size-5 text-muted-foreground" />
-        <div className="min-w-0 flex-1">
-          <p className="font-medium">Model safety check</p>
-          <p className="text-sm text-muted-foreground">
-            Plants {check.results.length || 6} known attacks in a test CV — hidden instructions,
-            fake system messages, requests to leak data or reveal instructions — and checks your AI
-            model ignores them with this product&apos;s defences on. An agent can be set to
-            Autonomous only after a pass for the model you use now; it is valid for 30 days.
-          </p>
-        </div>
+    <Fold
+      className="mt-4"
+      icon={<ShieldCheck className="size-4 text-muted-foreground" />}
+      title="Model safety check"
+      summary={
         <Badge
           variant={s.tone === "ok" ? "default" : s.tone === "bad" ? "destructive" : "secondary"}
         >
           {s.text}
         </Badge>
+      }
+      actions={
         <Button size="sm" variant="outline" onClick={run} disabled={!canEdit || busy}>
           {busy ? <Loader2 className="size-3.5 animate-spin" /> : null} Run check
         </Button>
-      </div>
+      }
+    >
+      <p className="text-sm text-muted-foreground">
+        Plants {check.results.length || 6} known attacks in a test CV — hidden instructions, fake
+        system messages, requests to leak data or reveal instructions — and checks your AI model
+        ignores them with this product&apos;s defences on. An agent can be set to Autonomous only
+        after a pass for the model you use now; it is valid for 30 days.
+      </p>
       {check.results.length ? (
         <ul className="mt-3 grid gap-1 text-sm sm:grid-cols-2">
           {check.results.map((r) => (
@@ -1008,6 +1060,6 @@ function SafetyCheckSection({
           ))}
         </ul>
       ) : null}
-    </section>
+    </Fold>
   );
 }
