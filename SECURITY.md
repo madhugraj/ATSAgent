@@ -295,6 +295,25 @@ audited as `org.agreement.accepted`. The request IP is kept only as an HMAC-SHA2
 blocking step (owner) or a waiting screen (members). The cross-tenant view is `requirePlatformAdmin`.
 Rows are deleted with the organisation; the audit entries remain.
 
+## Agent studio and hosted agent API
+
+Customised agent exports (`agent_exports`, migration 0080) can only narrow a stock agent: the server
+(`exportProblem` in `src/server/agents/exports.server.ts`) refuses any tool outside the agent's own,
+raised limits or an empty name; the stock instructions, injection rules, operating rules, gates and the
+registry's gate-verb ban always apply, and organisation instructions are appended under a heading that
+says they never override the rules above. Customisations apply only to runs started through the hosted
+API; in-app runs always use the stock manifest. Every studio change is HR head / President-CBO
+(`assertRole`), org-scoped and audited (`agent.export.*`).
+
+`/api/agents/*` and `/api/mcp` are authenticated with org keys (`atsk_…`): only the SHA-256 hash and a
+short prefix are stored (`agent_export_keys`), the key is shown once, revoked keys and unpublished or
+archived exports are refused (401), and archiving an export revokes its keys. Requests are rate-limited
+per caller per path (60/min) and per key (30/min) in `src/server.ts`. A run acts as the person who
+created the key — refused if they have left the organisation — under the organisation's agent policy
+(the agent must be switched on), and its decisions still go to people in the app. Runs can only be read
+with a key of the same organisation and export. Responses and packages carry no AI vendor or model
+fields.
+
 ## Training data
 
 `training_inferences` and `training_feedback` hold prompts and outputs that

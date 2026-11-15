@@ -52,10 +52,11 @@ import {
   type AgentType,
 } from "@db/schema";
 import { agentRunScope } from "./context";
+import { runDefinition } from "./exports.server";
 import { ensureDefinition, manifestHash, RUNTIME_RULES } from "./manifest.server";
 import { looksLikeInjection } from "./injection";
 import { decideToolCall, loadPolicy } from "./policy";
-import { getAgent, getTool, type ToolContext } from "./registry";
+import { getTool, type ToolContext } from "./registry";
 import { LIVE_RUN_STATUSES, runSubjectGone, staleReasonSql } from "./task-liveness";
 
 /**
@@ -1191,9 +1192,12 @@ export async function startRun(input: {
   maxSteps?: number;
   /** Hiring-desk thread; defaults to the thread of the subject's requisition. */
   conversationId?: string | null;
+  /** Agent studio export a hosted-API run executes under (narrows the stock agent). */
+  exportId?: string | null;
 }): Promise<{ runId: string }> {
-  const def = getAgent(input.agentType);
-  if (!def) throw new Error(`Unknown agent: ${input.agentType}`);
+  const resolved = await runDefinition(input.orgId, input.agentType, input.exportId);
+  if (!resolved) throw new Error(`Unknown agent: ${input.agentType}`);
+  const def = resolved.def;
   const definition = await ensureDefinition(def);
   let conversationId = input.conversationId ?? null;
   if (!conversationId && input.subjectId) {
@@ -1227,7 +1231,12 @@ export async function startRun(input: {
         subjectType: input.subjectType ?? null,
         subjectId: input.subjectId ?? null,
         triggerEventId: input.triggerEventId ?? null,
-        maxSteps: input.maxSteps ?? startPolicy.maxStepsPerLeg ?? def.maxSteps ?? 20,
+        maxSteps: input.exportId
+          ? Math.min(startPolicy.maxStepsPerLeg ?? def.maxSteps ?? 20, def.maxSteps ?? 20)
+          : (input.maxSteps ?? startPolicy.maxStepsPerLeg ?? def.maxSteps ?? 20),
+        ...(input.exportId
+          ? { exportId: input.exportId, exportVersion: resolved.exportVersion }
+          : {}),
         ...(startPolicy.maxTokensPerLeg || def.maxTokens
           ? {
               maxTokens: Math.min(
@@ -1309,9 +1318,9 @@ export async function startReplay(input: {
   if (!orig) throw new Error("Run not found");
   if (orig.mode !== "live") throw new Error("Replay the original run, not a replay.");
   if (!REPLAYABLE.has(orig.status)) throw new Error("Only finished runs can be replayed.");
-  const def = getAgent(orig.agentType);
-  if (!def) throw new Error(`Unknown agent: ${orig.agentType}`);
-  const definition = await ensureDefinition(def);
+  const resolved = await runDefinition(orig.orgId, orig.agentType, orig.exportId);
+  if (!resolved) throw new Error(`Unknown agent: ${orig.agentType}`);
+  const definition = await ensureDefinition(resolved.def);
   const [run] = await db
     .insert(agentRuns)
     .values({
@@ -1326,6 +1335,8 @@ export async function startReplay(input: {
       subjectType: orig.subjectType,
       subjectId: orig.subjectId,
       maxSteps: orig.maxSteps,
+      exportId: orig.exportId,
+      exportVersion: resolved.exportVersion,
       mode: "replay",
       replayOf: orig.id,
       transcript: [{ role: "user", content: orig.goal } satisfies AgentMessage],
@@ -1774,7 +1785,8 @@ async function renewLease(run: AgentRun): Promise<boolean> {
 }
 
 async function driveRun(run: AgentRun): Promise<"done" | "awaiting" | "yielded" | "failed"> {
-  const def = getAgent(run.agentType);
+  // Hosted-API runs execute their export's narrowed definition; in-app runs the stock one.
+  const def = (await runDefinition(run.orgId, run.agentType, run.exportId))?.def;
   if (!def) {
     await finish(run, "failed", null, `Unknown agent: ${run.agentType}`);
     return "failed";

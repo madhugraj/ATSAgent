@@ -361,6 +361,15 @@ Plan: `docs/org-context-agent-plan.md` (decided 2026-10-27; O0 built 2026-10-27,
 - [x] Real-agent eval scenarios for all seven live agents (`scripts/evals/scenarios.ts`); governance suite `scripts/agent-governance.test.ts`
 - [x] Agent register (Governance → Agent register) and per-run trail export (JSON, vendor-neutral)
 
+## Agent studio — customise and export agents (2026-11-16)
+
+- [x] `agent_exports` and `agent_export_keys` (migration `0080`); runs record `export_id` / `export_version`
+- [x] Customise a stock agent for another application: extra instructions after the stock ones, a tool subset, extra must-never rules, lower step limit — refused if it would widen the agent; in-app runs never see it
+- [x] Portable package download (`ats-agent-package/1`, vendor-neutral): instructions with the injection and operating rules, tool contracts, human tools, must-never, evals, implementation notes
+- [x] Hosted API — `POST /api/agents/:exportId/runs`, `GET /api/agents/runs/:runId` — and a stateless MCP endpoint (`/api/mcp`, `run_agent` / `get_run`); keys hashed, shown once, revocable, rate-limited per caller and per key, runs act as the key's creator under the org's agent policy; every change and API start audited
+- [x] Tests: `scripts/agent-exports.test.ts`
+- [ ] Health rule for repeated invalid-key calls (needs a failure counter)
+
 ## Agentic platform — Phase 2: intake → match → screen (2026-10-06)
 
 - [x] Pipeline cores (`src/lib/pipeline.server.ts`) shared by the screens and agent tools — stage moves, adding talent-pool candidates (now verifies the candidates belong to the organisation, closing a gap in `addApplicationsToRequisition`), candidate notes; `createAssessmentCore`
