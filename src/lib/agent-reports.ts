@@ -26,6 +26,8 @@ type Report = {
   agents?: boolean;
   file: string;
   window: Window;
+  /** Plain-language findings, shown before the tables. */
+  findings: string[];
   summary: [string, Cell][];
   sections: Section[];
 };
@@ -107,8 +109,29 @@ function toPdf(r: Report) {
   );
   doc.setTextColor(...INK);
 
+  let top = 100;
+  if (r.findings.length) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.text("Key findings", margin, top);
+    top += 16;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9.5);
+    for (const f of r.findings) {
+      const lines = doc.splitTextToSize(pdfText(f), width - margin * 2 - 12) as string[];
+      if (top + lines.length * 12 > doc.internal.pageSize.getHeight() - 40) {
+        doc.addPage();
+        top = 48;
+      }
+      doc.text("·", margin, top);
+      doc.text(lines, margin + 12, top);
+      top += lines.length * 12 + 4;
+    }
+    top += 8;
+  }
+
   autoTable(doc, {
-    startY: 96,
+    startY: top,
     head: [["Summary", ""]],
     body: r.summary.map(([k, v]) => [pdfText(k), pdfText(v)]),
     theme: "grid",
@@ -159,7 +182,12 @@ function toPdf(r: Report) {
 
 function toXlsx(r: Report) {
   const wb = XLSX.utils.book_new();
-  const summary = XLSX.utils.aoa_to_sheet([[r.title], [], ...r.summary.map(([k, v]) => [k, v])]);
+  const summary = XLSX.utils.aoa_to_sheet([
+    [r.title],
+    [],
+    ...(r.findings.length ? [["Key findings"], ...r.findings.map((f) => ["", f]), []] : []),
+    ...r.summary.map(([k, v]) => [k, v]),
+  ]);
   summary["!cols"] = [{ wch: 32 }, { wch: 90 }];
   XLSX.utils.book_append_sheet(wb, summary, "Summary");
   const used = new Set(["Summary"]);
@@ -240,6 +268,108 @@ function activitySections(a: ActivityReport): Section[] {
   ];
 }
 
+/* ------------------------------------------------------------- findings */
+
+const n = (v: number) => v.toLocaleString("en-GB");
+const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)}%` : "0%");
+const plural = (v: number, one: string, many = `${one}s`) => `${n(v)} ${v === 1 ? one : many}`;
+
+function topBy<T>(items: T[], key: (t: T) => string, val: (t: T) => number) {
+  const m = new Map<string, number>();
+  for (const i of items) m.set(key(i), (m.get(key(i)) ?? 0) + val(i));
+  return [...m.entries()].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+}
+
+/** Plain-language read of the period's runs, shared by both agent reports. */
+function activityFindings(a: ActivityReport): string[] {
+  const runs = a.runs;
+  if (!runs.length) return ["No agent runs started in this period."];
+  const out: string[] = [];
+  const agents = new Set(runs.map((r) => r.agent)).size;
+  const failed = runs.filter((r) => r.status === "failed").length;
+  const cancelled = runs.filter((r) => r.status === "cancelled").length;
+  const done = runs.filter((r) => r.status === "done").length;
+  out.push(
+    `${plural(runs.length, "run")} by ${plural(agents, "agent")}: ${n(done)} completed, ${n(failed)} failed (${pct(failed, runs.length)})${cancelled ? `, ${n(cancelled)} cancelled` : ""}, ${n(runs.length - done - failed - cancelled)} still open or waiting.`,
+  );
+  const tokens = runs.reduce((s, r) => s + r.tokens, 0);
+  const byTokens = topBy(
+    runs,
+    (r) => r.agent,
+    (r) => r.tokens,
+  );
+  if (tokens)
+    out.push(
+      `${n(tokens)} AI tokens used, ${n(Math.round(tokens / runs.length))} per run on average. Largest users: ${byTokens
+        .slice(0, 3)
+        .map(([k, v]) => `${nice(k)} ${n(v)} (${pct(v, tokens)})`)
+        .join(", ")}.`,
+    );
+  else out.push("No AI token usage was recorded for these runs.");
+  const busiest = topBy(
+    runs,
+    (r) => r.agent,
+    () => 1,
+  )[0];
+  if (busiest) out.push(`Busiest agent: ${nice(busiest[0])} with ${plural(busiest[1], "run")}.`);
+  const peak = topBy(
+    a.days,
+    (d) => d.day,
+    (d) => d.runs,
+  )[0];
+  if (peak) out.push(`Busiest day: ${peak[0]} with ${plural(peak[1], "run")}.`);
+  const timed = runs.filter((r) => r.durationMin !== null);
+  if (timed.length) {
+    const avg = timed.reduce((s, r) => s + (r.durationMin ?? 0), 0) / timed.length;
+    const longest = timed.reduce((m, r) => ((r.durationMin ?? 0) > (m.durationMin ?? 0) ? r : m));
+    out.push(
+      `Finished runs took ${avg.toFixed(1)} minutes on average; the longest was ${nice(longest.agent)} at ${longest.durationMin} minutes.`,
+    );
+  }
+  const failedCalls = runs.reduce((s, r) => s + r.failedCalls, 0);
+  if (failedCalls) {
+    const worst = topBy(
+      runs,
+      (r) => r.agent,
+      (r) => r.failedCalls,
+    )[0] ?? ["", 0];
+    out.push(
+      `${plural(failedCalls, "tool call")} failed, most in ${nice(worst[0])} (${n(worst[1])}).`,
+    );
+  }
+  const asks = runs.reduce((s, r) => s + r.approvals, 0);
+  const declined = runs.reduce((s, r) => s + r.declined, 0);
+  if (asks)
+    out.push(
+      `Agents asked a person to decide ${plural(asks, "time")}; ${n(declined)} ${declined === 1 ? "was" : "were"} declined (${pct(declined, asks)}).`,
+    );
+  const byFail = topBy(
+    runs,
+    (r) => r.agent,
+    (r) => (r.status === "failed" ? 1 : 0),
+  );
+  if (byFail.length)
+    out.push(
+      `Failures concentrate in ${byFail
+        .slice(0, 3)
+        .map(([k, v]) => `${nice(k)} (${n(v)})`)
+        .join(", ")}.`,
+    );
+  return out;
+}
+
+function fixFindings(fixes: FixRow[]): string[] {
+  const act = fixes.filter((f) => f.severity === "act");
+  const watch = fixes.filter((f) => f.severity === "watch");
+  if (!fixes.length) return ["Nothing needs action right now."];
+  return [
+    `${plural(act.length, "item")} need${act.length === 1 ? "s" : ""} action and ${n(watch.length)} to watch.`,
+    ...[...act, ...watch]
+      .slice(0, 5)
+      .map((f) => `${f.severity === "act" ? "Act" : "Watch"}: ${f.what} — ${f.why}`),
+  ];
+}
+
 /* ------------------------------------------------------------- behaviour */
 
 export function downloadBehaviourReport(
@@ -257,6 +387,16 @@ export function downloadBehaviourReport(
     title: "Agent behaviour report",
     file: "agent-behaviour",
     window,
+    findings: [
+      ...activityFindings(activity),
+      ...b.rejects
+        .slice(0, 1)
+        .map(
+          (r) =>
+            `Most declined proposal: "${r.title}" from ${nice(r.agentType)} (${plural(r.count, "time")}).`,
+        ),
+      ...fixFindings(fixes),
+    ],
     summary: [
       ...windowRows(window),
       ["Runs", b.fleet.runs],
@@ -326,6 +466,20 @@ export function downloadGovernanceReport(
     title: "Agent governance report",
     file: "agent-governance",
     window,
+    findings: [
+      ...h.questions.map((q) => `${q.question} ${TONE_WORD[q.tone]} — ${q.title}. ${q.detail}`),
+      ...activityFindings(activity),
+      ...(ho.loops.length
+        ? [`${plural(ho.loops.length, "hand-off loop")} found between agents.`]
+        : []),
+      ...h.budget
+        .filter((b) => b.budget !== null && b.tokensMonth > b.budget)
+        .map(
+          (b) =>
+            `${nice(b.agent)} is over its monthly token budget: ${n(b.tokensMonth)} of ${n(b.budget ?? 0)}.`,
+        ),
+      ...fixFindings(h.fixes),
+    ],
     summary: [
       ...windowRows(window),
       ...h.questions.map((q): [string, Cell] => [
@@ -583,6 +737,7 @@ export function downloadOntologyReport(
     file: "skill-ontology",
     agents: false,
     window: { ...window, agent: null },
+    findings: fixFindings(fixes),
     summary: [
       ["Period", windowLabel(window.from, window.to)],
       ["Generated", new Date().toUTCString()],
