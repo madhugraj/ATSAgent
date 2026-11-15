@@ -1709,6 +1709,8 @@ export function registerLabourAgents(): void {
     // 1.4.0: a plain source page (news, circulars) never briefed shows the documents
     // it lists (own-site PDFs, with addresses), and search works on any page — a
     // circulars page used to show nothing on its first read, so nothing was briefed.
+    // Each listed document carries the date its card or row prints, so a briefing's
+    // timeline can be checked against the page.
     version: "1.4.0",
     owner: "hr_head",
     responsibility:

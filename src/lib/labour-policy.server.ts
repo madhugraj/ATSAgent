@@ -1475,6 +1475,27 @@ const MAX_PAGE_DOCUMENTS = 60;
  */
 export function pageDocuments(html: string, pageUrl: string, host: string): string[] {
   const out = new Map<string, string>();
+  // Dates the page prints (a card's "Publish Date: 02/11/2026", a table row's
+  // "13-11-2026"), each as [position, DD/MM/YYYY]: a document is dated by the
+  // nearest one shortly before its link — its own card or row — never from afar.
+  const dates: [number, string][] = [];
+  for (const d of html.matchAll(
+    /\b(?:(\d{2})[/.-](\d{2})[/.-](\d{4})|(\d{4})-(\d{2})-(\d{2}))\b/g,
+  )) {
+    const [dd, mm, yyyy] = d[1] ? [d[1], d[2]!, d[3]!] : [d[6]!, d[5]!, d[4]!];
+    const day = Number(dd);
+    const month = Number(mm);
+    if (day >= 1 && day <= 31 && month >= 1 && month <= 12)
+      dates.push([d.index!, `${dd}/${mm}/${yyyy}`]);
+  }
+  const dateBefore = (at: number): string | null => {
+    let found: string | null = null;
+    for (const [pos, date] of dates) {
+      if (pos >= at) break;
+      if (at - pos <= DATE_REACH) found = date;
+    }
+    return found;
+  };
   for (const m of html.matchAll(/<a\b[^>]*?\bhref\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
     let u: URL;
     try {
@@ -1492,11 +1513,15 @@ export function pageDocuments(html: string, pageUrl: string, host: string): stri
         .replace(/[\s.]+$/, "")
         .trim()
         .slice(0, 200) || u.pathname.split("/").pop()!;
-    if (!out.has(u.toString())) out.set(u.toString(), title);
+    const date = dateBefore(m.index!);
+    if (!out.has(u.toString())) out.set(u.toString(), date ? `${title} — dated ${date}` : title);
     if (out.size >= MAX_PAGE_DOCUMENTS) break;
   }
   return [...out].map(([url, title]) => `Document: ${title} — ${url}`);
 }
+
+/** How far before a link (in HTML characters) its card's or row's date may be. */
+const DATE_REACH = 1_500;
 
 function htmlToTextInline(html: string): string {
   return html
