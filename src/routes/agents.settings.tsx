@@ -305,14 +305,14 @@ function AgentCard({
       }`}
     >
       <div className="flex items-center gap-2">
-        <h3 className="min-w-0 flex-1 truncate text-sm font-semibold">
+        <h3 className="min-w-0 flex-1 text-sm font-semibold">
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
               onOpen();
             }}
-            className="rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="block max-w-full truncate rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {info.label}
           </button>
