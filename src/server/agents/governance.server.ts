@@ -863,10 +863,10 @@ export async function computeHarness(
       check: "handoffs",
       what: "No agent has delegated to another yet",
       why: copilotOn
-        ? "Arjun is on, but the agent → agent channel is untested."
-        : "The agent → agent channel (Arjun) is untested in this organisation.",
+        ? "Aditi is on, but the agent → agent channel is untested."
+        : "The agent → agent channel (Aditi) is untested in this organisation.",
       agents: ["copilot"],
-      next: { label: "Try one task through Arjun", to: "/desk" },
+      next: { label: "Try one task through Aditi", to: "/desk" },
     });
   for (const b of budget) {
     if (b.budget !== null && b.tokensMonth > b.budget)
