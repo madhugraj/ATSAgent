@@ -235,7 +235,7 @@ function AgentList({
       </div>
 
       {shown.length ? (
-        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+        <div className="mt-4 grid gap-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
           {shown.map((item) => (
             <AgentCard
               key={item.row.type}
@@ -330,8 +330,8 @@ function AgentCard({
     <article
       id={anchorOf(row.type)}
       onClick={onOpen}
-      className={`group relative flex cursor-pointer flex-col overflow-hidden rounded-xl border bg-card p-4 pb-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
-        selected ? "ring-2 ring-primary" : ""
+      className={`glass-card group flex cursor-pointer flex-col overflow-hidden p-5 pb-6 ${
+        selected ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : ""
       }`}
     >
       <div className="flex items-center gap-2 text-[11px]">
@@ -391,7 +391,7 @@ function AgentCard({
           ))}
         </div>
 
-        <div className="mt-4 flex items-center gap-2 border-t pt-3">
+        <div className="mt-5 flex items-center gap-2 border-t border-foreground/5 pt-4">
           <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
             <Switch
               id={`en-${row.type}`}
@@ -423,7 +423,7 @@ function AgentCard({
           </Button>
         </div>
       </div>
-      <span className={`absolute inset-x-0 bottom-0 h-1 ${style.bar}`} />
+      <span className={`absolute inset-x-5 bottom-0 h-1 rounded-t-full ${style.bar}`} />
     </article>
   );
 }
