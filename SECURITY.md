@@ -311,22 +311,24 @@ Rows are deleted with the organisation; the audit entries remain.
 
 ## Agent studio and hosted agent API
 
-Customised agent exports (`agent_exports`, migration 0080) can only narrow a stock agent: the server
-(`exportProblem` in `src/server/agents/exports.server.ts`) refuses any tool outside the agent's own,
-raised limits or an empty name; the stock instructions, injection rules, operating rules, gates and the
-registry's gate-verb ban always apply, and organisation instructions are appended under a heading that
-says they never override the rules above. Customisations apply only to runs started through the hosted
-API; in-app runs always use the stock manifest. Every studio change is HR head / President-CBO
-(`assertRole`), org-scoped and audited (`agent.export.*`).
+Agent studio is a platform console page (`/platform-agent-studio`); every server function in
+`src/lib/platform-agent-studio.functions.ts` is `requirePlatformAdmin`, and no organisation route or
+menu reaches it. A blueprint (`agent_blueprints`, migration 0080) adapts a stock agent to another domain.
+`blueprintProblem` (`src/server/agents/blueprints.server.ts`) refuses tools outside the stock agent,
+renamed tools that read as a human decision (`isGateToolName`, the same ban the registry applies),
+names that drop or add a propose_/request_/submit_ prefix or clash with the human tools, empty
+instructions or must-never lists, and raised step limits. The injection and operating rules are always
+prepended and cannot be edited; tool inputs stay the stock contracts, and renamed calls are mapped back
+to the real tool, so every tool-level check (approvals, pre-approved templates, policy) still applies.
 
-`/api/agents/*` and `/api/mcp` are authenticated with org keys (`atsk_…`): only the SHA-256 hash and a
-short prefix are stored (`agent_export_keys`), the key is shown once, revoked keys and unpublished or
-archived exports are refused (401), and archiving an export revokes its keys. Requests are rate-limited
-per caller per path (60/min) and per key (30/min) in `src/server.ts`. A run acts as the person who
-created the key — refused if they have left the organisation — under the organisation's agent policy
-(the agent must be switched on), and its decisions still go to people in the app. Runs can only be read
-with a key of the same organisation and export. Responses and packages carry no AI vendor or model
-fields.
+Blueprints never affect in-app runs. Hosted runs execute only in the blueprint's workspace organisation,
+which the super admin must own, using that organisation's own AI key and agent policy (no platform key).
+`/api/agents/*` and `/api/mcp` take platform-issued keys (`atsk_…`): only the SHA-256 hash and a short
+prefix are stored, the key is shown once, and revoked keys, unpublished or archived blueprints, a changed
+workspace, or a principal who no longer owns the workspace are refused. Requests are rate-limited per
+caller per path (60/min) and per key (30/min) in `src/server.ts`. Runs are readable only with a key of the
+same blueprint and workspace. Every change, download, key and API start is audited
+(`platform.agent_blueprint.*`). Responses and packages carry no AI vendor or model fields.
 
 ## Training data
 

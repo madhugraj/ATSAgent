@@ -116,6 +116,11 @@ export type AgentDefinition = {
   maxSteps?: number;
   /** Default token budget per leg when the organisation has not set one (document-heavy agents). */
   maxTokens?: number;
+  /**
+   * Agent studio blueprints only (never stock agents): the name and description
+   * the model sees for a real tool. Calls are mapped back to the real tool.
+   */
+  toolAliases?: Record<string, { name: string; description: string }>;
 };
 
 const tools = new Map<string, AgentTool<never>>();

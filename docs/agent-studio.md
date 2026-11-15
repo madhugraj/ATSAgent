@@ -1,61 +1,60 @@
-# Agent studio — customise and export agents
+# Agent studio — platform blueprints
 
-Agent administration → Agent studio (`src/routes/agents.studio.tsx`). HR head and President / CBO edit;
-other governance members can view.
+**Platform super admin only** (Platform → Agent studio, `/platform-agent-studio`). Organisations never
+see it; it is not offered for sale. Server functions: `src/lib/platform-agent-studio.functions.ts`
+(all `requirePlatformAdmin`); core: `src/server/agents/blueprints.server.ts`.
 
-## What an export is
+## What a blueprint is
 
-A customised copy of a stock hiring agent (`agent_exports`, migration 0080) for use **outside** ATSIQ.
-It can only narrow the stock agent:
+A stock hiring agent adapted to another domain for use in other applications — for example the Labour
+law agent rewritten as an environmental-compliance agent. Blueprints belong to the platform, not to an
+organisation (`agent_blueprints`, migration 0080).
 
-| Field              | Rule                                                                                   |
-| ------------------ | -------------------------------------------------------------------------------------- |
-| Name, description  | Free text                                                                              |
-| Extra instructions | Appended after the stock instructions, under a heading saying they never override them |
-| Tools              | A subset of the stock agent's tools                                                    |
-| Must never         | Added to the stock list                                                                |
-| Steps              | At most the stock limit                                                                |
+| Editable                                                    | Locked (always added, never editable)                              |
+| ----------------------------------------------------------- | ------------------------------------------------------------------ |
+| Name, description, responsibility                           | Injection rules and operating rules, prepended to the instructions |
+| Full instructions (stock text pre-filled, "Reset to stock") | Human tools `ask_human` / `request_approval`                       |
+| Must-never list (at least one rule)                         | Gate-verb ban on every tool name, renamed ones included            |
+| Which stock tools to keep                                   | Only the stock agent's own tools                                   |
+| Each kept tool's name and description                       | Each tool's input contract (shown read-only)                       |
+| Step limit (≤ stock)                                        | Approval, pre-approval and policy checks of the real tool          |
 
-The stock instructions, injection and operating rules, gates and the registry's gate-verb ban always
-apply (`effectiveDefinition`, `exportProblem` in `src/server/agents/exports.server.ts`). Every save bumps
-the export's `version` and re-bases it on the current stock agent; the list shows **Agent updated** when
-the stock manifest changed since.
+Renamed tools must be `[a-z][a-z0-9_]{2,60}`, unique, not a human-tool name, and keep (or not add) a
+`propose_` / `request_` / `submit_` prefix exactly as the real tool has it. Saving re-bases a blueprint on
+the current stock agent and bumps its version; the list shows **Agent updated** when the stock agent has
+changed since. **Duplicate** makes a draft copy (e.g. one law per blueprint).
 
-**In-app runs never use exports.**
+## Package
 
-## Portable package
+Delivery → **Download package**: `<name>-v<version>.agent.json` (`ats-agent-package/2`) — the agent's
+identity, responsibility, must-never, human decisions and limits, `lockedRules`, the full `instructions`
+(locked rules first), the renamed tools with their real JSON-schema inputs and `needsPersonApproval`, the
+human tools, and implementation notes. The other application implements the tools on its own data. No AI
+vendor, model or feature fields.
 
-**Download package** returns `<name>-v<version>.agent.json` (`ats-agent-package/1`):
+## Hosted API and MCP
 
-- `agent` — identity, responsibility, owner, risk tier, must-never, scope, human decisions, limits, `basedOn` (stock type, version, hash)
-- `instructions` — the full system prompt (injection rules + operating rules + stock + extra)
-- `tools` — names, descriptions, risk, `needsPersonApproval`, JSON-schema inputs
-- `humanTools` — `ask_human` / `request_approval` contracts
-- `evals`, `implementationNotes`
+Delivery → **Hosted workspace**: an organisation the super admin owns (typically a dedicated one). Hosted
+runs execute there — its data (e.g. the legal sources on its Labour policy page), its own AI key and its
+agent settings (the agent must be switched on). Changing the workspace revokes the blueprint's keys.
 
-The receiving application implements the tools on its own data. No AI vendor, model or feature fields.
-
-## Hosted API
-
-Publish the export, then create a key on its **Hosted API** tab (shown once; only a hash is stored).
+Publish, pick a workspace, then **Create key** (shown once; only a hash is stored). Runs act as the key's
+creator, who must still own the workspace.
 
 ```
-POST /api/agents/:exportId/runs      Authorization: Bearer atsk_…   {"goal": "…"}
+POST /api/agents/:blueprintId/runs   Authorization: Bearer atsk_…   {"goal": "…"}
   → 202 {"runId": "…", "status": "queued"}
 GET  /api/agents/runs/:runId         Authorization: Bearer atsk_…
   → {"runId", "status", "result", "waitingFor", "error"}
+POST /api/mcp                        Authorization: Bearer atsk_…   (JSON-RPC)
+  initialize · ping · tools/list · tools/call run_agent {goal} · tools/call get_run {runId}
 ```
 
-Runs act as the key's creator under the organisation's agent policy (the agent must be switched on in
-Agent settings) and execute the export's narrowed definition (`agent_runs.export_id`, `export_version`).
-Decisions (`waitingFor`) go to people in ATSIQ's inbox. 401 for unknown/revoked keys or unpublished
-exports, 409 when the run is refused, 429 over the limit (60/min per caller and path, 30/min per key).
-
-## MCP
-
-`POST /api/mcp` with the same bearer key — stateless streamable HTTP with JSON responses. Methods:
-`initialize`, `ping`, `tools/list`, `tools/call`. Tools: `run_agent {goal}` and `get_run {runId}`.
+The model sees the renamed tools; the runtime runs the real ones (`agent_runs.blueprint_id`,
+`blueprint_version`). Decisions (`waitingFor`) go to people in the workspace organisation's inbox.
+401 for unknown or revoked keys, unpublished blueprints or a changed workspace; 409 when a run is refused;
+429 over the limit (60/min per caller and path, 30/min per key). In-app runs never use blueprints.
 
 ## Audit
 
-`agent.export.created|saved|archived|downloaded|key_created|key_revoked|run_started`.
+`platform.agent_blueprint.created|saved|duplicated|archived|downloaded|workspace_set|key_created|key_revoked|run_started`.

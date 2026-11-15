@@ -52,7 +52,7 @@ import {
   type AgentType,
 } from "@db/schema";
 import { agentRunScope } from "./context";
-import { runDefinition } from "./exports.server";
+import { aliasToReal, runDefinition } from "./blueprints.server";
 import { ensureDefinition, manifestHash, RUNTIME_RULES } from "./manifest.server";
 import { looksLikeInjection } from "./injection";
 import { decideToolCall, loadPolicy } from "./policy";
@@ -1200,10 +1200,10 @@ export async function startRun(input: {
   maxSteps?: number;
   /** Hiring-desk thread; defaults to the thread of the subject's requisition. */
   conversationId?: string | null;
-  /** Agent studio export a hosted-API run executes under (narrows the stock agent). */
-  exportId?: string | null;
+  /** Agent studio blueprint a hosted-API run executes under (in its workspace org only). */
+  blueprintId?: string | null;
 }): Promise<{ runId: string }> {
-  const resolved = await runDefinition(input.orgId, input.agentType, input.exportId);
+  const resolved = await runDefinition(input.orgId, input.agentType, input.blueprintId);
   if (!resolved) throw new Error(`Unknown agent: ${input.agentType}`);
   const def = resolved.def;
   const definition = await ensureDefinition(def);
@@ -1239,11 +1239,11 @@ export async function startRun(input: {
         subjectType: input.subjectType ?? null,
         subjectId: input.subjectId ?? null,
         triggerEventId: input.triggerEventId ?? null,
-        maxSteps: input.exportId
+        maxSteps: input.blueprintId
           ? Math.min(startPolicy.maxStepsPerLeg ?? def.maxSteps ?? 20, def.maxSteps ?? 20)
           : (input.maxSteps ?? startPolicy.maxStepsPerLeg ?? def.maxSteps ?? 20),
-        ...(input.exportId
-          ? { exportId: input.exportId, exportVersion: resolved.exportVersion }
+        ...(input.blueprintId
+          ? { blueprintId: input.blueprintId, blueprintVersion: resolved.blueprintVersion }
           : {}),
         ...(startPolicy.maxTokensPerLeg || def.maxTokens
           ? {
@@ -1326,7 +1326,7 @@ export async function startReplay(input: {
   if (!orig) throw new Error("Run not found");
   if (orig.mode !== "live") throw new Error("Replay the original run, not a replay.");
   if (!REPLAYABLE.has(orig.status)) throw new Error("Only finished runs can be replayed.");
-  const resolved = await runDefinition(orig.orgId, orig.agentType, orig.exportId);
+  const resolved = await runDefinition(orig.orgId, orig.agentType, orig.blueprintId);
   if (!resolved) throw new Error(`Unknown agent: ${orig.agentType}`);
   const definition = await ensureDefinition(resolved.def);
   const [run] = await db
@@ -1343,8 +1343,8 @@ export async function startReplay(input: {
       subjectType: orig.subjectType,
       subjectId: orig.subjectId,
       maxSteps: orig.maxSteps,
-      exportId: orig.exportId,
-      exportVersion: resolved.exportVersion,
+      blueprintId: orig.blueprintId,
+      blueprintVersion: resolved.blueprintVersion,
       mode: "replay",
       replayOf: orig.id,
       transcript: [{ role: "user", content: orig.goal } satisfies AgentMessage],
@@ -1793,12 +1793,20 @@ async function renewLease(run: AgentRun): Promise<boolean> {
 }
 
 async function driveRun(run: AgentRun): Promise<"done" | "awaiting" | "yielded" | "failed"> {
-  // Hosted-API runs execute their export's narrowed definition; in-app runs the stock one.
-  const def = (await runDefinition(run.orgId, run.agentType, run.exportId))?.def;
+  // Hosted-API runs execute their blueprint (adapted definition); in-app runs the stock one.
+  const def = (await runDefinition(run.orgId, run.agentType, run.blueprintId))?.def;
   if (!def) {
     await finish(run, "failed", null, `Unknown agent: ${run.agentType}`);
     return "failed";
   }
+  // Blueprints rename tools: the model sees the alias, the runtime runs the
+  // real tool. Identity for stock agents.
+  const toReal = aliasToReal(def);
+  const aliasOf = (name: string) => def.toolAliases?.[name]?.name ?? name;
+  const shownAs = (m: AgentMessage): AgentMessage =>
+    m.role === "tool" && "name" in m && typeof m.name === "string"
+      ? { ...m, name: aliasOf(m.name) }
+      : m;
   const policy = await loadPolicy(run.orgId, run.agentType);
   const ctx: ToolContext = {
     orgId: run.orgId,
@@ -1817,7 +1825,7 @@ async function driveRun(run: AgentRun): Promise<"done" | "awaiting" | "yielded" 
     for (const p of run.pending as PendingCall[]) {
       const [task] = await db.select().from(agentTasks).where(eq(agentTasks.id, p.taskId)).limit(1);
       const message = await applyDecision(ctx, task, p.call, seq++);
-      transcript.push(message);
+      transcript.push(shownAs(message));
     }
     // A person decided: the next stretch of work gets a fresh allowance.
     if ((run.pending as PendingCall[]).length) {
@@ -1834,7 +1842,16 @@ async function driveRun(run: AgentRun): Promise<"done" | "awaiting" | "yielded" 
   const specs: AgentToolSpec[] = [
     ...def.tools.flatMap((name) => {
       const t = getTool(name);
-      return t ? [{ name, description: t.description, parameters: toolParameters(t.input) }] : [];
+      const shown = def.toolAliases?.[name];
+      return t
+        ? [
+            {
+              name: shown?.name ?? name,
+              description: shown?.description ?? t.description,
+              parameters: toolParameters(t.input),
+            },
+          ]
+        : [];
     }),
     ...(Object.keys(HITL_TOOLS) as HitlName[]).map((name) => ({
       name,
@@ -1992,9 +2009,10 @@ async function driveRun(run: AgentRun): Promise<"done" | "awaiting" | "yielded" 
     }
 
     const pending: PendingCall[] = [];
-    for (const call of res.toolCalls) {
+    for (const shownCall of res.toolCalls) {
+      const call = { ...shownCall, name: toReal.get(shownCall.name) ?? shownCall.name };
       const outcome = await handleCall(run, ctx, policy, allowed, call, seq++);
-      if (outcome.kind === "message") transcript.push(outcome.message);
+      if (outcome.kind === "message") transcript.push(shownAs(outcome.message));
       else if (outcome.kind === "pending") pending.push({ taskId: outcome.taskId, call });
       else {
         // handoff: close the turn so the transcript stays well-formed.

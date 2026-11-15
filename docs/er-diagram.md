@@ -1177,16 +1177,16 @@ erDiagram
 
 | From (child) | Column | To (parent) | ON DELETE |
 |---|---|---|---|
+| `agent_blueprint_keys` | `blueprint_id` | `agent_blueprints` | cascade |
+| `agent_blueprint_keys` | `created_by` | `users` | no action |
+| `agent_blueprint_keys` | `org_id` | `organizations` | cascade |
+| `agent_blueprint_keys` | `principal_user_id` | `users` | cascade |
+| `agent_blueprints` | `created_by` | `users` | no action |
+| `agent_blueprints` | `workspace_org_id` | `organizations` | no action |
 | `agent_cost_rates` | `org_id` | `organizations` | cascade |
 | `agent_cost_rates` | `updated_by` | `users` | no action |
 | `agent_events` | `actor_user_id` | `users` | no action |
 | `agent_events` | `org_id` | `organizations` | cascade |
-| `agent_export_keys` | `created_by` | `users` | no action |
-| `agent_export_keys` | `export_id` | `agent_exports` | cascade |
-| `agent_export_keys` | `org_id` | `organizations` | cascade |
-| `agent_export_keys` | `principal_user_id` | `users` | cascade |
-| `agent_exports` | `created_by` | `users` | no action |
-| `agent_exports` | `org_id` | `organizations` | cascade |
 | `agent_issues` | `acknowledged_by` | `users` | no action |
 | `agent_issues` | `org_id` | `organizations` | cascade |
 | `agent_metrics_daily` | `org_id` | `organizations` | cascade |
@@ -1451,11 +1451,11 @@ erDiagram
 
 | Table | Domain | Columns | Unique constraints |
 |---|---|---|---|
+| `agent_blueprint_keys` | — | 11 | (key_hash) |
+| `agent_blueprints` | — | 18 | — |
 | `agent_cost_rates` | — | 6 | — |
 | `agent_definitions` | — | 6 | (agentType+hash) |
 | `agent_events` | — | 13 | — |
-| `agent_export_keys` | — | 11 | (key_hash) |
-| `agent_exports` | — | 17 | — |
 | `agent_issues` | — | 16 | — |
 | `agent_metrics_daily` | — | 17 | — |
 | `agent_policies` | — | 12 | (orgId+agentType) |

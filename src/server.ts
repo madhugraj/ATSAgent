@@ -87,7 +87,7 @@ function isH3SwallowedErrorBody(body: string): boolean {
 // RATE_LIMIT_STORE=postgres (src/server/rate-limit.ts).
 
 /**
- * Hosted agent API and MCP (Agent studio): authenticated by org keys, limited
+ * Hosted agent API and MCP (Agent studio): authenticated by platform-issued keys, limited
  * per caller per path and, tighter, per key (src/server/agents/hosted-api.server.ts).
  */
 const AGENT_API_KEY_LIMIT = 30;
@@ -100,7 +100,7 @@ async function agentApiResponse(request: Request, url: URL): Promise<Response> {
   const api = await import("./server/agents/hosted-api.server");
   const key = api.bearerKey(request);
   if (!key) return api.unauthorized();
-  const { hashKey } = await import("./server/agents/exports.server");
+  const { hashKey } = await import("./server/agents/blueprints.server");
   if (!(await allowRequest(`agent-key:${hashKey(key)}`, Date.now(), AGENT_API_KEY_LIMIT)))
     return tooManyRequests();
   try {

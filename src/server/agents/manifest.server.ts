@@ -54,6 +54,8 @@ export function canonicalManifest(def: AgentDefinition): Record<string, unknown>
     maxSteps: def.maxSteps ?? 20,
     system: def.system,
     skills: skillsOf(def),
+    // Blueprints only: stock manifests carry no aliases, so their hashes are unchanged.
+    ...(def.toolAliases ? { toolAliases: def.toolAliases } : {}),
     tools: def.tools.map((name) => {
       const t = getTool(name);
       return t
