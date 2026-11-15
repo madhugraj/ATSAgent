@@ -235,7 +235,7 @@ function AgentList({
       </div>
 
       {shown.length ? (
-        <div className="mt-4 grid gap-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {shown.map((item) => (
             <AgentCard
               key={item.row.type}
@@ -330,7 +330,7 @@ function AgentCard({
     <article
       id={anchorOf(row.type)}
       onClick={onOpen}
-      className={`glass-card group flex cursor-pointer flex-col overflow-hidden p-5 pb-6 ${
+      className={`glass-card group flex cursor-pointer flex-col overflow-hidden p-3.5 pb-4 ${
         selected ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : ""
       }`}
     >
@@ -359,7 +359,7 @@ function AgentCard({
         ) : null}
       </div>
 
-      <h3 className="mt-3 font-semibold leading-snug">
+      <h3 className="mt-2.5 text-sm font-semibold leading-snug">
         <button
           type="button"
           onClick={(e) => {
@@ -371,9 +371,9 @@ function AgentCard({
           {info.label}
         </button>
       </h3>
-      <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{info.description}</p>
+      <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{info.description}</p>
 
-      <div className="mt-auto pt-4">
+      <div className="mt-auto pt-3">
         <div className="flex items-center justify-between text-[11px]">
           <span className="text-muted-foreground">Autonomy</span>
           <span className={active ? "font-medium" : "text-muted-foreground"}>
@@ -391,7 +391,7 @@ function AgentCard({
           ))}
         </div>
 
-        <div className="mt-5 flex items-center gap-2 border-t border-foreground/5 pt-4">
+        <div className="mt-3 flex items-center gap-2 border-t border-foreground/5 pt-3">
           <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
             <Switch
               id={`en-${row.type}`}
@@ -412,7 +412,7 @@ function AgentCard({
           </div>
           <Button
             size="icon"
-            className="ml-auto size-7 rounded-full"
+            className="ml-auto size-6 shrink-0 rounded-full"
             aria-label={`Open ${info.label} settings`}
             onClick={(e) => {
               e.stopPropagation();
@@ -423,7 +423,7 @@ function AgentCard({
           </Button>
         </div>
       </div>
-      <span className={`absolute inset-x-5 bottom-0 h-1 rounded-t-full ${style.bar}`} />
+      <span className={`absolute inset-x-3.5 bottom-0 h-1 rounded-t-full ${style.bar}`} />
     </article>
   );
 }
