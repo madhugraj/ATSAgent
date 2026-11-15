@@ -9,7 +9,9 @@
  *
  * Only the instructions count: fenced untrusted data inside a system prompt
  * (a JD, an organisation profile) is cut out first, so a rationale that
- * quotes the CV or the JD as evidence is never touched. Pure; no imports.
+ * quotes the CV or the JD as evidence is never touched; nor is wording the
+ * instructions quote for the model to write (a red-flag sentence, a fixed
+ * phrase). Pure; no imports.
  */
 
 /** Consecutive words that must match before a string counts as an echo. */
@@ -31,12 +33,23 @@ function shingles(ws: string[], n = ECHO_WINDOW): Set<string> {
 }
 
 /**
- * The system prompt without its fenced data blocks (those are not instructions).
- * Only real fences — untrusted() always writes `label="…"` and a newline — so
- * INJECTION_RULES' own mention of the tag is not mistaken for one.
+ * Wording the instructions put in quotes on one line ("<skill>: confirmed only after
+ * the interviewer suggested it; …") is what the model is told to write, so writing it
+ * is obedience, not extraction. Capped in length so a stray quote cannot hide a
+ * whole section of the instructions.
+ */
+const QUOTED_WORDING = /"[^"\n]{1,240}"|“[^”\n]{1,240}”/g;
+
+/**
+ * The system prompt without its fenced data blocks (those are not instructions)
+ * and without the wording it quotes for the model to use. Only real fences —
+ * untrusted() always writes `label="…"` and a newline — so INJECTION_RULES' own
+ * mention of the tag is not mistaken for one.
  */
 export function instructionsOnly(system: string): string {
-  return system.replace(/<untrusted_data label="[^"]*">\n[\s\S]*?\n<\/untrusted_data>/g, " ");
+  return system
+    .replace(/<untrusted_data label="[^"]*">\n[\s\S]*?\n<\/untrusted_data>/g, " ")
+    .replace(QUOTED_WORDING, " ");
 }
 
 /** Does this text repeat ECHO_WINDOW consecutive words of the instructions? */

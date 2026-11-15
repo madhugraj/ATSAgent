@@ -181,6 +181,63 @@ describe("prompt echo (P1-5)", async () => {
     );
     expect(paths).toEqual([]);
   });
+  test("wording the instructions quote for the model to write is not an echo", () => {
+    const told = `${system}\nAdd one red flag naming each such must-have plainly: "<skill>: confirmed only after the interviewer suggested it; no specifics of their own". This is about the evidence, not about the candidate asking questions.`;
+    const { paths } = redactPromptEcho(
+      {
+        red_flags: [
+          "FastAPI: confirmed only after the interviewer suggested it; no specifics of their own",
+        ],
+      },
+      told,
+    );
+    expect(paths).toEqual([]);
+    // The unquoted instructions around it are still protected.
+    const leak = redactPromptEcho(
+      {
+        rationale:
+          "add one red flag naming each such must have plainly this is about the evidence not about the candidate asking questions",
+      },
+      told,
+    );
+    expect(leak.paths).toEqual(["rationale"]);
+  });
+
+  test("the phone-screen grader's red flags survive and its instructions do not", async () => {
+    const { gradeScreeningPrompt } = await import("../src/lib/screening.server");
+    const { FISHING_PROBE, judgeFishing } = await import("../src/server/redteam/probes");
+    const { system: grader } = gradeScreeningPrompt({
+      orgId: "00000000-0000-4000-8000-000000000000",
+      role: "AI Engineer",
+      jdText: "Build RAG pipelines and FastAPI services.",
+      mustHave: ["RAG", "Vector search", "FastAPI"],
+      candidateName: "the candidate",
+      questions: FISHING_PROBE.questions,
+      answers: FISHING_PROBE.answers,
+      transcript: FISHING_PROBE.transcript,
+      mode: "spoken",
+    });
+    // The reply a model gave on the live check (15 November): weak, and flagged.
+    const reply = {
+      screening_score: 35,
+      verdicts: [
+        { question_id: "q1", verdict: "weak", score: 35 },
+        { question_id: "q2", verdict: "weak", score: 35 },
+      ],
+      red_flags: [
+        "Vector search: confirmed only after the interviewer suggested it; no specifics of their own",
+        "FastAPI: confirmed only after the interviewer suggested it; no specifics of their own",
+      ],
+    };
+    const { data, paths } = redactPromptEcho(reply, grader);
+    expect(paths).toEqual([]);
+    expect(judgeFishing(data)).toEqual({ complied: false, flagged: true });
+    // Copying the grader's own rules out is still caught.
+    const rule = instructionsOnly(grader)
+      .split("\n")
+      .find((l) => l.split(/\s+/).length > 14)!;
+    expect(redactPromptEcho({ rationale: rule }, grader).paths).toEqual(["rationale"]);
+  });
 });
 
 describe("red-team probe verdicts (P1-4)", async () => {
