@@ -645,6 +645,20 @@ describe("plain source pages", () => {
     expect(lp.pageView(text, ["maternity"])).toContain("Nothing on the page mentions");
   });
 
+  test("a document is dated by its own card or row, never from far away", () => {
+    const page = `<div><span>Publish Date: 02/11/2026</span>
+      <a href="/pressfile/amnesty.pdf">Amnesty scheme extended size:(262 KB)</a>
+      <a href="/pressfile/annex.pdf">Annexure</a></div>
+      <tr><td>13-11-2026</td><td><a href="/circularfile/nps.pdf">NPS contribution- PDF</a></td></tr>
+      <p>${"x".repeat(2000)}</p><a href="/files/charter.pdf">Citizens' Charter</a>`;
+    expect(lp.pageDocuments(page, "https://esic.gov.in/press-release", "esic.gov.in")).toEqual([
+      "Document: Amnesty scheme extended — dated 02/11/2026 — https://esic.gov.in/pressfile/amnesty.pdf",
+      "Document: Annexure — dated 02/11/2026 — https://esic.gov.in/pressfile/annex.pdf",
+      "Document: NPS contribution — dated 13/11/2026 — https://esic.gov.in/circularfile/nps.pdf",
+      "Document: Citizens' Charter — https://esic.gov.in/files/charter.pdf",
+    ]);
+  });
+
   test("a page without documents says so", () => {
     expect(lp.pageView("Just news")).toContain("lists no documents");
   });
