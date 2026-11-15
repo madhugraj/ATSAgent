@@ -105,7 +105,10 @@ We credit reporters in release notes on request.
 - SSRF connect pinning: after `safeFetch` vets a user-supplied host, the connection is pinned to
   the vetted address with an undici dispatcher, so a DNS rebinding between the check and the
   connect cannot retarget the socket (2026-11 audit N-2; Bun's fetch ignores dispatchers, where
-  the pre-connect vetting remains the guard).
+  the pre-connect vetting remains the guard). Every address the host resolves to is vetted (one
+  private address refuses the host); when one is unreachable, the next vetted address is dialled,
+  only after a connect-phase failure (nothing sent, so nothing is replayed), with a 4 s connect
+  timeout per address inside the request's overall timeout.
 - Step-up re-authentication: releasing an offer and rejecting candidates in bulk (directly, or by
   approving an agent's offer release or rejection batch) need the password re-entered in that
   session within 10 minutes; audited `auth.step_up` / `auth.step_up_failed`, locked after five
