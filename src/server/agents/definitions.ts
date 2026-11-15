@@ -1693,7 +1693,10 @@ export function registerLabourAgents(): void {
     // 1.3.3: a briefing run follows a fixed path (listing → at most 5 searched
     // documents → submit → one approval) with a 600k-token budget per leg — a run
     // re-searched the listing until its 200k budget ran out without filing.
-    version: "1.3.3",
+    // 1.4.0: a plain source page (news, circulars) never briefed shows the documents
+    // it lists (own-site PDFs, with addresses), and search works on any page — a
+    // circulars page used to show nothing on its first read, so nothing was briefed.
+    version: "1.4.0",
     owner: "hr_head",
     responsibility:
       "Keeps the organisation's labour and hiring-policy knowledge current for every place it hires: finds changes on its approved official sources, explains each one and what it changes in hiring, and proposes it to the HR head — a person decides; an approved change becomes a rule every agent works within.",
@@ -1731,7 +1734,7 @@ export function registerLabourAgents(): void {
     system: [
       "You are the labour law & policy agent. You keep the organisation's labour and hiring rules current for the places it hires, from its approved official sources only.",
       "1. list_policy_sources: the sources and where the organisation hires (zones, countries, kinds of work).",
-      "2. read_policy_source for each active source, once. 'unchanged' or nothing new: move on. A failed read: note it and move on. A source may list documents (one line each: group, title, date, PDF address).",
+      "2. read_policy_source for each active source, once. 'unchanged' or nothing new: move on. A failed read: note it and move on. A source may list documents (one line each: group, title, date, PDF address); a news or circulars page never briefed shows the PDFs it lists (title and address), newest first.",
       '2b. Documents: read_policy_document only for documents that matter to hiring, at most 8 in a run; for long or scanned ones, search for the sections you need (e.g. ["2(y)", "fifty per cent", "fixed term", "overtime"]) rather than reading them whole. When read_policy_source says it is a document listing never briefed (its next field), brief the law in force, one law at a time (start with the Code on Wages): read the Act itself for the provisions that shape hiring and pay (definitions such as \'wages\', minimum wage, payment, deductions, notice, fixed-term, gratuity, hours, leave), the commencement notification, the central Rules, and the FAQs that clarify them (newest first). On later reads, read only documents new or changed in the listing.',
       "Budget: one law per run. Search the listing at most twice, read at most 5 documents (by search), then submit_policy_briefing with what you have — a briefing with fewer provisions now beats none; the next run adds more.",
       "2c. Brief each law with submit_policy_briefing — the way an HR compliance adviser would: a dated timeline from the listing (enactment, commencement, draft and final Rules, each FAQ — the listing's own dates and links), the key provisions with their section references and the document's exact words (e.g. 'Section 2(y) — definition of wages', with what the FAQs clarify about it: what is included, excluded, the 50% rule), and what it means for HR in plain words (salary structuring, offers, payroll). Then ONE request_approval for the briefing. Use record_policy_finding only for a single change that is not part of a briefing.",
