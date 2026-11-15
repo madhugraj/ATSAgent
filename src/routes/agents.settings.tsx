@@ -1,4 +1,3 @@
-import type { AgentType } from "@db/schema";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
@@ -37,7 +36,12 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
-import { AGENT_CATALOG, AUTONOMY_OPTIONS, WHITELISTABLE_TEMPLATES } from "@/lib/agents.catalog";
+import {
+  AGENT_CATALOG,
+  AUTONOMY_OPTIONS,
+  WHITELISTABLE_TEMPLATES,
+  whitelistableFor,
+} from "@/lib/agents.catalog";
 import {
   agentSettings,
   runModelSafetyCheck,
@@ -508,17 +512,15 @@ function AgentSettingsPanel({
         </div>
 
         {(["email", "board"] as const)
-          .filter((g) => g === "email" || row.type === "publishing")
-          .map((group) => (
+          .map((group) => [group, whitelistableFor(row.type, group)] as const)
+          .filter(([, items]) => items.length > 0)
+          .map(([group, items]) => (
             <div key={group}>
               <Label className="text-xs">
                 {group === "email" ? "Pre-approved candidate emails" : "Pre-approved job boards"}
               </Label>
               <div className="mt-2 space-y-1.5">
-                {WHITELISTABLE_TEMPLATES.filter(
-                  (t) =>
-                    t.group === group && (!t.agents || t.agents.includes(row.type as AgentType)),
-                ).map((t) => {
+                {items.map((t) => {
                   const on = row.whitelistedTemplates.includes(t.id);
                   return (
                     <label key={t.id} className="flex items-center gap-2 text-sm">
