@@ -12,6 +12,7 @@ import { db } from "../db";
 import { agentEvents, agentRuns, agentSteps, agentTasks } from "@db/schema";
 import type { ModalityFilter } from "../../lib/agent-modality";
 import { modalityWhere } from "./modality.server";
+import { ledgerTokensByRun, runTokens } from "./run-tokens.server";
 import { CEILING_MESSAGE, LEG_LIMIT_MESSAGE, OLD_LIMIT_MESSAGE } from "./run-messages";
 
 export type ActivityRun = {
@@ -135,6 +136,10 @@ export async function computeActivity(
       .where(and(eq(agentRuns.orgId, orgId), inArray(agentRuns.id, outside)));
     for (const r of extra) allRunAgent.set(r.id, r.agentType);
   }
+  const ledger = await ledgerTokensByRun(
+    orgId,
+    runs.map((r) => r.id),
+  );
   const eventById = new Map(events.map((e) => [e.id, e]));
   const failedBy = new Map<string, number>();
   for (const s of failedSteps) failedBy.set(s.runId, (failedBy.get(s.runId) ?? 0) + 1);
@@ -173,7 +178,7 @@ export async function computeActivity(
           ? Math.round((r.finishedAt.getTime() - r.createdAt.getTime()) / 6000) / 10
           : null,
         steps: r.stepCount,
-        tokens: r.tokensUsed,
+        tokens: runTokens(ledger, r),
         failedCalls: failedBy.get(r.id) ?? 0,
         approvals: t?.n ?? 0,
         declined: t?.declined ?? 0,
@@ -213,7 +218,7 @@ export async function computeActivity(
     d.runs += 1;
     if (r.status === "failed") d.failed += 1;
     d.steps += r.stepCount;
-    d.tokens += r.tokensUsed;
+    d.tokens += runTokens(ledger, r);
     dayMap.set(k, d);
   }
   const days = [...dayMap.values()].sort(

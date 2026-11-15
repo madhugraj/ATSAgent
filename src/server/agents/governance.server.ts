@@ -18,6 +18,7 @@ import { agentEvents, agentPolicies, agentRuns, agentSteps, agentTasks } from "@
 import { matchesModality, type ModalityFilter } from "../../lib/agent-modality";
 import { ensureAgentsRegistered } from "./index";
 import { modalityWhere } from "./modality.server";
+import { ledgerTokensByRun, runTokens } from "./run-tokens.server";
 import { SUBMISSION_TOOLS, getTool, isGateToolName, listAgents } from "./registry";
 import { CEILING_MESSAGE, LEG_LIMIT_MESSAGE, OLD_LIMIT_MESSAGE } from "./run-messages";
 
@@ -254,12 +255,20 @@ export async function computeHarness(
         ),
       // monthly budget is always this calendar month, whatever the window
       db
-        .select({ agentType: agentRuns.agentType, tokensUsed: agentRuns.tokensUsed })
+        .select({
+          id: agentRuns.id,
+          agentType: agentRuns.agentType,
+          tokensUsed: agentRuns.tokensUsed,
+        })
         .from(agentRuns)
         .where(and(eq(agentRuns.orgId, orgId), gte(agentRuns.createdAt, monthStart))),
     ],
   );
 
+  const monthLedger = await ledgerTokensByRun(
+    orgId,
+    monthTokens.map((r) => r.id),
+  );
   const runById = new Map(runs.map((r) => [r.id, r]));
   const agentOfRun = (id: string) => runById.get(id)?.agentType ?? "?";
 
@@ -550,7 +559,7 @@ export async function computeHarness(
         agent: d.type,
         tokensMonth: monthTokens
           .filter((r) => r.agentType === d.type)
-          .reduce((s, r) => s + r.tokensUsed, 0),
+          .reduce((s, r) => s + runTokens(monthLedger, r), 0),
         budget: policyOf.get(d.type)?.monthlyTokenBudget ?? null,
         limitStops: mine.filter((r) => r.lastError && limitText.includes(r.lastError)).length,
       };
