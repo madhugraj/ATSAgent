@@ -132,13 +132,6 @@ export const NAV_GROUPS: NavGroup[] = [
         show: (c) => c.governance,
         mode: "agent",
       },
-      {
-        to: "/agents/studio",
-        label: "Agent studio",
-        icon: PackageOpen,
-        show: (c) => c.governance,
-        mode: "agent",
-      },
     ],
   },
   {
@@ -302,6 +295,12 @@ export const NAV_GROUPS: NavGroup[] = [
         to: "/platform-agents",
         label: "Platform agents",
         icon: Bot,
+        show: (c) => c.isSuperUser,
+      },
+      {
+        to: "/platform-agent-studio",
+        label: "Agent studio",
+        icon: PackageOpen,
         show: (c) => c.isSuperUser,
       },
       {

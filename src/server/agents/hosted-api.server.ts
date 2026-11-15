@@ -1,13 +1,14 @@
 /**
  * Hosted agent API (Agent studio, docs/agent-studio.md). Another application
- * runs a published export here with an org key:
+ * runs a published blueprint here with a platform-issued key:
  *
- *   POST /api/agents/:exportId/runs   { "goal": "…" }  → { runId, status }
+ *   POST /api/agents/:blueprintId/runs   { "goal": "…" }  → { runId, status }
  *   GET  /api/agents/runs/:runId                       → { runId, status, result, waitingFor }
  *
- * The key resolves to its organisation, export and principal (the person who
- * created it); runs act as that person under the organisation's agent policy
- * and the export's narrowed definition. Decisions still go to people in this
+ * The key resolves to its blueprint, the blueprint's workspace organisation
+ * and principal (the super admin who created it, an owner of the workspace);
+ * runs act as that person under the workspace's agent policy and AI key, and
+ * execute the blueprint's adapted definition. Decisions still go to people in this
  * app. Responses are vendor-neutral: no model or engine fields. Rate limits
  * are applied in src/server.ts before this module is reached.
  */
@@ -17,7 +18,7 @@ import { z } from "zod";
 import { agentRuns, agentTasks } from "@db/schema";
 import { db } from "../db";
 import { log } from "../log";
-import { resolveKey, type ResolvedKey } from "./exports.server";
+import { resolveKey, type ResolvedKey } from "./blueprints.server";
 
 export const AGENT_API_PREFIX = "/api/agents/";
 
@@ -60,16 +61,15 @@ export type RunView = {
   error: string | null;
 };
 
-/** Start a run of the key's export. Throws a plain-language Error when refused. */
+/** Start a run of the key's blueprint. Throws a plain-language Error when refused. */
 export async function startHostedRun(k: ResolvedKey, goal: string): Promise<{ runId: string }> {
   const { ensureAgentsRegistered } = await import("./index");
   ensureAgentsRegistered();
-  const { activeOrgOf } = await import("@/lib/auth.middleware");
-  const member = await activeOrgOf(k.principalUserId);
-  if (!member || member.orgId !== k.orgId)
-    throw new Error("The person this key acts for is no longer in the organisation.");
+  const { isWorkspaceOwner } = await import("./blueprints.server");
+  if (!(await isWorkspaceOwner(k.principalUserId, k.orgId)))
+    throw new Error("The person this key acts for is no longer an owner of the workspace.");
   const { loadPolicy } = await import("./policy");
-  const policy = await loadPolicy(k.orgId, k.export.agentType);
+  const policy = await loadPolicy(k.orgId, k.blueprint.agentType);
   if (!policy.enabled) throw new Error("This agent is switched off in Agent settings.");
   const { resolveAiConfig } = await import("@/lib/ai-gateway.server");
   if (!(await resolveAiConfig(k.orgId)).apiKey)
@@ -77,27 +77,27 @@ export async function startHostedRun(k: ResolvedKey, goal: string): Promise<{ ru
   const { startRun } = await import("./runtime.server");
   const { runId } = await startRun({
     orgId: k.orgId,
-    agentType: k.export.agentType,
+    agentType: k.blueprint.agentType,
     principalUserId: k.principalUserId,
     goal,
-    exportId: k.export.id,
+    blueprintId: k.blueprint.id,
   });
   const { writeAudit } = await import("../audit");
   await writeAudit({
     actor: `api_key:${k.keyId}`,
     actorUserId: k.principalUserId,
     orgId: k.orgId,
-    action: "agent.export.run_started",
+    action: "platform.agent_blueprint.run_started",
     entityType: "agent_run",
     entityId: runId,
-    detail: { exportId: k.export.id, exportVersion: k.export.version },
+    detail: { blueprintId: k.blueprint.id, blueprintVersion: k.blueprint.version },
   });
   const { kickAgents } = await import("./orchestrator.server");
   kickAgents(k.orgId);
   return { runId };
 }
 
-/** A run started through one of this export's keys, or null. */
+/** A run started through one of this blueprint's keys, or null. */
 export async function hostedRunView(k: ResolvedKey, runId: string): Promise<RunView | null> {
   const [run] = await db
     .select({
@@ -111,7 +111,7 @@ export async function hostedRunView(k: ResolvedKey, runId: string): Promise<RunV
       and(
         eq(agentRuns.id, runId),
         eq(agentRuns.orgId, k.orgId),
-        eq(agentRuns.exportId, k.export.id),
+        eq(agentRuns.blueprintId, k.blueprint.id),
       ),
     )
     .limit(1);
@@ -146,7 +146,7 @@ export async function handleAgentApi(request: Request, url: URL): Promise<Respon
 
   // POST /api/agents/:exportId/runs
   if (request.method === "POST" && parts.length === 2 && parts[1] === "runs") {
-    if (parts[0] !== k.export.id) return json({ error: "This key is for another export." }, 403);
+    if (parts[0] !== k.blueprint.id) return json({ error: "This key is for another agent." }, 403);
     let body: unknown;
     try {
       body = await request.json();
@@ -178,8 +178,8 @@ export async function handleAgentApi(request: Request, url: URL): Promise<Respon
 
 /**
  * Minimal stateless MCP server over streamable HTTP (JSON responses):
- * initialize, ping, tools/list and tools/call. One key is one export, so the
- * server offers two tools: start a run of that export, and read a run.
+ * initialize, ping, tools/list and tools/call. One key is one blueprint, so the
+ * server offers two tools: start a run of that agent, and read a run.
  */
 export const MCP_PROTOCOL_VERSION = "2025-06-18";
 
@@ -189,7 +189,7 @@ function mcpTools(k: ResolvedKey) {
   return [
     {
       name: "run_agent",
-      description: `Start a run of "${k.export.name}". ${k.export.description}`.trim(),
+      description: `Start a run of "${k.blueprint.name}". ${k.blueprint.description}`.trim(),
       inputSchema: {
         type: "object",
         properties: { goal: { type: "string", minLength: 5, maxLength: 4000 } },
@@ -221,7 +221,7 @@ async function mcpCall(k: ResolvedKey, msg: JsonRpc): Promise<unknown> {
       return {
         protocolVersion: MCP_PROTOCOL_VERSION,
         capabilities: { tools: {} },
-        serverInfo: { name: "atsiq-agent", version: String(k.export.version) },
+        serverInfo: { name: "atsiq-agent", version: String(k.blueprint.version) },
       };
     case "ping":
       return {};

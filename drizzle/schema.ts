@@ -2356,63 +2356,74 @@ export const agentEvents = pgTable(
   ],
 );
 
-export type AgentExportStatus = "draft" | "published" | "archived";
+export type AgentBlueprintStatus = "draft" | "published" | "archived";
+
+/** A blueprint's renamed tool: what the model and the package see for a real tool. */
+export type BlueprintToolOverride = { name: string; description: string };
 
 /**
- * A customised copy of a stock agent for use outside this app (Agent studio,
- * migration 0080): downloaded as a portable package or run here through the
- * hosted API. Customisations only narrow the stock agent and never apply to
- * in-app runs.
+ * Agent studio (platform super admin only, migration 0080): a stock agent
+ * adapted to another domain for use in other applications. Owned by the
+ * platform, not by any organisation. The injection and operating rules, the
+ * human tools and the gate-verb ban are always added and never editable;
+ * tools stay the stock agent's own (renamed, re-described, same inputs).
+ * Hosted runs execute in `workspaceOrgId` with that organisation's own AI key.
  */
-export const agentExports = pgTable(
-  "agent_exports",
+export const agentBlueprints = pgTable(
+  "agent_blueprints",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    orgId: uuid("org_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
     agentType: text("agent_type").$type<AgentType>().notNull(),
-    /** The stock manifest it was customised from. */
+    /** The stock manifest it was adapted from. */
     baseVersion: text("base_version").notNull(),
     baseHash: text("base_hash").notNull(),
     name: text("name").notNull(),
     description: text("description").notNull().default(""),
-    extraInstructions: text("extra_instructions").notNull().default(""),
-    /** A subset of the stock agent's tools. */
+    responsibility: text("responsibility").notNull(),
+    instructions: text("instructions").notNull(),
+    mustNever: jsonb("must_never")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /** Real (stock) tool names the blueprint keeps. */
     tools: jsonb("tools")
       .$type<string[]>()
       .notNull()
       .default(sql`'[]'::jsonb`),
-    extraMustNever: jsonb("extra_must_never")
-      .$type<string[]>()
+    toolOverrides: jsonb("tool_overrides")
+      .$type<Record<string, BlueprintToolOverride>>()
       .notNull()
-      .default(sql`'[]'::jsonb`),
+      .default(sql`'{}'::jsonb`),
     maxSteps: integer("max_steps"),
-    maxTokens: integer("max_tokens"),
-    status: text("status").$type<AgentExportStatus>().notNull().default("draft"),
+    status: text("status").$type<AgentBlueprintStatus>().notNull().default("draft"),
     /** Bumped on every save so runs record exactly what they executed. */
     version: integer("version").notNull().default(1),
+    /** Organisation hosted runs execute in (its data and AI key); null = package only. */
+    workspaceOrgId: uuid("workspace_org_id").references(() => organizations.id, {
+      onDelete: "set null",
+    }),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("agent_exports_org_idx").on(t.orgId, t.status)],
+  (t) => [index("agent_blueprints_status_idx").on(t.status, t.updatedAt)],
 );
 
 /**
- * Hosted-API keys for a published export. Only the SHA-256 of the key is
- * stored; the key is shown once. Runs act as `principalUserId`.
+ * Hosted-API keys for a published blueprint. Only the SHA-256 of the key is
+ * stored; the key is shown once. Runs act as `principalUserId` in `orgId`
+ * (the blueprint's workspace organisation when the key was created).
  */
-export const agentExportKeys = pgTable(
-  "agent_export_keys",
+export const agentBlueprintKeys = pgTable(
+  "agent_blueprint_keys",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    blueprintId: uuid("blueprint_id")
+      .notNull()
+      .references(() => agentBlueprints.id, { onDelete: "cascade" }),
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    exportId: uuid("export_id")
-      .notNull()
-      .references(() => agentExports.id, { onDelete: "cascade" }),
     label: text("label").notNull().default(""),
     keyPrefix: text("key_prefix").notNull(),
     keyHash: text("key_hash").notNull(),
@@ -2425,8 +2436,8 @@ export const agentExportKeys = pgTable(
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
   },
   (t) => [
-    uniqueIndex("agent_export_keys_hash_key").on(t.keyHash),
-    index("agent_export_keys_export_idx").on(t.orgId, t.exportId),
+    uniqueIndex("agent_blueprint_keys_hash_key").on(t.keyHash),
+    index("agent_blueprint_keys_blueprint_idx").on(t.blueprintId),
   ],
 );
 
@@ -2516,13 +2527,13 @@ export const agentRuns = pgTable(
       { onDelete: "set null" },
     ),
     /**
-     * The customised export a hosted-API run executes under (migration 0080);
-     * null for in-app runs, which never see export customisations.
+     * The Agent studio blueprint a hosted-API run executes under (migration
+     * 0080); null for in-app runs, which always use the stock agent.
      */
-    exportId: uuid("export_id").references((): AnyPgColumn => agentExports.id, {
+    blueprintId: uuid("blueprint_id").references((): AnyPgColumn => agentBlueprints.id, {
       onDelete: "set null",
     }),
-    exportVersion: integer("export_version"),
+    blueprintVersion: integer("blueprint_version"),
   },
   (t) => [
     index("agent_runs_queue_idx").on(t.status, t.updatedAt),
