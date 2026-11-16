@@ -3,18 +3,21 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { toast } from "sonner";
-import { CalendarPlus, Loader2, Lock, Video } from "lucide-react";
+import { CalendarPlus, FileText, Loader2, Lock, Video } from "lucide-react";
 
 import {
   interviewerUnavailable,
   markInterviewOutcome,
   myInterviews,
+  myRoundBrief,
   submitScorecard,
   type MyInterview,
 } from "@/lib/interviews.functions";
 import { buildIcs, downloadIcs } from "@/lib/ics";
 import { STAGE_LABEL } from "@/lib/lifecycle";
 import { EmptyState, PageHeader, StageBadge } from "@/components/ats";
+import { PanelBriefView } from "@/components/PanelBriefView";
+import { useOrg } from "@/hooks/useOrg";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -61,6 +64,8 @@ function MyInterviewsPage() {
   const submit = useServerFn(submitScorecard);
 
   const mine = useQuery({ queryKey: ["my_interviews"], queryFn: () => fetchMine({}) });
+  const { panelOnly } = useOrg();
+  const [briefId, setBriefId] = useState<string | null>(null);
   const rounds = (mine.data ?? []) as MyInterview[];
 
   const [openId, setOpenId] = useState<string | null>(null);
@@ -169,9 +174,11 @@ function MyInterviewsPage() {
         title="My interviews"
         description="Your rounds, including panels you sit on. Rate the role's own competencies and give your verdict once — it locks and is attributed to you. When everyone on the panel has scored, the round completes; the hiring manager makes the hiring decision."
         actions={
-          <Button variant="outline" asChild>
-            <Link to="/interviews">Recruiter view</Link>
-          </Button>
+          panelOnly ? null : (
+            <Button variant="outline" asChild>
+              <Link to="/interviews">Recruiter view</Link>
+            </Button>
+          )
         }
       />
 
@@ -200,13 +207,17 @@ function MyInterviewsPage() {
                 <div className="flex flex-wrap items-center gap-4 p-5">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <Link
-                        to="/candidates/$id"
-                        params={{ id: round.candidate_id }}
-                        className="font-semibold hover:underline"
-                      >
-                        {round.candidate_name}
-                      </Link>
+                      {panelOnly ? (
+                        <span className="font-semibold">{round.candidate_name}</span>
+                      ) : (
+                        <Link
+                          to="/candidates/$id"
+                          params={{ id: round.candidate_id }}
+                          className="font-semibold hover:underline"
+                        >
+                          {round.candidate_name}
+                        </Link>
+                      )}
                       {round.stage !== `l${round.level}` ? (
                         <span className="text-xs text-muted-foreground">now</span>
                       ) : null}
@@ -238,6 +249,14 @@ function MyInterviewsPage() {
                     ) : null}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      aria-expanded={briefId === round.id}
+                      onClick={() => setBriefId(briefId === round.id ? null : round.id)}
+                    >
+                      <FileText className="size-4" /> Brief & CV
+                    </Button>
                     {round.teams_link ? (
                       <Button variant="ghost" size="sm" asChild>
                         <a href={round.teams_link} target="_blank" rel="noreferrer noopener">
@@ -316,6 +335,7 @@ function MyInterviewsPage() {
                     )}
                   </div>
                 </div>
+                {briefId === round.id ? <RoundBrief interviewId={round.id} /> : null}
 
                 {isOpen && !round.submitted && (
                   <div className="grid gap-4 border-t border-border bg-surface-2 p-5 md:grid-cols-2">
@@ -412,5 +432,26 @@ function MyInterviewsPage() {
         </div>
       )}
     </>
+  );
+}
+
+function RoundBrief({ interviewId }: { interviewId: string }) {
+  const fetchBrief = useServerFn(myRoundBrief);
+  const q = useQuery({
+    queryKey: ["round_brief", interviewId],
+    queryFn: () => fetchBrief({ data: { interviewId } }),
+  });
+  return (
+    <div className="border-t border-border p-5">
+      {q.isLoading ? (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" /> Loading…
+        </div>
+      ) : q.data ? (
+        <PanelBriefView brief={q.data} />
+      ) : (
+        <p className="text-sm text-destructive">{(q.error as Error | null)?.message}</p>
+      )}
+    </div>
   );
 }

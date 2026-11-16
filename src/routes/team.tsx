@@ -116,6 +116,12 @@ const ROLE_LABELS: { role: AppRole; label: string; short: string; hint: string }
     short: "CBO",
     hint: "Final approval; manages roles",
   },
+  {
+    role: "interviewer",
+    label: "Interviewer",
+    short: "INT",
+    hint: "Only the interviews they sit on",
+  },
 ];
 
 const PAGE_SIZES = [25, 50, 100, 250];

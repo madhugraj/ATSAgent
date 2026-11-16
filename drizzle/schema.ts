@@ -97,6 +97,8 @@ export const appRoleEnum = pgEnum("app_role", [
   "department_head",
   "hr_head",
   "president_cbo",
+  /** Panel only: their own interview rounds and scorecards (migration 0081). */
+  "interviewer",
 ]);
 
 /* ------------------------------------------------------- identity (new) */
@@ -327,7 +329,7 @@ export const memberInterviewerProfiles = pgTable(
 );
 
 /**
- * The panel directory (docs/panel-directory.md, migration 0068): everyone who may
+ * The panel directory (docs/panel-directory.md, migration 0070): everyone who may
  * sit on an interview panel — internal (an org member, or an employee without a
  * login) or external (a client, an advisor). Added in the hiring desk when the
  * Interview coordinator asks for someone new; whoever types them in approves them
@@ -572,7 +574,7 @@ export const rolePanels = pgTable(
       .notNull()
       .references(() => requisitions.id, { onDelete: "cascade" }),
     level: integer("level").notNull(),
-    /** Superseded by panelistIds (migration 0068); kept for code that predates it. */
+    /** Superseded by panelistIds (migration 0070); kept for code that predates it. */
     memberIds: uuid("member_ids")
       .array()
       .notNull()
@@ -967,7 +969,7 @@ export const roundSubstitutes = pgTable(
       .notNull()
       .references(() => applications.id, { onDelete: "cascade" }),
     level: integer("level").notNull(),
-    /** Superseded by the panelist columns (migration 0068). */
+    /** Superseded by the panelist columns (migration 0070). */
     replaceMemberId: uuid("replace_member_id").references(() => orgMembers.id, {
       onDelete: "cascade",
     }),
@@ -1002,7 +1004,7 @@ export const roundSubstitutes = pgTable(
 
 /**
  * An external panelist's private scorecard link for one interview (migration
- * 0068): /scorecard/<token>, expiring, one per panelist per round. Only the
+ * 0070): /scorecard/<token>, expiring, one per panelist per round. Only the
  * SHA-256 of the token is stored.
  */
 export const panelistScorecardLinks = pgTable(

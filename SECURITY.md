@@ -219,7 +219,9 @@ the same way, for people on an interview panel who have no account (a client, an
 token is 64 hex characters derived with HMAC-SHA-256 from the server secret and the interview,
 panellist and booked time (a resent brief carries the same link; a reschedule replaces it); only
 its SHA-256 is stored (`panelist_scorecard_links.token_hash`). It returns only the round, role,
-candidate name, the panellist's own name and the round's competencies; it accepts one final
+candidate name, the panellist's own name, the round's focus and competencies, and — while the link
+is valid — the candidate's profile, skills and CV text (never pay, offers, notes, match or
+screening; nothing about the candidate once it has expired); it accepts one final
 scorecard, only once the interview has started and until seven days after it; an external
 scorecard never moves a candidate into the offer pipeline (that waits for the HR head); its server
 functions are rate-limited with all other RPCs; the submission is audited
@@ -227,6 +229,18 @@ functions are rate-limited with all other RPCs; the submission is audited
 score, screening result and the candidate page. Panel directory entries are added by the HR head
 (Team page or the hiring desk card the Interview coordinator raises); typing someone in is
 approving them, recorded as self-approved in `panelist.added`.
+
+**Panel-only members (`interviewer` role, migration 0081).** A colleague who only sits on interview
+panels is invited with the Interviewer role. A member whose *only* role is `interviewer` (and who is
+not the owner) is denied by default: `activeOrgOf` resolves them to no organisation, so
+`requireOrg`, `requireRole`, `requireOrgOwner` and `assertRole` all refuse them, and the few places
+that read membership directly (`orgOf` in org.functions, collaboration, notifications) check
+`assertNotPanelOnly` / `isPanelOnly`. Only functions using `requirePanel` admit them — My
+interviews, scorecard submission, "can't make it", "didn't happen" and `myRoundBrief` — and each is
+limited to rounds whose interviewer or panel is the caller's own email. Their brief includes match
+and screening highlights (they are internal); the app shell shows them only My interviews. Any
+other role alongside `interviewer` restores normal access. Use `requirePanel` only for functions
+already limited to the caller's own rounds.
 
 Job-board application webhooks (`/api/public/boards/<provider>/<token>`) authenticate on two
 factors: a per-connection delivery token (24 random bytes, stored encrypted with a SHA-256 hash

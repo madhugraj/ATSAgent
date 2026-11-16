@@ -1,6 +1,6 @@
 # Panel directory
 
-Interview panels are drawn from one directory per organisation (`panelists`, migration 0068):
+Interview panels are drawn from one directory per organisation (`panelists`, migration 0070):
 
 - **Internal** — every org member is an entry (kept in step automatically), plus employees
   without a login whom HR adds.

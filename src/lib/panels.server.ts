@@ -221,7 +221,7 @@ export async function panelPeople(orgId: string, given: string[]): Promise<Panel
 
 /**
  * Keep every org member in the directory as an internal panelist (members who
- * joined after migration 0068), and their name and e-mail current.
+ * joined after migration 0070), and their name and e-mail current.
  */
 export async function syncMemberPanelists(orgId: string): Promise<void> {
   await db.execute(sql`

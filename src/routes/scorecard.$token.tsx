@@ -3,8 +3,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { toast } from "sonner";
+
 import { CheckCircle2, ClipboardCheck, Loader2 } from "lucide-react";
 
+import { PanelBriefView } from "@/components/PanelBriefView";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { getPanelistScorecard, submitPanelistScorecard } from "@/lib/panelist-links.functions";
@@ -104,6 +106,14 @@ function ScorecardPage() {
         <p className="text-sm">
           The scorecard opens once the interview has started. Please come back after it.
         </p>
+        {c.brief ? (
+          <div className="mt-5 border-t border-border pt-5">
+            <p className="mb-3 text-sm text-muted-foreground">
+              {c.candidateName} · {c.jobTitle} · {c.orgName}
+            </p>
+            <PanelBriefView brief={c.brief} />
+          </div>
+        ) : null}
       </Shell>
     );
 
@@ -148,6 +158,11 @@ function ScorecardPage() {
       <p className="mt-1 text-xs text-muted-foreground">
         Scoring as {c.panelistName}. Judge only what the candidate showed in the interview.
       </p>
+      {c.brief ? (
+        <div className="mt-5 border-t border-border pt-5">
+          <PanelBriefView brief={c.brief} />
+        </div>
+      ) : null}
 
       <div className="mt-5 space-y-2">
         {c.competencies.map((name) => (

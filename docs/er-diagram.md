@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-113 tables across 9 domains.
+115 tables across 9 domains.
 
 ## Identity & access
 

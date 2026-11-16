@@ -284,7 +284,15 @@ export async function sendPanelSummary(
     await import("@/lib/email-outbox.server");
   const tz = (await getOrgEmailSettings(ctx.orgId)).timezone;
   const site = env.PUBLIC_SITE_URL.replace(/\/$/, "");
-  for (const m of members)
+  const { linkPanelist, issueScorecardLink } = await import("@/lib/panelist-links.server");
+  for (const m of members) {
+    // A panellist without a login (external, or internal with no account) scores
+    // through their private link — the same token their brief carried.
+    const byLink = r.scheduledAt ? await linkPanelist(ctx.orgId, m.email) : null;
+    const scorecardUrl =
+      byLink && r.scheduledAt
+        ? `${site}/scorecard/${await issueScorecardLink(ctx.orgId, r.id, byLink.id, r.scheduledAt)}`
+        : `${site}/interviews/mine`;
     await enqueueEmail({
       orgId: ctx.orgId,
       kind: "panel_summary",
@@ -301,9 +309,10 @@ export async function sendPanelSummary(
         whenText: r.scheduledAt ? formatInOrgTZ(r.scheduledAt, tz) : undefined,
         overview: summary.overview || undefined,
         topicsJson: JSON.stringify(summary.topics),
-        scorecardUrl: `${site}/interviews/mine`,
+        scorecardUrl,
       },
     });
+  }
   await db
     .insert(panelAssessments)
     .values({

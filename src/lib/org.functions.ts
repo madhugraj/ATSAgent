@@ -2,7 +2,7 @@ import { and, eq, ilike, isNull, sql } from "drizzle-orm";
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-import { requireIdentity } from "@/lib/auth.middleware";
+import { assertNotPanelOnly, requireIdentity, type AppRole } from "@/lib/auth.middleware";
 import { db } from "../server/db";
 import { emailVerified } from "../server/claims";
 import { departments, masterItems, orgMembers, organizations, userRoles } from "@db/schema";
@@ -10,8 +10,7 @@ import { registrableDomain, workEmailProblem } from "@/lib/work-email";
 import { isCurrencyCode } from "@/lib/iso";
 import { AgreementAcceptanceInput } from "@/lib/legal/acceptance";
 
-export type AppRole =
-  "recruiter" | "hiring_manager" | "department_head" | "hr_head" | "president_cbo";
+export type { AppRole } from "@/lib/auth.middleware";
 
 const ROLES = [
   "recruiter",
@@ -19,6 +18,7 @@ const ROLES = [
   "department_head",
   "hr_head",
   "president_cbo",
+  "interviewer",
 ] as const;
 
 export type Organization = {
@@ -59,6 +59,8 @@ export type MyOrg = {
   org: Organization | null;
   membership: { id: string; isOwner: boolean; status: string } | null;
   roles: AppRole[];
+  /** Holds only the interviewer role: the app shows the panel view and nothing else. */
+  panelOnly: boolean;
 };
 
 const ROLE_LABELS: Record<AppRole, string> = {
@@ -67,6 +69,7 @@ const ROLE_LABELS: Record<AppRole, string> = {
   department_head: "Department head",
   hr_head: "HR head",
   president_cbo: "President / CBO",
+  interviewer: "Interviewer",
 };
 
 /**
@@ -152,7 +155,7 @@ export const myOrg = createServerFn({ method: "GET" })
       .orderBy(orgMembers.createdAt)
       .limit(1);
 
-    if (!member) return { org: null, membership: null, roles: [] };
+    if (!member) return { org: null, membership: null, roles: [], panelOnly: false };
 
     const [org, roles] = await Promise.all([
       db.select().from(organizations).where(eq(organizations.id, member.orgId)).limit(1),
@@ -166,6 +169,8 @@ export const myOrg = createServerFn({ method: "GET" })
       org: org[0] ? orgRowToOrganization(org[0]) : null,
       membership: { id: member.id, isOwner: member.isOwner, status: member.status },
       roles: roles.map((r) => r.role as AppRole),
+      panelOnly:
+        !member.isOwner && roles.length > 0 && roles.every((r) => r.role === "interviewer"),
     };
   });
 
@@ -452,6 +457,7 @@ const orgOf = createServerOnlyFn(async function orgOf(userId: string) {
     .where(and(eq(orgMembers.userId, userId), eq(orgMembers.status, "active")))
     .limit(1);
   if (!membership) throw new Error("You do not belong to an organisation yet.");
+  await assertNotPanelOnly(userId, membership.orgId);
   return membership.orgId;
 });
 

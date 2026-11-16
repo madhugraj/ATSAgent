@@ -1,4 +1,4 @@
--- 0068_panel_directory.sql — the panel directory (docs/panel-directory.md).
+-- 0070_panel_directory.sql — the panel directory (docs/panel-directory.md).
 --
 -- panelists: everyone who may sit on an interview panel, internal (an org
 -- member, or an employee without a login) or external (a client, an advisor).
