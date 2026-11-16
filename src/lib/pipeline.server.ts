@@ -27,7 +27,14 @@ const actorLabel = (a: LifecycleActor) => (a.via ? `${a.memberEmail} (via agent)
 
 export async function moveStageCore(
   actor: LifecycleActor,
-  input: { applicationId: string; toStage: Stage; reason?: string | null; note?: string | null },
+  input: {
+    applicationId: string;
+    toStage: Stage;
+    reason?: string | null;
+    note?: string | null;
+    /** An agent tool moved them (on a hiring-desk role this starts nothing on its own). */
+    byAgent?: boolean;
+  },
 ): Promise<{ from: Stage; to: Stage; unchanged: boolean }> {
   const [app] = await db
     .select({ id: applications.id, stage: applications.stage })
@@ -93,6 +100,7 @@ export async function moveStageCore(
     actor: actorLabel(actor),
     reason: skipNote ?? (input.reason?.trim() || null),
     note: input.note?.trim() || null,
+    ...(input.byAgent ? { byAgent: true } : {}),
   });
   return { from, to: input.toStage, unchanged: false };
 }
