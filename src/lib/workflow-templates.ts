@@ -26,6 +26,119 @@ const n = (
 
 export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   {
+    id: "need-to-screening-report",
+    name: "Hiring need → requisition → JD → screening → report",
+    description:
+      "Start it with a hiring need. The Requisition agent drafts the role; once a person approves it the JD agent writes the JD; once the JD is approved the role is published; once candidates are shortlisted the Screening agent screens them. Every path ends with a run report (PDF / Excel).",
+    graph: {
+      nodes: [
+        n("trigger", "trigger", 300, 0, { label: "Hiring need", event: "manual" }),
+        n("req", "agent", 280, 110, {
+          label: "Draft the requisition",
+          agentType: "requisition",
+          goal: "Hiring need: {{payload.need}}\nTurn it into a requisition — role, skills and weights, pay band backed by evidence — and submit it for approval.",
+        }),
+        n("waitReq", "wait", 300, 230, {
+          label: "Requisition approved",
+          event: "requisition.status_changed",
+          field: "payload.to",
+          op: "eq",
+          value: "approved",
+          timeoutHours: 168,
+        }),
+        n("okReq", "condition", 300, 350, {
+          label: "Approved in time?",
+          field: "wait.status",
+          op: "eq",
+          value: "happened",
+        }),
+        n("jd", "agent", 120, 470, {
+          label: "Write the JD",
+          agentType: "jd",
+          goal: "The requisition for this hiring need is approved. Draft its job description from the organisation's templates and profile and submit it for review. Hiring need: {{payload.need}}",
+        }),
+        n("waitJd", "wait", 140, 590, {
+          label: "JD approved",
+          event: "jd.approved",
+          timeoutHours: 168,
+        }),
+        n("okJd", "condition", 140, 710, {
+          label: "JD approved in time?",
+          field: "wait.status",
+          op: "eq",
+          value: "happened",
+        }),
+        n("publish", "agent", -40, 830, {
+          label: "Publish the role",
+          agentType: "publishing",
+          goal: "The job description is approved. Post the role internally and prepare the LinkedIn and job-board posts.",
+        }),
+        n("waitShort", "wait", -20, 950, {
+          label: "Candidates shortlisted",
+          event: "application.shortlisted",
+          timeoutHours: 336,
+        }),
+        n("okShort", "condition", -20, 1070, {
+          label: "Shortlisted in time?",
+          field: "wait.status",
+          op: "eq",
+          value: "happened",
+        }),
+        n("screen", "agent", -200, 1190, {
+          label: "Screen the shortlist",
+          agentType: "screening",
+          goal: "Candidates {{payload.applicationIds}} were shortlisted for this role. Prepare their screening kits, send assessments and summarise who should proceed.",
+        }),
+        n("report", "report", 300, 1310, { label: "Run report" }),
+        n("end", "end", 320, 1420, { label: "Done" }),
+      ],
+      edges: [
+        { id: "e1", source: "trigger", target: "req" },
+        { id: "e2", source: "req", target: "waitReq" },
+        { id: "e3", source: "waitReq", target: "okReq" },
+        { id: "e4", source: "okReq", target: "jd", branch: "yes" },
+        { id: "e5", source: "okReq", target: "report", branch: "no" },
+        { id: "e6", source: "jd", target: "waitJd" },
+        { id: "e7", source: "waitJd", target: "okJd" },
+        { id: "e8", source: "okJd", target: "publish", branch: "yes" },
+        { id: "e9", source: "okJd", target: "report", branch: "no" },
+        { id: "e10", source: "publish", target: "waitShort" },
+        { id: "e11", source: "waitShort", target: "okShort" },
+        { id: "e12", source: "okShort", target: "screen", branch: "yes" },
+        { id: "e13", source: "okShort", target: "report", branch: "no" },
+        { id: "e14", source: "screen", target: "report" },
+        { id: "e15", source: "report", target: "end" },
+      ],
+    },
+    tests: [
+      {
+        name: "Everything happens",
+        subjectType: "requisition",
+        payload: { need: "Two AI engineers in Chennai by March" },
+        outcomes: {
+          req: { status: "done", result: "REQ drafted and submitted" },
+          waitReq: { status: "done", result: "" },
+          jd: { status: "done", result: "JD v1 submitted" },
+          waitJd: { status: "done", result: "" },
+          publish: { status: "done", result: "Posted" },
+          waitShort: { status: "done", result: "" },
+          screen: { status: "done", result: "2 proceed" },
+        },
+        expectEnd: "end",
+      },
+      {
+        name: "Requisition never approved → report",
+        subjectType: "requisition",
+        payload: { need: "One data analyst" },
+        outcomes: {
+          req: { status: "done", result: "Submitted" },
+          waitReq: { status: "failed", result: "" },
+        },
+        expectEnd: "end",
+      },
+    ],
+  },
+  {
     id: "shortlist-screen-followup",
     name: "Shortlisted → screening, follow up if it stalls",
     description:

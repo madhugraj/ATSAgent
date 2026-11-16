@@ -188,14 +188,22 @@ describe("templates", () => {
         failures: [],
       });
       expect(r.passed).toBe(true);
-      // Each branch is exercised by at least one test.
-      const ends = new Set(r.runs.map((x) => x.path[x.path.length - 1]));
-      expect(ends.size).toBeGreaterThanOrEqual(2);
+      // Each template's tests take at least two different paths.
+      const paths = new Set(r.runs.map((x) => x.path.join(">")));
+      expect(paths.size).toBeGreaterThanOrEqual(2);
     }
   });
 });
 
 describe("access", () => {
+  test("organisation workflow functions are org-scoped and need the HR head or CBO", () => {
+    const src = readFileSync("src/lib/org-workflows.functions.ts", "utf8");
+    const fns = src.match(/createServerFn\(/g)?.length ?? 0;
+    expect(fns).toBe(3);
+    expect(src.match(/\.middleware\(\[requireOrg\]\)/g)?.length ?? 0).toBe(fns);
+    expect(src.match(/await assertRoles\(context\)/g)?.length ?? 0).toBe(fns);
+    expect(src).toContain("workflowRunReport(data.runId, context.orgId)");
+  });
   test("every workflow server function is super admin only", () => {
     const src = readFileSync("src/lib/platform-agent-workflows.functions.ts", "utf8");
     const fns = src.match(/createServerFn\(/g)?.length ?? 0;
@@ -439,5 +447,207 @@ describe("engine", () => {
       .from(workflowRuns)
       .where(and(eq(workflowRuns.workflowId, workflowId), eq(workflowRuns.status, "failed")));
     expect(wr!.error).toContain("switched off");
+  });
+});
+
+describe("hiring need, waits and reports", () => {
+  let orgId = "";
+  let otherOrgId = "";
+  let userId = "";
+  let workflowId = "";
+  const stamp = Date.now() + 1;
+  const wfr = () => db.select().from(workflowRuns).where(eq(workflowRuns.workflowId, workflowId));
+
+  beforeAll(async () => {
+    const [u] = await db
+      .insert(users)
+      .values({ email: `wfn-${stamp}@test.local` })
+      .returning({ id: users.id });
+    userId = u!.id;
+    const orgs = await db
+      .insert(organizations)
+      .values([
+        { name: "Need org", slug: `wfn-a-${stamp}`, status: "active" },
+        { name: "Elsewhere", slug: `wfn-b-${stamp}`, status: "active" },
+      ])
+      .returning({ id: organizations.id });
+    orgId = orgs[0]!.id;
+    otherOrgId = orgs[1]!.id;
+    registry.registerTool({
+      name: "wfn_probe",
+      description: "Probe",
+      input: z.object({}),
+      risk: "read",
+      run: async () => ({ ok: true }),
+    });
+    for (const type of ["requisition", "jd"] as const)
+      registry.registerAgent({
+        type,
+        name: `WFN ${type}`,
+        version: "0.0.0-test",
+        owner: "hr_head",
+        responsibility: "Test.",
+        mustNever: [],
+        scope: { reads: [], writes: [], external: [] },
+        gates: ["general"],
+        riskTier: "low",
+        evals: [],
+        feature: "agent_jd",
+        system: `WFN ${type}`,
+        tools: ["wfn_probe"],
+      });
+    await db.insert(agentPolicies).values([
+      { orgId, agentType: "requisition", enabled: true },
+      { orgId, agentType: "jd", enabled: true },
+    ]);
+    const graph: WorkflowGraph = {
+      nodes: [
+        node("t", "trigger", { event: "manual" }),
+        node("req", "agent", { agentType: "requisition", goal: "Need: {{payload.need}}" }),
+        node("w", "wait", {
+          event: "requisition.status_changed",
+          field: "payload.to",
+          op: "eq",
+          value: "approved",
+          timeoutHours: 1,
+        }),
+        node("ok", "condition", { field: "wait.status", op: "eq", value: "happened" }),
+        node("jd", "agent", { agentType: "jd", goal: "Write the JD for: {{payload.need}}" }),
+        node("rep", "report"),
+        node("e", "end"),
+      ],
+      edges: [
+        { id: "1", source: "t", target: "req" },
+        { id: "2", source: "req", target: "w" },
+        { id: "3", source: "w", target: "ok" },
+        { id: "4", source: "ok", target: "jd", branch: "yes" },
+        { id: "5", source: "ok", target: "rep", branch: "no" },
+        { id: "6", source: "jd", target: "rep" },
+        { id: "7", source: "rep", target: "e" },
+      ],
+    };
+    expect(w.graphProblems(graph, () => true)).toEqual([]);
+    const [wf] = await db
+      .insert(agentWorkflows)
+      .values({ name: `WFN ${stamp}`, graph, status: "published", version: 1, publishedVersion: 1 })
+      .returning({ id: agentWorkflows.id });
+    workflowId = wf!.id;
+    await db.insert(agentWorkflowVersions).values({
+      workflowId,
+      version: 1,
+      triggerEvent: "manual",
+      graph,
+      hash: "h",
+      test: { version: 1, passed: true, at: "", runs: [] },
+      approvedAt: new Date(),
+    });
+    await db.insert(agentWorkflowGrants).values({ workflowId, orgId });
+  });
+
+  afterAll(async () => {
+    await db.delete(organizations).where(inArray(organizations.id, [orgId, otherOrgId]));
+    await db.delete(agentWorkflows).where(eq(agentWorkflows.id, workflowId));
+    await db.delete(users).where(eq(users.id, userId));
+  });
+
+  const finishAgent = async (runId: string, text: string) => {
+    script.push({ ok: true, text, toolCalls: [], stopReason: "end", usage });
+    await runAgentTick({ max: 1, orgId, onlyRunId: runId });
+  };
+  const event = (
+    type: string,
+    reqId: string,
+    payload: Record<string, unknown>,
+    sourceRunId?: string,
+  ) =>
+    db.insert(agentEvents).values({
+      orgId,
+      type,
+      subjectType: "requisition",
+      subjectId: reqId,
+      actorUserId: userId,
+      payload,
+      ...(sourceRunId ? { sourceRunId } : {}),
+    });
+
+  test("a hiring need flows: role linked, wait ignores other changes, resumes on approval, report", async () => {
+    const { startWorkflowManually, workflowRunReport } =
+      await import("../src/server/agents/workflows.server");
+    await expect(
+      startWorkflowManually({ workflowId, orgId: otherOrgId, userId, need: "x needs" }),
+    ).rejects.toThrow("not available");
+    const { runId: wrId } = await startWorkflowManually({
+      workflowId,
+      orgId,
+      userId,
+      need: "Two AI engineers in Chennai",
+    });
+    let [wr] = await wfr();
+    expect(wr!.status).toBe("waiting");
+    const reqRun = wr!.waitingRunId!;
+    const [run] = await db.select().from(agentRuns).where(eq(agentRuns.id, reqRun));
+    expect(run!.goal).toContain("Two AI engineers in Chennai");
+
+    // The Requisition agent drafts a role (its own event links the flow to it).
+    const [req] = await db
+      .insert(requisitions)
+      .values({
+        orgId,
+        code: `WFN-${stamp}`,
+        title: "AI engineer",
+        status: "draft",
+        createdBy: userId,
+      } as never)
+      .returning({ id: requisitions.id });
+    await event("requisition.created", req!.id, {}, reqRun);
+    await processAgentEvents({ orgId });
+    await finishAgent(reqRun, "Requisition drafted and submitted.");
+    [wr] = await wfr();
+    expect(wr!.status).toBe("waiting");
+    expect(wr!.waitingEvent).toBe("requisition.status_changed");
+    expect((wr!.context as { subject: { id: string } }).subject.id).toBe(req!.id);
+
+    // A change that is not the approval keeps it waiting.
+    await event("requisition.status_changed", req!.id, { from: "draft", to: "pending_hr" });
+    await processAgentEvents({ orgId });
+    [wr] = await wfr();
+    expect(wr!.waitingEvent).toBe("requisition.status_changed");
+
+    // The approval resumes it; the JD agent works on that role.
+    await event("requisition.status_changed", req!.id, { from: "pending_hr", to: "approved" });
+    await processAgentEvents({ orgId });
+    [wr] = await wfr();
+    expect(wr!.currentNode).toBe("jd");
+    const [jdRun] = await db.select().from(agentRuns).where(eq(agentRuns.id, wr!.waitingRunId!));
+    expect(jdRun!.subjectId).toBe(req!.id);
+    expect(jdRun!.goal).toContain("Write the JD for: Two AI engineers in Chennai");
+
+    await finishAgent(jdRun!.id, "JD v1 submitted.");
+    [wr] = await wfr();
+    expect(wr!.status).toBe("done");
+    expect(wr!.history.some((h) => h.note === "Report ready.")).toBe(true);
+
+    const report = await workflowRunReport(wrId, orgId);
+    expect(report!.need).toBe("Two AI engineers in Chennai");
+    expect(report!.agents.map((a) => a.agent)).toEqual(["requisition", "jd"]);
+    expect(report!.agents[1]!.result).toContain("JD v1");
+    expect(report!.steps.length).toBeGreaterThan(5);
+    expect(await workflowRunReport(wrId, otherOrgId)).toBeNull();
+  });
+
+  test("a wait that times out takes the other path to the report", async () => {
+    const { startWorkflowManually, expireWorkflowWaits } =
+      await import("../src/server/agents/workflows.server");
+    await db.delete(workflowRuns).where(eq(workflowRuns.workflowId, workflowId));
+    await startWorkflowManually({ workflowId, orgId, userId, need: "One analyst" });
+    let [wr] = await wfr();
+    await finishAgent(wr!.waitingRunId!, "Submitted.");
+    [wr] = await wfr();
+    expect(wr!.waitingEvent).toBe("requisition.status_changed");
+    await expireWorkflowWaits(new Date(Date.now() + 2 * 3_600_000));
+    [wr] = await wfr();
+    expect(wr!.status).toBe("done");
+    expect((wr!.context as { wait: { status: string } }).wait.status).toBe("timed_out");
+    expect(wr!.history.map((h) => h.node).slice(-3)).toEqual(["ok", "rep", "e"]);
   });
 });

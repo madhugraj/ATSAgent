@@ -1667,6 +1667,9 @@ export async function runAgentTick(
       counts.events = (await processAgentEvents(opts.orgId ? { orgId: opts.orgId } : {})).processed;
       const { scheduleSweeps } = await import("./orchestrator.server");
       await scheduleSweeps(opts.orgId ? { orgId: opts.orgId } : {});
+      // Agent workflows waiting past their time move on (wait.status = timed_out).
+      const { expireWorkflowWaits } = await import("./workflows.server");
+      await expireWorkflowWaits();
     } catch (e) {
       log.error("agent.orchestrator.failed", { error: e instanceof Error ? e : String(e) });
     }

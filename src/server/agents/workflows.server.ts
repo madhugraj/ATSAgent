@@ -1,28 +1,32 @@
 /**
  * Agent workflows (platform super admin only; docs/agent-workflows.md).
  *
- * A workflow is a graph drawn in the builder: one trigger (a domain event),
- * agents (stock or published studio agents) with goals that may use event
- * fields, conditions (yes / no on event fields or the previous agent's
- * outcome) and ends. Published versions are immutable; granted organisations
- * run them from the orchestrator alongside the built-in flow.
+ * A workflow is a graph drawn in the builder: one trigger (a domain event, or
+ * "manual" — a hiring need someone starts by hand), agents (stock or
+ * published studio agents) with goals that may use event fields, conditions
+ * (yes / no), wait-for steps (pause until an event happens on the flow's own
+ * role, or a timeout), report steps and ends. Published versions are
+ * immutable; granted organisations run them alongside the built-in flow.
  *
  * Nothing here bypasses the agent harness: every agent starts through
  * startRun with the organisation's own switch, autonomy, budget and the
- * de-duplication the orchestrator uses, acts as the role's owner, and its
- * human decisions stay with people.
+ * de-duplication the orchestrator uses, acts for a person, and its human
+ * decisions stay with people.
  */
 import { createHash } from "node:crypto";
 
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt } from "drizzle-orm";
 
 import {
   agentRuns,
+  agentTasks,
   agentWorkflowGrants,
   agentWorkflows,
   agentWorkflowVersions,
   applications,
+  organizations,
   requisitions,
+  users,
   workflowRuns,
   type AgentType,
   type WorkflowGraph,
@@ -36,14 +40,27 @@ import { AGENT_EVENT_TYPES } from "./events";
 
 export const MAX_NODES = 40;
 const MAX_HOPS = 60;
-const FIELD = /^(payload(\.[A-Za-z0-9_]+)+|subject_type|last\.(status|result))$/;
+/** The trigger of a workflow someone starts by hand with a hiring need. */
+export const MANUAL_TRIGGER = "manual";
+export const DEFAULT_WAIT_HOURS = 72;
+export const MAX_WAIT_HOURS = 24 * 30;
+const FIELD = /^(payload(\.[A-Za-z0-9_]+)+|subject_type|last\.(status|result)|wait\.status)$/;
 const OPS = ["eq", "neq", "contains", "gt", "gte", "lt", "lte", "exists"] as const;
 
-/** What a running flow knows: the event, and how the last agent ended. */
+/** What a running flow knows. */
 export type WorkflowContext = {
   event: { type: string; subjectType: string; subjectId: string };
+  /** The trigger's payload, merged with each awaited event's payload. */
   payload: Record<string, unknown>;
+  /** How the last agent ended. */
   last: { status: string; result: string } | null;
+  /** How the last wait ended: happened | timed_out. */
+  wait?: { status: string; event: string; at: string } | null;
+  /** The role the flow works on (from the trigger, or learned from its agents' work). */
+  subject?: { type: string; id: string } | null;
+  /** Every agent run the flow started or joined. */
+  runs?: string[];
+  principal?: string | null;
 };
 
 /* -------------------------------------------------------------- the graph */
@@ -61,6 +78,9 @@ export function nextNode(
   const edge = g.edges.find((e) => e.source === from && (branch ? e.branch === branch : !e.branch));
   return edge ? g.nodes.find((n) => n.id === edge.target) : undefined;
 }
+
+const isEvent = (e: string | undefined) =>
+  (AGENT_EVENT_TYPES as readonly string[]).includes(e ?? "");
 
 /**
  * Every problem with a graph (empty when it can be tested). `knownAgent`
@@ -84,8 +104,8 @@ export function graphProblems(g: WorkflowGraph, knownAgent: (type: string) => bo
     const outgoing = g.edges.filter((e) => e.source === n.id);
     const incoming = g.edges.filter((e) => e.target === n.id);
     if (n.kind === "trigger") {
-      if (!(AGENT_EVENT_TYPES as readonly string[]).includes(n.data.event ?? ""))
-        out.push("Pick the event that starts the flow.");
+      if (n.data.event !== MANUAL_TRIGGER && !isEvent(n.data.event))
+        out.push("Pick the event that starts the flow, or Manual (a hiring need).");
       if (incoming.length) out.push("Nothing may lead into the trigger.");
     }
     if (n.kind === "agent") {
@@ -94,10 +114,24 @@ export function graphProblems(g: WorkflowGraph, knownAgent: (type: string) => bo
       if (!n.data.goal?.trim()) out.push(`"${label(n)}": write the agent's goal.`);
       if ((n.data.goal ?? "").length > 2000) out.push(`"${label(n)}": the goal is too long.`);
     }
+    if (n.kind === "wait") {
+      if (!isEvent(n.data.event)) out.push(`"${label(n)}": pick the event to wait for.`);
+      if (n.data.field) {
+        if (!/^payload(\.[A-Za-z0-9_]+)+$/.test(n.data.field))
+          out.push(`"${label(n)}": "only when" checks a payload.<name> field of the event.`);
+        if (!OPS.includes((n.data.op ?? "") as (typeof OPS)[number]))
+          out.push(`"${label(n)}": pick a comparison for "only when".`);
+        if (n.data.op !== "exists" && (n.data.value ?? "").trim() === "")
+          out.push(`"${label(n)}": give the value "only when" compares with.`);
+      }
+      const h = n.data.timeoutHours ?? DEFAULT_WAIT_HOURS;
+      if (!Number.isFinite(h) || h < 1 || h > MAX_WAIT_HOURS)
+        out.push(`"${label(n)}": wait between 1 and ${MAX_WAIT_HOURS} hours.`);
+    }
     if (n.kind === "condition") {
       if (!FIELD.test(n.data.field ?? ""))
         out.push(
-          `"${label(n)}": the field must be payload.<name>, subject_type, last.status or last.result.`,
+          `"${label(n)}": the field must be payload.<name>, subject_type, last.status, last.result or wait.status.`,
         );
       if (!OPS.includes((n.data.op ?? "") as (typeof OPS)[number]))
         out.push(`"${label(n)}": pick a comparison.`);
@@ -141,9 +175,10 @@ export function graphProblems(g: WorkflowGraph, knownAgent: (type: string) => bo
 
 /** The value a condition's field names in the context. */
 export function fieldValue(field: string, ctx: WorkflowContext): unknown {
-  if (field === "subject_type") return ctx.event.subjectType;
+  if (field === "subject_type") return ctx.subject?.type ?? ctx.event.subjectType;
   if (field === "last.status") return ctx.last?.status;
   if (field === "last.result") return ctx.last?.result;
+  if (field === "wait.status") return ctx.wait?.status;
   let v: unknown = ctx.payload;
   for (const part of field.split(".").slice(1)) {
     if (v && typeof v === "object" && part in (v as Record<string, unknown>))
@@ -197,8 +232,9 @@ export function graphHash(g: WorkflowGraph): string {
 /* ------------------------------------------------------------ dry-run test */
 
 /**
- * Walk the flow with a sample event and the outcome each agent is given —
- * no AI, no runs, nothing real. Returns the path and what went wrong.
+ * Walk the flow with a sample event and the outcome of each agent and wait
+ * step (an agent: done / failed; a wait: done = happens, failed = times out)
+ * — no AI, no runs, nothing real. Returns the path and what went wrong.
  */
 export function simulate(
   g: WorkflowGraph,
@@ -210,8 +246,9 @@ export function simulate(
   if (!trigger) return { path, failures: ["No trigger."] };
   const ctx: WorkflowContext = {
     event: { type: trigger.data.event ?? "", subjectType: s.subjectType, subjectId: "sample" },
-    payload: s.payload,
+    payload: { ...s.payload },
     last: null,
+    wait: null,
   };
   let node: WorkflowNode | undefined = trigger;
   for (let hop = 0; node && hop < MAX_HOPS; hop++) {
@@ -220,6 +257,14 @@ export function simulate(
     if (node.kind === "agent") {
       const o = s.outcomes[node.id] ?? { status: "done", result: "" };
       ctx.last = { status: o.status, result: o.result };
+      node = nextNode(g, node.id);
+    } else if (node.kind === "wait") {
+      const o = s.outcomes[node.id] ?? { status: "done", result: "" };
+      ctx.wait = {
+        status: o.status === "done" ? "happened" : "timed_out",
+        event: node.data.event ?? "",
+        at: "",
+      };
       node = nextNode(g, node.id);
     } else if (node.kind === "condition") {
       node = nextNode(g, node.id, conditionHolds(node, ctx) ? "yes" : "no");
@@ -286,22 +331,28 @@ type EventRow = {
   subjectType: string | null;
   subjectId: string | null;
   actorUserId: string | null;
+  sourceRunId?: string | null;
   payload: unknown;
 };
 
+/** The requisition an event is about (its subject, or named in its payload, or via its application). */
+async function eventRequisition(e: EventRow): Promise<string | null> {
+  const payload = (e.payload ?? {}) as { requisitionId?: string; applicationId?: string };
+  if (e.subjectType === "requisition" && e.subjectId) return e.subjectId;
+  if (payload.requisitionId) return payload.requisitionId;
+  const applicationId = e.subjectType === "application" ? e.subjectId : payload.applicationId;
+  if (!applicationId) return null;
+  const [a] = await db
+    .select({ r: applications.requisitionId })
+    .from(applications)
+    .where(and(eq(applications.id, applicationId), eq(applications.orgId, e.orgId)))
+    .limit(1);
+  return a?.r ?? null;
+}
+
 /** Who a workflow's agents act for: the role's owner, else the person who caused the event. */
 async function principalFor(e: EventRow): Promise<string | null> {
-  const payload = (e.payload ?? {}) as { requisitionId?: string; applicationId?: string };
-  let requisitionId = e.subjectType === "requisition" ? e.subjectId : payload.requisitionId;
-  const applicationId = e.subjectType === "application" ? e.subjectId : payload.applicationId;
-  if (!requisitionId && applicationId) {
-    const [a] = await db
-      .select({ r: applications.requisitionId })
-      .from(applications)
-      .where(and(eq(applications.id, applicationId), eq(applications.orgId, e.orgId)))
-      .limit(1);
-    requisitionId = a?.r ?? undefined;
-  }
+  const requisitionId = await eventRequisition(e);
   if (requisitionId) {
     const [r] = await db
       .select({ by: requisitions.createdBy })
@@ -313,10 +364,9 @@ async function principalFor(e: EventRow): Promise<string | null> {
   return e.actorUserId;
 }
 
-/** Start every published workflow granted to the event's organisation whose trigger matches. */
-export async function startWorkflowsFor(e: EventRow): Promise<number> {
-  if (!e.subjectId || !e.subjectType) return 0;
-  const matches = await db
+/** Live published versions granted to an organisation, optionally for one trigger. */
+async function grantedVersions(orgId: string, trigger?: string) {
+  return db
     .select({
       workflowId: agentWorkflowVersions.workflowId,
       version: agentWorkflowVersions.version,
@@ -333,20 +383,149 @@ export async function startWorkflowsFor(e: EventRow): Promise<number> {
       agentWorkflowGrants,
       and(
         eq(agentWorkflowGrants.workflowId, agentWorkflows.id),
-        eq(agentWorkflowGrants.orgId, e.orgId),
+        eq(agentWorkflowGrants.orgId, orgId),
         isNull(agentWorkflowGrants.revokedAt),
       ),
     )
-    .where(eq(agentWorkflowVersions.triggerEvent, e.type));
+    .where(trigger ? eq(agentWorkflowVersions.triggerEvent, trigger) : undefined);
+}
+
+/**
+ * Everything an event means for workflows: link the role an agent of a flow
+ * just created, resume flows waiting for this event on their role, and start
+ * flows it triggers.
+ */
+export async function onWorkflowEvent(e: EventRow): Promise<number> {
+  await linkSubject(e);
+  await resumeWaiting(e);
+  return startWorkflowsFor(e);
+}
+
+/** A flow learns its role from the first event one of its own agents caused. */
+async function linkSubject(e: EventRow): Promise<void> {
+  if (!e.sourceRunId) return;
+  const requisitionId = await eventRequisition(e);
+  if (!requisitionId) return;
+  const live = await db
+    .select()
+    .from(workflowRuns)
+    .where(
+      and(eq(workflowRuns.orgId, e.orgId), inArray(workflowRuns.status, ["running", "waiting"])),
+    );
+  for (const wr of live) {
+    const ctx = wr.context as WorkflowContext;
+    if (ctx.subject || !(ctx.runs ?? []).includes(e.sourceRunId)) continue;
+    ctx.subject = { type: "requisition", id: requisitionId };
+    await db
+      .update(workflowRuns)
+      .set({
+        context: ctx,
+        history: [
+          ...wr.history,
+          { node: wr.currentNode ?? "", at: new Date().toISOString(), note: "Linked to its role." },
+        ],
+        updatedAt: new Date(),
+      })
+      .where(eq(workflowRuns.id, wr.id));
+  }
+}
+
+/** Flows waiting for this event on their own role move on. */
+async function resumeWaiting(e: EventRow): Promise<void> {
+  const waiting = await db
+    .select()
+    .from(workflowRuns)
+    .where(
+      and(
+        eq(workflowRuns.orgId, e.orgId),
+        eq(workflowRuns.status, "waiting"),
+        eq(workflowRuns.waitingEvent, e.type),
+      ),
+    );
+  if (!waiting.length) return;
+  const requisitionId = await eventRequisition(e);
+  for (const wr of waiting) {
+    const ctx = wr.context as WorkflowContext;
+    const mine =
+      (ctx.subject && requisitionId && ctx.subject.id === requisitionId) ||
+      (e.sourceRunId && (ctx.runs ?? []).includes(e.sourceRunId));
+    if (!mine) continue;
+    // "Only when": an event that does not match keeps the flow waiting.
+    const graph = await versionGraph(wr.workflowId, wr.version);
+    const step = graph?.nodes.find((x) => x.id === wr.currentNode);
+    if (step?.data.field) {
+      const probe: WorkflowContext = {
+        ...ctx,
+        payload: (e.payload ?? {}) as Record<string, unknown>,
+      };
+      if (!conditionHolds(step, probe)) continue;
+    }
+    if (!ctx.subject && requisitionId) ctx.subject = { type: "requisition", id: requisitionId };
+    ctx.wait = { status: "happened", event: e.type, at: new Date().toISOString() };
+    ctx.payload = { ...ctx.payload, ...((e.payload ?? {}) as Record<string, unknown>) };
+    await moveOn(wr, ctx, `${e.type} happened.`);
+  }
+}
+
+/** Waits past their time move on with wait.status = timed_out (scheduler sweep). */
+export async function expireWorkflowWaits(now = new Date()): Promise<number> {
+  const due = await db
+    .select()
+    .from(workflowRuns)
+    .where(and(eq(workflowRuns.status, "waiting"), lt(workflowRuns.waitingUntil, now)));
+  for (const wr of due) {
+    if (!wr.waitingEvent) continue;
+    const ctx = wr.context as WorkflowContext;
+    ctx.wait = { status: "timed_out", event: wr.waitingEvent, at: now.toISOString() };
+    await moveOn(wr, ctx, `Stopped waiting for ${wr.waitingEvent} (timed out).`);
+  }
+  return due.length;
+}
+
+/** Leave the current step (an agent or a wait) for the next one, then advance. */
+async function moveOn(
+  wr: typeof workflowRuns.$inferSelect,
+  ctx: WorkflowContext,
+  note: string,
+): Promise<void> {
+  const graph = await versionGraph(wr.workflowId, wr.version);
+  const next = graph && wr.currentNode ? nextNode(graph, wr.currentNode) : undefined;
+  const moved = await db
+    .update(workflowRuns)
+    .set({
+      status: next ? "running" : "done",
+      context: ctx,
+      history: [...wr.history, { node: wr.currentNode ?? "", at: new Date().toISOString(), note }],
+      waitingRunId: null,
+      waitingEvent: null,
+      waitingUntil: null,
+      currentNode: next?.id ?? null,
+      ...(next ? {} : { finishedAt: new Date() }),
+      updatedAt: new Date(),
+    })
+    .where(and(eq(workflowRuns.id, wr.id), eq(workflowRuns.status, "waiting")))
+    .returning({ id: workflowRuns.id });
+  if (moved.length && next) await advanceWorkflowRun(wr.id);
+}
+
+/** Start every published workflow granted to the event's organisation whose trigger matches. */
+export async function startWorkflowsFor(e: EventRow): Promise<number> {
+  if (!e.subjectId || !e.subjectType) return 0;
+  const matches = await grantedVersions(e.orgId, e.type);
   let started = 0;
   for (const m of matches) {
     if (!m.workflowId) continue;
-    const principal = await principalFor(e);
-    const context: WorkflowContext & { principal: string | null } = {
+    const requisitionId = await eventRequisition(e);
+    const context: WorkflowContext = {
       event: { type: e.type, subjectType: e.subjectType, subjectId: e.subjectId },
       payload: (e.payload ?? {}) as Record<string, unknown>,
       last: null,
-      principal,
+      wait: null,
+      subject: requisitionId
+        ? { type: "requisition", id: requisitionId }
+        : { type: e.subjectType, id: e.subjectId },
+      runs: [],
+      principal: await principalFor(e),
     };
     const [wr] = await db
       .insert(workflowRuns)
@@ -366,6 +545,43 @@ export async function startWorkflowsFor(e: EventRow): Promise<number> {
   return started;
 }
 
+/**
+ * Start a manual (hiring-need) workflow in an organisation that holds a grant.
+ * Its agents act for `userId`, who must belong to the organisation.
+ */
+export async function startWorkflowManually(input: {
+  workflowId: string;
+  orgId: string;
+  userId: string;
+  need: string;
+}): Promise<{ runId: string }> {
+  const [m] = (await grantedVersions(input.orgId, MANUAL_TRIGGER)).filter(
+    (x) => x.workflowId === input.workflowId,
+  );
+  if (!m) throw new Error("This workflow is not available to this organisation.");
+  const context: WorkflowContext = {
+    event: { type: MANUAL_TRIGGER, subjectType: "", subjectId: "" },
+    payload: { need: input.need.trim() },
+    last: null,
+    wait: null,
+    subject: null,
+    runs: [],
+    principal: input.userId,
+  };
+  const [wr] = await db
+    .insert(workflowRuns)
+    .values({
+      orgId: input.orgId,
+      workflowId: input.workflowId,
+      version: m.version,
+      context,
+      startedBy: input.userId,
+    })
+    .returning({ id: workflowRuns.id });
+  await advanceWorkflowRun(wr!.id);
+  return { runId: wr!.id };
+}
+
 async function versionGraph(workflowId: string, version: number): Promise<WorkflowGraph | null> {
   const [v] = await db
     .select({ graph: agentWorkflowVersions.graph })
@@ -381,15 +597,16 @@ async function versionGraph(workflowId: string, version: number): Promise<Workfl
 }
 
 /**
- * Move a workflow run forward until it waits for an agent or ends. Each step
- * is recorded in its history.
+ * Move a workflow run forward until it waits (for an agent or an event) or
+ * ends. Each step is recorded in its history.
  */
 export async function advanceWorkflowRun(id: string): Promise<void> {
   const [wr] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, id)).limit(1);
-  if (!wr || !["running"].includes(wr.status)) return;
+  if (!wr || wr.status !== "running") return;
   const graph = await versionGraph(wr.workflowId, wr.version);
   const history = [...wr.history];
-  const ctx = wr.context as WorkflowContext & { principal: string | null };
+  const ctx = wr.context as WorkflowContext;
+  ctx.runs ??= [];
   const note = (node: string, text: string) =>
     history.push({ node, at: new Date().toISOString(), note: text });
   const save = (patch: Partial<typeof workflowRuns.$inferInsert>) =>
@@ -398,7 +615,7 @@ export async function advanceWorkflowRun(id: string): Promise<void> {
       .set({ history, context: ctx, updatedAt: new Date(), ...patch })
       .where(eq(workflowRuns.id, id));
   const end = (status: "done" | "failed", error: string | null) =>
-    save({ status, error, finishedAt: new Date(), waitingRunId: null });
+    save({ status, error, finishedAt: new Date(), waitingRunId: null, waitingEvent: null });
   if (!graph) return void (await end("failed", "The workflow version is missing."));
 
   let node = wr.currentNode ? graph.nodes.find((n) => n.id === wr.currentNode) : triggerOf(graph);
@@ -409,7 +626,12 @@ export async function advanceWorkflowRun(id: string): Promise<void> {
       return void (await end("done", null));
     }
     if (node.kind === "trigger") {
-      note(node.id, `Started by ${ctx.event.type}.`);
+      note(
+        node.id,
+        ctx.event.type === MANUAL_TRIGGER
+          ? `Started by hand: ${String(ctx.payload["need"] ?? "").slice(0, 200)}`
+          : `Started by ${ctx.event.type}.`,
+      );
       node = nextNode(graph, node.id);
       continue;
     }
@@ -418,6 +640,25 @@ export async function advanceWorkflowRun(id: string): Promise<void> {
       note(node.id, yes ? "Yes." : "No.");
       node = nextNode(graph, node.id, yes ? "yes" : "no");
       continue;
+    }
+    if (node.kind === "report") {
+      note(node.id, "Report ready.");
+      node = nextNode(graph, node.id);
+      continue;
+    }
+    if (node.kind === "wait") {
+      const hours = Math.min(
+        Math.max(node.data.timeoutHours ?? DEFAULT_WAIT_HOURS, 1),
+        MAX_WAIT_HOURS,
+      );
+      note(node.id, `Waiting for ${node.data.event} (up to ${hours} h).`);
+      await save({
+        status: "waiting",
+        currentNode: node.id,
+        waitingEvent: node.data.event ?? null,
+        waitingUntil: new Date(Date.now() + hours * 3_600_000),
+      });
+      return;
     }
     // Agent: start it the way the orchestrator does, then wait for it.
     const agentType = node.data.agentType as AgentType;
@@ -432,18 +673,21 @@ export async function advanceWorkflowRun(id: string): Promise<void> {
         note(node.id, "Nobody to act for.");
         return void (await end("failed", "No person to act for."));
       }
-      const [existing] = await db
-        .select({ id: agentRuns.id })
-        .from(agentRuns)
-        .where(
-          and(
-            eq(agentRuns.orgId, wr.orgId),
-            eq(agentRuns.agentType, agentType),
-            eq(agentRuns.subjectId, ctx.event.subjectId),
-            inArray(agentRuns.status, ["queued", "running", "awaiting_human"]),
-          ),
-        )
-        .limit(1);
+      const subject = ctx.subject ?? null;
+      const [existing] = subject
+        ? await db
+            .select({ id: agentRuns.id })
+            .from(agentRuns)
+            .where(
+              and(
+                eq(agentRuns.orgId, wr.orgId),
+                eq(agentRuns.agentType, agentType),
+                eq(agentRuns.subjectId, subject.id),
+                inArray(agentRuns.status, ["queued", "running", "awaiting_human"]),
+              ),
+            )
+            .limit(1)
+        : [];
       let runId = existing?.id;
       if (runId) note(node.id, "Joined the run already working on this.");
       else {
@@ -453,13 +697,13 @@ export async function advanceWorkflowRun(id: string): Promise<void> {
           orgId: wr.orgId,
           agentType,
           principalUserId: ctx.principal,
-          goal: `${goal}\n\n(${ctx.event.subjectType} id: ${ctx.event.subjectId})`,
-          subjectType: ctx.event.subjectType,
-          subjectId: ctx.event.subjectId,
+          goal: subject ? `${goal}\n\n(${subject.type} id: ${subject.id})` : goal,
+          ...(subject ? { subjectType: subject.type, subjectId: subject.id } : {}),
           triggerEventId: wr.triggerEventId,
         }));
         note(node.id, "Agent started.");
       }
+      if (!ctx.runs.includes(runId)) ctx.runs.push(runId);
       await save({ status: "waiting", currentNode: node.id, waitingRunId: runId });
       const { kickAgents } = await import("./orchestrator.server");
       kickAgents(wr.orgId);
@@ -475,7 +719,7 @@ export async function advanceWorkflowRun(id: string): Promise<void> {
   await end("failed", "The flow took too many steps.");
 }
 
-/** When an agent run a workflow waits on finishes, the flow moves to its next step. */
+/** When an agent run a workflow waits on ends, the flow moves to its next step. */
 export async function onAgentRunFinished(run: {
   id: string;
   orgId: string;
@@ -494,31 +738,18 @@ export async function onAgentRunFinished(run: {
     );
   for (const wr of waiting) {
     try {
-      const graph = await versionGraph(wr.workflowId, wr.version);
       const ctx = wr.context as WorkflowContext;
       ctx.last = { status: run.status, result: (run.result ?? "").slice(0, 2000) };
-      const next = graph && wr.currentNode ? nextNode(graph, wr.currentNode) : undefined;
-      const history = [
-        ...wr.history,
-        { node: wr.currentNode ?? "", at: new Date().toISOString(), note: `Agent ${run.status}.` },
-      ];
-      await db
-        .update(workflowRuns)
-        .set({
-          status: "running",
-          context: ctx,
-          history,
-          waitingRunId: null,
-          currentNode: next?.id ?? null,
-          updatedAt: new Date(),
-        })
-        .where(and(eq(workflowRuns.id, wr.id), eq(workflowRuns.status, "waiting")));
-      if (next) await advanceWorkflowRun(wr.id);
-      else
-        await db
-          .update(workflowRuns)
-          .set({ status: "done", finishedAt: new Date() })
-          .where(eq(workflowRuns.id, wr.id));
+      if (!ctx.subject) {
+        // The agent may have worked on a role (e.g. the Requisition agent drafted one).
+        const [r] = await db
+          .select({ type: agentRuns.subjectType, id: agentRuns.subjectId })
+          .from(agentRuns)
+          .where(eq(agentRuns.id, run.id))
+          .limit(1);
+        if (r?.type && r.id) ctx.subject = { type: r.type, id: r.id };
+      }
+      await moveOn(wr, ctx, `Agent ${run.status}.`);
     } catch (err) {
       log.error("workflow.advance_failed", { workflow_run_id: wr.id, error: err as Error });
     }
@@ -529,7 +760,13 @@ export async function onAgentRunFinished(run: {
 export async function cancelWorkflowRuns(workflowId: string, orgId?: string): Promise<number> {
   const done = await db
     .update(workflowRuns)
-    .set({ status: "cancelled", finishedAt: new Date(), waitingRunId: null })
+    .set({
+      status: "cancelled",
+      finishedAt: new Date(),
+      waitingRunId: null,
+      waitingEvent: null,
+      waitingUntil: null,
+    })
     .where(
       and(
         eq(workflowRuns.workflowId, workflowId),
@@ -539,4 +776,123 @@ export async function cancelWorkflowRuns(workflowId: string, orgId?: string): Pr
     )
     .returning({ id: workflowRuns.id });
   return done.length;
+}
+
+/* ------------------------------------------------------------------ report */
+
+export type WorkflowRunReport = {
+  title: string;
+  workflow: string;
+  version: number;
+  organisation: string;
+  status: string;
+  started: string;
+  finished: string | null;
+  startedBy: string | null;
+  trigger: string;
+  need: string | null;
+  error: string | null;
+  steps: { at: string; step: string; note: string }[];
+  agents: {
+    agent: string;
+    status: string;
+    started: string | null;
+    finished: string | null;
+    steps: number;
+    tokens: number;
+    result: string;
+  }[];
+  decisions: {
+    at: string | null;
+    agent: string;
+    request: string;
+    kind: string;
+    outcome: string;
+    by: string | null;
+  }[];
+  totals: { agentRuns: number; tokens: number; decisions: number; minutes: number | null };
+};
+
+/** Everything a workflow run did, for the PDF / Excel report (org-scoped by the caller). */
+export async function workflowRunReport(
+  runId: string,
+  orgId?: string,
+): Promise<WorkflowRunReport | null> {
+  const [row] = await db
+    .select({ wr: workflowRuns, name: agentWorkflows.name, org: organizations.name })
+    .from(workflowRuns)
+    .innerJoin(agentWorkflows, eq(agentWorkflows.id, workflowRuns.workflowId))
+    .innerJoin(organizations, eq(organizations.id, workflowRuns.orgId))
+    .where(and(eq(workflowRuns.id, runId), ...(orgId ? [eq(workflowRuns.orgId, orgId)] : [])))
+    .limit(1);
+  if (!row) return null;
+  const { wr } = row;
+  const ctx = wr.context as WorkflowContext;
+  const graph = await versionGraph(wr.workflowId, wr.version);
+  const stepName = (id: string) => {
+    const n = graph?.nodes.find((x) => x.id === id);
+    return n ? n.data.label?.trim() || n.data.agentType || n.kind : id;
+  };
+  const runIds = ctx.runs ?? [];
+  const runs = runIds.length
+    ? await db
+        .select()
+        .from(agentRuns)
+        .where(and(inArray(agentRuns.id, runIds), eq(agentRuns.orgId, wr.orgId)))
+    : [];
+  const tasks = runIds.length
+    ? await db
+        .select({ t: agentTasks, run: agentRuns.agentType, by: users.email })
+        .from(agentTasks)
+        .innerJoin(agentRuns, eq(agentRuns.id, agentTasks.runId))
+        .leftJoin(users, eq(users.id, agentTasks.decidedBy))
+        .where(and(inArray(agentTasks.runId, runIds), eq(agentTasks.orgId, wr.orgId)))
+    : [];
+  const [starter] = wr.startedBy
+    ? await db.select({ email: users.email }).from(users).where(eq(users.id, wr.startedBy))
+    : [];
+  const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
+  const tokens = runs.reduce((s, r) => s + r.tokensUsed, 0);
+  return {
+    title: `${row.name} — run report`,
+    workflow: row.name,
+    version: wr.version,
+    organisation: row.org,
+    status: wr.status,
+    started: wr.createdAt.toISOString(),
+    finished: iso(wr.finishedAt),
+    startedBy: starter?.email ?? null,
+    trigger: ctx.event.type,
+    need: typeof ctx.payload["need"] === "string" ? (ctx.payload["need"] as string) : null,
+    error: wr.error,
+    steps: wr.history.map((h) => ({ at: h.at, step: stepName(h.node), note: h.note })),
+    agents: runIds
+      .map((id) => runs.find((r) => r.id === id))
+      .filter((r): r is (typeof runs)[number] => Boolean(r))
+      .map((r) => ({
+        agent: r.agentType,
+        status: r.status,
+        started: iso(r.startedAt ?? r.createdAt),
+        finished: iso(r.finishedAt),
+        steps: r.stepCount,
+        tokens: r.tokensUsed,
+        result: (r.result ?? "").slice(0, 1500),
+      })),
+    decisions: tasks.map(({ t, run, by }) => ({
+      at: iso(t.decidedAt ?? t.createdAt),
+      agent: run,
+      request: t.title,
+      kind: t.kind,
+      outcome: t.status,
+      by: by ?? null,
+    })),
+    totals: {
+      agentRuns: runs.length,
+      tokens,
+      decisions: tasks.filter((x) => x.t.status !== "open").length,
+      minutes: wr.finishedAt
+        ? Math.round((wr.finishedAt.getTime() - wr.createdAt.getTime()) / 60_000)
+        : null,
+    },
+  };
 }

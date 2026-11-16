@@ -130,7 +130,7 @@ window rather than blocking traffic.
 `/api/agents/*` and `/api/mcp` are served by the app itself and authenticated with keys
 issued by the platform super admin on Platform → Agent studio; hosted runs use the chosen workspace organisation's own AI key, so no deployment configuration or platform AI key is needed. They are
 rate-limited per caller (60/min, the shared limiter above) and per key (30/min). Apply migrations
-`0080_agent_blueprints.sql`, `0082_studio_agents.sql` and `0083_agent_workflows.sql` before deploying.
+`0080_agent_blueprints.sql`, `0082_studio_agents.sql` and `0083_agent_workflows.sql` and `0084_workflow_waits.sql` before deploying.
 
 ### Sandboxed document parser (recommended)
 

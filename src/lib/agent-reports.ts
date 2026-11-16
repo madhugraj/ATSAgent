@@ -16,6 +16,7 @@ import type { ActivityReport, Harness } from "@/lib/agent-governance.functions";
 import type { TalentBrain } from "@/lib/ontology.functions";
 import type { OrgOntology } from "@/lib/org-ontology.functions";
 import { modalityLabel } from "@/lib/agent-modality";
+import { AGENT_LABEL } from "@/lib/agents.catalog";
 import { windowLabel } from "@/lib/report-window";
 
 type Cell = string | number;
@@ -825,6 +826,78 @@ export function downloadOntologyReport(
           h.grown,
           h.dormant,
           h.retired,
+        ]),
+      },
+    ],
+  });
+}
+
+/* ------------------------------------------------------------- workflow run report */
+
+/** One agent workflow run as a PDF or Excel report: the need, every step, agents and decisions. */
+export function downloadWorkflowRunReport(
+  kind: ReportKind,
+  r: import("../server/agents/workflows.server").WorkflowRunReport,
+) {
+  const label = (t: string) => AGENT_LABEL[t] ?? nice(t);
+  const findings: string[] = [
+    `${r.workflow} (v${r.version}) in ${r.organisation} is ${r.status}${r.finished ? ` (finished ${dt(r.finished)})` : ""}.`,
+    ...(r.need ? [`Hiring need: ${r.need}`] : []),
+    `${plural(r.totals.agentRuns, "agent run")}, ${plural(r.totals.decisions, "decision")} by people, ${n(r.totals.tokens)} AI tokens${r.totals.minutes != null ? `, ${plural(r.totals.minutes, "minute")} end to end` : ""}.`,
+    ...(r.error ? [`Stopped: ${r.error}`] : []),
+  ];
+  render(kind, {
+    title: r.title,
+    file: `workflow-${
+      r.workflow
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "") || "run"
+    }`,
+    agents: false,
+    window: { from: r.started, to: r.finished ?? new Date().toISOString(), agent: null },
+    findings,
+    summary: [
+      ["Workflow", `${r.workflow} · v${r.version}`],
+      ["Organisation", r.organisation],
+      ["Status", r.status],
+      ["Started", dt(r.started)],
+      ["Finished", r.finished ? dt(r.finished) : "—"],
+      ["Started by", r.startedBy ?? (r.trigger === "manual" ? "—" : `event ${nice(r.trigger)}`)],
+      ["Trigger", r.trigger === "manual" ? "Hiring need (manual)" : nice(r.trigger)],
+      ["Agent runs", r.totals.agentRuns],
+      ["Decisions by people", r.totals.decisions],
+      ["AI tokens", r.totals.tokens],
+    ],
+    sections: [
+      {
+        title: "Steps",
+        head: ["When", "Step", "What happened"],
+        rows: r.steps.map((s) => [dt(s.at), s.step, s.note]),
+      },
+      {
+        title: "Agents",
+        head: ["Agent", "Status", "Started", "Finished", "Steps", "Tokens", "Result"],
+        rows: r.agents.map((a) => [
+          label(a.agent),
+          a.status,
+          dt(a.started),
+          dt(a.finished),
+          a.steps,
+          a.tokens,
+          a.result,
+        ]),
+      },
+      {
+        title: "Decisions",
+        head: ["When", "Agent", "Request", "Kind", "Outcome", "By"],
+        rows: r.decisions.map((d) => [
+          dt(d.at),
+          label(d.agent),
+          d.request,
+          d.kind,
+          d.outcome,
+          d.by ?? "—",
         ]),
       },
     ],
