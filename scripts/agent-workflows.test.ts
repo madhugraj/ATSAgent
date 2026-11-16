@@ -359,6 +359,31 @@ describe("engine", () => {
     expect(done!.history.map((h) => h.node)).toEqual(["t", "a", "a", "c", "b", "b"]);
   });
 
+  test("a cancelled agent run moves the flow on (last.status = cancelled → the no branch)", async () => {
+    const { cancelRun } = await import("../src/server/agents/runtime.server");
+    const [r2] = await db
+      .insert(requisitions)
+      .values({
+        orgId,
+        code: `WF4-${stamp}`,
+        title: "Ops",
+        status: "approved",
+        createdBy: userId,
+      } as never)
+      .returning({ id: requisitions.id });
+    await emit(orgId, r2!.id);
+    await processAgentEvents({ orgId });
+    const [wr] = await db
+      .select()
+      .from(workflowRuns)
+      .where(and(eq(workflowRuns.workflowId, workflowId), eq(workflowRuns.status, "waiting")));
+    await cancelRun({ orgId, runId: wr!.waitingRunId!, userId });
+    const [after] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, wr!.id));
+    expect(after!.status).toBe("done");
+    expect((after!.context as { last: { status: string } }).last.status).toBe("cancelled");
+    expect(after!.history.map((h) => h.node).slice(-2)).toEqual(["c", "e"]);
+  });
+
   test("an organisation without a grant never runs it", async () => {
     await emit(otherOrgId, otherReqId);
     await processAgentEvents({ orgId: otherOrgId });

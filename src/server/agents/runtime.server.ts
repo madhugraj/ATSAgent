@@ -1609,6 +1609,22 @@ export async function cancelRun(input: { orgId: string; runId: string; userId: s
     entityType: "agent_run",
     entityId: input.runId,
   });
+  await moveWorkflowsOn({ id: input.runId, orgId: input.orgId, status: "cancelled", result: null });
+}
+
+/** An agent workflow waiting on a run that ended moves on (never blocks the caller). */
+async function moveWorkflowsOn(run: {
+  id: string;
+  orgId: string;
+  status: string;
+  result: string | null;
+}): Promise<void> {
+  try {
+    const { onAgentRunFinished } = await import("./workflows.server");
+    await onAgentRunFinished(run);
+  } catch (e) {
+    log.warn("workflow.advance_failed", { run_id: run.id, error: e as Error });
+  }
 }
 
 export type TickCounts = {
@@ -2742,12 +2758,7 @@ async function finish(
     }
   }
   // An agent workflow waiting on this run moves to its next step.
-  try {
-    const { onAgentRunFinished } = await import("./workflows.server");
-    await onAgentRunFinished({ id: run.id, orgId: run.orgId, status, result });
-  } catch (e) {
-    log.warn("workflow.advance_failed", { run_id: run.id, error: e as Error });
-  }
+  await moveWorkflowsOn({ id: run.id, orgId: run.orgId, status, result });
   if (run.conversationId) {
     try {
       const { onRunFinished } = await import("../desk/desk.server");
@@ -3029,6 +3040,8 @@ export async function closeStaleTasks(opts: { orgId?: string } = {}): Promise<nu
       orgId: agentRuns.orgId,
       subjectType: agentRuns.subjectType,
     });
+  for (const r of stopped)
+    await moveWorkflowsOn({ id: r.id, orgId: r.orgId, status: "cancelled", result: null });
   for (const r of stopped) {
     await writeAudit({
       actor: "system:subject-deleted",

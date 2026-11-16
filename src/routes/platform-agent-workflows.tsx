@@ -101,6 +101,20 @@ const OP_LABEL: Record<string, string> = {
   lte: "≤",
   exists: "is present",
 };
+/** A test's agent outcomes (stored as JSON text): step id → how it ends. */
+const outcomesOf = (json: string): Record<string, { status: string; result: string }> => {
+  try {
+    const v = JSON.parse(json || "{}") as Record<string, { status?: string; result?: string }>;
+    return Object.fromEntries(
+      Object.entries(v).map(([k, o]) => [
+        k,
+        { status: o?.status ?? "done", result: o?.result ?? "" },
+      ]),
+    );
+  } catch {
+    return {};
+  }
+};
 const errorText = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
 const eventLabel = (e?: string) => (e ? e.replace(/[._]/g, " ") : "Pick an event");
 
@@ -967,11 +981,38 @@ function Tests({
           </div>
           <div>
             <Label className="text-xs">How each agent ends</Label>
-            <Textarea
-              className="mt-1 min-h-32 font-mono text-xs"
-              value={t.outcomesJson}
-              onChange={(e) => set(i, { outcomesJson: e.target.value })}
-            />
+            <div className="mt-1 space-y-1.5">
+              {nodes
+                .filter((n) => n.type === "agent")
+                .map((n) => {
+                  const all = outcomesOf(t.outcomesJson);
+                  const o = all[n.id] ?? { status: "done", result: "" };
+                  const put = (patch: Partial<{ status: string; result: string }>) =>
+                    set(i, {
+                      outcomesJson: JSON.stringify({ ...all, [n.id]: { ...o, ...patch } }),
+                    });
+                  return (
+                    <div key={n.id} className="flex items-center gap-2">
+                      <span className="w-40 truncate text-xs">{label(n.id)}</span>
+                      <Select value={o.status} onValueChange={(v) => put({ status: v })}>
+                        <SelectTrigger className="h-8 w-28 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="done">finishes</SelectItem>
+                          <SelectItem value="failed">fails</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        className="h-8 text-xs"
+                        placeholder="Result text"
+                        value={o.result}
+                        onChange={(e) => put({ result: e.target.value })}
+                      />
+                    </div>
+                  );
+                })}
+            </div>
           </div>
         </div>
       ))}
