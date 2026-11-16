@@ -192,8 +192,12 @@ export function openingWatch(o: {
   return () => clearInterval(timer);
 }
 
-/** The screening call is told to close this long before its planned length… */
-export const CLOSE_BEFORE_END_MS = 30_000;
+/**
+ * The screening call is told to close this long before its planned length — at
+ * the planned length itself since 16 November (the organisation: target 4
+ * minutes, at most 5)…
+ */
+export const CLOSE_BEFORE_END_MS = 0;
 /** …and is ended this long after it. */
 export const HARD_STOP_AFTER_MS = 60_000;
 /** A screening answer is cut short at this (the candidate is asked for about 45 s). */
@@ -593,7 +597,11 @@ async function placeCall(
     // answers to the screening question cut short at 45 s.
     closeAfterMs: Math.max(60_000, policy.maxMinutes * 60_000 - CLOSE_BEFORE_END_MS),
     // Manual turns: the model always gets the end of their words, so no early cue.
-    timing: { longAnswerMs: SCREENING_LONG_ANSWER_MS, unheardMs: TURN_TIMING.replyMs },
+    // Several questions on a short call: about 30 s each, so cut short at 35 s.
+    timing: {
+      longAnswerMs: facts.questions.length > 1 ? 35_000 : SCREENING_LONG_ANSWER_MS,
+      unheardMs: TURN_TIMING.replyMs,
+    },
   });
   await setCall(call.id, orgId, { phoneLast4: number.last4 });
   // Ready while it rings: played the moment their hello ends.

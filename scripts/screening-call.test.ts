@@ -415,6 +415,10 @@ describe("the call brief", () => {
   test("questions fit the call: two in 10 minutes, said without the CV lead-in", () => {
     expect(brief.callQuestionCount(10)).toBe(2);
     expect(brief.callQuestionCount(6)).toBe(1);
+    // Short calls (16 November): target 4 minutes, hard stop 5 → three questions.
+    expect(brief.callQuestionCount(4)).toBe(3);
+    expect(brief.callQuestionCount(5)).toBe(3);
+    expect(brief.callQuestionCount(3)).toBe(2);
     expect(brief.callQuestionCount(20)).toBe(4);
     expect(
       brief.spokenQuestion(
@@ -425,7 +429,9 @@ describe("the call brief", () => {
   });
 
   test("9 November call: consent after a concern, no insisting, questions back answered", () => {
-    const p = brief.callSystemPrompt(facts());
+    const p = brief.callSystemPrompt(
+      facts({ questions: brief.questionsForCall(KIT as never).slice(0, 1) }),
+    );
     expect(p).toContain('an earlier "yes" does not count once they have raised a concern');
     expect(p).toContain(brief.SOURCE_LINE);
     expect(p).toContain("record open_to_relocate only if they then say yes or no");
@@ -434,7 +440,9 @@ describe("the call brief", () => {
   });
 
   test("the HR call: who, why, consent with alternatives, the role, why them, details, questions", () => {
-    const p = brief.callSystemPrompt(facts());
+    const p = brief.callSystemPrompt(
+      facts({ questions: brief.questionsForCall(KIT as never).slice(0, 1) }),
+    );
     expect(p).toContain(
       "You are Saranya, an AI recruiting assistant with Yavar's talent acquisition team",
     );
@@ -589,6 +597,15 @@ describe("the call brief", () => {
     // An answer recorded before the limit is a completed screen.
     s.answers.push({ question_id: "q1", summary: "Built a RAG demo", declined: false } as never);
     expect(session.callOutcome(s, "time_limit")).toBe("completed");
+  });
+
+  test("a 4-minute call asks three questions in turn, ~30 s each, no follow-ups", () => {
+    const q = [1, 2, 3].map((i) => ({ id: `q${i}`, question: `Question ${i}?` }));
+    const p = brief.callSystemPrompt(facts({ maxMinutes: 4, questions: q }));
+    expect(p).toContain("A few quick questions about your experience — about 30 seconds each");
+    expect(p).toContain("No follow-ups");
+    expect(p).toContain("quick 4 minutes call");
+    for (const x of q) expect(p).toContain(x.question);
   });
 
   test("3-minute script: a part of a month is a date; 'Hello?' and its own echo never restart it", () => {
@@ -1167,10 +1184,10 @@ describe("a whole call with a fake line", () => {
             args: { question_id: "q1", summary: "Runs three EKS clusters." },
           },
           { tool: "record_answer", args: { question_id: "q3", summary: "Wants 40 LPA" } },
-          // A 3-minute call plans one question (1.8.0): another id is refused.
+          // A question the call did not plan is refused.
           {
             tool: "record_answer",
-            args: { question_id: "q2", summary: "Led a payments outage postmortem." },
+            args: { question_id: "q9", summary: "Led a payments outage postmortem." },
           },
           { say: "ai", text: "Thank you, goodbye!" },
           { tool: "end_call", args: { reason: "completed" } },
@@ -1232,8 +1249,9 @@ describe("a whole call with a fake line", () => {
     expect(lastGrade.system).toContain("Spoken-answer rubric");
     expect(lastGrade.prompt).toContain('"question_id":"q1"');
     expect(lastGrade.prompt).not.toContain('"question_id":"q3"');
+    // A 3-minute call plans two questions (16 November); one was answered.
     expect(graded!.coverage).toMatchObject({
-      planned: 1,
+      planned: 2,
       asked: 1,
       answered: 1,
       confidence: "low",
@@ -1245,7 +1263,9 @@ describe("a whole call with a fake line", () => {
       .where(eq(hiringMessages.conversationId, conv!.id));
     const fromCall = posted.filter((m) => m.agentType === "screening_call");
     expect(fromCall).toHaveLength(1);
-    expect(fromCall[0]!.body).toContain("(1 asked of 1 planned · answered; low confidence)");
+    expect(fromCall[0]!.body).toContain(
+      "(1 asked of 2 planned · answered · 1 not reached on the call; low confidence)",
+    );
     // …with the result card that opens "Why this score".
     const card = (
       await db

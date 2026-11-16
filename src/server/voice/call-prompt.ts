@@ -73,6 +73,10 @@ const PAY =
  * candidate could not explain any of them in detail). 10 minutes → 2.
  */
 export function callQuestionCount(maxMinutes: number): number {
+  // A short call (5 minutes or less, 16 November): about 90 s go on the opening and
+  // the details, then each question takes about 45 s asked and answered in ~30 s —
+  // a 4-minute plan covers three.
+  if (maxMinutes <= 5) return Math.max(1, Math.min(3, Math.floor((maxMinutes * 60 - 90) / 45)));
   return Math.max(1, Math.min(4, Math.floor((maxMinutes - 6) / 2)));
 }
 
@@ -208,7 +212,9 @@ ${
     // Real calls credited the candidate with what only the CV said and reused one lead-in.
     // 1.8.0: one question, about 45 seconds — every second of an answer is read again by
     // the voice model on each later turn, and the call is planned at ${f.maxMinutes} minutes.
-    `6. "One question about your experience — about 45 seconds, please." Ask it in your own words, in one short sentence (under 25 words, plain, adding nothing), led in with "Your CV mentions …" only for what the question takes from the CV. Only if the answer is short or general, with no example of their own, ask one open follow-up ("Could you walk me through one example — what you did yourself?"); never after a full answer. If it assumes experience they lack, ask it around what they do have. ${f.questions.length > 1 ? "Ask the next question only if well under time." : ""}`,
+    f.questions.length > 1
+      ? `6. "${f.questions.length === 2 ? "Two" : "A few"} quick questions about your experience — about 30 seconds each, please." Ask each one below in turn, in your own words, in one short sentence (under 25 words, plain, adding nothing), led in with "Your CV mentions …" only for what the question takes from the CV. No follow-ups — after each answer go straight to the next question. If one assumes experience they lack, ask it around what they do have. Stop only when told time is nearly up.`
+      : `6. "One question about your experience — about 45 seconds, please." Ask it in your own words, in one short sentence (under 25 words, plain, adding nothing), led in with "Your CV mentions …" only for what the question takes from the CV. Only if the answer is short or general, with no example of their own, ask one open follow-up ("Could you walk me through one example — what you did yourself?"); never after a full answer. If it assumes experience they lack, ask it around what they do have. ${f.questions.length > 1 ? "Ask the next question only if well under time." : ""}`,
     questions ||
       "- (no prepared questions — ask about their current work and what they are proudest of)",
     // 1.4.0: no read-back — it repeated the candidate to themselves and cost time.

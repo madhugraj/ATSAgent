@@ -578,7 +578,10 @@ export function registerPhase2Agents(): void {
     // A call whose time runs out after consent ends fell_back (time_limit): the written
     // assessment follows instead of a fresh call. The line drops the echo of its last
     // words (turn-detector confirmAfterStopMs).
-    version: "1.12.0",
+    // 1.13.0 (the organisation: target 4 minutes, at most 5): a call of 5 minutes or
+    // less plans three questions (about 30 s each, no follow-ups; long answers cut at
+    // 35 s); told to close at the planned length, ended a minute after it.
+    version: "1.13.0",
     owner: "hr_head",
     responsibility:
       "Holds one AI screening phone call with a shortlisted candidate the way an HR recruiter does: says who it is and why it is calling, asks consent, explains the role and why it called them, records their practical details (including the pay they state, for HR only) and their answers to the role's screening questions, or agrees a better time — nothing else.",
