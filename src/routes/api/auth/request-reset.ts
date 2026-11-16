@@ -39,7 +39,10 @@ export const Route = createFileRoute("/api/auth/request-reset")({
             });
           }
           return Response.json({ ok: true, message: GENERIC });
-        } catch {
+        } catch (err) {
+          // The reply stays generic (no account enumeration), but the failure
+          // is logged so a broken relay is diagnosable server-side.
+          console.error("Password-reset email failed to send", err);
           return Response.json({ ok: true, message: GENERIC });
         }
       },

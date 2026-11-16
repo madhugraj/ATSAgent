@@ -53,13 +53,16 @@ const Email = ({
           <strong>{roleLabel}</strong>
           {title ? ` (${title})` : ""}.
         </Text>
-        <Button style={button} href={siteUrl}>
-          Sign in to {siteName}
+        <Button
+          style={button}
+          href={email ? `${siteUrl}/?invite=${encodeURIComponent(email)}` : siteUrl}
+        >
+          Get started with {siteName}
         </Button>
         <Text style={small}>
-          Sign in with your work address{email ? ` (${email})` : ""} — the same address this
-          invitation was sent to. Your role and organisation are applied automatically the first
-          time you sign in.
+          Use your work address{email ? ` (${email})` : ""} — the same address this invitation was
+          sent to. First time? Create your account with it; your role and organisation are applied
+          automatically when you join.
         </Text>
         <Hr style={hr} />
         <Section>

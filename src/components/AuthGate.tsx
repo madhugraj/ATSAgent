@@ -690,8 +690,12 @@ function ClosingCta() {
 /* --------------------------------------------------------------- sign-in UI */
 
 function SignInCard() {
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
-  const [email, setEmail] = useState("");
+  // Invited members arrive from their invitation e-mail (?invite=<address>):
+  // start on the create-account form with the invited address pre-filled.
+  // They have no account yet, so the sign-in form is a dead end for them.
+  const invitedEmail = new URLSearchParams(window.location.search).get("invite")?.trim() ?? "";
+  const [mode, setMode] = useState<"signin" | "signup">(invitedEmail ? "signup" : "signin");
+  const [email, setEmail] = useState(invitedEmail);
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -723,12 +727,18 @@ function SignInCard() {
     <form onSubmit={submit} className="panel w-full space-y-5 p-7 shadow-lg lg:sticky lg:top-24">
       <div className="space-y-1">
         <h2 className="text-xl font-semibold">
-          {mode === "signin" ? "Sign in to ATSIQ" : "Register your organisation"}
+          {mode === "signin"
+            ? "Sign in to ATSIQ"
+            : invitedEmail
+              ? "Create your account"
+              : "Register your organisation"}
         </h2>
         <p className="text-sm text-muted-foreground">
           {mode === "signin"
             ? "Use the work email your organisation invited."
-            : "Accounts exist only inside an organisation. Register your company here; a platform administrator approves it, then you invite your internal users."}
+            : invitedEmail
+              ? `Finish setting up ${invitedEmail}. After confirming your email, sign in and your invitation is applied when you join.`
+              : "Accounts exist only inside an organisation. Register your company here; a platform administrator approves it, then you invite your internal users."}
         </p>
       </div>
 
@@ -758,7 +768,13 @@ function SignInCard() {
       </div>
 
       <Button type="submit" className="w-full" disabled={busy}>
-        {busy ? "Please wait…" : mode === "signin" ? "Sign in" : "Create organisation account"}
+        {busy
+          ? "Please wait…"
+          : mode === "signin"
+            ? "Sign in"
+            : invitedEmail
+              ? "Create account"
+              : "Create organisation account"}
       </Button>
 
       {mode === "signin" ? (
