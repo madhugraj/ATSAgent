@@ -579,6 +579,27 @@ describe("the call brief", () => {
     expect(session.callOutcome(s)).toBe("no_answer");
   });
 
+  test("agreed, talked, then the time ran out: timed out, not 'no answer' (16 November)", () => {
+    const s = { ...session.freshCallState(), consent: true };
+    expect(session.callOutcome(s, "time_limit")).toBe("timed_out");
+    // Silence or a hang-up after agreeing is still tried again.
+    expect(session.callOutcome(s, "silence")).toBe("no_answer");
+    // Before agreeing, the time limit is not a conversation.
+    expect(session.callOutcome(session.freshCallState(), "time_limit")).toBe("no_answer");
+    // An answer recorded before the limit is a completed screen.
+    s.answers.push({ question_id: "q1", summary: "Built a RAG demo", declined: false } as never);
+    expect(session.callOutcome(s, "time_limit")).toBe("completed");
+  });
+
+  test("3-minute script: a part of a month is a date; 'Hello?' and its own echo never restart it", () => {
+    const p = brief.callSystemPrompt(facts({ maxMinutes: 3 }));
+    expect(p).toContain('"the first week of December"');
+    expect(p).toContain("record its first day and move on");
+    expect(p).toContain('"Yes, I can hear you" and carry on from where you stopped');
+    expect(p).toContain("your own last words repeated, it is the line's echo");
+    expect(p).toContain("quick 3 minutes call");
+  });
+
   test("helpers: JD bullets, strengths, how they applied, calling hours", () => {
     expect(brief.bullets("- Run **clusters**\n2. Lead incidents\n\n• ok")).toEqual([
       "Run clusters",

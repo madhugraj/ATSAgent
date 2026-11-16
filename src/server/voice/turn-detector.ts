@@ -45,6 +45,13 @@ export const TURN_DETECT = {
   bargeInLoudness: 2,
   /** …and a held start with this much silence after it was only echo or noise. */
   bargeInGiveUpMs: 400,
+  /**
+   * Speech held over the assistant's last words counts as theirs only if it goes
+   * on this long after the assistant stopped: the line's echo of those words dies
+   * away within it, a real answer does not (16 November: the echo of "Could you
+   * provide a specific date…" was passed on as the candidate saying it, twice).
+   */
+  confirmAfterStopMs: 400,
 };
 
 type State = "idle" | "speaking" | "maybe_interrupting";
@@ -58,6 +65,7 @@ export class TurnDetector {
   private startedAt = 0;
   private lastVoicedAt = 0;
   private heldSince = 0;
+  private stoppedAt = 0;
 
   constructor(
     private readonly o: {
@@ -114,10 +122,13 @@ export class TurnDetector {
       this.held.push(pcm);
       if (level > SPEECH_RMS * this.t.bargeInLoudness) this.loudMs += FRAME_MS;
       if (!assistantSpeaking) {
-        // It stopped first: their words are a normal turn.
-        if (voiced || t - this.lastVoicedAt < this.t.endAfterShortMs)
+        // It stopped first: their words are a turn if they keep going past the
+        // echo of its last words; otherwise it was only that echo.
+        if (!this.stoppedAt) this.stoppedAt = t;
+        if (voiced && t - this.stoppedAt >= this.t.confirmAfterStopMs)
           return this.open(this.heldSince, this.held);
-        return this.drop();
+        if (t - this.lastVoicedAt >= this.t.bargeInGiveUpMs) return this.drop();
+        return;
       }
       if (this.loudMs >= this.t.bargeInMs) {
         voiceDebug({ kind: "barge_in" });
@@ -152,6 +163,7 @@ export class TurnDetector {
     for (const f of frames) this.o.audio(f);
     this.preRoll = [];
     this.held = [];
+    this.stoppedAt = 0;
   }
 
   private drop(): void {
@@ -159,5 +171,6 @@ export class TurnDetector {
     this.state = "idle";
     this.held = [];
     this.voicedRun = 0;
+    this.stoppedAt = 0;
   }
 }

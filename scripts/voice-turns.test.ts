@@ -360,6 +360,15 @@ describe("our line decides the turns (turn-detector.ts)", () => {
     expect(log).toEqual(["barge_in", "start", "end"]);
   });
 
+  test("the echo of its last words, dying away after it stops, is dropped (16 November)", () => {
+    const { log, run, frames } = detector();
+    run(300, LOUD, true); // echo starts under its last words
+    run(TURN_DETECT.confirmAfterStopMs - 100, LOUD, false); // …and trails off after it
+    run(800, QUIET, false);
+    expect(log).toEqual([]);
+    expect(frames()).toBe(0);
+  });
+
   test("speech that began over its last words is a normal turn once it stops", () => {
     const { log, run } = detector();
     run(200, LOUD, true);

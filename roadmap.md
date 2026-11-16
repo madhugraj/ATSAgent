@@ -120,6 +120,7 @@
 - [x] Conversational role lookup (2026-11-09): read-only `get_role_profile` (role from the organisation's ontology — must-haves, good-to-haves, parents, titles, demand, pool fit) and `check_talent_availability` (strong / partial / internal pool fit, best matches, without a requisition) for the copilot (1.3.0) and the requisition agent (1.6.0), with real-agent evals; a Client delivery family and Solutions / Forward deployed engineer starter roles in the technology pack; role emergence picks the best pair of parent roles; pool search also matches the parts of compound skills
 - [x] 3D ontology: full-screen popup and Record video (WebM, labels composited)
 - [x] Skill ontology merged into the Talent Brain (2026-11-09): one page and one nav entry (both ways of working) for the skill and role ontology — verdict, fix list, 3D role map, skill graph with search, period changes, reports, Relearn and the super admin's all-organisations view; `/skill-ontology` redirects to `/brain`
+- [x] Screening call 1.12.0 (16 November): the echo of the assistant's last words is no longer passed on as the candidate (it must go on 400 ms past the assistant stopping); "Hello? Can you hear me?" is answered and the call carries on; "the first week of December" is a clear date; a call whose 3 minutes run out after consent ends `fell_back` (`time_limit`) so the written assessment follows instead of a fresh call
 - [ ] Cross-organisation role emergence on the platform view (anonymised)
 
 ## Prompt-injection guardrails — P0 (2026-11-01)
