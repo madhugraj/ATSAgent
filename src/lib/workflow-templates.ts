@@ -38,7 +38,13 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           agentType: "requisition",
           goal: "Hiring need: {{payload.need}}\nTurn it into a requisition — role, skills and weights, pay band backed by evidence — and submit it for approval.",
         }),
-        n("waitReq", "wait", 300, 230, {
+        n("reqOk", "condition", 300, 200, {
+          label: "Drafted?",
+          field: "last.status",
+          op: "eq",
+          value: "done",
+        }),
+        n("waitReq", "wait", 300, 290, {
           label: "Requisition approved",
           event: "requisition.status_changed",
           field: "payload.to",
@@ -57,7 +63,13 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           agentType: "jd",
           goal: "The requisition for this hiring need is approved. Draft its job description from the organisation's templates and profile and submit it for review. Hiring need: {{payload.need}}",
         }),
-        n("waitJd", "wait", 140, 590, {
+        n("jdOk", "condition", 140, 560, {
+          label: "JD written?",
+          field: "last.status",
+          op: "eq",
+          value: "done",
+        }),
+        n("waitJd", "wait", 140, 640, {
           label: "JD approved",
           event: "jd.approved",
           timeoutHours: 168,
@@ -73,7 +85,13 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           agentType: "publishing",
           goal: "The job description is approved. Post the role internally and prepare the LinkedIn and job-board posts.",
         }),
-        n("waitShort", "wait", -20, 950, {
+        n("pubOk", "condition", -20, 920, {
+          label: "Published?",
+          field: "last.status",
+          op: "eq",
+          value: "done",
+        }),
+        n("waitShort", "wait", -20, 1000, {
           label: "Candidates shortlisted",
           event: "application.shortlisted",
           timeoutHours: 336,
@@ -94,15 +112,21 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
       ],
       edges: [
         { id: "e1", source: "trigger", target: "req" },
-        { id: "e2", source: "req", target: "waitReq" },
+        { id: "e2", source: "req", target: "reqOk" },
+        { id: "e2y", source: "reqOk", target: "waitReq", branch: "yes" },
+        { id: "e2n", source: "reqOk", target: "report", branch: "no" },
         { id: "e3", source: "waitReq", target: "okReq" },
         { id: "e4", source: "okReq", target: "jd", branch: "yes" },
         { id: "e5", source: "okReq", target: "report", branch: "no" },
-        { id: "e6", source: "jd", target: "waitJd" },
+        { id: "e6", source: "jd", target: "jdOk" },
+        { id: "e6y", source: "jdOk", target: "waitJd", branch: "yes" },
+        { id: "e6n", source: "jdOk", target: "report", branch: "no" },
         { id: "e7", source: "waitJd", target: "okJd" },
         { id: "e8", source: "okJd", target: "publish", branch: "yes" },
         { id: "e9", source: "okJd", target: "report", branch: "no" },
-        { id: "e10", source: "publish", target: "waitShort" },
+        { id: "e10", source: "publish", target: "pubOk" },
+        { id: "e10y", source: "pubOk", target: "waitShort", branch: "yes" },
+        { id: "e10n", source: "pubOk", target: "report", branch: "no" },
         { id: "e11", source: "waitShort", target: "okShort" },
         { id: "e12", source: "okShort", target: "screen", branch: "yes" },
         { id: "e13", source: "okShort", target: "report", branch: "no" },
@@ -111,6 +135,13 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
       ],
     },
     tests: [
+      {
+        name: "Requisition agent fails → straight to the report",
+        subjectType: "requisition",
+        payload: { need: "One data analyst" },
+        outcomes: { req: { status: "failed", result: "" } },
+        expectEnd: "end",
+      },
       {
         name: "Everything happens",
         subjectType: "requisition",
