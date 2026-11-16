@@ -97,6 +97,7 @@ const notifyInvitedMember = createServerOnlyFn(async function notifyInvitedMembe
         inviteeName: args.inviteeName ?? undefined,
         inviterName: args.inviterName ?? undefined,
         email: args.email,
+        siteUrl: (await import("../server/env")).env.PUBLIC_SITE_URL.replace(/\/$/, ""),
       },
     });
   } catch (e) {
