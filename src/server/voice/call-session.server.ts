@@ -722,7 +722,7 @@ async function placeCall(
   line.close();
   const summary = await session.close();
 
-  const outcome = callOutcome(state);
+  const outcome = callOutcome(state, why);
   // The transcript is kept only when the candidate consented.
   const transcript: ScreeningCallTurn[] =
     state.consent === true ? (summary.transcript as ScreeningCallTurn[]) : [];
@@ -781,6 +781,16 @@ async function placeCall(
       return finish(orgId, call, {
         status: "fell_back",
         endReason: outcome,
+        now: endedAt,
+        extra: base,
+      });
+    case "timed_out":
+      // They took the call, but its time ran out first: what they said is kept and
+      // the Screening agent follows up with the written assessment — never a fresh
+      // call from the start.
+      return finish(orgId, call, {
+        status: "fell_back",
+        endReason: "time_limit",
         now: endedAt,
         extra: base,
       });

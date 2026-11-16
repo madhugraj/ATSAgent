@@ -332,7 +332,10 @@ export function applyCallTool(
       const input = { ...(parsed.data as CallDetailsInput) };
       // "Not allowed" only where an approved labour rule forbids asking current pay.
       const notAllowed = (input.not_given ?? []).filter((n) => n.why === "not_allowed");
-      if (notAllowed.length && (!state.payHistoryBanned || notAllowed.some((n) => n.item !== "current_pay")))
+      if (
+        notAllowed.length &&
+        (!state.payHistoryBanned || notAllowed.some((n) => n.item !== "current_pay"))
+      )
         return {
           ok: false,
           error: state.payHistoryBanned
@@ -458,11 +461,15 @@ export type CallOutcome =
   | "prefers_human"
   | "not_interested"
   | "no_answer"
-  | "wrong_person";
+  | "wrong_person"
+  /** They agreed and talked, but the call's time ran out before an answer was recorded. */
+  | "timed_out";
 
 /** Where a finished conversation leaves the call (pure; unit-tested). */
 export function callOutcome(
   s: Pick<CallState, "consent" | "answers" | "booking" | "endReason">,
+  /** Why the line closed ("time_limit", "silence", …), when known. */
+  why?: string,
 ): CallOutcome {
   if (s.endReason === "wrong_person") return "wrong_person";
   if (s.booking) return "booked";
@@ -472,6 +479,9 @@ export function callOutcome(
   if (s.endReason === "not_interested") return "not_interested";
   if (s.consent === true && (s.answers.some((a) => !a.declined) || s.endReason === "completed"))
     return "completed";
+  // They agreed and talked until the time ran out (16 November: logged as
+  // "no answer" and queued to be called again from the start).
+  if (s.consent === true && why === "time_limit") return "timed_out";
   // Voicemail, silence, or they hung up before agreeing: try again later.
   return "no_answer";
 }
