@@ -449,7 +449,8 @@ export const submitScorecardCore = createServerOnlyFn(async function submitScore
   // into the offer pipeline — the HR head does.
   const external = !ctx.userId && Boolean(target && HR_CONTROLLED_TARGETS.has(target));
   if (external)
-    blocked = "Waiting for the HR head: a verdict sent through a private scorecard link cannot open an offer.";
+    blocked =
+      "Waiting for the HR head: a verdict sent through a private scorecard link cannot open an offer.";
   if (target && HR_CONTROLLED_TARGETS.has(target) && ctx.userId) {
     await assertRole(
       ctx.userId,
