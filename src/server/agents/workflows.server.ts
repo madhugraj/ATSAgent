@@ -813,6 +813,24 @@ export type WorkflowRunReport = {
   totals: { agentRuns: number; tokens: number; decisions: number; minutes: number | null };
 };
 
+/**
+ * Why an agent failed, in words safe to show: the runtime's own messages
+ * (no key, budget, limits); anything else (provider text) stays generic.
+ */
+function failureReason(error: string | null): string {
+  if (!error) return "The agent could not complete this run.";
+  const safe = [
+    "No AI model key saved",
+    "Paused: this agent reached its monthly token budget",
+    "The run reached its step or token budget",
+    "The worker stopped before finishing this step",
+    "is switched off",
+  ];
+  return safe.some((m) => error.includes(m))
+    ? error.slice(0, 300)
+    : "The agent could not complete this run.";
+}
+
 /** Everything a workflow run did, for the PDF / Excel report (org-scoped by the caller). */
 export async function workflowRunReport(
   runId: string,
@@ -876,7 +894,10 @@ export async function workflowRunReport(
         finished: iso(r.finishedAt),
         steps: r.stepCount,
         tokens: r.tokensUsed,
-        result: (r.result ?? "").slice(0, 1500),
+        result: (r.result ?? (r.status === "failed" ? failureReason(r.lastError) : "")).slice(
+          0,
+          1500,
+        ),
       })),
     decisions: tasks.map(({ t, run, by }) => ({
       at: iso(t.decidedAt ?? t.createdAt),
