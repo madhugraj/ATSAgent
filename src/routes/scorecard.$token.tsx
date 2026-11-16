@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { CheckCircle2, ClipboardCheck, Loader2 } from "lucide-react";
 
+import { CompetencyRating, OverallReadout } from "@/components/CompetencyRating";
 import { PanelBriefView } from "@/components/PanelBriefView";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -30,28 +31,6 @@ function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Stars(props: { value: number; onChange: (n: number) => void; label: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3 text-sm">
-      <span>{props.label}</span>
-      <div className="flex gap-1" role="radiogroup" aria-label={props.label}>
-        {[1, 2, 3, 4, 5].map((n) => (
-          <button
-            key={n}
-            type="button"
-            role="radio"
-            aria-checked={props.value === n}
-            className={`h-7 w-7 rounded border text-xs ${props.value === n ? "border-primary bg-primary text-primary-foreground" : "border-border"}`}
-            onClick={() => props.onChange(n)}
-          >
-            {n}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function ScorecardPage() {
   const { token } = Route.useParams();
   const load = useServerFn(getPanelistScorecard);
@@ -61,7 +40,6 @@ function ScorecardPage() {
     queryFn: () => load({ data: { token } }),
     retry: false,
   });
-  const [rating, setRating] = useState(0);
   const [verdict, setVerdict] = useState<"select" | "hold" | "reject" | null>(null);
   const [comments, setComments] = useState("");
   const [reason, setReason] = useState("");
@@ -119,7 +97,6 @@ function ScorecardPage() {
 
   const needsReason = verdict !== null && verdict !== "select";
   const ready =
-    rating > 0 &&
     verdict !== null &&
     c.competencies.every((x) => (scores[x] ?? 0) > 0) &&
     (!needsReason || reason.trim().length > 0);
@@ -131,7 +108,6 @@ function ScorecardPage() {
       await submit({
         data: {
           token,
-          rating,
           verdict,
           comments: comments.trim() || null,
           reason: reason.trim() || null,
@@ -164,16 +140,17 @@ function ScorecardPage() {
         </div>
       ) : null}
 
-      <div className="mt-5 space-y-2">
+      <div className="mt-5 space-y-3">
         {c.competencies.map((name) => (
-          <Stars
+          <CompetencyRating
             key={name}
-            label={name}
+            name={name}
+            rubric={c}
             value={scores[name] ?? 0}
             onChange={(n) => setScores((s) => ({ ...s, [name]: n }))}
           />
         ))}
-        <Stars label="Overall" value={rating} onChange={setRating} />
+        <OverallReadout ratings={scores} rubric={c} />
       </div>
 
       <div className="mt-5 flex gap-2">

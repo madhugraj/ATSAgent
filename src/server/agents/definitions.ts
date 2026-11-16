@@ -1537,7 +1537,9 @@ export function registerPanelAgents(): void {
       name: `L${level} panel agent`,
       // 1.1.0 (S3): asks the HR head to review a round where its view and the
       // panel's differ (request_panel_review; gate panel_review).
-      version: "1.1.0",
+      // 1.2.0: assess_round's overall is the weighted average of the competencies
+      // it rated, under the role's rubric — the same rule as a panellist's card.
+      version: "1.2.0",
       owner: "hr_head",
       responsibility: `A silent member of every L${level} interview panel: once the call's transcript is in, records its own hidden view of the candidate and of how the panel ran the round, and sends the panel a factual summary of the call. People decide; its view is compared with the panel's only after they have all scored.`,
       mustNever: [

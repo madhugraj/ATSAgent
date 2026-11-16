@@ -85,6 +85,9 @@ export type MyInterview = {
   /** This round's name and competencies from the role's interview plan. */
   round_name: string | null;
   competencies: string[];
+  /** The round's rubric: weight (missing = 1) and what a 1, 3 and 5 look like. */
+  weights: Record<string, number>;
+  anchors: Record<string, { low: string; mid: string; high: string }>;
   /** Everyone on the panel (names or emails). */
   panel: string[];
   /** Panel members who have not scored yet (when I have). */
@@ -196,6 +199,8 @@ export const myInterviews = createServerFn({ method: "GET" })
         submitted: by.includes(email),
         round_name: round?.name ?? null,
         competencies: round?.competencies ?? [],
+        weights: round?.weights ?? {},
+        anchors: round?.anchors ?? {},
         panel: members.map((m) => m.name ?? m.email),
         waiting_for: members
           .filter((m) => !by.includes(m.email.toLowerCase()))
@@ -212,7 +217,12 @@ const ScorecardInput = z.object({
   applicationId: z.string().uuid(),
   level: z.number().min(1).max(3),
   focusArea: z.string().optional().nullable(),
-  rating: z.number().min(1).max(5),
+  /**
+   * Ignored when competencies are rated: the overall is then the weighted
+   * average the server computes from the role's rubric. Only a legacy card
+   * with no competencies uses it.
+   */
+  rating: z.number().min(1).max(5).optional(),
   verdict: z.enum(["select", "hold", "reject"]),
   comments: z.string().optional().nullable(),
   reason: z.string().optional().nullable(),
@@ -328,6 +338,26 @@ export const submitScorecardCore = createServerOnlyFn(async function submitScore
     throw new Error("A hold or reject needs a written reason.");
   }
 
+  // One overall rule for every way of scoring: the weighted average of the
+  // competency ratings under the role's rubric — never a client-sent number.
+  let overall: number;
+  if (data.competencies.length) {
+    const { planFor } = await import("./interview-plan.server");
+    const { overallRating, roundOf } = await import("./interview-plan");
+    const planRound = app.requisitionId
+      ? roundOf((await planFor(ctx.orgId, app.requisitionId)).plan, data.level)
+      : null;
+    if (planRound) {
+      const asked = new Set(planRound.competencies.map((c) => c.toLowerCase()));
+      const rated = new Set(data.competencies.map((c) => c.name.toLowerCase()));
+      if (data.competencies.some((c) => !asked.has(c.name.toLowerCase())))
+        throw new Error("Rate only the competencies this round's rubric lists.");
+      if ([...asked].some((c) => !rated.has(c))) throw new Error("Rate every competency.");
+    }
+    overall = overallRating(data.competencies, planRound);
+  } else if (data.rating) overall = data.rating;
+  else throw new Error("Rate at least one competency.");
+
   const [evaluation] = await db
     .insert(evaluations)
     .values({
@@ -338,7 +368,7 @@ export const submitScorecardCore = createServerOnlyFn(async function submitScore
       evaluator: actor,
       evaluatorEmail: me,
       focusArea: data.focusArea?.trim() || null,
-      rating: data.rating,
+      rating: overall,
       recommendation: data.verdict,
       comments: [data.comments?.trim(), data.reason?.trim()].filter(Boolean).join("\n\n") || null,
       competencies: data.competencies,
@@ -355,7 +385,7 @@ export const submitScorecardCore = createServerOnlyFn(async function submitScore
       orgId: ctx.orgId,
       source: "scorecard",
       label: data.verdict,
-      rating: data.rating,
+      rating: overall,
       reason: data.comments?.trim() || null,
       corrected: {
         level: data.level,
@@ -449,7 +479,8 @@ export const submitScorecardCore = createServerOnlyFn(async function submitScore
   // into the offer pipeline — the HR head does.
   const external = !ctx.userId && Boolean(target && HR_CONTROLLED_TARGETS.has(target));
   if (external)
-    blocked = "Waiting for the HR head: a verdict sent through a private scorecard link cannot open an offer.";
+    blocked =
+      "Waiting for the HR head: a verdict sent through a private scorecard link cannot open an offer.";
   if (target && HR_CONTROLLED_TARGETS.has(target) && ctx.userId) {
     await assertRole(
       ctx.userId,
