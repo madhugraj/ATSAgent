@@ -383,6 +383,7 @@ Plan: `docs/org-context-agent-plan.md` (decided 2026-10-27; O0 built 2026-10-27,
 - [x] Approve → publish → grant per organisation (studio agents must be granted there first); withdrawal cancels live runs
 - [x] Engine: orchestrator starts matching workflows for granted organisations; agents start through `startRun` with the org's switch, de-duplication and owner principal; finished runs move the flow on
 - [x] Tests: `scripts/agent-workflows.test.ts`
+- [x] Ready-made workflows (start from a template: shortlist → screening/follow-up, approved role → JD, JD → publish → advertise, final round → evaluation) and a real-agent test scenario in `docs/agent-workflows.md`
 - [ ] Approval steps on the canvas (people decide inside agents today); triggers from studio-built events
 
 ## Agent studio 2 — studio agents in the app (2026-11-16)

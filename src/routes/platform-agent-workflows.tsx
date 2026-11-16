@@ -57,6 +57,7 @@ import { AGENT_LABEL } from "@/lib/agents.catalog";
 import {
   approveWorkflow,
   archiveWorkflow,
+  createWorkflowFromTemplate,
   grantWorkflow,
   publishWorkflow,
   revokeWorkflow,
@@ -291,6 +292,41 @@ function WorkflowsPage() {
           </Button>
         }
       />
+      {data?.templates.length ? (
+        <section className="mt-4">
+          <h2 className="text-sm font-semibold">Start from a template</h2>
+          <div className="mt-2 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {data.templates.map((t) => (
+              <article key={t.id} className="glass-card flex flex-col p-3.5">
+                <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <Zap className="size-3 text-amber-500" />
+                  {eventLabel(t.trigger)} · {t.steps} steps
+                </div>
+                <h3 className="mt-1.5 text-sm font-semibold">{t.name}</h3>
+                <p className="mt-1 line-clamp-3 text-xs text-muted-foreground">{t.description}</p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="mt-auto self-start"
+                  style={{ marginTop: 12 }}
+                  onClick={async () => {
+                    try {
+                      const r = await createWorkflowFromTemplate({ data: { templateId: t.id } });
+                      toast.success("Draft created");
+                      await refresh();
+                      setOpen(r.id);
+                    } catch (e) {
+                      toast.error(errorText(e, "Could not create"));
+                    }
+                  }}
+                >
+                  Use
+                </Button>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
       {q.isLoading ? (
         <p className="mt-4 text-sm text-muted-foreground">Loading…</p>
       ) : q.error ? (
