@@ -271,7 +271,7 @@ export function PhoneScreeningCard({ canEdit }: { canEdit: boolean }) {
           When interview times e-mailed to a candidate go unanswered, the assistant can phone them
           to pick one — only the times offered, or up to three more that are free for the
           interviewers. It never changes the interviewer, format or length. A person approves each
-          call. Coming next: this setting is saved now and used once scheduling calls are released.
+          call unless the Interview coordinator is Autonomous.
         </p>
         <div className="grid items-end gap-3 sm:grid-cols-4">
           <div className="space-y-1">
