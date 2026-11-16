@@ -69,7 +69,8 @@ export function studioTypeFor(name: string): `studio:${string}` {
       .replace(/[^a-z0-9]+/g, "_")
       .replace(/^_|_$/g, "")
       .slice(0, 40) || "agent";
-  return `${STUDIO_PREFIX}${slug}`;
+  // `studio:test_…` is reserved for sample-data test runs.
+  return `${STUDIO_PREFIX}${slug.startsWith("test_") || slug === "test" ? `agent_${slug}` : slug}`;
 }
 
 const TOOL_NAME = /^[a-z][a-z0-9_]{2,60}$/;
