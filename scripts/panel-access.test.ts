@@ -43,9 +43,7 @@ async function user(email: string) {
   return (await db.insert(users).values({ email }).returning({ id: users.id }))[0]!.id;
 }
 async function member(userId: string, email: string, isOwner = false) {
-  await db
-    .insert(orgMembers)
-    .values({ orgId, userId, email, status: "active", isOwner } as never);
+  await db.insert(orgMembers).values({ orgId, userId, email, status: "active", isOwner } as never);
 }
 
 beforeAll(async () => {
