@@ -211,7 +211,8 @@ approving them, recorded as self-approved in `panelist.added`. Adding an interna
 company-domain address invites them with the Interviewer role only (same domain gate as any invite,
 audited `member.invited`); taking a panel-only member off panels removes their membership and roles
 (`member.removed`). A private link stops opening once its holder is off the round or the round is
-cancelled.
+cancelled. An invitation is claimed only by a signed-in user with a verified e-mail that matches it,
+into a live organisation, once (`user_id is null` guard), audited `member.joined`.
 
 **Panel-only members (`interviewer` role, migration 0081).** A colleague who only sits on interview
 panels is invited with the Interviewer role. A member whose *only* role is `interviewer` (and who is
