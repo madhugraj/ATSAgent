@@ -21,6 +21,14 @@ rounds (L1–L3) they take, and records who added and approved it.
 - **On the Team page** (Team → Panel directory), by the HR head or an owner. People added there
   can be taken off panels and put back; members are managed with their interviewer profile.
 
+**Invite on add.** An internal panellist with a company address (the owner's domain, not a
+personal mailbox) who is not yet a member is invited at once with the **Interviewer** role only
+(`member.invited`); the entry shows _Invited_ until they join, then _Interviewer_. When they join,
+the existing entry becomes theirs (`syncMemberPanelists` claims it by e-mail). Until then — and for
+anyone the invite rules refuse — they score through private links. Taking a panel-only member off
+panels removes their membership and roles (`member.removed`) and keeps the entry, inactive;
+putting them back invites them again. Members with other roles are still managed on the Team page.
+
 An e-mail that belongs to an org member makes that member's entry; the same e-mail cannot be
 added twice; a member cannot be added as external.
 
@@ -36,6 +44,8 @@ External panellists — and internal ones without a login — have no account. T
 brief and the L1–L3 panel summary carry a private link,
 `/scorecard/<token>`, for that round only:
 
+- the link opens only while the person is on the round (lead or panel) and the round is not
+  cancelled — swapped for a stand-in or re-panelled, it stops opening;
 - the token is an HMAC of the server secret, interview, panellist and booked time — only its
   SHA-256 is stored; a resent brief carries the same link and a reschedule replaces it;
 - the page shows the round, role, candidate name, the round's focus and competencies and, while

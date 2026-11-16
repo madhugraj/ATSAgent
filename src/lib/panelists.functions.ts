@@ -50,6 +50,5 @@ export const setPanelDirectoryActive = createServerFn({ method: "POST" })
       "Only the HR head can change the panel directory.",
     );
     const { setPanelistActive } = await import("./panelists.server");
-    await setPanelistActive(context.orgId, context.userId, data.id, data.active);
-    return { ok: true as const };
+    return setPanelistActive(context.orgId, context.userId, data.id, data.active);
   });

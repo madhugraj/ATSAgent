@@ -103,7 +103,7 @@ export async function eligibleInterviewers(
     left join org_members m on m.id = p.member_id and m.org_id = p.org_id
     left join member_interviewer_profiles prof on prof.member_id = p.member_id and prof.org_id = p.org_id
     where p.org_id = ${orgId} and p.active
-      and (p.member_id is null or m.status = 'active')`)) as unknown as {
+      and (p.member_id is null or m.status in ('active', 'invited'))`)) as unknown as {
     id: string;
     kind: "internal" | "external";
     company: string | null;
@@ -224,6 +224,15 @@ export async function panelPeople(orgId: string, given: string[]): Promise<Panel
  * joined after migration 0070), and their name and e-mail current.
  */
 export async function syncMemberPanelists(orgId: string): Promise<void> {
+  // A member who was already in the directory (added before they had a login)
+  // takes over that entry rather than colliding with it on the e-mail.
+  await db.execute(sql`
+    update panelists p
+    set member_id = m.id, kind = 'internal', company = null, updated_at = now()
+    from org_members m
+    where m.org_id = ${orgId} and p.org_id = ${orgId}
+      and p.member_id is null and lower(p.email) = lower(m.email)
+      and not exists (select 1 from panelists q where q.member_id = m.id)`);
   await db.execute(sql`
     insert into panelists (org_id, kind, member_id, full_name, email, approved_at)
     select m.org_id, 'internal', m.id, coalesce(nullif(m.full_name, ''), m.email), lower(m.email), now()

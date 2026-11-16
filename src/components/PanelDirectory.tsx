@@ -38,7 +38,7 @@ export function PanelDirectory({ canEdit }: { canEdit: boolean }) {
   const save = async () => {
     setBusy(true);
     try {
-      await add({
+      const res = await add({
         data: {
           fullName,
           email,
@@ -52,7 +52,11 @@ export function PanelDirectory({ canEdit }: { canEdit: boolean }) {
           rounds,
         },
       });
-      toast.success(`${fullName} added to the panel directory.`);
+      toast.success(
+        res.invited
+          ? `${fullName} added and invited to sign in as an interviewer.`
+          : `${fullName} added to the panel directory.`,
+      );
       setFullName("");
       setEmail("");
       setTitle("");
@@ -68,7 +72,8 @@ export function PanelDirectory({ canEdit }: { canEdit: boolean }) {
   };
   const toggle = async (id: string, active: boolean) => {
     try {
-      await setActive({ data: { id, active } });
+      const res = await setActive({ data: { id, active } });
+      if (res.invited) toast.success("Invited to sign in as an interviewer.");
       await refresh();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not change it.");
@@ -187,15 +192,19 @@ export function PanelDirectory({ canEdit }: { canEdit: boolean }) {
               <Badge variant={p.kind === "external" ? "default" : "secondary"}>
                 {p.kind === "external"
                   ? `External${p.company ? ` · ${p.company}` : ""}`
-                  : p.member
-                    ? "Member"
-                    : "Internal"}
+                  : p.invited
+                    ? "Invited"
+                    : p.panelOnly
+                      ? "Interviewer"
+                      : p.member
+                        ? "Member"
+                        : "Internal"}
               </Badge>
               <span className="text-xs text-muted-foreground">
                 {p.rounds.map((r) => `L${r}`).join(" ")}
                 {p.areas.length ? ` · ${p.areas.join(", ")}` : ""}
               </span>
-              {canEdit && !p.member ? (
+              {canEdit && (!p.member || p.panelOnly) ? (
                 <Button
                   size="sm"
                   variant="ghost"

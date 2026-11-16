@@ -228,7 +228,11 @@ functions are rate-limited with all other RPCs; the submission is audited
 (`scorecard.submitted_by_link`). The external panellist's brief leaves out internal material — match
 score, screening result and the candidate page. Panel directory entries are added by the HR head
 (Team page or the hiring desk card the Interview coordinator raises); typing someone in is
-approving them, recorded as self-approved in `panelist.added`.
+approving them, recorded as self-approved in `panelist.added`. Adding an internal panellist with a
+company-domain address invites them with the Interviewer role only (same domain gate as any invite,
+audited `member.invited`); taking a panel-only member off panels removes their membership and roles
+(`member.removed`). A private link stops opening once its holder is off the round or the round is
+cancelled.
 
 **Panel-only members (`interviewer` role, migration 0081).** A colleague who only sits on interview
 panels is invited with the Interviewer role. A member whose *only* role is `interviewer` (and who is
