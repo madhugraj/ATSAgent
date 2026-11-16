@@ -14,6 +14,7 @@ import { isPublicPath } from "@/lib/public-paths";
 import { AgreementFields } from "@/components/AgreementFields";
 import { EMPTY_AGREEMENT, agreementMissing, agreementPayload } from "@/lib/legal/acceptance";
 import { acceptOrgAgreements, myOrgAgreements } from "@/lib/org-agreements.functions";
+import { claimInvite } from "@/lib/org.functions";
 import type { AgreementKind } from "@/lib/legal/agreements";
 
 /**
@@ -22,7 +23,7 @@ import type { AgreementKind } from "@/lib/legal/agreements";
  */
 export function OrgGate({ children }: { children: React.ReactNode }) {
   const location = useLocation();
-  const { org, membership, isLoading, isError, error, refetch } = useOrg();
+  const { org, membership, invite, isLoading, isError, error, refetch } = useOrg();
   const platform = usePlatform();
   const fetchAgreements = useServerFn(myOrgAgreements);
   const agreementsLive =
@@ -83,7 +84,12 @@ export function OrgGate({ children }: { children: React.ReactNode }) {
   // Platform super users administer tenants; they do not belong to one.
   if ((!org || !membership) && (platform.isSuperUser || platform.claimable)) return <>{children}</>;
 
-  if (!org || !membership) return <OnboardingWizard onDone={() => refetch()} />;
+  if (!org || !membership)
+    return invite ? (
+      <JoinInvite invite={invite} onJoined={() => refetch()} />
+    ) : (
+      <OnboardingWizard onDone={() => refetch()} />
+    );
 
   // The organisation must have accepted the current Terms, Privacy Policy and
   // DPA. A super user can still reach the platform console meanwhile.
@@ -276,6 +282,57 @@ function AcceptAgreements({
             </Button>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** Invited into an organisation: join it instead of creating one. */
+function JoinInvite({
+  invite,
+  onJoined,
+}: {
+  invite: { orgName: string; roleLabel: string | null };
+  onJoined: () => void;
+}) {
+  const join = useServerFn(claimInvite);
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center gap-3 px-4 text-center">
+      <div className="panel max-w-md space-y-2 p-6">
+        <h1 className="text-lg font-semibold">Join {invite.orgName}</h1>
+        {invite.roleLabel ? (
+          <p className="text-sm text-muted-foreground">{invite.roleLabel}</p>
+        ) : null}
+      </div>
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              await join({});
+              onJoined();
+            } catch (e) {
+              toast.error(e instanceof Error ? e.message : "Could not join.");
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          Join
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={async () => {
+            await signOutApp();
+            window.location.assign("/");
+          }}
+        >
+          Sign out
+        </Button>
       </div>
     </div>
   );

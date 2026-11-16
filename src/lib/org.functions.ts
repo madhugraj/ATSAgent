@@ -61,6 +61,8 @@ export type MyOrg = {
   roles: AppRole[];
   /** Holds only the interviewer role: the app shows the panel view and nothing else. */
   panelOnly: boolean;
+  /** No organisation yet, but invited into one (verified e-mail): offer to join it. */
+  invite?: { orgName: string; roleLabel: string | null } | null;
 };
 
 const ROLE_LABELS: Record<AppRole, string> = {
@@ -155,7 +157,38 @@ export const myOrg = createServerFn({ method: "GET" })
       .orderBy(orgMembers.createdAt)
       .limit(1);
 
-    if (!member) return { org: null, membership: null, roles: [], panelOnly: false };
+    if (!member) {
+      const email = (context.claims?.email as string | undefined)?.toLowerCase();
+      const verified = emailVerified(context.claims as Record<string, unknown> | undefined);
+      const [inv] =
+        email && verified
+          ? await db
+              .select({ orgName: organizations.name, role: orgMembers.invitedRole })
+              .from(orgMembers)
+              .innerJoin(organizations, eq(organizations.id, orgMembers.orgId))
+              .where(
+                and(
+                  ilike(orgMembers.email, email),
+                  isNull(orgMembers.userId),
+                  eq(organizations.status, "active"),
+                ),
+              )
+              .orderBy(orgMembers.createdAt)
+              .limit(1)
+          : [];
+      return {
+        org: null,
+        membership: null,
+        roles: [],
+        panelOnly: false,
+        invite: inv
+          ? {
+              orgName: inv.orgName,
+              roleLabel: inv.role ? (ROLE_LABELS[inv.role as AppRole] ?? null) : null,
+            }
+          : null,
+      };
+    }
 
     const [org, roles] = await Promise.all([
       db.select().from(organizations).where(eq(organizations.id, member.orgId)).limit(1),
@@ -185,6 +218,8 @@ export const claimInvite = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     const email = (context.claims?.email as string | undefined)?.toLowerCase();
     if (!email) throw new Error("Your account has no email address.");
+    if (!emailVerified(context.claims as Record<string, unknown> | undefined))
+      throw new Error("Confirm your email address first.");
 
     const [invite] = await db
       .select({ id: orgMembers.id, orgId: orgMembers.orgId, invitedRole: orgMembers.invitedRole })
@@ -216,6 +251,16 @@ export const claimInvite = createServerFn({ method: "POST" })
         .insert(userRoles)
         .values({ userId: context.userId, role: invite.invitedRole, orgId: invite.orgId });
     }
+    const { writeAudit } = await import("../server/audit");
+    await writeAudit({
+      actor: email,
+      actorUserId: context.userId,
+      orgId: invite.orgId,
+      action: "member.joined",
+      entityType: "org_member",
+      entityId: invite.id,
+      detail: { role: invite.invitedRole },
+    });
     return { ok: true, orgId: invite.orgId };
   });
 
