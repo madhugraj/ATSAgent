@@ -28,7 +28,7 @@ const dir = await import("../src/lib/panelists.server");
 const links = await import("../src/lib/panelist-links.server");
 
 const stamp = Date.now();
-const domain = `ponb${stamp}.com`;
+const domain = `ponb${stamp}.test`;
 let orgId: string;
 let ownerId: string;
 let interviewId: string;
@@ -86,7 +86,7 @@ beforeAll(async () => {
         applicationId: appId,
         level: 2,
         interviewerEmail: `owner@${domain}`,
-        panel: [{ name: "Ext", email: `ext@client-${stamp}.com` }],
+        panel: [{ name: "Ext", email: `ext@client-${stamp}.test` }],
         scheduledAt: new Date(Date.now() + 864e5),
         status: "scheduled",
       } as never)
@@ -145,7 +145,7 @@ describe("adding a panellist", () => {
       ownerId,
       {
         fullName: "Out",
-        email: `out@elsewhere-${stamp}.com`,
+        email: `out@elsewhere-${stamp}.test`,
         kind: "internal",
         areas: [],
         rounds: [2],
@@ -158,7 +158,7 @@ describe("adding a panellist", () => {
       ownerId,
       {
         fullName: "Ext",
-        email: `ext@client-${stamp}.com`,
+        email: `ext@client-${stamp}.test`,
         kind: "external",
         areas: [],
         rounds: [2],
@@ -166,13 +166,13 @@ describe("adding a panellist", () => {
       { via: "team_page" },
     );
     expect(ext.invited).toBe(false);
-    expect(await memberOf(`ext@client-${stamp}.com`)).toBeUndefined();
+    expect(await memberOf(`ext@client-${stamp}.test`)).toBeUndefined();
   });
 });
 
 describe("private links follow the round", () => {
   test("off the round or cancelled, the link no longer opens", async () => {
-    const ext = await entryOf(`ext@client-${stamp}.com`);
+    const ext = await entryOf(`ext@client-${stamp}.test`);
     const [iv] = await db
       .select({ at: interviews.scheduledAt })
       .from(interviews)
@@ -189,7 +189,7 @@ describe("private links follow the round", () => {
     await db
       .update(interviews)
       .set({
-        panel: [{ name: "Ext", email: `ext@client-${stamp}.com` }],
+        panel: [{ name: "Ext", email: `ext@client-${stamp}.test` }],
         status: "cancelled",
       } as never)
       .where(eq(interviews.id, interviewId));
