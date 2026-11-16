@@ -415,7 +415,7 @@ describe("in the app", () => {
     registry.registerTool({
       name: "stub_write",
       description: "Write something",
-      input: z.object({ text: z.string() }),
+      input: z.object({ text: z.string(), candidateId: z.string().optional() }),
       risk: "write",
       run: async () => {
         executed.push("stub_write:real");
@@ -441,7 +441,14 @@ describe("in the app", () => {
     script.push({
       ok: true,
       text: "",
-      toolCalls: [{ id: "w1", name: "stub_write", args: { text: "hello" } }],
+      // Sample data names a candidate that does not exist in the test organisation.
+      toolCalls: [
+        {
+          id: "w1",
+          name: "stub_write",
+          args: { text: "hello", candidateId: "22222222-2222-4222-8222-222222222222" },
+        },
+      ],
       stopReason: "tool_use",
       usage,
     });

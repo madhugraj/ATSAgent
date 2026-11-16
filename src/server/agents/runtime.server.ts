@@ -1455,7 +1455,9 @@ export async function resolveTask(input: {
     throw new Error("Approve or reject this request.");
   }
 
-  const stale = await staleReasonOf(task.id);
+  // A studio test's sample data names records that do not exist in the test
+  // organisation, so only its run's own state can make its request stale.
+  const stale = studioTest ? await runEndedReasonOf(task.runId) : await staleReasonOf(task.id);
   if (stale) {
     await closeTasks(
       [{ id: task.id, runId: task.runId, orgId: task.orgId }],
@@ -2972,6 +2974,19 @@ async function closeRunTasks(run: { id: string; orgId: string }, reason: string)
       ),
     );
   await closeTasks(open, reason, "system:run-ended");
+}
+
+/** Why a run's requests can no longer be decided because the run ended, or null. */
+async function runEndedReasonOf(runId: string): Promise<string | null> {
+  const [run] = await db
+    .select({ status: agentRuns.status })
+    .from(agentRuns)
+    .where(eq(agentRuns.id, runId))
+    .limit(1);
+  if (!run) return "the agent working on it is gone";
+  return (LIVE_RUN_STATUSES as readonly string[]).includes(run.status)
+    ? null
+    : "the agent working on it has already finished";
 }
 
 /** Why an open request can no longer be decided, or null while it can. */
