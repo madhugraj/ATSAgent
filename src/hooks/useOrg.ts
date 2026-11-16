@@ -29,6 +29,8 @@ export function useOrg() {
     isOwner: Boolean(q.data?.membership?.isOwner),
     /** Interviewer role only: the app shows the panel view and nothing else. */
     panelOnly: Boolean(q.data?.panelOnly),
+    /** A pending invitation to join an organisation (no membership yet). */
+    invite: q.data?.invite ?? null,
     isLoading: q.isLoading,
     isError: q.isError,
     error: q.error as Error | null,
