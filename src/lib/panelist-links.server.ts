@@ -163,9 +163,15 @@ export type PublicScorecard = {
   scheduledAt: string | null;
   competencies: string[];
   state: "open" | "submitted" | "expired" | "not_yet";
+  /** The candidate's profile, CV and the round's focus — only while the link is valid. */
+  brief: import("./panel-brief").PanelBrief | null;
 };
 
-/** What the external panelist's page shows: the round and its rubric — nothing more. */
+/**
+ * What the external panelist's page shows: the round, its rubric and the
+ * candidate's profile and CV (no match or screening — internal material).
+ * Nothing about the candidate once the link has expired.
+ */
 export async function publicScorecard(token: string): Promise<PublicScorecard | null> {
   const r = await resolve(token);
   if (!r) return null;
@@ -188,6 +194,8 @@ export async function publicScorecard(token: string): Promise<PublicScorecard | 
     .where(and(eq(applications.id, r.applicationId), eq(applications.orgId, r.orgId)))
     .limit(1);
   const round = app ? roundOf((await planFor(r.orgId, app.requisitionId)).plan, r.level) : null;
+  const { panelBrief } = await import("./panel-brief.server");
+  const brief = r.expired ? null : await panelBrief(r.orgId, r.interviewId, { internal: false });
   return {
     orgName: r.orgName,
     candidateName: r.candidateName,
@@ -196,6 +204,7 @@ export async function publicScorecard(token: string): Promise<PublicScorecard | 
     panelistName: r.panelist.name,
     scheduledAt: r.scheduledAt?.toISOString() ?? null,
     competencies: round?.competencies ?? [],
+    brief,
     state:
       done || r.used
         ? "submitted"

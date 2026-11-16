@@ -25,17 +25,48 @@ export type IdentityClaims = {
 };
 
 export type AppRole =
-  "recruiter" | "hiring_manager" | "department_head" | "hr_head" | "president_cbo";
+  | "recruiter"
+  | "hiring_manager"
+  | "department_head"
+  | "hr_head"
+  | "president_cbo"
+  /** Panel only: their own interview rounds and scorecards, nothing else. */
+  | "interviewer";
 
 export type OrgContext = {
   orgId: string;
   isOwner: boolean;
   memberEmail: string;
+  /** Holds only the interviewer role: may reach `requirePanel` functions and nothing else. */
+  panelOnly: boolean;
 };
 
-/** Resolve the caller's active organisation. First membership wins, matching the legacy `current_org_id()`. */
+/**
+ * True when a member's only roles are `interviewer` (and they are not the
+ * owner). Such a member is denied everywhere except `requirePanel` functions.
+ */
+export const isPanelOnly = createServerOnlyFn(async function isPanelOnly(
+  userId: string,
+  orgId: string,
+  isOwner: boolean,
+): Promise<boolean> {
+  if (isOwner) return false;
+  const roles = await db
+    .select({ role: userRoles.role })
+    .from(userRoles)
+    .where(and(eq(userRoles.userId, userId), eq(userRoles.orgId, orgId)));
+  return roles.length > 0 && roles.every((r) => r.role === "interviewer");
+});
+
+/**
+ * Resolve the caller's active organisation. First membership wins, matching
+ * the legacy `current_org_id()`. A panel-only member resolves to null (no
+ * organisation) unless the caller is a panel function (`allowPanel`) — deny
+ * by default, so every existing tenant function stays closed to them.
+ */
 export const activeOrgOf = createServerOnlyFn(async function activeOrgOf(
   userId: string,
+  opts: { allowPanel?: boolean } = {},
 ): Promise<OrgContext | null> {
   const [membership] = await db
     .select({ orgId: orgMembers.orgId, isOwner: orgMembers.isOwner, email: orgMembers.email })
@@ -44,11 +75,24 @@ export const activeOrgOf = createServerOnlyFn(async function activeOrgOf(
     .orderBy(orgMembers.createdAt)
     .limit(1);
   if (!membership) return null;
+  const panelOnly = await isPanelOnly(userId, membership.orgId, membership.isOwner);
+  if (panelOnly && !opts.allowPanel) return null;
   return {
     orgId: membership.orgId,
     isOwner: membership.isOwner,
     memberEmail: membership.email,
+    panelOnly,
   };
+});
+
+/** Throws when the member holds only the interviewer role — for code that resolves membership itself. */
+export const assertNotPanelOnly = createServerOnlyFn(async function assertNotPanelOnly(
+  userId: string,
+  orgId: string,
+  isOwner = false,
+): Promise<void> {
+  if (await isPanelOnly(userId, orgId, isOwner))
+    throw new Error("You are not part of an organisation yet.");
 });
 
 /** Imperative role assertion for use inside handlers (input-dependent checks). */
@@ -104,6 +148,19 @@ export const requireOrg = createMiddleware({ type: "function" })
   .middleware([requireIdentity])
   .server(async ({ context, next }) => {
     const org = await activeOrgOf(context.userId);
+    if (!org) throw new Error("You are not part of an organisation yet.");
+    return next({ context: { ...context, ...org } });
+  });
+
+/**
+ * Authn + tenant for panel work: like `requireOrg`, but also admits a
+ * panel-only member (context.panelOnly). Use only for functions that are
+ * already limited to the caller's own interview rounds.
+ */
+export const requirePanel = createMiddleware({ type: "function" })
+  .middleware([requireIdentity])
+  .server(async ({ context, next }) => {
+    const org = await activeOrgOf(context.userId, { allowPanel: true });
     if (!org) throw new Error("You are not part of an organisation yet.");
     return next({ context: { ...context, ...org } });
   });

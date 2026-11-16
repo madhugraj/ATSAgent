@@ -1,7 +1,7 @@
 import { and, asc, eq, ilike, inArray, isNotNull, lte, or, sql } from "drizzle-orm";
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 
-import { requireIdentity, type AppRole } from "./auth.middleware";
+import { isPanelOnly, requireIdentity, type AppRole } from "./auth.middleware";
 import { db } from "../server/db";
 import { taskIsRemindable } from "../server/agents/task-liveness";
 import {
@@ -119,7 +119,8 @@ export const myNotifications = createServerFn({ method: "GET" })
       .where(and(eq(orgMembers.userId, context.userId), eq(orgMembers.status, "active")))
       .limit(1);
 
-    if (member) {
+    // A panel-only member's inbox is their interviews page, not the org's queues.
+    if (member && !(await isPanelOnly(context.userId, member.orgId, member.isOwner))) {
       const orgId = member.orgId;
       const now = Date.now();
       const in7 = new Date(now + 7 * 864e5);
