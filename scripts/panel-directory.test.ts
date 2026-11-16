@@ -249,7 +249,14 @@ describe("the coordinator asks; HR types someone in", () => {
       },
     );
     const gopal = (await dir.listPanelists(orgId)).find((p) => p.email === `gopal@${domain}`);
-    expect(gopal).toMatchObject({ kind: "internal", member: false, selfApproved: true });
+    // A company address is invited to sign in as an interviewer.
+    expect(gopal).toMatchObject({
+      kind: "internal",
+      member: true,
+      invited: true,
+      panelOnly: true,
+      selfApproved: true,
+    });
     const l2 = await panels.eligibleInterviewers(orgId, reqId, 2);
     expect(l2.people.some((p) => p.email === `gopal@${domain}`)).toBe(true);
   });

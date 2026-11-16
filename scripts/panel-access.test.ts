@@ -183,6 +183,10 @@ describe("the panel brief", () => {
         kind: "external",
       } as never)
       .returning({ id: panelists.id });
+    await db
+      .update(interviews)
+      .set({ panel: [{ name: "Ravi External", email: `ravi@client-${stamp}.example` }] } as never)
+      .where(eq(interviews.id, interviewId));
     const [iv] = await db
       .select({ scheduledAt: interviews.scheduledAt })
       .from(interviews)

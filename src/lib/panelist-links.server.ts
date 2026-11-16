@@ -107,6 +107,9 @@ async function resolve(token: string): Promise<Resolved | null> {
       applicationId: interviews.applicationId,
       level: interviews.level,
       scheduledAt: interviews.scheduledAt,
+      status: interviews.status,
+      interviewerEmail: interviews.interviewerEmail,
+      panel: interviews.panel,
       name: panelists.fullName,
       email: panelists.email,
       active: panelists.active,
@@ -138,6 +141,15 @@ async function resolve(token: string): Promise<Resolved | null> {
     .where(eq(panelistScorecardLinks.tokenHash, hashToken(token)))
     .limit(1);
   if (!r || !r.active) return null;
+  // Taken off the round (a substitute, a re-panel) or the round is cancelled:
+  // the link no longer opens.
+  const email = r.email.toLowerCase();
+  const onRound =
+    r.interviewerEmail?.toLowerCase() === email ||
+    ((r.panel as { email?: string | null }[] | null) ?? []).some(
+      (m) => m.email?.toLowerCase() === email,
+    );
+  if (!onRound || r.status === "cancelled") return null;
   return {
     linkId: r.linkId,
     orgId: r.orgId,
