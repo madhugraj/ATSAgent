@@ -151,6 +151,14 @@ export class RtpStream {
   }
 
   stop() {
+    // Local diagnosis only: the per-frame levels (numbers, no audio) of this call.
+    if (process.env["VOICE_ECHO_TRACE"])
+      void import("node:fs").then((fs) =>
+        fs.writeFileSync(
+          `/tmp/echo-trace-${Date.now()}.json`,
+          JSON.stringify({ stats: this.echo.stats(), ...this.echo.trace }),
+        ),
+      );
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     try {

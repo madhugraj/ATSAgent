@@ -100,6 +100,10 @@ export class EchoRemover {
   sent(pcm: Int16Array): void {
     this.tFar++;
     this.far[this.slot(this.tFar)] = rms(pcm);
+    if (this.trace.far.length < 30_000) {
+      this.trace.far.push(Math.round(this.far[this.slot(this.tFar)]!));
+      this.trace.near.push(0);
+    }
     // The near slot for this tick starts empty until a frame arrives.
     this.near[this.slot(this.tFar)] = 0;
   }
@@ -113,6 +117,7 @@ export class EchoRemover {
     const t = this.tFar;
     const level = rms(pcm);
     this.near[this.slot(t)] = level;
+    if (t < this.trace.near.length) this.trace.near[t] = Math.round(level);
     if (++this.sinceEstimate >= this.c.estimateEveryFrames) {
       this.sinceEstimate = 0;
       this.estimate(t);
@@ -132,6 +137,13 @@ export class EchoRemover {
     }
     return pcm;
   }
+
+  /** Level history for diagnosis (local only, VOICE_ECHO_TRACE): numbers, no audio. */
+  readonly trace: { far: number[]; near: number[]; estimates: unknown[] } = {
+    far: [],
+    near: [],
+    estimates: [],
+  };
 
   stats(): EchoStats {
     return {
@@ -178,7 +190,16 @@ export class EchoRemover {
         bestLag = lag;
       }
     }
-    if (best < this.c.minCorrelation) return;
+    const note = (why: string, extra: object = {}) =>
+      this.trace.estimates.length < 2_000 &&
+      this.trace.estimates.push({
+        t,
+        lag: bestLag,
+        r: Math.round(best * 100) / 100,
+        why,
+        ...extra,
+      });
+    if (best < this.c.minCorrelation) return void note("low_correlation");
     // How much comes back at that lag: a low percentile over frames we spoke in.
     // "Quiet" is relative to the line's own hiss: its floor is a low percentile
     // of everything heard lately.
@@ -201,12 +222,19 @@ export class EchoRemover {
       ratios.push(y / x);
       if (y >= quiet) heard++;
     }
-    if (ratios.length < this.c.minActiveFrames / 2) return;
-    if (heard / ratios.length < this.c.minEchoCoverage) return;
-    if (pauses >= this.c.minPauseFrames && quietPauses / pauses < this.c.minPauseQuiet) return;
+    const seen = {
+      coverage: Math.round((heard / Math.max(1, ratios.length)) * 100) / 100,
+      pauseQuiet: Math.round((quietPauses / Math.max(1, pauses)) * 100) / 100,
+      pauses,
+      quiet: Math.round(quiet),
+    };
+    if (ratios.length < this.c.minActiveFrames / 2) return void note("few_active", seen);
+    if (heard / ratios.length < this.c.minEchoCoverage) return void note("low_coverage", seen);
+    if (pauses >= this.c.minPauseFrames && quietPauses / pauses < this.c.minPauseQuiet)
+      return void note("pauses_not_quiet", seen);
     ratios.sort((a, b) => a - b);
     const g = ratios[Math.floor(ratios.length * this.c.gainPercentile)]!;
-    if (g < this.c.minReturn) return;
+    if (g < this.c.minReturn) return void note("low_return", { ...seen, g });
     // A real echo keeps its delay; a chance match moves as the talk moves on.
     if (this.candidateLag !== null && Math.abs(this.candidateLag - bestLag) <= 1)
       this.candidateHits++;
@@ -214,6 +242,7 @@ export class EchoRemover {
       this.candidateLag = bestLag;
       this.candidateHits = 1;
     }
+    note("candidate", { ...seen, g, hits: this.candidateHits });
     if (this.candidateHits < this.c.confirmEstimates) return;
     this.delay = bestLag;
     this.gain = this.gain === null ? g : 0.7 * this.gain + 0.3 * g;
