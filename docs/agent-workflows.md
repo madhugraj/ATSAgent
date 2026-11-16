@@ -24,9 +24,8 @@ goals not empty; at most 40 steps.
 
 ## More steps: hiring need, wait for, report
 
-- **Hiring need (manual) trigger** — the flow starts by hand with the need's text (`{{payload.need}}`): HR head
-  / CBO on **Agent administration → Agent workflows** in their organisation, or the super admin with **Run now**
-  (Runs tab) in an organisation they own. Its agents act for whoever starts it.
+- **Hiring need (manual) trigger** — the flow starts by hand with the need's text (`{{payload.need}}`): super
+  admin with **Run now** (Runs tab) in an organisation they own. Its agents act for whoever starts it.
 - **Wait for** — pauses until an event happens **on the flow's own role**, then continues; gives up after the
   timeout (hours, default 72, max 720). **Only when** (optional) keeps waiting until the event's payload matches,
   e.g. `requisition.status_changed` only when `payload.to` equals `approved`. Afterwards `wait.status` is
@@ -138,8 +137,8 @@ Template **Hiring need → requisition → JD → screening → report**, in an 
    tick the organisation.
 2. HR head of that organisation, **Agent settings**: switch on the Requisition, JD, Publishing and Screening
    agents (autonomy **Suggest**, so every external step waits for approval).
-3. **Agent administration → Agent workflows** → the workflow → type the need (e.g. _We need two AI engineers in
-   Chennai, hybrid, by March_) → **Start**. (Or super admin: Runs tab → **Run now**.)
+3. Super admin: Runs tab → **Run now** → type the need (e.g. _We need two AI engineers in Chennai, hybrid, by
+   March_).
 4. The Requisition agent drafts the role (approve its questions in **Waiting for you**) and submits it. The run
    waits for _requisition approved_.
 5. Approve the requisition as the approvers would. The run resumes: the JD agent drafts the JD; approve it.

@@ -196,14 +196,6 @@ describe("templates", () => {
 });
 
 describe("access", () => {
-  test("organisation workflow functions are org-scoped and need the HR head or CBO", () => {
-    const src = readFileSync("src/lib/org-workflows.functions.ts", "utf8");
-    const fns = src.match(/createServerFn\(/g)?.length ?? 0;
-    expect(fns).toBe(3);
-    expect(src.match(/\.middleware\(\[requireOrg\]\)/g)?.length ?? 0).toBe(fns);
-    expect(src.match(/await assertRoles\(context\)/g)?.length ?? 0).toBe(fns);
-    expect(src).toContain("workflowRunReport(data.runId, context.orgId)");
-  });
   test("every workflow server function is super admin only", () => {
     const src = readFileSync("src/lib/platform-agent-workflows.functions.ts", "utf8");
     const fns = src.match(/createServerFn\(/g)?.length ?? 0;
