@@ -7,6 +7,7 @@ import { randomInt } from "node:crypto";
 import dgram from "node:dgram";
 
 import { voiceDebug } from "./debug";
+import { EchoRemover, type EchoStats } from "./echo";
 import { decodeG711, encodeG711, PCMA, PCMU, type G711 } from "./g711";
 
 export const FRAME_SAMPLES = 160; // 20 ms at 8 kHz
@@ -35,6 +36,8 @@ export type AudioStats = {
   /** Send ticks more than 40 ms late. */
   lateTicks: number;
   maxLateMs: number;
+  /** The line's echo of the assistant: delay found, how much returns, frames removed. */
+  echo?: EchoStats;
 };
 
 export type Endpoint = { address: string; port: number };
@@ -74,6 +77,8 @@ export class RtpStream {
   /** Frame count when the queue last ran dry while playing, to tell a gap from a pause. */
   private dryAt: number | null = null;
   private readonly counts: AudioStats = { frames: 0, gaps: 0, lateTicks: 0, maxLateMs: 0 };
+  /** Our own voice coming back up the line is removed before anyone hears it. */
+  private readonly echo = new EchoRemover();
 
   /**
    * @param trusted addresses media may come from (the PBX and the address its
@@ -142,7 +147,7 @@ export class RtpStream {
 
   /** How smoothly the assistant's audio went out on this call (logged at the end). */
   audioStats(): AudioStats {
-    return { ...this.counts };
+    return { ...this.counts, echo: this.echo.stats() };
   }
 
   stop() {
@@ -184,6 +189,7 @@ export class RtpStream {
     view.setUint16(2, this.seq);
     view.setUint32(4, this.ts);
     view.setUint32(8, this.ssrc);
+    this.echo.sent(frame);
     packet.set(encodeG711(frame, this.pt), 12);
     this.sock.send(packet, this.remote.port, this.remote.address);
     this.seq = (this.seq + 1) & 0xffff;
@@ -200,6 +206,6 @@ export class RtpStream {
       this.remote = { address: rinfo.address, port: rinfo.port };
       this.latched = true;
     }
-    this.onAudio(decodeG711(rtp.payload, rtp.pt));
+    this.onAudio(this.echo.received(decodeG711(rtp.payload, rtp.pt)));
   }
 }
