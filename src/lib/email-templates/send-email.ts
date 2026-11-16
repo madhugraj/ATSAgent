@@ -11,6 +11,25 @@ const FROM_DOMAIN = "atsiq.yavar.ai";
 
 export type SendTemplateEmailResult = { sent: true };
 
+/**
+ * Addresses that can never receive mail (RFC 2606 / 6761 reserved names): test
+ * fixtures and placeholder candidates. Sending to them only bounces — 72 of
+ * 100 sends on 16 November bounced and used up the day's sending quota.
+ */
+export function undeliverableAddress(email: string): boolean {
+  const domain = email.trim().toLowerCase().split("@")[1] ?? "";
+  if (!domain) return true;
+  if (/\.(test|local|localhost|example|invalid)$/.test(domain)) return true;
+  return ["example.com", "example.org", "example.net"].includes(domain);
+}
+
+/**
+ * Under `bun test` (NODE_ENV=test) nothing reaches the mail relay, whatever
+ * SMTP_URL says: tests ran with the real relay configured and sent ~90 e-mails
+ * to made-up addresses in a day. What would have gone is kept here for tests.
+ */
+export const testOutbox: { template: string; to: string; subject: string }[] = [];
+
 export interface EmailAttachment {
   filename: string;
   contentBase64: string;
@@ -56,6 +75,15 @@ export async function sendTemplateEmail(
   const subject =
     typeof template.subject === "function" ? template.subject(templateData) : template.subject;
   const from = process.env["EMAIL_FROM"] || `${SITE_NAME} <noreply@${FROM_DOMAIN}>`;
+
+  if (process.env["NODE_ENV"] === "test") {
+    testOutbox.push({ template: templateName, to: recipient, subject });
+    return { sent: true };
+  }
+  if (undeliverableAddress(recipient)) {
+    console.warn(`[email] not sent: ${templateName} to a reserved test address`);
+    return { sent: true };
+  }
 
   const smtpUrl = process.env["SMTP_URL"];
   if (!smtpUrl) {
