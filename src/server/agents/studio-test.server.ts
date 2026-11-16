@@ -151,7 +151,16 @@ async function runScenario(
     }
     if (scenario.expectApproval && !gateTasks.length && !approvals)
       failures.push("It never asked a person for approval.");
-    const errors = steps.filter((x) => x.kind === "tool" && x.status === "error").length;
+    // A call the model got wrong and then corrected (invalid arguments) is normal;
+    // any other tool error fails the test.
+    const errors = steps.filter(
+      (x) =>
+        x.kind === "tool" &&
+        x.status === "error" &&
+        !String((x.output as { error?: unknown } | null)?.error ?? "").startsWith(
+          "Invalid arguments",
+        ),
+    ).length;
     if (errors) failures.push(`${errors} tool call${errors === 1 ? "" : "s"} failed.`);
     return {
       scenario: scenario.name,
