@@ -169,6 +169,32 @@ describe("dry-run tests", () => {
   });
 });
 
+describe("templates", () => {
+  test("every ready-made workflow uses real stock agents, passes the graph rules and its own tests", async () => {
+    const { ensureAgentsRegistered } = await import("../src/server/agents");
+    ensureAgentsRegistered();
+    const { listAgents } = await import("../src/server/agents/registry");
+    const stock = new Set(listAgents().map((a) => a.type as string));
+    const { WORKFLOW_TEMPLATES } = await import("../src/lib/workflow-templates");
+    expect(WORKFLOW_TEMPLATES.length).toBeGreaterThanOrEqual(4);
+    for (const t of WORKFLOW_TEMPLATES) {
+      expect({ id: t.id, problems: w.graphProblems(t.graph, (x) => stock.has(x)) }).toEqual({
+        id: t.id,
+        problems: [],
+      });
+      const r = w.runTests(t.graph, t.tests, 1);
+      expect({ id: t.id, failures: r.runs.flatMap((x) => x.failures) }).toEqual({
+        id: t.id,
+        failures: [],
+      });
+      expect(r.passed).toBe(true);
+      // Each branch is exercised by at least one test.
+      const ends = new Set(r.runs.map((x) => x.path[x.path.length - 1]));
+      expect(ends.size).toBeGreaterThanOrEqual(2);
+    }
+  });
+});
+
 describe("access", () => {
   test("every workflow server function is super admin only", () => {
     const src = readFileSync("src/lib/platform-agent-workflows.functions.ts", "utf8");

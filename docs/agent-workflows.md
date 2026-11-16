@@ -55,3 +55,61 @@ themselves.
 ## Audit
 
 `platform.agent_workflow.created|saved|tested|approved|published|granted|revoked|archived`.
+
+## Ready-made workflows
+
+**Start from a template** on the Agent workflows page creates a draft copy (with passing tests) to customise —
+swap in studio agents, edit goals and conditions, add steps. Templates live in `src/lib/workflow-templates.ts`
+and are checked by `scripts/agent-workflows.test.ts` (real stock agents, graph rules, every branch tested).
+
+| Template                                        | Trigger                      | Flow                                                                        |
+| ----------------------------------------------- | ---------------------------- | --------------------------------------------------------------------------- |
+| Shortlisted → screening, follow up if it stalls | `application.shortlisted`    | Screening agent → finished? yes: end · no: Follow-up agent reminds the team |
+| Role approved → draft the JD                    | `requisition.status_changed` | `payload.to` = approved? yes: JD agent · no: end                            |
+| JD approved → publish → advertise               | `jd.approved`                | Publishing agent → published? yes: Distribution agent · no: end             |
+| Final-round scorecard → evaluation              | `scorecard.submitted`        | `payload.finalRound` = true? yes: Evaluation agent · no: end                |
+
+Event fields the templates use: `application.shortlisted` → `payload.applicationIds`;
+`requisition.status_changed` → `payload.from`, `payload.to`; `scorecard.submitted` → `payload.applicationId`,
+`payload.level`, `payload.verdict`, `payload.finalRound`; `jd.approved` → `payload.requisitionId`.
+
+## Try it with real agents — sample scenario
+
+Template **Shortlisted → screening, follow up if it stalls**, in an organisation with its own AI key
+(locally: **Yavar**, role **REQ-2026-001 Head of AI**, candidates at _AI screened_). Real runs use real tokens.
+
+**Set up (super admin)**
+
+1. Platform → Agent workflows → **Use** on the template. Open **Tests** → **Test v1** → **Approve** →
+   **Publish**.
+2. **Organisations** → tick the organisation.
+
+**Set up (the organisation's HR head)**
+
+3. Agent settings → **Screening agent**: on, autonomy **Suggest** (every candidate email then waits for
+   your approval — at Autonomous it emails candidates on its own). **Follow-up agent**: on.
+
+**Run — the "yes" branch**
+
+4. Open the role → move **one or two candidates to Shortlisted**.
+5. Platform → Agent workflows → the workflow → **Runs**: _Started by application.shortlisted → Agent
+   started_ (status _waiting_).
+6. In the organisation: **Agent activity** shows the Screening run; **Waiting for you** shows its approvals
+   (assessment emails, screening kits) — approve or decline them.
+7. When the Screening agent finishes, **Runs** shows _Agent done → Yes → Ended_ at **Screened**.
+
+**Run — the "no" branch**
+
+8. Shortlist **another** candidate (each event starts the workflow once).
+9. In **Agent activity**, **stop** the new Screening run.
+10. **Runs**: _Agent cancelled → No → Agent started_ (Follow-up agent) → when it finishes, _Ended_ at
+    **Reminded**. The Follow-up agent's reminders appear for the people it chased.
+
+**Also check**
+
+- Switch the Screening agent **off** and shortlist again → the run fails with _screening is switched off_.
+- The built-in hand-off also starts screening on a shortlist; the workflow starts it first and the built-in
+  chain sees the run already working, so there is never a duplicate.
+
+**Clean up** — untick the organisation (live runs are cancelled) or archive the workflow, and put the agents'
+autonomy back.

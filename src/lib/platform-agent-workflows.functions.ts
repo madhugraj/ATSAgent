@@ -100,6 +100,8 @@ export type WorkflowRunRow = {
 };
 
 export type WorkflowBuilderView = {
+  /** Ready-made workflows to start from (src/lib/workflow-templates.ts). */
+  templates: { id: string; name: string; description: string; steps: number; trigger: string }[];
   events: readonly string[];
   agents: { type: string; name: string; studio: boolean }[];
   organisations: { id: string; name: string; status: string }[];
@@ -143,7 +145,15 @@ export const workflowBuilder = createServerFn({ method: "GET" })
             .limit(100)
         : [],
     ]);
+    const { WORKFLOW_TEMPLATES } = await import("./workflow-templates");
     return {
+      templates: WORKFLOW_TEMPLATES.map((t) => ({
+        id: t.id,
+        name: t.name,
+        description: t.description,
+        steps: t.graph.nodes.length,
+        trigger: t.graph.nodes.find((x) => x.kind === "trigger")?.data.event ?? "",
+      })),
       events: AGENT_EVENT_TYPES,
       agents: await agentPalette(),
       organisations: orgs,
@@ -458,4 +468,28 @@ export const archiveWorkflow = createServerFn({ method: "POST" })
     const cancelled = await (await wf()).cancelWorkflowRuns(data.id);
     await audit(context.userId, "archived", data.id, { cancelled });
     return { ok: true };
+  });
+
+const TemplateInput = z.object({ templateId: z.string().max(80) });
+
+/** A draft copy of a ready-made workflow (with its tests), to customise. */
+export const createWorkflowFromTemplate = createServerFn({ method: "POST" })
+  .middleware([requirePlatformAdmin])
+  .validator((d: unknown) => TemplateInput.parse(d))
+  .handler(async ({ data, context }): Promise<{ id: string }> => {
+    const { WORKFLOW_TEMPLATES } = await import("./workflow-templates");
+    const t = WORKFLOW_TEMPLATES.find((x) => x.id === data.templateId);
+    if (!t) throw new Error("Template not found.");
+    const [row] = await db
+      .insert(agentWorkflows)
+      .values({
+        name: t.name,
+        description: t.description,
+        graph: structuredClone(t.graph),
+        testScenarios: structuredClone(t.tests),
+        createdBy: context.userId,
+      })
+      .returning({ id: agentWorkflows.id });
+    await audit(context.userId, "created", row!.id, { template: t.id });
+    return { id: row!.id };
   });
