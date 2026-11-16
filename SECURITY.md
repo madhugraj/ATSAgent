@@ -396,3 +396,5 @@ schema; any instruction-like content is reported to the reviewer rather than
 acted upon. Upload, validation and rejection decisions are written to the audit
 log with the acting user, and offer release is refused server-side until every
 mandatory document type has been validated.
+
+**E-mail from tests and test data.** Under `bun test` (NODE_ENV=test) `sendTemplateEmail` never contacts the relay — what would have been sent is kept in memory (`testOutbox`) — and reserved test domains (`.test`, `.local`, `.example`, `.invalid`, `example.com/.org/.net`) are never mailed at all. Test runs had used the real relay and exhausted the daily quota with bounces, which also harms the sending domain's reputation.
