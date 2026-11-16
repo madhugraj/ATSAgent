@@ -133,13 +133,6 @@ export const NAV_GROUPS: NavGroup[] = [
         show: (c) => c.governance,
         mode: "agent",
       },
-      {
-        to: "/agents/workflows",
-        label: "Agent workflows",
-        icon: Workflow,
-        show: (c) => c.governance,
-        mode: "agent",
-      },
     ],
   },
   {
