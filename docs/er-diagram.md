@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-113 tables across 9 domains.
+115 tables across 9 domains.
 
 ## Identity & access
 
@@ -1180,6 +1180,7 @@ erDiagram
 | `agent_blueprint_keys` | `created_by` | `users` | no action |
 | `agent_blueprint_keys` | `org_id` | `organizations` | cascade |
 | `agent_blueprint_keys` | `principal_user_id` | `users` | cascade |
+| `agent_blueprints` | `approved_by` | `users` | no action |
 | `agent_blueprints` | `created_by` | `users` | no action |
 | `agent_blueprints` | `workspace_org_id` | `organizations` | no action |
 | `agent_cost_rates` | `org_id` | `organizations` | cascade |
@@ -1414,6 +1415,12 @@ erDiagram
 | `source_integrations` | `org_id` | `organizations` | cascade |
 | `stage_events` | `application_id` | `applications` | cascade |
 | `stage_events` | `org_id` | `organizations` | cascade |
+| `studio_agent_grants` | `blueprint_id` | `agent_blueprints` | cascade |
+| `studio_agent_grants` | `granted_by` | `users` | no action |
+| `studio_agent_grants` | `org_id` | `organizations` | cascade |
+| `studio_agent_versions` | `approved_by` | `users` | no action |
+| `studio_agent_versions` | `blueprint_id` | `agent_blueprints` | cascade |
+| `studio_agent_versions` | `published_by` | `users` | no action |
 | `talent_request_suggestions` | `candidate_id` | `candidates` | cascade |
 | `talent_request_suggestions` | `org_id` | `organizations` | no action |
 | `talent_request_suggestions` | `request_id` | `talent_requests` | cascade |
@@ -1442,7 +1449,7 @@ erDiagram
 | Table | Domain | Columns | Unique constraints |
 |---|---|---|---|
 | `agent_blueprint_keys` | — | 11 | (key_hash) |
-| `agent_blueprints` | — | 18 | — |
+| `agent_blueprints` | — | 29 | (type_slug) |
 | `agent_cost_rates` | — | 6 | — |
 | `agent_definitions` | — | 6 | (agentType+hash) |
 | `agent_events` | — | 13 | — |
@@ -1545,6 +1552,8 @@ erDiagram
 | `social_profiles` | Candidates & pipeline | 13 | (candidateId+provider) |
 | `source_integrations` | Sourcing & integrations | 17 | (orgId+provider) |
 | `stage_events` | Candidates & pipeline | 9 | — |
+| `studio_agent_grants` | — | 6 | — |
+| `studio_agent_versions` | — | 11 | (blueprintId+version) |
 | `talent_request_suggestions` | Candidates & pipeline | 8 | (requestId+candidateId) |
 | `talent_requests` | Candidates & pipeline | 10 | — |
 | `training_eval_results` | — | 13 | — |

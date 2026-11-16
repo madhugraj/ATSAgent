@@ -301,23 +301,29 @@ Rows are deleted with the organisation; the audit entries remain.
 ## Agent studio and hosted agent API
 
 Agent studio is a platform console page (`/platform-agent-studio`); every server function in
-`src/lib/platform-agent-studio.functions.ts` is `requirePlatformAdmin`, and no organisation route or
-menu reaches it. A blueprint (`agent_blueprints`, migration 0080) adapts a stock agent to another domain.
-`blueprintProblem` (`src/server/agents/blueprints.server.ts`) refuses tools outside the stock agent,
-renamed tools that read as a human decision (`isGateToolName`, the same ban the registry applies),
-names that drop or add a propose_/request_/submit_ prefix or clash with the human tools, empty
-instructions or must-never lists, and raised step limits. The injection and operating rules are always
-prepended and cannot be edited; tool inputs stay the stock contracts, and renamed calls are mapped back
-to the real tool, so every tool-level check (approvals, pre-approved templates, policy) still applies.
+`src/lib/platform-agent-studio.functions.ts` is `requirePlatformAdmin`, and no organisation route reaches
+it. Studio agents (`agent_blueprints`, migrations 0080 and 0082) are built only from the studio's tool
+catalogue (stock tools minus identity-bound ones). `blueprintProblem` (`src/server/agents/blueprints.server.ts`)
+refuses other tools, renamed tools that read as a human decision (`isGateToolName`, the registry's own ban),
+names that drop or add a propose_/request_/submit_ prefix or clash with the human tools, unknown roles or
+decision kinds, empty instructions or must-never lists, and raised step limits. The injection and operating
+rules are always prepended; tool inputs stay the stock contracts and renamed calls run the real tool, so every
+tool-level check (approvals, pre-approved templates, policy, org scoping) still applies.
 
-Blueprints never affect in-app runs. Hosted runs execute only in the blueprint's workspace organisation,
-which the super admin must own, using that organisation's own AI key and agent policy (no platform key).
-`/api/agents/*` and `/api/mcp` take platform-issued keys (`atsk_…`): only the SHA-256 hash and a short
-prefix are stored, the key is shown once, and revoked keys, unpublished or archived blueprints, a changed
-workspace, or a principal who no longer owns the workspace are refused. Requests are rate-limited per
-caller per path (60/min) and per key (30/min) in `src/server.ts`. Runs are readable only with a key of the
-same blueprint and workspace. Every change, download, key and API start is audited
-(`platform.agent_blueprint.*`). Responses and packages carry no AI vendor or model fields.
+Lifecycle: a version must pass its sample-data tests (`studio-test.server.ts`: stand-in tools in a test
+organisation the super admin owns, on its own AI key — nothing real is read or changed) before it can be
+approved (`approveProblem`; self-approval is recorded), and only an approved version can be published
+(`publishProblem`) as an immutable manifest in `studio_agent_versions`. Runs of `studio:<slug>` resolve to the
+published version **only in organisations holding a live grant** (`studio_agent_grants`; checked on every
+start and step), pin the version they started on, and still need the organisation's own switch, autonomy and
+budget. Withdrawing a grant refuses new runs and cancels open ones. Every step is audited
+(`platform.studio_agent.*`).
+
+`/api/agents/*` and `/api/mcp` take platform-issued keys (`atsk_…`): only the SHA-256 hash and a short prefix
+are stored, the key is shown once, and revoked keys, unpublished or archived agents, a changed workspace, a
+workspace without a grant, or a principal who no longer owns it are refused. Requests are rate-limited per
+caller per path (60/min) and per key (30/min) in `src/server.ts`. Responses and packages carry no AI vendor or
+model fields.
 
 ## Training data
 

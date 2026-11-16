@@ -36,6 +36,10 @@ export const HEALTH = {
   stuckLeaseMinutes: 15,
   /** Failed runs per agent in 24 h that trip the failure rule. */
   failedRuns24h: 3,
+  /** Agent studio agent: share of its runs in an organisation that failed over 7 days… */
+  studioFailShare: 0.5,
+  /** …counted once it has at least this many runs there. */
+  studioMinRuns: 4,
   /** Tool error rate over 24 h (with at least `minToolCalls`). */
   toolErrorRate: 0.2,
   minToolCalls: 10,
@@ -175,6 +179,27 @@ const rows = async <T>(q: ReturnType<typeof sql>) => (await db.execute(q)) as un
 /* ------------------------------------------------------------------ rules */
 
 export const RULES: Rule[] = [
+  {
+    id: "definition.studio_agent_failing",
+    element: "definition",
+    severity: "warning",
+    description: `An Agent studio agent (built by the platform and granted to this organisation) failed in at least ${Math.round(HEALTH.studioFailShare * 100)}% of its runs here over 7 days. Its published version may not fit this organisation's data or settings; the platform team can test it again with sample data, or withdraw it.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ agent_type: string; failed: number; total: number }>(sql`
+        select agent_type, count(*) filter (where status = 'failed')::int failed, count(*)::int total
+        from agent_runs
+        where org_id = ${orgId} and agent_type like 'studio:%' and agent_type not like 'studio:test\_%'
+          and created_at > now() - interval '7 days' and status in ('done', 'failed')
+        group by agent_type
+        having count(*) >= ${HEALTH.studioMinRuns}::int
+          and count(*) filter (where status = 'failed') >= ${HEALTH.studioFailShare}::float8 * count(*)`);
+      return r.map((x) => ({
+        agentType: x.agent_type,
+        title: `${x.failed} of ${x.total} runs failed in 7 days`,
+        detail: { failed: x.failed, total: x.total },
+      }));
+    },
+  },
   {
     id: "harness.autonomous_unverified",
     element: "harness",

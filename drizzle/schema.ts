@@ -2255,7 +2255,8 @@ export const boardSyncState = pgTable(
 /* ------------------------------------------------------------ agents (0024) */
 /* docs/agentic-plan.md §7. Statuses are app-level text, like email_outbox. */
 
-export type AgentType =
+/** The agents built in code (src/server/agents/definitions.ts). */
+export type StockAgentType =
   | "copilot"
   | "requisition"
   | "jd"
@@ -2279,6 +2280,12 @@ export type AgentType =
   | "panel_l3"
   | "voice_guard"
   | "labour_policy";
+/**
+ * Every agent type: the stock agents, plus Agent studio agents the platform
+ * super admin publishes (`studio:<slug>`, migration 0082), which run only in
+ * the organisations granted them.
+ */
+export type AgentType = StockAgentType | `studio:${string}`;
 export type AgentAutonomy = "suggest" | "act_and_notify" | "autonomous";
 export type AgentRunStatus =
   "queued" | "running" | "awaiting_human" | "done" | "failed" | "cancelled";
@@ -2356,7 +2363,42 @@ export const agentEvents = pgTable(
   ],
 );
 
-export type AgentBlueprintStatus = "draft" | "published" | "archived";
+/**
+ * Studio agent lifecycle (migration 0082): a working copy is draft → tested →
+ * approved → published. Editing a published agent starts a new draft while the
+ * last published version keeps running (`publishedVersion`).
+ */
+export type AgentBlueprintStatus = "draft" | "tested" | "approved" | "published" | "archived";
+
+/** A studio agent's test: sample data per tool instead of the real tools. */
+export type StudioTestScenario = {
+  name: string;
+  goal: string;
+  /** Real tool name → the JSON the stand-in returns (the sample data). */
+  fixtures: Record<string, unknown>;
+  /** Tools that must be called, in this relative order (real names). */
+  expectCalls?: string[];
+  /** The agent must ask a person (request_approval) before finishing. */
+  expectApproval?: boolean;
+};
+
+export type StudioTestResult = {
+  version: number;
+  passed: boolean;
+  at: string;
+  orgId: string;
+  runs: {
+    scenario: string;
+    runId: string | null;
+    passed: boolean;
+    failures: string[];
+    calls: string[];
+    status: string;
+    steps: number;
+    tokens: number;
+    result: string | null;
+  }[];
+};
 
 /** A blueprint's renamed tool: what the model and the package see for a real tool. */
 export type BlueprintToolOverride = { name: string; description: string };
@@ -2402,11 +2444,81 @@ export const agentBlueprints = pgTable(
     workspaceOrgId: uuid("workspace_org_id").references(() => organizations.id, {
       onDelete: "set null",
     }),
+    /** adapted from a stock agent, or new (built from the tool catalogue). Migration 0082. */
+    origin: text("origin").$type<"adapted" | "new">().notNull().default("adapted"),
+    /** Runtime agent type, `studio:<slug>`; set on first save, never changes. */
+    typeSlug: text("type_slug"),
+    riskTier: text("risk_tier").$type<"low" | "medium" | "high">().notNull().default("medium"),
+    ownerRole: text("owner_role").notNull().default("hr_head"),
+    gates: jsonb("gates").$type<string[]>().notNull().default(sql`'["general"]'::jsonb`),
+    scope: jsonb("scope")
+      .$type<{ reads: string[]; writes: string[]; external: string[] }>()
+      .notNull()
+      .default(sql`'{"reads":[],"writes":[],"external":[]}'::jsonb`),
+    testScenarios: jsonb("test_scenarios")
+      .$type<StudioTestScenario[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    lastTest: jsonb("last_test").$type<StudioTestResult>(),
+    approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    /** The version that runs (null = never published). */
+    publishedVersion: integer("published_version"),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("agent_blueprints_status_idx").on(t.status, t.updatedAt)],
+  (t) => [
+    index("agent_blueprints_status_idx").on(t.status, t.updatedAt),
+    uniqueIndex("agent_blueprints_type_slug_key").on(t.typeSlug),
+  ],
+);
+
+/**
+ * The immutable manifest of each published studio agent version: what runs
+ * execute (migration 0082). Written once on publish; never updated.
+ */
+export const studioAgentVersions = pgTable(
+  "studio_agent_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    blueprintId: uuid("blueprint_id")
+      .notNull()
+      .references(() => agentBlueprints.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    typeSlug: text("type_slug").notNull(),
+    manifest: jsonb("manifest").$type<Record<string, unknown>>().notNull(),
+    hash: text("hash").notNull(),
+    test: jsonb("test").$type<StudioTestResult>().notNull(),
+    approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }).notNull(),
+    publishedBy: uuid("published_by").references(() => users.id, { onDelete: "set null" }),
+    publishedAt: timestamp("published_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("studio_agent_versions_key").on(t.blueprintId, t.version)],
+);
+
+/** Organisations a studio agent is granted to by the super admin (migration 0082). */
+export const studioAgentGrants = pgTable(
+  "studio_agent_grants",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    blueprintId: uuid("blueprint_id")
+      .notNull()
+      .references(() => agentBlueprints.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    grantedBy: uuid("granted_by").references(() => users.id, { onDelete: "set null" }),
+    grantedAt: timestamp("granted_at", { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("studio_agent_grants_live_key")
+      .on(t.blueprintId, t.orgId)
+      .where(sql`${t.revokedAt} is null`),
+    index("studio_agent_grants_org_idx").on(t.orgId),
+  ],
 );
 
 /**

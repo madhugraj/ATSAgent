@@ -79,6 +79,17 @@ const open = () =>
 const evaluate = () => evaluateAgentHealth({ orgId });
 
 describe("rules", () => {
+  test("a studio agent failing in most of its runs here is flagged; studio tests are not", async () => {
+    for (const status of ["failed", "failed", "done", "failed"])
+      await run("studio:psychometric", { status });
+    for (const status of ["failed", "failed", "failed", "failed"])
+      await run("studio:test_abcd1234", { status });
+    await evaluate();
+    const flagged = (await open()).filter((i) => i.rule === "definition.studio_agent_failing");
+    expect(flagged.map((i) => i.agentType)).toEqual(["studio:psychometric"]);
+    expect(flagged[0]!.severity).toBe("warning");
+  });
+
   test("stuck run: critical while stuck, resolved (and audited) when it clears", async () => {
     const id = await run("intake", {
       status: "running",
