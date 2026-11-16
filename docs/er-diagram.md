@@ -1462,6 +1462,7 @@ erDiagram
 | `user_roles` | `org_id` | `organizations` | cascade |
 | `user_roles` | `user_id` | `users` | cascade |
 | `workflow_runs` | `org_id` | `organizations` | cascade |
+| `workflow_runs` | `started_by` | `users` | no action |
 | `workflow_runs` | `trigger_event_id` | `agent_events` | no action |
 | `workflow_runs` | `workflow_id` | `agent_workflows` | cascade |
 
@@ -1589,4 +1590,4 @@ erDiagram
 | `user_roles` | Identity & access | 4 | — |
 | `users` | Identity & access | 8 | (email) |
 | `voice_worker_heartbeat` | — | 4 | — |
-| `workflow_runs` | — | 14 | (workflowId+triggerEventId) |
+| `workflow_runs` | — | 17 | (workflowId+triggerEventId) |

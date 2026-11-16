@@ -26,6 +26,10 @@ import {
   Bot,
   CircleCheck,
   CircleStop,
+  Download,
+  FileText,
+  Hourglass,
+  Play,
   CircleX,
   FlaskConical,
   GitBranch,
@@ -63,6 +67,8 @@ import {
   revokeWorkflow,
   saveWorkflow,
   testWorkflow,
+  platformWorkflowReport,
+  runWorkflowNow,
   workflowBuilder,
   type SaveWorkflowInput,
   type WorkflowBuilderView,
@@ -79,10 +85,11 @@ export const Route = createFileRoute("/platform-agent-workflows")({
   component: WorkflowsPage,
 });
 
-type Kind = "trigger" | "agent" | "condition" | "end";
+type Kind = "trigger" | "agent" | "condition" | "wait" | "report" | "end";
 type NodeData = {
   label?: string | undefined;
   event?: string | undefined;
+  timeoutHours?: number | undefined;
   agentType?: string | undefined;
   goal?: string | undefined;
   field?: string | undefined;
@@ -117,7 +124,8 @@ const outcomesOf = (json: string): Record<string, { status: string; result: stri
   }
 };
 const errorText = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
-const eventLabel = (e?: string) => (e ? e.replace(/[._]/g, " ") : "Pick an event");
+const eventLabel = (e?: string) =>
+  e === "manual" ? "Hiring need (manual)" : e ? e.replace(/[._]/g, " ") : "Pick an event";
 
 /* ----------------------------------------------------------------- nodes */
 
@@ -209,6 +217,38 @@ function ConditionNode({ data, selected }: NodeProps<FlowNode>) {
   );
 }
 
+function WaitNode({ data, selected }: NodeProps<FlowNode>) {
+  return (
+    <>
+      <Handle type="target" position={Position.Top} />
+      <Box
+        tone="border-violet-400/70"
+        icon={<Hourglass className="size-3.5 text-violet-500" />}
+        title={data.label || "Wait for"}
+        sub={`${eventLabel(data.event)}${data.field ? ` · ${data.field} ${OP_LABEL[data.op ?? "eq"]} ${data.op === "exists" ? "" : (data.value ?? "")}` : ""} · up to ${data.timeoutHours ?? 72} h`}
+        selected={selected}
+      />
+      <Handle type="source" position={Position.Bottom} />
+    </>
+  );
+}
+
+function ReportNode({ data, selected }: NodeProps<FlowNode>) {
+  return (
+    <>
+      <Handle type="target" position={Position.Top} />
+      <Box
+        tone="border-emerald-400/70"
+        icon={<FileText className="size-3.5 text-emerald-600" />}
+        title={data.label || "Report"}
+        sub="PDF · Excel"
+        selected={selected}
+      />
+      <Handle type="source" position={Position.Bottom} />
+    </>
+  );
+}
+
 function EndNode({ data, selected }: NodeProps<FlowNode>) {
   return (
     <>
@@ -224,6 +264,8 @@ function EndNode({ data, selected }: NodeProps<FlowNode>) {
 }
 
 const nodeTypes = {
+  wait: WaitNode,
+  report: ReportNode,
   trigger: TriggerNode,
   agent: AgentNode,
   condition: ConditionNode,
@@ -667,6 +709,16 @@ function Editor({
                       "Condition",
                       <GitBranch key="c" className="size-3.5 text-sky-500" />,
                     ],
+                    [
+                      "wait",
+                      "Wait for",
+                      <Hourglass key="w" className="size-3.5 text-violet-500" />,
+                    ],
+                    [
+                      "report",
+                      "Report",
+                      <FileText key="r" className="size-3.5 text-emerald-600" />,
+                    ],
                     ["end", "End", <CircleStop key="e" className="size-3.5" />],
                   ] as const
                 ).map(([kind, label, icon]) => (
@@ -831,6 +883,7 @@ function Properties({
               <SelectValue placeholder="Pick an event" />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="manual">{eventLabel("manual")}</SelectItem>
               {view.events.map((e) => (
                 <SelectItem key={e} value={e}>
                   {eventLabel(e)}
@@ -839,6 +892,76 @@ function Properties({
             </SelectContent>
           </Select>
         </div>
+      ) : null}
+      {node.type === "wait" ? (
+        <>
+          <div>
+            <Label className="text-xs">Wait for</Label>
+            <Select value={d.event ?? ""} onValueChange={(v) => setData({ event: v })}>
+              <SelectTrigger className="mt-1 h-8">
+                <SelectValue placeholder="Pick an event" />
+              </SelectTrigger>
+              <SelectContent>
+                {view.events.map((e) => (
+                  <SelectItem key={e} value={e}>
+                    {eventLabel(e)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs">Only when</Label>
+            <Input
+              className="mt-1 h-8 font-mono text-xs"
+              placeholder="payload.to"
+              value={d.field ?? ""}
+              onChange={(e) => setData({ field: e.target.value || undefined })}
+            />
+            {d.field ? (
+              <div className="mt-1 flex gap-1">
+                <Select
+                  value={d.op ?? "eq"}
+                  onValueChange={(v) => setData({ op: v as NodeData["op"] })}
+                >
+                  <SelectTrigger className="h-8 w-28">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(OP_LABEL).map(([k, v]) => (
+                      <SelectItem key={k} value={k}>
+                        {v}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {d.op !== "exists" ? (
+                  <Input
+                    className="h-8"
+                    placeholder="approved"
+                    value={d.value ?? ""}
+                    onChange={(e) => setData({ value: e.target.value })}
+                  />
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+          <div>
+            <Label className="text-xs" htmlFor="wf-timeout">
+              Give up after (hours)
+            </Label>
+            <Input
+              id="wf-timeout"
+              className="mt-1 h-8 w-28"
+              inputMode="numeric"
+              value={String(d.timeoutHours ?? 72)}
+              onChange={(e) => {
+                const v = Number(e.target.value.replace(/\D/g, ""));
+                setData({ timeoutHours: v || undefined });
+              }}
+            />
+          </div>
+        </>
       ) : null}
       {node.type === "agent" ? (
         <>
@@ -871,7 +994,7 @@ function Properties({
               onChange={(e) => setData({ goal: e.target.value })}
             />
             <p className="mt-1 font-mono text-[10px] text-muted-foreground">
-              {"{{payload.<field>}} {{subject_type}} {{last.result}}"}
+              {"{{payload.need}} {{payload.<field>}} {{last.result}}"}
             </p>
           </div>
         </>
@@ -885,7 +1008,7 @@ function Properties({
             <Input
               id="wf-field"
               className="mt-1 h-8 font-mono text-xs"
-              placeholder="last.status · payload.level"
+              placeholder="last.status · wait.status · payload.level"
               value={d.field ?? ""}
               onChange={(e) => setData({ field: e.target.value })}
             />
@@ -953,7 +1076,9 @@ function Tests({
   const outcomesTemplate = () =>
     JSON.stringify(
       Object.fromEntries(
-        nodes.filter((n) => n.type === "agent").map((n) => [n.id, { status: "done", result: "" }]),
+        nodes
+          .filter((n) => n.type === "agent" || n.type === "wait")
+          .map((n) => [n.id, { status: "done", result: "" }]),
       ),
       null,
       2,
@@ -1019,7 +1144,7 @@ function Tests({
             <Label className="text-xs">How each agent ends</Label>
             <div className="mt-1 space-y-1.5">
               {nodes
-                .filter((n) => n.type === "agent")
+                .filter((n) => n.type === "agent" || n.type === "wait")
                 .map((n) => {
                   const all = outcomesOf(t.outcomesJson);
                   const o = all[n.id] ?? { status: "done", result: "" };
@@ -1035,8 +1160,12 @@ function Tests({
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="done">finishes</SelectItem>
-                          <SelectItem value="failed">fails</SelectItem>
+                          <SelectItem value="done">
+                            {n.type === "wait" ? "happens" : "finishes"}
+                          </SelectItem>
+                          <SelectItem value="failed">
+                            {n.type === "wait" ? "times out" : "fails"}
+                          </SelectItem>
                         </SelectContent>
                       </Select>
                       <Input
@@ -1062,7 +1191,9 @@ function Tests({
                 ...cur,
                 {
                   name: `Test ${cur.length + 1}`,
-                  payloadJson: "{}",
+                  payloadJson: nodes.some((n) => n.type === "trigger" && n.data.event === "manual")
+                    ? JSON.stringify({ need: "" }, null, 2)
+                    : "{}",
                   subjectType: "requisition",
                   outcomesJson: outcomesTemplate(),
                   expectEnd: "",
@@ -1159,38 +1290,122 @@ function Runs({
   nodes: FlowNode[];
 }) {
   const runs = view.runs.filter((r) => r.workflowId === workflow.id);
+  const [org, setOrg] = useState("");
+  const [need, setNeed] = useState("");
+  const [busy, setBusy] = useState(false);
+  const qc = useQueryClient();
+  const manual = workflow.graph.nodes.some(
+    (n) => n.kind === "trigger" && n.data.event === "manual",
+  );
+  const startable = view.owned.filter((o) => workflow.grants.includes(o.id));
   const label = (id: string) => {
     const n = nodes.find((x) => x.id === id);
     return n ? n.data.label || n.data.agentType || n.type : id;
   };
-  if (!runs.length) return <p className="text-sm text-muted-foreground">No runs yet.</p>;
+  const download = async (runId: string, kind: "pdf" | "xlsx") => {
+    try {
+      const r = await platformWorkflowReport({ data: { runId } });
+      const { downloadWorkflowRunReport } = await import("@/lib/agent-reports");
+      downloadWorkflowRunReport(kind, r);
+    } catch (e) {
+      toast.error(errorText(e, "Could not build the report"));
+    }
+  };
   return (
-    <ul className="divide-y rounded-md border text-sm">
-      {runs.map((r) => (
-        <li key={r.id} className="space-y-1 px-3 py-2">
-          <div className="flex items-center gap-2">
-            <Badge
-              variant={
-                r.status === "failed"
-                  ? "destructive"
-                  : r.status === "done"
-                    ? "default"
-                    : "secondary"
-              }
+    <div className="space-y-3">
+      {manual && workflow.publishedVersion ? (
+        <div className="space-y-2 rounded-md border p-3">
+          <div className="flex gap-2">
+            <Select value={org} onValueChange={setOrg}>
+              <SelectTrigger className="h-8 w-64">
+                <SelectValue placeholder="Organisation" />
+              </SelectTrigger>
+              <SelectContent>
+                {startable.map((o) => (
+                  <SelectItem key={o.id} value={o.id}>
+                    {o.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              size="sm"
+              disabled={busy || !org || need.trim().length < 5}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  await runWorkflowNow({ data: { id: workflow.id, orgId: org, need } });
+                  toast.success("Started");
+                  setNeed("");
+                  await qc.invalidateQueries({ queryKey: ["platform_agent_workflows"] });
+                } catch (e) {
+                  toast.error(errorText(e, "Could not start"));
+                } finally {
+                  setBusy(false);
+                }
+              }}
             >
-              {r.status}
-            </Badge>
-            <span className="font-medium">{r.orgName}</span>
-            <span className="text-xs text-muted-foreground">
-              v{r.version} · {new Date(r.createdAt).toLocaleString()}
-            </span>
+              <Play className="size-4" /> Run now
+            </Button>
           </div>
-          <div className="text-xs text-muted-foreground">
-            {r.history.map((h) => `${label(h.node)}: ${h.note}`).join(" → ")}
-          </div>
-          {r.error ? <div className="text-xs text-destructive">{r.error}</div> : null}
-        </li>
-      ))}
-    </ul>
+          <Textarea
+            className="min-h-16 text-sm"
+            placeholder="Hiring need, e.g. We need two AI engineers in Chennai by March"
+            value={need}
+            maxLength={4000}
+            onChange={(e) => setNeed(e.target.value)}
+          />
+        </div>
+      ) : null}
+      {!runs.length ? (
+        <p className="text-sm text-muted-foreground">No runs yet.</p>
+      ) : (
+        <ul className="divide-y rounded-md border text-sm">
+          {runs.map((r) => (
+            <li key={r.id} className="space-y-1 px-3 py-2">
+              <div className="flex items-center gap-2">
+                <Badge
+                  variant={
+                    r.status === "failed"
+                      ? "destructive"
+                      : r.status === "done"
+                        ? "default"
+                        : "secondary"
+                  }
+                >
+                  {r.status}
+                </Badge>
+                <span className="font-medium">{r.orgName}</span>
+                <span className="text-xs text-muted-foreground">
+                  v{r.version} · {new Date(r.createdAt).toLocaleString()}
+                </span>
+                <div className="ml-auto flex gap-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7"
+                    onClick={() => download(r.id, "pdf")}
+                  >
+                    <Download className="size-3.5" /> PDF
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7"
+                    onClick={() => download(r.id, "xlsx")}
+                  >
+                    <Download className="size-3.5" /> Excel
+                  </Button>
+                </div>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {r.history.map((h) => `${label(h.node)}: ${h.note}`).join(" → ")}
+              </div>
+              {r.error ? <div className="text-xs text-destructive">{r.error}</div> : null}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }

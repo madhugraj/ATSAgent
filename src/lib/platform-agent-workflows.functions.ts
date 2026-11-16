@@ -100,6 +100,8 @@ export type WorkflowRunRow = {
 };
 
 export type WorkflowBuilderView = {
+  /** Organisations the super admin owns (where Run now can start a manual workflow). */
+  owned: { id: string; name: string }[];
   /** Ready-made workflows to start from (src/lib/workflow-templates.ts). */
   templates: { id: string; name: string; description: string; steps: number; trigger: string }[];
   events: readonly string[];
@@ -111,7 +113,7 @@ export type WorkflowBuilderView = {
 
 export const workflowBuilder = createServerFn({ method: "GET" })
   .middleware([requirePlatformAdmin])
-  .handler(async (): Promise<WorkflowBuilderView> => {
+  .handler(async ({ context }): Promise<WorkflowBuilderView> => {
     const { AGENT_EVENT_TYPES } = await import("../server/agents/events");
     const rows = await db
       .select()
@@ -146,7 +148,20 @@ export const workflowBuilder = createServerFn({ method: "GET" })
         : [],
     ]);
     const { WORKFLOW_TEMPLATES } = await import("./workflow-templates");
+    const { orgMembers } = await import("@db/schema");
+    const owned = await db
+      .select({ id: organizations.id, name: organizations.name })
+      .from(orgMembers)
+      .innerJoin(organizations, eq(organizations.id, orgMembers.orgId))
+      .where(
+        and(
+          eq(orgMembers.userId, context.userId),
+          eq(orgMembers.status, "active"),
+          eq(orgMembers.isOwner, true),
+        ),
+      );
     return {
+      owned,
       templates: WORKFLOW_TEMPLATES.map((t) => ({
         id: t.id,
         name: t.name,
@@ -192,11 +207,12 @@ export const workflowBuilder = createServerFn({ method: "GET" })
 
 const Node = z.object({
   id: z.string().min(1).max(60),
-  kind: z.enum(["trigger", "agent", "condition", "end"]),
+  kind: z.enum(["trigger", "agent", "condition", "wait", "report", "end"]),
   position: z.object({ x: z.number().finite(), y: z.number().finite() }),
   data: z.object({
     label: z.string().max(80).optional(),
     event: z.string().max(60).optional(),
+    timeoutHours: z.number().int().min(1).max(720).optional(),
     agentType: z.string().max(80).optional(),
     goal: z.string().max(2000).optional(),
     field: z.string().max(120).optional(),
@@ -492,4 +508,44 @@ export const createWorkflowFromTemplate = createServerFn({ method: "POST" })
       .returning({ id: agentWorkflows.id });
     await audit(context.userId, "created", row!.id, { template: t.id });
     return { id: row!.id };
+  });
+
+const RunNowInput = z.object({
+  id: z.string().uuid(),
+  orgId: z.string().uuid(),
+  need: z.string().trim().min(5).max(4000),
+});
+
+/**
+ * Start a published manual (hiring-need) workflow now, in an organisation
+ * the super admin owns and that holds a grant. Its agents act for the caller.
+ */
+export const runWorkflowNow = createServerFn({ method: "POST" })
+  .middleware([requirePlatformAdmin])
+  .validator((d: unknown) => RunNowInput.parse(d))
+  .handler(async ({ data, context }): Promise<{ runId: string }> => {
+    const { isWorkspaceOwner } = await import("../server/agents/blueprints.server");
+    if (!(await isWorkspaceOwner(context.userId, data.orgId)))
+      throw new Error("Start it in an organisation you own.");
+    const { startWorkflowManually } = await wf();
+    const r = await startWorkflowManually({
+      workflowId: data.id,
+      orgId: data.orgId,
+      userId: context.userId,
+      need: data.need,
+    });
+    await audit(context.userId, "started", data.id, { runId: r.runId }, data.orgId);
+    return r;
+  });
+
+const ReportInput = z.object({ runId: z.string().uuid() });
+
+/** A workflow run's report data (rendered as PDF or Excel in the browser). */
+export const platformWorkflowReport = createServerFn({ method: "GET" })
+  .middleware([requirePlatformAdmin])
+  .validator((d: unknown) => ReportInput.parse(d))
+  .handler(async ({ data }) => {
+    const r = await (await wf()).workflowRunReport(data.runId);
+    if (!r) throw new Error("Run not found.");
+    return r;
   });

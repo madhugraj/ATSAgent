@@ -2665,7 +2665,7 @@ export const agentBlueprintKeys = pgTable(
 /* -------------------------------------------- agent workflows (0083) */
 /* docs/agent-workflows.md: platform-built flows of agents, granted per org. */
 
-export type WorkflowNodeKind = "trigger" | "agent" | "condition" | "end";
+export type WorkflowNodeKind = "trigger" | "agent" | "condition" | "wait" | "report" | "end";
 
 export type WorkflowNode = {
   id: string;
@@ -2673,8 +2673,10 @@ export type WorkflowNode = {
   position: { x: number; y: number };
   data: {
     label?: string;
-    /** trigger: the domain event that starts the flow. */
+    /** trigger: the domain event that starts the flow, or "manual" (a hiring need). wait: the event awaited. */
     event?: string;
+    /** wait: hours before it gives up (default 72). */
+    timeoutHours?: number;
     /** agent: stock agent type or `studio:<slug>`, and its goal (may use {{fields}}). */
     agentType?: string;
     goal?: string;
@@ -2804,6 +2806,11 @@ export const workflowRuns = pgTable(
     waitingRunId: uuid("waiting_run_id").references((): AnyPgColumn => agentRuns.id, {
       onDelete: "set null",
     }),
+    /** A wait step: the event it waits for on the flow's role, until when (migration 0084). */
+    waitingEvent: text("waiting_event"),
+    waitingUntil: timestamp("waiting_until", { withTimezone: true }),
+    /** Who started a manual (hiring-need) run. */
+    startedBy: uuid("started_by").references(() => users.id, { onDelete: "set null" }),
     context: jsonb("context")
       .$type<Record<string, unknown>>()
       .notNull()

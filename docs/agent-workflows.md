@@ -22,6 +22,21 @@ press Delete to remove it. Rules: exactly one trigger with a real event; every s
 trigger; one way out of each step except conditions (one yes, one no); no loops; agents must exist;
 goals not empty; at most 40 steps.
 
+## More steps: hiring need, wait for, report
+
+- **Hiring need (manual) trigger** — the flow starts by hand with the need's text (`{{payload.need}}`): HR head
+  / CBO on **Agent administration → Agent workflows** in their organisation, or the super admin with **Run now**
+  (Runs tab) in an organisation they own. Its agents act for whoever starts it.
+- **Wait for** — pauses until an event happens **on the flow's own role**, then continues; gives up after the
+  timeout (hours, default 72, max 720). **Only when** (optional) keeps waiting until the event's payload matches,
+  e.g. `requisition.status_changed` only when `payload.to` equals `approved`. Afterwards `wait.status` is
+  `happened` or `timed_out` (use a condition), and the event's fields are merged into `payload`.
+  The flow learns its role from the trigger, or from the first event one of its own agents causes (e.g. the
+  Requisition agent drafting a requisition).
+- **Report** — marks where the run report is ready. Every run (Runs tab, and the organisation's Agent
+  workflows page) downloads as **PDF** or **Excel**: summary, the hiring need, every step, each agent's
+  status / result / tokens, and every decision people made (who, when, outcome).
+
 ## Lifecycle — same protocol as agents
 
 `draft → tested → approved → published`, per version. Saving makes a new draft; the published version
@@ -113,3 +128,25 @@ Template **Shortlisted → screening, follow up if it stalls**, in an organisati
 
 **Clean up** — untick the organisation (live runs are cancelled) or archive the workflow, and put the agents'
 autonomy back.
+
+## Try it with real agents — a hiring need end to end
+
+Template **Hiring need → requisition → JD → screening → report**, in an organisation with its own AI key
+(locally **Yavar**). Real runs use real tokens; it takes as long as the people deciding.
+
+1. Super admin: **Use** the template → **Tests** → **Test** → **Approve** → **Publish** → **Organisations**:
+   tick the organisation.
+2. HR head of that organisation, **Agent settings**: switch on the Requisition, JD, Publishing and Screening
+   agents (autonomy **Suggest**, so every external step waits for approval).
+3. **Agent administration → Agent workflows** → the workflow → type the need (e.g. _We need two AI engineers in
+   Chennai, hybrid, by March_) → **Start**. (Or super admin: Runs tab → **Run now**.)
+4. The Requisition agent drafts the role (approve its questions in **Waiting for you**) and submits it. The run
+   waits for _requisition approved_.
+5. Approve the requisition as the approvers would. The run resumes: the JD agent drafts the JD; approve it.
+6. The Publishing agent posts the role (approve the posts). The run waits for _candidates shortlisted_.
+7. Shortlist one or two candidates on the role. The Screening agent screens them; approve its assessments.
+8. The run reaches **Run report** → **Done**. Download **PDF** or **Excel** from the organisation's Agent
+   workflows page or the builder's Runs tab.
+
+Try the other paths: leave the requisition unapproved past the timeout (set a short one, e.g. 1 hour, in a
+draft) and the run goes straight to the report with _timed out_.

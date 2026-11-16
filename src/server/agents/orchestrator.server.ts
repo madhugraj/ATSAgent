@@ -108,8 +108,8 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
   // 0. Agent workflows granted to this organisation run alongside the built-in
   // flow (docs/agent-workflows.md); a workflow failing never blocks it.
   try {
-    const { startWorkflowsFor } = await import("./workflows.server");
-    started += await startWorkflowsFor(e);
+    const { onWorkflowEvent } = await import("./workflows.server");
+    started += await onWorkflowEvent(e);
   } catch (err) {
     log.error("workflow.start_failed", { org_id: e.orgId, type: e.type, error: err as Error });
   }
