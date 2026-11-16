@@ -370,6 +370,16 @@ Plan: `docs/org-context-agent-plan.md` (decided 2026-10-27; O0 built 2026-10-27,
 - [x] Real-agent eval scenarios for all seven live agents (`scripts/evals/scenarios.ts`); governance suite `scripts/agent-governance.test.ts`
 - [x] Agent register (Governance → Agent register) and per-run trail export (JSON, vendor-neutral)
 
+## Agent workflows (2026-11-16)
+
+- [x] Migration `0083`: `agent_workflows`, `agent_workflow_versions` (immutable, trigger event + graph hash), `agent_workflow_grants`, `workflow_runs` (one per workflow and event, with history)
+- [x] Canvas builder (`@xyflow/react`): trigger, agent (stock or studio, goal with `{{fields}}`), condition (yes / no), end; drag, connect, edit, delete
+- [x] Graph rules (one trigger, connected, no loops, one way out except conditions, known agents and fields) and dry-run tests (sample event + each agent's outcome → path)
+- [x] Approve → publish → grant per organisation (studio agents must be granted there first); withdrawal cancels live runs
+- [x] Engine: orchestrator starts matching workflows for granted organisations; agents start through `startRun` with the org's switch, de-duplication and owner principal; finished runs move the flow on
+- [x] Tests: `scripts/agent-workflows.test.ts`
+- [ ] Approval steps on the canvas (people decide inside agents today); triggers from studio-built events
+
 ## Agent studio 2 — studio agents in the app (2026-11-16)
 
 - [x] Migration `0082`: studio agent lifecycle (draft → tested → approved → published), `studio_agent_versions` (immutable manifests), `studio_agent_grants` (organisations the super admin picks)
@@ -378,8 +388,7 @@ Plan: `docs/org-context-agent-plan.md` (decided 2026-10-27; O0 built 2026-10-27,
 - [x] Approve (tested version only, self-approval recorded) → publish → grant / withdraw per organisation (withdrawal cancels open runs)
 - [x] Runtime: `studio:<slug>` types resolve to the published version only where granted; runs pin their version; `agent_studio` AI feature; hosted API and MCP run studio agents in a granted workspace
 - [x] Organisations see granted studio agents in Agent settings (switch, autonomy, budget, start a run); health rule `definition.studio_agent_failing`
-- [ ] Phase 2: building blocks (questionnaire with fixed scoring, structured result, L4 rounds) and the psychometric example
-- [ ] Phase 3: agent workflow builder
+- [x] Agent workflow builder (see below)
 
 ## Agent studio — platform blueprints (2026-11-16)
 

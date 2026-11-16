@@ -105,6 +105,15 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
   let started = 0;
   if (!e.subjectId) return { started, synced };
 
+  // 0. Agent workflows granted to this organisation run alongside the built-in
+  // flow (docs/agent-workflows.md); a workflow failing never blocks it.
+  try {
+    const { startWorkflowsFor } = await import("./workflows.server");
+    started += await startWorkflowsFor(e);
+  } catch (err) {
+    log.error("workflow.start_failed", { org_id: e.orgId, type: e.type, error: err as Error });
+  }
+
   // 1. Keep inbox gates in step with decisions made on the regular pages.
   if (e.type === "requisition.status_changed") {
     const from = String((e.payload as { from?: string }).from ?? "");

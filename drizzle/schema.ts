@@ -2553,6 +2553,168 @@ export const agentBlueprintKeys = pgTable(
   ],
 );
 
+/* -------------------------------------------- agent workflows (0083) */
+/* docs/agent-workflows.md: platform-built flows of agents, granted per org. */
+
+export type WorkflowNodeKind = "trigger" | "agent" | "condition" | "end";
+
+export type WorkflowNode = {
+  id: string;
+  kind: WorkflowNodeKind;
+  position: { x: number; y: number };
+  data: {
+    label?: string;
+    /** trigger: the domain event that starts the flow. */
+    event?: string;
+    /** agent: stock agent type or `studio:<slug>`, and its goal (may use {{fields}}). */
+    agentType?: string;
+    goal?: string;
+    /** condition: field, operator and value. */
+    field?: string;
+    op?: "eq" | "neq" | "contains" | "gt" | "gte" | "lt" | "lte" | "exists";
+    value?: string;
+  };
+};
+
+/** A connection; a condition's carries `yes` or `no`. */
+export type WorkflowEdge = { id: string; source: string; target: string; branch?: "yes" | "no" };
+
+export type WorkflowGraph = { nodes: WorkflowNode[]; edges: WorkflowEdge[] };
+
+/** A dry-run test: a sample event, and what each agent ends with. */
+export type WorkflowTestScenario = {
+  name: string;
+  payload: Record<string, unknown>;
+  subjectType: string;
+  /** Agent node id → how that agent's run ends. */
+  outcomes: Record<string, { status: "done" | "failed"; result: string }>;
+  /** The node the flow must end on (optional). */
+  expectEnd?: string;
+};
+
+export type WorkflowTestResult = {
+  version: number;
+  passed: boolean;
+  at: string;
+  runs: { scenario: string; passed: boolean; path: string[]; failures: string[] }[];
+};
+
+export type AgentWorkflowStatus = "draft" | "tested" | "approved" | "published" | "archived";
+
+export const agentWorkflows = pgTable(
+  "agent_workflows",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    graph: jsonb("graph")
+      .$type<WorkflowGraph>()
+      .notNull()
+      .default(sql`'{"nodes":[],"edges":[]}'::jsonb`),
+    testScenarios: jsonb("test_scenarios")
+      .$type<WorkflowTestScenario[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    lastTest: jsonb("last_test").$type<WorkflowTestResult>(),
+    status: text("status").$type<AgentWorkflowStatus>().notNull().default("draft"),
+    version: integer("version").notNull().default(1),
+    publishedVersion: integer("published_version"),
+    approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("agent_workflows_status_idx").on(t.status, t.updatedAt)],
+);
+
+/** Immutable published versions: what workflow runs execute. */
+export const agentWorkflowVersions = pgTable(
+  "agent_workflow_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workflowId: uuid("workflow_id")
+      .notNull()
+      .references(() => agentWorkflows.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    /** The trigger event, for matching without reading the graph. */
+    triggerEvent: text("trigger_event").notNull(),
+    graph: jsonb("graph").$type<WorkflowGraph>().notNull(),
+    hash: text("hash").notNull(),
+    test: jsonb("test").$type<WorkflowTestResult>().notNull(),
+    approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }).notNull(),
+    publishedBy: uuid("published_by").references(() => users.id, { onDelete: "set null" }),
+    publishedAt: timestamp("published_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("agent_workflow_versions_key").on(t.workflowId, t.version)],
+);
+
+export const agentWorkflowGrants = pgTable(
+  "agent_workflow_grants",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workflowId: uuid("workflow_id")
+      .notNull()
+      .references(() => agentWorkflows.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    grantedBy: uuid("granted_by").references(() => users.id, { onDelete: "set null" }),
+    grantedAt: timestamp("granted_at", { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("agent_workflow_grants_live_key")
+      .on(t.workflowId, t.orgId)
+      .where(sql`${t.revokedAt} is null`),
+    index("agent_workflow_grants_org_idx").on(t.orgId),
+  ],
+);
+
+export type WorkflowRunStatus = "running" | "waiting" | "done" | "failed" | "cancelled";
+
+/** One triggered workflow in one organisation: where it is and how it got there. */
+export const workflowRuns = pgTable(
+  "workflow_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    workflowId: uuid("workflow_id")
+      .notNull()
+      .references(() => agentWorkflows.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    triggerEventId: uuid("trigger_event_id").references(() => agentEvents.id, {
+      onDelete: "set null",
+    }),
+    status: text("status").$type<WorkflowRunStatus>().notNull().default("running"),
+    currentNode: text("current_node"),
+    /** The agent run the flow waits for. */
+    waitingRunId: uuid("waiting_run_id").references((): AnyPgColumn => agentRuns.id, {
+      onDelete: "set null",
+    }),
+    context: jsonb("context")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    history: jsonb("history")
+      .$type<{ node: string; at: string; note: string }[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("workflow_runs_org_idx").on(t.orgId, t.status),
+    index("workflow_runs_waiting_idx").on(t.waitingRunId),
+    uniqueIndex("workflow_runs_event_key").on(t.workflowId, t.triggerEventId),
+  ],
+);
+
 /** Immutable snapshot of each agent manifest version, keyed by content hash. */
 export const agentDefinitions = pgTable(
   "agent_definitions",
