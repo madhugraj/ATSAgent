@@ -107,6 +107,10 @@ export const HEALTH = {
   expertUnansweredHours: 72,
   /** Phone screening: a call still not placed this many hours after it was due. */
   callOverdueHours: 3,
+  /** Due calls waiting this long while no voice worker has beaten in `voiceWorkerSilentMinutes`… */
+  callDueGraceMinutes: 10,
+  /** …means the voice worker is down or stalled (minutes since the last heartbeat). */
+  voiceWorkerSilentMinutes: 5,
   /** …a call still dialling / in progress this many minutes later (the worker stopped). */
   callStuckMinutes: 45,
   /** …calls that could not be placed (line or AI voice errors) in 24 h. */
@@ -911,6 +915,31 @@ export const RULES: Rule[] = [
           agentType: "*",
           title: `${x.failed} failed and ${x.stale} stale lifecycle event(s)`,
           detail: { failed: x.failed, stale: x.stale },
+        },
+      ];
+    },
+  },
+  {
+    id: "screening_call.worker_down",
+    element: "orchestrator",
+    severity: "critical",
+    description: `Phone calls are due and waiting, but no voice worker has checked in for ${HEALTH.voiceWorkerSilentMinutes} minutes — the worker is not running or is stalled (for example after the machine slept or lost its network), so nothing is dialled. Restart the voice worker.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number; last_seen: string | null }>(sql`
+        select
+          (select count(*)::int from screening_calls
+            where org_id = ${orgId} and status in ('approved', 'callback', 'no_answer', 'failed')
+              and due_at < now() - make_interval(mins => ${HEALTH.callDueGraceMinutes})) n,
+          (select max(last_seen) from voice_worker_heartbeat) last_seen`);
+      const n = r[0]?.n ?? 0;
+      const last = r[0]?.last_seen ? new Date(r[0].last_seen) : null;
+      if (!n) return [];
+      if (last && Date.now() - last.getTime() < HEALTH.voiceWorkerSilentMinutes * 60_000) return [];
+      return [
+        {
+          agentType: "screening_call",
+          title: `Voice worker silent — ${n} due call${n === 1 ? "" : "s"} not being dialled`,
+          detail: { waiting: n, lastHeartbeat: last?.toISOString() ?? null },
         },
       ];
     },

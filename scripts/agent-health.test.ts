@@ -5,7 +5,7 @@
  * the scheduler heartbeat reports a stopped scheduler.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 
 const { db } = await import("../src/server/db");
 const {
@@ -902,6 +902,18 @@ describe("phone screening health", () => {
     await clear(late);
     await evaluate();
     expect(await ruleOf("screening_call.not_placed")).toBeUndefined();
+    await clear(c);
+  });
+
+  test("due calls with a silent voice worker are critical; a fresh beat clears it", async () => {
+    await db.execute(sql`delete from voice_worker_heartbeat`);
+    const c = await calls(1, { status: "approved", dueAt: ago(HEALTH.callDueGraceMinutes + 5) });
+    await evaluate();
+    expect(await ruleOf("screening_call.worker_down")).toMatchObject({ severity: "critical" });
+    const { beat } = await import("../src/server/voice/settings.server");
+    await beat(`test-${Date.now()}`, 2, 0);
+    await evaluate();
+    expect(await ruleOf("screening_call.worker_down")).toBeUndefined();
     await clear(c);
   });
 
