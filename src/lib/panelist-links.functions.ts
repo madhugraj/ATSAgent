@@ -23,7 +23,8 @@ export const submitPanelistScorecard = createServerFn({ method: "POST" })
     z
       .object({
         token: Token,
-        rating: z.number().int().min(1).max(5),
+        // Ignored: the server computes the overall from the competency ratings.
+        rating: z.number().int().min(1).max(5).optional(),
         verdict: z.enum(["select", "hold", "reject"]),
         comments: z.string().max(4000).nullable().default(null),
         reason: z.string().max(2000).nullable().default(null),
@@ -31,13 +32,13 @@ export const submitPanelistScorecard = createServerFn({ method: "POST" })
           .array(
             z.object({ name: z.string().min(1).max(60), rating: z.number().int().min(1).max(5) }),
           )
-          .max(12)
-          .default([]),
+          .min(1, "Rate every competency.")
+          .max(12),
       })
       .parse(d),
   )
   .handler(async ({ data }) => {
     const { submitByLink } = await import("./panelist-links.server");
-    const { token, ...input } = data;
+    const { token, rating: _ignored, ...input } = data;
     return submitByLink(token, input);
   });

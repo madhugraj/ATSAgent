@@ -11,6 +11,8 @@
  */
 import { z } from "zod";
 
+import { overallRating } from "./interview-plan";
+
 import type { TranscriptSegment } from "./vtt";
 
 export const PROTECTED_TOPICS = [
@@ -190,6 +192,8 @@ export function buildAssessment(
   segments: TranscriptSegment[],
   roundCompetencies: string[],
   candidateName: string,
+  /** The round's weights; the overall follows the same rule as a panellist's scorecard. */
+  weights: Record<string, number> = {},
 ): {
   rating: number;
   verdict: AssessOutput["verdict"];
@@ -202,8 +206,14 @@ export function buildAssessment(
   const own = (name: string) => (allowed.size ? allowed.get(norm(name)) : name);
   const candidateSpeaker = candidateSpeakerOf(segments, out.candidate_speaker, candidateName);
   const offLimits = out.panel.off_limits.filter((o) => keepQuotes([o.quote], transcript).length);
+  // Same overall as a panellist: the weighted average of the competencies it
+  // could rate from the call; the model's own overall only when it rated none.
+  const rated = out.competencies
+    .map((c) => ({ name: own(c.name), rating: c.rating }))
+    .filter((c): c is { name: string; rating: number } => Boolean(c.name) && c.rating != null);
+  const rating = rated.length ? overallRating(rated, { weights }) : out.rating;
   return {
-    rating: out.rating,
+    rating,
     verdict: out.verdict,
     candidate: {
       competencies: out.competencies

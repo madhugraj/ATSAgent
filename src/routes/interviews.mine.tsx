@@ -16,6 +16,7 @@ import {
 import { buildIcs, downloadIcs } from "@/lib/ics";
 import { STAGE_LABEL } from "@/lib/lifecycle";
 import { EmptyState, PageHeader, StageBadge } from "@/components/ats";
+import { CompetencyRating, OverallReadout } from "@/components/CompetencyRating";
 import { PanelBriefView } from "@/components/PanelBriefView";
 import { useOrg } from "@/hooks/useOrg";
 import { Button } from "@/components/ui/button";
@@ -120,16 +121,14 @@ function MyInterviewsPage() {
     const competencies = names
       .filter((n) => form.ratings[n])
       .map((n) => ({ name: n, rating: form.ratings[n]! }));
-    if (competencies.length === 0) {
-      toast.error("Rate at least one competency");
+    if (competencies.length < names.length) {
+      toast.error("Rate every competency");
       return;
     }
     if (form.verdict !== "select" && !form.reason.trim() && !form.comments.trim()) {
       toast.error("A hold or reject needs a written reason");
       return;
     }
-    const avg = Math.round(competencies.reduce((s, c) => s + c.rating, 0) / competencies.length);
-
     setBusy(true);
     try {
       const res = await submit({
@@ -138,7 +137,6 @@ function MyInterviewsPage() {
           applicationId: round.application_id,
           level: round.level,
           focusArea: form.focus || null,
-          rating: Math.max(1, Math.min(5, avg)),
           verdict: form.verdict,
           comments: form.comments || null,
           reason: form.reason || null,
@@ -341,26 +339,17 @@ function MyInterviewsPage() {
                   <div className="grid gap-4 border-t border-border bg-surface-2 p-5 md:grid-cols-2">
                     <div className="space-y-3">
                       {names.map((name) => (
-                        <div key={name} className="flex items-center justify-between gap-3">
-                          <Label className="text-xs text-muted-foreground">{name}</Label>
-                          <div className="flex gap-1">
-                            {[1, 2, 3, 4, 5].map((n) => (
-                              <Button
-                                key={n}
-                                type="button"
-                                size="sm"
-                                variant={form.ratings[name] === n ? "default" : "outline"}
-                                className="num size-8 p-0"
-                                onClick={() =>
-                                  setForm((f) => ({ ...f, ratings: { ...f.ratings, [name]: n } }))
-                                }
-                              >
-                                {n}
-                              </Button>
-                            ))}
-                          </div>
-                        </div>
+                        <CompetencyRating
+                          key={name}
+                          name={name}
+                          rubric={round}
+                          value={form.ratings[name] ?? 0}
+                          onChange={(n) =>
+                            setForm((f) => ({ ...f, ratings: { ...f.ratings, [name]: n } }))
+                          }
+                        />
                       ))}
+                      <OverallReadout ratings={form.ratings} rubric={round} />
                       <div>
                         <Label className="mb-1.5 block text-xs text-muted-foreground">
                           Focus area covered

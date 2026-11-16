@@ -368,7 +368,6 @@ describe("an external panellist's scorecard link", () => {
     expect((await links.publicScorecard(token))!.state).toBe("not_yet");
     await expect(
       links.submitByLink(token, {
-        rating: 4,
         verdict: "select",
         comments: null,
         reason: null,
@@ -385,11 +384,10 @@ describe("an external panellist's scorecard link", () => {
     expect(JSON.stringify(view)).not.toContain("@");
 
     const r = await links.submitByLink(live, {
-      rating: 4,
       verdict: "select",
       comments: "Clear Spark design.",
       reason: null,
-      competencies: [],
+      competencies: view!.competencies.map((name) => ({ name, rating: 4 })),
     });
     expect(r.ok).toBe(true);
     const [ev] = await db
@@ -402,7 +400,6 @@ describe("an external panellist's scorecard link", () => {
     expect((await links.publicScorecard(live))!.state).toBe("submitted");
     await expect(
       links.submitByLink(live, {
-        rating: 1,
         verdict: "reject",
         comments: null,
         reason: "changed my mind",
@@ -429,7 +426,6 @@ describe("an external panellist's scorecard link", () => {
     expect((await links.publicScorecard(token))!.state).toBe("expired");
     await expect(
       links.submitByLink(token, {
-        rating: 3,
         verdict: "hold",
         comments: null,
         reason: "unsure",

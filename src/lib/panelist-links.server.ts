@@ -162,6 +162,8 @@ export type PublicScorecard = {
   panelistName: string;
   scheduledAt: string | null;
   competencies: string[];
+  weights: Record<string, number>;
+  anchors: Record<string, { low: string; mid: string; high: string }>;
   state: "open" | "submitted" | "expired" | "not_yet";
   /** The candidate's profile, CV and the round's focus — only while the link is valid. */
   brief: import("./panel-brief").PanelBrief | null;
@@ -204,6 +206,8 @@ export async function publicScorecard(token: string): Promise<PublicScorecard | 
     panelistName: r.panelist.name,
     scheduledAt: r.scheduledAt?.toISOString() ?? null,
     competencies: round?.competencies ?? [],
+    weights: round?.weights ?? {},
+    anchors: round?.anchors ?? {},
     brief,
     state:
       done || r.used
@@ -220,7 +224,6 @@ export async function publicScorecard(token: string): Promise<PublicScorecard | 
 export async function submitByLink(
   token: string,
   input: {
-    rating: number;
     verdict: "select" | "hold" | "reject";
     comments: string | null;
     reason: string | null;
@@ -243,7 +246,6 @@ export async function submitByLink(
       interviewId: r.interviewId,
       applicationId: r.applicationId,
       level: r.level,
-      rating: input.rating,
       verdict: input.verdict,
       comments: input.comments,
       reason: input.reason,

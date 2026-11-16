@@ -95,6 +95,7 @@ async function loadRound(orgId: string, interviewId: string, level: PanelLevel) 
     roundName: plan?.name ?? `L${level} interview`,
     roundFocus: plan?.focus ?? null,
     competencies: plan?.competencies ?? [],
+    weights: plan?.weights ?? {},
     assessedAt: a?.assessedAt ?? null,
     summarySentAt: a?.summarySentAt ?? null,
     // The panel has scored, the views differ and the HR head has not reviewed it yet.
@@ -201,7 +202,7 @@ export async function assessRound(
     }),
   );
   if (!res.ok) throw new Error(`The assessment could not be made: ${res.message}`);
-  const view = buildAssessment(res.data, r.segments, r.competencies, r.candidateName);
+  const view = buildAssessment(res.data, r.segments, r.competencies, r.candidateName, r.weights);
   const values = {
     rating: view.rating,
     verdict: view.verdict,
