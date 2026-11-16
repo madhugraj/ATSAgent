@@ -68,6 +68,8 @@ export interface RecordStageTransitionInput {
   note?: string | null;
   source?: "human" | "ai";
   cause?: "interview_scheduled" | "offer";
+  /** Moved by an agent tool on the person's behalf (still attributed to them). */
+  byAgent?: boolean;
 }
 
 export async function recordStageTransition(input: RecordStageTransitionInput): Promise<void> {
@@ -132,6 +134,17 @@ export async function recordStageTransitions(inputs: RecordStageTransitionInput[
       return true;
     });
   if (!eligible.length) return;
+  // No "you're shortlisted" e-mail from an agent on a hiring-desk role: only
+  // the person's pick shortlists there.
+  const aiPicks = eligible.filter(({ input }) => input.source === "ai" || input.byAgent);
+  if (aiPicks.length) {
+    const desk = await deskRolesOf(aiPicks.map(({ input }) => input));
+    const keep = eligible.filter(
+      ({ input }) => (input.source !== "ai" && !input.byAgent) || !desk.has(input.applicationId),
+    );
+    if (!keep.length) return;
+    eligible.splice(0, eligible.length, ...keep);
+  }
 
   const [ctx] = eligible;
   const contact = await db
@@ -269,9 +282,18 @@ async function emitAgentStageEvents(inputs: RecordStageTransitionInput[]): Promi
     (i) =>
       ROUNDS.includes(i.toStage) && i.fromStage !== i.toStage && i.cause !== "interview_scheduled",
   );
-  const shortlisted = inputs.filter(
+  let shortlisted = inputs.filter(
     (i) => i.toStage === "shortlisted" && i.fromStage !== "shortlisted",
   );
+  // A hiring-desk role screens only whom the person picked: an automatic
+  // (agent) shortlist there does not start screening on its own.
+  const aiShortlists = shortlisted.filter((i) => i.source === "ai" || i.byAgent);
+  if (aiShortlists.length) {
+    const desk = await deskRolesOf(aiShortlists);
+    shortlisted = shortlisted.filter(
+      (i) => (i.source !== "ai" && !i.byAgent) || !desk.has(i.applicationId),
+    );
+  }
   if (advanced.length) await emitPerRequisition(advanced, "application.advanced");
   if (!shortlisted.length) return;
   await emitPerRequisition(shortlisted, "application.shortlisted");
@@ -312,4 +334,27 @@ async function emitPerRequisition(
       payload: { applicationIds: e.applicationIds },
     });
   }
+}
+
+/** Of these transitions, the application ids whose role is run from the hiring desk. */
+async function deskRolesOf(inputs: RecordStageTransitionInput[]): Promise<Set<string>> {
+  const apps = await db
+    .select({ id: applications.id, orgId: applications.orgId, req: applications.requisitionId })
+    .from(applications)
+    .where(
+      inArray(
+        applications.id,
+        inputs.map((i) => i.applicationId),
+      ),
+    );
+  const { deskRequisitions } = await import("./desk-roles.server");
+  const out = new Set<string>();
+  for (const orgId of new Set(apps.map((a) => a.orgId).filter((x): x is string => Boolean(x)))) {
+    const desk = await deskRequisitions(
+      orgId,
+      apps.filter((a) => a.orgId === orgId).map((a) => a.req),
+    );
+    for (const a of apps) if (a.orgId === orgId && desk.has(a.req)) out.add(a.id);
+  }
+  return out;
 }

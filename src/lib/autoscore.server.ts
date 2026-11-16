@@ -264,7 +264,13 @@ export async function scoreUnscored(opts: {
             // never advances automatically — the score is recorded, a human
             // decides the stage.
             const held = injection || result.recommendation !== "select";
-            const nextStage = held ? "ai_screened" : "shortlisted";
+            // On a hiring-desk role the person's pick is the decision: a
+            // recommended candidate is ranked, not shortlisted.
+            const { deskRequisitions } = await import("./desk-roles.server");
+            const deskRole = (await deskRequisitions(opts.orgId, [app.requisitionId])).has(
+              app.requisitionId,
+            );
+            const nextStage = held || deskRole ? "ai_screened" : "shortlisted";
             await db
               .update(applications)
               .set({ stage: nextStage, lastActivityAt: now })
@@ -279,7 +285,9 @@ export async function scoreUnscored(opts: {
                     ? " — expected CTC above the approved band, held at ai_screened"
                     : result.experience_score <= EXPERIENCE_BAND_GATE
                       ? " — far outside the experience band, held at ai_screened"
-                      : ""
+                      : deskRole
+                        ? " — ranked for the person's pick on the hiring desk"
+                        : ""
               : injection
                 ? " — prompt-injection flag held at ai_screened"
                 : "";

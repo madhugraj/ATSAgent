@@ -201,6 +201,7 @@ export function registerPhase2Tools(): void {
         applicationId: i.applicationId,
         toStage: i.toStage,
         reason: i.reason,
+        byAgent: true,
       });
     },
   });
