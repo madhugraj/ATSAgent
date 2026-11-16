@@ -36,14 +36,17 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import {
   AGENT_CATALOG,
   AUTONOMY_OPTIONS,
   WHITELISTABLE_TEMPLATES,
   whitelistableFor,
+  type AgentInfo,
 } from "@/lib/agents.catalog";
 import {
   agentSettings,
+  startStudioAgentRun,
   runModelSafetyCheck,
   saveAgentPolicy,
   type AgentPolicyInput,
@@ -163,10 +166,28 @@ function AgentList({
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<AgentFilter>("all");
   const [openType, setOpenType] = useState<string | null>(null);
-  const items: Item[] = AGENT_CATALOG.flatMap((info) => {
-    const row = agents.find((a) => a.type === info.type);
-    return row ? [{ info, row }] : [];
-  });
+  const items: Item[] = [
+    ...AGENT_CATALOG.flatMap((info) => {
+      const row = agents.find((a) => a.type === info.type);
+      return row ? [{ info, row }] : [];
+    }),
+    // Agent studio agents the platform granted this organisation.
+    ...agents.flatMap((row) =>
+      row.studio
+        ? [
+            {
+              info: {
+                type: row.type as AgentInfo["type"],
+                label: row.studio.label,
+                description: row.studio.description,
+                phase: 4 as const,
+              },
+              row,
+            },
+          ]
+        : [],
+    ),
+  ];
   const count = (f: AgentFilter) =>
     f === "all" ? items.length : items.filter((x) => stateOf(x.row) === f).length;
   const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -346,7 +367,9 @@ function AgentCard({
       }`}
     >
       <div className="flex items-center gap-2 text-[11px]">
-        <span className="num font-medium text-muted-foreground">Phase {info.phase}</span>
+        <span className="num font-medium text-muted-foreground">
+          {row.studio ? `Studio · v${row.studio.version}` : `Phase ${info.phase}`}
+        </span>
         <span
           className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-medium ${style.chip}`}
         >
@@ -464,6 +487,7 @@ function AgentSettingsPanel({
       <SheetHeader className="pr-8 text-left">
         <div className="flex flex-wrap items-center gap-2">
           <SheetTitle>{info.label}</SheetTitle>
+          {row.studio ? <Badge variant="secondary">Studio · v{row.studio.version}</Badge> : null}
           {row.live ? (
             <Badge>Live</Badge>
           ) : (
@@ -510,6 +534,8 @@ function AgentSettingsPanel({
           </Select>
           {hint ? <p className="mt-1 text-xs text-muted-foreground">{hint}</p> : null}
         </div>
+
+        {row.studio ? <StudioRun row={row} canEdit={canEdit} /> : null}
 
         {(["email", "board"] as const)
           .map((group) => [group, whitelistableFor(row.type, group)] as const)
@@ -1063,5 +1089,47 @@ function SafetyCheckSection({
         </ul>
       ) : null}
     </Fold>
+  );
+}
+
+/** A granted Agent studio agent runs when a person starts it here (workflows come later). */
+function StudioRun({ row, canEdit }: { row: Row; canEdit: boolean }) {
+  const [goal, setGoal] = useState("");
+  const [busy, setBusy] = useState(false);
+  if (!canEdit) return null;
+  const start = async () => {
+    setBusy(true);
+    try {
+      await startStudioAgentRun({ data: { agentType: row.type, goal } });
+      toast.success("Started — follow it in Agent activity");
+      setGoal("");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not start");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div>
+      <Label className="text-xs" htmlFor={`studio-goal-${row.type}`}>
+        Start a run
+      </Label>
+      <Textarea
+        id={`studio-goal-${row.type}`}
+        className="mt-1 min-h-20"
+        placeholder="What should it do?"
+        value={goal}
+        maxLength={4000}
+        onChange={(e) => setGoal(e.target.value)}
+      />
+      <Button
+        size="sm"
+        className="mt-2"
+        disabled={busy || !row.enabled || goal.trim().length < 5}
+        onClick={start}
+      >
+        {busy ? "Starting…" : "Start"}
+      </Button>
+    </div>
   );
 }

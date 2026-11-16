@@ -1,60 +1,67 @@
-# Agent studio — platform blueprints
+# Agent studio
 
-**Platform super admin only** (Platform → Agent studio, `/platform-agent-studio`). Organisations never
-see it; it is not offered for sale. Server functions: `src/lib/platform-agent-studio.functions.ts`
-(all `requirePlatformAdmin`); core: `src/server/agents/blueprints.server.ts`.
+**Platform super admin only** (Platform → Agent studio, `/platform-agent-studio`). Not offered for sale to
+organisations. Server functions: `src/lib/platform-agent-studio.functions.ts` (all `requirePlatformAdmin`);
+core: `src/server/agents/blueprints.server.ts`; tests: `src/server/agents/studio-test.server.ts`.
 
-## What a blueprint is
+## What a studio agent is
 
-A stock hiring agent adapted to another domain for use in other applications — for example the Labour
-law agent rewritten as an environmental-compliance agent. Blueprints belong to the platform, not to an
-organisation (`agent_blueprints`, migration 0080).
+An agent built in the app — **adapted** from a stock agent or **new** — that runs inside the app for the
+organisations the super admin grants it to, and can be delivered to external applications. Its runtime type is
+`studio:<slug>` (fixed on first save).
 
-| Editable                                                    | Locked (always added, never editable)                              |
-| ----------------------------------------------------------- | ------------------------------------------------------------------ |
-| Name, description, responsibility                           | Injection rules and operating rules, prepended to the instructions |
-| Full instructions (stock text pre-filled, "Reset to stock") | Human tools `ask_human` / `request_approval`                       |
-| Must-never list (at least one rule)                         | Gate-verb ban on every tool name, renamed ones included            |
-| Which stock tools to keep                                   | Only the stock agent's own tools                                   |
-| Each kept tool's name and description                       | Each tool's input contract (shown read-only)                       |
-| Step limit (≤ stock)                                        | Approval, pre-approval and policy checks of the real tool          |
+| Built in the studio                                                        | Locked (always added, never editable)                              |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Name, description, responsibility                                          | Injection rules and operating rules, prepended to the instructions |
+| Instructions (stock text pre-filled when adapted)                          | Human tools `ask_human` / `request_approval`                       |
+| Must-never list, risk tier, accountable role                               | Gate-verb ban on every tool name, renamed ones included            |
+| Human decisions it may ask for (kinds the stock agents use)                | Each tool's input contract and its own checks                      |
+| Tools from the **catalogue** (any stock agent's), renamed and re-described | The organisation's switch, autonomy, budget                        |
+| Steps between human decisions (≤ stock, or ≤ 30 for new agents)            | Audit                                                              |
 
-Renamed tools must be `[a-z][a-z0-9_]{2,60}`, unique, not a human-tool name, and keep (or not add) a
-`propose_` / `request_` / `submit_` prefix exactly as the real tool has it. Saving re-bases a blueprint on
-the current stock agent and bumps its version; the list shows **Agent updated** when the stock agent has
-changed since. **Duplicate** makes a draft copy (e.g. one law per blueprint).
+The catalogue leaves out identity-bound tools (silent panel L1–L3, live AI calls, the Voice Guard). Building
+blocks (Phase 2: questionnaire with fixed scoring, structured result, L4 rounds) join it as code tools under
+the same protocol as stock tools.
 
-## Package
+## Lifecycle — same protocol as code agents
 
-Delivery → **Download package**: `<name>-v<version>.agent.json` (`ats-agent-package/2`) — the agent's
-identity, responsibility, must-never, human decisions and limits, `lockedRules`, the full `instructions`
-(locked rules first), the renamed tools with their real JSON-schema inputs and `needsPersonApproval`, the
-human tools, and implementation notes. The other application implements the tools on its own data. No AI
-vendor, model or feature fields.
+`draft → tested → approved → published`, per version. Saving creates a new draft version; a published version
+keeps running until another is published.
 
-## Hosted API and MCP
+1. **Test with sample data** (Test tab). Up to 5 tests: a goal, sample data per tool (`{"tool_name": result}`),
+   expected tools in order, and whether it must ask a person. Tests run in an organisation the super admin
+   owns, on its own AI key. Every tool is a **stand-in** with the real contract that returns the sample data —
+   nothing real is read, sent or changed. Approvals are approved and questions answered by the test. All tests
+   passing makes the version **tested**.
+2. **Approve** — only a tested version whose own tests passed. The approver is recorded (self-approval is
+   allowed after passing tests and flagged in the audit).
+3. **Publish** — writes the immutable manifest (`studio_agent_versions`) with its test result and approval.
+4. **Grant** (Organisations tab) — the agent appears in that organisation's Agent settings, off until they
+   switch it on. Withdrawing refuses new runs and cancels open ones.
 
-Delivery → **Hosted workspace**: an organisation the super admin owns (typically a dedicated one). Hosted
-runs execute there — its data (e.g. the legal sources on its Labour policy page), its own AI key and its
-agent settings (the agent must be switched on). Changing the workspace revokes the blueprint's keys.
+Runs pin the version they started on. Health rule `definition.studio_agent_failing` flags a studio agent that
+fails in most of its runs in an organisation.
 
-Publish, pick a workspace, then **Create key** (shown once; only a hash is stored). Runs act as the key's
-creator, who must still own the workspace.
+## Inside the app
+
+Granted organisations see it in Agent settings with a Studio chip: Enabled, autonomy, monthly budget, run
+limits, and **Start a run** (HR head / CBO) with a goal. (Phase 3 workflows will trigger it from events.)
+
+## Delivery
+
+- **Package** — `<name>-v<version>.agent.json` (`ats-agent-package/2`) of the published version: identity,
+  `lockedRules`, full `instructions`, renamed tools with their real JSON-schema inputs, human tools,
+  implementation notes. Vendor-neutral.
+- **Hosted API / MCP** — pick a **workspace**: an organisation you own that holds a grant. Create a key (shown
+  once; only a hash is stored). Runs execute there as `studio:<slug>`, under its Agent settings and AI key.
 
 ```
-POST /api/agents/:blueprintId/runs   Authorization: Bearer atsk_…   {"goal": "…"}
-  → 202 {"runId": "…", "status": "queued"}
-GET  /api/agents/runs/:runId         Authorization: Bearer atsk_…
-  → {"runId", "status", "result", "waitingFor", "error"}
-POST /api/mcp                        Authorization: Bearer atsk_…   (JSON-RPC)
-  initialize · ping · tools/list · tools/call run_agent {goal} · tools/call get_run {runId}
+POST /api/agents/:agentId/runs   Authorization: Bearer atsk_…   {"goal": "…"}   → 202 {runId}
+GET  /api/agents/runs/:runId     Authorization: Bearer atsk_…                    → {status, result, waitingFor}
+POST /api/mcp                    Authorization: Bearer atsk_…   (initialize · tools/list · run_agent · get_run)
 ```
-
-The model sees the renamed tools; the runtime runs the real ones (`agent_runs.blueprint_id`,
-`blueprint_version`). Decisions (`waitingFor`) go to people in the workspace organisation's inbox.
-401 for unknown or revoked keys, unpublished blueprints or a changed workspace; 409 when a run is refused;
-429 over the limit (60/min per caller and path, 30/min per key). In-app runs never use blueprints.
 
 ## Audit
 
-`platform.agent_blueprint.created|saved|duplicated|archived|downloaded|workspace_set|key_created|key_revoked|run_started`.
+`platform.studio_agent.created|saved|tested|approved|published|granted|revoked|duplicated|archived|downloaded|workspace_set|key_created|key_revoked`,
+and `platform.agent_blueprint.run_started` for hosted runs.

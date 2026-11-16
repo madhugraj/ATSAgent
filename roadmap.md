@@ -375,6 +375,17 @@ Plan: `docs/org-context-agent-plan.md` (decided 2026-10-27; O0 built 2026-10-27,
 - [x] Real-agent eval scenarios for all seven live agents (`scripts/evals/scenarios.ts`); governance suite `scripts/agent-governance.test.ts`
 - [x] Agent register (Governance → Agent register) and per-run trail export (JSON, vendor-neutral)
 
+## Agent studio 2 — studio agents in the app (2026-11-16)
+
+- [x] Migration `0082`: studio agent lifecycle (draft → tested → approved → published), `studio_agent_versions` (immutable manifests), `studio_agent_grants` (organisations the super admin picks)
+- [x] Build from the whole tool catalogue (adapted or new); risk tier, accountable role, human decisions, scope; identity-bound tools (panel, live calls, call review) excluded
+- [x] Test with sample data before approval: stand-in tools with the real contracts return the scenario's data in a test organisation on its own AI key; checks recorded per version (`studio-test.server.ts`)
+- [x] Approve (tested version only, self-approval recorded) → publish → grant / withdraw per organisation (withdrawal cancels open runs)
+- [x] Runtime: `studio:<slug>` types resolve to the published version only where granted; runs pin their version; `agent_studio` AI feature; hosted API and MCP run studio agents in a granted workspace
+- [x] Organisations see granted studio agents in Agent settings (switch, autonomy, budget, start a run); health rule `definition.studio_agent_failing`
+- [ ] Phase 2: building blocks (questionnaire with fixed scoring, structured result, L4 rounds) and the psychometric example
+- [ ] Phase 3: agent workflow builder
+
 ## Agent studio — platform blueprints (2026-11-16)
 
 - [x] Platform super admin only (`/platform-agent-studio`, `requirePlatformAdmin`); organisations never see it

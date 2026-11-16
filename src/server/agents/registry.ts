@@ -213,6 +213,14 @@ export function getAgent(type: AgentType): AgentDefinition | undefined {
 }
 
 /** Test helper: forget everything registered. */
+/** Prefix of the stand-in tools a studio test registers (and only these can be removed). */
+export const STUDIO_TEST_TOOL_PREFIX = "stest_";
+
+/** Remove a studio test's stand-in tool once the test ends. */
+export function unregisterTestTool(name: string): void {
+  if (name.startsWith(STUDIO_TEST_TOOL_PREFIX)) tools.delete(name);
+}
+
 export function resetRegistry(): void {
   tools.clear();
   agents.clear();

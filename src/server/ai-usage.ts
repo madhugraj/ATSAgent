@@ -55,6 +55,8 @@ export const AI_FEATURES = [
   "agent_followup",
   "agent_org_context",
   "agent_labour_policy",
+  // Agent studio agents (platform-built, granted per organisation; migration 0082).
+  "agent_studio",
   "agent_expert_interview",
   "agent_panel_l1",
   "agent_panel_l2",

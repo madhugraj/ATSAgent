@@ -15,7 +15,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
-import { agentRuns, agentTasks } from "@db/schema";
+import { agentRuns, agentTasks, type AgentType } from "@db/schema";
 import { db } from "../db";
 import { log } from "../log";
 import { resolveKey, type ResolvedKey } from "./blueprints.server";
@@ -69,7 +69,8 @@ export async function startHostedRun(k: ResolvedKey, goal: string): Promise<{ ru
   if (!(await isWorkspaceOwner(k.principalUserId, k.orgId)))
     throw new Error("The person this key acts for is no longer an owner of the workspace.");
   const { loadPolicy } = await import("./policy");
-  const policy = await loadPolicy(k.orgId, k.blueprint.agentType);
+  // The studio agent's own switch in the workspace's Agent settings.
+  const policy = await loadPolicy(k.orgId, k.blueprint.typeSlug as AgentType);
   if (!policy.enabled) throw new Error("This agent is switched off in Agent settings.");
   const { resolveAiConfig } = await import("@/lib/ai-gateway.server");
   if (!(await resolveAiConfig(k.orgId)).apiKey)
@@ -77,10 +78,9 @@ export async function startHostedRun(k: ResolvedKey, goal: string): Promise<{ ru
   const { startRun } = await import("./runtime.server");
   const { runId } = await startRun({
     orgId: k.orgId,
-    agentType: k.blueprint.agentType,
+    agentType: k.blueprint.typeSlug as AgentType,
     principalUserId: k.principalUserId,
     goal,
-    blueprintId: k.blueprint.id,
   });
   const { writeAudit } = await import("../audit");
   await writeAudit({
@@ -90,7 +90,7 @@ export async function startHostedRun(k: ResolvedKey, goal: string): Promise<{ ru
     action: "platform.agent_blueprint.run_started",
     entityType: "agent_run",
     entityId: runId,
-    detail: { blueprintId: k.blueprint.id, blueprintVersion: k.blueprint.version },
+    detail: { blueprintId: k.blueprint.id, version: k.blueprint.publishedVersion },
   });
   const { kickAgents } = await import("./orchestrator.server");
   kickAgents(k.orgId);
@@ -221,7 +221,7 @@ async function mcpCall(k: ResolvedKey, msg: JsonRpc): Promise<unknown> {
       return {
         protocolVersion: MCP_PROTOCOL_VERSION,
         capabilities: { tools: {} },
-        serverInfo: { name: "atsiq-agent", version: String(k.blueprint.version) },
+        serverInfo: { name: "atsiq-agent", version: String(k.blueprint.publishedVersion) },
       };
     case "ping":
       return {};

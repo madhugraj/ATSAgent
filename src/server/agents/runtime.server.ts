@@ -52,7 +52,7 @@ import {
   type AgentType,
 } from "@db/schema";
 import { agentRunScope } from "./context";
-import { aliasToReal, runDefinition } from "./blueprints.server";
+import { aliasToReal, isStudioType, runDefinition } from "./blueprints.server";
 import { ensureDefinition, manifestHash, RUNTIME_RULES } from "./manifest.server";
 import { looksLikeInjection } from "./injection";
 import { decideToolCall, loadPolicy } from "./policy";
@@ -1200,11 +1200,16 @@ export async function startRun(input: {
   maxSteps?: number;
   /** Hiring-desk thread; defaults to the thread of the subject's requisition. */
   conversationId?: string | null;
-  /** Agent studio blueprint a hosted-API run executes under (in its workspace org only). */
-  blueprintId?: string | null;
 }): Promise<{ runId: string }> {
-  const resolved = await runDefinition(input.orgId, input.agentType, input.blueprintId);
-  if (!resolved) throw new Error(`Unknown agent: ${input.agentType}`);
+  // Studio agents (`studio:<slug>`) resolve to their published version, and
+  // only in an organisation the super admin granted them to.
+  const resolved = await runDefinition(input.orgId, input.agentType);
+  if (!resolved)
+    throw new Error(
+      isStudioType(input.agentType)
+        ? "This agent is not available to this organisation."
+        : `Unknown agent: ${input.agentType}`,
+    );
   const def = resolved.def;
   const definition = await ensureDefinition(def);
   let conversationId = input.conversationId ?? null;
@@ -1239,11 +1244,15 @@ export async function startRun(input: {
         subjectType: input.subjectType ?? null,
         subjectId: input.subjectId ?? null,
         triggerEventId: input.triggerEventId ?? null,
-        maxSteps: input.blueprintId
-          ? Math.min(startPolicy.maxStepsPerLeg ?? def.maxSteps ?? 20, def.maxSteps ?? 20)
+        // A studio agent never takes more steps than its approved version allows.
+        maxSteps: isStudioType(input.agentType)
+          ? Math.min(
+              input.maxSteps ?? startPolicy.maxStepsPerLeg ?? def.maxSteps ?? 20,
+              def.maxSteps ?? 20,
+            )
           : (input.maxSteps ?? startPolicy.maxStepsPerLeg ?? def.maxSteps ?? 20),
-        ...(input.blueprintId
-          ? { blueprintId: input.blueprintId, blueprintVersion: resolved.blueprintVersion }
+        ...(resolved.blueprintId
+          ? { blueprintId: resolved.blueprintId, blueprintVersion: resolved.blueprintVersion }
           : {}),
         ...(startPolicy.maxTokensPerLeg || def.maxTokens
           ? {
@@ -1326,7 +1335,7 @@ export async function startReplay(input: {
   if (!orig) throw new Error("Run not found");
   if (orig.mode !== "live") throw new Error("Replay the original run, not a replay.");
   if (!REPLAYABLE.has(orig.status)) throw new Error("Only finished runs can be replayed.");
-  const resolved = await runDefinition(orig.orgId, orig.agentType, orig.blueprintId);
+  const resolved = await runDefinition(orig.orgId, orig.agentType, orig.blueprintVersion);
   if (!resolved) throw new Error(`Unknown agent: ${orig.agentType}`);
   const definition = await ensureDefinition(resolved.def);
   const [run] = await db
@@ -1343,7 +1352,7 @@ export async function startReplay(input: {
       subjectType: orig.subjectType,
       subjectId: orig.subjectId,
       maxSteps: orig.maxSteps,
-      blueprintId: orig.blueprintId,
+      blueprintId: resolved.blueprintId,
       blueprintVersion: resolved.blueprintVersion,
       mode: "replay",
       replayOf: orig.id,
@@ -1793,8 +1802,8 @@ async function renewLease(run: AgentRun): Promise<boolean> {
 }
 
 async function driveRun(run: AgentRun): Promise<"done" | "awaiting" | "yielded" | "failed"> {
-  // Hosted-API runs execute their blueprint (adapted definition); in-app runs the stock one.
-  const def = (await runDefinition(run.orgId, run.agentType, run.blueprintId))?.def;
+  // Studio agents run their published version (granted orgs only); stock agents their code.
+  const def = (await runDefinition(run.orgId, run.agentType, run.blueprintVersion))?.def;
   if (!def) {
     await finish(run, "failed", null, `Unknown agent: ${run.agentType}`);
     return "failed";
