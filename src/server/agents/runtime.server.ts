@@ -52,7 +52,12 @@ import {
   type AgentType,
 } from "@db/schema";
 import { agentRunScope } from "./context";
-import { aliasToReal, isStudioType, runDefinition } from "./blueprints.server";
+import {
+  aliasToReal,
+  isStudioType,
+  runDefinition,
+  studioTestDefinitions,
+} from "./blueprints.server";
 import { ensureDefinition, manifestHash, RUNTIME_RULES } from "./manifest.server";
 import { looksLikeInjection } from "./injection";
 import { decideToolCall, loadPolicy } from "./policy";
@@ -1406,6 +1411,16 @@ export type ResolveOutcome =
  * org owner passes) or be its named assignee. A request whose run has stopped
  * or whose subject was deleted is closed instead, and the caller is told so.
  */
+async function isLiveStudioTestRun(runId: string, orgId: string): Promise<boolean> {
+  const [run] = await db
+    .select({ agentType: agentRuns.agentType, orgId: agentRuns.orgId })
+    .from(agentRuns)
+    .where(eq(agentRuns.id, runId))
+    .limit(1);
+  if (!run || run.orgId !== orgId || !run.agentType.startsWith("studio:test_")) return false;
+  return studioTestDefinitions.get(run.agentType)?.orgId === orgId;
+}
+
 export async function resolveTask(input: {
   orgId: string;
   taskId: string;
@@ -1419,14 +1434,19 @@ export async function resolveTask(input: {
     .limit(1);
   if (!task) throw new Error("Task not found");
   if (task.status !== "open") throw new Error("This task has already been decided.");
-  if (task.assigneeUserId && task.assigneeUserId !== input.userId) {
+  // An Agent studio test answers its own test run's requests (as the super admin
+  // running it): only while that test is registered in this process, for its own
+  // run in its own organisation — no caller can ask for this.
+  const studioTest = await isLiveStudioTestRun(task.runId, input.orgId);
+  if (!studioTest && task.assigneeUserId && task.assigneeUserId !== input.userId) {
     // The named person decides; the organisation's owner may too (as the desk shows).
     const { activeOrgOf } = await import("@/lib/auth.middleware");
     const org = await activeOrgOf(input.userId);
     if (!org || org.orgId !== input.orgId || !org.isOwner)
       throw new Error("This task is assigned to someone else.");
   }
-  if (task.assigneeRole) await assertRole(input.userId, input.orgId, task.assigneeRole as AppRole);
+  if (task.assigneeRole && !studioTest)
+    await assertRole(input.userId, input.orgId, task.assigneeRole as AppRole);
   const { decision } = input;
   if (task.kind === "clarification" && decision.status !== "answered") {
     throw new Error("Answer the question to continue.");

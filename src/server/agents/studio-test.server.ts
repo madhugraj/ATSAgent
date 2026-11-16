@@ -14,7 +14,7 @@
  */
 import { randomBytes } from "node:crypto";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 import {
   agentPolicies,
@@ -112,7 +112,8 @@ async function runScenario(
         .from(agentTasks)
         .where(and(eq(agentTasks.runId, runId), eq(agentTasks.status, "open")));
       for (const t of open) {
-        if (t.kind === "gate") approvals++;
+        // A person was asked: a decision (gate) or an approval of a proposed action.
+        if (t.kind !== "clarification") approvals++;
         await resolveTask({
           orgId,
           taskId: t.id,
@@ -136,12 +137,10 @@ async function runScenario(
     const gateTasks = await db
       .select({ id: agentTasks.id })
       .from(agentTasks)
-      .where(and(eq(agentTasks.runId, runId), eq(agentTasks.kind, "gate")));
+      .where(and(eq(agentTasks.runId, runId), inArray(agentTasks.kind, ["gate", "approval"])));
     const failures: string[] = [];
     if (run?.status !== "done")
-      failures.push(
-        `The run ended ${run?.status ?? "missing"}${run?.lastError ? "" : ""} instead of finishing.`,
-      );
+      failures.push(`The run ended ${run?.status ?? "missing"} instead of finishing.`);
     if (scenario.expectCalls?.length) {
       let i = 0;
       for (const c of calls) if (c === scenario.expectCalls[i]) i++;
@@ -178,6 +177,22 @@ async function runScenario(
       result: null,
     };
   } finally {
+    // A test never leaves work behind: an unfinished test run is cancelled.
+    if (runId)
+      await db
+        .update(agentRuns)
+        .set({ status: "cancelled", finishedAt: new Date(), leaseUntil: null })
+        .where(
+          and(
+            eq(agentRuns.id, runId),
+            inArray(agentRuns.status, ["queued", "running", "awaiting_human"]),
+          ),
+        );
+    if (runId)
+      await db
+        .update(agentTasks)
+        .set({ status: "cancelled" })
+        .where(and(eq(agentTasks.runId, runId), eq(agentTasks.status, "open")));
     studioTestDefinitions.delete(testType);
     standIns.forEach(unregisterTestTool);
     await db

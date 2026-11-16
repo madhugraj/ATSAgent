@@ -410,6 +410,107 @@ describe("in the app", () => {
     ).rejects.toThrow("not available");
   });
 
+  test("a sample-data test approves its own write request, even with no role in the test org", async () => {
+    const { runStudioTests } = await import("../src/server/agents/studio-test.server");
+    registry.registerTool({
+      name: "stub_write",
+      description: "Write something",
+      input: z.object({ text: z.string() }),
+      risk: "write",
+      run: async () => {
+        executed.push("stub_write:real");
+        return "written";
+      },
+    });
+    executed.length = 0;
+    const [bp] = await db.select().from(agentBlueprints).where(eq(agentBlueprints.id, blueprintId));
+    const draft = {
+      ...bp!,
+      tools: ["stub_lookup", "stub_write"],
+      toolOverrides: {},
+      testScenarios: [
+        {
+          name: "writes after approval",
+          goal: "Write a note",
+          fixtures: { stub_write: { ok: true, sample: "note saved" } },
+          expectCalls: ["stub_write"],
+          expectApproval: true,
+        },
+      ],
+    };
+    script.push({
+      ok: true,
+      text: "",
+      toolCalls: [{ id: "w1", name: "stub_write", args: { text: "hello" } }],
+      stopReason: "tool_use",
+      usage,
+    });
+    const result = await runStudioTests(draft, orgId, userId);
+    expect(result.runs[0]!.failures).toEqual([]);
+    expect(result.passed).toBe(true);
+    expect(executed).toHaveLength(0);
+  });
+
+  test("a test answers a request to a role it lacks; outside a live test the role is required", async () => {
+    const { runStudioTests } = await import("../src/server/agents/studio-test.server");
+    const [bp] = await db.select().from(agentBlueprints).where(eq(agentBlueprints.id, blueprintId));
+    const draft = {
+      ...bp!,
+      tools: ["stub_lookup"],
+      toolOverrides: {},
+      testScenarios: [
+        {
+          name: "asks the HR head",
+          goal: "Ask the HR head",
+          fixtures: {},
+          expectApproval: true,
+        },
+      ],
+    };
+    script.push({
+      ok: true,
+      text: "",
+      toolCalls: [
+        {
+          id: "g1",
+          name: "request_approval",
+          args: { title: "Please decide", summary: "A decision", assignee_role: "hr_head" },
+        },
+      ],
+      stopReason: "tool_use",
+      usage,
+    });
+    const result = await runStudioTests(draft, orgId, userId);
+    expect(result.runs[0]!.failures).toEqual([]);
+    expect(result.passed).toBe(true);
+
+    // The same kind of task on an ordinary run: the user holds no HR head role here.
+    const { resolveTask } = await import("../src/server/agents/runtime.server");
+    const { agentTasks } = schema;
+    const [plain] = await db
+      .insert(agentRuns)
+      .values({ orgId, agentType: "requisition", principalUserId: userId, goal: "x" })
+      .returning({ id: agentRuns.id });
+    const [task] = await db
+      .insert(agentTasks)
+      .values({
+        orgId,
+        runId: plain!.id,
+        kind: "gate",
+        title: "Decide",
+        body: "b",
+        assigneeRole: "hr_head",
+      } as never)
+      .returning({ id: agentTasks.id });
+    await expect(
+      resolveTask({ orgId, taskId: task!.id, userId, decision: { status: "approved" } }),
+    ).rejects.toThrow();
+  });
+
+  test("a type named like a test run is renamed", () => {
+    expect(s.studioTypeFor("Test agent")).toBe("studio:agent_test_agent");
+  });
+
   test("a sample-data test runs stand-ins, never the real tool, and cleans up", async () => {
     const { runStudioTests } = await import("../src/server/agents/studio-test.server");
     executed.length = 0;
