@@ -2741,6 +2741,13 @@ async function finish(
       log.warn("agent.role_published_event_failed", { run_id: run.id, error: e as Error });
     }
   }
+  // An agent workflow waiting on this run moves to its next step.
+  try {
+    const { onAgentRunFinished } = await import("./workflows.server");
+    await onAgentRunFinished({ id: run.id, orgId: run.orgId, status, result });
+  } catch (e) {
+    log.warn("workflow.advance_failed", { run_id: run.id, error: e as Error });
+  }
   if (run.conversationId) {
     try {
       const { onRunFinished } = await import("../desk/desk.server");

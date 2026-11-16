@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-115 tables across 9 domains.
+119 tables across 9 domains.
 
 ## Identity & access
 
@@ -1205,6 +1205,14 @@ erDiagram
 | `agent_tasks` | `run_id` | `agent_runs` | cascade |
 | `agent_telemetry_settings` | `org_id` | `organizations` | cascade |
 | `agent_telemetry_settings` | `updated_by` | `users` | no action |
+| `agent_workflow_grants` | `granted_by` | `users` | no action |
+| `agent_workflow_grants` | `org_id` | `organizations` | cascade |
+| `agent_workflow_grants` | `workflow_id` | `agent_workflows` | cascade |
+| `agent_workflow_versions` | `approved_by` | `users` | no action |
+| `agent_workflow_versions` | `published_by` | `users` | no action |
+| `agent_workflow_versions` | `workflow_id` | `agent_workflows` | cascade |
+| `agent_workflows` | `approved_by` | `users` | no action |
+| `agent_workflows` | `created_by` | `users` | no action |
 | `ai_interviews` | `application_id` | `applications` | cascade |
 | `ai_interviews` | `org_id` | `organizations` | cascade |
 | `ai_provider_credentials` | `org_id` | `organizations` | cascade |
@@ -1453,6 +1461,9 @@ erDiagram
 | `training_settings` | `org_id` | `organizations` | cascade |
 | `user_roles` | `org_id` | `organizations` | cascade |
 | `user_roles` | `user_id` | `users` | cascade |
+| `workflow_runs` | `org_id` | `organizations` | cascade |
+| `workflow_runs` | `trigger_event_id` | `agent_events` | no action |
+| `workflow_runs` | `workflow_id` | `agent_workflows` | cascade |
 
 ## Table inventory
 
@@ -1471,6 +1482,9 @@ erDiagram
 | `agent_steps` | — | 17 | (runId+seq) |
 | `agent_tasks` | — | 16 | — |
 | `agent_telemetry_settings` | — | 12 | — |
+| `agent_workflow_grants` | — | 6 | — |
+| `agent_workflow_versions` | — | 11 | (workflowId+version) |
+| `agent_workflows` | — | 14 | — |
 | `ai_interviews` | Screening & interviews | 8 | — |
 | `ai_provider_credentials` | Communications & AI settings | 4 | (orgId+provider) |
 | `ai_redteam_checks` | — | 8 | — |
@@ -1575,3 +1589,4 @@ erDiagram
 | `user_roles` | Identity & access | 4 | — |
 | `users` | Identity & access | 8 | (email) |
 | `voice_worker_heartbeat` | — | 4 | — |
+| `workflow_runs` | — | 14 | (workflowId+triggerEventId) |

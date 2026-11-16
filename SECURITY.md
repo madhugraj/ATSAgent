@@ -353,6 +353,17 @@ workspace without a grant, or a principal who no longer owns it are refused. Req
 caller per path (60/min) and per key (30/min) in `src/server.ts`. Responses and packages carry no AI vendor or
 model fields.
 
+## Agent workflows
+
+Workflows (`src/lib/platform-agent-workflows.functions.ts`, all `requirePlatformAdmin`) only decide which
+agent runs next. The engine (`src/server/agents/workflows.server.ts`) starts agents through `startRun`, so the
+organisation's switch, autonomy, budget, studio grants, de-duplication and every human decision inside the
+agent still apply; it acts for the role's owner (else the person who caused the event). Conditions read only
+the event payload, the subject type and the last agent's status / result (`graphProblems` refuses other fields),
+goals are filled from the same fields, graphs cannot loop, and only published, tested, approved versions run,
+in organisations holding a grant (granting checks the studio agents it uses). Withdrawal cancels live runs;
+every step is audited (`platform.agent_workflow.*`) and each run keeps its history.
+
 ## Training data
 
 `training_inferences` and `training_feedback` hold prompts and outputs that

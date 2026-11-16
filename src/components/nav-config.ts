@@ -25,6 +25,7 @@ import {
   Scale,
   Plug,
   PackageOpen,
+  Workflow,
   ShieldCheck,
   Target,
   Users,
@@ -301,6 +302,12 @@ export const NAV_GROUPS: NavGroup[] = [
         to: "/platform-agent-studio",
         label: "Agent studio",
         icon: PackageOpen,
+        show: (c) => c.isSuperUser,
+      },
+      {
+        to: "/platform-agent-workflows",
+        label: "Agent workflows",
+        icon: Workflow,
         show: (c) => c.isSuperUser,
       },
       {

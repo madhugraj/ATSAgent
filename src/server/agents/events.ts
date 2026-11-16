@@ -7,32 +7,35 @@ import { agentEvents } from "@db/schema";
 import { log } from "../log";
 import { currentAgentRun } from "./context";
 
-export type AgentEventType =
-  | "requisition.created"
-  | "requisition.status_changed"
-  | "jd.submitted"
-  | "jd.approved"
-  | "jd.changes_requested"
-  | "application.shortlisted"
-  | "application.advanced"
-  | "scorecard.submitted"
-  | "hiring.selected"
-  | "offer.status_changed"
-  | "onboarding.document_received"
-  | "onboarding.document_rejected"
-  | "interview.missed"
-  | "interview.panellist_unavailable"
-  | "interview.slots_unanswered"
-  | "interview.slots_no_reply"
-  | "interview.transcript_ready"
-  | "panel.review_due"
-  | "assessment.completed"
-  | "compensation.submitted"
-  | "negotiation.agreed"
-  | "negotiation.needs_call"
-  | "screening_call.ended"
+export const AGENT_EVENT_TYPES = [
+  "requisition.created",
+  "requisition.status_changed",
+  "jd.submitted",
+  "jd.approved",
+  "jd.changes_requested",
+  "application.shortlisted",
+  "application.advanced",
+  "scorecard.submitted",
+  "hiring.selected",
+  "offer.status_changed",
+  "onboarding.document_received",
+  "onboarding.document_rejected",
+  "interview.missed",
+  "interview.panellist_unavailable",
+  "interview.slots_unanswered",
+  "interview.slots_no_reply",
+  "interview.transcript_ready",
+  "panel.review_due",
+  "assessment.completed",
+  "compensation.submitted",
+  "negotiation.agreed",
+  "negotiation.needs_call",
+  "screening_call.ended",
   /** The Publishing agent finished publishing a role: advertising it can start. */
-  | "role.published";
+  "role.published",
+] as const;
+
+export type AgentEventType = (typeof AGENT_EVENT_TYPES)[number];
 
 export async function emitAgentEvent(e: {
   orgId: string;

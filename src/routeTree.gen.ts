@@ -29,6 +29,7 @@ import { Route as OrgProfileRouteImport } from './routes/org-profile'
 import { Route as OrganisationRouteImport } from './routes/organisation'
 import { Route as PlatformRouteImport } from './routes/platform'
 import { Route as PlatformAgentStudioRouteImport } from './routes/platform-agent-studio'
+import { Route as PlatformAgentWorkflowsRouteImport } from './routes/platform-agent-workflows'
 import { Route as PlatformAgentsRouteImport } from './routes/platform-agents'
 import { Route as PlatformAiUsageRouteImport } from './routes/platform-ai-usage'
 import { Route as PlatformHealthRouteImport } from './routes/platform-health'
@@ -184,6 +185,11 @@ const PlatformRoute = PlatformRouteImport.update({
 const PlatformAgentStudioRoute = PlatformAgentStudioRouteImport.update({
   id: '/platform-agent-studio',
   path: '/platform-agent-studio',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PlatformAgentWorkflowsRoute = PlatformAgentWorkflowsRouteImport.update({
+  id: '/platform-agent-workflows',
+  path: '/platform-agent-workflows',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PlatformAgentsRoute = PlatformAgentsRouteImport.update({
@@ -495,6 +501,7 @@ export interface FileRoutesByFullPath {
   '/organisation': typeof OrganisationRoute
   '/platform': typeof PlatformRoute
   '/platform-agent-studio': typeof PlatformAgentStudioRoute
+  '/platform-agent-workflows': typeof PlatformAgentWorkflowsRoute
   '/platform-agents': typeof PlatformAgentsRoute
   '/platform-ai-usage': typeof PlatformAiUsageRoute
   '/platform-health': typeof PlatformHealthRoute
@@ -573,6 +580,7 @@ export interface FileRoutesByTo {
   '/organisation': typeof OrganisationRoute
   '/platform': typeof PlatformRoute
   '/platform-agent-studio': typeof PlatformAgentStudioRoute
+  '/platform-agent-workflows': typeof PlatformAgentWorkflowsRoute
   '/platform-agents': typeof PlatformAgentsRoute
   '/platform-ai-usage': typeof PlatformAiUsageRoute
   '/platform-health': typeof PlatformHealthRoute
@@ -652,6 +660,7 @@ export interface FileRoutesById {
   '/organisation': typeof OrganisationRoute
   '/platform': typeof PlatformRoute
   '/platform-agent-studio': typeof PlatformAgentStudioRoute
+  '/platform-agent-workflows': typeof PlatformAgentWorkflowsRoute
   '/platform-agents': typeof PlatformAgentsRoute
   '/platform-ai-usage': typeof PlatformAiUsageRoute
   '/platform-health': typeof PlatformHealthRoute
@@ -732,6 +741,7 @@ export interface FileRouteTypes {
     | '/organisation'
     | '/platform'
     | '/platform-agent-studio'
+    | '/platform-agent-workflows'
     | '/platform-agents'
     | '/platform-ai-usage'
     | '/platform-health'
@@ -810,6 +820,7 @@ export interface FileRouteTypes {
     | '/organisation'
     | '/platform'
     | '/platform-agent-studio'
+    | '/platform-agent-workflows'
     | '/platform-agents'
     | '/platform-ai-usage'
     | '/platform-health'
@@ -888,6 +899,7 @@ export interface FileRouteTypes {
     | '/organisation'
     | '/platform'
     | '/platform-agent-studio'
+    | '/platform-agent-workflows'
     | '/platform-agents'
     | '/platform-ai-usage'
     | '/platform-health'
@@ -967,6 +979,7 @@ export interface RootRouteChildren {
   OrganisationRoute: typeof OrganisationRoute
   PlatformRoute: typeof PlatformRoute
   PlatformAgentStudioRoute: typeof PlatformAgentStudioRoute
+  PlatformAgentWorkflowsRoute: typeof PlatformAgentWorkflowsRoute
   PlatformAgentsRoute: typeof PlatformAgentsRoute
   PlatformAiUsageRoute: typeof PlatformAiUsageRoute
   PlatformHealthRoute: typeof PlatformHealthRoute
@@ -1165,6 +1178,13 @@ declare module '@tanstack/react-router' {
       path: '/platform-agent-studio'
       fullPath: '/platform-agent-studio'
       preLoaderRoute: typeof PlatformAgentStudioRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/platform-agent-workflows': {
+      id: '/platform-agent-workflows'
+      path: '/platform-agent-workflows'
+      fullPath: '/platform-agent-workflows'
+      preLoaderRoute: typeof PlatformAgentWorkflowsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/platform-agents': {
@@ -1583,6 +1603,7 @@ const rootRouteChildren: RootRouteChildren = {
   OrganisationRoute: OrganisationRoute,
   PlatformRoute: PlatformRoute,
   PlatformAgentStudioRoute: PlatformAgentStudioRoute,
+  PlatformAgentWorkflowsRoute: PlatformAgentWorkflowsRoute,
   PlatformAgentsRoute: PlatformAgentsRoute,
   PlatformAiUsageRoute: PlatformAiUsageRoute,
   PlatformHealthRoute: PlatformHealthRoute,
