@@ -1893,7 +1893,7 @@ export function scenarios(): ScriptedScenario[] {
       ],
     },
     {
-      name: "interview: asks for a scheduling call when e-mailed times go unanswered",
+      name: "interview: asks for a scheduling call once one is possible for e-mailed times",
       agentType: "interview",
       setup: async ({ orgId, userId }) => {
         const requisitionId = await seedRequisition(orgId, userId, "approved");
@@ -1903,7 +1903,7 @@ export function scenarios(): ScriptedScenario[] {
         return { requisitionId, app };
       },
       goal: (d) =>
-        `Candidate application ${d["app"]} has not picked one of the L1 interview times e-mailed to them. Ask for a scheduling call (request_scheduling_call) so the assistant phones them to pick one. If it is refused, leave it to the e-mail — do not offer new times. app=${d["app"]}\n\nRequisition id: ${d["requisitionId"]}`,
+        `Candidate application ${d["app"]} was e-mailed the L1 interview times because no call could be placed then; a call is possible now. Ask for a scheduling call (request_scheduling_call) so the assistant phones them to pick one. If it is refused, leave it to the e-mail — do not offer new times. app=${d["app"]}\n\nRequisition id: ${d["requisitionId"]}`,
       decide: () => ({ status: "approved" }),
       expect: {
         status: "done",
@@ -3514,6 +3514,7 @@ async function seedOffer(
       token: `eval-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`,
       expiresAt: new Date(Date.now() + 2 * 864e5),
       createdAt: created,
+      linkEmailedAt: created,
       createdBy: userId,
     })
     .returning({ id: interviewSlotOffers.id });

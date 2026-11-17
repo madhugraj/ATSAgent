@@ -78,7 +78,7 @@ contact given is the organisation's mailbox.
 
 ## Scheduling call agent (`scheduling_call`)
 
-**Purpose:** Help the candidate and the interview panel agree a time for the candidate's current round, from times already e-mailed — nothing else.
+**Purpose:** Help the candidate and the interview panel agree a time for the candidate's current round, from the times offered for it — nothing else. The call goes first; the times are e-mailed with a link if it does not book.
 
 **Must say**
 
@@ -93,7 +93,7 @@ contact given is the organisation's mailbox.
 | Rule | Held by |
 |---|---|
 | The interview's round, length and format, and that it is with a person or a panel from the hiring team. | code |
-| The times in its list — the e-mailed times and up to three more free for the whole panel. | code |
+| The times in its list — the offered times and up to three more free for the whole panel. | code |
 
 **Must never**
 
@@ -117,7 +117,7 @@ contact given is the organisation's mailbox.
 | Any question outside its purpose: "That is one for the hiring team — please reply to the e-mail we sent you, and they will answer." Then carry on. | instruction + evals |
 | "Please don't call me": recorded, and no AI call dials them again. | code |
 | None of the times work, or they set a condition: their words go to the team, who offer other times. | code |
-| Not a good time: one short call-back, or the e-mailed link. | code |
+| Not a good time: one short call-back, or the times by e-mail with a link. | code |
 
 **Tone**
 

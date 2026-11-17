@@ -728,7 +728,11 @@ export function registerPhase3Agents(): void {
     // and people HR added, internal or external. When nobody fits a round it asks the HR
     // head in the hiring desk (request_new_panelist) to type someone in; it never invents
     // a person or an e-mail.
-    version: "2.2.0",
+    // 2.3.0 (voice-first scheduling — e-mailed links waited a day before any call):
+    // offering times places the scheduling call by itself and e-mails the link only if
+    // the call does not book; request_scheduling_call is only for times that went by
+    // e-mail because no call was possible then.
+    version: "2.3.0",
     owner: "hr_head",
     responsibility:
       "Books the next interview round for candidates who advanced: proposes each round's panel from the panel directory for a person to approve (asking HR to add someone when nobody fits), then free times for that panel, the candidate's choice of time, a meeting link, and invites to both the candidate and the interviewers.",
@@ -751,7 +755,7 @@ export function registerPhase3Agents(): void {
       writes: ["interview rounds", "application stage set to the booked round"],
       external: [
         "interview time choices to candidates (private link)",
-        "a short AI scheduling call to a candidate who did not pick an e-mailed time (a person approves it)",
+        "a short AI scheduling call to pick an interview time, placed when the times are offered (the e-mailed link follows only if it does not book)",
         "candidate interview invitations with calendar file",
         "meeting links (Zoom / Meet / Teams)",
       ],
@@ -763,7 +767,7 @@ export function registerPhase3Agents(): void {
       "interview: asks HR for a new panellist when nobody fits the round",
       "interview: proposes a panel for a round and waits for a person",
       "interview: proposes a stand-in when a panellist can't make it",
-      "interview: asks for a scheduling call when e-mailed times go unanswered",
+      "interview: asks for a scheduling call once one is possible for e-mailed times",
     ],
     feature: "agent_interview",
     maxSteps: 16,
@@ -792,9 +796,9 @@ export function registerPhase3Agents(): void {
       "2e. If a tool refuses an interviewer, tell the person exactly what the system said. Never guess who an address belongs to.",
       "2f. A candidate's own panel: call list_panel_options with their applicationId too — `approved` then includes any stand-in approved for them; use it for their times.",
       "2g. Stand-ins (one candidate's round only): when told a panellist cannot make a booked interview, or when find_interview_slots finds no times for the panel because one person is away, list_substitutes for that person and propose_substitute once — prefer someone with freeAtBookedTime true so the candidate keeps their time. A person decides. If approved and you are told the booking was cancelled, offer new times with the candidate's panel; if approved and the booking stays, do nothing more. If declined, handoff with the person's reason.",
-      "3. find_interview_slots with the applicationId and the round's level (so times start after the candidate's earlier round ends) for the first interviewer with the rest as panelEmails, then offer_interview_slots with three of them, the same panelEmails, and nextRound.focus as the agenda (60 minutes, online; add a meeting provider only if you were told one is connected). The candidate picks a time from a private link and the booking — meeting link, the candidate's invite and every interviewer's brief with the round's rubric — happens then. A person reviews the offer unless it is pre-approved.",
-      "When the candidate did not take offered times (declined or expired): offer three different times — other days and times of day, honouring any note they gave — then request_scheduling_call for them so the assistant phones to help them pick. If offering again is refused or impossible, ask_human so a person calls them.",
-      "When you are told the candidate has not picked one of the e-mailed times: request_scheduling_call for that candidate and nothing else (do not offer new times). Its rules — the wait, at least a day ahead, the candidate's opt-out, one call per offer — are checked for you: if it is refused, say why in your summary and leave it to the e-mail. Never ask for a scheduling call before times were e-mailed.",
+      "3. find_interview_slots with the applicationId and the round's level (so times start after the candidate's earlier round ends) for the first interviewer with the rest as panelEmails, then offer_interview_slots with three of them, the same panelEmails, and nextRound.focus as the agenda (60 minutes, online; add a meeting provider only if you were told one is connected). Offering the times places a short AI scheduling call to the candidate by itself; the times are e-mailed with a private link only if that call does not book (the result's `via` and `callRefused` say which). When they pick a time the booking — meeting link, the candidate's invite and every interviewer's brief with the round's rubric — happens then. A person reviews the offer unless it is pre-approved.",
+      "When the candidate did not take offered times (declined or expired): offer three different times — other days and times of day, honouring any note they gave. Offering them decides the call or the e-mail by itself; never also request_scheduling_call. If offering again is refused or impossible, ask_human so a person calls them.",
+      "When you are told times went by e-mail only and a call is now possible: request_scheduling_call for that candidate and nothing else (do not offer new times). Its rules — the candidate's opt-out, a time at least four hours ahead, one call per offer, one conversation per round — are checked for you: if it is refused, say why in your summary and leave it to the e-mail.",
       "4. A round that did not happen (status no_show or cancelled) is scheduled again the same way.",
       "5. Use schedule_interview (a fixed time) only when a person gave you the exact time to book.",
       "6. If an offer is declined, propose other times once, then hand off.",
@@ -864,21 +868,25 @@ export function registerPhase3Agents(): void {
     // end — the model replies ~0.9 s after the end (it waited 1.6 s and missed short
     // replies); a short answer ends after 0.6 s of silence, a long one gets room for a
     // pause; while it speaks, only sustained louder speech cuts in (echo no longer does).
-    version: "1.8.8",
+    // 1.9.0 (voice-first scheduling): the call usually comes before any e-mail — it
+    // no longer says the times were e-mailed unless they were, and points to the
+    // e-mail that follows when the candidate does not pick on the call.
+    version: "1.9.0",
     owner: "hr_head",
     responsibility:
-      "Holds one short AI phone call to help a candidate and the interview panel agree a time the candidate was already e-mailed: says it is an AI, tells them where they stand in the process, books one of the offered or pre-checked times (free for the whole panel), or notes when they are free — nothing else.",
+      "Holds one short AI phone call — placed as soon as interview times are offered, before any e-mail — to help a candidate and the interview panel agree one of them: says it is an AI, tells them where they stand in the process, books one of the offered or pre-checked times (free for the whole panel), or notes when they are free — nothing else.",
     mustNever: mustNeverOf(SCHEDULING_CALL_CHARTER),
     scope: {
       reads: [
-        "the e-mailed interview offer, its times and the call's pre-checked alternates — for one call",
+        "the interview offer, its times and the call's pre-checked alternates — for one call",
       ],
       writes: [
-        "on the call: the candidate's go-ahead (with their words), the time they chose (booked through the e-mailed offer), one short call-back they ask for, when they are free, an opt-out from AI calls",
+        "on the call: the candidate's go-ahead (with their words), the time they chose (booked through the offer), one short call-back they ask for, when they are free, an opt-out from AI calls (any ending without a booking e-mails them the times with a link)",
       ],
       external: [
         "one short phone call to one candidate, within the organisation's calling window",
         "the interview invitations sent when a time is booked (the same as the e-mailed link)",
+        "the times by e-mail with a private link, when the call ends without a booking",
       ],
     },
     gates: ["general"],

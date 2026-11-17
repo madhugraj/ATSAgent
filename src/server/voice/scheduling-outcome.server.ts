@@ -2,7 +2,7 @@
  * What a scheduling call does to the world (docs/voice-scheduling-call-plan.md):
  * book a chosen time through the same core as the e-mailed link, hand "none of
  * these work" to the same decline path, and close the call — retry, give up
- * (the link still works), or honour an opt-out. Used by the text-mode tools
+ * (the e-mailed link is sent then, if it was held), or honour an opt-out. Used by the text-mode tools
  * (evals) now and by the live call (step S2).
  */
 import { and, eq } from "drizzle-orm";
@@ -67,7 +67,7 @@ export async function callbackTime(
     return {
       ok: false,
       error:
-        "Not possible: a call-back was already arranged for these times. Point them to the link in their e-mail.",
+        "Not possible: a call-back was already arranged for these times. Say the times reach them by e-mail with a link to choose.",
     };
   const { phoneScreeningPolicyOf } = await import("./settings.server");
   const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
@@ -79,7 +79,7 @@ export async function callbackTime(
     return {
       ok: false,
       error:
-        "Not possible: that is outside the calling hours. Point them to the link in their e-mail.",
+        "Not possible: that is outside the calling hours. Say the times reach them by e-mail with a link to choose.",
     };
   return { ok: true, at, back_at: spokenWhen(at.toISOString(), tz) };
 }
@@ -171,6 +171,14 @@ export async function endSchedulingCall(
       actor,
       callId: call.id,
     }).catch((e) => log.warn("scheduling_call.opt_out_failed", { call_id: call.id, error: e }));
+  }
+  // Voice went first and did not book: the candidate gets the e-mailed link now
+  // (a retry stays on — they have the link meanwhile).
+  try {
+    const { releaseOfferLinkAfterCall } = await import("@/lib/slot-offers.server");
+    await releaseOfferLinkAfterCall(orgId, call.slotOfferId, status);
+  } catch (e) {
+    log.warn("scheduling_call.link_release_failed", { call_id: call.id, error: e as Error });
   }
   return status;
 }

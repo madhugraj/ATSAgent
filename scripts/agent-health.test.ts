@@ -622,6 +622,23 @@ describe("scheduling call health", () => {
       } as never);
     await evaluate();
     expect(await ruleOf("ai_call.opt_outs")).toMatchObject({ severity: "warning" });
+
+    // Voice first: a call due when the times were offered and never dialled.
+    expect(await ruleOf("scheduling_call.not_dialled")).toBeUndefined();
+    await db.insert(screeningCalls).values({
+      orgId,
+      candidateId: cand!.id,
+      applicationId: app!.id,
+      purpose: "scheduling",
+      slotOfferId: offer!.id,
+      status: "approved",
+      dueAt: new Date(Date.now() - (HEALTH.schedulingCallStuckMins + 5) * 60_000),
+    });
+    await evaluate();
+    expect(await ruleOf("scheduling_call.not_dialled")).toMatchObject({
+      agentType: "scheduling_call",
+      severity: "serious",
+    });
     await db.delete(screeningCalls).where(eq(screeningCalls.applicationId, app!.id));
     await db.delete(applications).where(eq(applications.id, app!.id));
     await db.delete(candidates).where(eq(candidates.id, cand!.id));

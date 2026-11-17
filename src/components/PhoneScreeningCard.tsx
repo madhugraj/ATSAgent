@@ -268,33 +268,11 @@ export function PhoneScreeningCard({ canEdit }: { canEdit: boolean }) {
           </div>
         </div>
         <p className="text-xs text-muted-foreground">
-          When interview times e-mailed to a candidate go unanswered, the assistant can phone them
-          to pick one — only the times offered, or up to three more that are free for the
-          interviewers. It never changes the interviewer, format or length. A person approves each
-          call.
+          Offered interview times go to the candidate by phone first: the assistant calls to let
+          them pick one — only the times offered, or up to three more that are free for the
+          interviewers. If the call does not book, the times are e-mailed with a link. Candidates
+          who asked not to be called by the assistant get the e-mail only.
         </p>
-        <div className="grid items-end gap-3 sm:grid-cols-4">
-          <div className="space-y-1">
-            <Label htmlFor="ps-wait" className="text-xs">
-              Call after (hours unanswered)
-            </Label>
-            <Input
-              id="ps-wait"
-              type="number"
-              min={2}
-              max={96}
-              disabled={!canEdit || !p.schedulingEnabled}
-              value={p.schedulingWaitHours}
-              onChange={(e) =>
-                set({ schedulingWaitHours: Math.min(96, Math.max(2, Number(e.target.value))) })
-              }
-            />
-          </div>
-          <p className="text-xs text-muted-foreground sm:col-span-3">
-            Only while the earliest offered time is still a day away. Candidates who asked not to be
-            called by the assistant are never phoned.
-          </p>
-        </div>
       </div>
       <div className="space-y-2 rounded-md border border-border p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">

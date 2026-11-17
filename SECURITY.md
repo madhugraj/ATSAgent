@@ -73,10 +73,12 @@ We credit reporters in release notes on request.
   fixed rule in code; the HR head's review card is built by the system (the agent cannot write
   it), and the decision runs as the HR head with `assertRole` — no agent moves a candidate.
   Reconciliations and decisions are audited (`panel_review.reconciled`, `panel_review.decided`).
-  A scheduling call books only the e-mailed times or up to three alternates checked free when it
+  A scheduling call books only the offered times or up to three alternates checked free when it
   is arranged — by number, never a free-form time — through the same booking core as the
-  candidate's link (one booking per offer); a person approves each call (audited
-  `scheduling_call.requested`).
+  candidate's link (one booking per offer). Voice goes first: the system (never the agent)
+  arranges the call when times are offered, under the offer's approval, and e-mails the link
+  only if the call does not book (audited `scheduling_call.requested` with `callFirst`, and
+  `interview.slots_offered` with `via`).
   Staff are confidential to candidates: the interview invite e-mail, its calendar file and the
   time-choice page say only who an interview is with ("the hiring team" / "a panel of N from the
   hiring team", `src/lib/interview-with.ts`), never a name; and on calls neither voice agent names or describes the hiring manager,

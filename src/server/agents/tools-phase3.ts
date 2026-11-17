@@ -470,7 +470,7 @@ export function registerPhase3Tools(): void {
   registerTool({
     name: "offer_interview_slots",
     description:
-      "Email the candidate 2–5 interview times (for the interviewer and any further panel members) to choose from, through a private link. Nothing is booked yet: when they pick a time, the round is booked with a meeting link (if a provider is given and connected) and both the candidate and the interviewer get their invites; if none work, the team is told. Every time is re-checked as free. Leaves the organisation, so a person approves it unless the interview time-choice email is pre-approved.",
+      "Offer the candidate 2–5 interview times (for the interviewer and any further panel members). Voice goes first: the system places a short AI scheduling call in the calling window to let them pick one, and e-mails the times with a private link only if that call does not book (or when no call is possible — then `via` is email and `callRefused` says why). Nothing is booked until they pick: the round is then booked with a meeting link (if a provider is given and connected) and both the candidate and the interviewer get their invites; if none work, the team is told. Every time is re-checked as free. Leaves the organisation, so a person approves it unless the interview time-choice e-mail is pre-approved.",
     input: AppId.extend({
       level: z.number().int().min(1).max(3),
       interviewerEmail: z.string().email(),
@@ -525,6 +525,9 @@ export function registerPhase3Tools(): void {
         slotsLocal: r.slots.map((x) => localWhen(x, tz)),
         expiresAt: r.expiresAt,
         expiresLocal: r.expiresAt ? localWhen(r.expiresAt, tz) : null,
+        via: r.via,
+        callAtLocal: r.callDueAt ? localWhen(r.callDueAt, tz) : null,
+        callRefused: r.callRefused,
       };
     },
   });
