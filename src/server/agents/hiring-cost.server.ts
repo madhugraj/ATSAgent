@@ -62,6 +62,17 @@ export const COST_STAGES: { stage: string; features: string[] }[] = [
 const stageOf = (feature: string) =>
   COST_STAGES.find((s) => s.features.includes(feature))?.stage ?? "Other";
 const STAGE_ORDER = [...COST_STAGES.map((s) => s.stage), "Other"];
+/** The three phases a hiring manager reads cost in; every stage folds into one (or Other). */
+const PHASE_OF: Record<string, string> = {
+  "Reading & checking the CV": "Screening",
+  Matching: "Screening",
+  Screening: "Screening",
+  Interviews: "Interview",
+  Evaluation: "Interview",
+  Offer: "Offer",
+  "Pre-onboarding": "Offer",
+};
+const PHASES = ["Screening", "Interview", "Offer", "Other"];
 const HIRED = ["offer_accepted", "hired", "joined"];
 const NOT_HIRED = ["rejected", "withdrawn", "offer_declined"];
 
@@ -364,6 +375,8 @@ export type OrgHiringCost = Pricing & {
     shared: CostLine;
     /** Average direct cost of a candidate on this role. */
     perCandidate: CostLine | null;
+    /** Average direct tokens per candidate in each phase; sums to perCandidate.tokens. */
+    perCandidateByPhase: { phase: string; tokens: number }[];
     costPerHire: CostLine | null;
   }[];
   stages: (CostLine & { stage: string })[];
@@ -443,7 +456,21 @@ export async function orgHiringCost(
   const total = acc();
   const loose = acc();
   const byMonth = new Map<string, Acc>();
-  const byReq = new Map<string, { all: Acc; shared: Acc; direct: Acc; apps: Set<string> }>();
+  type ReqAcc = {
+    all: Acc;
+    shared: Acc;
+    direct: Acc;
+    apps: Set<string>;
+    phases: Map<string, number>;
+  };
+  const byReq = new Map<string, ReqAcc>();
+  const emptyReq = (): ReqAcc => ({
+    all: acc(),
+    shared: acc(),
+    direct: acc(),
+    apps: new Set(),
+    phases: new Map(),
+  });
   const byStage = new Map<string, Acc>();
   const outcomes = { hired: acc(), notHired: acc(), inProgress: acc() };
   const groundingByMonth = new Map<string, number>();
@@ -463,7 +490,7 @@ export async function orgHiringCost(
       continue;
     }
     let r = byReq.get(b.reqId);
-    if (!r) byReq.set(b.reqId, (r = { all: acc(), shared: acc(), direct: acc(), apps: new Set() }));
+    if (!r) byReq.set(b.reqId, (r = emptyReq()));
     r.all.add(b, rate, pricing);
     if (!b.appId) {
       r.shared.add(b, rate, pricing);
@@ -471,6 +498,8 @@ export async function orgHiringCost(
     }
     r.direct.add(b, rate, pricing);
     r.apps.add(b.appId);
+    const phase = PHASE_OF[stageOf(b.feature)] ?? "Other";
+    r.phases.set(phase, (r.phases.get(phase) ?? 0) + b.tokens);
     bump(byStage, stageOf(b.feature)).add(b, rate, pricing);
     const st = appStage.get(b.appId) ?? "";
     (HIRED.includes(st)
@@ -514,7 +543,7 @@ export async function orgHiringCost(
     }),
     roles: reqs
       .map((r) => {
-        const x = byReq.get(r.id) ?? { all: acc(), shared: acc(), direct: acc(), apps: new Set() };
+        const x = byReq.get(r.id) ?? emptyReq();
         return {
           id: r.id,
           code: r.code,
@@ -525,6 +554,12 @@ export async function orgHiringCost(
           total: x.all.line(),
           shared: x.shared.line(),
           perCandidate: x.direct.per(x.apps.size),
+          perCandidateByPhase: x.apps.size
+            ? PHASES.filter((ph) => ph !== "Other" || x.phases.get(ph)).map((ph) => ({
+                phase: ph,
+                tokens: Math.round((x.phases.get(ph) ?? 0) / x.apps.size),
+              }))
+            : [],
           costPerHire: x.all.per(r.hires),
         };
       })
