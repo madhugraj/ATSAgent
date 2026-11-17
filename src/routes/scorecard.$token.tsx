@@ -6,11 +6,7 @@ import { toast } from "sonner";
 
 import { CheckCircle2, ClipboardCheck, Loader2 } from "lucide-react";
 
-import {
-  EMPTY_SCORECARD,
-  ScorecardFields,
-  scorecardReady,
-} from "@/components/CompetencyRating";
+import { EMPTY_SCORECARD, ScorecardFields, scorecardReady } from "@/components/CompetencyRating";
 import { PanelBriefView } from "@/components/PanelBriefView";
 import { Button } from "@/components/ui/button";
 import { getPanelistScorecard, submitPanelistScorecard } from "@/lib/panelist-links.functions";
@@ -137,12 +133,7 @@ function ScorecardPage() {
       ) : null}
 
       <div className="mt-5">
-        <ScorecardFields
-          competencies={c.competencies}
-          rubric={c}
-          value={card}
-          onChange={setCard}
-        />
+        <ScorecardFields competencies={c.competencies} rubric={c} value={card} onChange={setCard} />
       </div>
       <Button className="mt-4 w-full" disabled={!ready || busy} onClick={send}>
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit scorecard (final)"}
