@@ -14,9 +14,10 @@ import { CATALOGUE_SUMMARY, CATALOGUE_TIERS, totalCapabilities } from "@/lib/pro
 import {
   downloadCataloguePdf,
   downloadCatalogueXlsx,
-  previewCataloguePdf,
+  cataloguePdfUrl,
 } from "@/lib/catalogue-export";
 import { usePlatform } from "@/hooks/usePlatform";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -61,6 +62,7 @@ function Catalogue() {
 
   const [q, setQ] = useState("");
   const [tier, setTier] = useState("all");
+  const [preview, setPreview] = useState<string | null>(null);
 
   const rows = useMemo(() => {
     const list = cat.data?.modules ?? [];
@@ -116,7 +118,7 @@ function Catalogue() {
           <Button
             variant="outline"
             disabled={!cat.data}
-            onClick={() => cat.data && previewCataloguePdf(cat.data)}
+            onClick={() => cat.data && setPreview(cataloguePdfUrl(cat.data))}
           >
             <Eye className="mr-2 size-4" /> Preview
           </Button>
@@ -125,6 +127,27 @@ function Catalogue() {
           </Button>
         </div>
       </header>
+      <Dialog
+        open={preview != null}
+        onOpenChange={(open) => {
+          if (!open && preview) URL.revokeObjectURL(preview);
+          if (!open) setPreview(null);
+        }}
+      >
+        <DialogContent className="flex h-[90vh] max-w-5xl flex-col">
+          <DialogHeader>
+            <DialogTitle>Product catalogue</DialogTitle>
+          </DialogHeader>
+          {preview && (
+            <iframe title="Product catalogue PDF" src={preview} className="w-full flex-1 border" />
+          )}
+          <div className="flex justify-end">
+            <Button onClick={() => cat.data && downloadCataloguePdf(cat.data)}>
+              <Download className="mr-2 size-4" /> Download PDF
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <div className="grid gap-3 sm:grid-cols-3">
         <Figure label="Modules" value={String(cat.data?.modules.length ?? 0)} />
