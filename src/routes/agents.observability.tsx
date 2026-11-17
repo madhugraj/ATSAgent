@@ -1012,9 +1012,7 @@ function AgentCard({
 
 function ElementDot({ status }: { status: Status }) {
   const s = STATUS[status];
-  return (
-    <s.Icon className={`size-3.5 shrink-0 ${PILL_TONE_CLASS[s.tone]}`} aria-label={s.label} />
-  );
+  return <s.Icon className={`size-3.5 shrink-0 ${PILL_TONE_CLASS[s.tone]}`} aria-label={s.label} />;
 }
 
 /* ------------------------------------------------------------- issues */
