@@ -4,11 +4,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { ChevronDown, Eye, Lightbulb, PiggyBank } from "lucide-react";
 
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
 import { Badge } from "@/components/ui/badge";
@@ -346,54 +342,54 @@ function Recommendations({ u }: { u: UtilisationView }) {
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
-      {u.recommendations.length ? (
-        <ul className="mt-3 space-y-2">
-          {u.recommendations.map((r, i) => (
-            <li key={i} className="rounded-md border border-border p-3 text-sm">
-              <div className="flex flex-wrap items-center gap-2">
-                {r.severity === "save" ? (
-                  <Badge className="gap-1">
-                    <PiggyBank className="size-3" aria-hidden /> Save
-                  </Badge>
-                ) : (
-                  <Badge variant="outline" className="gap-1">
-                    <Eye className="size-3" aria-hidden /> Watch
-                  </Badge>
-                )}
-                <span className="text-xs text-muted-foreground">
-                  {AGENT_LABEL[r.agentType] ?? r.agentType}
-                </span>
-                <span className="font-medium">{r.title}</span>
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                <span className="font-medium text-foreground">Evidence: </span>
-                {r.evidence}
-              </p>
-              <p className="mt-0.5 text-xs">
-                <span className="font-medium">What to do: </span>
-                {r.action}
-              </p>
-              {r.saving ? (
-                <p className="num mt-0.5 text-xs text-primary">
-                  Estimated saving per week:{" "}
-                  {[
-                    r.saving.tokens ? `${compact(r.saving.tokens)} tokens` : "",
-                    r.saving.approvals ? `${r.saving.approvals} approvals` : "",
-                    r.saving.hours ? `${r.saving.hours} h of waiting` : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
+        {u.recommendations.length ? (
+          <ul className="mt-3 space-y-2">
+            {u.recommendations.map((r, i) => (
+              <li key={i} className="rounded-md border border-border p-3 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  {r.severity === "save" ? (
+                    <Badge className="gap-1">
+                      <PiggyBank className="size-3" aria-hidden /> Save
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="gap-1">
+                      <Eye className="size-3" aria-hidden /> Watch
+                    </Badge>
+                  )}
+                  <span className="text-xs text-muted-foreground">
+                    {AGENT_LABEL[r.agentType] ?? r.agentType}
+                  </span>
+                  <span className="font-medium">{r.title}</span>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">Evidence: </span>
+                  {r.evidence}
                 </p>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="mt-2 text-sm text-muted-foreground">
-          Nothing to optimise right now — no wasted runs, approval bottlenecks, repeated work or
-          budget risks were found.
-        </p>
-      )}
+                <p className="mt-0.5 text-xs">
+                  <span className="font-medium">What to do: </span>
+                  {r.action}
+                </p>
+                {r.saving ? (
+                  <p className="num mt-0.5 text-xs text-primary">
+                    Estimated saving per week:{" "}
+                    {[
+                      r.saving.tokens ? `${compact(r.saving.tokens)} tokens` : "",
+                      r.saving.approvals ? `${r.saving.approvals} approvals` : "",
+                      r.saving.hours ? `${r.saving.hours} h of waiting` : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-2 text-sm text-muted-foreground">
+            Nothing to optimise right now — no wasted runs, approval bottlenecks, repeated work or
+            budget risks were found.
+          </p>
+        )}
       </CollapsibleContent>
     </Collapsible>
   );

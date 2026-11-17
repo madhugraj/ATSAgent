@@ -172,7 +172,10 @@ class FakeLine implements session.PhoneLine {
 }
 
 /** A voice session that plays `steps` once the call is answered. */
-function scriptedVoice(steps: Step[], seen: { opts?: VoiceOpts; results: unknown[]; sent?: number[] }) {
+function scriptedVoice(
+  steps: Step[],
+  seen: { opts?: VoiceOpts; results: unknown[]; sent?: number[] },
+) {
   return (async (opts: VoiceOpts) => {
     seen.opts = opts;
     const transcript: { who: "caller" | "ai"; text: string; at: string }[] = [];
