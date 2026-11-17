@@ -3048,7 +3048,7 @@ async function seedSchedulingCall(
     third: said[2]!,
     alternate: said[3]!,
     options: said
-      .map((x, i) => `${i + 1}. ${x}${i === 3 ? " (not in the e-mail — also free)" : ""}`)
+      .map((x, i) => `${i + 1}. ${x}${i === 3 ? " (an extra time — also free)" : ""}`)
       .join(" "),
   };
 }
