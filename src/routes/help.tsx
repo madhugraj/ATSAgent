@@ -266,7 +266,7 @@ function Help() {
           <Download className="size-4" /> Download PDF
         </Button>
         <Button variant="outline" asChild>
-          <a href="/ATSIQ_Product_Handbook.docx" download>
+          <a href="/Scout_Product_Handbook.docx" download>
             <Download className="size-4" /> Product handbook
           </a>
         </Button>
