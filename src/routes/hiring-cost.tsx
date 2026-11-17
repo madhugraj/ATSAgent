@@ -167,7 +167,7 @@ function HiringCostPage() {
           <section className="panel p-5">
             <h2 className="font-semibold">By role</h2>
             <div className="mt-3 overflow-x-auto">
-              <table className="w-full min-w-[720px] text-sm">
+              <table className="w-full min-w-[820px] text-sm">
                 <thead>
                   <tr className="border-b border-border text-left text-xs text-muted-foreground">
                     <th className="px-2 py-2 font-medium">Role</th>
@@ -177,6 +177,7 @@ function HiringCostPage() {
                     <th className="px-2 py-2 text-right font-medium">Spent</th>
                     <th className="px-2 py-2 text-right font-medium">Shared</th>
                     <th className="px-2 py-2 text-right font-medium">Per candidate</th>
+                    <th className="px-2 py-2 text-right font-medium">Tokens / candidate</th>
                     <th className="px-2 py-2 text-right font-medium">Per hire</th>
                   </tr>
                 </thead>
@@ -202,6 +203,9 @@ function HiringCostPage() {
                       </td>
                       <td className="num px-2 py-2 text-right">
                         {r.perCandidate ? label(r.perCandidate) : "—"}
+                      </td>
+                      <td className="num px-2 py-2 text-right">
+                        {r.perCandidate ? fmtTokens(r.perCandidate.tokens) : "—"}
                       </td>
                       <td className="num px-2 py-2 text-right">
                         {r.costPerHire ? label(r.costPerHire) : "—"}
