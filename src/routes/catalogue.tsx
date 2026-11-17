@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Download, Eye, FileSpreadsheet, Search } from "lucide-react";
+import { BookOpen, Download, Eye, FileSpreadsheet, Search } from "lucide-react";
 
 import {
   readCatalogue,
@@ -108,6 +108,9 @@ function Catalogue() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setPreview("/Scout_Product_Handbook.pdf")}>
+            <BookOpen className="mr-2 size-4" /> Product handbook
+          </Button>
           <Button
             variant="outline"
             disabled={!cat.data}
@@ -130,21 +133,36 @@ function Catalogue() {
       <Dialog
         open={preview != null}
         onOpenChange={(open) => {
-          if (!open && preview) URL.revokeObjectURL(preview);
+          if (!open && preview?.startsWith("blob:")) URL.revokeObjectURL(preview);
           if (!open) setPreview(null);
         }}
       >
         <DialogContent className="flex h-[90vh] max-w-5xl flex-col">
           <DialogHeader>
-            <DialogTitle>Product catalogue</DialogTitle>
+            <DialogTitle>
+              {preview === "/Scout_Product_Handbook.pdf" ? "Product handbook" : "Product catalogue"}
+            </DialogTitle>
           </DialogHeader>
-          {preview && (
-            <iframe title="Product catalogue PDF" src={preview} className="w-full flex-1 border" />
-          )}
+          {preview && <iframe title="Preview" src={preview} className="w-full flex-1 border" />}
           <div className="flex justify-end">
-            <Button onClick={() => cat.data && downloadCataloguePdf(cat.data)}>
-              <Download className="mr-2 size-4" /> Download PDF
-            </Button>
+            {preview === "/Scout_Product_Handbook.pdf" ? (
+              <div className="flex gap-2">
+                <Button variant="outline" asChild>
+                  <a href="/Scout_Product_Handbook.docx" download>
+                    <Download className="mr-2 size-4" /> Word
+                  </a>
+                </Button>
+                <Button asChild>
+                  <a href="/Scout_Product_Handbook.pdf" download>
+                    <Download className="mr-2 size-4" /> PDF
+                  </a>
+                </Button>
+              </div>
+            ) : (
+              <Button onClick={() => cat.data && downloadCataloguePdf(cat.data)}>
+                <Download className="mr-2 size-4" /> Download PDF
+              </Button>
+            )}
           </div>
         </DialogContent>
       </Dialog>
