@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Download, FileSpreadsheet, Search } from "lucide-react";
+import { Download, Eye, FileSpreadsheet, Search } from "lucide-react";
 
 import {
   readCatalogue,
@@ -11,7 +11,11 @@ import {
   type CatalogueRow,
 } from "@/lib/catalogue.functions";
 import { CATALOGUE_SUMMARY, CATALOGUE_TIERS, totalCapabilities } from "@/lib/product-catalogue";
-import { downloadCataloguePdf, downloadCatalogueXlsx } from "@/lib/catalogue-export";
+import {
+  downloadCataloguePdf,
+  downloadCatalogueXlsx,
+  previewCataloguePdf,
+} from "@/lib/catalogue-export";
 import { usePlatform } from "@/hooks/usePlatform";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -108,6 +112,13 @@ function Catalogue() {
             onClick={() => cat.data && downloadCatalogueXlsx(cat.data)}
           >
             <FileSpreadsheet className="mr-2 size-4" /> Excel
+          </Button>
+          <Button
+            variant="outline"
+            disabled={!cat.data}
+            onClick={() => cat.data && previewCataloguePdf(cat.data)}
+          >
+            <Eye className="mr-2 size-4" /> Preview
           </Button>
           <Button disabled={!cat.data} onClick={() => cat.data && downloadCataloguePdf(cat.data)}>
             <Download className="mr-2 size-4" /> PDF
