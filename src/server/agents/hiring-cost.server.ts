@@ -519,7 +519,9 @@ export async function orgHiringCost(
     let r = byReq.get(b.reqId);
     if (!r) byReq.set(b.reqId, (r = emptyReq()));
     r.all.add(b, rate, pricing);
-    if (!b.appId) {
+    // Work for an application that no longer exists (or is not on file) stays with the
+    // role, as on the role's own page — it is not another candidate to average over.
+    if (!b.appId || !appStage.has(b.appId)) {
       r.shared.add(b, rate, pricing);
       continue;
     }

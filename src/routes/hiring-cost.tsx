@@ -102,9 +102,6 @@ function HiringCostPage() {
             </Tile>
           </section>
 
-          {/* What to change to spend less — evidence from the agents' own ledgers */}
-          <AgentOptimisationTips />
-
           {/* Month by month */}
           <section className="panel p-5">
             <h2 className="font-semibold">Month by month</h2>
@@ -260,6 +257,9 @@ function HiringCostPage() {
               Per role and per candidate detail is on each requisition and candidate page.
             </p>
           </section>
+
+          {/* What to change to spend less — evidence from the agents' own ledgers */}
+          <AgentOptimisationTips />
         </div>
       )}
     </>
