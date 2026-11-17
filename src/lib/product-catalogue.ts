@@ -1,5 +1,5 @@
 /**
- * The ATSIQ product catalogue: every shipped module, what it does, who it serves and the
+ * The Scout product catalogue: every shipped module, what it does, who it serves and the
  * capabilities inside it. This is the single source of truth for the super-admin catalogue
  * page and for the PDF / Excel exports, so it must describe what the product actually does.
  */
@@ -262,9 +262,9 @@ export const CATALOGUE_MODULES: CatalogueModule[] = [
     category: "Sourcing",
     audience: "Recruiter",
     summary:
-      "CVs reach the pool automatically from the careers inbox, bulk uploads, apply links and the ATSIQ Capture companion.",
+      "CVs reach the pool automatically from the careers inbox, bulk uploads, apply links and the Scout Capture companion.",
     overview:
-      "CVs arrive from every channel into one deduplicated pool: the careers inbox is watched and each CV is filed, parsed and scored automatically; recruiters bulk-upload PDF and DOCX files; candidates apply through public links; and the ATSIQ Capture browser companion collects profiles from LinkedIn Recruiter in the recruiter's own signed-in browser. Hidden text is stripped from CVs before any AI reads them, and the original file is kept in a private vault.",
+      "CVs arrive from every channel into one deduplicated pool: the careers inbox is watched and each CV is filed, parsed and scored automatically; recruiters bulk-upload PDF and DOCX files; candidates apply through public links; and the Scout Capture browser companion collects profiles from LinkedIn Recruiter in the recruiter's own signed-in browser. Hidden text is stripped from CVs before any AI reads them, and the original file is kept in a private vault.",
     outcome: "No CV is left sitting in a mailbox unparsed.",
     capabilities: [
       c(
@@ -276,7 +276,7 @@ export const CATALOGUE_MODULES: CatalogueModule[] = [
         "PDF and DOCX CVs are parsed into employment history, skills, education and contact details.",
       ),
       c(
-        "ATSIQ Capture companion",
+        "Scout Capture companion",
         "A browser companion for LinkedIn Recruiter that captures profiles and CVs from the recruiter's own session.",
       ),
       c(
@@ -363,7 +363,7 @@ export const CATALOGUE_MODULES: CatalogueModule[] = [
     summary:
       "Live checking of the public profiles a candidate shares, scored and audited rather than taken on trust.",
     overview:
-      "When a candidate shares public profiles, ATSIQ fetches them through a safe fetcher and compares what they show with what the CV claims. The result is an authenticity score with the evidence behind it, plus signals about career history, impact, innovation and mindset that feed the match score. Every run is recorded, and logistics and risk flags surface on the dossier before an interview is booked.",
+      "When a candidate shares public profiles, Scout fetches them through a safe fetcher and compares what they show with what the CV claims. The result is an authenticity score with the evidence behind it, plus signals about career history, impact, innovation and mindset that feed the match score. Every run is recorded, and logistics and risk flags surface on the dossier before an interview is booked.",
     outcome: "Claims on a CV are corroborated before an interview is booked.",
     capabilities: [
       c(
@@ -482,7 +482,7 @@ export const CATALOGUE_MODULES: CatalogueModule[] = [
     summary:
       "On-demand salary ranges for a role and level, drawn from live public sources with the evidence attached.",
     overview:
-      "From inside the requisition form, a hiring manager asks for the market range for the role, level and location. ATSIQ researches live public sources and returns a low, median and high figure with a recommended CTC band, a confidence rating, the quoted evidence and links. Where data is interpolated or estimated it says so, and the organisation's own corrections are saved and reused.",
+      "From inside the requisition form, a hiring manager asks for the market range for the role, level and location. Scout researches live public sources and returns a low, median and high figure with a recommended CTC band, a confidence rating, the quoted evidence and links. Where data is interpolated or estimated it says so, and the organisation's own corrections are saved and reused.",
     outcome: "Budgets are set against the market, not last year's band.",
     capabilities: [
       c(
@@ -843,7 +843,7 @@ export const CATALOGUE_MODULES: CatalogueModule[] = [
 export const CATALOGUE_TIERS = ["Included", "Growth", "Enterprise", "Add-on"] as const;
 
 export const CATALOGUE_SUMMARY = {
-  name: "ATSIQ by Yavar AI",
+  name: "Scout by Yavar AI",
   tagline: "Enterprise recruiting operating system",
   positioning:
     "One multi-tenant platform covering requisition to joining: evidence-based JD↔CV matching, screening support, verified candidate signals, market-aligned budgets, recruiter governance and leadership analytics.",

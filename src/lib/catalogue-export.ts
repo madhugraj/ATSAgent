@@ -125,7 +125,7 @@ export function buildCataloguePdf(cat: CatalogueResult) {
 }
 
 export function downloadCataloguePdf(cat: CatalogueResult) {
-  buildCataloguePdf(cat).save(`atsiq-product-catalogue-${stamp()}.pdf`);
+  buildCataloguePdf(cat).save(`scout-product-catalogue-${stamp()}.pdf`);
 }
 
 /** The catalogue PDF as an object URL, to show in the page before downloading. */
@@ -192,5 +192,5 @@ export function downloadCatalogueXlsx(cat: CatalogueResult) {
   about["!cols"] = [{ wch: 120 }];
   XLSX.utils.book_append_sheet(wb, about, "About");
 
-  XLSX.writeFile(wb, `atsiq-product-catalogue-${stamp()}.xlsx`);
+  XLSX.writeFile(wb, `scout-product-catalogue-${stamp()}.xlsx`);
 }
