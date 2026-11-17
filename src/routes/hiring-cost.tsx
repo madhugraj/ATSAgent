@@ -165,7 +165,7 @@ function HiringCostPage() {
           <section className="panel p-5">
             <h2 className="font-semibold">By role</h2>
             <div className="mt-3 overflow-x-auto">
-              <table className="w-full min-w-[820px] text-sm">
+              <table className="w-full min-w-[900px] text-sm">
                 <thead>
                   <tr className="border-b border-border text-left text-xs text-muted-foreground">
                     <th className="px-2 py-2 font-medium">Role</th>
@@ -176,6 +176,7 @@ function HiringCostPage() {
                     <th className="px-2 py-2 text-right font-medium">Shared</th>
                     <th className="px-2 py-2 text-right font-medium">Per candidate</th>
                     <th className="px-2 py-2 text-right font-medium">Tokens / candidate</th>
+                    <th className="px-2 py-2 text-right font-medium">Median / candidate</th>
                     <th className="px-2 py-2 text-right font-medium">Per hire</th>
                   </tr>
                 </thead>
@@ -215,6 +216,11 @@ function HiringCostPage() {
                                     {r.perCandidateByPhase.map((p) => (
                                       <tr key={p.phase}>
                                         <td className="pr-4">{p.phase}</td>
+                                        <td className="num px-2 py-2 text-right">
+                                          {r.medianPerCandidate != null
+                                            ? fmtTokens(r.medianPerCandidate)
+                                            : "—"}
+                                        </td>
                                         <td className="num text-right">{fmtTokens(p.tokens)}</td>
                                       </tr>
                                     ))}
@@ -239,6 +245,7 @@ function HiringCostPage() {
                       <td className="px-2 py-2 text-right">—</td>
                       <td className="px-2 py-2 text-right">—</td>
                       <td className="num px-2 py-2 text-right">{label(c.deletedRoles)}</td>
+                      <td className="px-2 py-2 text-right">—</td>
                       <td className="px-2 py-2 text-right">—</td>
                       <td className="px-2 py-2 text-right">—</td>
                       <td className="px-2 py-2 text-right">—</td>
