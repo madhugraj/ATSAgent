@@ -388,6 +388,8 @@ export type OrgHiringCost = Pricing & {
   total: CostLine;
   /** AI work not tied to any role (talent pool, copilot, organisation set-up). */
   notTiedToRole: CostLine;
+  /** AI work on requisitions that have since been deleted — still real spend. */
+  deletedRoles: CostLine & { count: number };
   hires: number;
   costPerHire: CostLine | null;
   months: (CostLine & { month: string; hires: number; costPerHire: CostLine | null })[];
@@ -482,6 +484,9 @@ export async function orgHiringCost(
 
   const total = acc();
   const loose = acc();
+  const liveReqs = new Set(reqs.map((r) => r.id));
+  const deleted = acc();
+  const deletedIds = new Set<string>();
   const byMonth = new Map<string, Acc>();
   type ReqAcc = {
     all: Acc;
@@ -514,6 +519,11 @@ export async function orgHiringCost(
     }
     if (!b.reqId) {
       loose.add(b, rate, pricing);
+      continue;
+    }
+    if (!liveReqs.has(b.reqId)) {
+      deleted.add(b, rate, pricing);
+      deletedIds.add(b.reqId);
       continue;
     }
     let r = byReq.get(b.reqId);
@@ -563,6 +573,7 @@ export async function orgHiringCost(
     window: { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10), months },
     total: total.line(),
     notTiedToRole: loose.line(),
+    deletedRoles: { ...deleted.line(), count: deletedIds.size },
     hires,
     costPerHire: total.per(hires),
     months: monthKeys.map((m) => {
