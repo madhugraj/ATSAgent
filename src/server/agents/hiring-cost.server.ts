@@ -406,6 +406,8 @@ export type OrgHiringCost = Pricing & {
     perCandidate: CostLine | null;
     /** Average direct tokens per candidate in each phase; sums to perCandidate.tokens. */
     perCandidateByPhase: { phase: string; tokens: number }[];
+    /** Middle candidate's direct tokens — less swayed than the average by one heavy candidate. */
+    medianPerCandidate: number | null;
     costPerHire: CostLine | null;
   }[];
   stages: (CostLine & { stage: string })[];
@@ -416,6 +418,13 @@ export type OrgHiringCost = Pricing & {
 };
 
 const monthOf = (day: string) => day.slice(0, 7);
+
+function median(xs: number[]): number | null {
+  if (!xs.length) return null;
+  const v = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(v.length / 2);
+  return Math.round(v.length % 2 ? v[m]! : (v[m - 1]! + v[m]!) / 2);
+}
 
 /**
  * Hiring cost across every role over the last `months` calendar months
@@ -493,6 +502,7 @@ export async function orgHiringCost(
     shared: Acc;
     direct: Acc;
     apps: Set<string>;
+    appTokens: Map<string, number>;
     phases: Map<string, number>;
   };
   const byReq = new Map<string, ReqAcc>();
@@ -501,6 +511,7 @@ export async function orgHiringCost(
     shared: acc(),
     direct: acc(),
     apps: new Set(),
+    appTokens: new Map(),
     phases: new Map(),
   });
   const byStage = new Map<string, Acc>();
@@ -537,6 +548,7 @@ export async function orgHiringCost(
     }
     r.direct.add(b, rate, pricing);
     r.apps.add(b.appId);
+    r.appTokens.set(b.appId, (r.appTokens.get(b.appId) ?? 0) + b.tokens);
     const phase = PHASE_OF[stageOf(b.feature)] ?? "Other";
     r.phases.set(phase, (r.phases.get(phase) ?? 0) + b.tokens);
     bump(byStage, stageOf(b.feature)).add(b, rate, pricing);
@@ -594,6 +606,7 @@ export async function orgHiringCost(
           total: x.all.line(),
           shared: x.shared.line(),
           perCandidate: x.direct.per(x.apps.size),
+          medianPerCandidate: median([...x.appTokens.values()]),
           perCandidateByPhase: x.apps.size
             ? PHASES.filter((ph) => ph !== "Other" || x.phases.get(ph)).map((ph) => ({
                 phase: ph,
