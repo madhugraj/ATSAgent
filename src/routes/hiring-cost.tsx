@@ -6,6 +6,7 @@ import { EmptyState, PageHeader } from "@/components/ats";
 import { CostFigure, PricingNote } from "@/components/HiringCost";
 import { AgentOptimisationTips } from "@/components/AgentUtilisation";
 import { fmtMoney, fmtTokens } from "@/lib/cost-format";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { getOrgHiringCost } from "@/lib/hiring-cost.functions";
 
 export const Route = createFileRoute("/hiring-cost")({
@@ -205,7 +206,29 @@ function HiringCostPage() {
                         {r.perCandidate ? label(r.perCandidate) : "—"}
                       </td>
                       <td className="num px-2 py-2 text-right">
-                        {r.perCandidate ? fmtTokens(r.perCandidate.tokens) : "—"}
+                        {r.perCandidate ? (
+                          <TooltipProvider delayDuration={100}>
+                            <Tooltip>
+                              <TooltipTrigger className="cursor-help underline decoration-dotted underline-offset-4">
+                                {fmtTokens(r.perCandidate.tokens)}
+                              </TooltipTrigger>
+                              <TooltipContent side="left">
+                                <table className="text-xs">
+                                  <tbody>
+                                    {r.perCandidateByPhase.map((p) => (
+                                      <tr key={p.phase}>
+                                        <td className="pr-4">{p.phase}</td>
+                                        <td className="num text-right">{fmtTokens(p.tokens)}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        ) : (
+                          "—"
+                        )}
                       </td>
                       <td className="num px-2 py-2 text-right">
                         {r.costPerHire ? label(r.costPerHire) : "—"}
