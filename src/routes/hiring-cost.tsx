@@ -216,11 +216,6 @@ function HiringCostPage() {
                                     {r.perCandidateByPhase.map((p) => (
                                       <tr key={p.phase}>
                                         <td className="pr-4">{p.phase}</td>
-                                        <td className="num px-2 py-2 text-right">
-                                          {r.medianPerCandidate != null
-                                            ? fmtTokens(r.medianPerCandidate)
-                                            : "—"}
-                                        </td>
                                         <td className="num text-right">{fmtTokens(p.tokens)}</td>
                                       </tr>
                                     ))}
@@ -232,6 +227,9 @@ function HiringCostPage() {
                         ) : (
                           "—"
                         )}
+                      </td>
+                      <td className="num px-2 py-2 text-right">
+                        {r.medianPerCandidate != null ? fmtTokens(r.medianPerCandidate) : "—"}
                       </td>
                       <td className="num px-2 py-2 text-right">
                         {r.costPerHire ? label(r.costPerHire) : "—"}
