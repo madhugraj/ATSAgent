@@ -1,3 +1,4 @@
+import type * as React from "react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 
@@ -30,16 +31,24 @@ export function PageHeader({
   );
 }
 
+/**
+ * The one stat tile: a label, a headline value, an optional hint, and an
+ * optional slot under the value (a breakdown) or at the foot (a sparkline).
+ */
 export function StatCard({
   label,
   value,
   hint,
   tone = "default",
+  children,
+  footer,
 }: {
   label: string;
-  value: string | number;
-  hint?: string;
+  value: React.ReactNode;
+  hint?: React.ReactNode | undefined;
   tone?: "default" | "success" | "warning" | "destructive";
+  children?: React.ReactNode;
+  footer?: React.ReactNode;
 }) {
   const toneClass = {
     default: "text-foreground",
@@ -48,12 +57,14 @@ export function StatCard({
     destructive: "text-destructive",
   }[tone];
   return (
-    <div className="panel p-3.5">
+    <div className="panel flex flex-col p-3.5">
       <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
         {label}
       </div>
       <div className={cn("num mt-1 text-2xl font-semibold", toneClass)}>{value}</div>
+      {children}
       {hint ? <div className="mt-0.5 text-xs text-muted-foreground">{hint}</div> : null}
+      {footer ? <div className="mt-auto pt-2">{footer}</div> : null}
     </div>
   );
 }

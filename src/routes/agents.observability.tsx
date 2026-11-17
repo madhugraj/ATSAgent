@@ -24,7 +24,7 @@ import {
   YAxis,
 } from "recharts";
 
-import { PageHeader } from "@/components/ats";
+import { PageHeader, StatCard } from "@/components/ats";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -347,34 +347,6 @@ function Sparkline({ values, color = "var(--primary)" }: { values: number[]; col
   );
 }
 
-function Tile({
-  label,
-  value,
-  hint,
-  spark,
-  children,
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-  spark?: number[];
-  children?: React.ReactNode;
-}) {
-  return (
-    <div className="panel flex flex-col p-4">
-      <p className="text-xs font-medium text-muted-foreground">{label}</p>
-      <p className="num mt-1 text-2xl font-semibold tracking-tight">{value}</p>
-      {children}
-      {hint ? <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p> : null}
-      {spark ? (
-        <div className="mt-auto pt-2">
-          <Sparkline values={spark} />
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function KpiRow({ d }: { d: ObservabilityView }) {
   const t = d.totals;
   const tr = d.trends;
@@ -385,37 +357,47 @@ function KpiRow({ d }: { d: ObservabilityView }) {
         <span className="font-normal normal-case">(sparklines: 14 days)</span>
       </p>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        <Tile
+        <StatCard
           label="Runs"
           value={t.runs7d.toLocaleString()}
-          spark={tr.map((x) => x.completed + x.failed + x.inProgress + x.stopped)}
+          footer={
+            <Sparkline values={tr.map((x) => x.completed + x.failed + x.inProgress + x.stopped)} />
+          }
         />
-        <Tile
+        <StatCard
           label="Success rate"
           value={t.successRate == null ? "—" : `${Math.round(t.successRate * 100)}%`}
           hint="Finished runs that completed"
-          spark={tr
-            .filter((x) => x.completed + x.failed)
-            .map((x) => (x.completed / (x.completed + x.failed)) * 100)}
+          footer={
+            <Sparkline
+              values={tr
+                .filter((x) => x.completed + x.failed)
+                .map((x) => (x.completed / (x.completed + x.failed)) * 100)}
+            />
+          }
         />
-        <Tile
+        <StatCard
           label="Tokens"
           value={compact(t.tokens7d)}
           hint="Incl. AI inside tools"
-          spark={tr.map((x) => x.tokens)}
+          footer={<Sparkline values={tr.map((x) => x.tokens)} />}
         />
-        <Tile
+        <StatCard
           label="Waiting on people"
           value={String(t.openRequests)}
           hint={`${t.overdueRequests} past the ${d.slaHours} h SLA`}
-          spark={tr.map((x) => x.hitlOpened)}
+          footer={<Sparkline values={tr.map((x) => x.hitlOpened)} />}
         />
-        <Tile
+        <StatCard
           label="Median wait for a person"
           value={mins(t.medianWaitMinutes)}
-          spark={tr.flatMap((x) => (x.medianWaitHours == null ? [] : [x.medianWaitHours]))}
+          footer={
+            <Sparkline
+              values={tr.flatMap((x) => (x.medianWaitHours == null ? [] : [x.medianWaitHours]))}
+            />
+          }
         />
-        <Tile
+        <StatCard
           label="Open issues"
           value={String(t.issues.critical + t.issues.serious + t.issues.warning)}
         >
@@ -424,7 +406,7 @@ function KpiRow({ d }: { d: ObservabilityView }) {
             <StatusPill status="serious" label={`${t.issues.serious} serious`} />
             <StatusPill status="warning" label={`${t.issues.warning} warning`} />
           </div>
-        </Tile>
+        </StatCard>
       </div>
     </section>
   );

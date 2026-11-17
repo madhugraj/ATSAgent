@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { EmptyState, PageHeader } from "@/components/ats";
+import { EmptyState, PageHeader, StatCard } from "@/components/ats";
 import { CostFigure, PricingNote } from "@/components/HiringCost";
 import { AgentOptimisationTips } from "@/components/AgentUtilisation";
 import { fmtMoney, fmtTokens } from "@/lib/cost-format";
@@ -83,22 +83,32 @@ function HiringCostPage() {
         <div className="mt-6 space-y-6">
           {/* Headline numbers */}
           <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <Tile title="Spent on hiring" sub={`${c.total.requests} AI requests`}>
-              <CostFigure line={c.total} currency={c.currency} />
-            </Tile>
-            <Tile title="Cost per hire" sub={`${c.hires} offer(s) accepted in the period`}>
-              {c.costPerHire ? (
-                <CostFigure line={c.costPerHire} currency={c.currency} />
-              ) : (
-                <span className="text-muted-foreground">— no hire yet</span>
-              )}
-            </Tile>
-            <Tile title="Spent on candidates not hired" sub="rejected, withdrawn or declined">
-              <CostFigure line={c.outcomes.notHired} currency={c.currency} />
-            </Tile>
-            <Tile title="Not tied to a role" sub="talent pool, copilot, set-up">
-              <CostFigure line={c.notTiedToRole} currency={c.currency} />
-            </Tile>
+            <StatCard
+              label="Spent on hiring"
+              hint={`${c.total.requests} AI requests`}
+              value={<CostFigure line={c.total} currency={c.currency} />}
+            />
+            <StatCard
+              label="Cost per hire"
+              hint={`${c.hires} offer(s) accepted in the period`}
+              value={
+                c.costPerHire ? (
+                  <CostFigure line={c.costPerHire} currency={c.currency} />
+                ) : (
+                  <span className="text-muted-foreground">— no hire yet</span>
+                )
+              }
+            />
+            <StatCard
+              label="Spent on candidates not hired"
+              hint="rejected, withdrawn or declined"
+              value={<CostFigure line={c.outcomes.notHired} currency={c.currency} />}
+            />
+            <StatCard
+              label="Not tied to a role"
+              hint="talent pool, copilot, set-up"
+              value={<CostFigure line={c.notTiedToRole} currency={c.currency} />}
+            />
           </section>
 
           {/* What to change to spend less — evidence from the agents' own ledgers */}
@@ -236,16 +246,6 @@ function HiringCostPage() {
         </div>
       )}
     </>
-  );
-}
-
-function Tile({ title, sub, children }: { title: string; sub: string; children: React.ReactNode }) {
-  return (
-    <div className="panel p-4">
-      <p className="text-xs text-muted-foreground">{title}</p>
-      <div className="mt-1 text-lg">{children}</div>
-      <p className="text-xs text-muted-foreground">{sub}</p>
-    </div>
   );
 }
 
