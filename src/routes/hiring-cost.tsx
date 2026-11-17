@@ -232,6 +232,19 @@ function HiringCostPage() {
                       </td>
                     </tr>
                   ))}
+                  {c.deletedRoles.count > 0 ? (
+                    <tr className="border-b border-border/60 text-muted-foreground">
+                      <td className="px-2 py-2">Deleted roles ({c.deletedRoles.count})</td>
+                      <td className="px-2 py-2 text-xs">deleted</td>
+                      <td className="px-2 py-2 text-right">—</td>
+                      <td className="px-2 py-2 text-right">—</td>
+                      <td className="num px-2 py-2 text-right">{label(c.deletedRoles)}</td>
+                      <td className="px-2 py-2 text-right">—</td>
+                      <td className="px-2 py-2 text-right">—</td>
+                      <td className="px-2 py-2 text-right">—</td>
+                      <td className="px-2 py-2 text-right">—</td>
+                    </tr>
+                  ) : null}
                 </tbody>
               </table>
             </div>
