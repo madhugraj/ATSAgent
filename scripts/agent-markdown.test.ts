@@ -24,6 +24,23 @@ describe("agent markdown", () => {
     expect(out).toContain('<p class="font-semibold">Screening Summary</p>');
   });
 
+  test("a table without outer pipes or a separator still renders", () => {
+    const bare = html(
+      "Summary:\n\nCandidate | Kit | Phone Call | Recommendation\n--- | --- | --- | ---\nSAIRAM B | Prepared | Completed (Score: 39/100) | Hold",
+    );
+    expect(bare).toContain("<table");
+    expect(bare).toContain("<td>SAIRAM B</td>".replace("<td>", '<td class="px-2 py-1">'));
+    expect(bare).not.toContain("--- |");
+    const noSep = html("Candidate | Kit | Recommendation\nSAIRAM B | Prepared | Hold");
+    expect(noSep).toContain("<th");
+    expect(noSep).toContain("Hold</td>");
+  });
+
+  test("a sentence with one pipe stays a paragraph", () => {
+    const out = html("Score 39 | high confidence\nNext line here");
+    expect(out).not.toContain("<table");
+  });
+
   test("lists, bold, italics and code", () => {
     const out = html("1. **Enable** boards\n2. Review *skills*\n\n- one\n- `two`");
     expect(out).toContain("<ol");

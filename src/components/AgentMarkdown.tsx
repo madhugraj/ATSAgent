@@ -71,8 +71,6 @@ function inline(text: string, keyBase = "i"): ReactNode[] {
 
 /* ------------------------------------------------------------ blocks */
 
-const isTableRow = (l: string) => /^\s*\|.*\|\s*$/.test(l);
-const isTableSep = (l: string) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(l);
 const cells = (l: string) =>
   l
     .trim()
@@ -80,6 +78,21 @@ const cells = (l: string) =>
     .replace(/\|$/, "")
     .split("|")
     .map((c) => c.trim());
+/** A pipe row, with or without the outer pipes (`a | b` or `| a | b |`). */
+const isTableRow = (l: string) => l.includes("|") && !/^\s*`/.test(l) && cells(l).length >= 2;
+const isTableSep = (l: string) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(l);
+/**
+ * Where a table starts: a row followed by a `---` separator, or — when the
+ * model drops the separator — a header and a row with the same 3+ columns.
+ */
+const tableAt = (lines: string[], i: number) => {
+  const a = lines[i]!;
+  const b = lines[i + 1];
+  if (b === undefined || !isTableRow(a)) return 0;
+  if (isTableSep(b)) return 2;
+  const n = cells(a).length;
+  return n >= 3 && isTableRow(b) && !isTableSep(b) && cells(b).length === n ? 1 : 0;
+};
 const bullet = /^\s*[-*•]\s+(.*)$/;
 const numbered = /^\s*(\d+)[.)]\s+(.*)$/;
 
@@ -96,11 +109,13 @@ function blocks(text: string): ReactNode[] {
       continue;
     }
     // Table: a row, a separator, then rows.
-    if (isTableRow(line) && i + 1 < lines.length && isTableSep(lines[i + 1]!)) {
+    const skip = tableAt(lines, i);
+    if (skip) {
       const head = cells(line);
       const rows: string[][] = [];
-      i += 2;
-      while (i < lines.length && isTableRow(lines[i]!)) rows.push(cells(lines[i++]!));
+      i += skip;
+      while (i < lines.length && isTableRow(lines[i]!) && !isTableSep(lines[i]!))
+        rows.push(cells(lines[i++]!));
       out.push(
         <div key={key} className="overflow-x-auto">
           <table className="w-full border-collapse text-left text-[0.92em]">
@@ -175,7 +190,7 @@ function blocks(text: string): ReactNode[] {
     while (
       i < lines.length &&
       lines[i]!.trim() &&
-      !(isTableRow(lines[i]!) && i + 1 < lines.length && isTableSep(lines[i + 1]!)) &&
+      !tableAt(lines, i) &&
       !/^\s*#{1,6}\s/.test(lines[i]!) &&
       !bullet.test(lines[i]!) &&
       !numbered.test(lines[i]!)
