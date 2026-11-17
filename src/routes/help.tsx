@@ -47,12 +47,19 @@ function Help() {
         title="User manual"
         description="How to configure and run the platform, from organisation registration to hires. The HR copilot answers from this same manual."
         actions={
-          <Button
-            variant="outline"
-            onClick={() => void import("@/lib/manual-export").then((m) => m.downloadManualPdf())}
-          >
-            <Download className="size-4" /> Download PDF
-          </Button>
+          <>
+            <Button
+              variant="outline"
+              onClick={() => void import("@/lib/manual-export").then((m) => m.downloadManualPdf())}
+            >
+              <Download className="size-4" /> Download PDF
+            </Button>
+            <Button variant="outline" asChild>
+              <a href="/ATSIQ_Product_Handbook.docx" download>
+                <Download className="size-4" /> Product handbook
+              </a>
+            </Button>
+          </>
         }
       />
 
