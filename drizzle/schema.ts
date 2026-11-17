@@ -918,6 +918,12 @@ export const interviewSlotOffers = pgTable(
     /** The candidate's own words when none of the times work (untrusted). */
     candidateNote: text("candidate_note"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    /**
+     * When the private link was e-mailed. Null while it is held back for the
+     * scheduling call that goes first (docs/voice-scheduling-call-plan.md):
+     * released when that call ends without a booking, or cannot happen in time.
+     */
+    linkEmailedAt: timestamp("link_emailed_at", { withTimezone: true }),
     createdBy: uuid("created_by"),
     agentRunId: uuid("agent_run_id"),
     /** Further interviewers on the panel: [{ name, email }]. */
@@ -932,6 +938,9 @@ export const interviewSlotOffers = pgTable(
     uniqueIndex("interview_slot_offers_token_key").on(t.token),
     index("interview_slot_offers_open_idx").on(t.orgId, t.status, t.expiresAt),
     index("interview_slot_offers_application_idx").on(t.applicationId),
+    index("interview_slot_offers_held_idx")
+      .on(t.orgId, t.status)
+      .where(sql`${t.linkEmailedAt} is null`),
   ],
 );
 
@@ -3199,6 +3208,7 @@ export const phoneScreeningSettings = pgTable(
     /** Scheduling calls (a follow-up to an unanswered interview-time e-mail) switched on. */
     schedulingEnabled: boolean("scheduling_enabled").notNull().default(false),
     /** Hours an e-mailed interview-time offer waits unanswered before a scheduling call. */
+    /** Retired: voice goes first now (no e-mail wait). Kept for old rows; not read. */
     schedulingWaitHours: integer("scheduling_wait_hours").notNull().default(24),
     /** Pay negotiation calls (docs/negotiator-voice-agent.md) switched on (0058). */
     negotiationEnabled: boolean("negotiation_enabled").notNull().default(false),

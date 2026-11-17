@@ -53,12 +53,25 @@ export type OfferInput = {
 
 const site = () => env.PUBLIC_SITE_URL.replace(/\/$/, "");
 
-/** Offer interview times to the candidate and email them the private link. */
+/**
+ * Offer interview times to the candidate: the AI scheduling call goes first and
+ * the private link is e-mailed if that call does not book (or cannot happen).
+ */
 export async function offerSlotsCore(
   orgId: string,
   by: { userId: string | null; runId: string | null },
   input: OfferInput,
-): Promise<{ offerId: string; slots: string[]; expiresAt: string; checkedWith: string | null }> {
+): Promise<{
+  offerId: string;
+  slots: string[];
+  expiresAt: string;
+  checkedWith: string | null;
+  /** How the times reach the candidate first: the AI call, or the e-mailed link. */
+  via: "call" | "email";
+  callDueAt: string | null;
+  /** Why no call went first (the link was e-mailed instead). */
+  callRefused: string | null;
+}> {
   const slots = [
     ...new Set(
       input.slots
@@ -209,6 +222,89 @@ export async function offerSlotsCore(
     })
     .returning({ id: interviewSlotOffers.id });
 
+  // Voice first: the AI scheduling call goes out now and the e-mailed link is
+  // held until that call ends without a booking. When no call can be placed
+  // (switched off, no mobile, opted out, already spoken about this round…), the
+  // link is e-mailed straight away. The system decides — never the agent.
+  let call: { callId: string; dueAt: Date } | null = null;
+  let callRefused: string | null = null;
+  try {
+    const { requestSchedulingCall } = await import("../server/voice/scheduling-request.server");
+    const r = await requestSchedulingCall({
+      orgId,
+      applicationId: app.id,
+      requestedBy: by.userId,
+      requestedRunId: by.runId,
+      actor: by.runId ? `agent:interview:${by.runId}` : `user:${by.userId ?? "?"}`,
+      now,
+      callFirst: true,
+    });
+    call = { callId: r.callId, dueAt: r.dueAt };
+  } catch (e) {
+    callRefused = (e as Error).message;
+  }
+  if (!call) await sendOfferLink(orgId, offer!.id);
+  await writeAudit({
+    actor: by.runId ? `agent:interview:${by.runId}` : `user:${by.userId ?? "?"}`,
+    actorUserId: by.userId,
+    orgId,
+    action: "interview.slots_offered",
+    entityType: "application",
+    entityId: app.id,
+    detail: {
+      offerId: offer!.id,
+      level: input.level,
+      slots: slots.length,
+      via: call ? "call" : "email",
+      ...(callRefused ? { callRefused } : {}),
+    },
+  });
+  return {
+    offerId: offer!.id,
+    slots: slots.map((d) => d.toISOString()),
+    expiresAt: expiresAt.toISOString(),
+    checkedWith: probe.source,
+    via: call ? "call" : "email",
+    callDueAt: call ? call.dueAt.toISOString() : null,
+    callRefused,
+  };
+}
+
+/**
+ * E-mail the candidate the offer's private link, once. Claims the offer
+ * atomically (link_emailed_at), so the call-end path and the sweep can both
+ * call it safely. Only an open offer is e-mailed — a time booked or declined on
+ * the call needs no link. Returns whether this call sent it.
+ */
+export async function sendOfferLink(orgId: string, offerId: string): Promise<boolean> {
+  const [o] = await db
+    .update(interviewSlotOffers)
+    .set({ linkEmailedAt: new Date(), updatedAt: new Date() })
+    .where(
+      and(
+        eq(interviewSlotOffers.id, offerId),
+        eq(interviewSlotOffers.orgId, orgId),
+        eq(interviewSlotOffers.status, "offered"),
+        sql`${interviewSlotOffers.linkEmailedAt} is null`,
+        sql`${interviewSlotOffers.expiresAt} > now()`,
+      ),
+    )
+    .returning();
+  if (!o) return false;
+  const [app] = await db
+    .select({
+      candidateName: candidates.fullName,
+      candidateEmail: candidates.email,
+      jobTitle: requisitions.title,
+      orgName: organizations.name,
+    })
+    .from(applications)
+    .innerJoin(candidates, eq(candidates.id, applications.candidateId))
+    .innerJoin(requisitions, eq(requisitions.id, applications.requisitionId))
+    .innerJoin(organizations, eq(organizations.id, applications.orgId))
+    .where(and(eq(applications.id, o.applicationId), eq(applications.orgId, orgId)))
+    .limit(1);
+  if (!app?.candidateEmail) return false;
   const { enqueueEmail, formatInOrgTZ, getOrgEmailSettings } =
     await import("./email-outbox.server");
   const tz = (await getOrgEmailSettings(orgId)).timezone;
@@ -220,8 +316,8 @@ export async function offerSlotsCore(
     .where(
       and(
         eq(interviews.orgId, orgId),
-        eq(interviews.applicationId, app.id),
-        eq(interviews.level, input.level),
+        eq(interviews.applicationId, o.applicationId),
+        eq(interviews.level, o.level),
         eq(interviews.status, "cancelled"),
         sql`${interviews.scheduledAt} > now()`,
       ),
@@ -233,36 +329,66 @@ export async function offerSlotsCore(
     kind: "interview_slots",
     templateName: "interview_slots",
     toEmail: app.candidateEmail,
-    applicationId: app.id,
-    idempotencyKey: `interview-slots:${offer!.id}`,
+    applicationId: o.applicationId,
+    idempotencyKey: `interview-slots:${o.id}`,
     templateData: {
       candidateName: app.candidateName,
       orgName: app.orgName,
       jobTitle: app.jobTitle,
-      roundLabel: `L${input.level} interview`,
-      durationMins: String(input.durationMins),
-      modeLabel: input.mode === "online" ? "Online" : input.mode === "onsite" ? "Onsite" : "Phone",
-      slotsText: slots.map((d) => formatInOrgTZ(d, tz)).join("\n"),
-      chooseUrl: `${site()}/schedule/${token}`,
-      expiresText: formatInOrgTZ(expiresAt, tz),
+      roundLabel: `L${o.level} interview`,
+      durationMins: String(o.durationMins),
+      modeLabel: o.mode === "online" ? "Online" : o.mode === "onsite" ? "Onsite" : "Phone",
+      slotsText: o.slots.map((d) => formatInOrgTZ(new Date(d), tz)).join("\n"),
+      chooseUrl: `${site()}/schedule/${o.token}`,
+      expiresText: formatInOrgTZ(o.expiresAt, tz),
       ...(dropped?.at ? { replacesText: formatInOrgTZ(dropped.at, tz) } : {}),
     },
   });
-  await writeAudit({
-    actor: by.runId ? `agent:interview:${by.runId}` : `user:${by.userId ?? "?"}`,
-    actorUserId: by.userId,
-    orgId,
-    action: "interview.slots_offered",
-    entityType: "application",
-    entityId: app.id,
-    detail: { offerId: offer!.id, level: input.level, slots: slots.length },
-  });
-  return {
-    offerId: offer!.id,
-    slots: slots.map((d) => d.toISOString()),
-    expiresAt: expiresAt.toISOString(),
-    checkedWith: probe.source,
-  };
+  return true;
+}
+
+/** Scheduling-call states during which the e-mailed link stays held. */
+const CALL_LIVE = ["requested", "approved", "dialling", "in_progress", "callback"];
+/** The link goes out by e-mail at the latest this long before it would close. */
+export const LINK_HOLD_BEFORE_EXPIRY_MS = 12 * 3600_000;
+/** …and never held longer than this after the offer, whatever the call is doing. */
+export const LINK_HOLD_MAX_MS = 6 * 3600_000;
+
+/**
+ * Release held links (run by the agent tick): the scheduling call that went first
+ * ended without a booking, never got going, or is taking too long — the
+ * candidate then has the e-mail. Returns how many were sent.
+ */
+export async function releaseHeldOfferLinks(orgId?: string, now = Date.now()): Promise<number> {
+  const at = new Date(now).toISOString();
+  const rows = (await db.execute(sql`
+    select o.id, o.org_id from interview_slot_offers o
+    where o.status = 'offered' and o.link_emailed_at is null
+      and o.expires_at > ${at}::timestamptz
+      ${orgId ? sql`and o.org_id = ${orgId}` : sql``}
+      and (
+        o.created_at <= ${at}::timestamptz - make_interval(secs => ${LINK_HOLD_MAX_MS / 1000})
+        or o.expires_at <= ${at}::timestamptz + make_interval(secs => ${LINK_HOLD_BEFORE_EXPIRY_MS / 1000})
+        or not exists (
+          select 1 from screening_calls c
+          where c.slot_offer_id = o.id and c.status in (${sql.join(
+            CALL_LIVE.map((x) => sql`${x}`),
+            sql`, `,
+          )})))
+    limit 200`)) as unknown as { id: string; org_id: string }[];
+  let sent = 0;
+  for (const r of rows) if (await sendOfferLink(r.org_id, r.id)) sent++;
+  return sent;
+}
+
+/** A scheduling call ended: if it left the offer open, e-mail the link now. */
+export async function releaseOfferLinkAfterCall(
+  orgId: string,
+  offerId: string | null,
+  callStatus: string,
+): Promise<void> {
+  if (!offerId || CALL_LIVE.includes(callStatus)) return;
+  await sendOfferLink(orgId, offerId);
 }
 
 /**

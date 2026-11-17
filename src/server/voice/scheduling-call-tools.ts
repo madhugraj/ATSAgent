@@ -23,7 +23,7 @@ export const SCHEDULING_END_REASONS = [
 ] as const;
 export type SchedulingEndReason = (typeof SCHEDULING_END_REASONS)[number];
 
-/** At most this many options on one call: the e-mailed times plus up to three alternates. */
+/** At most this many options on one call: the offered times plus up to three alternates. */
 export const MAX_OPTIONS = 8;
 
 /** Words that sound like confusion, not a refusal (pure; unit-tested). */
@@ -72,11 +72,11 @@ export const SCHEDULING_TOOL_DESCRIPTIONS: Record<SchedulingToolName, string> = 
   book_interview_time:
     "Book the interview at one of the times in your list of options: option is that time's number. Only after the candidate clearly chose it. The result says the booked time to read back, or why it could not be booked (then offer another option).",
   call_back_later:
-    "The candidate asked to be called back shortly (for example to check their calendar): minutes is how long from now they asked for (5 to 180). Allowed once; the result gives the exact time to read back, or says it is not possible (then point them to the e-mail link).",
+    "The candidate asked to be called back shortly (for example to check their calendar): minutes is how long from now they asked for (5 to 180). Allowed once; the result gives the exact time to read back, or says it is not possible (then say the times reach them by e-mail with a link).",
   record_availability:
     "None of the options work: record when the candidate is free, in their words (and, if they said, which days and times of day). The team offers matching times by e-mail.",
   end_scheduling_call:
-    "Hang up after saying goodbye out loud, with why the call ended: booked, availability_noted, not_now (they will use the e-mail link), declined (they do not want to schedule), opt_out (they asked not to be called by the AI assistant again), wrong_person, voicemail, candidate_left, other.",
+    "Hang up after saying goodbye out loud, with why the call ended: booked, availability_noted, not_now (the times go to them by e-mail with a link), declined (they do not want to schedule), opt_out (they asked not to be called by the AI assistant again), wrong_person, voicemail, candidate_left, other.",
 };
 
 /** JSON Schema of a tool's arguments, as providers want it (no `$schema`). */
@@ -169,7 +169,7 @@ export function applySchedulingTool(
         return {
           ok: false,
           error:
-            "Not recorded: that is not a clear no. In one plain sentence, say you are calling only to help them pick a time for the interview they were e-mailed about, then ask again whether they have a minute.",
+            "Not recorded: that is not a clear no. In one plain sentence, say you are calling only to help them pick a time for their next interview, then ask again whether they have a minute.",
         };
       }
       state.permission = granted;
@@ -195,7 +195,7 @@ export function applySchedulingTool(
         return {
           ok: false,
           error:
-            "Not possible: a call-back was already arranged for these times. Point them to the link in their e-mail.",
+            "Not possible: a call-back was already arranged for these times. Say the times reach them by e-mail with a link to choose.",
         };
       const { minutes } = parsed.data as { minutes: number };
       return { ok: true, callBackIn: minutes };

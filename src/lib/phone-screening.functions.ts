@@ -27,7 +27,6 @@ const Policy = z
     voice: z.enum(["Kore", "Aoede", "Leda", "Zephyr", "Puck", "Charon", "Fenrir", "Orus"]),
     nextStepsText: z.string().trim().max(300).nullable(),
     schedulingEnabled: z.boolean(),
-    schedulingWaitHours: z.number().int().min(2).max(96),
     negotiationEnabled: z.boolean(),
   })
   .refine((p) => p.windowEndMinute - p.windowStartMinute >= 60, {
