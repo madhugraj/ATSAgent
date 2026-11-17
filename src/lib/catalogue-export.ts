@@ -128,10 +128,9 @@ export function downloadCataloguePdf(cat: CatalogueResult) {
   buildCataloguePdf(cat).save(`atsiq-product-catalogue-${stamp()}.pdf`);
 }
 
-/** Open the catalogue PDF in a new tab to read before downloading. */
-export function previewCataloguePdf(cat: CatalogueResult) {
-  const url = buildCataloguePdf(cat).output("bloburl");
-  window.open(String(url), "_blank", "noopener");
+/** The catalogue PDF as an object URL, to show in the page before downloading. */
+export function cataloguePdfUrl(cat: CatalogueResult) {
+  return String(buildCataloguePdf(cat).output("bloburl"));
 }
 
 export function downloadCatalogueXlsx(cat: CatalogueResult) {
