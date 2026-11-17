@@ -51,6 +51,8 @@ import {
   requisitions,
   type AgentType,
   type ScreeningCoverage,
+  screeningCalls,
+  candidateAssessments,
 } from "@db/schema";
 
 /* ------------------------------------------------------------------ slots */
@@ -1183,18 +1185,54 @@ export async function screenCandidates(
     entityId: conv.requisitionId,
     detail: { conversation_id: conv.id, applications: rows.map((r) => r.id) },
   });
-  await startForThread(
-    conv,
-    "screening",
-    userId,
-    [
-      `The recruiter chose these candidates for screening for ${req?.code} "${req?.title}":`,
-      ...rows.map((r) => `- application ${r.id}`),
-      "Shortlist any that are not shortlisted yet, prepare a screening kit for each, and summarise who should proceed. Automated screening calls are not connected yet, so say that the kits are ready for the call.",
-    ].join("\n"),
-    conv.requisitionId,
-    `Screening ${plural(rows.length, "candidate")}: ${rows.map((r) => r.name).join(", ")}. The Screening agent is preparing their screening questions; calls will be placed by the voice agent once it is connected.`,
+  // Screening already under way (a phone call arranged or held, or the written
+  // assessment sent) is not started again — another run would only rebuild the
+  // kit. Everyone else goes to the Screening agent, which arranges the call.
+  const underWay = new Set(
+    (
+      (await db.execute(sql`
+        select a.id from ${applications} a
+        where a.org_id = ${conv.orgId}
+          and a.id in (${sql.join(
+            rows.map((r) => sql`${r.id}`),
+            sql`, `,
+          )})
+          and (
+            exists (
+              select 1 from ${screeningCalls} c
+              where c.org_id = ${conv.orgId} and c.application_id = a.id
+                and c.status not in ('cancelled', 'consent_declined')
+            )
+            or exists (
+              select 1 from ${candidateAssessments} x
+              where x.org_id = ${conv.orgId} and x.candidate_id = a.candidate_id
+                and x.requisition_id = a.requisition_id
+            )
+          )`)) as unknown as { id: string }[]
+    ).map((r) => r.id),
   );
+  const busy = rows.filter((r) => underWay.has(r.id));
+  const fresh = rows.filter((r) => !underWay.has(r.id));
+  if (busy.length) {
+    await postMessage(conv, {
+      role: "desk",
+      body: `${busy.map((r) => r.name).join(", ")} ${busy.length === 1 ? "is" : "are"} already being screened for this role (a call is arranged or the assessment was sent), so I haven't started again. Their progress shows on the candidate page.`,
+    });
+  }
+  if (fresh.length) {
+    await startForThread(
+      conv,
+      "screening",
+      userId,
+      [
+        `The recruiter chose these candidates for screening for ${req?.code} "${req?.title}":`,
+        ...fresh.map((r) => `- application ${r.id}`),
+        "Shortlist any that are not shortlisted yet, prepare a screening kit for each that has none (reuse an existing kit), arrange their screening as your instructions say, and summarise who should proceed.",
+      ].join("\n"),
+      conv.requisitionId,
+      `Screening ${plural(fresh.length, "candidate")}: ${fresh.map((r) => r.name).join(", ")}. The Screening agent is preparing their screening.`,
+    );
+  }
   return rows.length;
 }
 
