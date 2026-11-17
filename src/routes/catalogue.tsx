@@ -32,13 +32,13 @@ import {
 export const Route = createFileRoute("/catalogue")({
   head: () => ({
     meta: [
-      { title: "Product catalogue — ATSIQ modules, capabilities & commercials" },
+      { title: "Product catalogue — Scout modules, capabilities & commercials" },
       {
         name: "description",
         content:
-          "Product-owner catalogue of every ATSIQ module, the capabilities inside it, who it serves and its commercial terms, downloadable as PDF or Excel.",
+          "Product-owner catalogue of every Scout module, the capabilities inside it, who it serves and its commercial terms, downloadable as PDF or Excel.",
       },
-      { property: "og:title", content: "ATSIQ product catalogue" },
+      { property: "og:title", content: "Scout product catalogue" },
       {
         property: "og:description",
         content:
