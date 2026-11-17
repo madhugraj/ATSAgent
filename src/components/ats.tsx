@@ -222,14 +222,61 @@ const STATUS_LABEL: Record<string, string> = {
   revoked: "Revoked",
 };
 
+const STATUS_TONE: Record<string, keyof typeof STAGE_TONE_CLASS> = {
+  draft: "neutral",
+  pending_dh: "warn",
+  pending_hr: "warn",
+  pending_cbo: "warn",
+  changes_requested: "warn",
+  on_hold: "warn",
+  approved: "good",
+  released: "active",
+  accepted: "good",
+  rejected: "bad",
+  declined: "bad",
+  revoked: "bad",
+  closed: "neutral",
+};
+
+/** Requisition / offer status — same badge shape and tones as StageBadge. */
 export function StatusBadge({ status }: { status: string }) {
-  const variant =
-    status === "approved" || status === "accepted"
-      ? "default"
-      : status === "rejected" || status === "declined" || status === "revoked"
-        ? "destructive"
-        : "outline";
-  return <Badge variant={variant}>{STATUS_LABEL[status] ?? status}</Badge>;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center whitespace-nowrap rounded-md border px-2 py-0.5 text-xs font-medium",
+        STAGE_TONE_CLASS[STATUS_TONE[status] ?? "neutral"],
+      )}
+    >
+      {STATUS_LABEL[status] ?? status}
+    </span>
+  );
+}
+
+export const PILL_TONE_CLASS = {
+  good: "text-emerald-600 dark:text-emerald-400",
+  warn: "text-amber-600 dark:text-amber-500",
+  serious: "text-orange-600 dark:text-orange-400",
+  bad: "text-destructive",
+  neutral: "text-muted-foreground",
+} as const;
+export type PillTone = keyof typeof PILL_TONE_CLASS;
+
+/** An icon + label health/connection status. The icon carries the colour; the label stays readable. */
+export function StatusPill({
+  icon: Icon,
+  tone,
+  label,
+}: {
+  icon: React.ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
+  tone: PillTone;
+  label: string;
+}) {
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground">
+      <Icon className={cn("size-3.5 shrink-0", PILL_TONE_CLASS[tone])} aria-hidden />
+      {label}
+    </span>
+  );
 }
 
 export function SkillPills({
