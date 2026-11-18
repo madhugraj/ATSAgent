@@ -43,6 +43,8 @@ const MAX_HOPS = 60;
 /** The trigger of a workflow someone starts by hand with a hiring need. */
 export const MANUAL_TRIGGER = "manual";
 export const DEFAULT_WAIT_HOURS = 72;
+/** A run started this long before the workflow run still counts as the same event's. */
+export const JOIN_WINDOW_MS = 60_000;
 export const MAX_WAIT_HOURS = 24 * 30;
 const FIELD = /^(payload(\.[A-Za-z0-9_]+)+|subject_type|last\.(status|result)|wait\.status)$/;
 const OPS = ["eq", "neq", "contains", "gt", "gte", "lt", "lte", "exists"] as const;
@@ -61,6 +63,11 @@ export type WorkflowContext = {
   /** Every agent run the flow started or joined. */
   runs?: string[];
   principal?: string | null;
+  /**
+   * An older run of the step's agent was still open on the role (one open run
+   * per agent and role): the flow waits for it, then starts its own run.
+   */
+  queuedBehind?: string | null;
 };
 
 /* -------------------------------------------------------------- the graph */
@@ -676,7 +683,7 @@ export async function advanceWorkflowRun(id: string): Promise<void> {
       const subject = ctx.subject ?? null;
       const [existing] = subject
         ? await db
-            .select({ id: agentRuns.id })
+            .select({ id: agentRuns.id, createdAt: agentRuns.createdAt })
             .from(agentRuns)
             .where(
               and(
@@ -688,8 +695,20 @@ export async function advanceWorkflowRun(id: string): Promise<void> {
             )
             .limit(1)
         : [];
+      // Same event (e.g. the built-in hand-off started it): join it. An older
+      // run doing other work: wait for it, then start this step's own run.
+      if (existing && existing.createdAt.getTime() < wr.createdAt.getTime() - JOIN_WINDOW_MS) {
+        ctx.queuedBehind = existing.id;
+        note(
+          node.id,
+          `Waiting for an earlier ${agentType} run on this role (started ${existing.createdAt.toISOString().slice(0, 10)}) to finish — it may be waiting on a person in Waiting for you. Then this step starts its own run.`,
+        );
+        await save({ status: "waiting", currentNode: node.id, waitingRunId: existing.id });
+        return;
+      }
+      ctx.queuedBehind = null;
       let runId = existing?.id;
-      if (runId) note(node.id, "Joined the run already working on this.");
+      if (runId) note(node.id, "Joined the run this event already started.");
       else {
         const { startRun } = await import("./runtime.server");
         const goal = renderGoal(node.data.goal ?? "", ctx);
@@ -739,6 +758,30 @@ export async function onAgentRunFinished(run: {
   for (const wr of waiting) {
     try {
       const ctx = wr.context as WorkflowContext;
+      if (ctx.queuedBehind === run.id) {
+        // It was not this flow's run: now the role is free, start the step's own.
+        ctx.queuedBehind = null;
+        const resumed = await db
+          .update(workflowRuns)
+          .set({
+            status: "running",
+            context: ctx,
+            waitingRunId: null,
+            history: [
+              ...wr.history,
+              {
+                node: wr.currentNode ?? "",
+                at: new Date().toISOString(),
+                note: `The earlier run ${run.status}; starting this step's own run.`,
+              },
+            ],
+            updatedAt: new Date(),
+          })
+          .where(and(eq(workflowRuns.id, wr.id), eq(workflowRuns.status, "waiting")))
+          .returning({ id: workflowRuns.id });
+        if (resumed.length) await advanceWorkflowRun(wr.id);
+        continue;
+      }
       ctx.last = { status: run.status, result: (run.result ?? "").slice(0, 2000) };
       if (!ctx.subject) {
         // The agent may have worked on a role (e.g. the Requisition agent drafted one).
