@@ -50,11 +50,11 @@ can run it. The go-live check (`workflowReadiness` in `workflows.server.ts`) say
 
 Where it shows:
 
-- **Platform → Agent workflows → Organisations** — each organisation with *Ready* / *Not ready* and the items.
+- **Platform → Agent workflows → Organisations** — each organisation with _Ready_ / _Not ready_ and the items.
   Granting a not-ready organisation is allowed, with a warning.
 - **The organisation's Agent settings → Workflows** (HR head, President / CBO, owner;
-  `src/lib/org-workflows.functions.ts`, read-only) — every granted workflow, what starts it, *Live* / *Not
-  ready*, a **Switch on** shortcut for each missing agent (normal `saveAgentPolicy`, autonomy Suggest) and its
+  `src/lib/org-workflows.functions.ts`, read-only) — every granted workflow, what starts it, _Live_ / _Not
+  ready_, a **Switch on** shortcut for each missing agent (normal `saveAgentPolicy`, autonomy Suggest) and its
   latest runs.
 - **The bell** — owners and HR heads see "Workflow … is not running yet" until it is ready (derived live, so
   it disappears by itself).
