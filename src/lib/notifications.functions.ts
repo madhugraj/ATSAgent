@@ -336,6 +336,23 @@ export const myNotifications = createServerFn({ method: "GET" })
             at: i.firstSeenAt.toISOString(),
             severity: i.severity === "critical" ? "urgent" : "warn",
           });
+        // Workflows the platform granted that cannot run here yet (until fixed).
+        const { grantedWorkflows, workflowReadiness } =
+          await import("../server/agents/workflows.server");
+        for (const w of await grantedWorkflows(orgId)) {
+          const r = await workflowReadiness(orgId, w.graph);
+          if (r.ready) continue;
+          const missing = r.items.filter((i) => !i.ok).map((i) => i.label);
+          out.push({
+            id: `workflow-ready:${w.id}:${w.version}`,
+            kind: "agent",
+            title: `Workflow "${w.name}" is not running yet`,
+            body: `It needs: ${missing.join(", ")}. Switch these on in Agent settings → Workflows.`,
+            to: "/agents/settings#workflows",
+            at: w.grantedAt.toISOString(),
+            severity: "warn",
+          });
+        }
         const [anyOn] = await db
           .select({ id: agentPolicies.id })
           .from(agentPolicies)

@@ -15,7 +15,7 @@
  */
 import { createHash } from "node:crypto";
 
-import { and, eq, inArray, isNull, lt } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, ne } from "drizzle-orm";
 
 import {
   agentRuns,
@@ -916,4 +916,119 @@ export async function workflowRunReport(
         : null,
     },
   };
+}
+
+/* --------------------------------------------------------------- readiness */
+
+export type ReadinessItem = {
+  /** "ai_key", "agent:<type>" or "studio:<type>". */
+  key: string;
+  label: string;
+  ok: boolean;
+  /** What is wrong, or the current setting when ok (e.g. autonomy). */
+  detail: string;
+};
+
+export type WorkflowReadiness = { ready: boolean; items: ReadinessItem[] };
+
+/** The agent types a graph starts, in order, without repeats. */
+export function agentsOf(g: WorkflowGraph): string[] {
+  return [
+    ...new Set(
+      g.nodes.filter((n) => n.kind === "agent" && n.data.agentType).map((n) => n.data.agentType!),
+    ),
+  ];
+}
+
+/**
+ * Can this organisation run the workflow? Its own AI key, every agent the flow
+ * starts switched on there, and every studio agent granted to it. Read-only.
+ */
+export async function workflowReadiness(
+  orgId: string,
+  graph: WorkflowGraph,
+): Promise<WorkflowReadiness> {
+  const { resolveAiConfig } = await import("../../lib/ai-gateway.server");
+  const { loadPolicy } = await import("./policy");
+  const { AGENT_LABEL } = await import("../../lib/agents.catalog");
+  const items: ReadinessItem[] = [];
+  const cfg = await resolveAiConfig(orgId);
+  items.push({
+    key: "ai_key",
+    label: "AI key",
+    ok: Boolean(cfg.apiKey),
+    detail: cfg.apiKey ? "Saved" : "Add one in Integrations → AI model",
+  });
+  for (const type of agentsOf(graph)) {
+    const name = graph.nodes.find((n) => n.data.agentType === type)?.data.label;
+    const label = AGENT_LABEL[type] ?? name ?? type;
+    if (type.startsWith("studio:")) {
+      const { publishedStudioAgent, hasGrant } = await import("./blueprints.server");
+      const p = await publishedStudioAgent(type);
+      const granted = Boolean(p && (await hasGrant(p.blueprintId, orgId)));
+      items.push({
+        key: `studio:${type}`,
+        label,
+        ok: granted,
+        detail: granted ? "Granted" : "Grant this studio agent to the organisation",
+      });
+      if (!granted) continue;
+    }
+    const policy = await loadPolicy(orgId, type as AgentType);
+    items.push({
+      key: `agent:${type}`,
+      label,
+      ok: policy.enabled,
+      detail: policy.enabled ? `On · ${policy.autonomy}` : "Switched off in Agent settings",
+    });
+  }
+  return { ready: items.every((i) => i.ok), items };
+}
+
+/** The published graph of a workflow, or null when it has none. */
+export async function publishedGraph(workflowId: string): Promise<WorkflowGraph | null> {
+  const [w] = await db
+    .select({ v: agentWorkflows.publishedVersion })
+    .from(agentWorkflows)
+    .where(eq(agentWorkflows.id, workflowId))
+    .limit(1);
+  if (w?.v == null) return null;
+  const [row] = await db
+    .select({ graph: agentWorkflowVersions.graph })
+    .from(agentWorkflowVersions)
+    .where(
+      and(eq(agentWorkflowVersions.workflowId, workflowId), eq(agentWorkflowVersions.version, w.v)),
+    )
+    .limit(1);
+  return row?.graph ?? null;
+}
+
+/** Live workflows granted to an organisation, with their published graph. */
+export async function grantedWorkflows(orgId: string) {
+  return db
+    .select({
+      id: agentWorkflows.id,
+      name: agentWorkflows.name,
+      description: agentWorkflows.description,
+      version: agentWorkflowVersions.version,
+      trigger: agentWorkflowVersions.triggerEvent,
+      graph: agentWorkflowVersions.graph,
+      grantedAt: agentWorkflowGrants.grantedAt,
+    })
+    .from(agentWorkflowGrants)
+    .innerJoin(agentWorkflows, eq(agentWorkflows.id, agentWorkflowGrants.workflowId))
+    .innerJoin(
+      agentWorkflowVersions,
+      and(
+        eq(agentWorkflowVersions.workflowId, agentWorkflows.id),
+        eq(agentWorkflowVersions.version, agentWorkflows.publishedVersion),
+      ),
+    )
+    .where(
+      and(
+        eq(agentWorkflowGrants.orgId, orgId),
+        isNull(agentWorkflowGrants.revokedAt),
+        ne(agentWorkflows.status, "archived"),
+      ),
+    );
 }

@@ -73,6 +73,8 @@ import {
   platformWorkflowReport,
   runWorkflowNow,
   workflowBuilder,
+  workflowOrgReadiness,
+  type OrgReadinessRow,
   type SaveWorkflowInput,
   type WorkflowAssistResult,
   type WorkflowBuilderView,
@@ -1445,27 +1447,65 @@ function Orgs({
   workflow: WorkflowRow;
   onChanged: () => void;
 }) {
+  const readiness = useQuery({
+    queryKey: ["workflow_org_readiness", workflow.id, workflow.publishedVersion],
+    queryFn: () => workflowOrgReadiness({ data: { id: workflow.id } }),
+  });
+  const byOrg = new Map((readiness.data ?? []).map((r) => [r.orgId, r]));
   const set = async (orgId: string, on: boolean) => {
     try {
       if (on) await grantWorkflow({ data: { id: workflow.id, orgId } });
       else await revokeWorkflow({ data: { id: workflow.id, orgId } });
-      toast.success(on ? "Granted" : "Withdrawn");
+      const r = byOrg.get(orgId);
+      if (on && r && !r.ready)
+        toast.warning("Granted — it will not run there until the missing items are fixed");
+      else toast.success(on ? "Granted" : "Withdrawn");
       onChanged();
     } catch (e) {
       toast.error(errorText(e, "Could not change"));
     }
   };
   return (
-    <ul className="max-w-xl divide-y rounded-md border text-sm">
-      {view.organisations.map((o) => (
-        <li key={o.id} className="flex items-center gap-3 px-3 py-2">
-          <Checkbox
-            checked={workflow.grants.includes(o.id)}
-            onCheckedChange={(v) => set(o.id, Boolean(v))}
-            aria-label={`Grant to ${o.name}`}
-          />
-          <span className="flex-1">{o.name}</span>
-          {o.status !== "active" ? <Badge variant="outline">{o.status}</Badge> : null}
+    <ul className="max-w-3xl divide-y rounded-md border text-sm">
+      {view.organisations.map((o) => {
+        const r = byOrg.get(o.id);
+        return (
+          <li key={o.id} className="px-3 py-2">
+            <div className="flex items-center gap-3">
+              <Checkbox
+                checked={workflow.grants.includes(o.id)}
+                onCheckedChange={(v) => set(o.id, Boolean(v))}
+                aria-label={`Grant to ${o.name}`}
+              />
+              <span className="flex-1 font-medium">{o.name}</span>
+              {o.status !== "active" ? (
+                <Badge variant="outline">{o.status}</Badge>
+              ) : r ? (
+                <Badge variant={r.ready ? "default" : "outline"}>
+                  {r.ready ? "Ready" : "Not ready"}
+                </Badge>
+              ) : null}
+            </div>
+            {r ? <ReadinessList items={r.items} /> : null}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function ReadinessList({ items }: { items: OrgReadinessRow["items"] }) {
+  return (
+    <ul className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 pl-7 text-xs">
+      {items.map((i) => (
+        <li key={i.key} className="flex items-center gap-1">
+          {i.ok ? (
+            <CircleCheck className="size-3.5 text-emerald-600" />
+          ) : (
+            <CircleX className="size-3.5 text-destructive" />
+          )}
+          <span>{i.label}</span>
+          <span className="text-muted-foreground">· {i.detail}</span>
         </li>
       ))}
     </ul>
