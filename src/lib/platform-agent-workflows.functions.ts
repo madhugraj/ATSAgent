@@ -604,3 +604,30 @@ export const assistWorkflow = createServerFn({ method: "POST" })
     );
     return draft;
   });
+
+export type OrgReadinessRow = {
+  orgId: string;
+  ready: boolean;
+  items: { key: string; label: string; ok: boolean; detail: string }[];
+};
+
+/**
+ * Go-live check: for each organisation, whether it can run this workflow (AI
+ * key, every agent switched on, studio agents granted). Uses the published
+ * version when there is one, else the current draft. Read-only.
+ */
+export const workflowOrgReadiness = createServerFn({ method: "GET" })
+  .middleware([requirePlatformAdmin])
+  .validator((d: unknown) => IdInput.parse(d))
+  .handler(async ({ data }): Promise<OrgReadinessRow[]> => {
+    const w = await load(data.id);
+    const { publishedGraph, workflowReadiness } = await wf();
+    const graph = (await publishedGraph(w.id)) ?? w.graph;
+    const orgs = await db
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(eq(organizations.status, "active"));
+    return Promise.all(
+      orgs.map(async (o) => ({ orgId: o.id, ...(await workflowReadiness(o.id, graph)) })),
+    );
+  });

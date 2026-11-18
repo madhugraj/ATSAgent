@@ -440,6 +440,20 @@ describe("engine", () => {
       .where(and(eq(workflowRuns.workflowId, workflowId), eq(workflowRuns.status, "failed")));
     expect(wr!.error).toContain("switched off");
   });
+
+  test("go-live check: granted workflows and what each organisation still needs", async () => {
+    const granted = await w.grantedWorkflows(orgId);
+    expect(granted.map((g) => g.id)).toEqual([workflowId]);
+    expect(await w.grantedWorkflows(otherOrgId)).toHaveLength(0);
+    const r = await w.workflowReadiness(orgId, granted[0]!.graph);
+    const by = Object.fromEntries(r.items.map((i) => [i.key, i]));
+    expect(r.ready).toBe(false);
+    expect(by["ai_key"]!.ok).toBe(false);
+    expect(by["agent:jd"]!.ok).toBe(false);
+    expect(by["agent:publishing"]!.ok).toBe(true);
+    expect(by["agent:publishing"]!.detail).toContain("On");
+    expect(w.agentsOf(granted[0]!.graph)).toEqual(["jd", "publishing"]);
+  });
 });
 
 describe("hiring need, waits and reports", () => {

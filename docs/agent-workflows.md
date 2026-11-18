@@ -39,6 +39,26 @@ it edits the current canvas. Server: `assistWorkflow` (`requirePlatformAdmin`); 
   `workflow_assistant`; messages enter the prompt as untrusted data and the model's JSON is zod-validated.
 - Each turn is audited as `platform.agent_workflow.assisted`.
 
+## Going live in an organisation
+
+A workflow runs in an organisation only when it is **published**, **granted** there, and the organisation
+can run it. The go-live check (`workflowReadiness` in `workflows.server.ts`) says what is missing:
+
+- **AI key** — the organisation's own key (Integrations → AI model).
+- **Every agent the flow starts switched on** there (Agent settings); shows its autonomy when on.
+- **Studio agents granted** to the organisation.
+
+Where it shows:
+
+- **Platform → Agent workflows → Organisations** — each organisation with *Ready* / *Not ready* and the items.
+  Granting a not-ready organisation is allowed, with a warning.
+- **The organisation's Agent settings → Workflows** (HR head, President / CBO, owner;
+  `src/lib/org-workflows.functions.ts`, read-only) — every granted workflow, what starts it, *Live* / *Not
+  ready*, a **Switch on** shortcut for each missing agent (normal `saveAgentPolicy`, autonomy Suggest) and its
+  latest runs.
+- **The bell** — owners and HR heads see "Workflow … is not running yet" until it is ready (derived live, so
+  it disappears by itself).
+
 ## More steps: hiring need, wait for, report
 
 - **Hiring need (manual) trigger** — the flow starts by hand with the need's text (`{{payload.need}}`): super

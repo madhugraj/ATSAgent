@@ -339,6 +339,9 @@ The **Build with chat** assistant (`assistWorkflow`) only returns a draft to the
 approves, publishes or grants; the super admin's messages enter the prompt through `untrusted(...)` with
 `INJECTION_RULES`, the model JSON is zod-validated, and the call uses the AI key of an organisation the
 caller owns (checked server-side), never a platform key.
+The organisation's view of granted workflows (`orgWorkflows`) is read-only, org-scoped (`requireOrg`, every query
+filtered by `orgId`) and limited to HR head / President-CBO / owner; switching an agent on from it uses the
+existing `saveAgentPolicy` path.
 
 ## Training data
 
