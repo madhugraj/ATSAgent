@@ -410,6 +410,52 @@ describe("engine", () => {
     expect(after!.history.map((h) => h.node).slice(-2)).toEqual(["c", "e"]);
   });
 
+  test("an older run still open on the role: the flow waits for it, then starts its own", async () => {
+    const { cancelRun } = await import("../src/server/agents/runtime.server");
+    const [r5] = await db
+      .insert(requisitions)
+      .values({
+        orgId,
+        code: `WF5-${stamp}`,
+        title: "Data",
+        status: "approved",
+        createdBy: userId,
+      } as never)
+      .returning({ id: requisitions.id });
+    const [old] = await db
+      .insert(agentRuns)
+      .values({
+        orgId,
+        agentType: "jd",
+        status: "awaiting_human",
+        subjectType: "requisition",
+        subjectId: r5!.id,
+        goal: "Earlier work on this role",
+        principalUserId: userId,
+        createdAt: new Date(Date.now() - 2 * 864e5),
+      } as never)
+      .returning({ id: agentRuns.id });
+    await emit(orgId, r5!.id);
+    await processAgentEvents({ orgId });
+    const mineWr = async () =>
+      (await db.select().from(workflowRuns).where(eq(workflowRuns.workflowId, workflowId))).find(
+        (r) => (r.context as { subject?: { id: string } }).subject?.id === r5!.id,
+      )!;
+    const queued = await mineWr();
+    expect(queued.status).toBe("waiting");
+    expect(queued.waitingRunId).toBe(old!.id);
+    expect(queued.history.at(-1)!.note).toContain("Waiting for an earlier jd run");
+
+    await cancelRun({ orgId, runId: old!.id, userId });
+    const after = await mineWr();
+    expect(after.status).toBe("waiting");
+    expect(after.currentNode).toBe("a");
+    expect(after.waitingRunId).not.toBe(old!.id);
+    const [mine] = await db.select().from(agentRuns).where(eq(agentRuns.id, after.waitingRunId!));
+    expect(mine!.goal).toContain("Draft the JD for");
+    expect(after.history.map((h) => h.note).join(" ")).toContain("starting this step's own run");
+  });
+
   test("an organisation without a grant never runs it", async () => {
     await emit(otherOrgId, otherReqId);
     await processAgentEvents({ orgId: otherOrgId });
