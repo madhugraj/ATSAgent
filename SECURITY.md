@@ -335,6 +335,10 @@ the event payload, the subject type and the last agent's status / result (`graph
 goals are filled from the same fields, graphs cannot loop, and only published, tested, approved versions run,
 in organisations holding a grant (granting checks the studio agents it uses). Withdrawal cancels live runs;
 every step is audited (`platform.agent_workflow.*`) and each run keeps its history.
+The **Build with chat** assistant (`assistWorkflow`) only returns a draft to the canvas — it never saves,
+approves, publishes or grants; the super admin's messages enter the prompt through `untrusted(...)` with
+`INJECTION_RULES`, the model JSON is zod-validated, and the call uses the AI key of an organisation the
+caller owns (checked server-side), never a platform key.
 
 ## Training data
 

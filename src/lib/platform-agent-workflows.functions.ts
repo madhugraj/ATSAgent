@@ -25,7 +25,7 @@ import { requirePlatformAdmin } from "./auth.middleware";
 async function audit(
   userId: string,
   action: string,
-  entityId: string,
+  entityId: string | null,
   detail: unknown,
   orgId: string | null = null,
 ) {
@@ -548,4 +548,59 @@ export const platformWorkflowReport = createServerFn({ method: "GET" })
     const r = await (await wf()).workflowRunReport(data.runId);
     if (!r) throw new Error("Run not found.");
     return r;
+  });
+
+const AssistInput = z.object({
+  /** The workflow being edited, when it is saved already (for the audit trail). */
+  workflowId: z.string().uuid().optional(),
+  /** An organisation the super admin owns: its own AI key pays for the turn. */
+  orgId: z.string().uuid(),
+  messages: z
+    .array(z.object({ role: z.enum(["user", "assistant"]), text: z.string().max(4000) }))
+    .min(1)
+    .max(30),
+  current: z.object({ nodes: z.array(Node).max(40), edges: z.array(Edge).max(80) }).nullable(),
+});
+
+export type WorkflowAssistInput = z.infer<typeof AssistInput>;
+export type WorkflowAssistResult =
+  import("../server/agents/workflow-assistant.server").AssistantDraft;
+
+/**
+ * Build with chat: describe the flow, get a draft graph and its dry-run tests.
+ * Drafts only — nothing is saved; the builder loads it onto the canvas.
+ */
+export const assistWorkflow = createServerFn({ method: "POST" })
+  .middleware([requirePlatformAdmin])
+  .validator((d: unknown) => AssistInput.parse(d))
+  .handler(async ({ data, context }): Promise<WorkflowAssistResult> => {
+    const { isWorkspaceOwner } = await import("../server/agents/blueprints.server");
+    if (!(await isWorkspaceOwner(context.userId, data.orgId)))
+      throw new Error("Pick an organisation you own; its AI key is used.");
+    if (data.messages.at(-1)?.role !== "user")
+      throw new Error("Write what the workflow should do.");
+    const { ensureAgentsRegistered } = await import("../server/agents");
+    ensureAgentsRegistered();
+    const { listAgents } = await import("../server/agents/registry");
+    const responsibility = new Map(listAgents().map((d) => [d.type as string, d.responsibility]));
+    const agents = (await agentPalette()).map((a) => ({
+      type: a.type,
+      name: a.name,
+      responsibility: responsibility.get(a.type) ?? "",
+    }));
+    const { draftWorkflow } = await import("../server/agents/workflow-assistant.server");
+    const draft = await draftWorkflow({
+      orgId: data.orgId,
+      messages: data.messages,
+      current: data.current?.nodes.length ? (data.current as WorkflowGraph) : null,
+      agents,
+    });
+    await audit(
+      context.userId,
+      "assisted",
+      data.workflowId ?? null,
+      { steps: draft.graph.nodes.length, testsPassed: draft.testsPassed },
+      data.orgId,
+    );
+    return draft;
   });

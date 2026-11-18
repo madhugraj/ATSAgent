@@ -34,6 +34,8 @@ import {
   FlaskConical,
   GitBranch,
   KeyRound,
+  MessageSquare,
+  SendHorizontal,
   Plus,
   Rocket,
   ShieldCheck,
@@ -60,6 +62,7 @@ import { usePlatform } from "@/hooks/usePlatform";
 import { AGENT_LABEL } from "@/lib/agents.catalog";
 import {
   approveWorkflow,
+  assistWorkflow,
   archiveWorkflow,
   createWorkflowFromTemplate,
   grantWorkflow,
@@ -71,6 +74,7 @@ import {
   runWorkflowNow,
   workflowBuilder,
   type SaveWorkflowInput,
+  type WorkflowAssistResult,
   type WorkflowBuilderView,
   type WorkflowRow,
 } from "@/lib/platform-agent-workflows.functions";
@@ -284,6 +288,11 @@ function WorkflowsPage() {
     retry: false,
   });
   const [open, setOpen] = useState<string | "new" | null>(null);
+  const [chat, setChat] = useState<ChatTurn[]>([]);
+  const openWorkflow = (id: string | "new" | null) => {
+    if (id !== open) setChat([]);
+    setOpen(id);
+  };
   const refresh = () => qc.invalidateQueries({ queryKey: ["platform_agent_workflows"] });
 
   if (isLoading) return <p className="text-sm text-muted-foreground">Checking platform access…</p>;
@@ -310,13 +319,15 @@ function WorkflowsPage() {
           existing={editing}
           onBack={() => {
             refresh();
-            setOpen(null);
+            openWorkflow(null);
           }}
           onSaved={(id) => {
             refresh();
             setOpen(id);
           }}
           onChanged={refresh}
+          chat={chat}
+          setChat={setChat}
         />
       </ReactFlowProvider>
     );
@@ -329,7 +340,7 @@ function WorkflowsPage() {
         title="Agent workflows"
         description="Draw how agents follow each other, test the flow, approve and publish it to the organisations you pick."
         actions={
-          <Button size="sm" onClick={() => setOpen("new")}>
+          <Button size="sm" onClick={() => openWorkflow("new")}>
             <Plus className="size-4" /> New workflow
           </Button>
         }
@@ -356,7 +367,7 @@ function WorkflowsPage() {
                       const r = await createWorkflowFromTemplate({ data: { templateId: t.id } });
                       toast.success("Draft created");
                       await refresh();
-                      setOpen(r.id);
+                      openWorkflow(r.id);
                     } catch (e) {
                       toast.error(errorText(e, "Could not create"));
                     }
@@ -392,7 +403,7 @@ function WorkflowsPage() {
                 <tr
                   key={w.id}
                   className="cursor-pointer border-t hover:bg-muted/30"
-                  onClick={() => setOpen(w.id)}
+                  onClick={() => openWorkflow(w.id)}
                 >
                   <td className="px-4 py-2.5 font-medium">{w.name}</td>
                   <td className="px-4 py-2.5">
@@ -454,12 +465,16 @@ function Editor({
   onBack,
   onSaved,
   onChanged,
+  chat,
+  setChat,
 }: {
   view: WorkflowBuilderView;
   existing: WorkflowRow | undefined;
   onBack: () => void;
   onSaved: (id: string) => void;
   onChanged: () => void;
+  chat: ChatTurn[];
+  setChat: React.Dispatch<React.SetStateAction<ChatTurn[]>>;
 }) {
   const initial = useMemo(() => toFlow(existing), [existing]);
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>(initial.nodes);
@@ -471,7 +486,22 @@ function Editor({
   const [problems, setProblems] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState("");
+  const [chatOpen, setChatOpen] = useState(chat.length > 0);
+  const [dirty, setDirty] = useState(false);
   const flow = useReactFlow();
+
+  const applyDraft = (d: WorkflowAssistResult) => {
+    const f = toFlow({ graph: d.graph } as WorkflowRow);
+    setNodes(f.nodes);
+    setEdges(f.edges);
+    setTests(d.testScenarios);
+    if (d.name) setName(d.name);
+    if (d.description) setDescription(d.description);
+    setProblems(d.problems);
+    setSelected(null);
+    setDirty(true);
+    window.setTimeout(() => flow.fitView({ padding: 0.2 }), 50);
+  };
 
   const onConnect = useCallback(
     (c: Connection) =>
@@ -558,6 +588,7 @@ function Editor({
         data: { id: existing?.id, name, description, graph: graph(), testScenarios: tests },
       });
       toast.success("Saved as a draft");
+      setDirty(false);
       onSaved(r.id);
     }, "Could not save");
 
@@ -629,11 +660,18 @@ function Editor({
           </div>
         ) : null}
         <div className="ml-auto flex gap-2">
+          <Button
+            size="sm"
+            variant={chatOpen ? "secondary" : "outline"}
+            onClick={() => setChatOpen((o) => !o)}
+          >
+            <MessageSquare className="size-4" /> Build with chat
+          </Button>
           <Button size="sm" disabled={busy} onClick={save}>
-            Save draft
+            Save draft{dirty ? " •" : ""}
           </Button>
           {existing ? (
-            <Button size="sm" variant="outline" disabled={busy} onClick={test}>
+            <Button size="sm" variant="outline" disabled={busy || dirty} onClick={test}>
               <FlaskConical className="size-4" /> Test v{existing.version}
             </Button>
           ) : null}
@@ -681,6 +719,17 @@ function Editor({
             <li key={p}>{p}</li>
           ))}
         </ul>
+      ) : null}
+
+      {chatOpen ? (
+        <WorkflowChat
+          view={view}
+          workflowId={existing?.id}
+          chat={chat}
+          setChat={setChat}
+          current={graph}
+          onDraft={applyDraft}
+        />
       ) : null}
 
       <Tabs defaultValue="canvas">
@@ -834,6 +883,149 @@ function Editor({
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+/* ---------------------------------------------------------- build with chat */
+
+type ChatTurn = { role: "user" | "assistant"; text: string; passed?: boolean; problems?: string[] };
+
+function WorkflowChat({
+  view,
+  workflowId,
+  chat,
+  setChat,
+  current,
+  onDraft,
+}: {
+  view: WorkflowBuilderView;
+  workflowId: string | undefined;
+  chat: ChatTurn[];
+  setChat: React.Dispatch<React.SetStateAction<ChatTurn[]>>;
+  current: () => SaveWorkflowInput["graph"];
+  onDraft: (d: WorkflowAssistResult) => void;
+}) {
+  const [org, setOrg] = useState(view.owned[0]?.id ?? "");
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const send = async () => {
+    const msg = text.trim();
+    if (!msg || busy || !org) return;
+    const turns: ChatTurn[] = [...chat, { role: "user", text: msg }];
+    setChat(turns);
+    setText("");
+    setBusy(true);
+    try {
+      const g = current();
+      const d = await assistWorkflow({
+        data: {
+          orgId: org,
+          ...(workflowId ? { workflowId } : {}),
+          messages: turns.map(({ role, text: t }) => ({ role, text: t })),
+          current: g.nodes.some((n) => n.kind !== "trigger" || n.data.event) ? g : null,
+        },
+      });
+      onDraft(d);
+      setChat((c) => [
+        ...c,
+        { role: "assistant", text: d.reply, passed: d.testsPassed, problems: d.problems },
+      ]);
+    } catch (e) {
+      setChat((c) => [...c, { role: "assistant", text: errorText(e, "Could not draft that.") }]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="rounded-lg border p-3">
+      <div className="mb-2 flex items-center gap-2">
+        <MessageSquare className="size-4 text-primary" />
+        <h2 className="text-sm font-semibold">Build with chat</h2>
+        {view.owned.length > 1 ? (
+          <Select value={org} onValueChange={setOrg}>
+            <SelectTrigger className="ml-auto h-7 w-56 text-xs" aria-label="AI key from">
+              <SelectValue placeholder="Organisation" />
+            </SelectTrigger>
+            <SelectContent>
+              {view.owned.map((o) => (
+                <SelectItem key={o.id} value={o.id}>
+                  {o.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : null}
+      </div>
+      {!view.owned.length ? (
+        <p className="text-xs text-muted-foreground">
+          Own an organisation with an AI key to build with chat.
+        </p>
+      ) : (
+        <>
+          {chat.length ? (
+            <ol className="mb-2 max-h-56 space-y-2 overflow-y-auto text-sm">
+              {chat.map((m, i) => (
+                <li
+                  key={i}
+                  className={
+                    m.role === "user"
+                      ? "ml-auto w-fit max-w-[80%] rounded-lg bg-primary px-3 py-1.5 text-primary-foreground"
+                      : "w-fit max-w-[80%] rounded-lg bg-muted px-3 py-1.5"
+                  }
+                >
+                  {m.text}
+                  {m.role === "assistant" && m.passed !== undefined ? (
+                    <div className="mt-1 flex items-center gap-1 text-xs">
+                      {m.passed ? (
+                        <>
+                          <CircleCheck className="size-3.5 text-emerald-600" /> Dry-run tests pass
+                        </>
+                      ) : (
+                        <>
+                          <CircleX className="size-3.5 text-destructive" />{" "}
+                          {m.problems?.[0] ?? "Tests not passing"}
+                        </>
+                      )}
+                    </div>
+                  ) : null}
+                </li>
+              ))}
+              {busy ? (
+                <li className="w-fit rounded-lg bg-muted px-3 py-1.5 text-muted-foreground">
+                  Drafting…
+                </li>
+              ) : null}
+            </ol>
+          ) : null}
+          <div className="flex gap-2">
+            <Textarea
+              rows={2}
+              className="min-h-0 resize-none text-sm"
+              placeholder="When candidates are shortlisted, screen them; if screening fails, have the follow-up agent remind the team"
+              value={text}
+              maxLength={4000}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void send();
+                }
+              }}
+            />
+            <Button
+              size="icon"
+              aria-label="Send"
+              disabled={busy || !text.trim() || !org}
+              onClick={() => void send()}
+            >
+              <SendHorizontal className="size-4" />
+            </Button>
+          </div>
+        </>
+      )}
+    </section>
   );
 }
 

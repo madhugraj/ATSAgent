@@ -22,6 +22,23 @@ press Delete to remove it. Rules: exactly one trigger with a real event; every s
 trigger; one way out of each step except conditions (one yes, one no); no loops; agents must exist;
 goals not empty; at most 40 steps.
 
+## Build with chat
+
+**Build with chat** in the editor opens a chat panel: describe the flow ("when candidates are shortlisted,
+screen them; if screening fails, have the follow-up agent remind the team") and the assistant draws the graph
+and writes its dry-run tests onto the canvas. Ask for changes in the same chat ("add a wait for JD approval") —
+it edits the current canvas. Server: `assistWorkflow` (`requirePlatformAdmin`); engine:
+`src/server/agents/workflow-assistant.server.ts`.
+
+- **Drafts only.** Nothing is saved; **Save draft** (marked • while unsaved) then Test → Approve → Publish →
+  Grant as usual. It cannot approve, publish or grant.
+- **Checked like Test.** The draft is checked with the same graph rules and dry run; when it fails, the
+  assistant gets one repair turn with the problems. The reply says whether its tests pass.
+- **AI key.** Keys are per organisation, so the chat uses the key of an organisation the super admin owns
+  (picked in the panel when they own several). The call goes through `aiJson` with feature
+  `workflow_assistant`; messages enter the prompt as untrusted data and the model's JSON is zod-validated.
+- Each turn is audited as `platform.agent_workflow.assisted`.
+
 ## More steps: hiring need, wait for, report
 
 - **Hiring need (manual) trigger** — the flow starts by hand with the need's text (`{{payload.need}}`): super
@@ -68,7 +85,7 @@ themselves.
 
 ## Audit
 
-`platform.agent_workflow.created|saved|tested|approved|published|granted|revoked|archived`.
+`platform.agent_workflow.created|saved|assisted|tested|approved|published|granted|revoked|archived`.
 
 ## Ready-made workflows
 

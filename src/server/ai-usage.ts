@@ -57,6 +57,8 @@ export const AI_FEATURES = [
   "agent_labour_policy",
   // Agent studio agents (platform-built, granted per organisation; migration 0082).
   "agent_studio",
+  // Workflow builder chat: drafts a workflow graph and its dry-run tests.
+  "workflow_assistant",
   "agent_expert_interview",
   "agent_panel_l1",
   "agent_panel_l2",
