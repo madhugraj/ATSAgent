@@ -950,7 +950,8 @@ export async function workflowReadiness(
 ): Promise<WorkflowReadiness> {
   const { resolveAiConfig } = await import("../../lib/ai-gateway.server");
   const { loadPolicy } = await import("./policy");
-  const { AGENT_LABEL } = await import("../../lib/agents.catalog");
+  const { AGENT_LABEL, AUTONOMY_OPTIONS } = await import("../../lib/agents.catalog");
+  const level = (a: string) => AUTONOMY_OPTIONS.find((o) => o.value === a)?.label ?? a;
   const items: ReadinessItem[] = [];
   const cfg = await resolveAiConfig(orgId);
   items.push({
@@ -979,7 +980,7 @@ export async function workflowReadiness(
       key: `agent:${type}`,
       label,
       ok: policy.enabled,
-      detail: policy.enabled ? `On · ${policy.autonomy}` : "Switched off in Agent settings",
+      detail: policy.enabled ? `On · ${level(policy.autonomy)}` : "Switched off in Agent settings",
     });
   }
   return { ready: items.every((i) => i.ok), items };
