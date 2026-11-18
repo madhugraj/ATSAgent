@@ -93,8 +93,10 @@ When an organisation holding a grant has an event matching the trigger, the orch
 **workflow run** (`workflow_runs`, one per workflow and event) and walks the graph:
 
 - **Agent** — started through `startRun` like the orchestrator's own dispatch: the organisation's switch
-  must be on (otherwise the flow stops with the reason), a run already working on the same subject is
-  joined rather than duplicated, it acts for the role's owner (else the person who caused the event), and
+  must be on (otherwise the flow stops with the reason), a run the same event already started on the
+  subject (e.g. the built-in hand-off) is joined rather than duplicated; an older run of that agent still open
+  on the role (only one may be open per agent and role) is waited for, then the step starts its own run with
+  its own goal; it acts for the role's owner (else the person who caused the event), and
   autonomy, budget and every human decision inside the agent are unchanged. The flow waits until the run
   finishes, then records `last.status` / `last.result`.
 - **Condition** — evaluated on the event and the last agent's outcome.
