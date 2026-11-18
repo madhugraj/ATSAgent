@@ -390,6 +390,7 @@ Plan: `docs/org-context-agent-plan.md` (decided 2026-10-27; O0 built 2026-10-27,
 - [x] Engine: orchestrator starts matching workflows for granted organisations; agents start through `startRun` with the org's switch, de-duplication and owner principal; finished runs move the flow on
 - [x] Tests: `scripts/agent-workflows.test.ts`
 - [x] Ready-made workflows (start from a template: shortlist → screening/follow-up, approved role → JD, JD → publish → advertise, final round → evaluation) and a real-agent test scenario in `docs/agent-workflows.md`
+- [x] Build with chat: describe the flow, the assistant drafts the graph and dry-run tests onto the canvas (checked with the Test rules, one repair turn; `workflow_assistant` feature, organisation's own key; drafts only) — `scripts/workflow-assistant.test.ts`
 - [x] Hiring-need (manual) trigger — started by the super admin (Run now); wait-for steps on the flow's own role with "only when" and a timeout; report steps; PDF and Excel run reports (migration `0084`)
 - [ ] Approval steps on the canvas (people decide inside agents today); triggers from studio-built events
 
