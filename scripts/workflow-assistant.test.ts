@@ -153,3 +153,22 @@ describe("draftWorkflow", () => {
     expect(d.reply).toContain("Screening starts");
   });
 });
+
+describe("ModelDraft", () => {
+  test("accepts the common ways a model bends the format", () => {
+    const d = ModelDraft.parse({
+      ...good,
+      steps: good.steps.map((s) =>
+        s.id === "ok" ? { ...s, kind: "Condition", op: "equals", timeoutHours: "x" } : s,
+      ),
+      tests: [
+        { ...good.tests[0]!, payloadJson: { applicationIds: ["a"] }, subjectType: "candidate" },
+      ],
+    });
+    const ok = d.steps.find((s) => s.id === "ok")!;
+    expect(ok.kind).toBe("condition");
+    expect(ok.op).toBe("eq");
+    expect(d.tests[0]!.payloadJson).toBe('{"applicationIds":["a"]}');
+    expect(d.tests[0]!.subjectType).toBe("requisition");
+  });
+});
