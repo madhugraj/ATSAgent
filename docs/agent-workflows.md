@@ -115,7 +115,7 @@ When an organisation holding a grant has an event matching the trigger, the orch
   step's result (`stepGoal`), so it never starts blind. **Aditi (the copilot) cannot be a step**: it hands work
   to other agents on its own, which would happen outside the flow — start a hiring need with the Requisition
   agent. A step whose run ended without the flow hearing about it (e.g. a restart) moves on at the next
-  scheduler tick (`resumeFinishedRunWaits`).
+  scheduler tick (`resumeFinishedRunWaits`). A **wait** first looks back over the run's lifetime: if its event already happened on the role (e.g. people approved the requisition while the agent was still working), it moves straight on; the tick repeats that look-back for waits whose event was missed.
 - **Condition** — evaluated on the event and the last agent's outcome.
 - **End** (or no next step) — the run is done.
 
