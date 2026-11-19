@@ -129,7 +129,7 @@ function Breakup({ facts, title }: { facts: Record<string, unknown>; title?: str
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <span className="text-xs font-medium">{title ?? "Salary breakup as printed"}</span>
         {typeof facts["pay_frequency"] === "string" && facts["pay_frequency"] ? (
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-[0.6875rem] text-muted-foreground">
             stated {String(facts["pay_frequency"]).replace(/_/g, " ")}
           </span>
         ) : null}
@@ -138,7 +138,7 @@ function Breakup({ facts, title }: { facts: Record<string, unknown>; title?: str
         .filter(([, g]) => g.length)
         .map(([heading, g]) => (
           <div key={heading}>
-            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+            <div className="text-[0.6875rem] uppercase tracking-wide text-muted-foreground">
               {heading}
             </div>
             <ul className="divide-y divide-border">
@@ -146,12 +146,12 @@ function Breakup({ facts, title }: { facts: Record<string, unknown>; title?: str
                 <li key={`${c.label}-${i}`} className="flex items-baseline gap-2 py-1 text-sm">
                   <span className="min-w-0 flex-1 break-words">{c.label}</span>
                   {c.recurring === false ? (
-                    <span className="rounded-full border border-amber-300 bg-amber-50 px-1.5 text-[10px] text-amber-800">
+                    <span className="rounded-full border border-amber-300 bg-amber-50 px-1.5 text-[0.625rem] text-amber-800">
                       one-off
                     </span>
                   ) : null}
                   {c.cadence && c.cadence !== "monthly" ? (
-                    <span className="text-[10px] text-muted-foreground">
+                    <span className="text-[0.625rem] text-muted-foreground">
                       {String(c.cadence).replace(/_/g, " ")}
                     </span>
                   ) : null}
@@ -372,7 +372,7 @@ function PayReading({ applicationId }: { applicationId: string }) {
           </div>
         ) : null}
         <span
-          className={`rounded-full border px-2 py-0.5 text-[11px] ${
+          className={`rounded-full border px-2 py-0.5 text-[0.6875rem] ${
             r.confident
               ? "border-emerald-300 bg-emerald-50 text-emerald-700"
               : "border-amber-300 bg-amber-50 text-amber-700"
@@ -419,7 +419,7 @@ function PayReading({ applicationId }: { applicationId: string }) {
                     <span className="text-xs text-muted-foreground">{t.employer}</span>
                   ) : null}
                   <span
-                    className={`rounded-full border px-1.5 text-[10px] ${STATUS_TONE[t.status] ?? ""}`}
+                    className={`rounded-full border px-1.5 text-[0.625rem] ${STATUS_TONE[t.status] ?? ""}`}
                   >
                     {STATUS_LABEL[t.status] ?? t.status}
                   </span>
@@ -618,13 +618,13 @@ export function PreOnboardingDialog({
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-medium">{d.doc_type_label}</span>
                       <span
-                        className={`rounded-full border px-2 py-0.5 text-[10px] ${STATUS_TONE[d.status] ?? ""}`}
+                        className={`rounded-full border px-2 py-0.5 text-[0.625rem] ${STATUS_TONE[d.status] ?? ""}`}
                       >
                         {STATUS_LABEL[d.status] ?? d.status}
                       </span>
                     </div>
                     <div className="mt-1 truncate text-xs text-muted-foreground">{d.file_name}</div>
-                    <div className="text-[11px] text-muted-foreground">
+                    <div className="text-[0.6875rem] text-muted-foreground">
                       {d.source === "careers_inbox" ? "Received by mail" : "Uploaded"} ·{" "}
                       {new Date(d.created_at).toLocaleDateString()}
                     </div>

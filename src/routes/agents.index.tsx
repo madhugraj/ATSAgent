@@ -456,7 +456,7 @@ function RunSteps({ runId }: { runId: string }) {
   return (
     <div className="mt-3 rounded-md border border-border bg-muted/30 p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <p className="num text-[11px] text-muted-foreground">
+        <p className="num text-[0.6875rem] text-muted-foreground">
           Trace {q.data.traceId.replace(/-/g, "")}
         </p>
         <Button size="sm" variant="outline" onClick={() => downloadTrail(runId)}>
@@ -486,7 +486,7 @@ function RunSteps({ runId }: { runId: string }) {
               {s.durationMs ? ` · ${s.durationMs} ms` : ""}
             </span>
             {s.detail ? (
-              <pre className="mt-0.5 whitespace-pre-wrap break-all font-mono text-[11px] text-muted-foreground">
+              <pre className="mt-0.5 whitespace-pre-wrap break-all font-mono text-[0.6875rem] text-muted-foreground">
                 {s.detail}
               </pre>
             ) : null}

@@ -786,7 +786,7 @@ function SignInCard() {
 
       <div className="flex items-center gap-3">
         <span className="h-px flex-1 bg-border" />
-        <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+        <span className="text-[0.6875rem] font-medium uppercase tracking-[0.18em] text-muted-foreground">
           or
         </span>
         <span className="h-px flex-1 bg-border" />

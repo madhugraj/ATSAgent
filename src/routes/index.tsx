@@ -822,7 +822,7 @@ function Dashboard() {
           >
             <span className="absolute inset-x-5 top-0 h-px scale-x-0 bg-primary/70 transition-transform duration-300 group-hover:scale-x-100" />
             <ArrowUpRight className="absolute right-4 top-3.5 size-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            <p className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">
               {metric.label}
             </p>
             <p className="num mt-1.5 text-[1.7rem] font-bold leading-none tracking-tight">
@@ -1248,7 +1248,7 @@ function RoiBand() {
     <section className="border-b border-border">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-3 sm:px-7">
         <div>
-          <p className="text-[11px] font-mono uppercase tracking-[0.2em] text-primary">
+          <p className="text-[0.6875rem] font-mono uppercase tracking-[0.2em] text-primary">
             • Return on Individual
           </p>
           <p className="mt-0.5 text-xs text-muted-foreground">
@@ -1268,7 +1268,7 @@ function RoiBand() {
             className="group relative border-b border-border px-5 py-4 last:border-b-0 sm:[&:nth-child(odd)]:border-r xl:border-b-0 xl:border-r xl:last:border-r-0"
           >
             <span className="absolute inset-x-5 top-0 h-px scale-x-0 bg-primary/70 transition-transform duration-300 group-hover:scale-x-100" />
-            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            <p className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">
               {c.label}
             </p>
             <p
@@ -1482,7 +1482,7 @@ function ActionRow({
 function Signal({ label, value, note }: { label: string; value: string | number; note: string }) {
   return (
     <div className="bg-card p-4 transition-colors hover:bg-accent/30">
-      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+      <p className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">
         {label}
       </p>
       <p className="num mt-1.5 text-xl font-bold leading-none tracking-tight">{value}</p>

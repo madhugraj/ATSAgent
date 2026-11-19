@@ -212,7 +212,7 @@ function AgentList({
                 >
                   {info.label}
                 </a>
-                <span className="shrink-0 text-[11px] text-muted-foreground">
+                <span className="shrink-0 text-[0.6875rem] text-muted-foreground">
                   {!row.live
                     ? "not live"
                     : row.enabled
@@ -220,7 +220,7 @@ function AgentList({
                       : "off"}
                 </span>
                 {row.recommendation && row.enabled ? (
-                  <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px]">
+                  <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[0.625rem]">
                     recommendation
                   </Badge>
                 ) : null}
@@ -316,7 +316,7 @@ function AgentRow({
           />
           <a
             href="#agent-index"
-            className="inline-flex items-center gap-0.5 text-[11px] text-primary underline-offset-2 hover:underline"
+            className="inline-flex items-center gap-0.5 text-[0.6875rem] text-primary underline-offset-2 hover:underline"
           >
             <ArrowUp className="size-3" /> Index
           </a>

@@ -70,7 +70,7 @@ function RoiPage() {
     <div className="space-y-5 p-5 sm:p-7">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-[11px] font-mono uppercase tracking-[0.2em] text-primary">
+          <p className="text-[0.6875rem] font-mono uppercase tracking-[0.2em] text-primary">
             • Semantic layer
           </p>
           <h1 className="mt-1.5 text-2xl font-semibold tracking-tight">Return on Individual</h1>
@@ -254,7 +254,7 @@ function RoiPage() {
                       style={{ width: `${g.readiness}%` }}
                     />
                   </div>
-                  <p className="mt-1.5 text-[11px] text-muted-foreground">
+                  <p className="mt-1.5 text-[0.6875rem] text-muted-foreground">
                     Team {g.readiness}% · with the talent pool {g.poolReadiness}%
                   </p>
                   {g.covered.length ? (
@@ -275,7 +275,7 @@ function RoiPage() {
                       ))}
                     </div>
                   ) : null}
-                  <div className="mt-3 flex items-center justify-between text-[11px] text-muted-foreground">
+                  <div className="mt-3 flex items-center justify-between text-[0.6875rem] text-muted-foreground">
                     <span>
                       {g.contributors.length
                         ? `${g.contributors.length} can staff it`
@@ -284,7 +284,7 @@ function RoiPage() {
                     <span className="font-mono uppercase tracking-widest">{g.horizon}</span>
                   </div>
                   {g.note ? (
-                    <details className="mt-2 text-[11px] text-muted-foreground">
+                    <details className="mt-2 text-[0.6875rem] text-muted-foreground">
                       <summary className="cursor-pointer list-none text-primary">Detail</summary>
                       <p className="mt-1.5">{g.note}</p>
                       {g.contributors.length ? (
@@ -344,7 +344,7 @@ function RoiPage() {
               </header>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                  <thead className="text-left text-[0.6875rem] uppercase tracking-wide text-muted-foreground">
                     <tr className="border-b">
                       <th className="px-5 py-3 font-medium">Department</th>
                       <th className="px-5 py-3 font-medium">Hires</th>
@@ -393,11 +393,11 @@ function RoiPage() {
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="text-sm font-semibold">{h.name}</h3>
-                        <span className="rounded bg-accent px-2 py-0.5 text-[11px] text-muted-foreground">
+                        <span className="rounded bg-accent px-2 py-0.5 text-[0.6875rem] text-muted-foreground">
                           {h.cohort === "joined" ? "Joined" : "Offer committed"}
                         </span>
                         <span
-                          className={`rounded px-2 py-0.5 text-[11px] ${verdictTone(h.verdict)}`}
+                          className={`rounded px-2 py-0.5 text-[0.6875rem] ${verdictTone(h.verdict)}`}
                         >
                           {h.verdict === "compounding"
                             ? "Compounding"
@@ -420,7 +420,7 @@ function RoiPage() {
                   </div>
 
                   <details className="mt-2 [&[open]>summary>svg]:rotate-90">
-                    <summary className="flex cursor-pointer list-none items-center gap-1.5 text-[11px] font-medium text-primary">
+                    <summary className="flex cursor-pointer list-none items-center gap-1.5 text-[0.6875rem] font-medium text-primary">
                       <ChevronRight className="size-3.5 transition-transform" /> Evidence &
                       contribution
                     </summary>
@@ -428,7 +428,7 @@ function RoiPage() {
                       <div className="space-y-1.5">
                         {h.contribution.map((c) => (
                           <div key={c.label} className="flex items-center gap-2">
-                            <span className="w-44 shrink-0 text-[11px] text-muted-foreground">
+                            <span className="w-44 shrink-0 text-[0.6875rem] text-muted-foreground">
                               {c.label}
                             </span>
                             <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-accent">
@@ -437,7 +437,7 @@ function RoiPage() {
                                 style={{ width: `${c.value}%` }}
                               />
                             </span>
-                            <span className="num w-8 text-right text-[11px]">{c.value}</span>
+                            <span className="num w-8 text-right text-[0.6875rem]">{c.value}</span>
                           </div>
                         ))}
                       </div>
@@ -455,7 +455,7 @@ function RoiPage() {
                             Only source for {h.soleSourceSkills.join(", ")}
                           </p>
                         ) : null}
-                        <ul className="space-y-0.5 text-[11px] text-muted-foreground">
+                        <ul className="space-y-0.5 text-[0.6875rem] text-muted-foreground">
                           {h.evidence.map((e) => (
                             <li key={e}>· {e}</li>
                           ))}
@@ -494,7 +494,7 @@ function Figure({
 }) {
   return (
     <div className="panel-lift hover:panel-lift-hover p-4">
-      <p className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground">
+      <p className="text-[0.6875rem] font-mono uppercase tracking-widest text-muted-foreground">
         {label}
       </p>
       <p
@@ -504,7 +504,7 @@ function Figure({
       >
         {value}
       </p>
-      {note ? <p className="mt-1.5 text-[11px] text-muted-foreground">{note}</p> : null}
+      {note ? <p className="mt-1.5 text-[0.6875rem] text-muted-foreground">{note}</p> : null}
     </div>
   );
 }
@@ -512,7 +512,7 @@ function Figure({
 function Metric({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
     <div className="text-right">
-      <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
+      <p className="text-[0.625rem] font-mono uppercase tracking-widest text-muted-foreground">
         {label}
       </p>
       <p className={`num text-xl font-semibold leading-none ${accent ? "text-primary" : ""}`}>
@@ -525,7 +525,7 @@ function Metric({ label, value, accent }: { label: string; value: string; accent
 function Chip({ children, tone }: { children: React.ReactNode; tone: "ok" | "gap" }) {
   return (
     <span
-      className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+      className={`rounded-full px-2 py-0.5 text-[0.625rem] font-medium ${
         tone === "ok" ? "bg-success/10 text-success" : "bg-warning/15 text-warning"
       }`}
     >
@@ -548,7 +548,7 @@ function Bar({
   const pct = total ? Math.round((value / total) * 100) : 0;
   return (
     <div className="w-32">
-      <div className="flex items-baseline justify-between text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
+      <div className="flex items-baseline justify-between text-[0.625rem] font-mono uppercase tracking-widest text-muted-foreground">
         <span>{label}</span>
         <span className="num text-foreground">{value}</span>
       </div>
@@ -566,7 +566,7 @@ function Hint({ title, body }: { title: string; body: string }) {
   return (
     <div className="rounded-lg border bg-accent/30 p-3">
       <p className="text-xs font-semibold">{title}</p>
-      <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{body}</p>
+      <p className="mt-1 text-[0.6875rem] leading-relaxed text-muted-foreground">{body}</p>
     </div>
   );
 }
@@ -583,7 +583,7 @@ function Reading({
       {reading.skills.length ? (
         <div className="mt-2 flex flex-wrap gap-1.5">
           {reading.skills.slice(0, 8).map((s) => (
-            <span key={s} className="rounded bg-accent px-2 py-0.5 text-[11px]">
+            <span key={s} className="rounded bg-accent px-2 py-0.5 text-[0.6875rem]">
               {s}
             </span>
           ))}

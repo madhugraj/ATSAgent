@@ -126,7 +126,7 @@ export function Copilot() {
           </span>
           <span className="leading-tight">
             <span className="block text-sm font-semibold tracking-tight">HR copilot</span>
-            <span className="block text-[11px] text-muted-foreground">
+            <span className="block text-[0.6875rem] text-muted-foreground">
               Help and questions ·{" "}
               <Link to="/desk" className="text-primary underline" onClick={() => setOpen(false)}>
                 hire with agents
@@ -239,7 +239,7 @@ export function Copilot() {
         ) : null}
         {messages.length === 0 ? (
           <div className="space-y-4">
-            <p className="text-[13px] leading-relaxed text-muted-foreground">
+            <p className="text-[0.8125rem] leading-relaxed text-muted-foreground">
               Ask about your live pipeline, pool health, interviews or offers — every answer is
               grounded in your organisation's own data.
             </p>

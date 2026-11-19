@@ -1335,7 +1335,7 @@ function RequisitionDetail() {
                       </Label>
                       <div className="grid gap-2 sm:grid-cols-2">
                         <div>
-                          <Label className="text-[10px] uppercase text-muted-foreground">
+                          <Label className="text-[0.625rem] uppercase text-muted-foreground">
                             Dark overlay ({cardThemeFinal.overlayOpacity ?? 0}%)
                           </Label>
                           <input
@@ -1350,7 +1350,7 @@ function RequisitionDetail() {
                           />
                         </div>
                         <div>
-                          <Label className="text-[10px] uppercase text-muted-foreground">
+                          <Label className="text-[0.625rem] uppercase text-muted-foreground">
                             Artwork brightness ({cardThemeFinal.backgroundBrightness ?? 100}%)
                           </Label>
                           <input
@@ -1365,7 +1365,7 @@ function RequisitionDetail() {
                           />
                         </div>
                       </div>
-                      <p className="mt-1 text-[10px] text-muted-foreground">
+                      <p className="mt-1 text-[0.625rem] text-muted-foreground">
                         Saved with the corrections for this requisition.
                       </p>
                     </div>
@@ -1447,14 +1447,14 @@ function RequisitionDetail() {
                               ] as const
                             ).map(([field, step, min]) => (
                               <div key={field}>
-                                <Label className="text-[10px] uppercase text-muted-foreground">
+                                <Label className="text-[0.625rem] uppercase text-muted-foreground">
                                   {field}
                                 </Label>
                                 {stepper(field, step, min)}
                               </div>
                             ))}
                             <div>
-                              <Label className="text-[10px] uppercase text-muted-foreground">
+                              <Label className="text-[0.625rem] uppercase text-muted-foreground">
                                 align
                               </Label>
                               <select
@@ -1472,7 +1472,7 @@ function RequisitionDetail() {
                               </select>
                             </div>
                             <div>
-                              <Label className="text-[10px] uppercase text-muted-foreground">
+                              <Label className="text-[0.625rem] uppercase text-muted-foreground">
                                 font
                               </Label>
                               <select
@@ -1490,7 +1490,7 @@ function RequisitionDetail() {
                               </select>
                             </div>
                             <div>
-                              <Label className="text-[10px] uppercase text-muted-foreground">
+                              <Label className="text-[0.625rem] uppercase text-muted-foreground">
                                 colour
                               </Label>
                               <input

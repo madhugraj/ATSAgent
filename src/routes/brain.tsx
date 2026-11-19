@@ -122,7 +122,7 @@ function TalentBrainPage() {
     <div className="space-y-6 p-4 sm:p-6">
       <header className="dotted-canvas -mx-4 -mt-4 flex flex-wrap items-start justify-between gap-4 border-b border-border px-4 py-6 sm:-mx-6 sm:-mt-6 sm:px-6">
         <div>
-          <p className="text-[11px] font-mono uppercase tracking-widest text-primary">
+          <p className="text-[0.6875rem] font-mono uppercase tracking-widest text-primary">
             Leadership intelligence
           </p>
           <h1 className="flex items-center gap-2 font-display text-2xl">
@@ -175,7 +175,7 @@ function TalentBrainPage() {
 
       {data?.narrative ? (
         <section className="panel-lift border-l-2 border-l-primary p-4">
-          <p className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground">
+          <p className="text-[0.6875rem] font-mono uppercase tracking-widest text-muted-foreground">
             Executive reading
           </p>
           <p className="mt-2 text-sm leading-relaxed">{data.narrative}</p>
@@ -290,7 +290,7 @@ function TalentBrainPage() {
                 </p>
                 {neighbours.length ? (
                   <div>
-                    <p className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground">
+                    <p className="text-[0.6875rem] font-mono uppercase tracking-widest text-muted-foreground">
                       Pairs with
                     </p>
                     <ul className="mt-1 space-y-1 text-xs">
@@ -319,7 +319,7 @@ function TalentBrainPage() {
           </section>
 
           <section className="panel-lift p-4">
-            <p className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground">
+            <p className="text-[0.6875rem] font-mono uppercase tracking-widest text-muted-foreground">
               How the graph moved
             </p>
             <ul className="mt-2 space-y-1 text-xs">
@@ -381,7 +381,7 @@ function TalentBrainPage() {
                     <button
                       key={s}
                       onClick={() => setSelected(s)}
-                      className="rounded-full border px-2 py-0.5 text-[11px] hover:border-primary hover:text-primary"
+                      className="rounded-full border px-2 py-0.5 text-[0.6875rem] hover:border-primary hover:text-primary"
                     >
                       {data.nodes.find((n) => n.slug === s)?.name ?? s}
                     </button>
@@ -419,7 +419,7 @@ function Figure({
 }) {
   return (
     <div className="panel-lift hover:panel-lift-hover p-4">
-      <p className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground">
+      <p className="text-[0.6875rem] font-mono uppercase tracking-widest text-muted-foreground">
         {label}
       </p>
       <p
@@ -436,7 +436,7 @@ function Figure({
 function Stat({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-md border p-2">
-      <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</dt>
+      <dt className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">{label}</dt>
       <dd className="text-sm">{value}</dd>
     </div>
   );
@@ -450,7 +450,7 @@ function Guide({ icon: Icon, title, text }: { icon: typeof Users; title: string;
       </span>
       <div>
         <p className="text-xs font-semibold">{title}</p>
-        <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">{text}</p>
+        <p className="mt-0.5 text-[0.6875rem] leading-relaxed text-muted-foreground">{text}</p>
       </div>
     </div>
   );
