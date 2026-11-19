@@ -1511,7 +1511,9 @@ function Candidates() {
                             <dd className="num">{money(c.expected_ctc as number | null)}</dd>
                           </div>
                           <div>
-                            <dt className="text-[0.6875rem] uppercase text-muted-foreground">Notice</dt>
+                            <dt className="text-[0.6875rem] uppercase text-muted-foreground">
+                              Notice
+                            </dt>
                             <dd className="num">
                               {c.notice_period_days !== null ? `${c.notice_period_days} days` : "—"}
                             </dd>
