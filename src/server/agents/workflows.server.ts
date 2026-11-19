@@ -489,6 +489,38 @@ export async function expireWorkflowWaits(now = new Date()): Promise<number> {
   return due.length;
 }
 
+/**
+ * Safety net (each scheduler tick): a workflow still waiting on an agent run
+ * that has already ended — its finish signal was missed (e.g. a restart) —
+ * moves on as if the signal had arrived. Idempotent.
+ */
+export async function resumeFinishedRunWaits(): Promise<number> {
+  const stuck = await db
+    .select({
+      id: agentRuns.id,
+      orgId: agentRuns.orgId,
+      status: agentRuns.status,
+      result: agentRuns.result,
+    })
+    .from(workflowRuns)
+    .innerJoin(agentRuns, eq(agentRuns.id, workflowRuns.waitingRunId))
+    .where(
+      and(
+        eq(workflowRuns.status, "waiting"),
+        inArray(agentRuns.status, ["done", "failed", "cancelled"]),
+      ),
+    )
+    .limit(50);
+  for (const r of stuck) {
+    try {
+      await onAgentRunFinished(r);
+    } catch (err) {
+      log.error("workflow.resume_failed", { run_id: r.id, error: err as Error });
+    }
+  }
+  return stuck.length;
+}
+
 /** Leave the current step (an agent or a wait) for the next one, then advance. */
 async function moveOn(
   wr: typeof workflowRuns.$inferSelect,

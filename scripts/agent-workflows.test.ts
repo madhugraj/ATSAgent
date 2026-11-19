@@ -476,6 +476,36 @@ describe("engine", () => {
     expect(after.history.map((h) => h.note).join(" ")).toContain("starting this step's own run");
   });
 
+  test("a missed finish signal: the tick's sweep moves the flow on", async () => {
+    const [r6] = await db
+      .insert(requisitions)
+      .values({
+        orgId,
+        code: `WF6-${stamp}`,
+        title: "Infra",
+        status: "approved",
+        createdBy: userId,
+      } as never)
+      .returning({ id: requisitions.id });
+    await emit(orgId, r6!.id);
+    await processAgentEvents({ orgId });
+    const find = async () =>
+      (await db.select().from(workflowRuns).where(eq(workflowRuns.workflowId, workflowId))).find(
+        (r) => (r.context as { subject?: { id: string } }).subject?.id === r6!.id,
+      )!;
+    const wr = await find();
+    expect(wr.status).toBe("waiting");
+    // The run ends without the hook firing (as if the server restarted mid-way).
+    await db
+      .update(agentRuns)
+      .set({ status: "done", result: "no draft", finishedAt: new Date() })
+      .where(eq(agentRuns.id, wr.waitingRunId!));
+    expect(await w.resumeFinishedRunWaits()).toBeGreaterThan(0);
+    const after = await find();
+    expect(after.status).toBe("done");
+    expect(after.history.map((h) => h.node).slice(-2)).toEqual(["c", "e"]);
+  });
+
   test("an organisation without a grant never runs it", async () => {
     await emit(otherOrgId, otherReqId);
     await processAgentEvents({ orgId: otherOrgId });
