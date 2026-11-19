@@ -342,6 +342,11 @@ caller owns (checked server-side), never a platform key.
 The organisation's view of granted workflows (`orgWorkflows`) is read-only, org-scoped (`requireOrg`, every query
 filtered by `orgId`) and limited to HR head / President-CBO / owner; switching an agent on from it uses the
 existing `saveAgentPolicy` path.
+The workflow API (`/api/workflows/…`, `src/server/agents/workflow-app.server.ts`) takes organisation-issued keys
+(`atsw_…`, one workflow each; only the SHA-256 hash is stored; issue/revoke by HR head, CBO or owner, audited),
+rate-limited per caller and per key in `src/server.ts`. A key acts as the person who issued it, is refused once
+revoked, once the workflow is withdrawn or archived, or once that person is no longer an active member, and every
+query is scoped to the key's organisation and workflow. Responses carry no request text and no vendor fields.
 
 ## Training data
 

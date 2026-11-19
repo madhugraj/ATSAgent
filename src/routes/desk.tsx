@@ -100,7 +100,7 @@ function DeskPage() {
   const navigate = useNavigate({ from: "/desk" });
   const splitIds = (split ?? "")
     .split(",")
-    .filter((s) => /^[-0-9a-f]{36}$/.test(s))
+    .filter((s: string) => /^[-0-9a-f]{36}$/.test(s))
     .slice(0, 3);
   const list = useQuery({
     queryKey: ["desk_list"],

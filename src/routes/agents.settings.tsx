@@ -1199,6 +1199,11 @@ function WorkflowCard({
         <Badge variant="secondary">v{w.version}</Badge>
         <Badge variant={w.ready ? "default" : "outline"}>{w.ready ? "Live" : "Not ready"}</Badge>
         <span className="ml-auto text-xs text-muted-foreground">{triggerLabel(w.trigger)}</span>
+        <Button asChild size="sm" className="h-7">
+          <Link to="/w/$workflowId" params={{ workflowId: w.id }}>
+            Open
+          </Link>
+        </Button>
       </div>
       {w.description ? <p className="mt-1 text-sm text-muted-foreground">{w.description}</p> : null}
       <ul className="mt-3 divide-y rounded-md border text-sm">

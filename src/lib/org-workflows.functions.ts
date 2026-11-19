@@ -7,6 +7,7 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { and, desc, eq, inArray } from "drizzle-orm";
+import { z } from "zod";
 
 import { workflowRuns } from "@db/schema";
 import { db } from "../server/db";
@@ -84,4 +85,248 @@ export const orgWorkflows = createServerFn({ method: "GET" })
           })),
       })),
     );
+  });
+
+/* ------------------------------------------------------- workflow app (/w/:id) */
+
+const VIEW_ROLES = [
+  "hr_head",
+  "president_cbo",
+  "department_head",
+  "hiring_manager",
+  "recruiter",
+] as const;
+const MANAGE_ROLES = ["hr_head", "president_cbo"] as const;
+
+const WorkflowIdInput = z.object({ workflowId: z.string().uuid() });
+
+export type OrgWorkflowAppView = {
+  orgName: string;
+  workflow: {
+    id: string;
+    name: string;
+    description: string;
+    version: number;
+    trigger: string;
+    graph: import("@db/schema").WorkflowGraph;
+  };
+  ready: boolean;
+  items: { key: string; label: string; ok: boolean; detail: string }[];
+  /** HR head / CBO / owner: start runs (manual workflows) and manage API keys. */
+  canManage: boolean;
+  runs: AppRun[];
+};
+
+export type AppRun = {
+  id: string;
+  status: string;
+  currentNode: string | null;
+  history: { node: string; at: string; note: string }[];
+  error: string | null;
+  createdAt: string;
+  need: string | null;
+  waitingOn: { kind: "person" | "agent" | "event"; text: string } | null;
+  /** The graph of the version this run ran. */
+  graph: import("@db/schema").WorkflowGraph | null;
+};
+
+/** Everything the workflow app shows: the workflow, whether it can run here, and its runs. */
+export const orgWorkflowApp = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => WorkflowIdInput.parse(d))
+  .handler(async ({ data, context }): Promise<OrgWorkflowAppView> => {
+    const { assertRole } = await import("./auth.middleware");
+    await assertRole(context.userId, context.orgId, [...VIEW_ROLES]);
+    const { grantedWorkflows, workflowReadiness, runVersionGraph } =
+      await import("../server/agents/workflows.server");
+    const g = (await grantedWorkflows(context.orgId)).find((x) => x.id === data.workflowId);
+    if (!g) throw new Error("This workflow is not available to your organisation.");
+    const rows = await db
+      .select()
+      .from(workflowRuns)
+      .where(and(eq(workflowRuns.orgId, context.orgId), eq(workflowRuns.workflowId, g.id)))
+      .orderBy(desc(workflowRuns.createdAt))
+      .limit(20);
+    const { waitingOnFor } = await import("../server/agents/workflows.server");
+    const waits = await waitingOnFor(rows);
+    const { organizations } = await import("@db/schema");
+    const [org] = await db
+      .select({ name: organizations.name })
+      .from(organizations)
+      .where(eq(organizations.id, context.orgId))
+      .limit(1);
+    let canManage = true;
+    try {
+      await assertRole(context.userId, context.orgId, [...MANAGE_ROLES]);
+    } catch {
+      canManage = false;
+    }
+    const graphs = new Map<number, import("@db/schema").WorkflowGraph | null>();
+    for (const r of rows)
+      if (!graphs.has(r.version)) graphs.set(r.version, await runVersionGraph(g.id, r.version));
+    return {
+      orgName: org?.name ?? "",
+      workflow: {
+        id: g.id,
+        name: g.name,
+        description: g.description,
+        version: g.version,
+        trigger: g.trigger,
+        graph: g.graph,
+      },
+      ...(await workflowReadiness(context.orgId, g.graph)),
+      canManage,
+      runs: rows.map((r) => {
+        const w = waits.get(r.id);
+        const need = (r.context as { payload?: { need?: unknown } } | null)?.payload?.need;
+        return {
+          id: r.id,
+          status: r.status,
+          currentNode: r.currentNode,
+          history: r.history,
+          error: r.error,
+          createdAt: r.createdAt.toISOString(),
+          need: typeof need === "string" ? need : null,
+          waitingOn: w ? { kind: w.kind, text: w.text } : null,
+          graph: graphs.get(r.version) ?? null,
+        };
+      }),
+    };
+  });
+
+const StartInput = z.object({
+  workflowId: z.string().uuid(),
+  need: z.string().trim().min(5).max(4000),
+});
+
+/** Start a hiring-need workflow from the app. Its agents act for the person who starts it. */
+export const startOrgWorkflowRun = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => StartInput.parse(d))
+  .handler(async ({ data, context }): Promise<{ runId: string }> => {
+    const { assertRole } = await import("./auth.middleware");
+    await assertRole(context.userId, context.orgId, [...MANAGE_ROLES]);
+    const { startWorkflowManually } = await import("../server/agents/workflows.server");
+    const r = await startWorkflowManually({
+      workflowId: data.workflowId,
+      orgId: context.orgId,
+      userId: context.userId,
+      need: data.need,
+    });
+    const { writeAudit } = await import("../server/audit");
+    await writeAudit({
+      actor: `user:${context.userId}`,
+      actorUserId: context.userId,
+      orgId: context.orgId,
+      action: "workflow.run.started",
+      entityType: "workflow_run",
+      entityId: r.runId,
+      detail: { workflowId: data.workflowId },
+    });
+    return r;
+  });
+
+export type WorkflowKeyView = {
+  id: string;
+  label: string;
+  prefix: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+};
+
+/** The organisation's live API keys for one workflow (never the key itself). */
+export const listWorkflowKeys = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => WorkflowIdInput.parse(d))
+  .handler(async ({ data, context }): Promise<WorkflowKeyView[]> => {
+    const { assertRole } = await import("./auth.middleware");
+    await assertRole(context.userId, context.orgId, [...MANAGE_ROLES]);
+    const { workflowApiKeys } = await import("@db/schema");
+    const { isNull } = await import("drizzle-orm");
+    const rows = await db
+      .select()
+      .from(workflowApiKeys)
+      .where(
+        and(
+          eq(workflowApiKeys.orgId, context.orgId),
+          eq(workflowApiKeys.workflowId, data.workflowId),
+          isNull(workflowApiKeys.revokedAt),
+        ),
+      )
+      .orderBy(desc(workflowApiKeys.createdAt));
+    return rows.map((k) => ({
+      id: k.id,
+      label: k.label,
+      prefix: k.keyPrefix,
+      createdAt: k.createdAt.toISOString(),
+      lastUsedAt: k.lastUsedAt?.toISOString() ?? null,
+    }));
+  });
+
+const IssueInput = z.object({
+  workflowId: z.string().uuid(),
+  label: z.string().trim().max(80),
+});
+
+/** Issue a key for one granted workflow; the full key is returned once. Audited. */
+export const issueWorkflowKey = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => IssueInput.parse(d))
+  .handler(async ({ data, context }): Promise<{ key: string; prefix: string }> => {
+    const { assertRole } = await import("./auth.middleware");
+    await assertRole(context.userId, context.orgId, [...MANAGE_ROLES]);
+    const { grantedWorkflows } = await import("../server/agents/workflows.server");
+    if (!(await grantedWorkflows(context.orgId)).some((g) => g.id === data.workflowId))
+      throw new Error("This workflow is not available to your organisation.");
+    const { newWorkflowKey } = await import("../server/agents/workflow-app.server");
+    const { workflowApiKeys } = await import("@db/schema");
+    const k = newWorkflowKey();
+    const [row] = await db
+      .insert(workflowApiKeys)
+      .values({
+        workflowId: data.workflowId,
+        orgId: context.orgId,
+        label: data.label,
+        keyPrefix: k.prefix,
+        keyHash: k.hash,
+        principalUserId: context.userId,
+      })
+      .returning({ id: workflowApiKeys.id });
+    const { writeAudit } = await import("../server/audit");
+    await writeAudit({
+      actor: `user:${context.userId}`,
+      actorUserId: context.userId,
+      orgId: context.orgId,
+      action: "workflow.api_key.issued",
+      entityType: "workflow_api_key",
+      entityId: row!.id,
+      detail: { workflowId: data.workflowId, prefix: k.prefix, label: data.label },
+    });
+    return { key: k.key, prefix: k.prefix };
+  });
+
+/** Revoke a key at once. Audited. */
+export const revokeWorkflowKey = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ keyId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { assertRole } = await import("./auth.middleware");
+    await assertRole(context.userId, context.orgId, [...MANAGE_ROLES]);
+    const { workflowApiKeys } = await import("@db/schema");
+    const done = await db
+      .update(workflowApiKeys)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(workflowApiKeys.id, data.keyId), eq(workflowApiKeys.orgId, context.orgId)))
+      .returning({ id: workflowApiKeys.id });
+    if (!done.length) throw new Error("Key not found.");
+    const { writeAudit } = await import("../server/audit");
+    await writeAudit({
+      actor: `user:${context.userId}`,
+      actorUserId: context.userId,
+      orgId: context.orgId,
+      action: "workflow.api_key.revoked",
+      entityType: "workflow_api_key",
+      entityId: data.keyId,
+    });
+    return { ok: true };
   });
