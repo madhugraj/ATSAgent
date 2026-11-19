@@ -1076,3 +1076,97 @@ export async function grantedWorkflows(orgId: string) {
       ),
     );
 }
+
+/* ------------------------------------------------------- what a run awaits */
+
+export type WaitingOn = {
+  /** person: an agent asked people something; agent: an agent is working; event: a wait step. */
+  kind: "person" | "agent" | "event";
+  /** One plain line, e.g. "Aditi is waiting for you — 1 question". */
+  text: string;
+  /** Open requests the agent run is waiting on (count only; detail stays in the org). */
+  requests: number;
+  /** The first request's title and text — only filled for the organisation's own view. */
+  first?: { kind: string; title: string; body: string } | null;
+};
+
+/**
+ * What each waiting workflow run is waiting for, in plain words: a person to
+ * answer an agent (with a link to Waiting for you), an agent still working, or
+ * an event. `withDetail` adds the first request's text (organisation view only).
+ */
+export async function waitingOnFor(
+  rows: {
+    id: string;
+    status: string;
+    waitingRunId: string | null;
+    waitingEvent: string | null;
+    waitingUntil: Date | null;
+    context: unknown;
+  }[],
+  withDetail = false,
+): Promise<Map<string, WaitingOn>> {
+  const out = new Map<string, WaitingOn>();
+  const waiting = rows.filter((r) => r.status === "waiting");
+  const runIds = [...new Set(waiting.map((r) => r.waitingRunId).filter(Boolean) as string[])];
+  const { AGENT_LABEL } = await import("../../lib/agents.catalog");
+  const runs = runIds.length
+    ? await db
+        .select({ id: agentRuns.id, agentType: agentRuns.agentType, status: agentRuns.status })
+        .from(agentRuns)
+        .where(inArray(agentRuns.id, runIds))
+    : [];
+  const tasks = runIds.length
+    ? await db
+        .select({
+          runId: agentTasks.runId,
+          kind: agentTasks.kind,
+          title: agentTasks.title,
+          body: agentTasks.body,
+          createdAt: agentTasks.createdAt,
+        })
+        .from(agentTasks)
+        .where(and(inArray(agentTasks.runId, runIds), eq(agentTasks.status, "open")))
+        .orderBy(agentTasks.createdAt)
+    : [];
+  for (const r of waiting) {
+    if (r.waitingEvent) {
+      const until = r.waitingUntil
+        ? ` (until ${r.waitingUntil.toISOString().slice(0, 16).replace("T", " ")})`
+        : "";
+      out.set(r.id, {
+        kind: "event",
+        text: `Waiting for ${r.waitingEvent.replace(/[._]/g, " ")}${until}`,
+        requests: 0,
+      });
+      continue;
+    }
+    const run = runs.find((x) => x.id === r.waitingRunId);
+    if (!run) continue;
+    const name = AGENT_LABEL[run.agentType] ?? run.agentType;
+    const earlier = (r.context as WorkflowContext | null)?.queuedBehind === run.id;
+    const open = tasks.filter((t) => t.runId === run.id);
+    if (open.length) {
+      const questions = open.filter((t) => t.kind === "clarification").length;
+      const what =
+        questions === open.length
+          ? `${open.length} question${open.length === 1 ? "" : "s"}`
+          : `${open.length} request${open.length === 1 ? "" : "s"}`;
+      out.set(r.id, {
+        kind: "person",
+        text: `${earlier ? `An earlier ${name} run` : name} is waiting for you — ${what}`,
+        requests: open.length,
+        first: withDetail
+          ? { kind: open[0]!.kind, title: open[0]!.title, body: open[0]!.body.slice(0, 600) }
+          : null,
+      });
+    } else {
+      out.set(r.id, {
+        kind: "agent",
+        text: `${earlier ? `An earlier ${name} run` : name} is working`,
+        requests: 0,
+      });
+    }
+  }
+  return out;
+}

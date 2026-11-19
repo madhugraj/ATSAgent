@@ -97,6 +97,8 @@ export type WorkflowRunRow = {
   history: { node: string; at: string; note: string }[];
   error: string | null;
   createdAt: string;
+  /** What a waiting run waits for (no request text — that stays in the organisation). */
+  waitingOn: { kind: "person" | "agent" | "event"; text: string } | null;
 };
 
 export type WorkflowBuilderView = {
@@ -149,6 +151,7 @@ export const workflowBuilder = createServerFn({ method: "GET" })
     ]);
     const { WORKFLOW_TEMPLATES } = await import("./workflow-templates");
     const { orgMembers } = await import("@db/schema");
+    const waits = await (await wf()).waitingOnFor(runs.map(({ r }) => r));
     const owned = await db
       .select({ id: organizations.id, name: organizations.name })
       .from(orgMembers)
@@ -201,6 +204,10 @@ export const workflowBuilder = createServerFn({ method: "GET" })
         history: r.history,
         error: r.error,
         createdAt: r.createdAt.toISOString(),
+        waitingOn: (() => {
+          const w = waits.get(r.id);
+          return w ? { kind: w.kind, text: w.text } : null;
+        })(),
       })),
     };
   });
