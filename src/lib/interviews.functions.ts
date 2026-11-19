@@ -1130,6 +1130,7 @@ export const scheduleInterviewCore = createServerOnlyFn(async function scheduleI
           meetingLink: row.teamsLink,
           agenda: row.agenda,
           panelNames: members.map((x) => x.name ?? x.email),
+          bookedBy: actor,
         });
       } catch {
         /* the round stands even if a brief cannot be queued */
