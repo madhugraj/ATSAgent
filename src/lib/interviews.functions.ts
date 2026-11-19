@@ -1131,7 +1131,8 @@ export const scheduleInterviewCore = createServerOnlyFn(async function scheduleI
             contentType: "text/calendar",
           },
         ],
-        idempotencyKey: `interview-invite:${interviewId}:${scheduledAt.toISOString()}`,
+        // Each booking is its own invite: going back to an earlier time sends it again.
+        idempotencyKey: `interview-invite:${interviewId}:${scheduledAt.toISOString()}${candidateToken ? `:${candidateToken.slice(0, 12)}` : ""}`,
       });
     }
   } catch {
