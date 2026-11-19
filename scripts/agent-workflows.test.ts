@@ -776,4 +776,32 @@ describe("hiring need, waits and reports", () => {
     expect((wr!.context as { wait: { status: string } }).wait.status).toBe("timed_out");
     expect(wr!.history.map((h) => h.node).slice(-3)).toEqual(["ok", "rep", "e"]);
   });
+
+  test("approved before the wait began: the wait sees it and moves straight on", async () => {
+    const { startWorkflowManually } = await import("../src/server/agents/workflows.server");
+    await db.delete(workflowRuns).where(eq(workflowRuns.workflowId, workflowId));
+    await startWorkflowManually({ workflowId, orgId, userId, need: "One designer" });
+    let [wr] = await wfr();
+    const reqRun = wr!.waitingRunId!;
+    const [req] = await db
+      .insert(requisitions)
+      .values({
+        orgId,
+        code: `WFN2-${stamp}`,
+        title: "Designer",
+        status: "draft",
+        createdBy: userId,
+      } as never)
+      .returning({ id: requisitions.id });
+    await event("requisition.created", req!.id, {}, reqRun);
+    // People approve it while the Requisition agent is still working.
+    await event("requisition.status_changed", req!.id, { from: "pending_cbo", to: "approved" });
+    await processAgentEvents({ orgId });
+    [wr] = await wfr();
+    expect(wr!.currentNode).toBe("req");
+    await finishAgent(reqRun, "Submitted and approved.");
+    [wr] = await wfr();
+    expect(wr!.currentNode).toBe("jd");
+    expect((wr!.context as { wait: { status: string } }).wait.status).toBe("happened");
+  });
 });

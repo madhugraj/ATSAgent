@@ -15,7 +15,7 @@
  */
 import { createHash } from "node:crypto";
 
-import { and, eq, inArray, isNull, lt, ne } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, isNull, lt, ne } from "drizzle-orm";
 
 import {
   agentRuns,
@@ -463,6 +463,25 @@ async function linkSubject(e: EventRow): Promise<void> {
   }
 }
 
+/** Events of `type` since `since`, replayed to waiting flows (they check role and "only when"). */
+async function lookBackForWait(orgId: string, type: string, since: Date): Promise<void> {
+  if (!type) return;
+  const { agentEvents } = await import("@db/schema");
+  const past = await db
+    .select()
+    .from(agentEvents)
+    .where(
+      and(
+        eq(agentEvents.orgId, orgId),
+        eq(agentEvents.type, type),
+        gte(agentEvents.createdAt, since),
+      ),
+    )
+    .orderBy(agentEvents.createdAt)
+    .limit(50);
+  for (const e of past) await resumeWaiting(e as EventRow);
+}
+
 /** Flows waiting for this event on their own role move on. */
 async function resumeWaiting(e: EventRow): Promise<void> {
   const waiting = await db
@@ -542,6 +561,23 @@ export async function resumeFinishedRunWaits(): Promise<number> {
       await onAgentRunFinished(r);
     } catch (err) {
       log.error("workflow.resume_failed", { run_id: r.id, error: err as Error });
+    }
+  }
+  // Waits whose event already happened (before the wait began, or missed in a restart).
+  const waits = await db
+    .select({
+      orgId: workflowRuns.orgId,
+      event: workflowRuns.waitingEvent,
+      since: workflowRuns.createdAt,
+    })
+    .from(workflowRuns)
+    .where(and(eq(workflowRuns.status, "waiting"), isNotNull(workflowRuns.waitingEvent)))
+    .limit(50);
+  for (const w of waits) {
+    try {
+      await lookBackForWait(w.orgId, w.event ?? "", w.since);
+    } catch (err) {
+      log.error("workflow.lookback_failed", { org_id: w.orgId, error: err as Error });
     }
   }
   return stuck.length;
@@ -723,6 +759,10 @@ export async function advanceWorkflowRun(id: string): Promise<void> {
         waitingEvent: node.data.event ?? null,
         waitingUntil: new Date(Date.now() + hours * 3_600_000),
       });
+      // It may already have happened while an earlier step was still working
+      // (e.g. people approved the requisition before the agent finished): look
+      // back over this run's lifetime, and move on if it did.
+      await lookBackForWait(wr.orgId, node.data.event ?? "", wr.createdAt);
       return;
     }
     // Agent: start it the way the orchestrator does, then wait for it.
