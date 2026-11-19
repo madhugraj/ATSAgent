@@ -495,11 +495,13 @@ async function afterRoundAnswer(
         ])}::jsonb`,
       })
       .where(and(eq(interviews.id, interviewId), eq(interviews.orgId, orgId)));
+    // …and the same event, so the Interview coordinator proposes a stand-in.
+    await raiseUnavailable(orgId, c.applicationId, interviewId, c.level, r, note);
     await tellDesk(
       orgId,
       c.applicationId,
       (cand) =>
-        `${r.name ?? r.email} cannot make ${cand}'s L${c.level} interview at the booked time${note ? ` ("${note}")` : ""}. The candidate has not been sent the invite; find a stand-in or re-schedule.`,
+        `${r.name ?? r.email} cannot make ${cand}'s L${c.level} interview at the booked time${note ? ` ("${note}")` : ""}. The candidate has not been sent the invite; the Interview coordinator proposes a stand-in for you to approve, or re-schedule the round.`,
     );
     return;
   }
@@ -510,6 +512,57 @@ async function afterRoundAnswer(
       (cand) =>
         `${cand} cannot make their L${c.level} interview at the booked time${note ? ` ("${note}")` : ""}. Re-schedule it.`,
     );
+}
+
+/** The `interview.panellist_unavailable` event, as "Can't make it" on My interviews raises it. */
+export async function raiseUnavailable(
+  orgId: string,
+  applicationId: string,
+  interviewId: string,
+  level: number,
+  who: { email: string; name: string | null },
+  note: string | null,
+): Promise<void> {
+  try {
+    const { orgMembers } = await import("@db/schema");
+    const [a] = await db
+      .select({ requisitionId: applications.requisitionId })
+      .from(applications)
+      .where(and(eq(applications.id, applicationId), eq(applications.orgId, orgId)))
+      .limit(1);
+    const [member] = await db
+      .select({ id: orgMembers.id, name: orgMembers.fullName, userId: orgMembers.userId })
+      .from(orgMembers)
+      .where(and(eq(orgMembers.orgId, orgId), sql`lower(${orgMembers.email}) = ${who.email}`))
+      .limit(1);
+    const [i] = await db
+      .select({ at: interviews.scheduledAt })
+      .from(interviews)
+      .where(and(eq(interviews.id, interviewId), eq(interviews.orgId, orgId)))
+      .limit(1);
+    const { getOrgEmailSettings } = await import("./email-outbox.server");
+    const { localWhen } = await import("./local-time");
+    const when = i?.at ? localWhen(i.at, (await getOrgEmailSettings(orgId)).timezone) : undefined;
+    const { emitAgentEvent } = await import("../server/agents/events");
+    await emitAgentEvent({
+      orgId,
+      type: "interview.panellist_unavailable",
+      subjectType: "application",
+      subjectId: applicationId,
+      actorUserId: member?.userId ?? null,
+      payload: {
+        requisitionId: a?.requisitionId ?? null,
+        level,
+        interviewId,
+        memberId: member?.id ?? null,
+        name: member?.name || who.name || who.email,
+        when,
+        note,
+      },
+    });
+  } catch {
+    /* the desk message and the audit trail still carry it */
+  }
 }
 
 async function tellDesk(orgId: string, applicationId: string, body: (cand: string) => string) {
