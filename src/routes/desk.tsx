@@ -2,7 +2,14 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { RECENT_MESSAGES, SCREENABLE, foldText, supersededMessages } from "@/lib/desk-view";
+import {
+  RECENT_MESSAGES,
+  SCREENABLE,
+  decisionsByStep,
+  foldText,
+  reportLine,
+  supersededMessages,
+} from "@/lib/desk-view";
 import { AgentMarkdown } from "@/components/AgentMarkdown";
 import { ScreeningResultSummary, WhyThisScore } from "@/components/ScreeningRationale";
 import { z } from "zod";
@@ -1086,14 +1093,19 @@ function Bubble({
   role,
   body,
   who,
+  report,
 }: {
   role: DeskMessageView["role"];
   body: string;
   who?: string;
+  /** An agent's report: one line until opened. */
+  report?: boolean;
 }) {
   const mine = role === "user";
   const [expanded, setExpanded] = useState(false);
-  const { head, folded } = foldText(body);
+  const line = report ? reportLine(body) : "";
+  const { head, folded } =
+    report && line && line !== body.trim() ? { head: line, folded: true } : foldText(body);
   return (
     <div className={`flex gap-2 ${mine ? "justify-end" : ""}`}>
       {!mine ? (
@@ -1156,9 +1168,21 @@ function Message({
       : m.role === "desk"
         ? "Hiring desk"
         : undefined;
+  // A decision card's own title says what is decided: no generic line above it.
+  const isTask = m.card?.type === "task";
   return (
     <div className="space-y-2">
-      {m.body ? <Bubble role={m.role} body={m.body} {...(who ? { who } : {})} /> : null}
+      {m.body && !isTask ? (
+        <Bubble
+          role={m.role}
+          body={m.body}
+          {...(who ? { who } : {})}
+          report={m.role === "agent" && !m.card}
+        />
+      ) : null}
+      {isTask && who ? (
+        <p className="ml-9 text-[11px] font-medium text-muted-foreground">{who}</p>
+      ) : null}
       {m.card ? (
         <div className="ml-9 space-y-2">
           <Card card={m.card} conv={conv} onChanged={onChanged} compact={compact} />
@@ -2103,9 +2127,71 @@ function RetryButton({
 }
 
 /** The hiring journey, top to bottom: done, now (with what happens next), to come. */
+/** Scroll the conversation to a decision's card and flash it. */
+function showTask(taskId: string) {
+  const el = document.querySelector<HTMLElement>(`[data-open-task="${CSS.escape(taskId)}"]`);
+  if (!el) {
+    toast("That decision is further up the conversation — open earlier messages to see it.");
+    return;
+  }
+  el.scrollIntoView({ behavior: "smooth", block: "start" });
+  el.classList.add("ring-2", "ring-primary");
+  window.setTimeout(() => el.classList.remove("ring-2", "ring-primary"), 1600);
+}
+
+function ago(at: string): string {
+  const mins = Math.max(0, Math.round((Date.now() - new Date(at).getTime()) / 60_000));
+  if (mins < 60) return `${mins}m`;
+  const h = Math.round(mins / 60);
+  return h < 48 ? `${h}h` : `${Math.round(h / 24)}d`;
+}
+
+function StepDecisions({ items }: { items: import("@/lib/desk-view").JourneyDecision[] }) {
+  return (
+    <ul className="mt-1.5 space-y-1.5">
+      {items.map((t) => (
+        <li
+          key={t.taskId}
+          className={`flex items-start gap-2 rounded-md border-l-[3px] p-2 text-xs ${
+            t.waitingFor
+              ? "border-l-border bg-muted/40"
+              : t.urgent
+                ? "border-l-destructive bg-destructive/5"
+                : "border-l-amber-500 bg-amber-500/10"
+          }`}
+        >
+          <div className="min-w-0 flex-1">
+            <p className="font-medium text-foreground">
+              {t.title}
+              {t.count > 1 ? <span className="num text-muted-foreground"> ×{t.count}</span> : null}
+            </p>
+            <p className="text-muted-foreground">
+              {t.waitingFor ? `Waiting for ${t.waitingFor} · ` : ""}
+              {ago(t.at)}
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant={t.waitingFor ? "ghost" : "outline"}
+            className="h-6 px-2 text-[11px]"
+            onClick={() => showTask(t.taskId)}
+          >
+            {t.waitingFor ? "View" : "Review"}
+          </Button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function JourneyPanel({ conv, onChanged }: { conv: DeskConversationView; onChanged: () => void }) {
   const p = conv.progress;
   const n = p.next;
+  const decisions = decisionsByStep(
+    conv,
+    p.stages.map((s) => s.key),
+    p.stages.find((s) => s.state === "current")?.key ?? null,
+  );
   const runState =
     n?.run?.status === "failed"
       ? "stopped"
@@ -2151,6 +2237,9 @@ function JourneyPanel({ conv, onChanged }: { conv: DeskConversationView; onChang
                   <span className="num mr-1 text-xs text-muted-foreground">{i + 1}.</span>
                   {s.label}
                 </p>
+                {decisions.get(s.key)?.length ? (
+                  <StepDecisions items={decisions.get(s.key)!} />
+                ) : null}
                 {isNow && n ? (
                   <div className="mt-1.5 space-y-2 rounded-md border border-primary/30 bg-primary/5 p-2.5 text-xs">
                     <p className="text-foreground">
