@@ -104,6 +104,19 @@ export async function sendInterviewerBrief(
   const scorecardToken = byLink
     ? await issueScorecardLink(orgId, r.interviewId, byLink.id, r.scheduledAt)
     : null;
+  // Their own accept / can't-make-it link for this round and time.
+  let confirmUrl: string | undefined;
+  try {
+    const { panelistConfirmation } = await import("./interview-confirmations.server");
+    const c = await panelistConfirmation(orgId, r.interviewId, r.scheduledAt, {
+      name: r.interviewerName,
+      email: r.interviewerEmail,
+    });
+    if (c.state === "pending")
+      confirmUrl = `${env.PUBLIC_SITE_URL.replace(/\/$/, "")}/confirm/${c.token}`;
+  } catch {
+    /* the brief goes out either way */
+  }
   const { enqueueEmail, formatInOrgTZ, getOrgEmailSettings } =
     await import("./email-outbox.server");
   const tz = (await getOrgEmailSettings(orgId)).timezone;
@@ -154,6 +167,7 @@ export async function sendInterviewerBrief(
           ? `${screen.recommendation}${screen.reason ? ` — ${firstSentence(screen.reason)}` : ""}`
           : undefined,
       bookedText: await bookedTextFor(orgId, r),
+      confirmUrl,
       earlierRounds: external ? undefined : await earlierRoundsOf(orgId, r.applicationId, r.level),
       ...(r.panelNames && r.panelNames.length > 1
         ? { panelText: r.panelNames.filter(Boolean).join(", ") }
@@ -164,7 +178,6 @@ export async function sendInterviewerBrief(
         : {
             candidateUrl: `${site}/candidates/${r.candidateId}`,
             scorecardUrl: `${site}/interviews/mine`,
-            cannotMakeItUrl: `${site}/interviews/mine`,
           }),
     },
     attachments: [
@@ -192,9 +205,7 @@ async function bookedTextFor(
   } catch {
     unchecked = true;
   }
-  const warn = unchecked
-    ? "Your calendar could not be checked for this time. If it does not work, say so below."
-    : undefined;
+  const warn = unchecked ? "Your calendar could not be checked for this time." : undefined;
   return [how ? `${how}.` : undefined, warn].filter(Boolean).join(" ") || undefined;
 }
 

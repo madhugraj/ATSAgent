@@ -112,6 +112,26 @@ export async function checkSchedulingCall(
       ok: false,
       reason: "No interview times are waiting for this candidate — offer times first.",
     };
+  {
+    const { emailOutbox } = await import("@db/schema");
+    const [held] = await db
+      .select({ id: emailOutbox.id })
+      .from(emailOutbox)
+      .where(
+        and(
+          eq(emailOutbox.orgId, orgId),
+          eq(emailOutbox.status, "held"),
+          eq(emailOutbox.idempotencyKey, `interview-slots:${offer.id}`),
+        ),
+      )
+      .limit(1);
+    if (held)
+      return {
+        ok: false,
+        reason:
+          "The panel has not agreed these times yet, so the candidate has not been sent them.",
+      };
+  }
   // Only for the round they are in (an older offer for a later round is never called about).
   const { roundNotYet } = await import("@/lib/slot-offers.server");
   const notYet = roundNotYet(app.stage, offer.level);
@@ -302,6 +322,11 @@ export async function raiseUnansweredOffers(now = Date.now(), orgId?: string): P
       and (o.created_at <= ${new Date(now).toISOString()}::timestamptz - make_interval(hours => s.scheduling_wait_hours)
         or o.expires_at <= ${new Date(now).toISOString()}::timestamptz + interval '6 hours')
       and not exists (select 1 from screening_calls c where c.slot_offer_id = o.id and c.status <> 'cancelled')
+      -- Not while the panel has yet to agree the times (the e-mail is held).
+      and not exists (
+        select 1 from email_outbox m
+        where m.org_id = o.org_id and m.status = 'held'
+          and m.idempotency_key = 'interview-slots:' || o.id::text)
       and not exists (
         select 1 from agent_events e
         where e.org_id = o.org_id and e.type = 'interview.slots_no_reply'

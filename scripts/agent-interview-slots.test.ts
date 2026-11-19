@@ -466,7 +466,12 @@ describe("the candidate chooses the time", () => {
     const kinds = (await db.select().from(emailOutbox).where(eq(emailOutbox.orgId, orgId)))
       .map((m) => m.kind)
       .sort();
-    expect(kinds).toEqual(["interview_invite", "interview_slots", "interviewer_brief"]);
+    expect(kinds).toEqual([
+      "interview_invite",
+      "interview_slots",
+      "interviewer_brief",
+      "panel_time_check",
+    ]);
     const brief = (
       await db.select().from(emailOutbox).where(eq(emailOutbox.kind, "interviewer_brief"))
     ).find((m) => m.orgId === orgId)!;

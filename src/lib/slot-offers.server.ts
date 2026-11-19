@@ -244,7 +244,9 @@ export async function offerSlotsCore(
     )
     .orderBy(desc(interviews.scheduledAt))
     .limit(1);
+  // Held until every panelist agrees these times (interview-confirmations.server.ts).
   await enqueueEmail({
+    hold: true,
     orgId,
     kind: "interview_slots",
     templateName: "interview_slots",
@@ -263,6 +265,15 @@ export async function offerSlotsCore(
       expiresText: formatInOrgTZ(expiresAt, tz),
       ...(dropped?.at ? { replacesText: formatInOrgTZ(dropped.at, tz) } : {}),
     },
+  });
+  const { askPanelAboutOffer } = await import("./interview-confirmations.server");
+  await askPanelAboutOffer(orgId, {
+    id: offer!.id,
+    level: input.level,
+    durationMins: input.durationMins,
+    slots,
+    applicationId: app.id,
+    people: [{ name: member.name ?? null, email: member.email }, ...panel],
   });
   await writeAudit({
     actor: by.runId ? `agent:interview:${by.runId}` : `user:${by.userId ?? "?"}`,
@@ -307,7 +318,7 @@ export async function withdrawOfferEmails(orgId: string, offerIds: string[]): Pr
     .where(
       and(
         eq(emailOutbox.orgId, orgId),
-        eq(emailOutbox.status, "queued"),
+        inArray(emailOutbox.status, ["queued", "held"]),
         inArray(
           emailOutbox.idempotencyKey,
           offerIds.map((id) => `interview-slots:${id}`),

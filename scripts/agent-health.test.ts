@@ -1001,6 +1001,32 @@ describe("interviewers who can't make it", () => {
   });
 });
 
+describe("panel not answering", () => {
+  test("a candidate e-mail held for the panel over a day is flagged; cleared once it goes", async () => {
+    const { emailOutbox } = await import("../drizzle/schema");
+    const key = `interview-slots:health-${stamp}`;
+    await db.insert(emailOutbox).values({
+      orgId,
+      kind: "interview_slots",
+      templateName: "interview_slots",
+      toEmail: `held-${stamp}@cand.local`,
+      idempotencyKey: key,
+      status: "held",
+      createdAt: new Date(Date.now() - 30 * 3600_000),
+    } as never);
+    const rule = async () => (await open()).find((i) => i.rule === "interview.panel_not_answering");
+    await evaluate();
+    expect(await rule()).toMatchObject({ agentType: "interview", severity: "warning" });
+    await db
+      .update(emailOutbox)
+      .set({ status: "queued" })
+      .where(eq(emailOutbox.idempotencyKey, key));
+    await evaluate();
+    expect(await rule()).toBeUndefined();
+    await db.delete(emailOutbox).where(eq(emailOutbox.idempotencyKey, key));
+  });
+});
+
 describe("silent panel agent", () => {
   test("an interview call whose transcript never came is flagged; cleared once it is in", async () => {
     const { applications, candidates, interviews, requisitions } =

@@ -34,8 +34,8 @@ interface Props {
   competencies?: string;
   candidateUrl?: string;
   scorecardUrl?: string;
-  /** Where an interviewer says they cannot make the time. */
-  cannotMakeItUrl?: string;
+  /** Accept the time or say it does not work (absent once accepted). */
+  confirmUrl?: string;
 }
 
 const { text, detail } = layoutStyles;
@@ -103,7 +103,7 @@ const Email = ({
   competencies,
   candidateUrl,
   scorecardUrl,
-  cannotMakeItUrl,
+  confirmUrl,
 }: Props) => {
   const joinUrl = whereText?.startsWith("http") ? whereText : undefined;
   const rounds = earlierRounds ? earlierRounds.split("\n").filter(Boolean) : [];
@@ -138,9 +138,9 @@ const Email = ({
           Join meeting
         </a>
       ) : null}
-      {cannotMakeItUrl ? (
-        <a href={cannotMakeItUrl} style={quiet}>
-          I can&apos;t make this time
+      {confirmUrl ? (
+        <a href={confirmUrl} style={joinUrl ? quiet : button}>
+          Accept or decline this time
         </a>
       ) : null}
 
@@ -204,6 +204,6 @@ export const template = {
     competencies: "Design systems, Collaboration, Ownership",
     candidateUrl: "https://example.com/candidates/abc",
     scorecardUrl: "https://example.com/interviews/mine",
-    cannotMakeItUrl: "https://example.com/interviews/mine",
+    confirmUrl: "https://example.com/confirm/abc",
   },
 } satisfies TemplateEntry;
