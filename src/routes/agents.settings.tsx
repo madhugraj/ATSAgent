@@ -1241,14 +1241,29 @@ function WorkflowCard({
       {w.runs.length ? (
         <ul className="mt-3 space-y-1 text-xs">
           {w.runs.map((r) => (
-            <li key={r.id} className="flex gap-2">
-              <Badge variant="outline" className="h-5">
-                {r.status}
-              </Badge>
-              <span className="text-muted-foreground">
-                {new Date(r.createdAt).toLocaleString()}
-              </span>
-              <span className="truncate">{r.error ?? r.lastNote ?? ""}</span>
+            <li key={r.id} className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="h-5">
+                  {r.status}
+                </Badge>
+                <span className="text-muted-foreground">
+                  {new Date(r.createdAt).toLocaleString()}
+                </span>
+                <span className="truncate">{r.error ?? r.waitingOn?.text ?? r.lastNote ?? ""}</span>
+                {r.waitingOn?.kind === "person" ? (
+                  <Button asChild size="sm" className="ml-auto h-6 px-2 text-xs">
+                    <Link to="/agents">Answer in Waiting for you</Link>
+                  </Button>
+                ) : null}
+              </div>
+              {r.waitingOn?.first ? (
+                <div className="ml-1 rounded-md border-l-2 border-amber-500 bg-amber-50 px-3 py-2 text-xs dark:bg-amber-950/30">
+                  <div className="font-medium">{r.waitingOn.first.title}</div>
+                  <p className="mt-0.5 line-clamp-4 whitespace-pre-line text-muted-foreground">
+                    {r.waitingOn.first.body}
+                  </p>
+                </div>
+              ) : null}
             </li>
           ))}
         </ul>

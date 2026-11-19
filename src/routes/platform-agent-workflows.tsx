@@ -1630,6 +1630,13 @@ function Runs({
                   </Button>
                 </div>
               </div>
+              {r.waitingOn ? (
+                <div
+                  className={`text-xs font-medium ${r.waitingOn.kind === "person" ? "text-amber-700" : "text-foreground"}`}
+                >
+                  {r.waitingOn.text}
+                </div>
+              ) : null}
               <div className="text-xs text-muted-foreground">
                 {r.history.map((h) => `${label(h.node)}: ${h.note}`).join(" → ")}
               </div>

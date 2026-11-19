@@ -59,6 +59,14 @@ Where it shows:
 - **The bell** — owners and HR heads see "Workflow … is not running yet" until it is ready (derived live, so
   it disappears by itself).
 
+## What a run is waiting for
+
+A waiting run says why, in plain words (`waitingOnFor` in `workflows.server.ts`): **"<agent> is waiting for
+you — 1 question"** when its agent asked people something, **"<agent> is working"**, or **"Waiting for <event>"**
+on a wait step ("An earlier <agent> run" when it waits behind one). The organisation's Agent settings →
+Workflows also shows the first request's text and **Answer in Waiting for you**; the platform's Runs tab shows
+the line only — the request text stays in the organisation.
+
 ## More steps: hiring need, wait for, report
 
 - **Hiring need (manual) trigger** — the flow starts by hand with the need's text (`{{payload.need}}`): super

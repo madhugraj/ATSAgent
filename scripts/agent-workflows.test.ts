@@ -212,6 +212,7 @@ const schema = await import("../drizzle/schema");
 const {
   agentEvents,
   agentPolicies,
+  agentTasks,
   agentRuns,
   agentWorkflowGrants,
   agentWorkflows,
@@ -445,6 +446,25 @@ describe("engine", () => {
     expect(queued.status).toBe("waiting");
     expect(queued.waitingRunId).toBe(old!.id);
     expect(queued.history.at(-1)!.note).toContain("Waiting for an earlier jd run");
+
+    // What it waits for, in plain words: an agent working, then a person's question.
+    const working = (await w.waitingOnFor([queued])).get(queued.id)!;
+    expect(working.kind).toBe("agent");
+    expect(working.text).toContain("An earlier");
+    await db.insert(agentTasks).values({
+      orgId,
+      runId: old!.id,
+      kind: "clarification",
+      status: "open",
+      title: "The agent has a question",
+      body: "Which team is this for?",
+      assigneeRole: "hiring_manager",
+    } as never);
+    const asked = (await w.waitingOnFor([queued], true)).get(queued.id)!;
+    expect(asked.kind).toBe("person");
+    expect(asked.text).toContain("waiting for you — 1 question");
+    expect(asked.first!.body).toBe("Which team is this for?");
+    expect((await w.waitingOnFor([queued])).get(queued.id)!.first).toBeNull();
 
     await cancelRun({ orgId, runId: old!.id, userId });
     const after = await mineWr();

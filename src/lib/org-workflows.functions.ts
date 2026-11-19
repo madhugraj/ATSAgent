@@ -27,6 +27,12 @@ export type OrgWorkflowRow = {
     createdAt: string;
     lastNote: string | null;
     error: string | null;
+    /** What a waiting run waits for; a person's request links to Waiting for you. */
+    waitingOn: {
+      kind: "person" | "agent" | "event";
+      text: string;
+      first: { kind: string; title: string; body: string } | null;
+    } | null;
   }[];
 };
 
@@ -35,7 +41,7 @@ export const orgWorkflows = createServerFn({ method: "GET" })
   .handler(async ({ context }): Promise<OrgWorkflowRow[]> => {
     const { assertRole } = await import("./auth.middleware");
     await assertRole(context.userId, context.orgId, ["hr_head", "president_cbo"]);
-    const { grantedWorkflows, workflowReadiness } =
+    const { grantedWorkflows, workflowReadiness, waitingOnFor } =
       await import("../server/agents/workflows.server");
     const granted = await grantedWorkflows(context.orgId);
     if (!granted.length) return [];
@@ -53,6 +59,7 @@ export const orgWorkflows = createServerFn({ method: "GET" })
       )
       .orderBy(desc(workflowRuns.createdAt))
       .limit(50);
+    const waits = await waitingOnFor(runs, true);
     return Promise.all(
       granted.map(async (g) => ({
         id: g.id,
@@ -70,6 +77,10 @@ export const orgWorkflows = createServerFn({ method: "GET" })
             createdAt: r.createdAt.toISOString(),
             lastNote: r.history.at(-1)?.note ?? null,
             error: r.error,
+            waitingOn: (() => {
+              const w = waits.get(r.id);
+              return w ? { kind: w.kind, text: w.text, first: w.first ?? null } : null;
+            })(),
           })),
       })),
     );
