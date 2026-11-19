@@ -38,7 +38,7 @@ export function bookedTextOf(actor: string | undefined): string | undefined {
   if (!actor) return undefined;
   if (/AI scheduling call/i.test(actor)) return "Confirmed by the candidate on a scheduling call";
   if (/^candidate/i.test(actor)) return "Picked by the candidate";
-  return `Booked by ${actor}; the candidate has been sent the invite`;
+  return `Booked by ${actor}; the candidate is sent the invite once the whole panel accepts`;
 }
 
 export async function sendInterviewerBrief(
