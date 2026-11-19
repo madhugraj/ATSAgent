@@ -683,6 +683,10 @@ export async function startWorkflowManually(input: {
   return { runId: wr!.id };
 }
 
+/** The graph of a published version (what a run of that version follows). */
+export const runVersionGraph = (workflowId: string, version: number) =>
+  versionGraph(workflowId, version);
+
 async function versionGraph(workflowId: string, version: number): Promise<WorkflowGraph | null> {
   const [v] = await db
     .select({ graph: agentWorkflowVersions.graph })

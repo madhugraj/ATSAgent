@@ -2609,7 +2609,10 @@ export const agentBlueprints = pgTable(
     typeSlug: text("type_slug"),
     riskTier: text("risk_tier").$type<"low" | "medium" | "high">().notNull().default("medium"),
     ownerRole: text("owner_role").notNull().default("hr_head"),
-    gates: jsonb("gates").$type<string[]>().notNull().default(sql`'["general"]'::jsonb`),
+    gates: jsonb("gates")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'["general"]'::jsonb`),
     scope: jsonb("scope")
       .$type<{ reads: string[]; writes: string[]; external: string[] }>()
       .notNull()
@@ -2878,6 +2881,36 @@ export const workflowRuns = pgTable(
     index("workflow_runs_org_idx").on(t.orgId, t.status),
     index("workflow_runs_waiting_idx").on(t.waitingRunId),
     uniqueIndex("workflow_runs_event_key").on(t.workflowId, t.triggerEventId),
+  ],
+);
+
+/* ------------------------------------------- workflow app API keys (0087) */
+/* docs/agent-workflows.md § Workflow app and API: an organisation's own key
+   to start and follow one granted workflow from its other systems. Only the
+   hash is stored; runs act as the person who issued the key. */
+export const workflowApiKeys = pgTable(
+  "workflow_api_keys",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workflowId: uuid("workflow_id")
+      .notNull()
+      .references(() => agentWorkflows.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    label: text("label").notNull().default(""),
+    keyPrefix: text("key_prefix").notNull(),
+    keyHash: text("key_hash").notNull(),
+    principalUserId: uuid("principal_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("workflow_api_keys_hash_key").on(t.keyHash),
+    index("workflow_api_keys_org_idx").on(t.orgId, t.workflowId),
   ],
 );
 

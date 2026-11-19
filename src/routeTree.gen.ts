@@ -63,6 +63,7 @@ import { Route as RequisitionsIndexRouteImport } from './routes/requisitions.ind
 import { Route as RequisitionsIdRouteImport } from './routes/requisitions.$id'
 import { Route as ScheduleTokenRouteImport } from './routes/schedule.$token'
 import { Route as ScorecardTokenRouteImport } from './routes/scorecard.$token'
+import { Route as WWorkflowIdRouteImport } from './routes/w.$workflowId'
 import { Route as ApiAuthChangePasswordRouteImport } from './routes/api/auth/change-password'
 import { Route as ApiAuthConfirmRouteImport } from './routes/api/auth/confirm'
 import { Route as ApiAuthLoginRouteImport } from './routes/api/auth/login'
@@ -358,6 +359,11 @@ const ScorecardTokenRoute = ScorecardTokenRouteImport.update({
   path: '/scorecard/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WWorkflowIdRoute = WWorkflowIdRouteImport.update({
+  id: '/w/$workflowId',
+  path: '/w/$workflowId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAuthChangePasswordRoute = ApiAuthChangePasswordRouteImport.update({
   id: '/api/auth/change-password',
   path: '/api/auth/change-password',
@@ -537,6 +543,7 @@ export interface FileRoutesByFullPath {
   '/requisitions/$id': typeof RequisitionsIdRoute
   '/schedule/$token': typeof ScheduleTokenRoute
   '/scorecard/$token': typeof ScorecardTokenRoute
+  '/w/$workflowId': typeof WWorkflowIdRoute
   '/agents/': typeof AgentsIndexRoute
   '/candidates/': typeof CandidatesIndexRoute
   '/interviews/': typeof InterviewsIndexRoute
@@ -617,6 +624,7 @@ export interface FileRoutesByTo {
   '/requisitions/$id': typeof RequisitionsIdRoute
   '/schedule/$token': typeof ScheduleTokenRoute
   '/scorecard/$token': typeof ScorecardTokenRoute
+  '/w/$workflowId': typeof WWorkflowIdRoute
   '/agents': typeof AgentsIndexRoute
   '/candidates': typeof CandidatesIndexRoute
   '/interviews': typeof InterviewsIndexRoute
@@ -698,6 +706,7 @@ export interface FileRoutesById {
   '/requisitions/$id': typeof RequisitionsIdRoute
   '/schedule/$token': typeof ScheduleTokenRoute
   '/scorecard/$token': typeof ScorecardTokenRoute
+  '/w/$workflowId': typeof WWorkflowIdRoute
   '/agents/': typeof AgentsIndexRoute
   '/candidates/': typeof CandidatesIndexRoute
   '/interviews/': typeof InterviewsIndexRoute
@@ -780,6 +789,7 @@ export interface FileRouteTypes {
     | '/requisitions/$id'
     | '/schedule/$token'
     | '/scorecard/$token'
+    | '/w/$workflowId'
     | '/agents/'
     | '/candidates/'
     | '/interviews/'
@@ -860,6 +870,7 @@ export interface FileRouteTypes {
     | '/requisitions/$id'
     | '/schedule/$token'
     | '/scorecard/$token'
+    | '/w/$workflowId'
     | '/agents'
     | '/candidates'
     | '/interviews'
@@ -940,6 +951,7 @@ export interface FileRouteTypes {
     | '/requisitions/$id'
     | '/schedule/$token'
     | '/scorecard/$token'
+    | '/w/$workflowId'
     | '/agents/'
     | '/candidates/'
     | '/interviews/'
@@ -1021,6 +1033,7 @@ export interface RootRouteChildren {
   RequisitionsIdRoute: typeof RequisitionsIdRoute
   ScheduleTokenRoute: typeof ScheduleTokenRoute
   ScorecardTokenRoute: typeof ScorecardTokenRoute
+  WWorkflowIdRoute: typeof WWorkflowIdRoute
   AgentsIndexRoute: typeof AgentsIndexRoute
   CandidatesIndexRoute: typeof CandidatesIndexRoute
   InterviewsIndexRoute: typeof InterviewsIndexRoute
@@ -1431,6 +1444,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ScorecardTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/w/$workflowId': {
+      id: '/w/$workflowId'
+      path: '/w/$workflowId'
+      fullPath: '/w/$workflowId'
+      preLoaderRoute: typeof WWorkflowIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/auth/change-password': {
       id: '/api/auth/change-password'
       path: '/api/auth/change-password'
@@ -1653,6 +1673,7 @@ const rootRouteChildren: RootRouteChildren = {
   RequisitionsIdRoute: RequisitionsIdRoute,
   ScheduleTokenRoute: ScheduleTokenRoute,
   ScorecardTokenRoute: ScorecardTokenRoute,
+  WWorkflowIdRoute: WWorkflowIdRoute,
   AgentsIndexRoute: AgentsIndexRoute,
   CandidatesIndexRoute: CandidatesIndexRoute,
   InterviewsIndexRoute: InterviewsIndexRoute,

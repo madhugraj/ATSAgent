@@ -241,9 +241,11 @@ const {
   agentWorkflowGrants,
   agentWorkflows,
   agentWorkflowVersions,
+  orgMembers,
   organizations,
   requisitions,
   users,
+  workflowApiKeys,
   workflowRuns,
 } = schema;
 const registry = await import("../src/server/agents/registry");
@@ -803,5 +805,71 @@ describe("hiring need, waits and reports", () => {
     [wr] = await wfr();
     expect(wr!.currentNode).toBe("jd");
     expect((wr!.context as { wait: { status: string } }).wait.status).toBe("happened");
+  });
+
+  test("workflow API: a key starts and reads runs of its own workflow only", async () => {
+    const app = await import("../src/server/agents/workflow-app.server");
+    await db.delete(workflowRuns).where(eq(workflowRuns.workflowId, workflowId));
+    const k = app.newWorkflowKey();
+    const [row] = await db
+      .insert(workflowApiKeys)
+      .values({
+        workflowId,
+        orgId,
+        label: "HRMS",
+        keyPrefix: k.prefix,
+        keyHash: k.hash,
+        principalUserId: userId,
+      })
+      .returning({ id: workflowApiKeys.id });
+    // The person who issued it must be an active member.
+    expect(await app.resolveWorkflowKey(k.key)).toBeNull();
+    await db.insert(orgMembers).values({
+      orgId,
+      userId,
+      email: `wfapi-${stamp}@test.local`,
+      status: "active",
+    } as never);
+    const key = (await app.resolveWorkflowKey(k.key))!;
+    expect(key.workflowId).toBe(workflowId);
+    expect(await app.resolveWorkflowKey("atsw_nope")).toBeNull();
+
+    const call = (method: string, path: string, body?: unknown) =>
+      app.handleWorkflowApi(
+        new Request(`http://x${path}`, {
+          method,
+          ...(body
+            ? { body: JSON.stringify(body), headers: { "content-type": "application/json" } }
+            : {}),
+        }),
+        new URL(`http://x${path}`),
+        key,
+      );
+    const started = await call("POST", `/api/workflows/${workflowId}/runs`, {
+      need: "Two data engineers in Pune",
+    });
+    expect(started.status).toBe(201);
+    const view = (await started.json()) as { runId: string; status: string; waitingOn: unknown };
+    expect(view.status).toBe("waiting");
+    expect(JSON.stringify(view)).not.toMatch(/"(model|provider|engine)"/i);
+
+    const read = await call("GET", `/api/workflows/runs/${view.runId}`);
+    expect(((await read.json()) as { runId: string }).runId).toBe(view.runId);
+    const list = await call("GET", `/api/workflows/${workflowId}/runs`);
+    expect(((await list.json()) as { runs: unknown[] }).runs).toHaveLength(1);
+
+    expect(
+      (await call("POST", `/api/workflows/${crypto.randomUUID()}/runs`, { need: "xxxxx" })).status,
+    ).toBe(403);
+    expect((await call("POST", `/api/workflows/${workflowId}/runs`, { need: "x" })).status).toBe(
+      400,
+    );
+    expect((await call("GET", `/api/workflows/runs/${crypto.randomUUID()}`)).status).toBe(404);
+
+    await db
+      .update(workflowApiKeys)
+      .set({ revokedAt: new Date() })
+      .where(eq(workflowApiKeys.id, row!.id));
+    expect(await app.resolveWorkflowKey(k.key)).toBeNull();
   });
 });

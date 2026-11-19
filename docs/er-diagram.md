@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-122 tables across 9 domains.
+123 tables across 9 domains.
 
 ## Identity & access
 
@@ -1464,6 +1464,9 @@ erDiagram
 | `training_settings` | `org_id` | `organizations` | cascade |
 | `user_roles` | `org_id` | `organizations` | cascade |
 | `user_roles` | `user_id` | `users` | cascade |
+| `workflow_api_keys` | `org_id` | `organizations` | cascade |
+| `workflow_api_keys` | `principal_user_id` | `users` | cascade |
+| `workflow_api_keys` | `workflow_id` | `agent_workflows` | cascade |
 | `workflow_runs` | `org_id` | `organizations` | cascade |
 | `workflow_runs` | `started_by` | `users` | no action |
 | `workflow_runs` | `trigger_event_id` | `agent_events` | no action |
@@ -1594,4 +1597,5 @@ erDiagram
 | `user_roles` | Identity & access | 4 | — |
 | `users` | Identity & access | 8 | (email) |
 | `voice_worker_heartbeat` | — | 4 | — |
+| `workflow_api_keys` | — | 10 | (key_hash) |
 | `workflow_runs` | — | 17 | (workflowId+triggerEventId) |

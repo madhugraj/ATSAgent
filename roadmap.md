@@ -393,6 +393,8 @@ Plan: `docs/org-context-agent-plan.md` (decided 2026-10-27; O0 built 2026-10-27,
 - [x] Ready-made workflows (start from a template: shortlist → screening/follow-up, approved role → JD, JD → publish → advertise, final round → evaluation) and a real-agent test scenario in `docs/agent-workflows.md`
 - [x] Build with chat: describe the flow, the assistant drafts the graph and dry-run tests onto the canvas (checked with the Test rules, one repair turn; `workflow_assistant` feature, organisation's own key; drafts only) — `scripts/workflow-assistant.test.ts`
 - [x] Going live: go-live check per organisation (AI key, agents on, studio grants) on the Organisations tab, Agent settings → Workflows for the organisation (Switch on shortcut, recent runs) and a bell item until ready
+- [x] Workflow app and API: `/w/<id>` per granted workflow (start, follow, decide in place) and `/api/workflows/…` with organisation-issued, hashed, revocable keys (migration `0087`)
+- [ ] Webhooks when a run waits on a person or ends; MCP tools for workflows
 - [x] Hiring-need (manual) trigger — started by the super admin (Run now); wait-for steps on the flow's own role with "only when" and a timeout; report steps; PDF and Excel run reports (migration `0084`)
 - [ ] Approval steps on the canvas (people decide inside agents today); triggers from studio-built events
 
