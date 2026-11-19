@@ -289,6 +289,11 @@ function WorkflowsPage() {
     queryFn: () => workflowBuilder(),
     enabled: isSuperUser,
     retry: false,
+    // Live runs move on their own: keep the Runs tab current while any is live.
+    refetchInterval: (query) =>
+      query.state.data?.runs.some((r) => r.status === "waiting" || r.status === "running")
+        ? 10_000
+        : false,
   });
   const [open, setOpen] = useState<string | "new" | null>(null);
   const [chat, setChat] = useState<ChatTurn[]>([]);
@@ -1735,7 +1740,14 @@ function Runs({
                   {r.waitingOn.text}
                 </div>
               ) : null}
-              <RunFlow run={r} graph={workflow.graph} label={label} />
+              <RunFlow
+                run={r}
+                graph={r.graph ?? workflow.graph}
+                label={(id) => {
+                  const n = (r.graph ?? workflow.graph).nodes.find((x) => x.id === id);
+                  return n ? n.data.label || n.data.agentType || n.kind : label(id);
+                }}
+              />
               {r.waitingOn?.kind === "person" && view.owned.some((o) => o.id === r.orgId) ? (
                 <WorkflowRunRequests
                   workflowRunId={r.id}
