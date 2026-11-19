@@ -59,6 +59,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { usePlatform } from "@/hooks/usePlatform";
+import { WorkflowRunRequests } from "@/components/agents/AgentTaskCard";
 import { AGENT_LABEL } from "@/lib/agents.catalog";
 import {
   approveWorkflow,
@@ -1736,9 +1737,12 @@ function Runs({
               ) : null}
               <RunFlow run={r} graph={workflow.graph} label={label} />
               {r.waitingOn?.kind === "person" && view.owned.some((o) => o.id === r.orgId) ? (
-                <Button asChild size="sm" className="h-7">
-                  <a href="/agents">Answer in Waiting for you</a>
-                </Button>
+                <WorkflowRunRequests
+                  workflowRunId={r.id}
+                  onDecided={() =>
+                    void qc.invalidateQueries({ queryKey: ["platform_agent_workflows"] })
+                  }
+                />
               ) : null}
               <details className="text-xs text-muted-foreground">
                 <summary className="cursor-pointer">History</summary>

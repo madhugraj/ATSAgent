@@ -18,6 +18,7 @@ import {
 
 import { PageHeader } from "@/components/ats";
 import { orgWorkflows, type OrgWorkflowRow } from "@/lib/org-workflows.functions";
+import { WorkflowRunRequests } from "@/components/agents/AgentTaskCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -1190,6 +1191,7 @@ function WorkflowCard({
   onSwitchOn: (agentType: string) => Promise<void>;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
+  const qc = useQueryClient();
   return (
     <div className="panel p-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -1250,19 +1252,12 @@ function WorkflowCard({
                   {new Date(r.createdAt).toLocaleString()}
                 </span>
                 <span className="truncate">{r.error ?? r.waitingOn?.text ?? r.lastNote ?? ""}</span>
-                {r.waitingOn?.kind === "person" ? (
-                  <Button asChild size="sm" className="ml-auto h-6 px-2 text-xs">
-                    <Link to="/agents">Answer in Waiting for you</Link>
-                  </Button>
-                ) : null}
               </div>
-              {r.waitingOn?.first ? (
-                <div className="ml-1 rounded-md border-l-2 border-amber-500 bg-amber-50 px-3 py-2 text-xs dark:bg-amber-950/30">
-                  <div className="font-medium">{r.waitingOn.first.title}</div>
-                  <p className="mt-0.5 line-clamp-4 whitespace-pre-line text-muted-foreground">
-                    {r.waitingOn.first.body}
-                  </p>
-                </div>
+              {r.waitingOn?.kind === "person" ? (
+                <WorkflowRunRequests
+                  workflowRunId={r.id}
+                  onDecided={() => void qc.invalidateQueries({ queryKey: ["org_workflows"] })}
+                />
               ) : null}
             </li>
           ))}

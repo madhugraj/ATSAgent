@@ -69,7 +69,36 @@ export type AgentTaskView = {
 /** Open agent requests the caller can act on (owner: all of the org's). */
 export const listAgentTasks = createServerFn({ method: "GET" })
   .middleware([requireOrg])
-  .handler(async ({ context }): Promise<AgentTaskView[]> => {
+  .handler(async ({ context }): Promise<AgentTaskView[]> => openTasks(context));
+
+/**
+ * The open requests of one workflow run's agents — answered and approved
+ * inside the workflow window instead of the whole inbox. Org-scoped; same
+ * visibility as Waiting for you (owner: all; others: theirs or their role's).
+ */
+export const listWorkflowRunTasks = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ workflowRunId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<AgentTaskView[]> => {
+    const { workflowRuns } = await import("@db/schema");
+    const [wr] = await db
+      .select({ context: workflowRuns.context, waitingRunId: workflowRuns.waitingRunId })
+      .from(workflowRuns)
+      .where(and(eq(workflowRuns.id, data.workflowRunId), eq(workflowRuns.orgId, context.orgId)))
+      .limit(1);
+    if (!wr) return [];
+    const ids = new Set([
+      ...(((wr.context as { runs?: string[] } | null)?.runs ?? []) as string[]),
+      ...(wr.waitingRunId ? [wr.waitingRunId] : []),
+    ]);
+    return ids.size ? openTasks(context, [...ids]) : [];
+  });
+
+async function openTasks(
+  context: { userId: string; orgId: string; isOwner: boolean },
+  runIds?: string[],
+): Promise<AgentTaskView[]> {
+  {
     const roles = await rolesOf(context.userId, context.orgId);
     const mine = context.isOwner
       ? undefined
@@ -93,7 +122,13 @@ export const listAgentTasks = createServerFn({ method: "GET" })
       .from(agentTasks)
       .innerJoin(agentRuns, eq(agentRuns.id, agentTasks.runId))
       .where(
-        and(eq(agentTasks.orgId, context.orgId), eq(agentTasks.status, "open"), taskIsLive(), mine),
+        and(
+          eq(agentTasks.orgId, context.orgId),
+          eq(agentTasks.status, "open"),
+          taskIsLive(),
+          mine,
+          runIds ? inArray(agentTasks.runId, runIds) : undefined,
+        ),
       )
       .orderBy(agentTasks.createdAt)
       .limit(200);
@@ -122,7 +157,8 @@ export const listAgentTasks = createServerFn({ method: "GET" })
         createdAt: r.createdAt.toISOString(),
       };
     });
-  });
+  }
+}
 
 const Decision = z.discriminatedUnion("status", [
   z.object({
