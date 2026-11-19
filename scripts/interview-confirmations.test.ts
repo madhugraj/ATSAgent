@@ -178,6 +178,16 @@ describe("interview confirmations", () => {
     await conf.answerConfirmation(p.token, false, "On leave");
     const [i] = await db.select().from(interviews).where(eq(interviews.id, roundId));
     expect(i!.unavailable.map((u) => u.email)).toContain(second);
+    // The Interview coordinator is told, as with "Can't make it".
+    const { agentEvents } = await import("../drizzle/schema");
+    const ev = await db
+      .select({ type: agentEvents.type, payload: agentEvents.payload })
+      .from(agentEvents)
+      .where(
+        and(eq(agentEvents.orgId, orgId), eq(agentEvents.type, "interview.panellist_unavailable")),
+      );
+    expect(ev).toHaveLength(1);
+    expect(ev[0]!.payload).toMatchObject({ interviewId: roundId, level: 1, note: "On leave" });
     expect((await conf.confirmationsFor(orgId, [roundId]))[roundId]?.inviteHeld).toBe(true);
     // The team can still send it, on the record.
     expect(await conf.releaseInviteNow(orgId, roundId, { email: lead, userId })).toBe(1);
