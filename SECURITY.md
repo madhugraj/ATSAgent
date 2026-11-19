@@ -197,8 +197,9 @@ Calendar access for availability is free/busy only — event titles and details 
 
 The interview-time confirmation page (`/confirm/<token>`) is public in the same way: one 64-hex
 token per person per time asked, it returns only the round, role, organisation and time(s) (the
-candidate's name only to a panelist), it records one answer (accept, or decline with an optional
-note stored as plain text and never sent to an AI model), every answer is written to `audit_log`,
+candidate's name only to a panelist), it records one answer (accept — for offered times, which of
+them — or decline, with an optional suggested time validated server-side and an optional note
+stored as plain text and never sent to an AI model), every answer is written to `audit_log`,
 and its server functions are rate-limited with all other RPCs. A re-schedule supersedes old
 tokens. The hiring team's "Send invite now" is behind `requireOrg`, scoped by `org_id`, and audited.
 

@@ -249,4 +249,135 @@ describe("interview confirmations", () => {
     expect(o!.status).toBe("cancelled");
     expect(o!.linkEmailedAt).toBeNull();
   });
+
+  test("workable and common times", () => {
+    const t = ["2026-12-01T05:00:00.000Z", "2026-12-02T05:00:00.000Z"];
+    expect(conf.workableTimes(t, { accept: true })).toEqual(t);
+    expect(conf.workableTimes(t, { accept: true, okSlots: [t[1]!] })).toEqual([t[1]]);
+    expect(conf.workableTimes(t, { accept: false })).toEqual([]);
+    expect(
+      conf.commonTimes(t, [
+        { party: "panelist", state: "accepted", okSlots: null },
+        { party: "panelist", state: "accepted", okSlots: [t[1]!] },
+        { party: "candidate", state: "pending", okSlots: null },
+      ]),
+    ).toEqual([t[1]]);
+    expect(
+      conf.commonTimes(t, [
+        { party: "panelist", state: "accepted", okSlots: [t[0]!] },
+        { party: "panelist", state: "declined", okSlots: [] },
+      ]),
+    ).toEqual([]);
+  });
+
+  const offerTwo = (days: number[]) =>
+    offers.offerSlotsCore(
+      orgId,
+      { userId, runId: null },
+      {
+        applicationId: app,
+        level: 1,
+        interviewerEmail: lead,
+        panelEmails: [second],
+        slots: days.map((d) => inDays(d, 9).toISOString()),
+        durationMins: 60,
+        mode: "online",
+      },
+    );
+  const tokensOf = async (offerId: string) =>
+    Object.fromEntries(
+      (
+        await db
+          .select({ email: interviewConfirmations.email, token: interviewConfirmations.token })
+          .from(interviewConfirmations)
+          .where(eq(interviewConfirmations.offerId, offerId))
+      ).map((r) => [r.email, r.token]),
+    );
+
+  test("the candidate is offered only the times the whole panel can do", async () => {
+    const r = await offerTwo([11, 12, 13]);
+    const tok = await tokensOf(r.offerId);
+    await conf.answerConfirmation(tok[lead]!, {
+      accept: true,
+      okSlots: [r.slots[0]!, r.slots[1]!],
+    });
+    // Still waiting for the second panelist: nobody contacted.
+    const [o1] = await db
+      .select()
+      .from(interviewSlotOffers)
+      .where(eq(interviewSlotOffers.id, r.offerId));
+    expect(o1!.linkEmailedAt).toBeNull();
+    await conf.answerConfirmation(tok[second]!, {
+      accept: true,
+      okSlots: [r.slots[1]!, r.slots[2]!],
+    });
+    const [o2] = await db
+      .select()
+      .from(interviewSlotOffers)
+      .where(eq(interviewSlotOffers.id, r.offerId));
+    expect(o2!.slots.map((x) => Date.parse(x))).toEqual([Date.parse(r.slots[1]!)]);
+    expect(o2!.linkEmailedAt).not.toBeNull();
+  });
+
+  test("no time in common: the offer stops and the coordinator gets the suggestions", async () => {
+    const r = await offerTwo([15, 16]);
+    const tok = await tokensOf(r.offerId);
+    const sugg = inDays(17, 11).toISOString();
+    await conf.answerConfirmation(tok[lead]!, { accept: true, okSlots: [r.slots[0]!] });
+    await conf.answerConfirmation(tok[second]!, {
+      accept: true,
+      okSlots: [r.slots[1]!],
+      suggestedAt: sugg,
+    });
+    const [o] = await db
+      .select()
+      .from(interviewSlotOffers)
+      .where(eq(interviewSlotOffers.id, r.offerId));
+    expect(o!.status).toBe("cancelled");
+    expect(o!.linkEmailedAt).toBeNull();
+    const { agentEvents } = await import("../drizzle/schema");
+    const evs = await db
+      .select({ payload: agentEvents.payload })
+      .from(agentEvents)
+      .where(
+        and(eq(agentEvents.orgId, orgId), eq(agentEvents.type, "interview.panel_times_rejected")),
+      );
+    const ev = evs.find((e) => (e.payload as { offerId?: string }).offerId === r.offerId);
+    expect(ev?.payload).toMatchObject({
+      offerId: r.offerId,
+      suggested: [{ email: second, at: sugg }],
+    });
+  });
+
+  test("a booked round moves to a panelist's suggested time while the candidate has not been told", async () => {
+    const r = await scheduleInterviewCore(
+      { orgId, actor: "Madhu" },
+      {
+        applicationId: app,
+        level: 2,
+        interviewer: "Priya",
+        interviewerEmail: lead,
+        scheduledAt: inDays(20, 7).toISOString(),
+        durationMins: 60,
+        mode: "online",
+        panel: [{ name: "Ravi", email: second }],
+      },
+    );
+    const id = r.interviewId!;
+    const rows = await rowsOf(id);
+    const ravi = rows.find((x) => x.email === second)!;
+    const half = new Date(inDays(20, 7).getTime() + 30 * 60_000);
+    await conf.answerConfirmation(ravi.token, {
+      accept: false,
+      note: "13.30 is okay",
+      suggestedAt: half.toISOString(),
+    });
+    const [i] = await db.select().from(interviews).where(eq(interviews.id, id));
+    expect(i!.scheduledAt!.getTime()).toBe(half.getTime());
+    expect(i!.unavailable).toEqual([]);
+    const live = (await rowsOf(id)).filter((x) => x.state !== "superseded");
+    expect(live.find((x) => x.email === second)?.state).toBe("accepted");
+    expect(live.find((x) => x.email === lead)?.state).toBe("pending");
+    expect((await conf.confirmationsFor(orgId, [id]))[id]?.inviteHeld).toBe(true);
+  });
 });

@@ -580,10 +580,11 @@ export function registerPhase3Agents(): void {
     // offering times places the scheduling call by itself and e-mails the link only if
     // the call does not book; request_scheduling_call is only for times that went by
     // e-mail because no call was possible then.
-    // 2.4.0 (migration 0085): the panel agrees a time before the candidate hears of it —
-    // offered times go to each panelist first and the candidate is contacted (voice
-    // first) only once every panelist accepts; a booked round's invite waits for the
-    // panel, then asks the candidate to confirm.
+    // 2.4.0 (migrations 0085–0086): the panel agrees a time before the candidate hears
+    // of it — each panelist ticks which offered times they can do and may suggest
+    // another; the candidate is contacted (voice first) with only the times the whole
+    // panel can do; with none in common it re-offers from the suggestions. A booked
+    // round's invite waits for the panel, then asks the candidate to confirm.
     version: "2.4.0",
     owner: "hr_head",
     responsibility:
@@ -649,7 +650,7 @@ export function registerPhase3Agents(): void {
       "2e. If a tool refuses an interviewer, tell the person exactly what the system said. Never guess who an address belongs to.",
       "2f. A candidate's own panel: call list_panel_options with their applicationId too — `approved` then includes any stand-in approved for them; use it for their times.",
       "2g. Stand-ins (one candidate's round only): when told a panellist cannot make a booked interview, or when find_interview_slots finds no times for the panel because one person is away, list_substitutes for that person and propose_substitute once — prefer someone with freeAtBookedTime true so the candidate keeps their time. A person decides. If approved and you are told the booking was cancelled, offer new times with the candidate's panel; if approved and the booking stays, do nothing more. If declined, handoff with the person's reason.",
-      "3. find_interview_slots with the applicationId and the round's level (so times start after the candidate's earlier round ends) for the first interviewer with the rest as panelEmails, then offer_interview_slots with three of them, the same panelEmails, and nextRound.focus as the agenda (60 minutes, online; add a meeting provider only if you were told one is connected). Each panelist is asked first (the result's `via` is panel); once every panelist agrees, the system places a short AI scheduling call to the candidate by itself and e-mails the times with a private link only if that call does not book. A panelist's decline cancels the offer and the team is told — then offer other times. When they pick a time the booking — meeting link, the candidate's invite and every interviewer's brief with the round's rubric — happens then. A person reviews the offer unless it is pre-approved.",
+      "3. find_interview_slots with the applicationId and the round's level (so times start after the candidate's earlier round ends) for the first interviewer with the rest as panelEmails, then offer_interview_slots with three of them, the same panelEmails, and nextRound.focus as the agenda (60 minutes, online; add a meeting provider only if you were told one is connected). Each panelist is asked first (the result's `via` is panel) and ticks the times they can do; the candidate is offered only the times the whole panel can do. Once the panel has answered, the system places a short AI scheduling call to the candidate by itself and e-mails the times with a private link only if that call does not book. When no time suits the whole panel you are told what each said and their suggested times — offer new times starting from those suggestions. When they pick a time the booking — meeting link, the candidate's invite and every interviewer's brief with the round's rubric — happens then. A person reviews the offer unless it is pre-approved.",
       "When the candidate did not take offered times (declined or expired): offer three different times — other days and times of day, honouring any note they gave. Offering them decides the call or the e-mail by itself; never also request_scheduling_call. If offering again is refused or impossible, ask_human so a person calls them.",
       "When you are told times went by e-mail only and a call is now possible: request_scheduling_call for that candidate and nothing else (do not offer new times). Its rules — the panel's agreement, the candidate's opt-out, a time at least four hours ahead, one call per offer, one conversation per round — are checked for you: if it is refused, say why in your summary and leave it to the e-mail.",
       "4. A round that did not happen (status no_show or cancelled) is scheduled again the same way.",
