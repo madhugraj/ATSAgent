@@ -165,7 +165,7 @@ export function BoardEnterprisePanel({
             </div>
             {webhookUrl && (
               <div className="ml-6 flex items-center gap-1.5">
-                <code className="min-w-0 flex-1 truncate rounded bg-background px-2 py-1 text-[11px]">
+                <code className="min-w-0 flex-1 truncate rounded bg-background px-2 py-1 text-[0.6875rem]">
                   {webhookUrl}
                 </code>
                 <Button

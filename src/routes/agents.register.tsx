@@ -236,7 +236,7 @@ function AgentTile({
         selected ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : ""
       }`}
     >
-      <div className="flex items-center gap-2 text-[11px]">
+      <div className="flex items-center gap-2 text-[0.6875rem]">
         <span className="num font-medium text-muted-foreground">v{a.version}</span>
         <span
           className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-medium ${style.chip}`}
@@ -268,7 +268,7 @@ function AgentTile({
       <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{m.responsibility}</p>
 
       <div className="mt-auto pt-3">
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-[0.6875rem] text-muted-foreground">
           <span className="font-medium text-foreground">{a.last30.runs}</span> runs ·{" "}
           {a.last30.done} done · {a.last30.failed} stopped
         </p>
@@ -280,7 +280,7 @@ function AgentTile({
             />
           ) : null}
         </div>
-        <div className="mt-1 flex items-baseline gap-2 text-[11px] text-muted-foreground">
+        <div className="mt-1 flex items-baseline gap-2 text-[0.6875rem] text-muted-foreground">
           <span className="num min-w-0 truncate">
             {a.monthTokens.toLocaleString()}
             {budget != null ? ` / ${budget.toLocaleString()}` : ""} tokens
@@ -289,7 +289,7 @@ function AgentTile({
         </div>
 
         <div className="mt-3 flex items-center gap-2 border-t border-foreground/5 pt-3">
-          <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">
+          <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[0.625rem] font-semibold text-primary">
             {owner
               .split(/[\s/]+/)
               .filter(Boolean)
@@ -299,7 +299,7 @@ function AgentTile({
           </span>
           <div className="min-w-0 leading-tight">
             <p className="truncate text-xs font-medium">{owner}</p>
-            <p className="text-[10px] text-muted-foreground">Accountable owner</p>
+            <p className="text-[0.625rem] text-muted-foreground">Accountable owner</p>
           </div>
           <Button
             size="icon"
@@ -354,7 +354,7 @@ function AgentDetail({ a }: { a: AgentRegisterEntry }) {
             {a.policy.enabled ? `On · ${a.policy.autonomy.replace(/_/g, " ")}` : "Off"}
           </Badge>
         </div>
-        <SheetDescription className="num text-[11px]">
+        <SheetDescription className="num text-[0.6875rem]">
           id {a.type} · hash {a.hash.slice(0, 12)}
         </SheetDescription>
       </SheetHeader>
@@ -467,7 +467,7 @@ function AgentDetail({ a }: { a: AgentRegisterEntry }) {
           </pre>
         ) : null}
         {showManifest ? (
-          <pre className="mt-2 max-h-96 overflow-auto rounded-md border border-border bg-muted/30 p-3 font-mono text-[11px]">
+          <pre className="mt-2 max-h-96 overflow-auto rounded-md border border-border bg-muted/30 p-3 font-mono text-[0.6875rem]">
             {a.manifestJson}
           </pre>
         ) : null}

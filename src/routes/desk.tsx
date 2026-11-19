@@ -262,12 +262,12 @@ function ThreadList({
         b.group && b.items.length >= 2 ? (
           <li key={b.group} className="rounded-md border border-border/70 py-1">
             <div className="flex items-center gap-1 px-3 py-1">
-              <span className="flex-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              <span className="flex-1 text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">
                 {b.items.length} needs in parallel
               </span>
               <button
                 type="button"
-                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-primary hover:bg-primary/10"
+                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[0.6875rem] text-primary hover:bg-primary/10"
                 onClick={() => onSideBySide(b.items.slice(0, 3).map((i) => i.id))}
               >
                 <Columns2 className="size-3" /> Side by side
@@ -1116,7 +1116,7 @@ function Bubble({
       <div
         className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${mine ? "bg-primary text-primary-foreground" : "bg-muted"}`}
       >
-        {who ? <p className="mb-0.5 text-[11px] font-medium opacity-70">{who}</p> : null}
+        {who ? <p className="mb-0.5 text-[0.6875rem] font-medium opacity-70">{who}</p> : null}
         <AgentMarkdown text={folded && !expanded ? head : body} />
         {folded ? (
           <button
@@ -3254,7 +3254,7 @@ function JdCard({ card }: { card: DeskCardView }) {
           Open the requisition
         </Link>
       </div>
-      <div className="max-h-96 overflow-y-auto whitespace-pre-wrap px-3 py-2 text-[13px] leading-relaxed">
+      <div className="max-h-96 overflow-y-auto whitespace-pre-wrap px-3 py-2 text-[0.8125rem] leading-relaxed">
         <AgentMarkdown text={String(card["text"] ?? "")} />
       </div>
     </div>

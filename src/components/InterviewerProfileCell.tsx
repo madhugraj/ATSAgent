@@ -81,11 +81,11 @@ export function InterviewerProfileCell(props: {
       <div className="flex flex-wrap items-center gap-1">
         {p.active ? (
           <>
-            <Badge variant="outline" className="text-[10px]">
+            <Badge variant="outline" className="text-[0.625rem]">
               {p.rounds.map((r) => `L${r}`).join(" · ")}
             </Badge>
             {p.areas.slice(0, 3).map((a) => (
-              <Badge key={a} variant="secondary" className="text-[10px]">
+              <Badge key={a} variant="secondary" className="text-[0.625rem]">
                 {a}
               </Badge>
             ))}

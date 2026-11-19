@@ -374,7 +374,7 @@ function AgentCard({
         selected ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : ""
       }`}
     >
-      <div className="flex items-center gap-2 text-[11px]">
+      <div className="flex items-center gap-2 text-[0.6875rem]">
         <span className="num font-medium text-muted-foreground">
           {row.studio ? `Studio · v${row.studio.version}` : `Phase ${info.phase}`}
         </span>
@@ -416,7 +416,7 @@ function AgentCard({
       <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{info.description}</p>
 
       <div className="mt-auto pt-3">
-        <div className="flex items-center justify-between text-[11px]">
+        <div className="flex items-center justify-between text-[0.6875rem]">
           <span className="text-muted-foreground">Autonomy</span>
           <span className={active ? "font-medium" : "text-muted-foreground"}>
             {LEVEL_LABEL[row.autonomy] ?? row.autonomy}

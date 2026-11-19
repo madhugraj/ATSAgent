@@ -133,7 +133,7 @@ export function JobBoardsSection({
                       )}
                       {posting && (
                         <span
-                          className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_STYLE[posting.status] ?? "bg-muted text-muted-foreground"}`}
+                          className={`rounded-full px-2 py-0.5 text-[0.6875rem] font-medium ${STATUS_STYLE[posting.status] ?? "bg-muted text-muted-foreground"}`}
                         >
                           {posting.status}
                         </span>

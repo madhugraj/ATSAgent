@@ -970,13 +970,13 @@ function AgentCard({
             {a.name}
           </button>
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
-            <Badge variant={a.enabled ? "default" : "outline"} className="text-[11px]">
+            <Badge variant={a.enabled ? "default" : "outline"} className="text-[0.6875rem]">
               {a.enabled ? (AUTONOMY_LABEL[a.autonomy] ?? a.autonomy) : "Off"}
             </Badge>
-            <Badge variant="outline" className="num text-[11px]">
+            <Badge variant="outline" className="num text-[0.6875rem]">
               v{a.version}
             </Badge>
-            <Badge variant="outline" className="text-[11px]">
+            <Badge variant="outline" className="text-[0.6875rem]">
               {a.riskTier} risk
             </Badge>
           </div>
@@ -987,14 +987,14 @@ function AgentCard({
       <div className="mt-3 grid grid-cols-4 gap-2">
         {metrics.map(([k, v]) => (
           <div key={k}>
-            <p className="text-[11px] text-muted-foreground">{k}</p>
+            <p className="text-[0.6875rem] text-muted-foreground">{k}</p>
             <p className="num text-base font-semibold">{v}</p>
           </div>
         ))}
       </div>
 
       <div className="mt-2">
-        <p className="text-[11px] text-muted-foreground">Runs per day · 14 days</p>
+        <p className="text-[0.6875rem] text-muted-foreground">Runs per day · 14 days</p>
         <Sparkline values={a.harness.daily.map((x) => x.runs)} />
       </div>
 

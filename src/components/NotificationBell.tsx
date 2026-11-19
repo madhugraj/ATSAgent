@@ -30,7 +30,7 @@ export function NotificationBell() {
           <Bell className="size-4" />
           {items.length ? (
             <span
-              className={`absolute -right-0.5 -top-0.5 flex min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold ${
+              className={`absolute -right-0.5 -top-0.5 flex min-w-4 items-center justify-center rounded-full px-1 text-[0.625rem] font-semibold ${
                 urgent
                   ? "bg-destructive text-destructive-foreground"
                   : "bg-primary text-primary-foreground"
@@ -66,14 +66,14 @@ export function NotificationBell() {
                   <div className="flex items-start justify-between gap-2">
                     <span className="text-sm font-medium leading-snug">{n.title}</span>
                     {n.severity === "urgent" ? (
-                      <Badge variant="destructive" className="shrink-0 text-[10px]">
+                      <Badge variant="destructive" className="shrink-0 text-[0.625rem]">
                         Action
                       </Badge>
                     ) : null}
                   </div>
                   <p className="mt-0.5 text-xs text-muted-foreground">{n.body}</p>
                   {n.at ? (
-                    <p className="num mt-0.5 text-[11px] text-muted-foreground">
+                    <p className="num mt-0.5 text-[0.6875rem] text-muted-foreground">
                       {new Date(n.at).toLocaleString()}
                     </p>
                   ) : null}
