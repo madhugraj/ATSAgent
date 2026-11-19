@@ -216,6 +216,13 @@ offered times, it can book one of those times once (the offer is claimed before 
 time is re-checked as free), and its server functions are rate-limited with all other RPCs.
 Calendar access for availability is free/busy only — event titles and details are never read.
 
+The interview-time confirmation page (`/confirm/<token>`) is public in the same way: one 64-hex
+token per person per time asked, it returns only the round, role, organisation and time(s) (the
+candidate's name only to a panelist), it records one answer (accept, or decline with an optional
+note stored as plain text and never sent to an AI model), every answer is written to `audit_log`,
+and its server functions are rate-limited with all other RPCs. A re-schedule supersedes old
+tokens. The hiring team's "Send invite now" is behind `requireOrg`, scoped by `org_id`, and audited.
+
 An external panellist's scorecard page (`/scorecard/<token>`, docs/panel-directory.md) is public in
 the same way, for people on an interview panel who have no account (a client, an advisor). The
 token is 64 hex characters derived with HMAC-SHA-256 from the server secret and the interview,
@@ -238,7 +245,7 @@ cancelled. An invitation is claimed only by a signed-in user with a verified e-m
 into a live organisation, once (`user_id is null` guard), audited `member.joined`.
 
 **Panel-only members (`interviewer` role, migration 0081).** A colleague who only sits on interview
-panels is invited with the Interviewer role. A member whose *only* role is `interviewer` (and who is
+panels is invited with the Interviewer role. A member whose _only_ role is `interviewer` (and who is
 not the owner) is denied by default: `activeOrgOf` resolves them to no organisation, so
 `requireOrg`, `requireRole`, `requireOrgOwner` and `assertRole` all refuse them, and the few places
 that read membership directly (`orgOf` in org.functions, collaboration, notifications) check

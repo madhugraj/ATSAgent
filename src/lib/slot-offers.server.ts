@@ -81,8 +81,9 @@ export async function connectedMeetingProvider(orgId: string): Promise<MeetingPr
 }
 
 /**
- * Offer interview times to the candidate: the AI scheduling call goes first and
- * the private link is e-mailed if that call does not book (or cannot happen).
+ * Offer interview times: each panelist agrees them first, then the AI
+ * scheduling call goes to the candidate and the private link is e-mailed if
+ * that call does not book (or cannot happen).
  */
 export async function offerSlotsCore(
   orgId: string,
@@ -93,8 +94,11 @@ export async function offerSlotsCore(
   slots: string[];
   expiresAt: string;
   checkedWith: string | null;
-  /** How the times reach the candidate first: the AI call, or the e-mailed link. */
-  via: "call" | "email";
+  /**
+   * `panel`: waiting for every panelist to agree the times; then the candidate
+   * is contacted voice first (the AI call, else the e-mailed link).
+   */
+  via: "call" | "email" | "panel";
   callDueAt: string | null;
   /** Why no call went first (the link was e-mailed instead). */
   callRefused: string | null;
@@ -238,28 +242,17 @@ export async function offerSlotsCore(
     })
     .returning({ id: interviewSlotOffers.id });
 
-  // Voice first: the AI scheduling call goes out now and the e-mailed link is
-  // held until that call ends without a booking. When no call can be placed
-  // (switched off, no mobile, opted out, already spoken about this round…), the
-  // link is e-mailed straight away. The system decides — never the agent.
-  let call: { callId: string; dueAt: Date } | null = null;
-  let callRefused: string | null = null;
-  try {
-    const { requestSchedulingCall } = await import("../server/voice/scheduling-request.server");
-    const r = await requestSchedulingCall({
-      orgId,
-      applicationId: app.id,
-      requestedBy: by.userId,
-      requestedRunId: by.runId,
-      actor: by.runId ? `agent:interview:${by.runId}` : `user:${by.userId ?? "?"}`,
-      now,
-      callFirst: true,
-    });
-    call = { callId: r.callId, dueAt: r.dueAt };
-  } catch (e) {
-    callRefused = (e as Error).message;
-  }
-  if (!call) await sendOfferLink(orgId, offer!.id);
+  // The panel agrees the times first (interview-confirmations.server.ts); only
+  // then is the candidate contacted — voice first (contactCandidate).
+  const { askPanelAboutOffer } = await import("./interview-confirmations.server");
+  await askPanelAboutOffer(orgId, {
+    id: offer!.id,
+    level: input.level,
+    durationMins: input.durationMins,
+    slots,
+    applicationId: app.id,
+    people: [{ name: member.name ?? null, email: member.email }, ...panel],
+  });
   await writeAudit({
     actor: by.runId ? `agent:interview:${by.runId}` : `user:${by.userId ?? "?"}`,
     actorUserId: by.userId,
@@ -267,19 +260,59 @@ export async function offerSlotsCore(
     action: "interview.slots_offered",
     entityType: "application",
     entityId: app.id,
-    detail: {
-      offerId: offer!.id,
-      level: input.level,
-      slots: slots.length,
-      via: call ? "call" : "email",
-      ...(callRefused ? { callRefused } : {}),
-    },
+    detail: { offerId: offer!.id, level: input.level, slots: slots.length, via: "panel" },
   });
   return {
     offerId: offer!.id,
     slots: slots.map((d) => d.toISOString()),
     expiresAt: expiresAt.toISOString(),
     checkedWith: probe.source,
+    via: "panel",
+    callDueAt: null,
+    callRefused: null,
+  };
+}
+
+/**
+ * Once the panel has agreed the times: voice first — the AI scheduling call
+ * goes out now and the e-mailed link is held until that call ends without a
+ * booking. When no call can be placed (switched off, no mobile, opted out,
+ * already spoken about this round…), the link is e-mailed straight away. The
+ * system decides — never the agent.
+ */
+export async function contactCandidate(
+  orgId: string,
+  offerId: string,
+): Promise<{ via: "call" | "email"; callDueAt: string | null; callRefused: string | null }> {
+  const [o] = await db
+    .select({
+      applicationId: interviewSlotOffers.applicationId,
+      createdBy: interviewSlotOffers.createdBy,
+      agentRunId: interviewSlotOffers.agentRunId,
+    })
+    .from(interviewSlotOffers)
+    .where(and(eq(interviewSlotOffers.id, offerId), eq(interviewSlotOffers.orgId, orgId)))
+    .limit(1);
+  if (!o) return { via: "email", callDueAt: null, callRefused: "offer not found" };
+  let call: { callId: string; dueAt: Date } | null = null;
+  let callRefused: string | null = null;
+  try {
+    const { requestSchedulingCall } = await import("../server/voice/scheduling-request.server");
+    const r = await requestSchedulingCall({
+      orgId,
+      applicationId: o.applicationId,
+      requestedBy: o.createdBy,
+      requestedRunId: o.agentRunId,
+      actor: o.agentRunId ? `agent:interview:${o.agentRunId}` : `user:${o.createdBy ?? "?"}`,
+      now: Date.now(),
+      callFirst: true,
+    });
+    call = { callId: r.callId, dueAt: r.dueAt };
+  } catch (e) {
+    callRefused = (e as Error).message;
+  }
+  if (!call) await sendOfferLink(orgId, offerId);
+  return {
     via: call ? "call" : "email",
     callDueAt: call ? call.dueAt.toISOString() : null,
     callRefused,
@@ -380,6 +413,10 @@ export async function releaseHeldOfferLinks(orgId?: string, now = Date.now()): P
   const rows = (await db.execute(sql`
     select o.id, o.org_id from interview_slot_offers o
     where o.status = 'offered' and o.link_emailed_at is null
+      -- Never before the panel has agreed the times.
+      and not exists (
+        select 1 from interview_confirmations k
+        where k.offer_id = o.id and k.state in ('pending','declined'))
       and o.expires_at > ${at}::timestamptz
       ${orgId ? sql`and o.org_id = ${orgId}` : sql``}
       and (
@@ -433,7 +470,7 @@ export async function withdrawOfferEmails(orgId: string, offerIds: string[]): Pr
     .where(
       and(
         eq(emailOutbox.orgId, orgId),
-        eq(emailOutbox.status, "queued"),
+        inArray(emailOutbox.status, ["queued", "held"]),
         inArray(
           emailOutbox.idempotencyKey,
           offerIds.map((id) => `interview-slots:${id}`),

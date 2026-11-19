@@ -141,6 +141,7 @@ function RootComponent() {
     pathname.startsWith("/pay/") ||
     pathname.startsWith("/negotiate/") ||
     pathname.startsWith("/schedule/") ||
+    pathname.startsWith("/confirm/") ||
     pathname.startsWith("/offer/") ||
     pathname.startsWith("/scorecard/") ||
     pathname.startsWith("/apply/") ||

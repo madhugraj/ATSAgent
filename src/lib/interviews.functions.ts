@@ -1029,6 +1029,32 @@ export const scheduleInterviewCore = createServerOnlyFn(async function scheduleI
     }
   }
 
+  /* Confirmations: on a round a person booked, the candidate's invite waits
+   * until every panelist accepts, then asks the candidate to confirm. A time the
+   * candidate picked is theirs already (interview-confirmations.server.ts). */
+  const panelPeople = [
+    ...(row.interviewerEmail ? [{ name: row.interviewer, email: row.interviewerEmail }] : []),
+    ...row.panel,
+  ];
+  const confirmations = await import("./interview-confirmations.server");
+  const picked = confirmations.candidatePicked(actor);
+  const holdInvite = !picked && panelPeople.length > 0;
+  let candidateToken: string | null = null;
+  if (interviewId) {
+    try {
+      await confirmations.supersedeForInterview(ctx.orgId, interviewId, scheduledAt);
+      candidateToken = await confirmations.candidateConfirmation(
+        ctx.orgId,
+        interviewId,
+        scheduledAt,
+        { name: candidateName, email: candidateEmail },
+        picked ? "accepted" : "pending",
+      );
+    } catch {
+      /* best-effort: without a row the invite simply goes out as before */
+    }
+  }
+
   /* Invite email with calendar attachment — best-effort, both create and
    * reschedule. The .ics UID is the interview id so reschedules update the
    * same calendar entry. */
@@ -1087,9 +1113,13 @@ export const scheduleInterviewCore = createServerOnlyFn(async function scheduleI
         .limit(1);
       if (tx?.transcription === "requested") templateData["transcribed"] = "yes";
       if (data.agenda?.trim()) templateData["agenda"] = data.agenda.trim();
+      if (candidateToken && !picked)
+        templateData["confirmUrl"] =
+          `${(await import("../server/env")).env.PUBLIC_SITE_URL.replace(/\/$/, "")}/confirm/${candidateToken}`;
       await enqueueEmail({
         orgId: ctx.orgId,
         kind: "interview_invite",
+        hold: holdInvite && Boolean(candidateToken),
         templateName: "interview_invite",
         toEmail: candidateEmail,
         applicationId: app.id,
@@ -1110,10 +1140,7 @@ export const scheduleInterviewCore = createServerOnlyFn(async function scheduleI
 
   /* Every interviewer's own invite and brief — best-effort too. */
   if (interviewId) {
-    const members = [
-      ...(row.interviewerEmail ? [{ name: row.interviewer, email: row.interviewerEmail }] : []),
-      ...row.panel,
-    ];
+    const members = panelPeople;
     for (const m of members) {
       try {
         const { sendInterviewerBrief } = await import("./interviewer-brief.server");
@@ -1130,10 +1157,17 @@ export const scheduleInterviewCore = createServerOnlyFn(async function scheduleI
           meetingLink: row.teamsLink,
           agenda: row.agenda,
           panelNames: members.map((x) => x.name ?? x.email),
+          bookedBy: actor,
         });
       } catch {
         /* the round stands even if a brief cannot be queued */
       }
+    }
+    // Everyone already agreed this time (e.g. on the offered times): send it now.
+    try {
+      await confirmations.releaseIfAgreed(ctx.orgId, interviewId);
+    } catch {
+      /* the team can release it from the Interviews page */
     }
   }
 

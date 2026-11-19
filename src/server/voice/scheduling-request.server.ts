@@ -98,6 +98,25 @@ export async function checkSchedulingCall(
       ok: false,
       reason: "No interview times are waiting for this candidate — offer times first.",
     };
+  {
+    const { interviewConfirmations } = await import("@db/schema");
+    const [waiting] = await db
+      .select({ id: interviewConfirmations.id })
+      .from(interviewConfirmations)
+      .where(
+        and(
+          eq(interviewConfirmations.orgId, orgId),
+          eq(interviewConfirmations.offerId, offer.id),
+          sql`${interviewConfirmations.state} in ('pending','declined')`,
+        ),
+      )
+      .limit(1);
+    if (waiting)
+      return {
+        ok: false,
+        reason: "The panel has not agreed these times yet, so the candidate is not contacted.",
+      };
+  }
   // Only for the round they are in (an older offer for a later round is never called about).
   const { roundNotYet } = await import("@/lib/slot-offers.server");
   const notYet = roundNotYet(app.stage, offer.level);
@@ -281,6 +300,10 @@ export async function raiseUnansweredOffers(now = Date.now(), orgId?: string): P
       ${orgId ? sql`and o.org_id = ${orgId}` : sql``}
       and o.expires_at > ${new Date(now).toISOString()}::timestamptz
       and not exists (select 1 from screening_calls c where c.slot_offer_id = o.id and c.status <> 'cancelled')
+      -- Not while the panel has yet to agree the times.
+      and not exists (
+        select 1 from interview_confirmations k
+        where k.offer_id = o.id and k.state in ('pending','declined'))
       and not exists (
         select 1 from agent_events e
         where e.org_id = o.org_id and e.type = 'interview.slots_no_reply'

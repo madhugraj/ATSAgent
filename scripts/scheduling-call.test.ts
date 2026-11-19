@@ -611,7 +611,7 @@ describe("asking for a scheduling call", () => {
     });
   });
 
-  test("offering times places the call first and holds the e-mail; no call → e-mail at once", async () => {
+  test("offered times wait for the panel; then the call goes first and holds the e-mail; no call → e-mail at once", async () => {
     const offers = await import("../src/lib/slot-offers.server");
     const offerFor = (appId: string) =>
       offers.offerSlotsCore(
@@ -633,22 +633,26 @@ describe("asking for a scheduling call", () => {
           .from(interviewSlotOffers)
           .where(eq(interviewSlotOffers.id, id))
       )[0]!.at;
-    // Callable: the call is arranged now, the link waits.
+    const callsOf = (id: string) =>
+      db
+        .select({ status: screeningCalls.status, purpose: screeningCalls.purpose })
+        .from(screeningCalls)
+        .where(eq(screeningCalls.slotOfferId, id));
+    // Nothing reaches the candidate before the panel agrees.
     const a = await candidateApp();
     const r = await offerFor(a.appId);
-    expect(r).toMatchObject({ via: "call", callRefused: null });
-    expect(r.callDueAt).not.toBeNull();
+    expect(r).toMatchObject({ via: "panel", callDueAt: null });
     expect(await linkOf(r.offerId)).toBeNull();
-    const calls = await db
-      .select({ status: screeningCalls.status, purpose: screeningCalls.purpose })
-      .from(screeningCalls)
-      .where(eq(screeningCalls.slotOfferId, r.offerId));
-    expect(calls).toEqual([{ status: "approved", purpose: "scheduling" }]);
-    // No mobile to dial: e-mailed straight away, with the reason kept.
+    expect(await callsOf(r.offerId)).toEqual([]);
+    // Callable: once agreed, the call is arranged and the link waits.
+    await panelAgrees(r.offerId);
+    expect(await callsOf(r.offerId)).toEqual([{ status: "approved", purpose: "scheduling" }]);
+    expect(await linkOf(r.offerId)).toBeNull();
+    // No mobile to dial: e-mailed straight away once agreed.
     const b = await candidateApp({ phone: null });
     const e = await offerFor(b.appId);
-    expect(e).toMatchObject({ via: "email", callDueAt: null });
-    expect(e.callRefused).toMatch(/no Indian mobile/);
+    expect(await linkOf(e.offerId)).toBeNull();
+    await panelAgrees(e.offerId);
     expect(await linkOf(e.offerId)).not.toBeNull();
   });
 
@@ -1284,3 +1288,14 @@ describe("who speaks first", () => {
     ]);
   }, 25_000);
 });
+
+/** The panel agrees an offer's times (each panelist accepts), as the confirm links would. */
+async function panelAgrees(offerId: string): Promise<void> {
+  const { interviewConfirmations } = await import("../drizzle/schema");
+  const conf = await import("../src/lib/interview-confirmations.server");
+  const rows = await db
+    .select({ token: interviewConfirmations.token })
+    .from(interviewConfirmations)
+    .where(eq(interviewConfirmations.offerId, offerId));
+  for (const r of rows) await conf.answerConfirmation(r.token, true, null);
+}

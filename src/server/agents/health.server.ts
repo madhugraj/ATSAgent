@@ -67,6 +67,8 @@ export const HEALTH = {
   slotOffersUnanswered7d: 3,
   /** …and as a share of all offers that closed. */
   slotOffersUnansweredShare: 0.5,
+  /** Hours a candidate's interview e-mail may wait on the panel's answer. */
+  panelAnswerHours: 24,
   /** Rounds the candidate did not join, in 7 days, before it is flagged. */
   interviewNoShows7d: 3,
   /** An open offer on its this-many-th revision is going back and forth. */
@@ -633,6 +635,33 @@ export const RULES: Rule[] = [
           agentType: "interview",
           title: `${x.missed} of ${x.closed} interview-time offers in 7 days were not taken up`,
           detail: { closed: x.closed, missed: x.missed },
+        },
+      ];
+    },
+  },
+  {
+    id: "interview.panel_not_answering",
+    element: "hitl",
+    severity: "warning",
+    description: `Offered interview times, or a booked round's invite, have waited more than ${HEALTH.panelAnswerHours} hours for the panel to accept the time — the candidate has not been contacted. Chase the panel, or send the invite from the Interviews page.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ held: number }>(sql`
+        select (
+          (select count(*) from email_outbox
+            where org_id = ${orgId} and status = 'held' and kind = 'interview_invite'
+              and created_at <= now() - make_interval(hours => ${HEALTH.panelAnswerHours}))
+          + (select count(distinct k.offer_id) from interview_confirmations k
+              join interview_slot_offers o on o.id = k.offer_id and o.status = 'offered'
+              where k.org_id = ${orgId} and k.state = 'pending'
+                and k.created_at <= now() - make_interval(hours => ${HEALTH.panelAnswerHours}))
+        )::int held`);
+      const held = r[0]?.held ?? 0;
+      if (!held) return [];
+      return [
+        {
+          agentType: "interview",
+          title: `${held} candidate interview e-mail${held === 1 ? " is" : "s are"} waiting on the panel`,
+          detail: { held },
         },
       ];
     },

@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-119 tables across 9 domains.
+122 tables across 9 domains.
 
 ## Identity & access
 
@@ -1290,6 +1290,9 @@ erDiagram
 | `inbox_messages` | `org_id` | `organizations` | cascade |
 | `integration_credentials` | `integration_id` | `source_integrations` | cascade |
 | `integration_credentials` | `org_id` | `organizations` | cascade |
+| `interview_confirmations` | `interview_id` | `interviews` | cascade |
+| `interview_confirmations` | `offer_id` | `interview_slot_offers` | cascade |
+| `interview_confirmations` | `org_id` | `organizations` | cascade |
 | `interview_slot_offers` | `application_id` | `applications` | cascade |
 | `interview_slot_offers` | `interview_id` | `interviews` | no action |
 | `interview_slot_offers` | `org_id` | `organizations` | cascade |
@@ -1523,6 +1526,7 @@ erDiagram
 | `hrms_sync_state` | — | 12 | (integrationId+entity) |
 | `inbox_messages` | Sourcing & integrations | 16 | — |
 | `integration_credentials` | Sourcing & integrations | 4 | — |
+| `interview_confirmations` | — | 13 | (token) |
 | `interview_slot_offers` | — | 23 | (token) |
 | `interview_transcripts` | — | 8 | (interview_id) |
 | `interviews` | Screening & interviews | 24 | — |

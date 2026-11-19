@@ -1,5 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ConfirmLine } from "@/components/interviews/ConfirmLine";
+import { roundConfirmations } from "@/lib/interview-confirmations.functions";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -80,6 +82,16 @@ function Interviews() {
   const reqs = useQuery(requisitionsQuery);
   const scores = useQuery(matchScoresQuery);
   const ivs = useQuery(interviewsQuery);
+  const confirmFn = useServerFn(roundConfirmations);
+  const roundIds = (ivs.data ?? [])
+    .filter((i) => ["scheduled", "rescheduled"].includes(i.status))
+    .map((i) => i.id)
+    .slice(0, 500);
+  const confirms = useQuery({
+    queryKey: ["round_confirmations", roundIds],
+    queryFn: () => confirmFn({ data: { interviewIds: roundIds } }),
+    enabled: roundIds.length > 0,
+  });
   const evals = useQuery(evaluationsQuery);
 
   const doSchedule = useServerFn(scheduleInterview);
@@ -663,6 +675,13 @@ function Interviews() {
                                       </Button>
                                     ) : null}
                                   </div>
+                                  {round ? (
+                                    <ConfirmLine
+                                      interviewId={round.id}
+                                      c={confirms.data?.[round.id]}
+                                      onChange={() => void confirms.refetch()}
+                                    />
+                                  ) : null}
                                   {round && round.transcription !== "off" ? (
                                     <span
                                       className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground"

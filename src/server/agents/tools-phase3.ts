@@ -334,7 +334,7 @@ export function registerPhase3Tools(): void {
   registerTool({
     name: "schedule_interview",
     description:
-      "Book an interview round and email the candidate the invite with a calendar file. The interviewer must be an active member of the organisation. Optionally creates a Zoom / Google Meet / Teams link when that integration is connected. There is no calendar free/busy check: propose a working-hours slot at least one day ahead; a person reviews it unless the interview invitation is pre-approved.",
+      "Book an interview round. Each panelist gets their brief and accepts or declines the time; the candidate's invite (with a calendar file and a confirm link) is sent once the whole panel accepts. The interviewer must be an active member of the organisation. Optionally creates a Zoom / Google Meet / Teams link when that integration is connected. There is no calendar free/busy check: propose a working-hours slot at least one day ahead; a person reviews it unless the interview invitation is pre-approved.",
     input: AppId.extend({
       level: z.number().int().min(1).max(3),
       interviewerEmail: z.string().email(),
@@ -470,7 +470,7 @@ export function registerPhase3Tools(): void {
   registerTool({
     name: "offer_interview_slots",
     description:
-      "Offer the candidate 2–5 interview times (for the interviewer and any further panel members). Voice goes first: the system places a short AI scheduling call in the calling window to let them pick one, and e-mails the times with a private link only if that call does not book (or when no call is possible — then `via` is email and `callRefused` says why). Nothing is booked until they pick: the round is then booked with a meeting link (if a provider is given and connected) and both the candidate and the interviewer get their invites; if none work, the team is told. Every time is re-checked as free. Leaves the organisation, so a person approves it unless the interview time-choice e-mail is pre-approved.",
+      "Offer the candidate 2–5 interview times (for the interviewer and any further panel members). The panel goes first: each panelist is asked to agree the times (`via` is panel) and one decline cancels the offer and tells the team. Once every panelist agrees, voice goes first: the system places a short AI scheduling call in the calling window to let the candidate pick one, and e-mails the times with a private link only if that call does not book (or when no call is possible). Nothing is booked until they pick: the round is then booked with a meeting link (if a provider is given and connected) and both the candidate and the interviewer get their invites; if none work, the team is told. Every time is re-checked as free. Leaves the organisation, so a person approves it unless the interview time-choice e-mail is pre-approved.",
     input: AppId.extend({
       level: z.number().int().min(1).max(3),
       interviewerEmail: z.string().email(),

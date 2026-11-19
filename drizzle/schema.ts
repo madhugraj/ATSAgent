@@ -1090,6 +1090,41 @@ export const interviewSlotOffers = pgTable(
   ],
 );
 
+/**
+ * A panelist's or candidate's answer to an interview time (migration 0085):
+ * for a booked round (`interviewId`) or for the times about to be e-mailed to
+ * the candidate (`offerId`). `party`: panelist | candidate. `state`: pending |
+ * accepted | declined | superseded. `note` is the person's own words (untrusted).
+ */
+export const interviewConfirmations = pgTable(
+  "interview_confirmations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    interviewId: uuid("interview_id").references(() => interviews.id, { onDelete: "cascade" }),
+    offerId: uuid("offer_id").references(() => interviewSlotOffers.id, { onDelete: "cascade" }),
+    party: text("party").$type<"panelist" | "candidate">().notNull(),
+    email: text("email").notNull(),
+    name: text("name"),
+    token: text("token").notNull(),
+    state: text("state")
+      .$type<"pending" | "accepted" | "declined" | "superseded">()
+      .notNull()
+      .default("pending"),
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
+    note: text("note"),
+    respondedAt: timestamp("responded_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("interview_confirmations_token_key").on(t.token),
+    index("interview_confirmations_interview_idx").on(t.orgId, t.interviewId),
+    index("interview_confirmations_offer_idx").on(t.orgId, t.offerId),
+  ],
+);
+
 export const evaluations = pgTable(
   "evaluations",
   {
@@ -1447,8 +1482,10 @@ export type EmailOutboxKind =
   | "compensation_form"
   | "offer_negotiation"
   | "screening_call_booked"
-  | "panel_summary";
-export type EmailOutboxStatus = "queued" | "sent" | "failed" | "suppressed";
+  | "panel_summary"
+  | "panel_time_check";
+/** `held`: waiting on interview confirmations (migration 0085) — released to `queued`. */
+export type EmailOutboxStatus = "queued" | "held" | "sent" | "failed" | "suppressed";
 export type EmailOutboxAttachment = {
   filename: string;
   contentBase64: string;
