@@ -90,6 +90,7 @@ export type WorkflowRow = {
 export type WorkflowRunRow = {
   id: string;
   workflowId: string;
+  orgId: string;
   orgName: string;
   version: number;
   status: string;
@@ -197,6 +198,7 @@ export const workflowBuilder = createServerFn({ method: "GET" })
       runs: runs.map(({ r, orgName }) => ({
         id: r.id,
         workflowId: r.workflowId,
+        orgId: r.orgId,
         orgName,
         version: r.version,
         status: r.status,
