@@ -116,7 +116,11 @@ export function graphProblems(g: WorkflowGraph, knownAgent: (type: string) => bo
       if (incoming.length) out.push("Nothing may lead into the trigger.");
     }
     if (n.kind === "agent") {
-      if (!n.data.agentType || !knownAgent(n.data.agentType))
+      if (n.data.agentType && NOT_A_STEP.has(n.data.agentType))
+        out.push(
+          `"${label(n)}": Aditi hands work to other agents on its own, so it cannot be a workflow step — use the agent that does the work (e.g. the Requisition agent).`,
+        );
+      else if (!n.data.agentType || !knownAgent(n.data.agentType))
         out.push(`"${label(n)}": pick an agent that exists.`);
       if (!n.data.goal?.trim()) out.push(`"${label(n)}": write the agent's goal.`);
       if ((n.data.goal ?? "").length > 2000) out.push(`"${label(n)}": the goal is too long.`);
@@ -225,6 +229,28 @@ export function conditionHolds(n: WorkflowNode, ctx: WorkflowContext): boolean {
 }
 
 /** A goal with {{field}} placeholders filled from the context (missing → empty). */
+/**
+ * Agents that cannot be workflow steps: the copilot (Aditi) is the front door —
+ * it starts other agents itself, so their work would happen outside the flow.
+ */
+export const NOT_A_STEP = new Set(["copilot"]);
+
+/**
+ * The goal an agent step starts with: its own goal, then what the flow already
+ * knows — the hiring need and what the previous step produced — so a step never
+ * starts blind, whatever its goal mentions.
+ */
+export function stepGoal(goal: string, ctx: WorkflowContext): string {
+  const own = renderGoal(goal, ctx).trim();
+  const need = typeof ctx.payload?.["need"] === "string" ? String(ctx.payload["need"]).trim() : "";
+  const prev = ctx.last?.result?.trim() ?? "";
+  const parts = [own];
+  if (need && !own.includes(need)) parts.push(`Hiring need: ${need.slice(0, 2000)}`);
+  if (prev && !own.includes(prev.slice(0, 200)))
+    parts.push(`What the previous step produced:\n${prev.slice(0, 3000)}`);
+  return parts.join("\n\n");
+}
+
 export function renderGoal(goal: string, ctx: WorkflowContext): string {
   return goal.replace(/\{\{\s*([A-Za-z0-9_.]+)\s*\}\}/g, (_m, f: string) => {
     const v = FIELD.test(f) ? fieldValue(f, ctx) : undefined;
@@ -743,7 +769,7 @@ export async function advanceWorkflowRun(id: string): Promise<void> {
       if (runId) note(node.id, "Joined the run this event already started.");
       else {
         const { startRun } = await import("./runtime.server");
-        const goal = renderGoal(node.data.goal ?? "", ctx);
+        const goal = stepGoal(node.data.goal ?? "", ctx);
         ({ runId } = await startRun({
           orgId: wr.orgId,
           agentType,

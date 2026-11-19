@@ -111,6 +111,11 @@ When an organisation holding a grant has an event matching the trigger, the orch
   its own goal; it acts for the role's owner (else the person who caused the event), and
   autonomy, budget and every human decision inside the agent are unchanged. The flow waits until the run
   finishes, then records `last.status` / `last.result`.
+- **What each step knows** — every agent step starts with its own goal plus the hiring need and the previous
+  step's result (`stepGoal`), so it never starts blind. **Aditi (the copilot) cannot be a step**: it hands work
+  to other agents on its own, which would happen outside the flow — start a hiring need with the Requisition
+  agent. A step whose run ended without the flow hearing about it (e.g. a restart) moves on at the next
+  scheduler tick (`resumeFinishedRunWaits`).
 - **Condition** — evaluated on the event and the last agent's outcome.
 - **End** (or no next step) — the run is done.
 
