@@ -98,6 +98,8 @@ export type WorkflowRunRow = {
   history: { node: string; at: string; note: string }[];
   error: string | null;
   createdAt: string;
+  /** The graph of the version this run ran (steps are drawn from it, not the current draft). */
+  graph: WorkflowGraph | null;
   /** What a waiting run waits for (no request text — that stays in the organisation). */
   waitingOn: { kind: "person" | "agent" | "event"; text: string } | null;
 };
@@ -153,6 +155,23 @@ export const workflowBuilder = createServerFn({ method: "GET" })
     const { WORKFLOW_TEMPLATES } = await import("./workflow-templates");
     const { orgMembers } = await import("@db/schema");
     const waits = await (await wf()).waitingOnFor(runs.map(({ r }) => r));
+    const versionKeys = [...new Set(runs.map(({ r }) => `${r.workflowId}:${r.version}`))];
+    const versionGraphs = new Map<string, WorkflowGraph>();
+    if (versionKeys.length) {
+      const rowsV = await db
+        .select({
+          workflowId: agentWorkflowVersions.workflowId,
+          version: agentWorkflowVersions.version,
+          graph: agentWorkflowVersions.graph,
+        })
+        .from(agentWorkflowVersions)
+        .where(
+          inArray(agentWorkflowVersions.workflowId, [
+            ...new Set(runs.map(({ r }) => r.workflowId)),
+          ]),
+        );
+      for (const v of rowsV) versionGraphs.set(`${v.workflowId}:${v.version}`, v.graph);
+    }
     const owned = await db
       .select({ id: organizations.id, name: organizations.name })
       .from(orgMembers)
@@ -206,6 +225,7 @@ export const workflowBuilder = createServerFn({ method: "GET" })
         history: r.history,
         error: r.error,
         createdAt: r.createdAt.toISOString(),
+        graph: versionGraphs.get(`${r.workflowId}:${r.version}`) ?? null,
         waitingOn: (() => {
           const w = waits.get(r.id);
           return w ? { kind: w.kind, text: w.text } : null;
