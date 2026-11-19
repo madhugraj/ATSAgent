@@ -27,10 +27,8 @@ export type PhoneScreeningPolicy = {
   voice: string;
   /** What candidates are told happens next; null = a plain default. */
   nextStepsText: string | null;
-  /** Scheduling calls: a follow-up call when e-mailed interview times go unanswered. */
+  /** Scheduling calls: offered interview times go to the candidate by phone first (the link is e-mailed if the call does not book). */
   schedulingEnabled: boolean;
-  /** Hours an e-mailed interview-time offer waits unanswered before that call (2–96). */
-  schedulingWaitHours: number;
   /** Pay negotiation calls: the assistant talks through an approved offer (a person approves each). */
   negotiationEnabled: boolean;
 };
@@ -59,7 +57,6 @@ export const DEFAULT_PHONE_SCREENING_POLICY: PhoneScreeningPolicy = {
   voice: "Kore",
   nextStepsText: null,
   schedulingEnabled: false,
-  schedulingWaitHours: 24,
   negotiationEnabled: false,
 };
 
@@ -82,7 +79,6 @@ export async function phoneScreeningPolicyOf(orgId: string): Promise<PhoneScreen
     voice: r.voice,
     nextStepsText: r.nextStepsText,
     schedulingEnabled: r.schedulingEnabled,
-    schedulingWaitHours: r.schedulingWaitHours,
     negotiationEnabled: r.negotiationEnabled,
   };
 }

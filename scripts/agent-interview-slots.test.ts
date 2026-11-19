@@ -27,7 +27,26 @@ const {
   users,
 } = await import("../drizzle/schema");
 const cal = await import("../src/lib/calendar-availability.server");
-const offers = await import("../src/lib/slot-offers.server");
+const rawOffers = await import("../src/lib/slot-offers.server");
+// Offered times reach the candidate once the panel agrees: these tests agree at once.
+const offers = {
+  ...rawOffers,
+  offerSlotsCore: async (...a: Parameters<typeof rawOffers.offerSlotsCore>) => {
+    const r = await rawOffers.offerSlotsCore(...a);
+    await panelAgrees(r.offerId);
+    return r;
+  },
+};
+/** The panel agrees an offer's times (each panelist accepts), as the confirm links would. */
+async function panelAgrees(offerId: string): Promise<void> {
+  const { interviewConfirmations } = await import("../drizzle/schema");
+  const conf = await import("../src/lib/interview-confirmations.server");
+  const rows = await db
+    .select({ token: interviewConfirmations.token })
+    .from(interviewConfirmations)
+    .where(eq(interviewConfirmations.offerId, offerId));
+  for (const r of rows) await conf.answerConfirmation(r.token, true, null);
+}
 
 const stamp = Date.now();
 const TZ = "UTC"; // the test org has no email settings row → default time zone

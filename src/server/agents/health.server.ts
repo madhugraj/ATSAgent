@@ -76,6 +76,8 @@ export const HEALTH = {
   minSchedulingCalls7d: 5,
   /** …fewer than this share ending in a booking is flagged. */
   schedulingBookedShare: 0.3,
+  /** A scheduling call placed when times were offered, still not dialled this many minutes after it was due. */
+  schedulingCallStuckMins: 30,
   /** Pay calls: a yes heard on a call and not confirmed by a person for this many hours. */
   verbalConfirmHours: 24,
   /** …with at least this many connected pay calls in 14 days… */
@@ -573,13 +575,18 @@ export const RULES: Rule[] = [
     id: "interview.panel_not_answering",
     element: "hitl",
     severity: "warning",
-    description: `A candidate's interview e-mail (offered times or a booked round's invite) has waited more than ${HEALTH.panelAnswerHours} hours for the panel to accept the time — the candidate has not been told anything. Chase the panel, or send the invite from the Interviews page.`,
+    description: `Offered interview times, or a booked round's invite, have waited more than ${HEALTH.panelAnswerHours} hours for the panel to accept the time — the candidate has not been contacted. Chase the panel, or send the invite from the Interviews page.`,
     evaluate: async (orgId) => {
       const r = await rows<{ held: number }>(sql`
-        select count(*)::int held from email_outbox
-        where org_id = ${orgId} and status = 'held'
-          and kind in ('interview_slots','interview_invite')
-          and created_at <= now() - make_interval(hours => ${HEALTH.panelAnswerHours})`);
+        select (
+          (select count(*) from email_outbox
+            where org_id = ${orgId} and status = 'held' and kind = 'interview_invite'
+              and created_at <= now() - make_interval(hours => ${HEALTH.panelAnswerHours}))
+          + (select count(distinct k.offer_id) from interview_confirmations k
+              join interview_slot_offers o on o.id = k.offer_id and o.status = 'offered'
+              where k.org_id = ${orgId} and k.state = 'pending'
+                and k.created_at <= now() - make_interval(hours => ${HEALTH.panelAnswerHours}))
+        )::int held`);
       const held = r[0]?.held ?? 0;
       if (!held) return [];
       return [
@@ -1036,6 +1043,28 @@ export const RULES: Rule[] = [
           agentType: "scheduling_call",
           title: `${x.booked} of ${x.connected} scheduling calls booked a time`,
           detail: { connected: x.connected, booked: x.booked },
+        },
+      ];
+    },
+  },
+  {
+    id: "scheduling_call.not_dialled",
+    element: "harness",
+    severity: "serious",
+    description: `A scheduling call placed when interview times were offered has not been dialled ${HEALTH.schedulingCallStuckMins} minutes after it was due — the voice worker or its phone line may be down. Voice goes first, so the candidate has not heard about these times yet; the e-mail goes out within hours as a fallback.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number; oldest: string }>(sql`
+        select count(*)::int n, min(due_at)::text oldest from screening_calls
+        where org_id = ${orgId} and purpose = 'scheduling'
+          and status in ('approved', 'callback')
+          and due_at < now() - make_interval(mins => ${HEALTH.schedulingCallStuckMins})`);
+      const x = r[0];
+      if (!x || x.n === 0) return [];
+      return [
+        {
+          agentType: "scheduling_call",
+          title: `${x.n} scheduling call${x.n === 1 ? " has" : "s have"} not been dialled`,
+          detail: { calls: x.n, oldestDueAt: x.oldest },
         },
       ];
     },

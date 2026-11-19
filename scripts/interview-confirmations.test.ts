@@ -197,15 +197,22 @@ describe("interview confirmations", () => {
         mode: "online",
       },
     );
-    const key = conf.offerKey(r.offerId);
-    const mail = () => db.select().from(emailOutbox).where(eq(emailOutbox.idempotencyKey, key));
-    expect((await mail())[0]?.status).toBe("held");
+    const linkOf = async () =>
+      (
+        await db
+          .select({ at: interviewSlotOffers.linkEmailedAt })
+          .from(interviewSlotOffers)
+          .where(eq(interviewSlotOffers.id, r.offerId))
+      )[0]!.at;
+    expect(r.via).toBe("panel");
+    expect(await linkOf()).toBeNull();
     const [row] = await db
       .select()
       .from(interviewConfirmations)
       .where(eq(interviewConfirmations.offerId, r.offerId));
     await conf.answerConfirmation(row!.token, true, null);
-    expect((await mail())[0]?.status).toBe("queued");
+    // No phone screening in this org: no call, so the link is e-mailed now.
+    expect(await linkOf()).not.toBeNull();
 
     // A decline on a fresh offer cancels it before the candidate hears.
     const r2 = await offers.offerSlotsCore(
@@ -230,10 +237,6 @@ describe("interview confirmations", () => {
       .from(interviewSlotOffers)
       .where(eq(interviewSlotOffers.id, r2.offerId));
     expect(o!.status).toBe("cancelled");
-    const [m] = await db
-      .select()
-      .from(emailOutbox)
-      .where(eq(emailOutbox.idempotencyKey, conf.offerKey(r2.offerId)));
-    expect(m!.status).toBe("suppressed");
+    expect(o!.linkEmailedAt).toBeNull();
   });
 });

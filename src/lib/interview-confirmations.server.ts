@@ -2,9 +2,10 @@
  * Interview time confirmations (migration 0085). Nobody is told a time the
  * panel has not agreed:
  *
- * - Times e-mailed for the candidate to pick (slot offers): each panelist is
- *   asked first; the candidate's e-mail is `held` in the outbox until every
- *   panelist accepts. One decline cancels the offer and tells the hiring team.
+ * - Times offered for the candidate to pick (slot offers): each panelist is
+ *   asked first; only when every panelist accepts is the candidate contacted —
+ *   voice first (the AI call, else the e-mailed link). One decline cancels the
+ *   offer and tells the hiring team.
  * - A round a person (or the Interview coordinator) books directly: each
  *   panelist accepts or declines from their brief; the candidate's invite is
  *   `held` until the whole panel accepts, and then asks the candidate to
@@ -425,16 +426,14 @@ async function afterOfferAnswer(
   note: string | null,
   c: Ctx,
 ) {
-  const { releaseHeldEmails } = await import("./email-outbox.server");
   if (accept) {
     if (!panelAgreed(await liveRows(orgId, { offerId }))) return;
-    if (!(await releaseHeldEmails(orgId, offerKey(offerId)))) return;
-    // The candidate's clock starts now: the wait before a scheduling call
-    // (created_at) and the link's life are counted from when they were told.
-    const { SLOT_OFFER } = await import("./slot-offers.server");
+    // The candidate's clock starts now: the link's life and the wait before any
+    // follow-up are counted from when they are first contacted.
+    const { SLOT_OFFER, contactCandidate } = await import("./slot-offers.server");
     const now = Date.now();
     const first = Math.min(...c.times.map((t) => Date.parse(t)));
-    await db
+    const [claimed] = await db
       .update(interviewSlotOffers)
       .set({
         createdAt: new Date(now),
@@ -446,7 +445,17 @@ async function afterOfferAnswer(
           ),
         ),
       })
-      .where(and(eq(interviewSlotOffers.id, offerId), eq(interviewSlotOffers.orgId, orgId)));
+      .where(
+        and(
+          eq(interviewSlotOffers.id, offerId),
+          eq(interviewSlotOffers.orgId, orgId),
+          eq(interviewSlotOffers.status, "offered"),
+          sql`${interviewSlotOffers.linkEmailedAt} is null`,
+        ),
+      )
+      .returning({ id: interviewSlotOffers.id });
+    // Voice first: the AI call, else the e-mailed link.
+    if (claimed) await contactCandidate(orgId, offerId);
     return;
   }
   // One panelist cannot do these times: the offer never reaches the candidate.
