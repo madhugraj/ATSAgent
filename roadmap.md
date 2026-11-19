@@ -389,3 +389,4 @@ Study in `docs/hrms-integrations-study.md`: vendor API landscape (Keka, greytHR,
 - [ ] Run current security checks and resolve release blockers (basic scan passed; dependency scan parser blocked by URL-pinned xlsx package)
 - [ ] Publish and verify the production release (after revalidation on the clean database)
 - [x] Pre-onboarding: per-employer salary breakup captured verbatim; multi-page, scanned, merged and zipped uploads read as individual documents
+- [x] Hiring desk: open decisions shown under their hiring-journey step (named for what they decide, age, who decides, Review jumps to the card; same-kind requests folded with a count, a panel review first); the generic line above decision cards removed; agents' reports in the conversation fold to one line
