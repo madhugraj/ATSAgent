@@ -23,11 +23,28 @@ export const getConfirmation = createServerFn({ method: "GET" })
 
 export const answerTime = createServerFn({ method: "POST" })
   .validator((d: unknown) =>
-    z.object({ token: Token, accept: z.boolean(), note: z.string().max(500).default("") }).parse(d),
+    z
+      .object({
+        token: Token,
+        accept: z.boolean(),
+        note: z.string().max(500).default(""),
+        /** Offers: the times (ISO) that work; absent = all of them. */
+        okSlots: z
+          .array(z.string().datetime({ offset: true }))
+          .max(5)
+          .optional(),
+        suggestedAt: z.string().datetime({ offset: true }).nullable().optional(),
+      })
+      .parse(d),
   )
   .handler(async ({ data }) => {
     const { answerConfirmation } = await import("./interview-confirmations.server");
-    return answerConfirmation(data.token, data.accept, data.note);
+    return answerConfirmation(data.token, {
+      accept: data.accept,
+      note: data.note,
+      ...(data.okSlots ? { okSlots: data.okSlots } : {}),
+      suggestedAt: data.suggestedAt ?? null,
+    });
   });
 
 export const sendInviteNow = createServerFn({ method: "POST" })

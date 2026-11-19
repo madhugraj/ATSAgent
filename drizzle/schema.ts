@@ -1115,6 +1115,10 @@ export const interviewConfirmations = pgTable(
       .default("pending"),
     scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
     note: text("note"),
+    /** Offers: the offered times (ISO) this panelist can do (migration 0086). */
+    okSlots: jsonb("ok_slots").$type<string[]>(),
+    /** Another time this person suggests (migration 0086). */
+    suggestedAt: timestamp("suggested_at", { withTimezone: true }),
     respondedAt: timestamp("responded_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

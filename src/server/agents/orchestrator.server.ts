@@ -350,6 +350,22 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
     );
   }
 
+  if (e.type === "interview.panel_times_rejected" && applicationId) {
+    const p = e.payload as {
+      level?: number;
+      interviewerEmail?: string | null;
+      panelEmails?: string[];
+      suggested?: { email: string; at: string }[];
+      said?: string;
+    };
+    const sugg = (p.suggested ?? []).map((x) => x.at);
+    await dispatch(
+      "interview",
+      `No proposed L${p.level ?? "?"} interview time suits the whole panel for candidate application ${applicationId} (${req.code} "${req.title}"); the candidate was not contacted. What the panel said: ${String(p.said ?? "").slice(0, 600)}. Offer new times with the same panel (interviewerEmail ${p.interviewerEmail ?? "?"}${p.panelEmails?.length ? `, panelEmails ${p.panelEmails.join(", ")}` : ""}): ${sugg.length ? `start from the suggested times ${sugg.join(", ")} and add free times from find_interview_slots` : "use find_interview_slots"}. The panel is asked again before the candidate hears.`,
+      { type: "application", id: applicationId },
+    );
+  }
+
   if (e.type === "interview.missed" && applicationId) {
     const p = e.payload as { level?: number; outcome?: string };
     await dispatch(

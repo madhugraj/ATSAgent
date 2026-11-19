@@ -1526,7 +1526,7 @@ erDiagram
 | `hrms_sync_state` | — | 12 | (integrationId+entity) |
 | `inbox_messages` | Sourcing & integrations | 16 | — |
 | `integration_credentials` | Sourcing & integrations | 4 | — |
-| `interview_confirmations` | — | 13 | (token) |
+| `interview_confirmations` | — | 15 | (token) |
 | `interview_slot_offers` | — | 23 | (token) |
 | `interview_transcripts` | — | 8 | (interview_id) |
 | `interviews` | Screening & interviews | 24 | — |

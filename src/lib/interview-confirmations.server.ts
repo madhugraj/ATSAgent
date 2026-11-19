@@ -115,7 +115,9 @@ export async function panelistConfirmation(
     )
     .limit(1);
   if (have) return have;
-  const agreed = await agreedOnOffer(orgId, interviewId, email, scheduledAt);
+  const agreed =
+    (await agreedOnOffer(orgId, interviewId, email, scheduledAt)) ||
+    (await suggestedThis(orgId, interviewId, email, scheduledAt));
   const token = newToken();
   const state: ConfirmState = agreed ? "accepted" : "pending";
   await db.insert(interviewConfirmations).values({
@@ -130,6 +132,28 @@ export async function panelistConfirmation(
     respondedAt: agreed ? new Date() : null,
   });
   return { token, state };
+}
+
+/** Did this panelist suggest this very time for the round? */
+async function suggestedThis(
+  orgId: string,
+  interviewId: string,
+  email: string,
+  at: Date,
+): Promise<boolean> {
+  const [x] = await db
+    .select({ id: interviewConfirmations.id })
+    .from(interviewConfirmations)
+    .where(
+      and(
+        eq(interviewConfirmations.orgId, orgId),
+        eq(interviewConfirmations.interviewId, interviewId),
+        eq(interviewConfirmations.email, email),
+        eq(interviewConfirmations.suggestedAt, at),
+      ),
+    )
+    .limit(1);
+  return Boolean(x);
 }
 
 /** Did this panelist accept an offer for this round that included this time? */
@@ -272,6 +296,8 @@ export async function askPanelAboutOffer(
 
 export type PublicConfirmation = {
   party: "panelist" | "candidate";
+  /** offer: times to tick before the candidate is offered them; round: one booked time. */
+  kind: "offer" | "round";
   state: ConfirmState;
   candidateName: string | null;
   jobTitle: string;
@@ -363,6 +389,7 @@ export async function publicConfirmation(token: string): Promise<PublicConfirmat
   const { getOrgEmailSettings } = await import("./email-outbox.server");
   return {
     party: r.party,
+    kind: r.offerId ? "offer" : "round",
     state: r.state,
     // The candidate sees only their own role; the panelist sees whom they interview.
     candidateName: r.party === "panelist" ? ctx.candidateName : null,
@@ -378,12 +405,49 @@ export async function publicConfirmation(token: string): Promise<PublicConfirmat
 
 export type AnswerResult = { ok: true; state: ConfirmState } | { ok: false; error: string };
 
-/** A panelist's or candidate's answer. `note` is their own words (untrusted, stored as text). */
+/** What a person answers. `note` is their own words (untrusted, stored as text). */
+export type Answer = {
+  accept: boolean;
+  note?: string | null;
+  /** Offers: the offered times (ISO) this panelist can do; absent = all of them. */
+  okSlots?: string[];
+  /** Another time that suits them (ISO). */
+  suggestedAt?: string | null;
+};
+
+/** Which of `times` a panelist can do (pure): the ones ticked, or all when accepting without ticks. */
+export function workableTimes(times: string[], a: Answer): string[] {
+  if (!a.accept) return [];
+  if (!a.okSlots) return times;
+  const ok = new Set(a.okSlots.map((t) => Date.parse(t)));
+  return times.filter((t) => ok.has(Date.parse(t)));
+}
+
+/** The times every panelist can do (pure); `null` okSlots on an accepted row means all. */
+export function commonTimes(
+  times: string[],
+  rows: { party: string; state: string; okSlots: string[] | null }[],
+): string[] {
+  const panel = rows.filter((r) => r.party === "panelist" && r.state !== "superseded");
+  return times.filter((t) =>
+    panel.every((r) => {
+      if (r.state !== "accepted") return false;
+      if (!r.okSlots) return true;
+      return r.okSlots.some((x) => Date.parse(x) === Date.parse(t));
+    }),
+  );
+}
+
+/** A panelist's or candidate's answer. */
 export async function answerConfirmation(
   token: string,
-  accept: boolean,
-  note: string | null,
+  acceptOrAnswer: boolean | Answer,
+  note?: string | null,
 ): Promise<AnswerResult> {
+  const a: Answer =
+    typeof acceptOrAnswer === "boolean"
+      ? { accept: acceptOrAnswer, note: note ?? null }
+      : acceptOrAnswer;
   const r = await rowByToken(token);
   if (!r) return { ok: false, error: "This link is not valid." };
   const c = await contextOf(r);
@@ -391,11 +455,23 @@ export async function answerConfirmation(
     return { ok: false, error: "This time no longer stands; the team will be in touch." };
   if (r.state !== "pending")
     return { ok: false, error: `You already ${r.state === "accepted" ? "accepted" : "declined"}.` };
+  const okSlots = r.offerId ? workableTimes(c.times, a) : null;
+  // Ticking none of the offered times is a "no".
+  const accept = r.offerId ? okSlots!.length > 0 : a.accept;
   const state: ConfirmState = accept ? "accepted" : "declined";
-  const clean = note?.trim().slice(0, 500) || null;
+  const clean = a.note?.trim().slice(0, 500) || null;
+  let suggestedAt: Date | null = null;
+  if (a.suggestedAt) {
+    const t = new Date(a.suggestedAt);
+    if (Number.isNaN(t.getTime()) || t.getTime() < Date.now() + 3600_000)
+      return { ok: false, error: "Suggest a time at least an hour from now." };
+    if (t.getTime() > Date.now() + 60 * 864e5)
+      return { ok: false, error: "Suggest a time within the next 60 days." };
+    suggestedAt = t;
+  }
   const [updated] = await db
     .update(interviewConfirmations)
-    .set({ state, note: clean, respondedAt: new Date() })
+    .set({ state, note: clean, okSlots, suggestedAt, respondedAt: new Date() })
     .where(and(eq(interviewConfirmations.id, r.id), eq(interviewConfirmations.state, "pending")))
     .returning({ id: interviewConfirmations.id });
   if (!updated) return { ok: false, error: "You already answered." };
@@ -407,35 +483,45 @@ export async function answerConfirmation(
     action: `interview.time_${state}`,
     entityType: r.interviewId ? "interview" : "interview_slot_offer",
     entityId: (r.interviewId ?? r.offerId)!,
-    detail: { party: r.party, level: c.level, note: clean },
+    detail: {
+      party: r.party,
+      level: c.level,
+      note: clean,
+      ...(okSlots ? { okSlots } : {}),
+      ...(suggestedAt ? { suggestedAt: suggestedAt.toISOString() } : {}),
+    },
   });
 
-  if (r.offerId) await afterOfferAnswer(r.orgId, r.offerId, r, accept, clean, c);
-  else if (r.interviewId) await afterRoundAnswer(r.orgId, r.interviewId, r, accept, clean, c);
+  const row = { ...r, state, note: clean, okSlots, suggestedAt };
+  if (r.offerId) await afterOfferAnswer(r.orgId, r.offerId, row, c);
+  else if (r.interviewId) await afterRoundAnswer(r.orgId, r.interviewId, row, accept, clean, c);
   return { ok: true, state };
 }
 
 type Ctx = NonNullable<Awaited<ReturnType<typeof contextOf>>>;
 type Row = typeof interviewConfirmations.$inferSelect;
 
-async function afterOfferAnswer(
-  orgId: string,
-  offerId: string,
-  r: Row,
-  accept: boolean,
-  note: string | null,
-  c: Ctx,
-) {
-  if (accept) {
-    if (!panelAgreed(await liveRows(orgId, { offerId }))) return;
+/**
+ * Once every panelist has answered an offer: the candidate is offered only the
+ * times they can all do — voice first. With none in common the offer is
+ * cancelled before the candidate hears of it and the Interview coordinator is
+ * asked for new times, with the panel's suggestions.
+ */
+async function afterOfferAnswer(orgId: string, offerId: string, _r: Row, c: Ctx) {
+  const rows = await liveRows(orgId, { offerId });
+  if (rows.some((x) => x.party === "panelist" && x.state === "pending")) return;
+  const common = commonTimes(c.times, rows);
+  const { SLOT_OFFER, contactCandidate, withdrawOfferEmails } =
+    await import("./slot-offers.server");
+  if (common.length) {
     // The candidate's clock starts now: the link's life and the wait before any
     // follow-up are counted from when they are first contacted.
-    const { SLOT_OFFER, contactCandidate } = await import("./slot-offers.server");
     const now = Date.now();
-    const first = Math.min(...c.times.map((t) => Date.parse(t)));
+    const first = Math.min(...common.map((t) => Date.parse(t)));
     const [claimed] = await db
       .update(interviewSlotOffers)
       .set({
+        slots: common,
         createdAt: new Date(now),
         updatedAt: new Date(now),
         expiresAt: new Date(
@@ -458,18 +544,53 @@ async function afterOfferAnswer(
     if (claimed) await contactCandidate(orgId, offerId);
     return;
   }
-  // One panelist cannot do these times: the offer never reaches the candidate.
+  // No time suits the whole panel: the offer never reaches the candidate.
   await db
     .update(interviewSlotOffers)
     .set({ status: "cancelled", updatedAt: new Date() })
     .where(and(eq(interviewSlotOffers.id, offerId), eq(interviewSlotOffers.orgId, orgId)));
-  const { withdrawOfferEmails } = await import("./slot-offers.server");
   await withdrawOfferEmails(orgId, [offerId]);
+  const { getOrgEmailSettings } = await import("./email-outbox.server");
+  const { localWhen } = await import("./local-time");
+  const tz = (await getOrgEmailSettings(orgId)).timezone;
+  const panel = rows.filter((x) => x.party === "panelist");
+  const suggested = panel
+    .filter((x) => x.suggestedAt)
+    .map((x) => ({ email: x.email, at: x.suggestedAt!.toISOString() }));
+  const said = panel
+    .map((x) => {
+      const ok = (x.okSlots ?? []).map((t) => localWhen(new Date(t), tz));
+      return `${x.name ?? x.email}: ${ok.length ? `can do ${ok.join(", ")}` : "none of them"}${
+        x.suggestedAt ? `; suggests ${localWhen(x.suggestedAt, tz)}` : ""
+      }${x.note ? ` ("${x.note}")` : ""}`;
+    })
+    .join(". ");
+  const [o] = await db
+    .select({ panel: interviewSlotOffers.panel, lead: interviewSlotOffers.interviewerEmail })
+    .from(interviewSlotOffers)
+    .where(eq(interviewSlotOffers.id, offerId))
+    .limit(1);
+  const { emitAgentEvent } = await import("../server/agents/events");
+  await emitAgentEvent({
+    orgId,
+    type: "interview.panel_times_rejected",
+    subjectType: "application",
+    subjectId: c.applicationId,
+    actorUserId: null,
+    payload: {
+      offerId,
+      level: c.level,
+      interviewerEmail: o?.lead ?? null,
+      panelEmails: (o?.panel ?? []).map((p) => p.email),
+      suggested,
+      said,
+    },
+  });
   await tellDesk(
     orgId,
     c.applicationId,
     (cand) =>
-      `${r.name ?? r.email} cannot do the L${c.level} times proposed for ${cand}${note ? ` ("${note}")` : ""}. The times were not sent to the candidate; offer new ones.`,
+      `No proposed L${c.level} time suits the whole panel for ${cand} (${said}). The times were not sent to the candidate; the Interview coordinator offers new ones${suggested.length ? ", starting from the panel's suggestions" : ""}.`,
   );
 }
 
@@ -486,6 +607,9 @@ async function afterRoundAnswer(
       await releaseIfAgreed(orgId, interviewId);
       return;
     }
+    // A time they suggest, while the candidate has not been told: move the round
+    // there if the rest of the panel is free, and ask the panel again.
+    if (r.suggestedAt && (await moveToSuggested(orgId, interviewId, r, c))) return;
     // Same record as "I can't make it" on My interviews: a stand-in is arranged.
     await db
       .update(interviews)
@@ -501,7 +625,7 @@ async function afterRoundAnswer(
       orgId,
       c.applicationId,
       (cand) =>
-        `${r.name ?? r.email} cannot make ${cand}'s L${c.level} interview at the booked time${note ? ` ("${note}")` : ""}. The candidate has not been sent the invite; the Interview coordinator proposes a stand-in for you to approve, or re-schedule the round.`,
+        `${r.name ?? r.email} cannot make ${cand}'s L${c.level} interview at the booked time${note ? ` ("${note}")` : ""}${r.suggestedAt ? `, and the suggested time ${r.suggestedAt.toISOString()} does not suit the rest of the panel or the candidate already has the invite` : ""}. The Interview coordinator proposes a stand-in for you to approve, or re-schedule the round.`,
     );
     return;
   }
@@ -512,6 +636,115 @@ async function afterRoundAnswer(
       (cand) =>
         `${cand} cannot make their L${c.level} interview at the booked time${note ? ` ("${note}")` : ""}. Re-schedule it.`,
     );
+}
+
+/** Is the candidate's invite for this round still waiting on the panel? */
+async function inviteHeld(orgId: string, interviewId: string): Promise<boolean> {
+  const { emailOutbox } = await import("@db/schema");
+  const [h] = await db
+    .select({ id: emailOutbox.id })
+    .from(emailOutbox)
+    .where(
+      and(
+        eq(emailOutbox.orgId, orgId),
+        eq(emailOutbox.status, "held"),
+        sql`${emailOutbox.idempotencyKey} like ${`${invitePrefix(interviewId)}%`}`,
+      ),
+    )
+    .limit(1);
+  return Boolean(h);
+}
+
+/**
+ * Re-book the round at the panelist's suggested time when the candidate has not
+ * been told and everyone else on the panel is free then. The panel is asked
+ * again (the one who suggested it is already agreed). Returns whether it moved.
+ */
+async function moveToSuggested(
+  orgId: string,
+  interviewId: string,
+  r: Row & { suggestedAt: Date | null },
+  c: Ctx,
+): Promise<boolean> {
+  if (!r.suggestedAt || !(await inviteHeld(orgId, interviewId))) return false;
+  const at = r.suggestedAt;
+  const [i] = await db
+    .select()
+    .from(interviews)
+    .where(and(eq(interviews.id, interviewId), eq(interviews.orgId, orgId)))
+    .limit(1);
+  if (!i || !i.scheduledAt) return false;
+  const others = [
+    ...(i.interviewerEmail ? [i.interviewerEmail] : []),
+    ...(i.panel ?? []).map((p) => p.email),
+  ]
+    .map((e) => e.toLowerCase())
+    .filter((e) => e !== r.email);
+  const { busyFor, assertAfterEarlierRounds } = await import("./calendar-availability.server");
+  try {
+    await assertAfterEarlierRounds(orgId, c.applicationId, i.level, [at]);
+  } catch {
+    return false;
+  }
+  const end = new Date(at.getTime() + i.durationMins * 60_000);
+  if (others.length) {
+    // Another round for any of them then (this round itself does not count)…
+    const clash = await db
+      .select({ id: interviews.id })
+      .from(interviews)
+      .where(
+        and(
+          eq(interviews.orgId, orgId),
+          sql`${interviews.id} <> ${interviewId}`,
+          sql`${interviews.status} not in ('cancelled','no_show','completed')`,
+          sql`(lower(${interviews.interviewerEmail}) in (${sql.join(
+            others.map((e) => sql`${e}`),
+            sql`, `,
+          )}) or ${sql.join(
+            others.map((e) => sql`${interviews.panel} @> ${JSON.stringify([{ email: e }])}::jsonb`),
+            sql` or `,
+          )})`,
+          sql`${interviews.scheduledAt} < ${end.toISOString()}::timestamptz`,
+          sql`${interviews.scheduledAt} + make_interval(mins => ${interviews.durationMins}) > ${at.toISOString()}::timestamptz`,
+        ),
+      )
+      .limit(1);
+    if (clash.length) return false;
+    // …or a busy calendar.
+    const cal = await busyFor(orgId, others, at, end);
+    const overlaps = (b: { start: number; end: number }) =>
+      b.start < end.getTime() && b.end > at.getTime();
+    if (others.some((e) => (cal.busy[e] ?? []).some(overlaps))) return false;
+  }
+  const { getOrgEmailSettings } = await import("./email-outbox.server");
+  const { localWhen } = await import("./local-time");
+  const tz = (await getOrgEmailSettings(orgId)).timezone;
+  const who = r.name ?? r.email;
+  const { scheduleInterviewCore } = await import("./interviews.functions");
+  await scheduleInterviewCore(
+    { orgId, actor: `panel (time suggested by ${who})` },
+    {
+      applicationId: c.applicationId,
+      level: i.level,
+      interviewId,
+      rescheduleReason: `${who} cannot make ${localWhen(i.scheduledAt, tz)} and suggested ${localWhen(at, tz)}; the rest of the panel is free then. The candidate had not been told.`,
+      interviewer: i.interviewer,
+      interviewerEmail: i.interviewerEmail,
+      scheduledAt: at.toISOString(),
+      durationMins: i.durationMins,
+      mode: i.mode as "online" | "onsite" | "phone",
+      meetingLink: i.teamsLink,
+      agenda: i.agenda,
+      panel: i.panel ?? [],
+    },
+  );
+  await tellDesk(
+    orgId,
+    c.applicationId,
+    (cand) =>
+      `${who} cannot make ${cand}'s L${c.level} interview at ${localWhen(i.scheduledAt!, tz)} and suggested ${localWhen(at, tz)}${others.length ? "; the rest of the panel is free then" : ""}. The round moved there and the panel is asked to confirm; the candidate has not been told yet.`,
+  );
+  return true;
 }
 
 /** The `interview.panellist_unavailable` event, as "Can't make it" on My interviews raises it. */

@@ -44,6 +44,9 @@ function ConfirmPage() {
   const [busy, setBusy] = useState(false);
   const [noOpen, setNoOpen] = useState(false);
   const [note, setNote] = useState("");
+  /** Offer times NOT ticked (all are ticked to start). */
+  const [unticked, setUnticked] = useState<string[]>([]);
+  const [suggest, setSuggest] = useState("");
   const q = useQuery({
     queryKey: ["confirmation", token],
     queryFn: () => load({ data: { token } }),
@@ -66,7 +69,8 @@ function ConfirmPage() {
     );
   const c = q.data;
   const panelist = c.party === "panelist";
-  const several = c.times.length > 1;
+  const offer = c.kind === "offer";
+  const ticked = c.times.filter((t) => !unticked.includes(t));
 
   if (c.state === "accepted" || c.state === "declined")
     return (
@@ -74,14 +78,20 @@ function ConfirmPage() {
         <div className="text-center">
           <CheckCircle2 className="mx-auto size-8 text-primary" />
           <h1 className="mt-3 text-lg font-semibold">
-            {c.state === "accepted" ? "Thanks, you're confirmed" : "Thanks, we've told the team"}
+            {c.state === "accepted"
+              ? offer
+                ? "Thanks, we have your times"
+                : "Thanks, you're confirmed"
+              : "Thanks, we've told the team"}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {c.state === "accepted"
               ? panelist
                 ? "The candidate is told once the whole panel has agreed."
                 : "See you then."
-              : "The hiring team will be in touch about another time."}
+              : panelist
+                ? "Thanks — the team works out a time that suits the whole panel."
+                : "The hiring team will be in touch about another time."}
           </p>
         </div>
       </Shell>
@@ -98,7 +108,16 @@ function ConfirmPage() {
   async function send(accept: boolean) {
     setBusy(true);
     try {
-      const r = await answer({ data: { token, accept, note: note.trim() } });
+      const suggestedAt = suggest ? new Date(suggest).toISOString() : null;
+      const r = await answer({
+        data: {
+          token,
+          accept,
+          note: note.trim(),
+          ...(offer ? { okSlots: accept ? ticked : [] } : {}),
+          suggestedAt,
+        },
+      });
       if (!r.ok) toast.error(r.error);
       await q.refetch();
     } catch (e) {
@@ -108,13 +127,34 @@ function ConfirmPage() {
     }
   }
 
+  const suggestBox = (
+    <div className="space-y-2">
+      <label className="block text-xs text-muted-foreground">
+        Another time that suits you (optional, your time zone)
+        <input
+          type="datetime-local"
+          value={suggest}
+          onChange={(e) => setSuggest(e.target.value)}
+          className="mt-1 block w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+        />
+      </label>
+      <Textarea
+        rows={2}
+        maxLength={500}
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder="Anything the team should know (optional)"
+      />
+    </div>
+  );
+
   return (
     <Shell>
       <CalendarCheck className="size-7 text-primary" />
       <h1 className="mt-3 text-xl font-semibold">
         {panelist
-          ? several
-            ? "Do these times work for you?"
+          ? offer
+            ? "Which of these times work for you?"
             : "Can you make this time?"
           : "Please confirm your interview"}
       </h1>
@@ -122,46 +162,93 @@ function ConfirmPage() {
         {panelist && c.candidateName ? `${c.candidateName}'s ` : ""}
         {c.roundLabel} for <strong>{c.jobTitle}</strong> at {c.orgName} · {c.durationMins} minutes
       </p>
-      <div className="mt-5 space-y-2">
-        {c.times.map((t) => (
-          <div key={t} className="rounded-md border border-border px-3 py-2.5 text-sm">
-            {fmt(t)}
-            {fmt(t, c.timeZone) !== fmt(t) ? (
-              <span className="block text-xs text-muted-foreground">{fmt(t, c.timeZone)}</span>
-            ) : null}
+      {offer ? (
+        <>
+          <div className="mt-5 space-y-2" role="group" aria-label="Interview times">
+            {c.times.map((t) => (
+              <label
+                key={t}
+                className="flex cursor-pointer items-start gap-3 rounded-md border border-border px-3 py-2.5 text-sm"
+              >
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={!unticked.includes(t)}
+                  onChange={(e) =>
+                    setUnticked((u) => (e.target.checked ? u.filter((x) => x !== t) : [...u, t]))
+                  }
+                />
+                <span>
+                  {fmt(t)}
+                  {fmt(t, c.timeZone) !== fmt(t) ? (
+                    <span className="block text-xs text-muted-foreground">
+                      {fmt(t, c.timeZone)}
+                    </span>
+                  ) : null}
+                </span>
+              </label>
+            ))}
           </div>
-        ))}
-      </div>
-      <Button className="mt-4 w-full" disabled={busy} onClick={() => void send(true)}>
-        {busy ? <Loader2 className="size-4 animate-spin" /> : null}
-        {several ? "All of these work" : "Yes, I'll be there"}
-      </Button>
-      {noOpen ? (
-        <div className="mt-4 space-y-2">
-          <Textarea
-            rows={3}
-            maxLength={500}
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="When would suit you instead? (optional)"
-          />
+          <div className="mt-4">{suggestBox}</div>
           <Button
-            variant="outline"
-            className="w-full"
-            disabled={busy}
-            onClick={() => void send(false)}
+            className="mt-4 w-full"
+            disabled={busy || (!ticked.length && !suggest)}
+            onClick={() => void send(ticked.length > 0)}
           >
-            Send to the hiring team
+            {busy ? <Loader2 className="size-4 animate-spin" /> : null}
+            {ticked.length
+              ? `Send — ${ticked.length} of ${c.times.length} work`
+              : "Send — none of these work"}
           </Button>
-        </div>
+        </>
       ) : (
-        <button
-          type="button"
-          className="mt-3 w-full text-center text-xs text-muted-foreground underline"
-          onClick={() => setNoOpen(true)}
-        >
-          {several ? "Not all of these work" : "I can't make this time"}
-        </button>
+        <>
+          <div className="mt-5 space-y-2">
+            {c.times.map((t) => (
+              <div key={t} className="rounded-md border border-border px-3 py-2.5 text-sm">
+                {fmt(t)}
+                {fmt(t, c.timeZone) !== fmt(t) ? (
+                  <span className="block text-xs text-muted-foreground">{fmt(t, c.timeZone)}</span>
+                ) : null}
+              </div>
+            ))}
+          </div>
+          <Button className="mt-4 w-full" disabled={busy} onClick={() => void send(true)}>
+            {busy ? <Loader2 className="size-4 animate-spin" /> : null}
+            Yes, I&apos;ll be there
+          </Button>
+          {noOpen ? (
+            <div className="mt-4 space-y-2">
+              {panelist ? (
+                suggestBox
+              ) : (
+                <Textarea
+                  rows={3}
+                  maxLength={500}
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="When would suit you instead? (optional)"
+                />
+              )}
+              <Button
+                variant="outline"
+                className="w-full"
+                disabled={busy}
+                onClick={() => void send(false)}
+              >
+                Send to the hiring team
+              </Button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="mt-3 w-full text-center text-xs text-muted-foreground underline"
+              onClick={() => setNoOpen(true)}
+            >
+              I can&apos;t make this time
+            </button>
+          )}
+        </>
       )}
     </Shell>
   );
