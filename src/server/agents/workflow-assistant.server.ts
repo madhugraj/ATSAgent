@@ -144,6 +144,7 @@ export function assistantSystem(agents: AssistantAgent[]): string {
     "- wait: pauses until `event` happens on the flow's own role; optional field/op/value filter; `timeoutHours` (default 72). Afterwards wait.status is happened or timed_out — follow it with a condition.",
     "- report: marks where the run report is ready. end: stops the flow.",
     "After an agent step, last.status is done, failed or cancelled.",
+    "Each agent step automatically receives the hiring need and the previous step's result, so goals can focus on the step's own job. Never use the copilot (Aditi): it hands work to other agents itself — start a hiring need with the requisition agent.",
     "Rules: every step reachable from the trigger; one connection out of each step except conditions (one yes, one no); end has none; no loops; at most 40 steps. Use short ids like `screen`, `ok1`. Agents never approve, reject, hire or decide — people do; workflows only start agents.",
     "",
     "Events: " + AGENT_EVENT_TYPES.join(", "),

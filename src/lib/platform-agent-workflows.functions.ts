@@ -61,7 +61,7 @@ async function agentPalette(): Promise<{ type: string; name: string; studio: boo
   ).filter((r) => r.type && r.publishedVersion != null && r.status !== "archived");
   return [
     ...listAgents()
-      .filter((d) => !d.type.startsWith("studio:"))
+      .filter((d) => !d.type.startsWith("studio:") && d.type !== "copilot")
       .map((d) => ({ type: d.type as string, name: d.name, studio: false })),
     ...published.map((r) => ({ type: r.type!, name: r.name, studio: true })),
   ];

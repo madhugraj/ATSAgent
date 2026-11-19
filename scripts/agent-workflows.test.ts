@@ -117,6 +117,30 @@ describe("conditions and goals", () => {
   });
 });
 
+describe("step goals and agents that cannot be steps", () => {
+  const ctx = {
+    event: { type: "manual", subjectType: "requisition", subjectId: "" },
+    payload: { need: "1 fullstack developer in Chennai" },
+    last: { status: "done", result: "Team Engineering; React, Node.js; 3-5 years" },
+  };
+  test("each step gets the hiring need and the previous step's result", () => {
+    const g = w.stepGoal("Draft the requisition and submit it.", ctx);
+    expect(g).toStartWith("Draft the requisition and submit it.");
+    expect(g).toContain("Hiring need: 1 fullstack developer in Chennai");
+    expect(g).toContain("What the previous step produced:\nTeam Engineering");
+  });
+  test("nothing is repeated when the goal already uses them", () => {
+    const g = w.stepGoal("Need: {{payload.need}}. Inputs: {{last.result}}", ctx);
+    expect(g.match(/1 fullstack developer/g)).toHaveLength(1);
+    expect(g).not.toContain("What the previous step produced");
+  });
+  test("the copilot (Aditi) is refused as a step", () => {
+    const g = flow();
+    g.nodes[1]!.data.agentType = "copilot";
+    expect(w.graphProblems(g, known).join(" ")).toContain("cannot be a workflow step");
+  });
+});
+
 describe("dry-run tests", () => {
   test("the path follows each agent's outcome", () => {
     const g = flow();
