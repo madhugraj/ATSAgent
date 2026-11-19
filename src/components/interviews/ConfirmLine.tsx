@@ -11,7 +11,12 @@ type RoundConfirmations = {
   inviteHeld: boolean;
 };
 
-const WORD: Record<State, string> = { pending: "waiting", accepted: "accepted", declined: "can't make it", superseded: "" };
+const WORD: Record<State, string> = {
+  pending: "waiting",
+  accepted: "accepted",
+  declined: "can't make it",
+  superseded: "",
+};
 
 /** Who has agreed the round's time; the held candidate invite can be sent anyway. */
 export function ConfirmLine({
