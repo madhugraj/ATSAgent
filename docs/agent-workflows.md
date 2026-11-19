@@ -59,13 +59,17 @@ Where it shows:
 - **The bell** — owners and HR heads see "Workflow … is not running yet" until it is ready (derived live, so
   it disappears by itself).
 
-## What a run is waiting for
+## What a run is waiting for — and deciding it in place
 
 A waiting run says why, in plain words (`waitingOnFor` in `workflows.server.ts`): **"<agent> is waiting for
-you — 1 question"** when its agent asked people something, **"<agent> is working"**, or **"Waiting for <event>"**
-on a wait step ("An earlier <agent> run" when it waits behind one). The organisation's Agent settings →
-Workflows also shows the first request's text and **Answer in Waiting for you**; the platform's Runs tab shows
-the line only — the request text stays in the organisation.
+you — 1 question"**, **"<agent> is working"**, or **"Waiting for <event>"** ("An earlier <agent> run" when it
+waits behind one). Each run on the Runs tab is drawn as its flow: steps done, the step it is on, and what comes
+next up to the next condition.
+
+A run's open requests (questions, approvals, gates) are answered **inside the workflow window** — under the run
+on the Runs tab (for organisations the super admin belongs to) and in the organisation's Agent settings →
+Workflows — with the same card and decision path as Waiting for you (`listWorkflowRunTasks` returns only that
+run's agents' requests, org-scoped, same visibility; `decideAgentTask` records the decision, step-up included).
 
 ## More steps: hiring need, wait for, report
 
