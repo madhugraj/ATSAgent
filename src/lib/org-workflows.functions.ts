@@ -97,6 +97,18 @@ const VIEW_ROLES = [
   "recruiter",
 ] as const;
 const MANAGE_ROLES = ["hr_head", "president_cbo"] as const;
+/** Who runs a shared workflow from the hiring desk: HR and TA (recruiters). */
+const RUN_ROLES = ["hr_head", "president_cbo", "recruiter"] as const;
+
+async function hasRole(userId: string, orgId: string, roles: readonly string[]) {
+  const { assertRole } = await import("./auth.middleware");
+  try {
+    await assertRole(userId, orgId, [...roles] as Parameters<typeof assertRole>[2]);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const WorkflowIdInput = z.object({ workflowId: z.string().uuid() });
 
@@ -112,8 +124,10 @@ export type OrgWorkflowAppView = {
   };
   ready: boolean;
   items: { key: string; label: string; ok: boolean; detail: string }[];
-  /** HR head / CBO / owner: start runs (manual workflows) and manage API keys. */
+  /** HR head / CBO / owner: manage API keys. */
   canManage: boolean;
+  /** HR and TA: start runs (manual workflows), retry or skip a stopped step. */
+  canStart: boolean;
   runs: AppRun[];
 };
 
@@ -155,12 +169,8 @@ export const orgWorkflowApp = createServerFn({ method: "GET" })
       .from(organizations)
       .where(eq(organizations.id, context.orgId))
       .limit(1);
-    let canManage = true;
-    try {
-      await assertRole(context.userId, context.orgId, [...MANAGE_ROLES]);
-    } catch {
-      canManage = false;
-    }
+    const canManage = await hasRole(context.userId, context.orgId, MANAGE_ROLES);
+    const canStart = await hasRole(context.userId, context.orgId, RUN_ROLES);
     const graphs = new Map<number, import("@db/schema").WorkflowGraph | null>();
     for (const r of rows)
       if (!graphs.has(r.version)) graphs.set(r.version, await runVersionGraph(g.id, r.version));
@@ -176,6 +186,7 @@ export const orgWorkflowApp = createServerFn({ method: "GET" })
       },
       ...(await workflowReadiness(context.orgId, g.graph)),
       canManage,
+      canStart,
       runs: rows.map((r) => {
         const w = waits.get(r.id);
         const need = (r.context as { payload?: { need?: unknown } } | null)?.payload?.need;
@@ -205,7 +216,7 @@ export const startOrgWorkflowRun = createServerFn({ method: "POST" })
   .validator((d: unknown) => StartInput.parse(d))
   .handler(async ({ data, context }): Promise<{ runId: string }> => {
     const { assertRole } = await import("./auth.middleware");
-    await assertRole(context.userId, context.orgId, [...MANAGE_ROLES]);
+    await assertRole(context.userId, context.orgId, [...RUN_ROLES]);
     const { startWorkflowManually } = await import("../server/agents/workflows.server");
     const r = await startWorkflowManually({
       workflowId: data.workflowId,
@@ -342,7 +353,7 @@ export const resolveWorkflowStep = createServerFn({ method: "POST" })
   .validator((d: unknown) => ResolveInput.parse(d))
   .handler(async ({ data, context }) => {
     const { assertRole } = await import("./auth.middleware");
-    await assertRole(context.userId, context.orgId, [...MANAGE_ROLES]);
+    await assertRole(context.userId, context.orgId, [...RUN_ROLES]);
     const { resolveStoppedStep } = await import("../server/agents/workflows.server");
     await resolveStoppedStep({
       workflowRunId: data.workflowRunId,
@@ -360,4 +371,52 @@ export const resolveWorkflowStep = createServerFn({ method: "POST" })
       entityId: data.workflowRunId,
     });
     return { ok: true };
+  });
+
+export type DeskWorkflow = {
+  id: string;
+  name: string;
+  description: string;
+  ready: boolean;
+  /** Runs still going (running or waiting). */
+  live: number;
+  /** Runs waiting on a person or a stopped step. */
+  needsYou: number;
+};
+
+/** The workflows shared with this organisation, for the hiring desk. */
+export const deskWorkflows = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .handler(async ({ context }): Promise<DeskWorkflow[]> => {
+    if (!(await hasRole(context.userId, context.orgId, VIEW_ROLES))) return [];
+    const { grantedWorkflows, workflowReadiness, waitingOnFor } =
+      await import("../server/agents/workflows.server");
+    const granted = await grantedWorkflows(context.orgId);
+    if (!granted.length) return [];
+    const live = await db
+      .select()
+      .from(workflowRuns)
+      .where(
+        and(
+          eq(workflowRuns.orgId, context.orgId),
+          inArray(workflowRuns.status, ["running", "waiting"]),
+        ),
+      );
+    const waits = await waitingOnFor(live);
+    const out: DeskWorkflow[] = [];
+    for (const g of granted) {
+      const mine = live.filter((r) => r.workflowId === g.id);
+      out.push({
+        id: g.id,
+        name: g.name,
+        description: g.description,
+        ready: (await workflowReadiness(context.orgId, g.graph)).ready,
+        live: mine.length,
+        needsYou: mine.filter((r) => {
+          const k = waits.get(r.id)?.kind;
+          return k === "person" || k === "stopped";
+        }).length,
+      });
+    }
+    return out;
   });

@@ -41,6 +41,7 @@ import {
   ShieldCheck,
   Trash2,
   Zap,
+  Link2,
 } from "lucide-react";
 
 import { EmptyState, PageHeader } from "@/components/ats";
@@ -1486,6 +1487,20 @@ function Orgs({
                 aria-label={`Grant to ${o.name}`}
               />
               <span className="flex-1 font-medium">{o.name}</span>
+              {workflow.grants.includes(o.id) ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7"
+                  onClick={() =>
+                    void navigator.clipboard
+                      .writeText(`${window.location.origin}/desk?workflow=${workflow.id}`)
+                      .then(() => toast.success(`Link copied — share it with ${o.name}'s HR or TA`))
+                  }
+                >
+                  <Link2 className="size-3.5" /> Copy link
+                </Button>
+              ) : null}
               {o.status !== "active" ? (
                 <Badge variant="outline">{o.status}</Badge>
               ) : r ? (

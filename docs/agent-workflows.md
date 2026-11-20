@@ -73,6 +73,13 @@ run's agents' requests, org-scoped, same visibility; `decideAgentTask` records t
 
 ## Workflow app and API
 
+**Sharing with HR and TA.** Once a workflow is published and granted, the platform admin presses **Copy link**
+next to the organisation (Builder → Organisations) and sends it to that organisation's HR or TA. The link opens
+**`/desk?workflow=<workflowId>`**: the hiring desk lists every shared workflow under **Workflows** in its
+sidebar (with a count of live runs, amber when one needs a person), and the workflow opens inline there.
+HR head, CBO, owner and recruiters (TA) start runs and retry or skip a stopped step; API keys stay with the
+HR head, CBO and owner. A finished run shows the end it reached ("Workflow completed", "Stopped early").
+
 Each granted workflow has its own app page in the organisation: **`/w/<workflowId>`** (Agent settings →
 Workflows → **Open**). It shows only that workflow: what starts it, whether it is Live, a **Start** box for a
 hiring need (HR head / CBO / owner), and every run as its flow with its questions and approvals answered in
