@@ -1099,6 +1099,28 @@ export const interviewConfirmations = pgTable(
   ],
 );
 
+/**
+ * How far a missing scorecard has been chased (migration 0089): 1 reminded as
+ * the round ended, 2 reminded again, 3 the HR head told, 4+ daily escalation.
+ */
+export const scorecardChases = pgTable(
+  "scorecard_chases",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    interviewId: uuid("interview_id")
+      .notNull()
+      .references(() => interviews.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    step: smallint("step").notNull().default(0),
+    lastAt: timestamp("last_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("scorecard_chases_round_person_key").on(t.interviewId, t.email)],
+);
+
 export const evaluations = pgTable(
   "evaluations",
   {

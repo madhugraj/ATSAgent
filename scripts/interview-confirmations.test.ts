@@ -450,14 +450,14 @@ describe("interview confirmations", () => {
         .select({ to: emailOutbox.toEmail })
         .from(emailOutbox)
         .where(and(eq(emailOutbox.orgId, orgId), eq(emailOutbox.kind, "panel_reminder")));
-    await back(2.5);
+    await back(1.5);
     await conf.sweepPanelAnswers(orgId);
     expect((await reminders()).map((m) => m.to)).toEqual([second]);
     await conf.sweepPanelAnswers(orgId);
     expect(await reminders()).toHaveLength(1);
     // The window closes; no calendar is connected, so the panelist lapses and the
     // candidate is offered the time the rest of the panel agreed.
-    await back(4.5);
+    await back(2.5);
     await conf.sweepPanelAnswers(orgId);
     const [row] = await db
       .select({ state: interviewConfirmations.state })
@@ -493,7 +493,7 @@ describe("interview confirmations", () => {
     const id = r.interviewId!;
     await db
       .update(interviewConfirmations)
-      .set({ createdAt: new Date(Date.now() - 5 * 3600_000) })
+      .set({ createdAt: new Date(Date.now() - 3 * 3600_000) })
       .where(
         and(
           eq(interviewConfirmations.interviewId, id),

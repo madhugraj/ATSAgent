@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ConfirmLine } from "@/components/interviews/ConfirmLine";
-import { roundConfirmations } from "@/lib/interview-confirmations.functions";
+import { overdueScorecards, roundConfirmations } from "@/lib/interview-confirmations.functions";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -87,6 +87,21 @@ function Interviews() {
     .filter((i) => ["scheduled", "rescheduled"].includes(i.status))
     .map((i) => i.id)
     .slice(0, 500);
+  const overdueFn = useServerFn(overdueScorecards);
+  const pastIds = (ivs.data ?? [])
+    .filter(
+      (i) =>
+        ["scheduled", "rescheduled", "completed"].includes(i.status) &&
+        i.scheduled_at &&
+        new Date(i.scheduled_at).getTime() < Date.now(),
+    )
+    .map((i) => i.id)
+    .slice(0, 500);
+  const overdue = useQuery({
+    queryKey: ["overdue_scorecards", pastIds],
+    queryFn: () => overdueFn({ data: { interviewIds: pastIds } }),
+    enabled: pastIds.length > 0,
+  });
   const confirms = useQuery({
     queryKey: ["round_confirmations", roundIds],
     queryFn: () => confirmFn({ data: { interviewIds: roundIds } }),
@@ -675,6 +690,11 @@ function Interviews() {
                                       </Button>
                                     ) : null}
                                   </div>
+                                  {round && overdue.data?.[round.id]?.length ? (
+                                    <span className="text-[11px] text-destructive">
+                                      Scorecard overdue: {overdue.data[round.id]!.join(", ")}
+                                    </span>
+                                  ) : null}
                                   {round ? (
                                     <ConfirmLine
                                       interviewId={round.id}

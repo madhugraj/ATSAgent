@@ -14,7 +14,10 @@ import type { Availability, SchedulingEndReason } from "./scheduling-call-tools"
 import { spokenWhen } from "./scheduling-brief.server";
 
 /** A scheduling call is tried at most twice (no answer → once more, two hours later). */
-export const SCHEDULING_MAX_ATTEMPTS = 2;
+/** Tries to reach a candidate about their interview time — all the same day (hiring SLA). */
+export const SCHEDULING_MAX_ATTEMPTS = 3;
+/** Gap between those tries (ms): the slot closes the same day, not the next. */
+export const SCHEDULING_RETRY_MS = 3600_000;
 
 type Call = typeof screeningCalls.$inferSelect;
 

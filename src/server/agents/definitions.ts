@@ -513,7 +513,9 @@ export function registerPhase2Agents(): void {
     // 1.4.4: the request_approval subject gained the organisation profile; no behaviour change for this agent.
     // 1.5.0: list_overdue leaves out requests whose agent stopped or whose
     // requisition, candidate, JD or offer was deleted.
-    version: "1.5.0",
+    // 1.6.0 (hiring SLA): scorecards are no longer chased here — the system reminds
+    // interviewers as a round ends and tells the HR head when one is overdue.
+    version: "1.6.0",
     owner: "hr_head",
     responsibility: "Once a day, finds work that is overdue and reminds the right person.",
     mustNever: [
@@ -531,13 +533,13 @@ export function registerPhase2Agents(): void {
     evals: ["followup: reminds the approver of an overdue requisition"],
     feature: "agent_followup",
     maxSteps: 16,
-    tools: ["list_overdue", "list_pending_scorecards", "list_members", "remind_member"],
+    tools: ["list_overdue", "list_members", "remind_member"],
     system: [
       "You are the follow-up agent. Once a day you make sure nothing is stuck.",
       "1. list_overdue.",
       "2. For each requisition or JD waiting on an approver: list_members, pick the member(s) holding the waiting role, and remind_member with a one-line heading naming the requisition and how long it has waited, and the path /requisitions/<requisitionId>.",
       "3. For agent requests nobody answered: remind the assignee (or the role holders) with path /agents.",
-      "4. list_pending_scorecards (one row per interviewer still to score a round); remind each of them once (path /interviews/mine), naming the candidate and the round.",
+      "Do not chase interview scorecards: the system reminds interviewers as a round ends and tells the HR head when one is overdue.",
       "Never remind the same person about the same item twice in one run. Keep messages short, specific and polite.",
       "Finish with who was reminded about what.",
     ].join("\n"),
@@ -586,7 +588,7 @@ export function registerPhase3Agents(): void {
     // panel can do; with none in common it re-offers from the suggestions. A booked
     // round's invite waits for the panel, then asks the candidate to confirm.
     // 2.5.0 (hiring SLA, migration 0088): find_interview_slots returns the earliest free
-    // times; a panelist has 4 hours to answer before the round goes ahead without them.
+    // times; a panelist has 2 hours to answer before the round goes ahead without them.
     version: "2.5.0",
     owner: "hr_head",
     responsibility:
@@ -624,6 +626,7 @@ export function registerPhase3Agents(): void {
       "interview: proposes a panel for a round and waits for a person",
       "interview: proposes a stand-in when a panellist can't make it",
       "interview: asks for a scheduling call once one is possible for e-mailed times",
+      "interview: re-offers from the panel's suggested times when none suit the whole panel",
     ],
     feature: "agent_interview",
     maxSteps: 16,

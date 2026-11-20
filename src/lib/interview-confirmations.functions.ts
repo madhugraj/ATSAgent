@@ -68,3 +68,32 @@ export const roundConfirmations = createServerFn({ method: "GET" })
     const { confirmationsFor } = await import("./interview-confirmations.server");
     return confirmationsFor(context.orgId, data.interviewIds);
   });
+
+/** Interviewers whose scorecard is past due (2 h after the round), by round id. */
+export const overdueScorecards = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .validator((d: unknown) =>
+    z.object({ interviewIds: z.array(z.string().uuid()).max(500) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    if (!data.interviewIds.length) return {} as Record<string, string[]>;
+    const { db } = await import("../server/db");
+    const { interviews } = await import("@db/schema");
+    const { and, eq, inArray, sql } = await import("drizzle-orm");
+    const { missingScorecards, SCORECARD_DUE } = await import("./scorecard-chase.server");
+    const due = await db
+      .select({ id: interviews.id })
+      .from(interviews)
+      .where(
+        and(
+          eq(interviews.orgId, context.orgId),
+          inArray(interviews.id, data.interviewIds),
+          inArray(interviews.status, ["scheduled", "rescheduled", "completed"]),
+          sql`${interviews.scheduledAt} + make_interval(mins => ${interviews.durationMins} + ${SCORECARD_DUE.dueHours * 60}) <= now()`,
+        ),
+      );
+    return missingScorecards(
+      context.orgId,
+      due.map((d) => d.id),
+    );
+  });

@@ -331,6 +331,16 @@ export const EVAL_CATALOG: Record<string, EvalExplainer> = {
       "It then proposes the round's panel with that person.",
     ],
   },
+  "interview: re-offers from the panel's suggested times when none suit the whole panel": {
+    title: "Re-offers from the panel's suggested times",
+    situation:
+      "No proposed time suited Leela's whole L1 panel; the panelist suggested another time, and Leela has not been contacted.",
+    checks: [
+      "It offers new times with the same panel, starting from the suggested time.",
+      "It never books a time itself or changes the panel.",
+      "The panel is asked again before Leela hears.",
+    ],
+  },
   "interview: asks for a scheduling call once one is possible for e-mailed times": {
     title: "Asks for a scheduling call once one is possible",
     situation:

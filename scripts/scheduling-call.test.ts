@@ -343,7 +343,8 @@ describe("the in-call tools", () => {
       "no_answer",
     );
     expect(outcome.scheduledEnd("voicemail", 1)).toBe("retry");
-    expect(outcome.scheduledEnd("voicemail", 2)).toBe("fell_back");
+    expect(outcome.scheduledEnd("voicemail", 2)).toBe("retry");
+    expect(outcome.scheduledEnd("voicemail", 3)).toBe("fell_back");
     expect(outcome.scheduledEnd("opt_out", 1)).toBe("completed");
   });
 
@@ -1060,7 +1061,7 @@ describe("a whole scheduling call (fake line)", () => {
     expect(c!.consentWords).toBe("Yes, go ahead.");
   });
 
-  test("voicemail: tried once more, then the e-mailed link stands", async () => {
+  test("voicemail: tried hourly the same day, then the e-mailed link stands", async () => {
     const steps: Step[] = [
       { say: "ai", text: "The talent acquisition team will try again later. Goodbye." },
       { tool: "end_scheduling_call", args: { reason: "voicemail" } },
@@ -1072,9 +1073,15 @@ describe("a whole scheduling call (fake line)", () => {
     const [c1] = await db.select().from(screeningCalls).where(eq(screeningCalls.id, first.call.id));
     expect(c1!.dueAt).not.toBeNull();
     expect(c1!.transcript).toEqual([]); // nothing kept without their go-ahead
+    // The retry comes about an hour later (inside the calling window), not the next day.
+    expect(c1!.dueAt!.getTime() - Date.now()).toBeLessThan(20 * 3600_000);
     const second = await arranged({ attempt: 2 });
     expect(
       await place(second.call.id, new FakeLine(), scriptedVoice(steps, { results: [] })),
+    ).toMatchObject({ status: "no_answer" });
+    const third = await arranged({ attempt: 3 });
+    expect(
+      await place(third.call.id, new FakeLine(), scriptedVoice(steps, { results: [] })),
     ).toMatchObject({ status: "fell_back" });
   });
 

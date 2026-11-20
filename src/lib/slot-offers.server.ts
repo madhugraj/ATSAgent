@@ -35,8 +35,8 @@ export const SLOT_OFFER = {
   leadHours: 12,
   /** …and when picked (hours). */
   pickLeadHours: 2,
-  /** How long the link works at most (hours) — never past the first slot. */
-  expiresHours: 72,
+  /** How long the link works at most (hours) — never past the first slot; the hiring SLA closes the slot within a day. */
+  expiresHours: 24,
 } as const;
 
 export type OfferInput = {
