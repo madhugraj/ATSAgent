@@ -56,7 +56,7 @@ export function RunFlow({
       state === "done"
         ? "border-emerald-600/40 bg-emerald-600/10 text-foreground"
         : state === "current"
-          ? run.waitingOn?.kind === "person"
+          ? run.waitingOn?.kind === "person" || run.waitingOn?.kind === "stopped"
             ? "border-amber-500 bg-amber-500/15 font-medium text-foreground ring-2 ring-amber-500/30"
             : "border-primary bg-primary/10 font-medium text-foreground ring-2 ring-primary/30"
           : "border-dashed text-muted-foreground";

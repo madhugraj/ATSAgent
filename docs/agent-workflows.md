@@ -139,7 +139,7 @@ When an organisation holding a grant has an event matching the trigger, the orch
   step's result (`stepGoal`), so it never starts blind. **Aditi (the copilot) cannot be a step**: it hands work
   to other agents on its own, which would happen outside the flow — start a hiring need with the Requisition
   agent. A step whose run ended without the flow hearing about it (e.g. a restart) moves on at the next
-  scheduler tick (`resumeFinishedRunWaits`). A **wait** first looks back over the run's lifetime: if its event already happened on the role (e.g. people approved the requisition while the agent was still working), it moves straight on; the tick repeats that look-back for waits whose event was missed.
+  scheduler tick (`resumeFinishedRunWaits`). A step whose agent **stopped at its run limit** (turns or tokens) does not fail the flow: it pauses with "<agent> stopped at its run limit — Retry or Skip". **Retry** (HR head / CBO / owner, in the workflow app or the Runs tab) starts the step's agent again with the same goal, told to pick up what the stopped run already did; **Skip** treats the step as failed and follows the flow (`resolveStoppedStep`, audited as `workflow.step.retried|skipped`). A **wait** first looks back over the run's lifetime: if its event already happened on the role (e.g. people approved the requisition while the agent was still working), it moves straight on; the tick repeats that look-back for waits whose event was missed.
 - **Condition** — evaluated on the event and the last agent's outcome.
 - **End** (or no next step) — the run is done.
 

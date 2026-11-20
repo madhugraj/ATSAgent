@@ -7,6 +7,7 @@ import { CircleX, Copy, KeyRound, Play, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/ats";
 import { WorkflowRunRequests } from "@/components/agents/AgentTaskCard";
 import { RunFlow } from "@/components/agents/RunFlow";
+import { StoppedStepActions } from "@/components/agents/StoppedStepActions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -115,6 +116,7 @@ function WorkflowAppPage() {
               fallbackGraph={v.workflow.graph}
               focused={r.id === focus}
               workflowId={v.workflow.id}
+              canManage={v.canManage}
             />
           ))
         ) : (
@@ -165,8 +167,10 @@ function RunCard({
   fallbackGraph,
   focused,
   workflowId,
+  canManage,
 }: {
   run: AppRun;
+  canManage: boolean;
   fallbackGraph: AppRun["graph"] & object;
   focused: boolean;
   workflowId: string;
@@ -201,13 +205,16 @@ function RunCard({
       </div>
       {run.waitingOn ? (
         <div
-          className={`text-xs font-medium ${run.waitingOn.kind === "person" ? "text-amber-700" : ""}`}
+          className={`text-xs font-medium ${run.waitingOn.kind === "person" || run.waitingOn.kind === "stopped" ? "text-amber-700" : ""}`}
         >
           {run.waitingOn.text}
         </div>
       ) : null}
       <RunFlow run={run} graph={graph} label={label} />
       {run.error ? <div className="text-xs text-destructive">{run.error}</div> : null}
+      {run.waitingOn?.kind === "stopped" && canManage ? (
+        <StoppedStepActions workflowRunId={run.id} invalidate={["workflow_app", workflowId]} />
+      ) : null}
       {run.waitingOn?.kind === "person" ? (
         <WorkflowRunRequests
           workflowRunId={run.id}

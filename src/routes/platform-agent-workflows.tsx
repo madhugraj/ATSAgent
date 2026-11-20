@@ -61,6 +61,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { usePlatform } from "@/hooks/usePlatform";
 import { WorkflowRunRequests } from "@/components/agents/AgentTaskCard";
 import { RunFlow } from "@/components/agents/RunFlow";
+import { StoppedStepActions } from "@/components/agents/StoppedStepActions";
 import { AGENT_LABEL } from "@/lib/agents.catalog";
 import {
   approveWorkflow,
@@ -1639,7 +1640,7 @@ function Runs({
               </div>
               {r.waitingOn ? (
                 <div
-                  className={`text-xs font-medium ${r.waitingOn.kind === "person" ? "text-amber-700" : "text-foreground"}`}
+                  className={`text-xs font-medium ${r.waitingOn.kind === "person" || r.waitingOn.kind === "stopped" ? "text-amber-700" : "text-foreground"}`}
                 >
                   {r.waitingOn.text}
                 </div>
@@ -1652,6 +1653,12 @@ function Runs({
                   return n ? n.data.label || n.data.agentType || n.kind : label(id);
                 }}
               />
+              {r.waitingOn?.kind === "stopped" && view.owned.some((o) => o.id === r.orgId) ? (
+                <StoppedStepActions
+                  workflowRunId={r.id}
+                  invalidate={["platform_agent_workflows"]}
+                />
+              ) : null}
               {r.waitingOn?.kind === "person" && view.owned.some((o) => o.id === r.orgId) ? (
                 <WorkflowRunRequests
                   workflowRunId={r.id}
