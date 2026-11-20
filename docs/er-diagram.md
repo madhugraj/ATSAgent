@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-124 tables across 9 domains.
+125 tables across 9 domains.
 
 ## Identity & access
 
@@ -675,6 +675,7 @@ erDiagram
     text outcome_note "nullable"
     timestamptz completed_at "nullable"
     jsonb unavailable
+    jsonb panel_changes
     text meeting_provider "nullable"
     text meeting_external_id "nullable"
     text transcription
@@ -1371,6 +1372,9 @@ erDiagram
 | `pay_zones` | `updated_by` | `users` | no action |
 | `phone_screening_settings` | `org_id` | `organizations` | cascade |
 | `phone_screening_settings` | `updated_by` | `users` | no action |
+| `plan_change_proposals` | `interview_id` | `interviews` | no action |
+| `plan_change_proposals` | `org_id` | `organizations` | cascade |
+| `plan_change_proposals` | `requisition_id` | `requisitions` | cascade |
 | `policy_briefings` | `decided_by` | `users` | no action |
 | `policy_briefings` | `org_id` | `organizations` | cascade |
 | `policy_findings` | `briefing_id` | `policy_briefings` | no action |
@@ -1536,7 +1540,7 @@ erDiagram
 | `interview_confirmations` | — | 17 | (token) |
 | `interview_slot_offers` | — | 23 | (token) |
 | `interview_transcripts` | — | 8 | (interview_id) |
-| `interviews` | Screening & interviews | 24 | — |
+| `interviews` | Screening & interviews | 25 | — |
 | `job_descriptions` | Requisitions & job content | 17 | — |
 | `job_index_notifications` | — | 10 | — |
 | `master_items` | Organisations & masters | 8 | — |
@@ -1564,6 +1568,7 @@ erDiagram
 | `pay_figures` | — | 22 | — |
 | `pay_zones` | — | 19 | (orgId+name) |
 | `phone_screening_settings` | Screening & interviews | 16 | — |
+| `plan_change_proposals` | — | 16 | — |
 | `platform_admins` | Identity & access | 6 | (email) |
 | `policy_briefings` | — | 12 | — |
 | `policy_findings` | — | 18 | — |

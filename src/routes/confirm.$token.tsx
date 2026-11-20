@@ -7,6 +7,7 @@ import { CalendarCheck, CheckCircle2, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { ChangeTime, ScorecardChange } from "@/components/interviews/PanelChanges";
 import { answerTime, getConfirmation } from "@/lib/interview-confirmations.functions";
 
 export const Route = createFileRoute("/confirm/$token")({
@@ -94,6 +95,12 @@ function ConfirmPage() {
                 : "The hiring team will be in touch about another time."}
           </p>
         </div>
+        {panelist && !offer && c.state === "accepted" && !c.closed ? (
+          <div className="mt-6 space-y-3 border-t border-border pt-4">
+            <ChangeTime token={token} onDone={() => void q.refetch()} />
+            <ScorecardChange token={token} />
+          </div>
+        ) : null}
       </Shell>
     );
   if (c.closed)

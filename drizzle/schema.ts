@@ -917,6 +917,14 @@ export const interviews = pgTable(
       .notNull()
       .default(sql`'[]'::jsonb`),
     /**
+     * Time changes a panelist made after accepting — one each per round, never
+     * past the stage's SLA deadline (migration 0090).
+     */
+    panelChanges: jsonb("panel_changes")
+      .$type<{ email: string; from: string; to: string | null; reason: string; at: string }[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /**
      * The meeting's provider and the reference its API finds it by after the
      * call (Zoom id, Meet code, Teams join link) — read from the link when the
      * round is booked (src/lib/meeting-ref.ts, migration 0059).
@@ -1156,6 +1164,50 @@ export const scorecardChases = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("scorecard_chases_round_person_key").on(t.interviewId, t.email)],
+);
+
+/**
+ * A panelist's proposed change to their round's scorecard (topics, competencies,
+ * weights) for a role. Checked against the role's must-haves by fixed rules,
+ * reviewed by the AI against the job, and applied only when the hiring manager
+ * (or, failing them, the HR head) approves (migration 0090).
+ */
+export const planChangeProposals = pgTable(
+  "plan_change_proposals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    requisitionId: uuid("requisition_id")
+      .notNull()
+      .references(() => requisitions.id, { onDelete: "cascade" }),
+    interviewId: uuid("interview_id").references(() => interviews.id, { onDelete: "set null" }),
+    level: smallint("level").notNull(),
+    email: text("email").notNull(),
+    name: text("name"),
+    /** The round as it stood when proposed, and as proposed. */
+    before: jsonb("before").$type<import("../src/lib/interview-plan").PlanRoundT>().notNull(),
+    round: jsonb("round").$type<import("../src/lib/interview-plan").PlanRoundT>().notNull(),
+    reason: text("reason").notNull(),
+    /** reviewing | awaiting_approval | approved | rejected | stale */
+    status: text("status")
+      .$type<"reviewing" | "awaiting_approval" | "approved" | "rejected" | "stale">()
+      .notNull()
+      .default("reviewing"),
+    review: jsonb("review").$type<import("../src/lib/interview-plan").PlanReview>(),
+    decidedBy: uuid("decided_by"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decisionNote: text("decision_note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("plan_change_proposals_req_idx").on(t.orgId, t.requisitionId, t.status),
+    check(
+      "plan_change_proposals_status_check",
+      sql`${t.status} in ('reviewing','awaiting_approval','approved','rejected','stale')`,
+    ),
+  ],
 );
 
 export const evaluations = pgTable(

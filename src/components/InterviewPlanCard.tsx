@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getInterviewPlan, saveInterviewPlan } from "@/lib/interview-plan.functions";
 import { pruneRubric, weightOf, type InterviewPlan } from "@/lib/interview-plan";
+import { PlanProposals } from "./PlanProposals";
 
 /** The role's interview rounds, rubric, panel size and verdict policy — view and edit. */
 export function InterviewPlanCard({
@@ -86,6 +87,7 @@ export function InterviewPlanCard({
           <span className="text-xs text-muted-foreground">Default from the must-haves</span>
         ) : null}
       </div>
+      {editing ? null : <PlanProposals requisitionId={requisitionId} />}
       <ol className="space-y-3">
         {plan.rounds.map((r, i) => (
           <li key={r.level} className="rounded-md border border-border p-3">

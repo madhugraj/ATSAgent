@@ -71,3 +71,31 @@ export const saveInterviewPlan = createServerFn({ method: "POST" })
     });
     return planFor(context.orgId, data.requisitionId);
   });
+
+/** Panelists' proposed scorecard changes for a role (src/lib/panel-changes.server.ts). */
+export const listPlanProposals = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => ReqInput.parse(d))
+  .handler(async ({ data, context }) => {
+    const { assertRequisitionInOrg } = await import("../server/guards");
+    await assertRequisitionInOrg(data.requisitionId, context.orgId);
+    const { proposalsFor } = await import("./panel-changes.server");
+    return proposalsFor(context.orgId, data.requisitionId);
+  });
+
+/** The hiring manager (or, after a wait, the HR head) approves or rejects one. */
+export const decidePlanProposal = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) =>
+    z
+      .object({
+        proposalId: z.string().uuid(),
+        approve: z.boolean(),
+        note: z.string().max(500).nullable().default(null),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { decideProposal } = await import("./panel-changes.server");
+    return decideProposal(context.orgId, context.userId, data.proposalId, data.approve, data.note);
+  });

@@ -92,6 +92,9 @@ export const AI_FEATURES = [
   "panel_summary",
   // Model safety check: red-team probes before Autonomous (docs/red-team.md).
   "redteam_probe",
+  // A panelist's proposed scorecard change, reviewed against the job before the
+  // hiring manager decides (src/lib/panel-changes.server.ts).
+  "plan_change_review",
 ] as const;
 
 /**
