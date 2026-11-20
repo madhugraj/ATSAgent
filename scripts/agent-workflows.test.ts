@@ -865,6 +865,46 @@ describe("hiring need, waits and reports", () => {
     expect((wr!.context as { wait: { status: string } }).wait.status).toBe("happened");
   });
 
+  test("the role is learned from the agent's own events; a hand-off is not done", async () => {
+    const { startWorkflowManually } = await import("../src/server/agents/workflows.server");
+    await db.delete(workflowRuns).where(eq(workflowRuns.workflowId, workflowId));
+    await startWorkflowManually({ workflowId, orgId, userId, need: "One marketer" });
+    let [wr] = await wfr();
+    const reqRun = wr!.waitingRunId!;
+    const [req] = await db
+      .insert(requisitions)
+      .values({
+        orgId,
+        code: `WFN3-${stamp}`,
+        title: "Marketer",
+        status: "draft",
+        createdBy: userId,
+      } as never)
+      .returning({ id: requisitions.id });
+    // Its "created" event is already handled elsewhere, so the live link is missed.
+    await db.insert(agentEvents).values({
+      orgId,
+      type: "requisition.created",
+      subjectType: "requisition",
+      subjectId: req!.id,
+      actorUserId: userId,
+      payload: {},
+      sourceRunId: reqRun,
+      status: "done",
+    } as never);
+    await finishAgent(reqRun, "Drafted and submitted.");
+    [wr] = await wfr();
+    expect((wr!.context as { subject: { id: string } }).subject.id).toBe(req!.id);
+    await event("requisition.status_changed", req!.id, { from: "pending_cbo", to: "approved" });
+    await processAgentEvents({ orgId });
+    [wr] = await wfr();
+    const [jdRun] = await db.select().from(agentRuns).where(eq(agentRuns.id, wr!.waitingRunId!));
+    expect(jdRun!.subjectId).toBe(req!.id);
+    await finishAgent(jdRun!.id, "Handed off: I cannot find the role.");
+    [wr] = await wfr();
+    expect((wr!.context as { last: { status: string } }).last.status).toBe("handed_off");
+  });
+
   test("workflow API: a key starts and reads runs of its own workflow only", async () => {
     const app = await import("../src/server/agents/workflow-app.server");
     await db.delete(workflowRuns).where(eq(workflowRuns.workflowId, workflowId));

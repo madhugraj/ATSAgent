@@ -440,6 +440,33 @@ export async function onWorkflowEvent(e: EventRow): Promise<number> {
   return startWorkflowsFor(e);
 }
 
+/**
+ * The role a flow's own agents worked on: a run's subject, else the first
+ * requisition one of those runs created or changed (its events). Null if none.
+ */
+async function subjectFromRuns(runIds: string[]): Promise<{ type: string; id: string } | null> {
+  const ids = [...new Set(runIds)].filter(Boolean);
+  if (!ids.length) return null;
+  const withSubject = await db
+    .select({ type: agentRuns.subjectType, id: agentRuns.subjectId })
+    .from(agentRuns)
+    .where(and(inArray(agentRuns.id, ids), eq(agentRuns.subjectType, "requisition")))
+    .limit(1);
+  if (withSubject[0]?.id) return { type: "requisition", id: withSubject[0].id };
+  const { agentEvents } = await import("@db/schema");
+  const events = await db
+    .select()
+    .from(agentEvents)
+    .where(inArray(agentEvents.sourceRunId, ids))
+    .orderBy(agentEvents.createdAt)
+    .limit(20);
+  for (const e of events) {
+    const id = await eventRequisition(e as EventRow);
+    if (id) return { type: "requisition", id };
+  }
+  return null;
+}
+
 /** A flow learns its role from the first event one of its own agents caused. */
 async function linkSubject(e: EventRow): Promise<void> {
   if (!e.sourceRunId) return;
@@ -777,6 +804,10 @@ export async function advanceWorkflowRun(id: string): Promise<void> {
     }
     // Agent: start it the way the orchestrator does, then wait for it.
     const agentType = node.data.agentType as AgentType;
+    if (!ctx.subject && ctx.runs.length) {
+      ctx.subject = await subjectFromRuns(ctx.runs);
+      if (ctx.subject) note(node.id, "Linked to its role.");
+    }
     try {
       const { loadPolicy } = await import("./policy");
       const policy = await loadPolicy(wr.orgId, agentType);
@@ -997,16 +1028,13 @@ export async function onAgentRunFinished(run: {
           continue;
         }
       }
-      ctx.last = { status: run.status, result: (run.result ?? "").slice(0, 2000) };
-      if (!ctx.subject) {
-        // The agent may have worked on a role (e.g. the Requisition agent drafted one).
-        const [r] = await db
-          .select({ type: agentRuns.subjectType, id: agentRuns.subjectId })
-          .from(agentRuns)
-          .where(eq(agentRuns.id, run.id))
-          .limit(1);
-        if (r?.type && r.id) ctx.subject = { type: r.type, id: r.id };
-      }
+      // A hand-off ("I can't do this, someone else must") is not the step done.
+      const handedOff = run.status === "done" && (run.result ?? "").startsWith("Handed off:");
+      ctx.last = {
+        status: handedOff ? "handed_off" : run.status,
+        result: (run.result ?? "").slice(0, 2000),
+      };
+      if (!ctx.subject) ctx.subject = await subjectFromRuns([run.id, ...(ctx.runs ?? [])]);
       await moveOn(wr, ctx, `Agent ${run.status}.`);
     } catch (err) {
       log.error("workflow.advance_failed", { workflow_run_id: wr.id, error: err as Error });
