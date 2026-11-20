@@ -8,6 +8,7 @@ import {
   applications,
   candidates,
   evaluations,
+  interviewConfirmations,
   interviews,
   orgMembers,
   panelists,
@@ -94,6 +95,8 @@ export type MyInterview = {
   waiting_for: string[];
   /** I said I cannot make this booked round (a stand-in is being arranged). */
   i_cannot_make_it: boolean;
+  /** My accepted confirmation link token: changing the time or scorecard uses it. */
+  change_token: string | null;
 };
 
 /** Every interview assigned to the signed-in user, newest first. */
@@ -133,6 +136,24 @@ export const myInterviews = createServerFn({ method: "GET" })
     if (!mine.length) return [];
 
     const appIds = [...new Set(mine.map((r) => r.applicationId))];
+    const tokens = await db
+      .select({
+        interviewId: interviewConfirmations.interviewId,
+        token: interviewConfirmations.token,
+      })
+      .from(interviewConfirmations)
+      .where(
+        and(
+          eq(interviewConfirmations.orgId, context.orgId),
+          inArray(
+            interviewConfirmations.interviewId,
+            mine.map((r) => r.id),
+          ),
+          eq(interviewConfirmations.party, "panelist"),
+          eq(interviewConfirmations.state, "accepted"),
+          sql`lower(${interviewConfirmations.email}) = ${email}`,
+        ),
+      );
     const [apps, evals] = await Promise.all([
       db
         .select({
@@ -206,6 +227,7 @@ export const myInterviews = createServerFn({ method: "GET" })
           .filter((m) => !by.includes(m.email.toLowerCase()))
           .map((m) => m.name ?? m.email),
         i_cannot_make_it: (r.unavailable ?? []).some((u) => u.email === email),
+        change_token: tokens.find((t) => t.interviewId === r.id)?.token ?? null,
       };
     });
   });
