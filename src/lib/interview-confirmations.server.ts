@@ -28,7 +28,8 @@ import {
 } from "@db/schema";
 
 type Person = { name: string | null; email: string };
-export type ConfirmState = "pending" | "accepted" | "declined" | "superseded";
+/** `lapsed`: a panelist's answer window closed unanswered and the round went ahead. */
+export type ConfirmState = "pending" | "accepted" | "declined" | "superseded" | "lapsed";
 
 const newToken = () => `${crypto.randomUUID()}${crypto.randomUUID()}`.replace(/-/g, "");
 
@@ -46,7 +47,7 @@ export const candidatePicked = (actor: string) => /^candidate\b/i.test(actor);
  */
 export function panelAgreed(rows: { party: string; state: string }[]): boolean {
   const live = rows.filter((r) => r.party === "panelist" && r.state !== "superseded");
-  return live.every((r) => r.state === "accepted");
+  return live.every((r) => r.state === "accepted" || r.state === "lapsed");
 }
 
 /** Old answers no longer apply once the round moves to another time. */
@@ -441,7 +442,11 @@ export function commonTimes(
   times: string[],
   rows: { party: string; state: string; okSlots: string[] | null }[],
 ): string[] {
-  const panel = rows.filter((r) => r.party === "panelist" && r.state !== "superseded");
+  // A panelist whose answer window lapsed does not hold the others up; they are
+  // asked again for the booked time.
+  const panel = rows.filter(
+    (r) => r.party === "panelist" && r.state !== "superseded" && r.state !== "lapsed",
+  );
   return times.filter((t) =>
     panel.every((r) => {
       if (r.state !== "accepted") return false;
@@ -651,6 +656,51 @@ async function afterRoundAnswer(
     );
 }
 
+/**
+ * Are these people free at this time — no other round in ATSIQ (this round
+ * itself aside) and nothing busy on a connected calendar? `checked` is false
+ * when any of their calendars could not be read.
+ */
+export async function allFree(
+  orgId: string,
+  emails: string[],
+  at: Date,
+  durationMins: number,
+  exceptInterviewId?: string,
+): Promise<{ free: boolean; checked: boolean }> {
+  const list = emails.map((e) => e.toLowerCase());
+  if (!list.length) return { free: true, checked: true };
+  const end = new Date(at.getTime() + durationMins * 60_000);
+  const clash = await db
+    .select({ id: interviews.id })
+    .from(interviews)
+    .where(
+      and(
+        eq(interviews.orgId, orgId),
+        exceptInterviewId ? sql`${interviews.id} <> ${exceptInterviewId}` : sql`true`,
+        sql`${interviews.status} not in ('cancelled','no_show','completed')`,
+        sql`(lower(${interviews.interviewerEmail}) in (${sql.join(
+          list.map((e) => sql`${e}`),
+          sql`, `,
+        )}) or ${sql.join(
+          list.map((e) => sql`${interviews.panel} @> ${JSON.stringify([{ email: e }])}::jsonb`),
+          sql` or `,
+        )})`,
+        sql`${interviews.scheduledAt} < ${end.toISOString()}::timestamptz`,
+        sql`${interviews.scheduledAt} + make_interval(mins => ${interviews.durationMins}) > ${at.toISOString()}::timestamptz`,
+      ),
+    )
+    .limit(1);
+  const { busyFor } = await import("./calendar-availability.server");
+  const cal = await busyFor(orgId, list, at, end);
+  const checked = Boolean(cal.source) && !list.some((e) => cal.unknown.includes(e));
+  if (clash.length) return { free: false, checked };
+  const hit = list.some((e) =>
+    (cal.busy[e] ?? []).some((b) => b.start < end.getTime() && b.end > at.getTime()),
+  );
+  return { free: !hit, checked };
+}
+
 /** Is the candidate's invite for this round still waiting on the panel? */
 async function inviteHeld(orgId: string, interviewId: string): Promise<boolean> {
   const { emailOutbox } = await import("@db/schema");
@@ -693,42 +743,14 @@ async function moveToSuggested(
   ]
     .map((e) => e.toLowerCase())
     .filter((e) => e !== r.email);
-  const { busyFor, assertAfterEarlierRounds } = await import("./calendar-availability.server");
+  const { assertAfterEarlierRounds } = await import("./calendar-availability.server");
   try {
     await assertAfterEarlierRounds(orgId, c.applicationId, i.level, [at]);
   } catch {
     return false;
   }
-  const end = new Date(at.getTime() + i.durationMins * 60_000);
-  if (others.length) {
-    // Another round for any of them then (this round itself does not count)…
-    const clash = await db
-      .select({ id: interviews.id })
-      .from(interviews)
-      .where(
-        and(
-          eq(interviews.orgId, orgId),
-          sql`${interviews.id} <> ${interviewId}`,
-          sql`${interviews.status} not in ('cancelled','no_show','completed')`,
-          sql`(lower(${interviews.interviewerEmail}) in (${sql.join(
-            others.map((e) => sql`${e}`),
-            sql`, `,
-          )}) or ${sql.join(
-            others.map((e) => sql`${interviews.panel} @> ${JSON.stringify([{ email: e }])}::jsonb`),
-            sql` or `,
-          )})`,
-          sql`${interviews.scheduledAt} < ${end.toISOString()}::timestamptz`,
-          sql`${interviews.scheduledAt} + make_interval(mins => ${interviews.durationMins}) > ${at.toISOString()}::timestamptz`,
-        ),
-      )
-      .limit(1);
-    if (clash.length) return false;
-    // …or a busy calendar.
-    const cal = await busyFor(orgId, others, at, end);
-    const overlaps = (b: { start: number; end: number }) =>
-      b.start < end.getTime() && b.end > at.getTime();
-    if (others.some((e) => (cal.busy[e] ?? []).some(overlaps))) return false;
-  }
+  if (others.length && !(await allFree(orgId, others, at, i.durationMins, interviewId)).free)
+    return false;
   const { getOrgEmailSettings } = await import("./email-outbox.server");
   const { localWhen } = await import("./local-time");
   const tz = (await getOrgEmailSettings(orgId)).timezone;
@@ -899,4 +921,191 @@ export async function releaseInviteNow(
     });
   }
   return n;
+}
+
+/* ---------------------------------------------------- the panel's answer window */
+
+/**
+ * How long a panelist has to answer before the round goes ahead without them —
+ * the hiring SLA (default 5 days from application to offer) leaves no room for
+ * a day's silence.
+ */
+export const PANEL_ANSWER = { remindAfterHours: 2, windowHours: 4 } as const;
+
+/**
+ * Run by the agent tick. A pending panelist is reminded once at
+ * `remindAfterHours`; when `windowHours` passes unanswered:
+ * - their connected calendar shows them free → counted as yes (audited);
+ * - offered times, calendar unknown or busy → `lapsed`: the candidate is offered
+ *   the times the rest of the panel agreed, and the lapsed panelist is asked
+ *   again for the booked time;
+ * - a booked round, calendar unknown or busy → the Interview coordinator
+ *   proposes a stand-in for the HR head (one click) and the desk is told;
+ *   "Send invite now" stays on the Interviews page.
+ */
+export async function sweepPanelAnswers(orgId?: string, now = Date.now()): Promise<number> {
+  const remindBefore = new Date(now - PANEL_ANSWER.remindAfterHours * 3600_000);
+  const lapseBefore = new Date(now - PANEL_ANSWER.windowHours * 3600_000);
+  const rows = await db
+    .select()
+    .from(interviewConfirmations)
+    .where(
+      and(
+        orgId ? eq(interviewConfirmations.orgId, orgId) : sql`true`,
+        eq(interviewConfirmations.party, "panelist"),
+        eq(interviewConfirmations.state, "pending"),
+        sql`${interviewConfirmations.lapsedAt} is null`,
+        sql`${interviewConfirmations.createdAt} <= ${remindBefore.toISOString()}::timestamptz`,
+      ),
+    )
+    .limit(200);
+  let acted = 0;
+  for (const r of rows) {
+    try {
+      const c = await contextOf(r);
+      if (!c || c.closed) continue;
+      if (r.createdAt <= lapseBefore) {
+        await closeWindow(r, c);
+        acted++;
+      } else if (!r.remindedAt) {
+        await remind(r, c, now);
+        acted++;
+      }
+    } catch {
+      /* one row never stops the sweep */
+    }
+  }
+  return acted;
+}
+
+async function remind(r: Row, c: Ctx, now: number) {
+  const [claimed] = await db
+    .update(interviewConfirmations)
+    .set({ remindedAt: new Date(now) })
+    .where(
+      and(eq(interviewConfirmations.id, r.id), sql`${interviewConfirmations.remindedAt} is null`),
+    )
+    .returning({ id: interviewConfirmations.id });
+  if (!claimed) return;
+  const { enqueueEmail, formatInOrgTZ, getOrgEmailSettings } =
+    await import("./email-outbox.server");
+  const { env } = await import("../server/env");
+  const tz = (await getOrgEmailSettings(r.orgId)).timezone;
+  const [ctx] = await db
+    .select({ orgName: organizations.name, candidateName: candidates.fullName })
+    .from(applications)
+    .innerJoin(organizations, eq(organizations.id, applications.orgId))
+    .innerJoin(candidates, eq(candidates.id, applications.candidateId))
+    .where(and(eq(applications.id, c.applicationId), eq(applications.orgId, r.orgId)))
+    .limit(1);
+  const left = PANEL_ANSWER.windowHours - PANEL_ANSWER.remindAfterHours;
+  await enqueueEmail({
+    orgId: r.orgId,
+    kind: "panel_reminder",
+    templateName: "panel_reminder",
+    toEmail: r.email,
+    applicationId: c.applicationId,
+    idempotencyKey: `panel-reminder:${r.id}`,
+    templateData: {
+      interviewerName: r.name ?? undefined,
+      orgName: ctx?.orgName,
+      candidateName: ctx?.candidateName ?? undefined,
+      roundLabel: `L${c.level} interview`,
+      timesText: c.times.map((t) => formatInOrgTZ(new Date(t), tz)).join("\n"),
+      leftText: `${left} hour${left === 1 ? "" : "s"}`,
+      confirmUrl: `${env.PUBLIC_SITE_URL.replace(/\/$/, "")}/confirm/${r.token}`,
+    },
+  });
+}
+
+async function closeWindow(r: Row, c: Ctx) {
+  // Which of the times their calendar shows them free for (when it can be read).
+  const exceptId = r.interviewId ?? undefined;
+  const freeTimes: string[] = [];
+  let checked = true;
+  for (const t of c.times) {
+    const f = await allFree(r.orgId, [r.email], new Date(t), c.durationMins, exceptId);
+    if (!f.checked) checked = false;
+    if (f.checked && f.free) freeTimes.push(t);
+  }
+  const who = r.name ?? r.email;
+  const hours = PANEL_ANSWER.windowHours;
+  const { writeAudit } = await import("../server/audit");
+  if (checked && freeTimes.length) {
+    // Silence with a free calendar counts as yes.
+    const [done] = await db
+      .update(interviewConfirmations)
+      .set({
+        state: "accepted",
+        okSlots: r.offerId ? freeTimes : null,
+        note: `No answer within ${hours} hours; their calendar shows them free — counted as yes.`,
+        respondedAt: new Date(),
+        lapsedAt: new Date(),
+      })
+      .where(and(eq(interviewConfirmations.id, r.id), eq(interviewConfirmations.state, "pending")))
+      .returning({ id: interviewConfirmations.id });
+    if (!done) return;
+    await writeAudit({
+      actor: "system:panel-answer-window",
+      orgId: r.orgId,
+      action: "interview.time_accepted_by_calendar",
+      entityType: r.interviewId ? "interview" : "interview_slot_offer",
+      entityId: (r.interviewId ?? r.offerId)!,
+      detail: { email: r.email, level: c.level, freeTimes },
+    });
+    if (r.offerId) await afterOfferAnswer(r.orgId, r.offerId, r, c);
+    else await releaseIfAgreed(r.orgId, r.interviewId!);
+    await tellDesk(
+      r.orgId,
+      c.applicationId,
+      (cand) =>
+        `${who} did not answer ${cand}'s L${c.level} interview time within ${hours} hours; their calendar shows them free, so it counts as yes and the candidate is contacted.`,
+    );
+    return;
+  }
+  if (r.offerId) {
+    // The candidate is not kept waiting on one silent panelist.
+    const [done] = await db
+      .update(interviewConfirmations)
+      .set({ state: "lapsed", lapsedAt: new Date() })
+      .where(and(eq(interviewConfirmations.id, r.id), eq(interviewConfirmations.state, "pending")))
+      .returning({ id: interviewConfirmations.id });
+    if (!done) return;
+    await writeAudit({
+      actor: "system:panel-answer-window",
+      orgId: r.orgId,
+      action: "interview.time_lapsed",
+      entityType: "interview_slot_offer",
+      entityId: r.offerId,
+      detail: { email: r.email, level: c.level },
+    });
+    await tellDesk(
+      r.orgId,
+      c.applicationId,
+      (cand) =>
+        `${who} did not answer the L${c.level} times proposed for ${cand} within ${hours} hours${checked ? " and their calendar is busy for them" : " and their calendar could not be checked"}. The candidate is offered the times the rest of the panel agreed; ${who} is asked again for the booked time.`,
+    );
+    await afterOfferAnswer(r.orgId, r.offerId, r, c);
+    return;
+  }
+  // A booked round: a person decides, in one click.
+  await db
+    .update(interviewConfirmations)
+    .set({ lapsedAt: new Date() })
+    .where(eq(interviewConfirmations.id, r.id));
+  await writeAudit({
+    actor: "system:panel-answer-window",
+    orgId: r.orgId,
+    action: "interview.time_unanswered",
+    entityType: "interview",
+    entityId: r.interviewId!,
+    detail: { email: r.email, level: c.level, calendarChecked: checked },
+  });
+  await raiseUnavailable(r.orgId, c.applicationId, r.interviewId!, c.level, r, null);
+  await tellDesk(
+    r.orgId,
+    c.applicationId,
+    (cand) =>
+      `${who} has not answered ${cand}'s L${c.level} interview time within ${hours} hours${checked ? " and their calendar is busy then" : " and their calendar could not be checked"}. Approve the stand-in the Interview coordinator proposes, or press Send invite now on the Interviews page.`,
+  );
 }

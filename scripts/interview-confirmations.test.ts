@@ -430,4 +430,95 @@ describe("interview confirmations", () => {
     expect(again).toHaveLength(2);
     expect((await invite(id)).filter((m) => m.status === "held")).toHaveLength(1);
   });
+
+  test("a silent panelist is reminded, then the offer goes ahead with the rest of the panel", async () => {
+    const r = await offerTwo([30, 31]);
+    const tok = await tokensOf(r.offerId);
+    await conf.answerConfirmation(tok[lead]!, { accept: true, okSlots: [r.slots[1]!] });
+    const back = (h: number) =>
+      db
+        .update(interviewConfirmations)
+        .set({ createdAt: new Date(Date.now() - h * 3600_000) })
+        .where(
+          and(
+            eq(interviewConfirmations.offerId, r.offerId),
+            eq(interviewConfirmations.email, second),
+          ),
+        );
+    const reminders = () =>
+      db
+        .select({ to: emailOutbox.toEmail })
+        .from(emailOutbox)
+        .where(and(eq(emailOutbox.orgId, orgId), eq(emailOutbox.kind, "panel_reminder")));
+    await back(2.5);
+    await conf.sweepPanelAnswers(orgId);
+    expect((await reminders()).map((m) => m.to)).toEqual([second]);
+    await conf.sweepPanelAnswers(orgId);
+    expect(await reminders()).toHaveLength(1);
+    // The window closes; no calendar is connected, so the panelist lapses and the
+    // candidate is offered the time the rest of the panel agreed.
+    await back(4.5);
+    await conf.sweepPanelAnswers(orgId);
+    const [row] = await db
+      .select({ state: interviewConfirmations.state })
+      .from(interviewConfirmations)
+      .where(
+        and(
+          eq(interviewConfirmations.offerId, r.offerId),
+          eq(interviewConfirmations.email, second),
+        ),
+      );
+    expect(row!.state).toBe("lapsed");
+    const [o] = await db
+      .select()
+      .from(interviewSlotOffers)
+      .where(eq(interviewSlotOffers.id, r.offerId));
+    expect(o!.slots.map((x) => Date.parse(x))).toEqual([Date.parse(r.slots[1]!)]);
+    expect(o!.linkEmailedAt).not.toBeNull();
+  });
+
+  test("a silent panelist on a booked round: a stand-in is asked for, the invite stays held", async () => {
+    const r = await scheduleInterviewCore(
+      { orgId, actor: "Madhu" },
+      {
+        applicationId: app,
+        level: 1,
+        interviewer: "Priya",
+        interviewerEmail: lead,
+        scheduledAt: inDays(33, 7).toISOString(),
+        durationMins: 60,
+        mode: "online",
+      },
+    );
+    const id = r.interviewId!;
+    await db
+      .update(interviewConfirmations)
+      .set({ createdAt: new Date(Date.now() - 5 * 3600_000) })
+      .where(
+        and(
+          eq(interviewConfirmations.interviewId, id),
+          eq(interviewConfirmations.party, "panelist"),
+        ),
+      );
+    await conf.sweepPanelAnswers(orgId);
+    const { agentEvents } = await import("../drizzle/schema");
+    const evs = await db
+      .select({ payload: agentEvents.payload })
+      .from(agentEvents)
+      .where(
+        and(eq(agentEvents.orgId, orgId), eq(agentEvents.type, "interview.panellist_unavailable")),
+      );
+    expect(evs.some((e) => (e.payload as { interviewId?: string }).interviewId === id)).toBe(true);
+    expect((await conf.confirmationsFor(orgId, [id]))[id]?.inviteHeld).toBe(true);
+    // Once handled, the sweep leaves it alone.
+    const before = evs.length;
+    await conf.sweepPanelAnswers(orgId);
+    const after = await db
+      .select({ id: agentEvents.id })
+      .from(agentEvents)
+      .where(
+        and(eq(agentEvents.orgId, orgId), eq(agentEvents.type, "interview.panellist_unavailable")),
+      );
+    expect(after).toHaveLength(before);
+  });
 });

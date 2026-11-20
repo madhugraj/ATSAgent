@@ -177,6 +177,8 @@ export const organizations = pgTable(
     hqCity: text("hq_city"),
     employeeBand: text("employee_band"),
     currency: text("currency").notNull().default("INR"),
+    /** End-to-end hiring SLA: days from application to offer (migration 0088). */
+    hiringSlaDays: smallint("hiring_sla_days").notNull().default(5),
     fiscalYearStartMonth: smallint("fiscal_year_start_month").notNull().default(4),
     careersEmail: text("careers_email"),
     onboardingStep: text("onboarding_step").notNull().default("profile"),
@@ -717,6 +719,8 @@ export const applications = pgTable(
     stage: appStageEnum("stage").notNull().default("applied"),
     source: text("source").notNull().default("direct"),
     appliedAt: timestamp("applied_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Last hiring-SLA state posted to the desk: at_risk | breached (migration 0088). */
+    slaFlag: text("sla_flag").$type<"at_risk" | "breached">(),
     lastActivityAt: timestamp("last_activity_at", { withTimezone: true }).notNull().defaultNow(),
     stageReason: text("stage_reason"),
     stageNote: text("stage_note"),
@@ -1073,7 +1077,7 @@ export const interviewConfirmations = pgTable(
     name: text("name"),
     token: text("token").notNull(),
     state: text("state")
-      .$type<"pending" | "accepted" | "declined" | "superseded">()
+      .$type<"pending" | "accepted" | "declined" | "superseded" | "lapsed">()
       .notNull()
       .default("pending"),
     scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
@@ -1082,6 +1086,9 @@ export const interviewConfirmations = pgTable(
     okSlots: jsonb("ok_slots").$type<string[]>(),
     /** Another time this person suggests (migration 0086). */
     suggestedAt: timestamp("suggested_at", { withTimezone: true }),
+    /** The answer window (migration 0088): when reminded, and when it closed unanswered. */
+    remindedAt: timestamp("reminded_at", { withTimezone: true }),
+    lapsedAt: timestamp("lapsed_at", { withTimezone: true }),
     respondedAt: timestamp("responded_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1428,7 +1435,8 @@ export type EmailOutboxKind =
   | "offer_negotiation"
   | "screening_call_booked"
   | "panel_summary"
-  | "panel_time_check";
+  | "panel_time_check"
+  | "panel_reminder";
 /** `held`: waiting on interview confirmations (migration 0085) — released to `queued`. */
 export type EmailOutboxStatus = "queued" | "held" | "sent" | "failed" | "suppressed";
 export type EmailOutboxAttachment = {

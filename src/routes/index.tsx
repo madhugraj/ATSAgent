@@ -286,7 +286,7 @@ function Dashboard() {
   const stalled = useMemo(
     () =>
       applications
-        .map((a) => ({ app: a, days: stalledDays(a.stage as Stage, a.last_activity_at) }))
+        .map((a) => ({ app: a, days: stalledDays(a.stage as Stage, a.last_activity_at, org?.hiring_sla_days) }))
         .filter((r): r is { app: (typeof applications)[number]; days: number } => r.days !== null)
         .sort((a, b) => b.days - a.days)
         .slice(0, 6),
@@ -340,7 +340,7 @@ function Dashboard() {
   );
   const stalledTotal = useMemo(
     () =>
-      applications.filter((a) => stalledDays(a.stage as Stage, a.last_activity_at) !== null).length,
+      applications.filter((a) => stalledDays(a.stage as Stage, a.last_activity_at, org?.hiring_sla_days) !== null).length,
     [applications],
   );
   const offersAwaiting = offerRows.filter(

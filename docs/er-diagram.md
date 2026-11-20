@@ -88,6 +88,7 @@ erDiagram
     text hq_city "nullable"
     text employee_band "nullable"
     text currency
+    smallint hiring_sla_days
     smallint fiscal_year_start_month
     text careers_email "nullable"
     text onboarding_step
@@ -420,6 +421,7 @@ erDiagram
     appStageEnum stage
     text source
     timestamptz applied_at
+    text sla_flag "nullable"
     timestamptz last_activity_at
     text stage_reason "nullable"
     text stage_note "nullable"
@@ -1404,7 +1406,7 @@ erDiagram
 | `ai_redteam_checks` | — | 8 | — |
 | `ai_settings` | Communications & AI settings | 11 | (org_id) |
 | `ai_usage_events` | Communications & AI settings | 19 | — |
-| `applications` | Candidates & pipeline | 10 | (requisitionId+candidateId) |
+| `applications` | Candidates & pipeline | 11 | (requisitionId+candidateId) |
 | `assessment_settings` | — | 8 | — |
 | `audit_log` | Identity & access | 10 | — |
 | `board_sync_state` | — | 11 | (integration_id) |
@@ -1433,7 +1435,7 @@ erDiagram
 | `hrms_sync_state` | — | 12 | (integrationId+entity) |
 | `inbox_messages` | Sourcing & integrations | 16 | — |
 | `integration_credentials` | Sourcing & integrations | 4 | — |
-| `interview_confirmations` | — | 15 | (token) |
+| `interview_confirmations` | — | 17 | (token) |
 | `interview_slot_offers` | — | 23 | (token) |
 | `interview_transcripts` | — | 8 | (interview_id) |
 | `interviews` | Screening & interviews | 24 | — |
@@ -1455,7 +1457,7 @@ erDiagram
 | `org_pool_shares` | Organisations & masters | 10 | (ownerOrg+partnerOrg) |
 | `org_profile_versions` | Organisations & masters | 16 | (orgId+version) |
 | `org_profiles` | Organisations & masters | 12 | — |
-| `organizations` | Organisations & masters | 27 | (slug), (capture_token), (capture_token_hash), (distribution_token_hash) |
+| `organizations` | Organisations & masters | 28 | (slug), (capture_token), (capture_token_hash), (distribution_token_hash) |
 | `panel_agent_settings` | — | 5 | — |
 | `panel_assessments` | — | 23 | (interview_id) |
 | `panelist_scorecard_links` | — | 8 | (interviewId+panelistId), (token_hash) |

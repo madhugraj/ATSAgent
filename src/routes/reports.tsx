@@ -13,7 +13,17 @@ import {
   offersQuery,
   requisitionsQuery,
 } from "@/lib/data";
-import { canonical, FLOW, isTerminal, stalledDays, STAGE_LABEL, type Stage } from "@/lib/lifecycle";
+import {
+  canonical,
+  DEFAULT_HIRING_SLA_DAYS,
+  FLOW,
+  hiringSla,
+  isTerminal,
+  stalledDays,
+  STAGE_LABEL,
+  type Stage,
+} from "@/lib/lifecycle";
+import { useOrg } from "@/hooks/useOrg";
 import { HrPerformance } from "@/components/HrPerformance";
 import { EmptyState, PageHeader, ScoreBar, StatCard, inr } from "@/components/ats";
 import { Button } from "@/components/ui/button";
@@ -96,6 +106,8 @@ function downloadCsv(name: string, rows: (string | number)[][]) {
 }
 
 function Reports() {
+  const { org } = useOrg();
+  const slaDays = org?.hiring_sla_days ?? DEFAULT_HIRING_SLA_DAYS;
   const apps = useQuery(applicationsQuery);
   const reqs = useQuery(requisitionsQuery);
   const cands = useQuery(candidatesQuery);
@@ -179,7 +191,15 @@ function Reports() {
   const top = Math.max(1, reached[0]?.count ?? 1);
 
   const active = applications.filter((a) => !isTerminal(canonical(a.stage)));
-  const stalled = active.filter((a) => stalledDays(a.stage as Stage, a.last_activity_at) !== null);
+  const stalled = active.filter(
+    (a) => stalledDays(a.stage as Stage, a.last_activity_at, slaDays) !== null,
+  );
+  // The end-to-end hiring SLA: application to a released offer.
+  const inSla = active
+    .map((a) => hiringSla(a.stage as Stage, a.applied_at, slaDays))
+    .filter((x) => x !== null);
+  const slaBreached = inSla.filter((x) => x.state === "breached").length;
+  const slaAtRisk = inSla.filter((x) => x.state === "at_risk").length;
   const joined = applications.filter((a) => canonical(a.stage) === "joined");
   const released = scopedOffers.filter((o) =>
     ["released", "accepted", "declined"].includes(o.status),
@@ -260,8 +280,9 @@ function Reports() {
           .length,
         joined: j,
         gap: r.openings - j,
-        stalled: as.filter((a) => stalledDays(a.stage as Stage, a.last_activity_at) !== null)
-          .length,
+        stalled: as.filter(
+          (a) => stalledDays(a.stage as Stage, a.last_activity_at, slaDays) !== null,
+        ).length,
         avgScore: scored.length
           ? Math.round(
               scored.reduce((s, a) => s + scoreMap.get(a.id)!.overall_score, 0) / scored.length,
@@ -329,7 +350,7 @@ function Reports() {
           scoreMap.get(a.id)?.overall_score ?? "",
           sourceLabel(a.source),
           new Date(a.applied_at).toISOString().slice(0, 10),
-          stalledDays(a.stage as Stage, a.last_activity_at) ?? "",
+          stalledDays(a.stage as Stage, a.last_activity_at, slaDays) ?? "",
         ];
       }),
     ]);
@@ -426,7 +447,7 @@ function Reports() {
         </div>
       </section>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <StatCard
           label="Applications in scope"
           value={applications.length}
@@ -437,6 +458,12 @@ function Reports() {
           value={active.length}
           hint={`${stalled.length} breaching stage SLA`}
           tone={stalled.length > 0 ? "destructive" : "default"}
+        />
+        <StatCard
+          label={`${slaDays}-day hiring SLA`}
+          value={inSla.length - slaBreached - slaAtRisk}
+          hint={`on track · ${slaAtRisk} at risk · ${slaBreached} past`}
+          tone={slaBreached > 0 ? "destructive" : "default"}
         />
         <StatCard
           label="Offer acceptance"
