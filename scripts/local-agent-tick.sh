@@ -9,3 +9,5 @@ SECRET=$(grep '^CRON_SECRET=' "$DIR/.env.local" 2>/dev/null | head -1 | cut -d= 
 [ -n "$SECRET" ] || { echo "$(date -u +%FT%TZ) no CRON_SECRET in $DIR/.env.local"; exit 1; }
 OUT=$(curl -s -m 170 -X POST -H "Authorization: Bearer $SECRET" "http://localhost:$PORT/api/public/agent-tick")
 echo "$(date -u +%FT%TZ) $OUT"
+# …and send queued e-mail (production runs this on its own schedule).
+echo "$(date -u +%FT%TZ) outbox $(curl -s -m 100 -X POST -H "Authorization: Bearer $SECRET" "http://localhost:$PORT/api/public/process-email-outbox")"
