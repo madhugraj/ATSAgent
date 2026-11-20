@@ -36,8 +36,16 @@ import {
 } from "lucide-react";
 
 import { EmptyState, PageHeader } from "@/components/ats";
-import { WorkflowApp } from "@/components/agents/WorkflowApp";
-import { deskWorkflows } from "@/lib/org-workflows.functions";
+import { WorkflowJourney } from "@/components/agents/WorkflowApp";
+import { WorkflowRunRequests } from "@/components/agents/AgentTaskCard";
+import { StoppedStepActions } from "@/components/agents/StoppedStepActions";
+import {
+  deskWorkflows,
+  orgWorkflowApp,
+  startOrgWorkflowRun,
+  type AppRun,
+} from "@/lib/org-workflows.functions";
+import type { WorkflowGraph as WfGraph } from "@db/schema";
 import { OrgProfileNotice } from "@/components/OrgProfileNotice";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -191,7 +199,10 @@ function DeskPage() {
           >
             <DeskWorkflowList
               current={workflow}
-              onSelect={(id) => void navigate({ search: { workflow: id } })}
+              currentRun={run}
+              onSelect={(id, r) =>
+                void navigate({ search: r ? { workflow: id, run: r } : { workflow: id } })
+              }
             />
             {list.isLoading ? (
               <p className="p-3 text-sm text-muted-foreground">Loading…</p>
@@ -208,7 +219,14 @@ function DeskPage() {
             <RecentlyDeleted onRestored={(id) => select(id)} />
           </aside>
           {workflow ? (
-            <WorkflowApp workflowId={workflow} focus={run} compact />
+            run ? (
+              <DeskWorkflowRun workflowId={workflow} runId={run} />
+            ) : (
+              <DeskWorkflowStart
+                workflowId={workflow}
+                onStarted={(id) => void navigate({ search: { workflow, run: id } })}
+              />
+            )
           ) : c ? (
             <Thread id={c} onDeleted={() => select(undefined)} />
           ) : (
@@ -220,43 +238,232 @@ function DeskPage() {
   );
 }
 
-/** Workflows the platform shared with this organisation, run from the desk. */
+/** Workflows the platform shared with this organisation; the open one lists its runs like conversations. */
 function DeskWorkflowList({
   current,
+  currentRun,
   onSelect,
 }: {
   current: string | undefined;
-  onSelect: (id: string) => void;
+  currentRun: string | undefined;
+  onSelect: (id: string, run?: string) => void;
 }) {
   const q = useQuery({
     queryKey: ["desk_workflows"],
     queryFn: () => deskWorkflows(),
     refetchInterval: 30_000,
   });
+  const app = useWorkflowApp(current);
   if (!q.data?.length) return null;
   return (
     <div className="mb-2 border-b pb-2">
       <div className="px-2 py-1 text-xs font-medium text-muted-foreground">Workflows</div>
       {q.data.map((w) => (
-        <button
-          key={w.id}
-          type="button"
-          onClick={() => onSelect(w.id)}
-          className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted ${current === w.id ? "bg-muted font-medium" : ""}`}
-        >
-          <Workflow className="size-4 shrink-0 text-muted-foreground" />
-          <span className="flex-1 truncate">{w.name}</span>
-          {w.needsYou ? (
-            <Badge className="bg-amber-500/15 text-amber-800 hover:bg-amber-500/15">
-              {w.needsYou}
-            </Badge>
-          ) : w.live ? (
-            <Badge variant="secondary">{w.live}</Badge>
-          ) : !w.ready ? (
-            <Badge variant="outline">Not ready</Badge>
+        <div key={w.id}>
+          <button
+            type="button"
+            onClick={() => onSelect(w.id)}
+            className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted ${current === w.id && !currentRun ? "bg-muted font-medium" : ""}`}
+          >
+            <Workflow className="size-4 shrink-0 text-muted-foreground" />
+            <span className="flex-1 truncate">{w.name}</span>
+            {w.needsYou ? (
+              <span className="inline-block size-2 rounded-full bg-amber-500" />
+            ) : !w.ready ? (
+              <Badge variant="outline">Not ready</Badge>
+            ) : null}
+          </button>
+          {current === w.id && app.data?.runs.length ? (
+            <ul className="ml-4 border-l pl-1">
+              {app.data.runs.map((r) => (
+                <li key={r.id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelect(w.id, r.id)}
+                    className={`w-full rounded-md px-2 py-1.5 text-left hover:bg-muted ${currentRun === r.id ? "bg-muted" : ""}`}
+                  >
+                    <span className="flex items-center gap-2 text-sm">
+                      <span className="flex-1 truncate">{r.need ?? "Run"}</span>
+                      {r.waitingOn?.kind === "person" || r.waitingOn?.kind === "stopped" ? (
+                        <span className="inline-block size-2 shrink-0 rounded-full bg-amber-500" />
+                      ) : null}
+                    </span>
+                    <span className="block text-xs text-muted-foreground">
+                      {runOutcome(r)} · {new Date(r.createdAt).toLocaleDateString()}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
           ) : null}
-        </button>
+        </div>
       ))}
+    </div>
+  );
+}
+
+function useWorkflowApp(workflowId: string | undefined) {
+  return useQuery({
+    queryKey: ["workflow_app", workflowId],
+    queryFn: () => orgWorkflowApp({ data: { workflowId: workflowId! } }),
+    enabled: Boolean(workflowId),
+    retry: false,
+    refetchInterval: (query) =>
+      query.state.data?.runs.some((r) => r.status === "waiting" || r.status === "running")
+        ? 10_000
+        : false,
+  });
+}
+
+const stepName = (graph: WfGraph | null, id: string) => {
+  const n = graph?.nodes.find((x) => x.id === id);
+  return n ? n.data.label || n.data.agentType || n.kind : id;
+};
+
+function runOutcome(r: AppRun): string {
+  if (r.status === "running" || r.status === "waiting") return "In progress";
+  if (r.status === "failed") return "Failed";
+  const last = r.history.at(-1);
+  return last?.note === "Ended." ? stepName(r.graph, last.node) : "Done";
+}
+
+/** A new workflow run, started like a new desk conversation. */
+function DeskWorkflowStart({
+  workflowId,
+  onStarted,
+}: {
+  workflowId: string;
+  onStarted: (runId: string) => void;
+}) {
+  const qc = useQueryClient();
+  const app = useWorkflowApp(workflowId);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const v = app.data;
+  async function start() {
+    if (text.trim().length < 5) return;
+    setBusy(true);
+    try {
+      const { runId } = await startOrgWorkflowRun({ data: { workflowId, need: text.trim() } });
+      await qc.invalidateQueries({ queryKey: ["workflow_app", workflowId] });
+      onStarted(runId);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not start");
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (app.error)
+    return (
+      <section className="panel p-6 text-sm text-muted-foreground">
+        {app.error instanceof Error ? app.error.message : "This workflow is not available."}
+      </section>
+    );
+  if (!v) return <section className="panel p-6 text-sm text-muted-foreground">Loading…</section>;
+  const canStart = v.canStart && v.ready && v.workflow.trigger === "manual";
+  return (
+    <section className="panel flex flex-col items-center justify-center gap-4 p-8 text-center">
+      <Workflow className="size-8 text-primary" aria-hidden />
+      <div>
+        <h2 className="text-lg font-semibold">{v.workflow.name}</h2>
+        <p className="mt-1 max-w-xl text-sm text-muted-foreground">{v.workflow.description}</p>
+      </div>
+      {!v.ready ? (
+        <p className="text-sm text-destructive">
+          {v.items
+            .filter((i) => !i.ok)
+            .map((i) => i.label)
+            .join(" · ")}
+        </p>
+      ) : null}
+      {canStart ? (
+        <Composer
+          value={text}
+          onChange={setText}
+          busy={busy}
+          onSend={start}
+          placeholder="Who do you need? e.g. Two AI engineers in Chennai, hybrid, by March"
+        />
+      ) : null}
+    </section>
+  );
+}
+
+/** One workflow run, shown like a desk conversation with its journey alongside. */
+function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: string }) {
+  const qc = useQueryClient();
+  const app = useWorkflowApp(workflowId);
+  const v = app.data;
+  const r = v?.runs.find((x) => x.id === runId);
+  if (!v) return <section className="panel p-6 text-sm text-muted-foreground">Loading…</section>;
+  if (!r)
+    return <section className="panel p-6 text-sm text-muted-foreground">Run not found.</section>;
+  const graph = r.graph ?? v.workflow.graph;
+  const kind = (id: string) => graph.nodes.find((n) => n.id === id)?.kind;
+  // One update per step, in plain words; checks and the start are left out.
+  const updates: { node: string; at: string; text: string }[] = [];
+  for (const h of r.history) {
+    const k = kind(h.node);
+    if (k !== "agent" && k !== "wait" && k !== "report" && k !== "end") continue;
+    const text =
+      h.note === "Agent started." || h.note.startsWith("Joined the run")
+        ? "Working on it."
+        : h.note === "Agent done."
+          ? "Done."
+          : h.note === "Ended."
+            ? "This workflow has ended."
+            : h.note.startsWith("Waiting for")
+              ? "Waiting for the approval."
+              : h.note.endsWith(" happened.")
+                ? "Approved — moving on."
+                : h.note;
+    const prev = updates.at(-1);
+    if (prev && prev.node === h.node) prev.text = text;
+    else updates.push({ node: h.node, at: h.at, text });
+  }
+  const needsYou = r.waitingOn?.kind === "person" || r.waitingOn?.kind === "stopped";
+  return (
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
+      <div className="xl:order-2">
+        <WorkflowJourney run={r} graph={graph} />
+      </div>
+      <section className="panel flex h-[calc(100vh-9.5rem)] min-h-[460px] flex-col xl:order-1">
+        <header className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
+          <h2 className="font-semibold">{v.workflow.name}</h2>
+          <Badge variant="outline">{runOutcome(r)}</Badge>
+          {needsYou ? <span className="inline-block size-2 rounded-full bg-amber-500" /> : null}
+        </header>
+        <div className="flex-1 space-y-3 overflow-y-auto p-4">
+          {r.need ? <Bubble role="user" body={r.need} /> : null}
+          {updates.map((u, i) => (
+            <Bubble
+              key={i}
+              role="agent"
+              who={kind(u.node) === "end" ? undefined : stepName(graph, u.node)}
+              body={u.text}
+            />
+          ))}
+          {r.error ? <p className="text-xs text-destructive">{r.error}</p> : null}
+        </div>
+        {r.waitingOn ? (
+          <footer
+            className={`space-y-2 border-t px-4 py-3 text-sm ${needsYou ? "bg-amber-500/10" : ""}`}
+          >
+            <p>{r.waitingOn.text}</p>
+            {r.waitingOn.kind === "stopped" && v.canStart ? (
+              <StoppedStepActions workflowRunId={r.id} invalidate={["workflow_app", workflowId]} />
+            ) : null}
+            {r.waitingOn.kind === "person" ? (
+              <WorkflowRunRequests
+                workflowRunId={r.id}
+                onDecided={() =>
+                  void qc.invalidateQueries({ queryKey: ["workflow_app", workflowId] })
+                }
+              />
+            ) : null}
+          </footer>
+        ) : null}
+      </section>
     </div>
   );
 }

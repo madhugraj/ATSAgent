@@ -361,14 +361,14 @@ function ApiKeys({ workflowId, manual }: { workflowId: string; manual: boolean }
   );
 }
 
-type Graph = AppRun["graph"] & object;
+export type Graph = AppRun["graph"] & object;
 const isLive = (r: AppRun) => r.status === "waiting" || r.status === "running";
 
 /**
  * The steps a person cares about, in order: the agents and waits on the main
  * path (following "yes" at each check), plus any off-path step this run took.
  */
-function journeySteps(graph: Graph, run: AppRun): { id: string; label: string }[] {
+export function journeySteps(graph: Graph, run: AppRun): { id: string; label: string }[] {
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
   const name = (id: string) => {
     const n = byId.get(id);
@@ -544,5 +544,58 @@ function JourneyRun({
         })}
       </ol>
     </article>
+  );
+}
+
+/** The run's steps as the desk's hiring journey: done, now, to come (no actions). */
+export function WorkflowJourney({ run, graph }: { run: AppRun; graph: Graph }) {
+  const steps = journeySteps(graph, run);
+  const done = new Set(
+    run.history
+      .filter((h) => h.note === "Agent done." || h.note.endsWith(" happened."))
+      .map((h) => h.node),
+  );
+  const live = isLive(run);
+  const nowId = live
+    ? (steps.find((s) => s.id === run.currentNode)?.id ?? steps.find((s) => !done.has(s.id))?.id)
+    : undefined;
+  return (
+    <aside className="panel p-4 xl:sticky xl:top-4">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Workflow journey
+      </h3>
+      <ol className="mt-3" aria-label="Workflow progress">
+        {steps.map((s, i) => {
+          const last = i === steps.length - 1;
+          const isNow = s.id === nowId;
+          const isDone = done.has(s.id) && !isNow;
+          return (
+            <li key={s.id} className="relative flex gap-3 pb-3">
+              {!last ? (
+                <span
+                  aria-hidden
+                  className={`absolute left-[9px] top-6 bottom-0 w-px ${isDone ? "bg-primary/50" : "bg-border"}`}
+                />
+              ) : null}
+              <span className="relative z-10 mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-card">
+                {isDone ? (
+                  <CheckCircle2 className="size-5 text-primary" aria-label="done" />
+                ) : isNow ? (
+                  <CircleDot className="size-5 text-primary" aria-label="current step" />
+                ) : (
+                  <Circle className="size-5 text-muted-foreground/40" aria-label="to come" />
+                )}
+              </span>
+              <p
+                className={`text-sm ${isNow ? "font-semibold" : isDone ? "" : "text-muted-foreground"}`}
+              >
+                <span className="num mr-1 text-xs text-muted-foreground">{i + 1}.</span>
+                {s.label}
+              </p>
+            </li>
+          );
+        })}
+      </ol>
+    </aside>
   );
 }
