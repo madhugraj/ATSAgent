@@ -439,7 +439,7 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
             <Bubble
               key={i}
               role="agent"
-              who={kind(u.node) === "end" ? undefined : stepName(graph, u.node)}
+              {...(kind(u.node) === "end" ? {} : { who: stepName(graph, u.node) })}
               body={u.text}
             />
           ))}
