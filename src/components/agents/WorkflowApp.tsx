@@ -548,7 +548,16 @@ function JourneyRun({
 }
 
 /** The run's steps as the desk's hiring journey: done, now, to come (no actions). */
-export function WorkflowJourney({ run, graph }: { run: AppRun; graph: Graph }) {
+export function WorkflowJourney({
+  run,
+  graph,
+  onReview,
+}: {
+  run: AppRun;
+  graph: Graph;
+  /** Shows the run's waiting request in the conversation. */
+  onReview?: () => void;
+}) {
   const steps = journeySteps(graph, run);
   const done = new Set(
     run.history
@@ -560,7 +569,7 @@ export function WorkflowJourney({ run, graph }: { run: AppRun; graph: Graph }) {
     ? (steps.find((s) => s.id === run.currentNode)?.id ?? steps.find((s) => !done.has(s.id))?.id)
     : undefined;
   return (
-    <aside className="panel p-4 xl:sticky xl:top-4">
+    <aside className="panel p-4 xl:sticky xl:top-4 xl:max-h-[calc(100vh-13rem)] xl:overflow-y-auto">
       <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         Workflow journey
       </h3>
@@ -586,12 +595,36 @@ export function WorkflowJourney({ run, graph }: { run: AppRun; graph: Graph }) {
                   <Circle className="size-5 text-muted-foreground/40" aria-label="to come" />
                 )}
               </span>
-              <p
-                className={`text-sm ${isNow ? "font-semibold" : isDone ? "" : "text-muted-foreground"}`}
-              >
-                <span className="num mr-1 text-xs text-muted-foreground">{i + 1}.</span>
-                {s.label}
-              </p>
+              <div className="min-w-0 flex-1">
+                <p
+                  className={`text-sm ${isNow ? "font-semibold" : isDone ? "" : "text-muted-foreground"}`}
+                >
+                  <span className="num mr-1 text-xs text-muted-foreground">{i + 1}.</span>
+                  {s.label}
+                </p>
+                {isNow && run.waitingOn ? (
+                  <div
+                    className={`mt-1.5 flex items-start gap-2 rounded-md border-l-[3px] p-2 text-xs ${
+                      run.waitingOn.kind === "person" || run.waitingOn.kind === "stopped"
+                        ? "border-l-amber-500 bg-amber-500/10"
+                        : "border-l-border bg-muted/40"
+                    }`}
+                  >
+                    <p className="min-w-0 flex-1 text-foreground">{run.waitingOn.text}</p>
+                    {(run.waitingOn.kind === "person" || run.waitingOn.kind === "stopped") &&
+                    onReview ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-6 px-2 text-[11px]"
+                        onClick={onReview}
+                      >
+                        Review
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
             </li>
           );
         })}
