@@ -406,7 +406,9 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
     const k = kind(h.node);
     if (k !== "agent" && k !== "wait" && k !== "report" && k !== "end") continue;
     const text =
-      h.note === "Agent started." || h.note.startsWith("Joined the run")
+      h.note === "Agent started." ||
+      h.note === "Linked to its role." ||
+      h.note.startsWith("Joined the run")
         ? "Working on it."
         : h.note === "Agent done."
           ? "Done."
