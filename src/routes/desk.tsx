@@ -20,10 +20,13 @@ import {
   Sparkles,
   Trash2,
   UserRound,
+  Workflow,
   X,
 } from "lucide-react";
 
 import { EmptyState, PageHeader } from "@/components/ats";
+import { WorkflowApp } from "@/components/agents/WorkflowApp";
+import { deskWorkflows } from "@/lib/org-workflows.functions";
 import { OrgProfileNotice } from "@/components/OrgProfileNotice";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -75,7 +78,12 @@ import {
 } from "@/lib/hiring-desk.functions";
 
 export const Route = createFileRoute("/desk")({
-  validateSearch: z.object({ c: z.string().optional(), split: z.string().optional() }),
+  validateSearch: z.object({
+    c: z.string().optional(),
+    split: z.string().optional(),
+    workflow: z.string().uuid().optional(),
+    run: z.string().uuid().optional(),
+  }),
   head: () => ({
     meta: [
       { title: "Hiring desk — ATSIQ" },
@@ -96,7 +104,7 @@ const EXAMPLES = [
 ];
 
 function DeskPage() {
-  const { c, split } = Route.useSearch();
+  const { c, split, workflow, run } = Route.useSearch();
   const navigate = useNavigate({ from: "/desk" });
   const splitIds = (split ?? "")
     .split(",")
@@ -129,6 +137,10 @@ function DeskPage() {
       ) : (
         <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
           <aside className="panel h-fit max-h-[70vh] overflow-y-auto p-2">
+            <DeskWorkflowList
+              current={workflow}
+              onSelect={(id) => void navigate({ search: { workflow: id } })}
+            />
             {list.isLoading ? (
               <p className="p-3 text-sm text-muted-foreground">Loading…</p>
             ) : !list.data?.length ? (
@@ -143,7 +155,9 @@ function DeskPage() {
             )}
             <RecentlyDeleted onRestored={(id) => select(id)} />
           </aside>
-          {c ? (
+          {workflow ? (
+            <WorkflowApp workflowId={workflow} focus={run} />
+          ) : c ? (
             <Thread id={c} onDeleted={() => select(undefined)} />
           ) : (
             <NewThread onStarted={(id) => select(id)} />
@@ -151,6 +165,47 @@ function DeskPage() {
         </div>
       )}
     </>
+  );
+}
+
+/** Workflows the platform shared with this organisation, run from the desk. */
+function DeskWorkflowList({
+  current,
+  onSelect,
+}: {
+  current: string | undefined;
+  onSelect: (id: string) => void;
+}) {
+  const q = useQuery({
+    queryKey: ["desk_workflows"],
+    queryFn: () => deskWorkflows(),
+    refetchInterval: 30_000,
+  });
+  if (!q.data?.length) return null;
+  return (
+    <div className="mb-2 border-b pb-2">
+      <div className="px-2 py-1 text-xs font-medium text-muted-foreground">Workflows</div>
+      {q.data.map((w) => (
+        <button
+          key={w.id}
+          type="button"
+          onClick={() => onSelect(w.id)}
+          className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted ${current === w.id ? "bg-muted font-medium" : ""}`}
+        >
+          <Workflow className="size-4 shrink-0 text-muted-foreground" />
+          <span className="flex-1 truncate">{w.name}</span>
+          {w.needsYou ? (
+            <Badge className="bg-amber-500/15 text-amber-800 hover:bg-amber-500/15">
+              {w.needsYou}
+            </Badge>
+          ) : w.live ? (
+            <Badge variant="secondary">{w.live}</Badge>
+          ) : !w.ready ? (
+            <Badge variant="outline">Not ready</Badge>
+          ) : null}
+        </button>
+      ))}
+    </div>
   );
 }
 
