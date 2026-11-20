@@ -330,12 +330,18 @@ export const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-/** The way of working a page belongs to (null for shared pages), by longest matching path. */
+/**
+ * The way of working a page belongs to (null for shared pages). Only a menu
+ * page itself sets the mode; a record opened from either side (a requisition
+ * linked from the hiring desk, a candidate from an approval) keeps the mode you
+ * are in, so following a link never flips the menu.
+ */
 export function modeForPath(pathname: string): WorkMode | null {
   let best: { len: number; mode: WorkMode | null } = { len: -1, mode: null };
+  const path = pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
   for (const item of NAV_GROUPS.flatMap((g) => g.items)) {
     const to = item.to;
-    const hit = to === "/" ? pathname === "/" : pathname === to || pathname.startsWith(`${to}/`);
+    const hit = path === to;
     if (hit && to.length > best.len) best = { len: to.length, mode: item.mode ?? null };
   }
   return best.mode;
