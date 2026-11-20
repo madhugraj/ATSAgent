@@ -422,16 +422,31 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
     else updates.push({ node: h.node, at: h.at, text });
   }
   const needsYou = r.waitingOn?.kind === "person" || r.waitingOn?.kind === "stopped";
+  const showAction = () => {
+    const el = document.getElementById(`wf-action-${r.id}`);
+    el?.scrollIntoView({ behavior: "smooth", block: "start" });
+    el?.classList.add("ring-2", "ring-primary");
+    window.setTimeout(() => el?.classList.remove("ring-2", "ring-primary"), 1600);
+  };
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
       <div className="xl:order-2">
-        <WorkflowJourney run={r} graph={graph} />
+        <WorkflowJourney run={r} graph={graph} onReview={showAction} />
       </div>
       <section className="panel flex h-[calc(100vh-9.5rem)] min-h-[460px] flex-col xl:order-1">
         <header className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
           <h2 className="font-semibold">{v.workflow.name}</h2>
           <Badge variant="outline">{runOutcome(r)}</Badge>
           {needsYou ? <span className="inline-block size-2 rounded-full bg-amber-500" /> : null}
+          {r.requisition ? (
+            <Link
+              to="/requisitions/$id"
+              params={{ id: r.requisition.id }}
+              className="ml-auto text-xs text-primary underline"
+            >
+              {r.requisition.code} · {r.requisition.status.replace(/_/g, " ")}
+            </Link>
+          ) : null}
         </header>
         <div className="flex-1 space-y-3 overflow-y-auto p-4">
           {r.need ? <Bubble role="user" body={r.need} /> : null}
@@ -444,25 +459,44 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
             />
           ))}
           {r.error ? <p className="text-xs text-destructive">{r.error}</p> : null}
+          {needsYou ? (
+            <div id={`wf-action-${r.id}`} className="rounded-lg transition-shadow">
+              {r.waitingOn?.kind === "stopped" ? (
+                <div className="space-y-2 rounded-lg border border-amber-500/50 bg-amber-500/10 p-3 text-sm">
+                  <p>{r.waitingOn.text}</p>
+                  {v.canStart ? (
+                    <StoppedStepActions
+                      workflowRunId={r.id}
+                      invalidate={["workflow_app", workflowId]}
+                    />
+                  ) : null}
+                </div>
+              ) : (
+                <WorkflowRunRequests
+                  workflowRunId={r.id}
+                  onDecided={() =>
+                    void qc.invalidateQueries({ queryKey: ["workflow_app", workflowId] })
+                  }
+                />
+              )}
+            </div>
+          ) : null}
         </div>
-        {r.waitingOn ? (
-          <footer
-            className={`space-y-2 border-t px-4 py-3 text-sm ${needsYou ? "bg-amber-500/10" : ""}`}
-          >
-            <p>{r.waitingOn.text}</p>
-            {r.waitingOn.kind === "stopped" && v.canStart ? (
-              <StoppedStepActions workflowRunId={r.id} invalidate={["workflow_app", workflowId]} />
-            ) : null}
-            {r.waitingOn.kind === "person" ? (
-              <WorkflowRunRequests
-                workflowRunId={r.id}
-                onDecided={() =>
-                  void qc.invalidateQueries({ queryKey: ["workflow_app", workflowId] })
-                }
-              />
-            ) : null}
-          </footer>
-        ) : null}
+        <footer className="space-y-2 border-t border-border p-3">
+          {needsYou ? (
+            <button
+              type="button"
+              onClick={showAction}
+              className="w-full rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-left text-sm text-primary"
+            >
+              {r.waitingOn?.kind === "stopped"
+                ? "A step stopped in this run — show"
+                : `${r.waitingOn?.text.replace(/^.* — /, "") ?? "Requests"} waiting for you in this run — show`}
+            </button>
+          ) : r.waitingOn ? (
+            <p className="px-1 text-sm text-muted-foreground">{r.waitingOn.text}</p>
+          ) : null}
+        </footer>
       </section>
     </div>
   );

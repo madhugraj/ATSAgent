@@ -142,6 +142,8 @@ export type AppRun = {
   waitingOn: { kind: "person" | "agent" | "event" | "stopped"; text: string } | null;
   /** The graph of the version this run ran. */
   graph: import("@db/schema").WorkflowGraph | null;
+  /** The role the run is working on, once it has one. */
+  requisition: { id: string; code: string; status: string } | null;
 };
 
 /** Everything the workflow app shows: the workflow, whether it can run here, and its runs. */
@@ -171,6 +173,22 @@ export const orgWorkflowApp = createServerFn({ method: "GET" })
       .limit(1);
     const canManage = await hasRole(context.userId, context.orgId, MANAGE_ROLES);
     const canStart = await hasRole(context.userId, context.orgId, RUN_ROLES);
+    const { requisitions } = await import("@db/schema");
+    const reqIds = [
+      ...new Set(
+        rows
+          .map((r) => (r.context as { subject?: { id?: string; type?: string } } | null)?.subject)
+          .filter((x) => x?.type === "requisition" && x.id)
+          .map((x) => x!.id!),
+      ),
+    ];
+    const reqs = reqIds.length
+      ? await db
+          .select({ id: requisitions.id, code: requisitions.code, status: requisitions.status })
+          .from(requisitions)
+          .where(and(eq(requisitions.orgId, context.orgId), inArray(requisitions.id, reqIds)))
+      : [];
+    const reqById = new Map(reqs.map((x) => [x.id, x]));
     const graphs = new Map<number, import("@db/schema").WorkflowGraph | null>();
     for (const r of rows)
       if (!graphs.has(r.version)) graphs.set(r.version, await runVersionGraph(g.id, r.version));
@@ -200,6 +218,9 @@ export const orgWorkflowApp = createServerFn({ method: "GET" })
           need: typeof need === "string" ? need : null,
           waitingOn: w ? { kind: w.kind, text: w.text } : null,
           graph: graphs.get(r.version) ?? null,
+          requisition:
+            reqById.get((r.context as { subject?: { id?: string } } | null)?.subject?.id ?? "") ??
+            null,
         };
       }),
     };
