@@ -230,12 +230,41 @@ export function keptShares(
 }
 
 /**
+ * The competencies a panelist's split moves too far (pure). Each one that
+ * stays is judged by its share among the competencies that stay, before and
+ * after, so dropping one or adding new ones alone moves nothing; a move of
+ * more than PANEL_SHARE_LIMIT is too far.
+ */
+export function movedTooFar(
+  before: Pick<PlanRoundT, "competencies" | "weights">,
+  proposed: Pick<PlanRoundT, "competencies" | "weights">,
+): { name: string; was: number; is: number }[] {
+  const was = keptShares(before, proposed);
+  const keptNow = proposed.competencies.filter((c) => norm(c) in was);
+  const is = sharesOf({ competencies: keptNow, weights: proposed.weights });
+  return keptNow
+    .filter((c) => Math.abs((is[norm(c)] ?? 0) - (was[norm(c)] ?? 0)) > PANEL_SHARE_LIMIT + 1e-9)
+    .map((c) => ({ name: c, was: was[norm(c)] ?? 0, is: is[norm(c)] ?? 0 }));
+}
+
+/** Competencies that would outweigh one of the role's must-haves (pure). */
+export function outweighMustHaves(
+  proposed: Pick<PlanRoundT, "competencies" | "weights">,
+  mustHave: string[] | null | undefined,
+): string[] {
+  const must = new Set((mustHave ?? []).map(norm));
+  const musts = proposed.competencies.filter((c) => must.has(norm(c)));
+  if (!musts.length) return [];
+  const floor = Math.min(...musts.map((c) => weightOf(proposed, c)));
+  return proposed.competencies.filter((c) => !must.has(norm(c)) && weightOf(proposed, c) > floor);
+}
+
+/**
  * What a panelist's change breaks (pure; empty = within the rules). The level,
  * name and panel size are the hiring team's and are kept by the caller; the
- * role's must-have competencies cannot be removed, and no competency that
- * stays may move by more than PANEL_SHARE_LIMIT of the overall (against its
- * share among the competencies that stay, so new ones take their share from
- * the others within that limit).
+ * role's must-haves stay on the scorecard and nothing else outweighs them,
+ * and no competency that stays moves by more than PANEL_SHARE_LIMIT among
+ * the competencies that stay.
  */
 export function panelChangeViolations(
   before: PlanRoundT,
@@ -247,17 +276,12 @@ export function panelChangeViolations(
   for (const c of lockedCompetencies(before, mustHave))
     if (!now.has(norm(c)))
       out.push(`"${c}" is a must-have for the role and stays on the scorecard.`);
-  const was = keptShares(before, proposed);
-  const is = sharesOf(proposed);
-  for (const c of before.competencies) {
-    const k = norm(c);
-    if (!(k in is)) continue;
-    const moved = Math.abs((is[k] ?? 0) - (was[k] ?? 0));
-    if (moved > PANEL_SHARE_LIMIT + 1e-9)
-      out.push(
-        `"${c}" would move from ${Math.round((was[k] ?? 0) * 100)}% to ${Math.round((is[k] ?? 0) * 100)}% of the overall; a panel change can move it by ${PANEL_SHARE_LIMIT * 100} points at most.`,
-      );
-  }
+  for (const m of movedTooFar(before, proposed))
+    out.push(
+      `"${m.name}" would move from ${Math.round(m.was * 100)}% to ${Math.round(m.is * 100)}% of the original competencies; a panel change can move it by ${PANEL_SHARE_LIMIT * 100} points at most.`,
+    );
+  for (const c of outweighMustHaves(proposed, mustHave))
+    out.push(`"${c}" would weigh more than one of the role's must-haves.`);
   if (!proposed.competencies.length) out.push("Keep at least one competency.");
   return out;
 }

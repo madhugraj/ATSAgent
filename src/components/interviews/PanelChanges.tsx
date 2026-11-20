@@ -12,7 +12,7 @@ import {
   getRoundScorecard,
   proposeScorecardChange,
 } from "@/lib/interview-confirmations.functions";
-import { keptShares, percentSplit, sharesOf } from "@/lib/interview-plan";
+import { movedTooFar, outweighMustHaves, percentSplit, sharesOf } from "@/lib/interview-plan";
 
 /** In the reader's own time zone. */
 function fmt(iso: string) {
@@ -165,11 +165,30 @@ export function ScorecardChange({ token }: { token: string }) {
   const start = percentSplit(sharesOf(round));
   const pctOf = (c: string) => pct?.[c] ?? start[key(c)] ?? 0;
   const total = list.reduce((sum, c) => sum + pctOf(c), 0);
-  const was = keptShares(round, { competencies: list });
   const locked = new Set(d.locked.map(key));
-  const over = (c: string) =>
-    key(c) in was && Math.abs(pctOf(c) / 100 - (was[key(c)] ?? 0)) > d.shareLimit + 1e-9;
   const w = Object.fromEntries(list.map((c) => [c, Math.max(1, pctOf(c))]));
+  const red = new Set(
+    [
+      ...movedTooFar(round, { competencies: list, weights: w }).map((m) => m.name),
+      ...outweighMustHaves({ competencies: list, weights: w }, d.locked),
+    ].map(key),
+  );
+  const over = (c: string) => red.has(key(c));
+  /** Spread 100% evenly over the given competencies (5-point steps). */
+  const balance = (names: string[]) => {
+    const step = Math.floor(100 / names.length / 5) * 5;
+    let left = 100 - step * names.length;
+    setComps(names);
+    setPctMap(
+      Object.fromEntries(
+        names.map((x) => {
+          const extra = left >= 5 && locked.has(key(x)) ? 5 : 0;
+          left -= extra;
+          return [x, step + extra];
+        }),
+      ),
+    );
+  };
   const setPct = (c: string, v: number) => {
     setComps(list);
     setPctMap({ ...Object.fromEntries(list.map((x) => [x, pctOf(x)])), [c]: v });
@@ -284,8 +303,8 @@ export function ScorecardChange({ token }: { token: string }) {
             disabled={adding.trim().length < 2}
             onClick={() => {
               const name = adding.trim();
-              setComps([...list, name]);
-              setPctMap({ ...Object.fromEntries(list.map((x) => [x, pctOf(x)])), [name]: 0 });
+              if (list.some((x) => key(x) === key(name))) return;
+              balance([...list, name]);
               setAdding("");
             }}
           >
@@ -293,11 +312,20 @@ export function ScorecardChange({ token }: { token: string }) {
           </Button>
         </div>
       ) : null}
-      <p
-        className={`text-right text-xs tabular-nums ${total === 100 ? "text-muted-foreground" : "text-destructive"}`}
-      >
-        Total {total}%
-      </p>
+      <div className="flex items-center justify-between text-xs">
+        <button
+          type="button"
+          className="text-muted-foreground underline"
+          onClick={() => balance(list)}
+        >
+          Balance evenly
+        </button>
+        <span
+          className={`tabular-nums ${total === 100 ? "text-muted-foreground" : "text-destructive"}`}
+        >
+          Total {total}%
+        </span>
+      </div>
       <Textarea
         rows={2}
         maxLength={1000}
