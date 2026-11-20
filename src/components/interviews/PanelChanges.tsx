@@ -12,7 +12,7 @@ import {
   getRoundScorecard,
   proposeScorecardChange,
 } from "@/lib/interview-confirmations.functions";
-import { sharesOf, weightOf } from "@/lib/interview-plan";
+import { keptShares, percentSplit, sharesOf } from "@/lib/interview-plan";
 
 /** In the reader's own time zone. */
 function fmt(iso: string) {
@@ -132,7 +132,8 @@ export function ScorecardChange({ token }: { token: string }) {
   });
   const [focus, setFocus] = useState<string | null>(null);
   const [comps, setComps] = useState<string[] | null>(null);
-  const [weights, setWeights] = useState<Record<string, number> | null>(null);
+  /** Competency → percent of the overall, once the panelist changes it. */
+  const [pct, setPctMap] = useState<Record<string, number> | null>(null);
   const [adding, setAdding] = useState("");
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -159,11 +160,22 @@ export function ScorecardChange({ token }: { token: string }) {
     );
   const round = d.round;
   const list = comps ?? round.competencies;
-  const w = weights ?? Object.fromEntries(round.competencies.map((c) => [c, weightOf(round, c)]));
-  const draft = { competencies: list, weights: w };
-  const was = sharesOf(round);
-  const is = sharesOf(draft);
-  const locked = new Set(d.locked.map((x) => x.toLowerCase()));
+  const key = (c: string) => c.toLowerCase();
+  // The split in percent: the round's own to start, then the panelist's.
+  const start = percentSplit(sharesOf(round));
+  const pctOf = (c: string) => pct?.[c] ?? start[key(c)] ?? 0;
+  const total = list.reduce((sum, c) => sum + pctOf(c), 0);
+  const was = keptShares(round, { competencies: list });
+  const locked = new Set(d.locked.map(key));
+  const over = (c: string) =>
+    key(c) in was && Math.abs(pctOf(c) / 100 - (was[key(c)] ?? 0)) > d.shareLimit + 1e-9;
+  const w = Object.fromEntries(list.map((c) => [c, Math.max(1, pctOf(c))]));
+  const setPct = (c: string, v: number) => {
+    setComps(list);
+    setPctMap({ ...Object.fromEntries(list.map((x) => [x, pctOf(x)])), [c]: v });
+  };
+  const ready =
+    reason.trim().length >= 10 && total === 100 && list.every((c) => pctOf(c) > 0 && !over(c));
 
   async function send() {
     setBusy(true);
@@ -208,7 +220,6 @@ export function ScorecardChange({ token }: { token: string }) {
       <div className="space-y-1.5">
         {list.map((c) => {
           const k = c.toLowerCase();
-          const moved = k in was ? Math.abs((is[k] ?? 0) - (was[k] ?? 0)) : 0;
           return (
             <div key={c} className="flex items-center gap-2">
               <span className="flex-1 text-xs">
@@ -217,31 +228,40 @@ export function ScorecardChange({ token }: { token: string }) {
                   <span className="ml-1 text-muted-foreground">(must-have)</span>
                 ) : null}
               </span>
+              <button
+                type="button"
+                className="rounded border border-border px-2 text-xs disabled:opacity-40"
+                aria-label={`Less weight on ${c}`}
+                disabled={pctOf(c) <= 5}
+                onClick={() => setPct(c, pctOf(c) - 5)}
+              >
+                −
+              </button>
               <span
-                className={`w-10 text-right text-xs tabular-nums ${moved > d.shareLimit + 1e-9 ? "text-destructive" : "text-muted-foreground"}`}
+                className={`w-10 text-center text-xs tabular-nums ${over(c) ? "text-destructive" : ""}`}
               >
-                {Math.round((is[k] ?? 0) * 100)}%
+                {pctOf(c)}%
               </span>
-              <select
-                className="rounded-md border border-border bg-background px-2 py-1 text-xs"
-                value={w[c] ?? 1}
-                aria-label={`${c} weight`}
-                onChange={(e) => {
-                  setComps(list);
-                  setWeights({ ...w, [c]: Number(e.target.value) });
-                }}
+              <button
+                type="button"
+                className="rounded border border-border px-2 text-xs disabled:opacity-40"
+                aria-label={`More weight on ${c}`}
+                disabled={pctOf(c) >= 95}
+                onClick={() => setPct(c, pctOf(c) + 5)}
               >
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <option key={n} value={n}>
-                    ×{n}
-                  </option>
-                ))}
-              </select>
+                +
+              </button>
               <button
                 type="button"
                 className="text-xs text-muted-foreground underline disabled:no-underline disabled:opacity-40"
                 disabled={locked.has(k) || list.length <= 1}
-                onClick={() => setComps(list.filter((x) => x !== c))}
+                onClick={() => {
+                  // Its share goes to the rest in proportion.
+                  const rest = list.filter((x) => x !== c);
+                  const tot = rest.reduce((sum, x) => sum + pctOf(x), 0) || 1;
+                  setComps(rest);
+                  setPctMap(percentSplit(Object.fromEntries(rest.map((x) => [x, pctOf(x) / tot]))));
+                }}
               >
                 Remove
               </button>
@@ -263,8 +283,9 @@ export function ScorecardChange({ token }: { token: string }) {
             variant="outline"
             disabled={adding.trim().length < 2}
             onClick={() => {
-              setComps([...list, adding.trim()]);
-              setWeights({ ...w, [adding.trim()]: 1 });
+              const name = adding.trim();
+              setComps([...list, name]);
+              setPctMap({ ...Object.fromEntries(list.map((x) => [x, pctOf(x)])), [name]: 0 });
               setAdding("");
             }}
           >
@@ -272,6 +293,11 @@ export function ScorecardChange({ token }: { token: string }) {
           </Button>
         </div>
       ) : null}
+      <p
+        className={`text-right text-xs tabular-nums ${total === 100 ? "text-muted-foreground" : "text-destructive"}`}
+      >
+        Total {total}%
+      </p>
       <Textarea
         rows={2}
         maxLength={1000}
@@ -286,11 +312,7 @@ export function ScorecardChange({ token }: { token: string }) {
           ))}
         </ul>
       ) : null}
-      <Button
-        className="w-full"
-        disabled={busy || reason.trim().length < 10}
-        onClick={() => void send()}
-      >
+      <Button className="w-full" disabled={busy || !ready} onClick={() => void send()}>
         {busy ? <Loader2 className="size-4 animate-spin" /> : null} Send to the hiring manager
       </Button>
     </div>

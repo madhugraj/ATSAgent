@@ -234,7 +234,7 @@ function RubricEditor({
                       onChange({ weights: { ...round.weights, [c]: Number(e.target.value) } })
                     }
                   >
-                    {[1, 2, 3, 4, 5].map((n) => (
+                    {[...new Set([1, 2, 3, 4, 5, weightOf(round, c)])].map((n) => (
                       <option key={n} value={n}>
                         ×{n}
                       </option>

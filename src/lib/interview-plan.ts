@@ -15,8 +15,8 @@
  *
  * Rubric (per round, keyed by competency name so every reader of the plain
  * `competencies` list keeps working):
- * - weights: how much each competency counts toward the overall (1–5,
- *   default 1 = all equal). The overall is always the weighted average of
+ * - weights: how much each competency counts toward the overall (×1–×5,
+ *   or a percent split from an approved panel change; default 1 = all equal). The overall is always the weighted average of
  *   the competency ratings, computed on the server (`overallRating`).
  * - anchors: what a 1, a 3 and a 5 look like for that competency in this
  *   role, shown on the scorecard so interviewers read the scale the same way.
@@ -35,8 +35,12 @@ export const PlanRound = z.object({
   focus: z.string().trim().max(300).default(""),
   competencies: z.array(z.string().trim().min(2).max(60)).min(1).max(8),
   panelSize: z.number().int().min(1).max(3).default(1),
-  /** Competency → weight (1–5); missing = 1. */
-  weights: z.record(z.string(), z.number().int().min(1).max(5)).optional(),
+  /**
+   * Competency → weight; missing = 1. The hiring team picks ×1–×5; a panel
+   * change approved by the hiring manager stores the split in percent (1–100).
+   * Only the ratios count.
+   */
+  weights: z.record(z.string(), z.number().int().min(1).max(100)).optional(),
   /** Competency → what a 1, 3 and 5 look like in this role. */
   anchors: z.record(z.string(), Anchor).optional(),
 });
@@ -212,10 +216,26 @@ export function sharesOf(round: Pick<PlanRoundT, "competencies" | "weights">) {
 }
 
 /**
+ * Shares before the change among the competencies that stay (pure): dropping
+ * one spreads its share over the rest in proportion, so that alone moves
+ * nothing.
+ */
+export function keptShares(
+  before: Pick<PlanRoundT, "competencies" | "weights">,
+  proposed: Pick<PlanRoundT, "competencies">,
+): Record<string, number> {
+  const now = new Set(proposed.competencies.map(norm));
+  const kept = before.competencies.filter((c) => now.has(norm(c)));
+  return sharesOf({ competencies: kept, weights: before.weights });
+}
+
+/**
  * What a panelist's change breaks (pure; empty = within the rules). The level,
  * name and panel size are the hiring team's and are kept by the caller; the
- * role's must-have competencies cannot be removed, and no existing
- * competency's share of the overall moves by more than PANEL_SHARE_LIMIT.
+ * role's must-have competencies cannot be removed, and no competency that
+ * stays may move by more than PANEL_SHARE_LIMIT of the overall (against its
+ * share among the competencies that stay, so new ones take their share from
+ * the others within that limit).
  */
 export function panelChangeViolations(
   before: PlanRoundT,
@@ -227,7 +247,7 @@ export function panelChangeViolations(
   for (const c of lockedCompetencies(before, mustHave))
     if (!now.has(norm(c)))
       out.push(`"${c}" is a must-have for the role and stays on the scorecard.`);
-  const was = sharesOf(before);
+  const was = keptShares(before, proposed);
   const is = sharesOf(proposed);
   for (const c of before.competencies) {
     const k = norm(c);
@@ -240,4 +260,19 @@ export function panelChangeViolations(
   }
   if (!proposed.competencies.length) out.push("Keep at least one competency.");
   return out;
+}
+
+/** Whole percents that add up to 100 (pure; largest remainder). */
+export function percentSplit(shares: Record<string, number>): Record<string, number> {
+  const keys = Object.keys(shares);
+  const raw = keys.map((k) => (shares[k] ?? 0) * 100);
+  const out = raw.map(Math.floor);
+  let left = 100 - out.reduce((a, b) => a + b, 0);
+  const order = raw.map((r, i) => [r - Math.floor(r), i] as const).sort((a, b) => b[0] - a[0]);
+  for (const [, i] of order) {
+    if (left <= 0) break;
+    out[i]!++;
+    left--;
+  }
+  return Object.fromEntries(keys.map((k, i) => [k, out[i]!]));
 }
