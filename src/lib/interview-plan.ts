@@ -175,3 +175,69 @@ export function roundVerdict(verdicts: Verdict[]): Verdict {
   if (verdicts.includes("hold")) return "hold";
   return "select";
 }
+
+/* ------------------------------------------- a panelist's proposed change */
+
+/** How far a panelist may move any existing competency's share of the overall. */
+export const PANEL_SHARE_LIMIT = 0.1;
+
+/** The AI's review of a proposed change (stored; shown to the approver). */
+export const PlanReviewSchema = z.object({
+  verdict: z.enum(["fits", "concerns"]),
+  summary: z.string().trim().max(600),
+  findings: z
+    .array(
+      z.object({
+        kind: z.enum(["coverage", "relevance", "fairness", "clarity"]),
+        text: z.string().trim().max(300),
+      }),
+    )
+    .max(8)
+    .default([]),
+});
+export type PlanReview = z.infer<typeof PlanReviewSchema>;
+
+const norm = (s: string) => s.trim().toLowerCase();
+
+/** The round's competencies that come from the role's must-haves: these stay. */
+export function lockedCompetencies(round: PlanRoundT, mustHave: string[] | null | undefined) {
+  const must = new Set((mustHave ?? []).map(norm));
+  return round.competencies.filter((c) => must.has(norm(c)));
+}
+
+/** Each competency's share of the overall (pure). */
+export function sharesOf(round: Pick<PlanRoundT, "competencies" | "weights">) {
+  const total = round.competencies.reduce((s, c) => s + weightOf(round, c), 0) || 1;
+  return Object.fromEntries(round.competencies.map((c) => [norm(c), weightOf(round, c) / total]));
+}
+
+/**
+ * What a panelist's change breaks (pure; empty = within the rules). The level,
+ * name and panel size are the hiring team's and are kept by the caller; the
+ * role's must-have competencies cannot be removed, and no existing
+ * competency's share of the overall moves by more than PANEL_SHARE_LIMIT.
+ */
+export function panelChangeViolations(
+  before: PlanRoundT,
+  proposed: Pick<PlanRoundT, "competencies" | "weights">,
+  mustHave: string[] | null | undefined,
+): string[] {
+  const out: string[] = [];
+  const now = new Set(proposed.competencies.map(norm));
+  for (const c of lockedCompetencies(before, mustHave))
+    if (!now.has(norm(c)))
+      out.push(`"${c}" is a must-have for the role and stays on the scorecard.`);
+  const was = sharesOf(before);
+  const is = sharesOf(proposed);
+  for (const c of before.competencies) {
+    const k = norm(c);
+    if (!(k in is)) continue;
+    const moved = Math.abs((is[k] ?? 0) - (was[k] ?? 0));
+    if (moved > PANEL_SHARE_LIMIT + 1e-9)
+      out.push(
+        `"${c}" would move from ${Math.round((was[k] ?? 0) * 100)}% to ${Math.round((is[k] ?? 0) * 100)}% of the overall; a panel change can move it by ${PANEL_SHARE_LIMIT * 100} points at most.`,
+      );
+  }
+  if (!proposed.competencies.length) out.push("Keep at least one competency.");
+  return out;
+}

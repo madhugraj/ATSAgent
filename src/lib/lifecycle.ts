@@ -310,3 +310,20 @@ export function hiringSla(
     daysLeft: Math.round((slaDays - elapsed) * 10) / 10,
   };
 }
+
+/**
+ * The latest a booked interview round may move to without slowing the hiring
+ * SLA (pure): the end of its stage's share of the SLA, or the time it is
+ * booked for now when that is later (moving earlier never hurts).
+ */
+export function latestRoundTime(
+  stage: Stage,
+  appliedAt: string | Date | null | undefined,
+  bookedAt: Date,
+  slaDays: number = DEFAULT_HIRING_SLA_DAYS,
+): Date {
+  const end = SLA_END[canonical(stage)];
+  if (end === undefined || !appliedAt) return bookedAt;
+  const due = new Date(new Date(appliedAt).getTime() + end * slaDays * 86_400_000);
+  return due > bookedAt ? due : bookedAt;
+}

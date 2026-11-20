@@ -202,6 +202,15 @@ them — or decline, with an optional suggested time validated server-side and a
 stored as plain text and never sent to an AI model), every answer is written to `audit_log`,
 and its server functions are rate-limited with all other RPCs. A re-schedule supersedes old
 tokens. The hiring team's "Send invite now" is behind `requireOrg`, scoped by `org_id`, and audited.
+A panelist who accepted can, from the same token, move the round once or step down (the new time
+is re-checked server-side against the panel's free times, the earlier rounds and the hiring SLA —
+the client's list is never trusted; one change per panelist per round is claimed atomically; both
+audited), and propose a change to the round's scorecard. A proposal is validated server-side
+against the role's must-haves and the 10-point share limit, reviewed by the AI through the gateway
+(`plan_change_review`, with the proposal and the job description fenced by `untrusted(...)` and
+the reply zod-validated), and applied only when the role's hiring manager, the owner, or the HR
+head after 4 hours approves it behind `requireOrg` (re-checked against the plan at that moment;
+proposal, approval and rejection audited).
 
 An external panellist's scorecard page (`/scorecard/<token>`, docs/panel-directory.md) is public in
 the same way, for people on an interview panel who have no account (a client, an advisor). The

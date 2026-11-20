@@ -65,6 +65,10 @@ export const HEALTH = {
    * window (4 h) has closed and nobody acted on the stand-in or "Send invite now".
    */
   panelAnswerHours: 8,
+  /** A panelist's scorecard proposal left undecided this long. */
+  planProposalHours: 8,
+  /** Panelists who moved or stepped down from this many rounds in 14 days. */
+  panelChangesPerPerson: 3,
   /** Rounds the candidate did not join, in 7 days, before it is flagged. */
   interviewNoShows7d: 3,
   /** An open offer on its this-many-th revision is going back and forth. */
@@ -599,6 +603,46 @@ export const RULES: Rule[] = [
           detail: { held },
         },
       ];
+    },
+  },
+  {
+    id: "interview.plan_proposal_waiting",
+    element: "hitl",
+    severity: "warning",
+    description: `A panelist's proposed scorecard change has waited more than ${HEALTH.planProposalHours} hours for the hiring manager — the round keeps the current scorecard until someone decides. Approve or reject it on the role's Interview plan; the HR head can decide too.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number }>(sql`
+        select count(*)::int n from plan_change_proposals
+        where org_id = ${orgId} and status = 'awaiting_approval'
+          and created_at <= now() - make_interval(hours => ${HEALTH.planProposalHours})`);
+      const n = r[0]?.n ?? 0;
+      if (!n) return [];
+      return [
+        {
+          agentType: "interview",
+          title: `${n} scorecard proposal${n === 1 ? " is" : "s are"} waiting for the hiring manager`,
+          detail: { waiting: n },
+        },
+      ];
+    },
+  },
+  {
+    id: "interview.panel_changes_often",
+    element: "hitl",
+    severity: "warning",
+    description: `A panelist moved or stepped down from ${HEALTH.panelChangesPerPerson} or more booked rounds in the last 14 days. Each change costs the candidate time against the hiring SLA; talk to them or rely on others for the panel.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ email: string; n: number }>(sql`
+        select c->>'email' email, count(*)::int n
+        from interviews i, jsonb_array_elements(i.panel_changes) c
+        where i.org_id = ${orgId}
+          and (c->>'at')::timestamptz > now() - interval '14 days'
+        group by 1 having count(*) >= ${HEALTH.panelChangesPerPerson}`);
+      return r.map((x) => ({
+        agentType: "interview",
+        title: `${x.email} changed ${x.n} booked rounds in 14 days`,
+        detail: { email: x.email, changes: x.n },
+      }));
     },
   },
   {

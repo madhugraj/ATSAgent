@@ -325,7 +325,7 @@ export type PublicConfirmation = {
   closed: boolean;
 };
 
-async function rowByToken(token: string) {
+export async function rowByToken(token: string) {
   if (!/^[a-f0-9]{64}$/.test(token)) return null;
   const [r] = await db
     .select()
@@ -833,7 +833,7 @@ export async function raiseUnavailable(
   }
 }
 
-async function tellDesk(orgId: string, applicationId: string, body: (cand: string) => string) {
+export async function tellDesk(orgId: string, applicationId: string, body: (cand: string) => string) {
   try {
     const [a] = await db
       .select({ requisitionId: applications.requisitionId, name: candidates.fullName })

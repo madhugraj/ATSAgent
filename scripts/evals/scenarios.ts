@@ -1005,6 +1005,90 @@ export function scenarios(): ScriptedScenario[] {
         say("A stand-in was approved; Kiran keeps the booked time."),
       ],
     },
+    {
+      name: "interview: keeps the booked time when a panellist steps down under the SLA",
+      agentType: "interview",
+      setup: async ({ orgId, userId }) => {
+        const requisitionId = await seedRequisition(orgId, userId, "approved");
+        const app = await seedApplication(orgId, requisitionId, "Kiran", "l1", 81);
+        const { db } = await import("../../src/server/db");
+        const { interviews, memberInterviewerProfiles, orgMembers, requisitions, rolePanels } =
+          await import("../../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const [me] = await db
+          .select({ id: orgMembers.id })
+          .from(orgMembers)
+          .where(eq(orgMembers.userId, userId));
+        // The approved L1 panel is Dev, who now can't make Kiran's booked interview.
+        const [dev] = await db
+          .insert(orgMembers)
+          .values({
+            orgId,
+            email: `dev-${orgId.slice(0, 8)}@eval.local`,
+            fullName: "Dev",
+            status: "active",
+          } as never)
+          .returning({ id: orgMembers.id, email: orgMembers.email });
+        await db
+          .insert(rolePanels)
+          .values({ orgId, requisitionId, level: 1, memberIds: [dev!.id] });
+        await db.insert(memberInterviewerProfiles).values({
+          orgId,
+          memberId: me!.id,
+          active: true,
+          areas: ["Kubernetes"],
+          rounds: [1, 2, 3],
+        });
+        await db
+          .update(requisitions)
+          .set({ hiringManagerMemberId: me!.id })
+          .where(eq(requisitions.id, requisitionId));
+        await db.insert(interviews).values({
+          orgId,
+          applicationId: app,
+          level: 1,
+          interviewer: "Dev",
+          interviewerEmail: dev!.email,
+          scheduledAt: new Date(Date.now() + 3 * 86_400_000),
+          status: "scheduled",
+          unavailable: [
+            {
+              email: dev!.email,
+              note: "Customer escalation all week",
+              at: new Date().toISOString(),
+            },
+          ],
+        } as never);
+        return { requisitionId, app, dev: dev!.id };
+      },
+      goal: (d) =>
+        `Dev (memberId ${d["dev"]}) stepped down from the booked L1 interview of candidate application ${d["app"]} ("Customer escalation all week"): no time within the hiring SLA suited the whole panel, so the booked time stands. Arrange the round so it still happens on time. app=${d["app"]} dev=${d["dev"]}\n\nRequisition id: ${d["requisitionId"]}`,
+      decide: () => ({ status: "approved" }),
+      expect: {
+        status: "done",
+        calls: ["list_substitutes", "propose_substitute"],
+        neverCalls: ["offer_interview_slots", "schedule_interview", "propose_panel"],
+      },
+      script: [
+        (m) =>
+          call("s", "list_substitutes", {
+            applicationId: fromGoal(m, "app"),
+            level: 1,
+            replaceMemberId: fromGoal(m, "dev"),
+          }),
+        (m) =>
+          call("ps", "propose_substitute", {
+            applicationId: fromGoal(m, "app"),
+            level: 1,
+            replaceMemberId: fromGoal(m, "dev"),
+            withMemberId: (
+              toolResult(m, "list_substitutes")["options"] as { memberId: string }[]
+            )[0]!.memberId,
+            reason: "Dev stepped down; the stand-in is free at the booked time, so the SLA holds.",
+          }),
+        say("A stand-in was approved; Kiran keeps the booked time."),
+      ],
+    },
     // Silent panel agents (docs/silent-panel-agent-plan.md): one rehearsal per level.
     ...([1, 2, 3] as const).map((level): ScriptedScenario => ({
       name: `panel_l${level}: assesses the call and sends the panel a factual summary`,
