@@ -737,7 +737,9 @@ export function registerPhase3Agents(): void {
     // another; the candidate is contacted (voice first) with only the times the whole
     // panel can do; with none in common it re-offers from the suggestions. A booked
     // round's invite waits for the panel, then asks the candidate to confirm.
-    version: "2.4.0",
+    // 2.5.0 (hiring SLA, migration 0088): find_interview_slots returns the earliest free
+    // times; a panelist has 4 hours to answer before the round goes ahead without them.
+    version: "2.5.0",
     owner: "hr_head",
     responsibility:
       "Books the next interview round for candidates who advanced: proposes each round's panel from the panel directory for a person to approve (asking HR to add someone when nobody fits), then free times for that panel, the candidate's choice of time, a meeting link, and invites to both the candidate and the interviewers.",

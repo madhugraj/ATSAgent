@@ -67,8 +67,11 @@ export const HEALTH = {
   slotOffersUnanswered7d: 3,
   /** …and as a share of all offers that closed. */
   slotOffersUnansweredShare: 0.5,
-  /** Hours a candidate's interview e-mail may wait on the panel's answer. */
-  panelAnswerHours: 24,
+  /**
+   * Hours a candidate may wait on the panel before this is flagged — the answer
+   * window (4 h) has closed and nobody acted on the stand-in or "Send invite now".
+   */
+  panelAnswerHours: 8,
   /** Rounds the candidate did not join, in 7 days, before it is flagged. */
   interviewNoShows7d: 3,
   /** An open offer on its this-many-th revision is going back and forth. */

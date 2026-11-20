@@ -434,7 +434,7 @@ export function registerPhase3Tools(): void {
   registerTool({
     name: "find_interview_slots",
     description:
-      "Free interview times for an interviewer and the rest of the panel (times that suit everyone): weekdays 10:00–17:00 in the organisation's time zone, at least 18 hours ahead, spread over different days, avoiding their calendar's busy time (when Google or Microsoft 365 calendar is connected), rounds already booked in ATSIQ and times already offered to another candidate. slotsLocal gives each time in the organisation's time zone — quote those to people, never UTC. Pass the applicationId and level of the round being booked so its times start after the candidate's earlier rounds end. Says whether the calendar was actually checked.",
+      "Free interview times for an interviewer and the rest of the panel (times that suit everyone): weekdays 10:00–17:00 in the organisation's time zone, at least 18 hours ahead, the earliest free ones first (the hiring SLA is days, not weeks), avoiding their calendar's busy time (when Google or Microsoft 365 calendar is connected), rounds already booked in ATSIQ and times already offered to another candidate. slotsLocal gives each time in the organisation's time zone — quote those to people, never UTC. Pass the applicationId and level of the round being booked so its times start after the candidate's earlier rounds end. Says whether the calendar was actually checked.",
     input: z.object({
       /** The candidate's application and round: times start after their earlier rounds end. */
       applicationId: z.string().uuid().optional(),
@@ -462,6 +462,7 @@ export function registerPhase3Tools(): void {
         durationMins: i.durationMins,
         count: i.count,
         timeZone,
+        earliest: true,
       });
       return { ...r, slotsLocal: r.slots.map((x) => localWhen(x, timeZone)), timeZone };
     },

@@ -32,6 +32,8 @@ export type Organization = {
   employee_band: string | null;
   currency: string;
   fiscal_year_start_month: number;
+  /** End-to-end hiring SLA: days from application to offer. */
+  hiring_sla_days: number;
   careers_email: string | null;
   onboarding_step: string;
   onboarded_at: string | null;
@@ -128,6 +130,7 @@ function orgRowToOrganization(o: typeof organizations.$inferSelect): Organizatio
     employee_band: o.employeeBand,
     currency: o.currency,
     fiscal_year_start_month: o.fiscalYearStartMonth,
+    hiring_sla_days: o.hiringSlaDays,
     careers_email: o.careersEmail,
     onboarding_step: o.onboardingStep,
     onboarded_at: o.onboardedAt ? o.onboardedAt.toISOString() : null,
@@ -524,6 +527,7 @@ export const updateOrganization = createServerFn({ method: "POST" })
           .refine(isCurrencyCode, "a real ISO currency code")
           .optional(),
         fiscalYearStartMonth: z.number().int().min(1).max(12).optional(),
+        hiringSlaDays: z.number().int().min(2).max(60).optional(),
         careersEmail: z.string().max(160).optional(),
       })
       .parse(data),
@@ -542,8 +546,21 @@ export const updateOrganization = createServerFn({ method: "POST" })
     if (data.fiscalYearStartMonth !== undefined)
       patch.fiscalYearStartMonth = data.fiscalYearStartMonth;
     if (data.careersEmail !== undefined) patch.careersEmail = data.careersEmail.trim() || null;
+    if (data.hiringSlaDays !== undefined) patch.hiringSlaDays = data.hiringSlaDays;
 
     await db.update(organizations).set(patch).where(eq(organizations.id, orgId));
+    if (data.hiringSlaDays !== undefined) {
+      const { writeAudit } = await import("../server/audit");
+      await writeAudit({
+        actor: context.claims.email,
+        actorUserId: context.userId,
+        orgId,
+        action: "org.hiring_sla_changed",
+        entityType: "organization",
+        entityId: orgId,
+        detail: { days: data.hiringSlaDays },
+      });
+    }
     return { ok: true };
   });
 

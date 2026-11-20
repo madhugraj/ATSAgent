@@ -21,6 +21,7 @@ import { template as offerNegotiationTemplate } from "./offer-negotiation";
 import { template as screeningCallBookedTemplate } from "./screening-call-booked";
 import { template as panelSummaryTemplate } from "./panel-summary";
 import { template as panelTimeCheckTemplate } from "./panel-time-check";
+import { template as panelReminderTemplate } from "./panel-reminder";
 
 /**
  * Dynamic template-data bag passed to every template renderer and subject
@@ -79,4 +80,5 @@ export const TEMPLATES: Record<string, TemplateEntry> = {
   screening_call_booked: screeningCallBookedTemplate,
   panel_summary: panelSummaryTemplate,
   panel_time_check: panelTimeCheckTemplate,
+  panel_reminder: panelReminderTemplate,
 };

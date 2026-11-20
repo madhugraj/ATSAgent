@@ -4,7 +4,7 @@ import { toast } from "sonner";
 
 import { sendInviteNow } from "@/lib/interview-confirmations.functions";
 
-type State = "pending" | "accepted" | "declined" | "superseded";
+type State = "pending" | "accepted" | "declined" | "superseded" | "lapsed";
 type RoundConfirmations = {
   panel: { name: string | null; email: string; state: State }[];
   candidate: State | null;
@@ -16,6 +16,7 @@ const WORD: Record<State, string> = {
   accepted: "accepted",
   declined: "can't make it",
   superseded: "",
+  lapsed: "no answer",
 };
 
 /** Who has agreed the round's time; the held candidate invite can be sent anyway. */

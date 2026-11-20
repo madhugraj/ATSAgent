@@ -951,6 +951,21 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
   } catch (err) {
     log.warn("interview.slot_expiry_failed", { error: err as Error });
   }
+  // The end-to-end hiring SLA: the desk hears once when a candidate falls behind.
+  try {
+    const { sweepHiringSla } = await import("../hiring-sla.server");
+    await sweepHiringSla(opts.orgId);
+  } catch (err) {
+    log.warn("hiring.sla_sweep_failed", { error: err as Error });
+  }
+  // The panel's answer window: a reminder, then a default so a silent panelist
+  // never holds the candidate up past the hiring SLA.
+  try {
+    const { sweepPanelAnswers } = await import("@/lib/interview-confirmations.server");
+    await sweepPanelAnswers(opts.orgId);
+  } catch (err) {
+    log.warn("interview.panel_answer_sweep_failed", { error: err as Error });
+  }
   // Interview links held for the scheduling call that went first: e-mailed once
   // that call ended without a booking, never got going, or ran out of time.
   try {
