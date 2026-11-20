@@ -256,6 +256,23 @@ describe("scorecard change rules", () => {
       plan.panelChangeViolations(before, { competencies: kept }, ["Go", "Kubernetes"]),
     ).toEqual([]);
   });
+  test("adding two competencies and balancing all five evenly passes", () => {
+    const five = [...before.competencies, "Loop engineering", "Harness"];
+    const even = Object.fromEntries(five.map((x) => [x, 20]));
+    expect(
+      plan.panelChangeViolations(before, { competencies: five, weights: even }, [
+        "Go",
+        "Kubernetes",
+      ]),
+    ).toEqual([]);
+  });
+  test("nothing may outweigh a must-have", () => {
+    const four = [...before.competencies, "Harness"];
+    const w = Object.fromEntries(four.map((x) => [x, x === "Harness" ? 40 : 20]));
+    expect(
+      plan.panelChangeViolations(before, { competencies: four, weights: w }, ["Go", "Kubernetes"]),
+    ).toContain('"Harness" would weigh more than one of the role\'s must-haves.');
+  });
   test("percents add up to 100", () => {
     const p = plan.percentSplit({ a: 1 / 3, b: 1 / 3, c: 1 / 3 });
     expect(Object.values(p).reduce((x, y) => x + y, 0)).toBe(100);
