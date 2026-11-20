@@ -271,7 +271,8 @@ export async function changeTime(
 export const ProposalInput = z.object({
   focus: z.string().trim().max(300),
   competencies: z.array(z.string().trim().min(2).max(60)).min(1).max(8),
-  weights: z.record(z.string(), z.number().int().min(1).max(5)).default({}),
+  /** The split in percent (5-point steps from the page; only the ratios count). */
+  weights: z.record(z.string(), z.number().int().min(1).max(100)).default({}),
   reason: z.string().trim().min(10).max(1000),
 });
 export type ProposalInputT = z.infer<typeof ProposalInput>;

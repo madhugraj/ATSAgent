@@ -232,6 +232,34 @@ describe("scorecard change rules", () => {
       ),
     ).toEqual([]);
   });
+  test("a percent split within 10 points of each share passes; 50 points does not", () => {
+    // Three competencies at 33% each: 40/30/30 is within the limit.
+    const [a, b, c] = before.competencies as [string, string, string];
+    expect(
+      plan.panelChangeViolations(
+        before,
+        { competencies: before.competencies, weights: { [a]: 40, [b]: 30, [c]: 30 } },
+        ["Go", "Kubernetes"],
+      ),
+    ).toEqual([]);
+    expect(
+      plan.panelChangeViolations(
+        before,
+        { competencies: before.competencies, weights: { [a]: 50, [b]: 25, [c]: 25 } },
+        ["Go", "Kubernetes"],
+      ).length,
+    ).toBeGreaterThan(0);
+  });
+  test("dropping a non-must-have spreads its share; that alone moves nothing", () => {
+    const kept = before.competencies.filter((x) => x !== "Problem solving");
+    expect(
+      plan.panelChangeViolations(before, { competencies: kept }, ["Go", "Kubernetes"]),
+    ).toEqual([]);
+  });
+  test("percents add up to 100", () => {
+    const p = plan.percentSplit({ a: 1 / 3, b: 1 / 3, c: 1 / 3 });
+    expect(Object.values(p).reduce((x, y) => x + y, 0)).toBe(100);
+  });
   test("the HR head decides only after the wait", () => {
     const base = { isHiringManager: false, isHrHead: true, isOwner: false };
     expect(pc.mayDecide({ ...base, waitedHours: 1 })).toBe(false);
