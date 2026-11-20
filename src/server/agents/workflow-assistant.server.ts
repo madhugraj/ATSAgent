@@ -157,7 +157,7 @@ export function assistantSystem(agents: AssistantAgent[]): string {
     "Agents (agentType — name: responsibility):",
     ...agents.map((a) => `- ${a.type} — ${a.name}: ${a.responsibility || "—"}`),
     "",
-    "Also write 1–5 dry-run tests that together take every branch: a sample event payload (JSON object text), the subject type, and for each agent step on the path how it ends (done or failed, with a short result). Set expectEnd to the id of the step the flow must stop at.",
+    "Also write 1–5 dry-run tests that together take every branch: a sample event payload (JSON object text), the subject type, and for each agent step on the path how it ends (done or failed, with a short result). Set expectEnd to the id of the step the flow must stop at. In a test, a wait step ends the same way: list it in outcomes with status done (the event happened) or failed (it timed out); a test of a timeout must mark that wait failed.",
     "When the person asks to change the current workflow, return the whole updated workflow. If the request is unclear, make a sensible draft and say in `reply` what you assumed.",
     "`reply` is one to three plain sentences to the person: what you built or changed. No vendor or model names.",
     "",
