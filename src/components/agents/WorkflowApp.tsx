@@ -29,7 +29,7 @@ const triggerText = (t: string) =>
  * The workflow app: one granted workflow, on its own — start it, follow each
  * run as its flow, and answer its questions and approvals right here.
  */
-export function WorkflowApp({ workflowId, focus }: { workflowId: string; focus?: string }) {
+export function WorkflowApp({ workflowId, focus }: { workflowId: string; focus?: string | undefined }) {
   const q = useQuery({
     queryKey: ["workflow_app", workflowId],
     queryFn: () => orgWorkflowApp({ data: { workflowId } }),
