@@ -450,7 +450,8 @@ export async function reviewProposal(orgId: string, id: string): Promise<PlanRev
         "does anything invite questions about protected characteristics — age, gender, family, religion, caste, nationality, health, disability — or personal life rather than the work (fairness), " +
         "and is each competency clear enough that two interviewers would rate it the same way (clarity). " +
         'verdict "fits" only when there is nothing the hiring manager must weigh; otherwise "concerns". ' +
-        "summary: one or two plain sentences for the hiring manager. findings: each concern, short. Never approve or reject — a person decides.",
+        "summary: one or two plain sentences for the hiring manager. findings: each concern, short. Never approve or reject — a person decides.\n" +
+        'Reply with JSON only: {"verdict":"fits"|"concerns","summary":string,"findings":[{"kind":"coverage"|"relevance"|"fairness"|"clarity","text":string}]}',
       prompt: [
         `Job: ${c.title}`,
         `Must-have skills: ${(c.mustHave ?? []).join(", ") || "none listed"}`,

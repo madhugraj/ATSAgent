@@ -187,17 +187,23 @@ export const PANEL_SHARE_LIMIT = 0.1;
 
 /** The AI's review of a proposed change (stored; shown to the approver). */
 export const PlanReviewSchema = z.object({
-  verdict: z.enum(["fits", "concerns"]),
-  summary: z.string().trim().max(600),
+  verdict: z.enum(["fits", "concerns"]).catch("concerns"),
+  summary: z
+    .string()
+    .trim()
+    .transform((t) => t.slice(0, 600)),
   findings: z
     .array(
       z.object({
-        kind: z.enum(["coverage", "relevance", "fairness", "clarity"]),
-        text: z.string().trim().max(300),
+        kind: z.enum(["coverage", "relevance", "fairness", "clarity"]).catch("relevance"),
+        text: z
+          .string()
+          .trim()
+          .transform((t) => t.slice(0, 300)),
       }),
     )
-    .max(8)
-    .default([]),
+    .default([])
+    .transform((f) => f.slice(0, 8)),
 });
 export type PlanReview = z.infer<typeof PlanReviewSchema>;
 
