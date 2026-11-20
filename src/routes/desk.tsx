@@ -208,7 +208,7 @@ function DeskPage() {
             <RecentlyDeleted onRestored={(id) => select(id)} />
           </aside>
           {workflow ? (
-            <WorkflowApp workflowId={workflow} focus={run} />
+            <WorkflowApp workflowId={workflow} focus={run} compact />
           ) : c ? (
             <Thread id={c} onDeleted={() => select(undefined)} />
           ) : (

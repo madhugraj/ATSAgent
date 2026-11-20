@@ -2,7 +2,16 @@ import { Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { CircleX, Copy, KeyRound, Play, Trash2 } from "lucide-react";
+import {
+  CheckCircle2,
+  Circle,
+  CircleDot,
+  CircleX,
+  Copy,
+  KeyRound,
+  Play,
+  Trash2,
+} from "lucide-react";
 
 import { PageHeader } from "@/components/ats";
 import { WorkflowRunRequests } from "@/components/agents/AgentTaskCard";
@@ -29,7 +38,16 @@ const triggerText = (t: string) =>
  * The workflow app: one granted workflow, on its own — start it, follow each
  * run as its flow, and answer its questions and approvals right here.
  */
-export function WorkflowApp({ workflowId, focus }: { workflowId: string; focus?: string | undefined }) {
+export function WorkflowApp({
+  workflowId,
+  focus,
+  compact = false,
+}: {
+  workflowId: string;
+  focus?: string | undefined;
+  /** The hiring desk: live runs as a journey, past runs as one line each, no API keys. */
+  compact?: boolean;
+}) {
   const q = useQuery({
     queryKey: ["workflow_app", workflowId],
     queryFn: () => orgWorkflowApp({ data: { workflowId } }),
@@ -64,7 +82,7 @@ export function WorkflowApp({ workflowId, focus }: { workflowId: string; focus?:
         description={v.workflow.description}
         actions={
           <div className="flex items-center gap-2">
-            <Badge variant="secondary">v{v.workflow.version}</Badge>
+            {compact ? null : <Badge variant="secondary">v{v.workflow.version}</Badge>}
             <Badge variant={v.ready ? "default" : "outline"}>
               {v.ready ? "Live" : "Not ready"}
             </Badge>
@@ -72,7 +90,9 @@ export function WorkflowApp({ workflowId, focus }: { workflowId: string; focus?:
         }
       />
 
-      <p className="text-sm text-muted-foreground">{triggerText(v.workflow.trigger)}</p>
+      {compact ? null : (
+        <p className="text-sm text-muted-foreground">{triggerText(v.workflow.trigger)}</p>
+      )}
 
       {!v.ready ? (
         <section className="panel space-y-2 p-4">
@@ -97,25 +117,34 @@ export function WorkflowApp({ workflowId, focus }: { workflowId: string; focus?:
 
       {manual && v.canStart && v.ready ? <StartRun workflowId={v.workflow.id} /> : null}
 
-      <section className="space-y-3">
-        <h2 className="text-sm font-semibold">Runs</h2>
-        {v.runs.length ? (
-          v.runs.map((r) => (
-            <RunCard
-              key={r.id}
-              run={r}
-              fallbackGraph={v.workflow.graph}
-              focused={r.id === focus}
-              workflowId={v.workflow.id}
-              canManage={v.canStart}
-            />
-          ))
-        ) : (
-          <p className="text-sm text-muted-foreground">No runs yet.</p>
-        )}
-      </section>
+      {compact ? (
+        <DeskRuns
+          runs={v.runs}
+          fallbackGraph={v.workflow.graph}
+          workflowId={v.workflow.id}
+          canAct={v.canStart}
+        />
+      ) : (
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold">Runs</h2>
+          {v.runs.length ? (
+            v.runs.map((r) => (
+              <RunCard
+                key={r.id}
+                run={r}
+                fallbackGraph={v.workflow.graph}
+                focused={r.id === focus}
+                workflowId={v.workflow.id}
+                canManage={v.canStart}
+              />
+            ))
+          ) : (
+            <p className="text-sm text-muted-foreground">No runs yet.</p>
+          )}
+        </section>
+      )}
 
-      {v.canManage ? <ApiKeys workflowId={v.workflow.id} manual={manual} /> : null}
+      {v.canManage && !compact ? <ApiKeys workflowId={v.workflow.id} manual={manual} /> : null}
     </div>
   );
 }
@@ -329,5 +358,191 @@ function ApiKeys({ workflowId, manual }: { workflowId: string; manual: boolean }
       </div>
       <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs">{`${example}\n\n${status}`}</pre>
     </section>
+  );
+}
+
+type Graph = AppRun["graph"] & object;
+const isLive = (r: AppRun) => r.status === "waiting" || r.status === "running";
+
+/**
+ * The steps a person cares about, in order: the agents and waits on the main
+ * path (following "yes" at each check), plus any off-path step this run took.
+ */
+function journeySteps(graph: Graph, run: AppRun): { id: string; label: string }[] {
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+  const name = (id: string) => {
+    const n = byId.get(id);
+    return n ? n.data.label || n.data.agentType || n.kind : id;
+  };
+  const path: string[] = [];
+  const seen = new Set<string>();
+  let cur = graph.nodes.find((n) => n.kind === "trigger")?.id;
+  while (cur && !seen.has(cur)) {
+    seen.add(cur);
+    path.push(cur);
+    const out = graph.edges.filter((e) => e.source === cur);
+    cur = (out.find((e) => e.branch === "yes") ?? out.find((e) => !e.branch) ?? out[0])?.target;
+  }
+  const visited = new Set(run.history.map((h) => h.node));
+  if (run.currentNode) visited.add(run.currentNode);
+  const off = [...visited].filter((id) => !seen.has(id));
+  const keep = (id: string) => {
+    const k = byId.get(id)?.kind;
+    return k === "agent" || k === "wait";
+  };
+  return [...path, ...off].filter(keep).map((id) => ({ id, label: name(id) }));
+}
+
+function DeskRuns({
+  runs,
+  fallbackGraph,
+  workflowId,
+  canAct,
+}: {
+  runs: AppRun[];
+  fallbackGraph: Graph;
+  workflowId: string;
+  canAct: boolean;
+}) {
+  const live = runs.filter(isLive);
+  const past = runs.filter((r) => !isLive(r));
+  const name = (r: AppRun, id: string) => {
+    const n = (r.graph ?? fallbackGraph).nodes.find((x) => x.id === id);
+    return n ? n.data.label || n.data.agentType || n.kind : id;
+  };
+  return (
+    <div className="space-y-4">
+      {live.map((r) => (
+        <JourneyRun
+          key={r.id}
+          run={r}
+          graph={r.graph ?? fallbackGraph}
+          workflowId={workflowId}
+          canAct={canAct}
+        />
+      ))}
+      {past.length ? (
+        <details className="panel p-3">
+          <summary className="cursor-pointer text-sm font-medium">
+            Past runs <span className="num text-muted-foreground">{past.length}</span>
+          </summary>
+          <ul className="mt-2 divide-y text-sm">
+            {past.map((r) => {
+              const last = r.history.at(-1);
+              const outcome =
+                r.status === "failed"
+                  ? "Failed"
+                  : last?.note === "Ended."
+                    ? name(r, last.node)
+                    : "Done";
+              return (
+                <li key={r.id} className="flex items-center gap-3 py-1.5">
+                  <span className="min-w-0 flex-1 truncate">{r.need ?? "—"}</span>
+                  <Badge variant={r.status === "failed" ? "destructive" : "secondary"}>
+                    {outcome}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">
+                    {new Date(r.createdAt).toLocaleDateString()}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+/** One live run as the hiring journey: done, now (with what it needs), to come. */
+function JourneyRun({
+  run,
+  graph,
+  workflowId,
+  canAct,
+}: {
+  run: AppRun;
+  graph: Graph;
+  workflowId: string;
+  canAct: boolean;
+}) {
+  const qc = useQueryClient();
+  const steps = journeySteps(graph, run);
+  const done = new Set(
+    run.history
+      .filter((h) => h.note === "Agent done." || h.note.endsWith(" happened."))
+      .map((h) => h.node),
+  );
+  const nowId =
+    steps.find((s) => s.id === run.currentNode)?.id ?? steps.find((s) => !done.has(s.id))?.id;
+  const nowIndex = steps.findIndex((s) => s.id === nowId);
+  return (
+    <article id={`run-${run.id}`} className="panel p-4">
+      <div className="flex items-baseline gap-2">
+        <p className="min-w-0 flex-1 truncate text-sm font-medium">{run.need ?? "Run"}</p>
+        <span className="num text-xs text-muted-foreground">
+          Step {nowIndex + 1} of {steps.length}
+        </span>
+      </div>
+      <ol className="mt-3" aria-label="Workflow progress">
+        {steps.map((s, i) => {
+          const last = i === steps.length - 1;
+          const isNow = s.id === nowId;
+          const isDone = done.has(s.id) && !isNow;
+          return (
+            <li key={s.id} className="relative flex gap-3 pb-3">
+              {!last ? (
+                <span
+                  aria-hidden
+                  className={`absolute left-[9px] top-6 bottom-0 w-px ${isDone ? "bg-primary/50" : "bg-border"}`}
+                />
+              ) : null}
+              <span className="relative z-10 mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-card">
+                {isDone ? (
+                  <CheckCircle2 className="size-5 text-primary" aria-label="done" />
+                ) : isNow ? (
+                  <CircleDot className="size-5 text-primary" aria-label="current step" />
+                ) : (
+                  <Circle className="size-5 text-muted-foreground/40" aria-label="to come" />
+                )}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p
+                  className={`text-sm ${isNow ? "font-semibold" : isDone ? "" : "text-muted-foreground"}`}
+                >
+                  <span className="num mr-1 text-xs text-muted-foreground">{i + 1}.</span>
+                  {s.label}
+                </p>
+                {isNow && run.waitingOn ? (
+                  <div
+                    className={`mt-1.5 space-y-2 rounded-md border p-2.5 text-xs ${
+                      run.waitingOn.kind === "person" || run.waitingOn.kind === "stopped"
+                        ? "border-amber-500/50 bg-amber-500/10"
+                        : "border-primary/30 bg-primary/5"
+                    }`}
+                  >
+                    <p>{run.waitingOn.text}</p>
+                    {run.waitingOn.kind === "stopped" && canAct ? (
+                      <StoppedStepActions
+                        workflowRunId={run.id}
+                        invalidate={["workflow_app", workflowId]}
+                      />
+                    ) : null}
+                    {run.waitingOn.kind === "person" ? (
+                      <WorkflowRunRequests
+                        workflowRunId={run.id}
+                        onDecided={() =>
+                          void qc.invalidateQueries({ queryKey: ["workflow_app", workflowId] })
+                        }
+                      />
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </article>
   );
 }
