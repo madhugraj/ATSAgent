@@ -41,7 +41,12 @@ const call = (id: string, name: string, args: unknown): AgentStepResult => ({
 const tool = <I>(t: AgentTool<I>) => t as unknown as AgentTool<never>;
 
 export function scenarios(): ScriptedScenario[] {
-  const draft = { id: "REQ-1", title: "Platform SRE", skills: [] as string[], status: "draft" };
+  const draft = {
+    id: "7c1e2a4b-3d5f-4a6b-8c9d-0e1f2a3b4c5d",
+    title: "Platform SRE",
+    skills: [] as string[],
+    status: "draft",
+  };
 
   return [
     {
@@ -93,7 +98,7 @@ export function scenarios(): ScriptedScenario[] {
           },
         }),
       ],
-      goal: "Requisition REQ-1 has no skills listed. Complete it with sensible skills for a platform SRE and get it to the department head for approval.",
+      goal: "Requisition 7c1e2a4b-3d5f-4a6b-8c9d-0e1f2a3b4c5d has no skills listed. Complete it with sensible skills for a platform SRE and get it to the department head for approval.",
       autonomy: "act_and_notify",
       decide: (t) =>
         t.kind === "clarification"
@@ -111,18 +116,22 @@ export function scenarios(): ScriptedScenario[] {
         maxSteps: 10,
       },
       script: [
-        call("a", "get_requisition", { id: "REQ-1" }),
+        call("a", "get_requisition", { id: "7c1e2a4b-3d5f-4a6b-8c9d-0e1f2a3b4c5d" }),
         call("b", "update_requisition_draft", {
-          id: "REQ-1",
+          id: "7c1e2a4b-3d5f-4a6b-8c9d-0e1f2a3b4c5d",
           skills: ["Kubernetes", "Terraform", "Go"],
         }),
-        call("c", "submit_requisition_for_approval", { id: "REQ-1" }),
+        call("c", "submit_requisition_for_approval", {
+          id: "7c1e2a4b-3d5f-4a6b-8c9d-0e1f2a3b4c5d",
+        }),
         call("d", "request_approval", {
-          title: "Approve REQ-1 Platform SRE",
+          title: "Approve 7c1e2a4b-3d5f-4a6b-8c9d-0e1f2a3b4c5d Platform SRE",
           summary: "Skills completed; submitted.",
           assignee_role: "department_head",
         }),
-        say("REQ-1 is complete, submitted and approved by the department head."),
+        say(
+          "7c1e2a4b-3d5f-4a6b-8c9d-0e1f2a3b4c5d is complete, submitted and approved by the department head.",
+        ),
       ],
     },
     {
