@@ -30,7 +30,7 @@ export type OrgWorkflowRow = {
     error: string | null;
     /** What a waiting run waits for; a person's request links to Waiting for you. */
     waitingOn: {
-      kind: "person" | "agent" | "event";
+      kind: "person" | "agent" | "event" | "stopped";
       text: string;
       first: { kind: string; title: string; body: string } | null;
     } | null;
@@ -125,7 +125,7 @@ export type AppRun = {
   error: string | null;
   createdAt: string;
   need: string | null;
-  waitingOn: { kind: "person" | "agent" | "event"; text: string } | null;
+  waitingOn: { kind: "person" | "agent" | "event" | "stopped"; text: string } | null;
   /** The graph of the version this run ran. */
   graph: import("@db/schema").WorkflowGraph | null;
 };
@@ -327,6 +327,37 @@ export const revokeWorkflowKey = createServerFn({ method: "POST" })
       action: "workflow.api_key.revoked",
       entityType: "workflow_api_key",
       entityId: data.keyId,
+    });
+    return { ok: true };
+  });
+
+const ResolveInput = z.object({
+  workflowRunId: z.string().uuid(),
+  action: z.enum(["retry", "skip"]),
+});
+
+/** Retry or Skip a step paused at its agent's run limit. Audited. */
+export const resolveWorkflowStep = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => ResolveInput.parse(d))
+  .handler(async ({ data, context }) => {
+    const { assertRole } = await import("./auth.middleware");
+    await assertRole(context.userId, context.orgId, [...MANAGE_ROLES]);
+    const { resolveStoppedStep } = await import("../server/agents/workflows.server");
+    await resolveStoppedStep({
+      workflowRunId: data.workflowRunId,
+      orgId: context.orgId,
+      userId: context.userId,
+      action: data.action,
+    });
+    const { writeAudit } = await import("../server/audit");
+    await writeAudit({
+      actor: `user:${context.userId}`,
+      actorUserId: context.userId,
+      orgId: context.orgId,
+      action: `workflow.step.${data.action === "retry" ? "retried" : "skipped"}`,
+      entityType: "workflow_run",
+      entityId: data.workflowRunId,
     });
     return { ok: true };
   });

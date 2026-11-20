@@ -37,6 +37,7 @@ import {
 import { db } from "../db";
 import { log } from "../log";
 import { AGENT_EVENT_TYPES } from "./events";
+import { CEILING_MESSAGE, LEG_LIMIT_MESSAGE } from "./run-messages";
 
 export const MAX_NODES = 40;
 const MAX_HOPS = 60;
@@ -68,6 +69,11 @@ export type WorkflowContext = {
    * per agent and role): the flow waits for it, then starts its own run.
    */
   queuedBehind?: string | null;
+  /**
+   * The step's agent run stopped at its turn or token limit (a resumable stop):
+   * the flow pauses on that step until a person presses Retry or Skip.
+   */
+  stoppedRun?: string | null;
 };
 
 /* -------------------------------------------------------------- the graph */
@@ -840,6 +846,85 @@ export async function advanceWorkflowRun(id: string): Promise<void> {
   await end("failed", "The flow took too many steps.");
 }
 
+const LIMIT_STOPS = new Set([LEG_LIMIT_MESSAGE, CEILING_MESSAGE]);
+
+/**
+ * A person's choice on a step paused at its run limit: Retry starts the step's
+ * agent again (same goal, told to pick up what the stopped run already did,
+ * acting for that person); Skip treats the step as failed and follows the flow.
+ */
+export async function resolveStoppedStep(input: {
+  workflowRunId: string;
+  orgId: string;
+  userId: string;
+  action: "retry" | "skip";
+}): Promise<void> {
+  const [wr] = await db
+    .select()
+    .from(workflowRuns)
+    .where(
+      and(
+        eq(workflowRuns.id, input.workflowRunId),
+        eq(workflowRuns.orgId, input.orgId),
+        eq(workflowRuns.status, "waiting"),
+      ),
+    )
+    .limit(1);
+  const ctx = wr?.context as WorkflowContext | undefined;
+  if (!wr || !ctx?.stoppedRun) throw new Error("This run is not paused on a stopped step.");
+  const [stopped] = await db
+    .select()
+    .from(agentRuns)
+    .where(eq(agentRuns.id, ctx.stoppedRun))
+    .limit(1);
+  if (!stopped) throw new Error("The stopped run was not found.");
+  const note = (text: string) => ({
+    node: wr.currentNode ?? "",
+    at: new Date().toISOString(),
+    note: text,
+  });
+  if (input.action === "skip") {
+    ctx.stoppedRun = null;
+    ctx.last = { status: "failed", result: "" };
+    await moveOn(
+      { ...wr, history: [...wr.history] },
+      ctx,
+      "Skipped after it stopped at its run limit.",
+    );
+    return;
+  }
+  const { loadPolicy } = await import("./policy");
+  if (!(await loadPolicy(wr.orgId, stopped.agentType as AgentType)).enabled)
+    throw new Error("That agent is switched off — switch it on in Agent settings first.");
+  const { startRun } = await import("./runtime.server");
+  const subject =
+    ctx.subject ??
+    (stopped.subjectType && stopped.subjectId
+      ? { type: stopped.subjectType, id: stopped.subjectId }
+      : null);
+  const { runId } = await startRun({
+    orgId: wr.orgId,
+    agentType: stopped.agentType as AgentType,
+    principalUserId: input.userId,
+    goal: `${stopped.goal}\n\nAn earlier attempt at this step stopped at its turn limit before finishing. Pick up from what it already did (for example a draft it created) instead of starting over, and keep lookups short.`,
+    ...(subject ? { subjectType: subject.type, subjectId: subject.id } : {}),
+    triggerEventId: wr.triggerEventId,
+  });
+  ctx.stoppedRun = null;
+  ctx.runs = [...(ctx.runs ?? []), runId];
+  await db
+    .update(workflowRuns)
+    .set({
+      context: ctx,
+      waitingRunId: runId,
+      history: [...wr.history, note("Retried.")],
+      updatedAt: new Date(),
+    })
+    .where(eq(workflowRuns.id, wr.id));
+  const { kickAgents } = await import("./orchestrator.server");
+  kickAgents(wr.orgId);
+}
+
 /** When an agent run a workflow waits on ends, the flow moves to its next step. */
 export async function onAgentRunFinished(run: {
   id: string;
@@ -883,6 +968,34 @@ export async function onAgentRunFinished(run: {
           .returning({ id: workflowRuns.id });
         if (resumed.length) await advanceWorkflowRun(wr.id);
         continue;
+      }
+      // Stopped at its run limit: not a real failure — pause for Retry or Skip.
+      if (run.status === "failed") {
+        const [ended] = await db
+          .select({ lastError: agentRuns.lastError })
+          .from(agentRuns)
+          .where(eq(agentRuns.id, run.id))
+          .limit(1);
+        if (ended?.lastError && LIMIT_STOPS.has(ended.lastError)) {
+          ctx.stoppedRun = run.id;
+          await db
+            .update(workflowRuns)
+            .set({
+              context: ctx,
+              waitingRunId: null,
+              history: [
+                ...wr.history,
+                {
+                  node: wr.currentNode ?? "",
+                  at: new Date().toISOString(),
+                  note: "Stopped at its run limit — Retry the step (raise the limit in Agent settings if it keeps stopping) or Skip it.",
+                },
+              ],
+              updatedAt: new Date(),
+            })
+            .where(and(eq(workflowRuns.id, wr.id), eq(workflowRuns.status, "waiting")));
+          continue;
+        }
       }
       ctx.last = { status: run.status, result: (run.result ?? "").slice(0, 2000) };
       if (!ctx.subject) {
@@ -1183,7 +1296,7 @@ export async function grantedWorkflows(orgId: string) {
 
 export type WaitingOn = {
   /** person: an agent asked people something; agent: an agent is working; event: a wait step. */
-  kind: "person" | "agent" | "event";
+  kind: "person" | "agent" | "event" | "stopped";
   /** One plain line, e.g. "Aditi is waiting for you — 1 question". */
   text: string;
   /** Open requests the agent run is waiting on (count only; detail stays in the org). */
@@ -1232,6 +1345,21 @@ export async function waitingOnFor(
         .orderBy(agentTasks.createdAt)
     : [];
   for (const r of waiting) {
+    const stoppedId = (r.context as WorkflowContext | null)?.stoppedRun;
+    if (stoppedId) {
+      const [st] = await db
+        .select({ agentType: agentRuns.agentType })
+        .from(agentRuns)
+        .where(eq(agentRuns.id, stoppedId))
+        .limit(1);
+      const nm = st ? (AGENT_LABEL[st.agentType] ?? st.agentType) : "The agent";
+      out.set(r.id, {
+        kind: "stopped",
+        text: `${nm} stopped at its run limit — Retry or Skip`,
+        requests: 0,
+      });
+      continue;
+    }
     if (r.waitingEvent) {
       const until = r.waitingUntil
         ? ` (until ${r.waitingUntil.toISOString().slice(0, 16).replace("T", " ")})`

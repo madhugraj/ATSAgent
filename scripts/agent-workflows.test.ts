@@ -532,6 +532,64 @@ describe("engine", () => {
     expect(after.history.map((h) => h.node).slice(-2)).toEqual(["c", "e"]);
   });
 
+  test("a step stopped at its run limit pauses for Retry or Skip", async () => {
+    const { LEG_LIMIT_MESSAGE } = await import("../src/server/agents/run-messages");
+    const mk = async (code: string) => {
+      const [r] = await db
+        .insert(requisitions)
+        .values({
+          orgId,
+          code: `${code}-${stamp}`,
+          title: "Ops",
+          status: "approved",
+          createdBy: userId,
+        } as never)
+        .returning({ id: requisitions.id });
+      await emit(orgId, r!.id);
+      await processAgentEvents({ orgId });
+      return (
+        await db.select().from(workflowRuns).where(eq(workflowRuns.workflowId, workflowId))
+      ).find((x) => (x.context as { subject?: { id: string } }).subject?.id === r!.id)!;
+    };
+    const stop = async (runId: string) => {
+      await db
+        .update(agentRuns)
+        .set({ status: "failed", lastError: LEG_LIMIT_MESSAGE, finishedAt: new Date() })
+        .where(eq(agentRuns.id, runId));
+      await w.onAgentRunFinished({ id: runId, orgId, status: "failed", result: null });
+    };
+    const reload = async (id: string) =>
+      (await db.select().from(workflowRuns).where(eq(workflowRuns.id, id)))[0]!;
+
+    // Retry: the step starts again, told to pick up what was done.
+    const a = await mk("WF7");
+    const first = a.waitingRunId!;
+    await stop(first);
+    let now = await reload(a.id);
+    expect(now.status).toBe("waiting");
+    expect(now.waitingRunId).toBeNull();
+    expect((await w.waitingOnFor([now])).get(now.id)!.kind).toBe("stopped");
+    expect(await w.resumeFinishedRunWaits()).toBeGreaterThanOrEqual(0);
+    expect((await reload(a.id)).status).toBe("waiting");
+    await w.resolveStoppedStep({ workflowRunId: a.id, orgId, userId, action: "retry" });
+    now = await reload(a.id);
+    expect(now.waitingRunId).not.toBe(first);
+    const [again] = await db.select().from(agentRuns).where(eq(agentRuns.id, now.waitingRunId!));
+    expect(again!.goal).toContain("stopped at its turn limit");
+    expect(now.currentNode).toBe("a");
+
+    // Skip: the step counts as failed and the flow follows its way out.
+    const b = await mk("WF8");
+    await stop(b.waitingRunId!);
+    await w.resolveStoppedStep({ workflowRunId: b.id, orgId, userId, action: "skip" });
+    now = await reload(b.id);
+    expect(now.status).toBe("done");
+    expect(now.history.map((h) => h.node).slice(-2)).toEqual(["c", "e"]);
+    await expect(
+      w.resolveStoppedStep({ workflowRunId: b.id, orgId, userId, action: "retry" }),
+    ).rejects.toThrow("not paused");
+  });
+
   test("an organisation without a grant never runs it", async () => {
     await emit(otherOrgId, otherReqId);
     await processAgentEvents({ orgId: otherOrgId });

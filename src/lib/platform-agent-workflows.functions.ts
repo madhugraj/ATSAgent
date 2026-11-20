@@ -101,7 +101,7 @@ export type WorkflowRunRow = {
   /** The graph of the version this run ran (steps are drawn from it, not the current draft). */
   graph: WorkflowGraph | null;
   /** What a waiting run waits for (no request text — that stays in the organisation). */
-  waitingOn: { kind: "person" | "agent" | "event"; text: string } | null;
+  waitingOn: { kind: "person" | "agent" | "event" | "stopped"; text: string } | null;
 };
 
 export type WorkflowBuilderView = {

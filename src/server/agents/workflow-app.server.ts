@@ -105,7 +105,7 @@ export type WorkflowRunApiView = {
   /** The step it is on, by its name in the workflow. */
   currentStep: string | null;
   /** Plain words: "<agent> is waiting for you — 1 question", "<agent> is working", … */
-  waitingOn: { kind: "person" | "agent" | "event"; text: string; requests: number } | null;
+  waitingOn: { kind: "person" | "agent" | "event" | "stopped"; text: string; requests: number } | null;
   steps: { step: string; at: string; note: string }[];
   error: string | null;
   createdAt: string;
