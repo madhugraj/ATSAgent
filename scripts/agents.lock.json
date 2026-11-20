@@ -16,8 +16,8 @@
     "hash": "e31a0b0e069867175d791e4920e000ad41dec3164f63e34e4342b1c228974d5c"
   },
   "followup": {
-    "version": "1.5.0",
-    "hash": "ed4e0abdbf8e2d85b2b00474f19144a9fc871b93d4ab15d6db3672dece9173fa"
+    "version": "1.6.0",
+    "hash": "af613e29f16d3be596928735fc5fa22975025fd8fde460945010114f77b6ab08"
   },
   "intake": {
     "version": "1.5.1",
@@ -25,7 +25,7 @@
   },
   "interview": {
     "version": "2.5.0",
-    "hash": "4929f5ca06802104b0c09e12fc64911723f0480e4e76e261900af8b1fdc932c3"
+    "hash": "4c131f217bc21aa712a52d243f59ecdfedff83a2b8ead2447f038977ace02eb2"
   },
   "jd": {
     "version": "1.5.0",

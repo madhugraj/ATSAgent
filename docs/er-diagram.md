@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-123 tables across 9 domains.
+124 tables across 9 domains.
 
 ## Identity & access
 
@@ -1403,6 +1403,8 @@ erDiagram
 | `round_substitutes` | `with_panelist_id` | `panelists` | cascade |
 | `salary_benchmarks` | `org_id` | `organizations` | cascade |
 | `salary_benchmarks` | `requisition_id` | `requisitions` | no action |
+| `scorecard_chases` | `interview_id` | `interviews` | cascade |
+| `scorecard_chases` | `org_id` | `organizations` | cascade |
 | `screening_calls` | `agent_run_id` | `agent_runs` | no action |
 | `screening_calls` | `application_id` | `applications` | no action |
 | `screening_calls` | `candidate_id` | `candidates` | cascade |
@@ -1575,6 +1577,7 @@ erDiagram
 | `role_panels` | — | 9 | (requisitionId+level) |
 | `round_substitutes` | — | 11 | — |
 | `salary_benchmarks` | Intelligence | 15 | — |
+| `scorecard_chases` | — | 7 | (interviewId+email) |
 | `screening_calls` | Screening & interviews | 37 | — |
 | `screening_kits` | Screening & interviews | 11 | — |
 | `screening_prep_jobs` | Screening & interviews | 10 | (application_id) |

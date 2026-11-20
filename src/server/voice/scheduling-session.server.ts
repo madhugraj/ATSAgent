@@ -43,7 +43,7 @@ import { readsOutWorkings, WORKINGS_CORRECTION } from "./spoken-guard";
 import { GREETING_WAIT_MS, greetingCue, ReadyGreeting } from "./greeting";
 import { TURN_TIMING, TurnKeeper } from "./turns";
 import { rms, Vad } from "./vad";
-import { localNow, retryAt } from "./schedule";
+import { localNow, nextWindowStart } from "./schedule";
 import {
   applySchedulingTool,
   freshSchedulingState,
@@ -60,6 +60,7 @@ import {
   noteAvailability,
   saveCallback,
   SCHEDULING_MAX_ATTEMPTS,
+  SCHEDULING_RETRY_MS,
 } from "./scheduling-outcome.server";
 import { schedulingSystemPrompt, schedulingFirstWords } from "./scheduling-prompt";
 import { phoneScreeningPolicyOf } from "./settings.server";
@@ -471,7 +472,12 @@ async function settle(
     if (call.attempt < SCHEDULING_MAX_ATTEMPTS) {
       const policy = await phoneScreeningPolicyOf(orgId);
       const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
-      dueAt = retryAt(at, call.attempt, policy, (await getOrgEmailSettings(orgId)).timezone);
+      // Hourly the same day (hiring SLA), not the screening call's 2 h then next day.
+      dueAt = nextWindowStart(
+        at + SCHEDULING_RETRY_MS,
+        policy,
+        (await getOrgEmailSettings(orgId)).timezone,
+      );
       status = "no_answer";
     } else {
       status = "fell_back";
@@ -559,7 +565,7 @@ async function postToThread(orgId: string, call: Call, how: string, dueAt: Date 
       agentType: "scheduling_call",
       body:
         said[how] ??
-        `The assistant could not reach ${name} to pick their ${round} time; the times are e-mailed to them with a link.`,
+        `The assistant could not reach ${name} about their ${round} time after ${SCHEDULING_MAX_ATTEMPTS} calls; the times are e-mailed to them with a link. Please phone them today — the hiring SLA leaves no room for a missed day.`,
     },
   );
 }

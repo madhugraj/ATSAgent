@@ -930,7 +930,7 @@ export async function releaseInviteNow(
  * the hiring SLA (default 5 days from application to offer) leaves no room for
  * a day's silence.
  */
-export const PANEL_ANSWER = { remindAfterHours: 2, windowHours: 4 } as const;
+export const PANEL_ANSWER = { remindAfterHours: 1, windowHours: 2 } as const;
 
 /**
  * Run by the agent tick. A pending panelist is reminded once at

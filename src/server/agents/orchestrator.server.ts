@@ -958,6 +958,13 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
   } catch (err) {
     log.warn("hiring.sla_sweep_failed", { error: err as Error });
   }
+  // Scorecards are due 2 hours after a round: reminders, then the HR head.
+  try {
+    const { sweepScorecards } = await import("@/lib/scorecard-chase.server");
+    await sweepScorecards(opts.orgId);
+  } catch (err) {
+    log.warn("interview.scorecard_sweep_failed", { error: err as Error });
+  }
   // The panel's answer window: a reminder, then a default so a silent panelist
   // never holds the candidate up past the hiring SLA.
   try {
