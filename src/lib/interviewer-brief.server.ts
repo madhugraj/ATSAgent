@@ -106,12 +106,33 @@ export async function sendInterviewerBrief(
     : null;
   // Their own accept / can't-make-it link for this round and time.
   let confirmUrl: string | undefined;
+  let confirmToken = "";
   try {
     const { panelistConfirmation } = await import("./interview-confirmations.server");
     const c = await panelistConfirmation(orgId, r.interviewId, r.scheduledAt, {
       name: r.interviewerName,
       email: r.interviewerEmail,
     });
+    confirmToken = c.token;
+    // Still waiting on the brief they already have for this time: nothing to send.
+    if (!c.created) {
+      const { emailOutbox } = await import("@db/schema");
+      const { like } = await import("drizzle-orm");
+      const [sent] = await db
+        .select({ id: emailOutbox.id })
+        .from(emailOutbox)
+        .where(
+          and(
+            eq(emailOutbox.orgId, orgId),
+            like(
+              emailOutbox.idempotencyKey,
+              `interviewer-brief:${r.interviewId}:${r.interviewerEmail.toLowerCase()}:${r.scheduledAt.toISOString()}%`,
+            ),
+          ),
+        )
+        .limit(1);
+      if (sent) return;
+    }
     if (c.state === "pending")
       confirmUrl = `${env.PUBLIC_SITE_URL.replace(/\/$/, "")}/confirm/${c.token}`;
   } catch {
@@ -145,7 +166,8 @@ export async function sendInterviewerBrief(
     templateName: "interviewer_brief",
     toEmail: r.interviewerEmail,
     applicationId: r.applicationId,
-    idempotencyKey: `interviewer-brief:${r.interviewId}:${r.interviewerEmail.toLowerCase()}:${r.scheduledAt.toISOString()}`,
+    // Each ask is its own brief: going back to an earlier time sends it again.
+    idempotencyKey: `interviewer-brief:${r.interviewId}:${r.interviewerEmail.toLowerCase()}:${r.scheduledAt.toISOString()}${confirmToken ? `:${confirmToken.slice(0, 12)}` : ""}`,
     templateData: {
       interviewerName: r.interviewerName ?? undefined,
       orgName: ctx.orgName,

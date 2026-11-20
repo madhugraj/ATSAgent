@@ -380,4 +380,54 @@ describe("interview confirmations", () => {
     expect(live.find((x) => x.email === lead)?.state).toBe("pending");
     expect((await conf.confirmationsFor(orgId, [id]))[id]?.inviteHeld).toBe(true);
   });
+
+  test("going back to an earlier time sends a fresh invite once the panel accepts", async () => {
+    const at = inDays(25, 7);
+    const book = (when: Date) =>
+      scheduleInterviewCore(
+        { orgId, actor: "Madhu" },
+        {
+          applicationId: app,
+          level: 3,
+          interviewer: "Priya",
+          interviewerEmail: lead,
+          scheduledAt: when.toISOString(),
+          durationMins: 60,
+          mode: "online",
+          ...(id ? { interviewId: id, rescheduleReason: "test" } : {}),
+        },
+      );
+    let id: string | undefined;
+    id = (await book(at)).interviewId!;
+    await book(inDays(26, 7));
+    await book(at);
+    const live = (await rowsOf(id)).filter((x) => x.state !== "superseded");
+    expect(live.filter((x) => x.party === "candidate")).toHaveLength(1);
+    const held = (await invite(id)).filter((m) => m.status === "held");
+    expect(held).toHaveLength(1);
+    // The panelist is asked again for that time, with a new brief.
+    const briefs = await db
+      .select({ key: emailOutbox.idempotencyKey })
+      .from(emailOutbox)
+      .where(
+        and(
+          eq(emailOutbox.kind, "interviewer_brief"),
+          like(emailOutbox.idempotencyKey, `interviewer-brief:${id}:${lead}:${at.toISOString()}%`),
+        ),
+      );
+    expect(briefs).toHaveLength(2);
+    // The same time again while they have not answered: no duplicate brief.
+    await book(at);
+    const again = await db
+      .select({ key: emailOutbox.idempotencyKey })
+      .from(emailOutbox)
+      .where(
+        and(
+          eq(emailOutbox.kind, "interviewer_brief"),
+          like(emailOutbox.idempotencyKey, `interviewer-brief:${id}:${lead}:${at.toISOString()}%`),
+        ),
+      );
+    expect(again).toHaveLength(2);
+    expect((await invite(id)).filter((m) => m.status === "held")).toHaveLength(1);
+  });
 });

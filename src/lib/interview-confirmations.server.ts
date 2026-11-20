@@ -99,7 +99,7 @@ export async function panelistConfirmation(
   interviewId: string,
   scheduledAt: Date,
   p: Person,
-): Promise<{ token: string; state: ConfirmState }> {
+): Promise<{ token: string; state: ConfirmState; created: boolean }> {
   const email = p.email.toLowerCase();
   const [have] = await db
     .select({ token: interviewConfirmations.token, state: interviewConfirmations.state })
@@ -111,10 +111,11 @@ export async function panelistConfirmation(
         eq(interviewConfirmations.party, "panelist"),
         eq(interviewConfirmations.email, email),
         eq(interviewConfirmations.scheduledAt, scheduledAt),
+        sql`${interviewConfirmations.state} <> 'superseded'`,
       ),
     )
     .limit(1);
-  if (have) return have;
+  if (have) return { ...have, created: false };
   const agreed =
     (await agreedOnOffer(orgId, interviewId, email, scheduledAt)) ||
     (await suggestedThis(orgId, interviewId, email, scheduledAt));
@@ -131,7 +132,7 @@ export async function panelistConfirmation(
     scheduledAt,
     respondedAt: agreed ? new Date() : null,
   });
-  return { token, state };
+  return { token, state, created: true };
 }
 
 /** Did this panelist suggest this very time for the round? */
@@ -186,6 +187,18 @@ export async function candidateConfirmation(
   c: Person,
   state: ConfirmState,
 ): Promise<string> {
+  // One live answer per booking: an earlier one for the same time is replaced.
+  await db
+    .update(interviewConfirmations)
+    .set({ state: "superseded" })
+    .where(
+      and(
+        eq(interviewConfirmations.orgId, orgId),
+        eq(interviewConfirmations.interviewId, interviewId),
+        eq(interviewConfirmations.party, "candidate"),
+        sql`${interviewConfirmations.state} <> 'superseded'`,
+      ),
+    );
   const token = newToken();
   await db.insert(interviewConfirmations).values({
     orgId,
