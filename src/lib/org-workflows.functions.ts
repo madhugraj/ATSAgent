@@ -143,7 +143,8 @@ export type AppRun = {
   /** The graph of the version this run ran. */
   graph: import("@db/schema").WorkflowGraph | null;
   /** The role the run is working on, once it has one. */
-  requisition: { id: string; code: string; status: string } | null;
+  /** agentBusy: an agent is working on it right now (e.g. applying a send-back). */
+  requisition: { id: string; code: string; status: string; agentBusy: boolean } | null;
 };
 
 /** Everything the workflow app shows: the workflow, whether it can run here, and its runs. */
@@ -188,7 +189,22 @@ export const orgWorkflowApp = createServerFn({ method: "GET" })
           .from(requisitions)
           .where(and(eq(requisitions.orgId, context.orgId), inArray(requisitions.id, reqIds)))
       : [];
-    const reqById = new Map(reqs.map((x) => [x.id, x]));
+    const { agentRuns } = await import("@db/schema");
+    const busy = reqIds.length
+      ? await db
+          .select({ id: agentRuns.subjectId })
+          .from(agentRuns)
+          .where(
+            and(
+              eq(agentRuns.orgId, context.orgId),
+              eq(agentRuns.subjectType, "requisition"),
+              inArray(agentRuns.subjectId, reqIds),
+              inArray(agentRuns.status, ["queued", "running"]),
+            ),
+          )
+      : [];
+    const busyIds = new Set(busy.map((b) => b.id));
+    const reqById = new Map(reqs.map((x) => [x.id, { ...x, agentBusy: busyIds.has(x.id) }]));
     const graphs = new Map<number, import("@db/schema").WorkflowGraph | null>();
     for (const r of rows)
       if (!graphs.has(r.version)) graphs.set(r.version, await runVersionGraph(g.id, r.version));
