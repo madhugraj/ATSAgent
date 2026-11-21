@@ -694,3 +694,111 @@ export async function actorFor(orgId: string, userId: string): Promise<Lifecycle
     throw new Error("The person this agent works for has left the organisation.");
   return { orgId, userId, memberEmail: org.memberEmail, via: "agent" };
 }
+
+export type ApproverEdit = {
+  title?: string | undefined;
+  openings?: number | undefined;
+  location?: string | undefined;
+  workMode?: "onsite" | "hybrid" | "remote" | undefined;
+  experienceMin?: number | undefined;
+  experienceMax?: number | undefined;
+  ctcBandMin?: number | null | undefined;
+  ctcBandMax?: number | null | undefined;
+  mustHaveSkills?: string[] | undefined;
+  goodToHaveSkills?: string[] | undefined;
+  responsibilities?: string | undefined;
+};
+
+/**
+ * Correct a requisition while it waits for approval: only the current step's
+ * approver (owners pass). It stays at its step; what changed goes on the
+ * approval trail (built here) and the audit log, so the next approver sees it.
+ */
+export async function editRequisitionInApprovalCore(
+  actor: LifecycleActor,
+  id: string,
+  patch: ApproverEdit,
+): Promise<{ changed: string[] }> {
+  const [current] = await db
+    .select()
+    .from(requisitions)
+    .where(and(eq(requisitions.id, id), eq(requisitions.orgId, actor.orgId)))
+    .limit(1);
+  if (!current) throw new Error("Requisition not found.");
+  const from = current.status as ReqStatus;
+  if (!IN_APPROVAL.includes(from))
+    throw new Error("Only a requisition waiting for approval can be corrected here.");
+  await assertRole(
+    actor.userId,
+    actor.orgId,
+    APPROVER_ROLE[from]!,
+    "Only the approver at this step can correct it.",
+  );
+  if (
+    (patch.experienceMin ?? current.experienceMin) > (patch.experienceMax ?? current.experienceMax)
+  )
+    throw new Error("Minimum experience is above the maximum.");
+  const set: Record<string, unknown> = {};
+  const changed: string[] = [];
+  const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === undefined) continue;
+    const val = k === "ctcBandMin" || k === "ctcBandMax" ? (v === null ? null : String(v)) : v;
+    const cur = (current as Record<string, unknown>)[k];
+    const norm = (x: unknown) =>
+      k === "ctcBandMin" || k === "ctcBandMax" ? (x == null ? null : Number(x)) : x;
+    if (same(norm(cur), norm(val))) continue;
+    set[k] = val;
+    changed.push(k);
+  }
+  if (!changed.length) return { changed };
+  const LABEL: Record<string, string> = {
+    title: "role",
+    openings: "openings",
+    location: "location",
+    workMode: "work mode",
+    experienceMin: "experience",
+    experienceMax: "experience",
+    ctcBandMin: "CTC band",
+    ctcBandMax: "CTC band",
+    mustHaveSkills: "must-have skills",
+    goodToHaveSkills: "good-to-have skills",
+    responsibilities: "responsibilities",
+  };
+  const words = [...new Set(changed.map((c) => LABEL[c] ?? c))];
+  const prior = Array.isArray(current.approvalTrail) ? current.approvalTrail : [];
+  set["approvalTrail"] = [
+    ...prior,
+    {
+      from,
+      to: from,
+      actor: actor.memberEmail,
+      decision: "edited",
+      comment: `Corrected ${words.join(", ")}.`,
+      at: new Date().toISOString(),
+    },
+  ];
+  const done = await db
+    .update(requisitions)
+    .set(set)
+    .where(
+      and(
+        eq(requisitions.id, id),
+        eq(requisitions.orgId, actor.orgId),
+        eq(requisitions.status, from),
+      ),
+    )
+    .returning({ id: requisitions.id });
+  if (!done.length) throw new Error("This requisition has just moved on; refresh to see it.");
+  const { writeAudit } = await import("../server/audit");
+  await writeAudit({
+    actor: actor.memberEmail,
+    actorUserId: actor.userId,
+    orgId: actor.orgId,
+    action: "requisition.edited_in_approval",
+    entityType: "requisition",
+    entityId: id,
+    detail: { code: current.code, at: from, fields: words },
+  });
+  return { changed: words };
+}

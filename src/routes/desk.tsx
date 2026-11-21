@@ -40,7 +40,11 @@ import { WorkflowJourney } from "@/components/agents/WorkflowApp";
 import { WorkflowRunRequests } from "@/components/agents/AgentTaskCard";
 import { StoppedStepActions } from "@/components/agents/StoppedStepActions";
 import { useRoles } from "@/hooks/useRoles";
-import { advanceRequisition } from "@/lib/requisitions.functions";
+import {
+  advanceRequisition,
+  editRequisitionInApproval,
+  sendBackRequisition,
+} from "@/lib/requisitions.functions";
 import { getRequisition } from "@/lib/queries.functions";
 import {
   deskWorkflows,
@@ -540,62 +544,130 @@ function RequisitionApprovalCard({
   requisition: { id: string; code: string; status: string };
   onDone: () => void;
 }) {
+  const qc = useQueryClient();
   const step = REQ_NEXT[requisition.status]!;
   const full = useQuery({
     queryKey: ["requisition", requisition.id],
     queryFn: () => getRequisition({ data: { id: requisition.id } }),
   });
   const q = (full.data ?? {}) as Record<string, unknown>;
-  const list = (v: unknown) =>
-    Array.isArray(v) ? v.map(String).filter(Boolean).join(", ") : v ? String(v) : "";
-  const range = (a: unknown, b: unknown, unit = "") =>
-    a || b ? `${a ?? "?"}–${b ?? "?"}${unit}` : "";
+  const str = (v: unknown) => (v == null ? "" : String(v));
+  const arr = (v: unknown) => (Array.isArray(v) ? v.map(String).filter(Boolean) : []);
+  const money = (v: unknown) =>
+    v == null || v === "" ? "" : Number(v).toLocaleString("en-IN", { maximumFractionDigits: 0 });
   const facts: [string, string][] = (
     [
-      ["Role", list(q["title"])],
-      ["Type", list(q["req_type"]).replace(/_/g, " ")],
-      ["Openings", list(q["openings"])],
-      ["Location", [list(q["location"]), list(q["work_mode"])].filter(Boolean).join(" · ")],
-      ["Experience", range(q["experience_min"], q["experience_max"], " yrs")],
-      ["CTC band", range(q["ctc_band_min"], q["ctc_band_max"]) || list(q["budget_ctc"])],
-      ["Hiring manager", list(q["hiring_manager"])],
+      ["Role", str(q["title"])],
+      ["Type", str(q["req_type"]).replace(/_/g, " ")],
+      ["Openings", str(q["openings"])],
+      ["Location", [str(q["location"]), str(q["work_mode"])].filter(Boolean).join(" · ")],
+      ["Experience", `${str(q["experience_min"])}–${str(q["experience_max"])} yrs`],
+      [
+        "CTC band",
+        q["ctc_band_min"] || q["ctc_band_max"]
+          ? `₹${money(q["ctc_band_min"])} – ₹${money(q["ctc_band_max"])}`
+          : "",
+      ],
+      ["Hiring manager", str(q["hiring_manager"])],
       ["Needed by", q["needed_by"] ? new Date(String(q["needed_by"])).toLocaleDateString() : ""],
-      ["Must-have skills", list(q["must_have_skills"])],
-      ["Good to have", list(q["good_to_have_skills"])],
-      ["Responsibilities", list(q["responsibilities"])],
+      ["Must-have skills", arr(q["must_have_skills"]).join(", ")],
+      ["Good to have", arr(q["good_to_have_skills"]).join(", ")],
+      ["Responsibilities", str(q["responsibilities"])],
     ] as [string, string][]
-  ).filter(([, v]) => v);
+  ).filter(([, v]) => v && v !== "–  yrs");
   const trail = (Array.isArray(q["approval_trail"]) ? q["approval_trail"] : []) as {
     actor?: string;
     comment?: string | null;
-    to?: string;
   }[];
   const notes = trail.filter((t) => t.comment);
+  const [mode, setMode] = useState<"view" | "edit" | "changes">("view");
   const [comment, setComment] = useState("");
-  const [declining, setDeclining] = useState(false);
+  const [f, setF] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
-  async function go(status: "pending_hr" | "pending_cbo" | "approved" | "rejected") {
-    if (status === "rejected" && !comment.trim()) {
-      toast.error("Say what needs to change — it goes on the approval trail");
-      return;
-    }
+  function startEdit() {
+    setF({
+      title: str(q["title"]),
+      openings: str(q["openings"]),
+      location: str(q["location"]),
+      workMode: str(q["work_mode"]),
+      experienceMin: str(q["experience_min"]),
+      experienceMax: str(q["experience_max"]),
+      ctcBandMin: q["ctc_band_min"] == null ? "" : String(Number(q["ctc_band_min"])),
+      ctcBandMax: q["ctc_band_max"] == null ? "" : String(Number(q["ctc_band_max"])),
+      mustHaveSkills: arr(q["must_have_skills"]).join(", "),
+      goodToHaveSkills: arr(q["good_to_have_skills"]).join(", "),
+      responsibilities: str(q["responsibilities"]),
+    });
+    setMode("edit");
+  }
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ["requisition", requisition.id] });
+    onDone();
+  };
+  async function run(fn: () => Promise<unknown>, ok: string) {
     setBusy(true);
     try {
-      await withStepUp(() =>
-        advanceRequisition({
-          data: { id: requisition.id, status, comment: comment.trim() || null },
-        }),
-      );
-      toast.success(status === "rejected" ? "Sent back for changes" : "Approved");
+      await withStepUp(fn);
+      toast.success(ok);
       setComment("");
-      setDeclining(false);
-      onDone();
+      setMode("view");
+      refresh();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not record the decision");
+      toast.error(e instanceof Error ? e.message : "Could not save");
     } finally {
       setBusy(false);
     }
   }
+  const list = (v: string | undefined) =>
+    (v ?? "")
+      .split(",")
+      .map((x) => x.trim())
+      .filter(Boolean);
+  const num = (v: string | undefined) => (v && v.trim() ? Number(v) : null);
+  const saveEdit = () =>
+    run(
+      () =>
+        editRequisitionInApproval({
+          data: {
+            id: requisition.id,
+            title: f["title"]!,
+            openings: Number(f["openings"]) || 1,
+            location: f["location"] ?? "",
+            ...(f["workMode"] === "onsite" ||
+            f["workMode"] === "hybrid" ||
+            f["workMode"] === "remote"
+              ? { workMode: f["workMode"] }
+              : {}),
+            experienceMin: Number(f["experienceMin"]) || 0,
+            experienceMax: Number(f["experienceMax"]) || 0,
+            ctcBandMin: num(f["ctcBandMin"]),
+            ctcBandMax: num(f["ctcBandMax"]),
+            mustHaveSkills: list(f["mustHaveSkills"]),
+            goodToHaveSkills: list(f["goodToHaveSkills"]),
+            responsibilities: f["responsibilities"] ?? "",
+          },
+        }),
+      "Requisition corrected",
+    );
+  const field = (k: string, label: string, opts?: { type?: string; long?: boolean }) => (
+    <label className="grid gap-1 text-xs">
+      <span className="text-muted-foreground">{label}</span>
+      {opts?.long ? (
+        <Textarea
+          rows={3}
+          value={f[k] ?? ""}
+          onChange={(e) => setF({ ...f, [k]: e.target.value })}
+        />
+      ) : (
+        <input
+          type={opts?.type ?? "text"}
+          className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+          value={f[k] ?? ""}
+          onChange={(e) => setF({ ...f, [k]: e.target.value })}
+        />
+      )}
+    </label>
+  );
   return (
     <div className="rounded-lg border border-primary/40 p-3 text-sm">
       <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-primary">
@@ -607,6 +679,33 @@ function RequisitionApprovalCard({
       </div>
       {full.isLoading ? (
         <p className="mt-2 text-xs text-muted-foreground">Loading…</p>
+      ) : mode === "edit" ? (
+        <div className="mt-2 grid gap-2 rounded-md bg-muted/40 p-2 sm:grid-cols-2">
+          {field("title", "Role")}
+          {field("openings", "Openings", { type: "number" })}
+          {field("location", "Location")}
+          <label className="grid gap-1 text-xs">
+            <span className="text-muted-foreground">Work mode</span>
+            <select
+              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+              value={f["workMode"] ?? ""}
+              onChange={(e) => setF({ ...f, workMode: e.target.value })}
+            >
+              <option value="onsite">Onsite</option>
+              <option value="hybrid">Hybrid</option>
+              <option value="remote">Remote</option>
+            </select>
+          </label>
+          {field("experienceMin", "Experience from (yrs)", { type: "number" })}
+          {field("experienceMax", "Experience to (yrs)", { type: "number" })}
+          {field("ctcBandMin", "CTC band from (₹)", { type: "number" })}
+          {field("ctcBandMax", "CTC band to (₹)", { type: "number" })}
+          <div className="sm:col-span-2">{field("mustHaveSkills", "Must-have skills")}</div>
+          <div className="sm:col-span-2">{field("goodToHaveSkills", "Good to have")}</div>
+          <div className="sm:col-span-2">
+            {field("responsibilities", "Responsibilities", { long: true })}
+          </div>
+        </div>
       ) : (
         <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-md bg-muted/40 p-2 text-xs">
           {facts.map(([k, v]) => (
@@ -617,7 +716,7 @@ function RequisitionApprovalCard({
           ))}
         </dl>
       )}
-      {notes.length ? (
+      {notes.length && mode !== "edit" ? (
         <ul className="mt-2 space-y-1 text-xs">
           {notes.map((t, i) => (
             <li key={i}>
@@ -626,29 +725,69 @@ function RequisitionApprovalCard({
           ))}
         </ul>
       ) : null}
-      <Textarea
-        className="mt-2"
-        rows={2}
-        value={comment}
-        onChange={(e) => setComment(e.target.value)}
-        placeholder={declining ? "What needs to change?" : "Comment (optional)"}
-      />
+      {mode !== "edit" ? (
+        <Textarea
+          className="mt-2"
+          rows={2}
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          placeholder={mode === "changes" ? "What should change?" : "Comment (optional)"}
+        />
+      ) : null}
       <div className="mt-2 flex flex-wrap gap-2">
-        {declining ? (
+        {mode === "edit" ? (
           <>
-            <Button size="sm" disabled={busy} onClick={() => go("rejected")}>
+            <Button size="sm" disabled={busy} onClick={() => void saveEdit()}>
+              Save changes
+            </Button>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => setMode("view")}>
+              Cancel
+            </Button>
+          </>
+        ) : mode === "changes" ? (
+          <>
+            <Button
+              size="sm"
+              disabled={busy || comment.trim().length < 3}
+              onClick={() =>
+                void run(
+                  () =>
+                    sendBackRequisition({ data: { id: requisition.id, reason: comment.trim() } }),
+                  "Sent back for changes",
+                )
+              }
+            >
               Send back
             </Button>
-            <Button size="sm" variant="ghost" disabled={busy} onClick={() => setDeclining(false)}>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => setMode("view")}>
               Cancel
             </Button>
           </>
         ) : (
           <>
-            <Button size="sm" disabled={busy} onClick={() => go(step.next)}>
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() =>
+                void run(
+                  () =>
+                    advanceRequisition({
+                      data: {
+                        id: requisition.id,
+                        status: step.next,
+                        comment: comment.trim() || null,
+                      },
+                    }),
+                  "Approved",
+                )
+              }
+            >
               Approve
             </Button>
-            <Button size="sm" variant="outline" disabled={busy} onClick={() => setDeclining(true)}>
+            <Button size="sm" variant="outline" disabled={busy} onClick={startEdit}>
+              Edit
+            </Button>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => setMode("changes")}>
               Ask for changes
             </Button>
           </>
