@@ -11,9 +11,8 @@ import { ChangeTime, ScorecardChange } from "@/components/interviews/PanelChange
 import { answerTime, getConfirmation } from "@/lib/interview-confirmations.functions";
 
 export const Route = createFileRoute("/confirm/$token")({
-  validateSearch: (s: Record<string, unknown>) => ({
-    change: s["change"] === "1" || s["change"] === 1,
-  }),
+  validateSearch: (s: Record<string, unknown>): { change?: true } =>
+    [1, "1", true, "true"].includes(s["change"] as never) ? { change: true } : {},
   head: () => ({
     meta: [{ title: "Interview time" }, { name: "robots", content: "noindex" }],
   }),
@@ -47,7 +46,7 @@ function ConfirmPage() {
   const load = useServerFn(getConfirmation);
   const answer = useServerFn(answerTime);
   const [busy, setBusy] = useState(false);
-  const [noOpen, setNoOpen] = useState(change);
+  const [noOpen, setNoOpen] = useState(change === true);
   const [note, setNote] = useState("");
   /** Offer times NOT ticked (all are ticked to start). */
   const [unticked, setUnticked] = useState<string[]>([]);
@@ -101,7 +100,11 @@ function ConfirmPage() {
         </div>
         {panelist && !offer && c.state === "accepted" && !c.closed ? (
           <div className="mt-6 space-y-3 border-t border-border pt-4">
-            <ChangeTime token={token} onDone={() => void q.refetch()} defaultOpen={change} />
+            <ChangeTime
+              token={token}
+              onDone={() => void q.refetch()}
+              defaultOpen={change === true}
+            />
             <ScorecardChange token={token} />
           </div>
         ) : null}
