@@ -206,7 +206,7 @@ export function registerPhase3Tools(): void {
         ...(registered
           ? {}
           : {
-              note: "No interviewers are registered on the Team page; every active member is listed.",
+              note: "No interviewers are registered on the Team page; every active member (and everyone in the panel directory who takes this round) is listed.",
             }),
       };
     },
@@ -247,6 +247,37 @@ export function registerPhase3Tools(): void {
     },
     run: async () => {
       throw new Error("A panel is decided by a person.");
+    },
+  });
+
+  registerTool({
+    name: "request_new_panelist",
+    description:
+      "When nobody in list_panel_options' eligible list fits a round (empty, or no one covers what the round rates), ask the HR head in the hiring desk to add someone to the panel directory: `needed` says what the round needs that nobody covers (from the round's competencies — never a name, e-mail or company you were not given). The HR head types the person in — internal or external — and approves; you are told who was added, then call list_panel_options again and propose the panel. Never invent a person or an e-mail.",
+    input: z.object({
+      requisitionId: z.string().uuid(),
+      level: z.number().int().min(1).max(3),
+      needed: z.string().min(5).max(300),
+      reason: z.string().min(10).max(600),
+    }),
+    risk: "write",
+    describe: (i) => `A new panellist for L${i.level}`,
+    proposes: async (ctx, i) => {
+      await assertRequisitionInOrg(i.requisitionId, ctx.orgId);
+      return {
+        title: `Someone new for the L${i.level} panel?`,
+        summary: i.reason,
+        subject: {
+          type: "new_panelist",
+          requisitionId: i.requisitionId,
+          level: i.level,
+          needed: i.needed,
+          reason: i.reason,
+        },
+      };
+    },
+    run: async () => {
+      throw new Error("A person adds people to the panel directory.");
     },
   });
 
@@ -314,7 +345,7 @@ export function registerPhase3Tools(): void {
       mode: z.enum(["online", "onsite", "phone"]).default("online"),
       meetingProvider: z.enum(["zoom", "google_meet", "teams"]).optional(),
       agenda: z.string().max(2000).optional(),
-      /** Further interviewers on the panel (active members). */
+      /** Further interviewers on the panel (active members or directory panelists). */
       panelEmails: z.array(z.string().email()).max(2).optional(),
     }),
     risk: "external",
@@ -328,23 +359,23 @@ export function registerPhase3Tools(): void {
         throw new Error("Schedule at least 12 hours ahead.");
       if (when.getTime() > Date.now() + 60 * 864e5)
         throw new Error("Schedule within the next 60 days.");
-      const [member] = await db
-        .select({ name: orgMembers.fullName, email: orgMembers.email })
-        .from(orgMembers)
-        .where(
-          and(
-            eq(orgMembers.orgId, ctx.orgId),
-            eq(orgMembers.status, "active"),
-            sql`lower(${orgMembers.email}) = ${i.interviewerEmail.toLowerCase()}`,
-          ),
-        )
-        .limit(1);
-      if (!member) throw new Error("Interviewers must be active members of the organisation.");
+      const { activeInterviewer } = await import("@/lib/panelists.server");
+      const member = await activeInterviewer(ctx.orgId, i.interviewerEmail);
+      if (!member)
+        throw new Error(
+          `${i.interviewerEmail} is not an active member of the organisation or in its panel directory.`,
+        );
       const app = await loadApplication(ctx.orgId, i.applicationId);
       const { assertAfterEarlierRounds } = await import("@/lib/calendar-availability.server");
       await assertAfterEarlierRounds(ctx.orgId, i.applicationId, i.level, [when]);
 
       let meetingLink: string | null = null;
+      // An online round gets a link from the connected provider unless one was named.
+      if (i.mode === "online" && !i.meetingProvider) {
+        const { connectedMeetingProvider } = await import("@/lib/slot-offers.server");
+        const p = await connectedMeetingProvider(ctx.orgId);
+        if (p) i = { ...i, meetingProvider: p };
+      }
       if (i.mode === "online" && i.meetingProvider) {
         const [integration] = await db
           .select({ enabled: sourceIntegrations.enabled, ready: sourceIntegrations.hasCredentials })
@@ -367,7 +398,7 @@ export function registerPhase3Tools(): void {
           topic: `L${i.level} interview: ${app.jobTitle}`,
           startIso: when.toISOString(),
           durationMins: i.durationMins,
-          attendees: [member.email],
+          attendees: [member.email, ...(i.panelEmails ?? [])],
           agenda: i.agenda ?? null,
         });
         meetingLink = meeting.joinUrl;

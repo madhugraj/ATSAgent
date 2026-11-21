@@ -121,6 +121,8 @@ export const HEALTH = {
   profileStaleDays: 180,
   /** A submitted profile version waiting longer than this for a decision (days). */
   reviewWaitingDays: 7,
+  /** A request for a new panellist left this long holds the round up. */
+  newPanelistWaitingHours: 24,
   /** Website re-read failures before the warning becomes serious. */
   rereadSeriousFailures: 2,
   /** Profile items refused from sources in 7 days before it is flagged. */
@@ -570,7 +572,7 @@ export const RULES: Rule[] = [
     element: "skills",
     severity: "warning",
     description:
-      "Candidates are waiting for an interview round that has no approved panel and nobody eligible to propose: no registered interviewer takes the round, or all are at their weekly limit. The owner, CBO or HR head can register interviewers on the Team page.",
+      "Candidates are waiting for an interview round that has no approved panel and nobody eligible to propose: nobody in the panel directory takes the round, or all are at their weekly limit. The Interview coordinator asks the HR head in the hiring desk to add someone; people can also be added under Team → Panel directory.",
     evaluate: async (orgId) => {
       const waiting = await rows<{
         requisition_id: string;
@@ -974,7 +976,11 @@ export const RULES: Rule[] = [
         where c.org_id = ${orgId} and c.purpose = 'screening'
           and c.updated_at >= now() - interval '7 days'`);
       const x = r[0];
-      if (!x || x.total < HEALTH.minCallAnswers7d || x.prompted / x.total < HEALTH.callPromptedShare)
+      if (
+        !x ||
+        x.total < HEALTH.minCallAnswers7d ||
+        x.prompted / x.total < HEALTH.callPromptedShare
+      )
         return [];
       return [
         {
@@ -1390,6 +1396,29 @@ export const RULES: Rule[] = [
           ...(serious ? { severity: "serious" as const } : {}),
         },
       ];
+    },
+  },
+  {
+    id: "interview.new_panelist_waiting",
+    element: "hitl",
+    severity: "warning",
+    description: `The Interview coordinator asked the HR head to add someone to the panel directory more than ${HEALTH.newPanelistWaitingHours} hours ago and nobody has answered — that interview round cannot get a panel or times until someone is typed in (or the request is declined) in the hiring desk.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ code: string; level: number; hours: number }>(sql`
+        select r.code, (t.proposed_action -> 'args' -> 'subject' ->> 'level')::int as level,
+          extract(epoch from now() - t.created_at)::int / 3600 as hours
+        from agent_tasks t
+        join requisitions r on r.org_id = t.org_id
+          and r.id::text = t.proposed_action -> 'args' -> 'subject' ->> 'requisitionId'
+        where t.org_id = ${orgId} and t.status = 'open' and t.kind = 'gate'
+          and t.proposed_action -> 'args' -> 'subject' ->> 'type' = 'new_panelist'
+          and t.created_at < now() - make_interval(hours => ${HEALTH.newPanelistWaitingHours})
+        limit 20`);
+      return r.map((x) => ({
+        agentType: "interview",
+        title: `${x.code} L${x.level} has waited ${x.hours} hours for a new panellist`,
+        detail: { requisition: x.code, level: x.level, hours: x.hours },
+      }));
     },
   },
   {

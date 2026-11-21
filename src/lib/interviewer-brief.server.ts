@@ -74,6 +74,16 @@ export async function sendInterviewerBrief(
     .orderBy(desc(screeningRuns.createdAt))
     .limit(1);
 
+  // A panelist without an account (external, or internal with no login) scores
+  // through a private link. An external one's brief also leaves out
+  // internal-only material: match score and screening result. The candidate
+  // page needs a sign-in, so neither gets that link.
+  const { linkPanelist, issueScorecardLink } = await import("./panelist-links.server");
+  const byLink = await linkPanelist(orgId, r.interviewerEmail);
+  const external = byLink?.kind === "external" ? byLink : null;
+  const scorecardToken = byLink
+    ? await issueScorecardLink(orgId, r.interviewId, byLink.id, r.scheduledAt)
+    : null;
   const { enqueueEmail, formatInOrgTZ, getOrgEmailSettings } =
     await import("./email-outbox.server");
   const tz = (await getOrgEmailSettings(orgId)).timezone;
@@ -115,19 +125,25 @@ export async function sendInterviewerBrief(
       whereText: r.meetingLink ?? undefined,
       profile: profile || undefined,
       skills: (ctx.skills ?? []).slice(0, 8).join(", ") || undefined,
-      matchText: score
-        ? `${score.overall}/100${score.rationale ? ` — ${clip(score.rationale, 220)}` : ""}`
-        : undefined,
-      screeningText: screen?.recommendation
-        ? `${screen.recommendation}${screen.reason ? ` — ${clip(screen.reason, 220)}` : ""}`
-        : undefined,
+      matchText:
+        score && !external
+          ? `${score.overall}/100${score.rationale ? ` — ${clip(score.rationale, 220)}` : ""}`
+          : undefined,
+      screeningText:
+        screen?.recommendation && !external
+          ? `${screen.recommendation}${screen.reason ? ` — ${clip(screen.reason, 220)}` : ""}`
+          : undefined,
       agenda: r.agenda ?? undefined,
       ...(r.panelNames && r.panelNames.length > 1
         ? { panelText: r.panelNames.filter(Boolean).join(", ") }
         : {}),
       ...(await rubricFor(orgId, r.applicationId, r.level)),
-      candidateUrl: `${site}/candidates/${r.candidateId}`,
-      scorecardUrl: `${site}/interviews/mine`,
+      ...(scorecardToken
+        ? { scorecardUrl: `${site}/scorecard/${scorecardToken}` }
+        : {
+            candidateUrl: `${site}/candidates/${r.candidateId}`,
+            scorecardUrl: `${site}/interviews/mine`,
+          }),
     },
     attachments: [
       {
