@@ -474,8 +474,10 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
     r.status === "waiting" &&
     !!r.requisition &&
     (reqStatus === "rejected" || reqStatus === "draft" || reqStatus === "on_hold");
+  const agentFixing = returned && !!r.requisition?.agentBusy;
   const canFix =
     returned &&
+    !agentFixing &&
     (isAdmin || roles.includes("hr_head") || roles.includes("president_cbo") || !!v.canStart);
   // A requisition waiting for an approval this person can give is answered
   // here, in the thread, like every other desk decision.
@@ -486,11 +488,13 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
   const reqApprovable = !!reqPending && canApprove(reqPending.status);
   const needsYou =
     r.waitingOn?.kind === "person" || r.waitingOn?.kind === "stopped" || reqApprovable || canFix;
-  const waitWords = returned
-    ? `${r.requisition!.code} was sent back — waiting for it to be corrected and resubmitted.`
-    : reqPending
-      ? `Waiting for the ${REQ_NEXT[reqPending.status]!.who} to approve ${reqPending.code}.`
-      : r.waitingOn?.text.replace(/^Waiting for (.+?) (\(until .*\))?$/, "Waiting — $1.");
+  const waitWords = agentFixing
+    ? `The requisition agent is applying the change to ${r.requisition!.code} and will resubmit it.`
+    : returned
+      ? `${r.requisition!.code} was sent back — waiting for it to be corrected and resubmitted.`
+      : reqPending
+        ? `Waiting for the ${REQ_NEXT[reqPending.status]!.who} to approve ${reqPending.code}.`
+        : r.waitingOn?.text.replace(/^Waiting for (.+?) (\(until .*\))?$/, "Waiting — $1.");
   const showAction = () => {
     const el = document.getElementById(`wf-action-${r.id}`);
     el?.scrollIntoView({ behavior: "smooth", block: "start" });
