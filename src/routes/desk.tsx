@@ -72,7 +72,11 @@ import { getInterviewPlan } from "@/lib/interview-plan.functions";
 import { RolePanelsEditor } from "@/components/RolePanelsEditor";
 import { getPanelChoices } from "@/lib/panels.functions";
 import { AGENT_LABEL } from "@/lib/agents.catalog";
-import { decideAgentTask, type AgentDecisionInput } from "@/lib/agents.functions";
+import {
+  decideAgentTask,
+  listWorkflowRunTasks,
+  type AgentDecisionInput,
+} from "@/lib/agents.functions";
 import { withStepUp } from "@/lib/step-up-client";
 import {
   acceptDeskProposal,
@@ -410,6 +414,13 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
     enabled: !!reqId,
     refetchInterval: 15_000,
   });
+  // Same query the request cards use: open questions and approvals from agents.
+  const openTasks = useQuery({
+    queryKey: ["workflow_run_tasks", runId],
+    queryFn: () => listWorkflowRunTasks({ data: { workflowRunId: runId } }),
+    refetchInterval: 15_000,
+  });
+  const agentAsking = (openTasks.data?.length ?? 0) > 0;
   if (!v) return <section className="panel p-6 text-sm text-muted-foreground">Loading…</section>;
   if (!r)
     return <section className="panel p-6 text-sm text-muted-foreground">Run not found.</section>;
@@ -478,6 +489,7 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
   const canFix =
     returned &&
     !agentFixing &&
+    !agentAsking &&
     (isAdmin || roles.includes("hr_head") || roles.includes("president_cbo") || !!v.canStart);
   // A requisition waiting for an approval this person can give is answered
   // here, in the thread, like every other desk decision.
@@ -485,9 +497,14 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
     r.status === "waiting" && r.requisition && REQ_NEXT[r.requisition.status]
       ? r.requisition
       : null;
-  const reqApprovable = !!reqPending && canApprove(reqPending.status);
+  const reqApprovable =
+    !!reqPending && canApprove(reqPending.status) && !agentAsking && !r.requisition?.agentBusy;
   const needsYou =
-    r.waitingOn?.kind === "person" || r.waitingOn?.kind === "stopped" || reqApprovable || canFix;
+    agentAsking ||
+    r.waitingOn?.kind === "person" ||
+    r.waitingOn?.kind === "stopped" ||
+    reqApprovable ||
+    canFix;
   const waitWords = agentFixing
     ? `The requisition agent is applying the change to ${r.requisition!.code} and will resubmit it.`
     : returned
@@ -535,7 +552,7 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
             <Bubble key={`t${i}`} role="agent" who={r.requisition!.code} body={trailText(t)} />
           ))}
           {r.error ? <p className="text-xs text-destructive">{r.error}</p> : null}
-          {needsYou ? (
+          {needsYou && !agentAsking ? (
             <div id={`wf-action-${r.id}`} className="rounded-lg transition-shadow">
               {canFix ? (
                 <RequisitionApprovalCard
@@ -568,8 +585,8 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
             </div>
           ) : null}
           {/* Questions from agents on this run or its requisition, whatever the run waits on. */}
-          {r.status === "waiting" ? (
-            <div id={needsYou ? undefined : `wf-action-${r.id}`}>
+          {r.status === "waiting" && agentAsking ? (
+            <div id={`wf-action-${r.id}`}>
               <WorkflowRunRequests
                 workflowRunId={r.id}
                 onDecided={() =>
@@ -586,13 +603,15 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
               onClick={showAction}
               className="w-full rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-left text-sm text-primary"
             >
-              {r.waitingOn?.kind === "stopped"
-                ? "A step stopped in this run — show"
-                : canFix && r.waitingOn?.kind !== "person"
-                  ? "A requisition to correct and resubmit — show"
-                  : reqApprovable && r.waitingOn?.kind !== "person"
-                    ? "1 approval waiting for you in this run — show"
-                    : `${r.waitingOn?.text.replace(/^.* — /, "") ?? "Requests"} waiting for you in this run — show`}
+              {agentAsking
+                ? `${openTasks.data!.length === 1 ? "1 request" : `${openTasks.data!.length} requests`} from an agent waiting for you — show`
+                : r.waitingOn?.kind === "stopped"
+                  ? "A step stopped in this run — show"
+                  : canFix && r.waitingOn?.kind !== "person"
+                    ? "A requisition to correct and resubmit — show"
+                    : reqApprovable && r.waitingOn?.kind !== "person"
+                      ? "1 approval waiting for you in this run — show"
+                      : `${r.waitingOn?.text.replace(/^.* — /, "") ?? "Requests"} waiting for you in this run — show`}
             </button>
           ) : waitWords ? (
             <p className="px-1 text-sm text-muted-foreground">{waitWords}</p>
