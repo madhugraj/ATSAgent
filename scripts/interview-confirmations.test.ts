@@ -383,7 +383,7 @@ describe("interview confirmations", () => {
 
   test("going back to an earlier time sends a fresh invite once the panel accepts", async () => {
     const at = inDays(25, 7);
-    const book = (when: Date) =>
+    const book = (when: Date, id?: string) =>
       scheduleInterviewCore(
         { orgId, actor: "Madhu" },
         {
@@ -397,10 +397,9 @@ describe("interview confirmations", () => {
           ...(id ? { interviewId: id, rescheduleReason: "test" } : {}),
         },
       );
-    let id: string | undefined;
-    id = (await book(at)).interviewId!;
-    await book(inDays(26, 7));
-    await book(at);
+    const id = (await book(at)).interviewId!;
+    await book(inDays(26, 7), id);
+    await book(at, id);
     const live = (await rowsOf(id)).filter((x) => x.state !== "superseded");
     expect(live.filter((x) => x.party === "candidate")).toHaveLength(1);
     const held = (await invite(id)).filter((m) => m.status === "held");
