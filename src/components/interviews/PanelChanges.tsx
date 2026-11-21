@@ -27,8 +27,16 @@ function fmt(iso: string) {
 }
 
 /** After accepting: move the round once, within the hiring SLA, or step down. */
-export function ChangeTime({ token, onDone }: { token: string; onDone: () => void }) {
-  const [open, setOpen] = useState(false);
+export function ChangeTime({
+  token,
+  onDone,
+  defaultOpen = false,
+}: {
+  token: string;
+  onDone: () => void;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
   const [reason, setReason] = useState("");
   const [to, setTo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -46,7 +54,7 @@ export function ChangeTime({ token, onDone }: { token: string; onDone: () => voi
         className="w-full text-center text-xs text-muted-foreground underline"
         onClick={() => setOpen(true)}
       >
-        I need to change this time
+        I can&apos;t make it or need another time
       </button>
     );
   const o = q.data;
@@ -71,7 +79,7 @@ export function ChangeTime({ token, onDone }: { token: string; onDone: () => voi
   }
   return (
     <div className="space-y-2 text-sm">
-      <h2 className="font-medium">Change the time</h2>
+      <h2 className="font-medium">Move it or step down</h2>
       {q.isLoading ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
       <Textarea
         rows={2}

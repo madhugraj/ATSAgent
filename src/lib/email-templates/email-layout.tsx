@@ -4,10 +4,10 @@ import {
   Container,
   Head,
   Heading,
-  Hr,
   Html,
   Link,
   Preview,
+  Section,
   Text,
 } from "@react-email/components";
 
@@ -21,26 +21,63 @@ interface EmailLayoutProps {
   children?: React.ReactNode;
 }
 
-const main = { backgroundColor: "#ffffff", fontFamily: "Arial, Helvetica, sans-serif" };
-const container = { padding: "24px 28px", maxWidth: "560px" };
-const brand = {
-  fontSize: "13px",
-  letterSpacing: "0.12em",
-  textTransform: "uppercase" as const,
-  color: "#0f172a",
-  fontWeight: "bold" as const,
-  margin: "0 0 22px",
+/** The brand colour: the band, buttons and links. */
+export const BRAND = "#4f46e5";
+
+const main = {
+  backgroundColor: "#f3f4f8",
+  fontFamily: "Arial, Helvetica, sans-serif",
+  padding: "24px 0",
 };
-const h1 = { fontSize: "22px", fontWeight: "bold" as const, color: "#0f172a", margin: "0 0 18px" };
-const text = { fontSize: "14px", color: "#45505f", lineHeight: "1.6", margin: "0 0 14px" };
+const frame = {
+  maxWidth: "600px",
+  backgroundColor: "#ffffff",
+  border: "1px solid #d9dbe6",
+  borderRadius: "10px",
+  overflow: "hidden" as const,
+};
+const band = { backgroundColor: BRAND, padding: "22px 32px" };
+const wordmark = {
+  display: "inline-block",
+  backgroundColor: "#ffffff",
+  color: BRAND,
+  borderRadius: "8px",
+  padding: "6px 12px",
+  fontSize: "16px",
+  fontWeight: "bold" as const,
+  letterSpacing: "0.02em",
+  margin: 0,
+};
+const inner = { padding: "26px 36px 8px" };
+const h1 = { fontSize: "21px", fontWeight: "bold" as const, color: "#0f172a", margin: "0 0 16px" };
+const text = { fontSize: "14px", color: "#45505f", lineHeight: "1.65", margin: "0 0 14px" };
 const detail = { fontSize: "14px", color: "#45505f", lineHeight: "1.6", margin: "0 0 6px" };
-const hr = { borderColor: "#e5e7eb", margin: "28px 0 20px" };
-const link = { color: "#1d4ed8", textDecoration: "underline" };
-const footer = { fontSize: "12px", color: "#9ca3af", margin: "26px 0 0", lineHeight: "1.6" };
+const link = { color: BRAND, textDecoration: "underline" };
+const foot = {
+  borderTop: `3px solid ${BRAND}`,
+  padding: "14px 36px 20px",
+  textAlign: "center" as const,
+  fontSize: "12px",
+  color: "#9ca3af",
+  lineHeight: "1.6",
+  margin: 0,
+};
+/** The main action: one per email. */
+export const primaryButton = {
+  backgroundColor: BRAND,
+  color: "#ffffff",
+  fontSize: "14px",
+  fontWeight: "bold" as const,
+  textDecoration: "none",
+  padding: "11px 22px",
+  borderRadius: "6px",
+  display: "inline-block",
+};
 
 /**
- * Shared layout for candidate-facing templates. Greeting/greeting-name and all
- * variable copy are passed in as strings — dates are formatted at enqueue time.
+ * Shared frame for every template: a bordered card with the organisation's
+ * band and wordmark, the content, and a footer rule. All variable copy is
+ * passed in as strings — dates are formatted at enqueue time.
  */
 export function EmailLayout({
   preview,
@@ -56,16 +93,17 @@ export function EmailLayout({
       <Head />
       <Preview>{preview}</Preview>
       <Body style={main}>
-        <Container style={container}>
-          <Text style={brand}>
-            {orgName} · {siteName}
-          </Text>
-          <Heading style={h1}>{heading}</Heading>
-          <Text style={text}>{greeting ?? "Hello,"}</Text>
-          {children}
-          <Hr style={hr} />
-          <Text style={footer}>
-            This message was sent on behalf of {orgName} by{" "}
+        <Container style={frame}>
+          <Section style={band}>
+            <Text style={wordmark}>{orgName}</Text>
+          </Section>
+          <Section style={inner}>
+            <Heading style={h1}>{heading}</Heading>
+            <Text style={text}>{greeting ?? "Hello,"}</Text>
+            {children}
+          </Section>
+          <Text style={foot}>
+            Sent on behalf of {orgName} by{" "}
             <Link href={siteUrl} style={link}>
               {siteName}
             </Link>
