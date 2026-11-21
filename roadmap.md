@@ -3,7 +3,8 @@
 ## Navigation by area (2026-11-21)
 
 - [x] Sidebar regrouped from ~34 links into hubs (Home, Agents, Agent admin, Pipeline, Candidates, Sourcing, Insights; Settings, Platform, Help at the foot); each hub's pages show as a tab strip above the page. URLs, role predicates and Agent/Manual mode filtering unchanged
-- [ ] Next: counts on tabs (screening calls today, waiting for you); optional pinned row for power users
+- [x] Pinned pages: pin button on the tab strip, up to six per browser, shown above the hubs
+- [ ] Next: counts on tabs (screening calls today, waiting for you); pins kept per user on the server
 
 ## Prompt-injection guardrails — P0 (2026-11-01)
 

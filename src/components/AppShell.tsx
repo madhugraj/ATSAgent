@@ -1,6 +1,6 @@
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Bot, Hand, PanelLeftClose, PanelLeftOpen, Search } from "lucide-react";
+import { Bot, Hand, PanelLeftClose, PanelLeftOpen, Pin, PinOff, Search } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Copilot } from "@/components/Copilot";
@@ -11,6 +11,7 @@ import { CommandPalette } from "@/components/CommandPalette";
 import { useNavCtx } from "@/hooks/useNavCtx";
 import { useOrg } from "@/hooks/useOrg";
 import { useWorkMode } from "@/hooks/useWorkMode";
+import { usePins } from "@/hooks/usePins";
 import {
   NAV_GROUPS,
   hubForPath,
@@ -41,6 +42,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   });
   const [paletteOpen, setPaletteOpen] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const searchTab = useRouterState({
+    select: (s) => String((s.location.search as Record<string, unknown>)["tab"] ?? ""),
+  });
+  const [pins, togglePin] = usePins();
   const navigate = useNavigate();
 
   // The menu follows the page: opening an agent page (e.g. from the bell) while
@@ -49,6 +54,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const currentHub = hubForPath(pathname);
   const tabHub = hubs.find((h) => h.heading === currentHub?.heading);
   const tabs = tabHub?.items ?? [];
+  // The page on screen among its hub's tabs (longest path; /agents tabs differ by ?tab=).
+  const currentItem = tabs
+    .filter((i) =>
+      i.to === "/" ? pathname === "/" : pathname === i.to || pathname.startsWith(`${i.to}/`),
+    )
+    .filter((i) => !i.search || i.search["tab"] === searchTab)
+    .sort((a, b) => b.to.length - a.to.length || Number(!!b.search) - Number(!!a.search))[0];
   useEffect(() => {
     if (modeReady && pageMode && pageMode !== mode) setMode(pageMode);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- follow the page (once the saved mode is known)
@@ -96,6 +108,30 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const itemKey = ({ to, search }: NavItem) =>
     `${to}${search ? `?${new URLSearchParams(search)}` : ""}`;
+
+  // Pinned pages this person can still open in this mode, in the order they were pinned.
+  const visibleItems = hubs.flatMap((h) => h.items);
+  const pinned = pins.flatMap((k) => visibleItems.filter((i) => itemKey(i) === k).slice(0, 1));
+  const currentPinned = currentItem ? pins.includes(itemKey(currentItem)) : false;
+
+  function renderPinned(item: NavItem) {
+    const { to, search, label, icon: Icon } = item;
+    return (
+      <Link
+        key={itemKey(item)}
+        to={to}
+        {...(search ? { search } : {})}
+        title={label}
+        activeOptions={activeOptions(to)}
+        className={`flex items-center gap-3 rounded-md py-1.5 text-sm text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground data-[status=active]:text-sidebar-accent-foreground ${
+          collapsed ? "justify-center px-2" : "px-3"
+        }`}
+      >
+        <Icon className="size-4 shrink-0" />
+        {collapsed ? null : <span className="truncate">{label}</span>}
+      </Link>
+    );
+  }
 
   /** One sidebar entry per hub; it opens the hub's first page and stays lit on all of them. */
   function renderHub({ heading, icon: Icon, first }: NavGroup & { first: NavItem }) {
@@ -162,6 +198,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               )}
             </Button>
           </div>
+          {pinned.length ? (
+            <nav
+              aria-label="Pinned"
+              className="mb-3 space-y-0.5 border-b border-sidebar-border pb-3"
+            >
+              {collapsed ? null : (
+                <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/40">
+                  Pinned
+                </div>
+              )}
+              {pinned.map(renderPinned)}
+            </nav>
+          ) : null}
           <nav className="space-y-1">{hubs.filter((h) => !h.bottom).map(renderHub)}</nav>
         </div>
         <nav className="mt-auto space-y-1 border-t border-sidebar-border pt-3">
@@ -271,6 +320,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 {tabHub ? tabLabel(tabHub, item) : item.label}
               </Link>
             ))}
+            {currentItem ? (
+              <button
+                type="button"
+                onClick={() => togglePin(itemKey(currentItem))}
+                aria-pressed={currentPinned}
+                title={
+                  currentPinned
+                    ? `Unpin ${currentItem.label}`
+                    : `Pin ${currentItem.label} to the menu`
+                }
+                aria-label={
+                  currentPinned ? `Unpin ${currentItem.label}` : `Pin ${currentItem.label}`
+                }
+                className="ml-auto flex shrink-0 items-center self-center rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                {currentPinned ? <PinOff className="size-4" /> : <Pin className="size-4" />}
+              </button>
+            ) : null}
           </nav>
         ) : null}
         <main className="mx-auto max-w-[1400px] space-y-4 p-4 sm:p-6">{children}</main>
