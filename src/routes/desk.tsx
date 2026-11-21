@@ -2175,6 +2175,26 @@ function TaskCard({
   const panel = kind === "gate" && card["subjectType"] === "panel_approval";
   const [changing, setChanging] = useState(false);
   const status = conv.tasks[taskId] ?? "open";
+  // One decision at a time: a role-level request waits while a newer open
+  // request (a follow-up question, a fresh approval) sits below it — answering
+  // both at once raced. Per-candidate decisions stay independent.
+  const PER_CANDIDATE = new Set([
+    "screening_decision",
+    "panel_approval",
+    "panel_review",
+    "panel_substitute",
+  ]);
+  const roleLevel = (c: DeskCardView) => !PER_CANDIDATE.has(String(c["subjectType"] ?? ""));
+  const locked = (() => {
+    if (status !== "open" || !roleLevel(card)) return false;
+    const cards = conv.messages
+      .map((m) => m.card)
+      .filter((c): c is DeskCardView => !!c && c.type === "task");
+    const at = cards.findIndex((c) => String(c["taskId"]) === taskId);
+    return cards
+      .slice(at + 1)
+      .some((c) => roleLevel(c) && (conv.tasks[String(c["taskId"])] ?? "open") === "open");
+  })();
   const details =
     conv.taskDetails[taskId] ??
     (Array.isArray(card["details"]) ? (card["details"] as { label: string; value: string }[]) : []);
@@ -2212,6 +2232,11 @@ function TaskCard({
           {TASK_STATUS[status] ?? status}
         </Badge>
       </div>
+      {locked ? (
+        <p className="mt-2 rounded-md bg-amber-500/10 px-2 py-1 text-xs text-amber-800">
+          A newer request below needs you first — this one waits until it is answered.
+        </p>
+      ) : null}
       {card["revision"] ? <RevisionNote revision={card["revision"] as Revision} /> : null}
       {screening && card["applicationId"] ? (
         <div className="mt-2">
@@ -2261,7 +2286,7 @@ function TaskCard({
             />
             <Button
               size="sm"
-              disabled={busy || !answer.trim()}
+              disabled={busy || locked || !answer.trim()}
               onClick={() => decide({ status: "answered", answer: answer.trim() })}
             >
               Answer
@@ -2292,7 +2317,7 @@ function TaskCard({
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={busy || why.trim().length < 3}
+                  disabled={busy || locked || why.trim().length < 3}
                   title={
                     review
                       ? "The candidate goes on hold; later rounds not yet held are cancelled"
@@ -2305,7 +2330,7 @@ function TaskCard({
                 <Button
                   size="sm"
                   variant="destructive"
-                  disabled={busy || why.trim().length < 3}
+                  disabled={busy || locked || why.trim().length < 3}
                   title="Rejects the candidate for this role, with your reason on record"
                   onClick={() =>
                     decide({ status: "rejected", reason: why.trim(), rejectCandidate: true })
@@ -2316,7 +2341,7 @@ function TaskCard({
                 <Button
                   size="sm"
                   variant="ghost"
-                  disabled={busy}
+                  disabled={busy || locked}
                   onClick={() => setDeclining(false)}
                 >
                   Back
@@ -2327,7 +2352,7 @@ function TaskCard({
                 {sendable ? (
                   <Button
                     size="sm"
-                    disabled={busy || why.trim().length < 3}
+                    disabled={busy || locked || why.trim().length < 3}
                     title="Back to draft with your change; the agent applies it and the approvals start over"
                     onClick={() =>
                       decide({ status: "rejected", reason: why.trim(), changes: true })
@@ -2339,7 +2364,7 @@ function TaskCard({
                 <Button
                   size="sm"
                   variant="destructive"
-                  disabled={busy || (kind === "gate" && why.trim().length < 3)}
+                  disabled={busy || locked || (kind === "gate" && why.trim().length < 3)}
                   onClick={() =>
                     decide({
                       status: "rejected",
@@ -2352,7 +2377,7 @@ function TaskCard({
                 <Button
                   size="sm"
                   variant="ghost"
-                  disabled={busy}
+                  disabled={busy || locked}
                   onClick={() => setDeclining(false)}
                 >
                   Back
@@ -2372,7 +2397,7 @@ function TaskCard({
             <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
-                disabled={busy || why.trim().length < 3}
+                disabled={busy || locked || why.trim().length < 3}
                 onClick={() =>
                   decide({
                     status: "approved",
@@ -2386,7 +2411,7 @@ function TaskCard({
               <Button
                 size="sm"
                 variant="ghost"
-                disabled={busy}
+                disabled={busy || locked}
                 onClick={() => setOverruling(false)}
               >
                 Back
@@ -2404,7 +2429,11 @@ function TaskCard({
           />
         ) : (
           <div className="mt-2 flex flex-wrap gap-2">
-            <Button size="sm" disabled={busy} onClick={() => decide({ status: "approved" })}>
+            <Button
+              size="sm"
+              disabled={busy || locked}
+              onClick={() => decide({ status: "approved" })}
+            >
               {panel
                 ? "Approve this panel"
                 : review
@@ -2416,7 +2445,12 @@ function TaskCard({
                     : "Approve"}
             </Button>
             {panel ? (
-              <Button size="sm" variant="outline" disabled={busy} onClick={() => setChanging(true)}>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy || locked}
+                onClick={() => setChanging(true)}
+              >
                 Change the people
               </Button>
             ) : null}
@@ -2424,7 +2458,7 @@ function TaskCard({
               <Button
                 size="sm"
                 variant="outline"
-                disabled={busy}
+                disabled={busy || locked}
                 onClick={() => setOverruling(true)}
               >
                 {proceed ? "Put on hold instead" : "Move to L1 instead"}
@@ -2436,13 +2470,18 @@ function TaskCard({
               <Button
                 size="sm"
                 variant="outline"
-                disabled={busy}
+                disabled={busy || locked}
                 onClick={() => setDeclining(true)}
               >
                 Send back for changes
               </Button>
             ) : null}
-            <Button size="sm" variant="outline" disabled={busy} onClick={() => setDeclining(true)}>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy || locked}
+              onClick={() => setDeclining(true)}
+            >
               {screening ? "Decline" : sendable ? "Decline (final)" : "Decline"}
             </Button>
             <Link to="/agents" className="self-center text-xs text-primary underline">
