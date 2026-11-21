@@ -505,13 +505,15 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
     r.waitingOn?.kind === "stopped" ||
     reqApprovable ||
     canFix;
-  const waitWords = agentFixing
-    ? `The requisition agent is applying the change to ${r.requisition!.code} and will resubmit it.`
-    : returned
-      ? `${r.requisition!.code} was sent back — waiting for it to be corrected and resubmitted.`
-      : reqPending
-        ? `Waiting for the ${REQ_NEXT[reqPending.status]!.who} to approve ${reqPending.code}.`
-        : r.waitingOn?.text.replace(/^Waiting for (.+?) (\(until .*\))?$/, "Waiting — $1.");
+  const waitWords = agentAsking
+    ? "An agent needs your decision below before this can move on."
+    : agentFixing
+      ? `The requisition agent is applying the change to ${r.requisition!.code} and will resubmit it.`
+      : returned
+        ? `${r.requisition!.code} was sent back — waiting for it to be corrected and resubmitted.`
+        : reqPending
+          ? `Waiting for the ${REQ_NEXT[reqPending.status]!.who} to approve ${reqPending.code}.`
+          : r.waitingOn?.text.replace(/^Waiting for (.+?) (\(until .*\))?$/, "Waiting — $1.");
   const showAction = () => {
     const el = document.getElementById(`wf-action-${r.id}`);
     el?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -521,7 +523,13 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
       <div className="xl:order-2">
-        <WorkflowJourney run={r} graph={graph} onReview={showAction} />
+        <WorkflowJourney
+          run={
+            r.waitingOn && waitWords ? { ...r, waitingOn: { ...r.waitingOn, text: waitWords } } : r
+          }
+          graph={graph}
+          onReview={showAction}
+        />
       </div>
       <section className="panel flex h-[calc(100vh-9.5rem)] min-h-[460px] flex-col xl:order-1">
         <header className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
