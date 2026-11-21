@@ -15,7 +15,7 @@ ATSIQ by Yavar AI is an enterprise recruiting intelligence platform. It combines
 
 ## Product scope
 
-- Navigation by area: the sidebar lists hubs (Home, Agents, Agent admin, Pipeline, Candidates, Sourcing, Insights; Settings, Platform and Help at the foot) and each hub's pages show as tabs above the page; page URLs and role visibility are unchanged (`src/components/nav-config.ts`)
+- Navigation by area: the sidebar lists hubs (Home, Agents, Agent admin, Pipeline, Candidates, Sourcing, Insights; Settings, Platform and Help at the foot) and each hub's pages show as tabs above the page; page URLs and role visibility are unchanged (`src/components/nav-config.ts`); people pin up to six pages to a Pinned list at the top of the sidebar (per browser)
 - Organisation registration, platform approval, role-based access and tenant lifecycle controls
 - Versioned Terms of Service, Privacy Policy and Data Processing Agreement (`src/lib/legal/`, `/terms`, `/privacy`, `/dpa`): accepted by a named signatory at registration, re-accepted by the owner when a version changes, recorded in `org_agreements`, audited and visible on the platform console
 - Requisition, JD and offer approval workflows with immutable decision trails
