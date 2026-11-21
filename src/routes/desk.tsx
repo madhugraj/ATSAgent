@@ -512,14 +512,18 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
                     />
                   ) : null}
                 </div>
-              ) : r.waitingOn?.kind === "person" ? (
-                <WorkflowRunRequests
-                  workflowRunId={r.id}
-                  onDecided={() =>
-                    void qc.invalidateQueries({ queryKey: ["workflow_app", workflowId] })
-                  }
-                />
               ) : null}
+            </div>
+          ) : null}
+          {/* Questions from agents on this run or its requisition, whatever the run waits on. */}
+          {r.status === "waiting" ? (
+            <div id={needsYou ? undefined : `wf-action-${r.id}`}>
+              <WorkflowRunRequests
+                workflowRunId={r.id}
+                onDecided={() =>
+                  void qc.invalidateQueries({ queryKey: ["workflow_app", workflowId] })
+                }
+              />
             </div>
           ) : null}
         </div>
