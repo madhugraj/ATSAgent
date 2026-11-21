@@ -140,7 +140,7 @@ const Email = ({
       ) : null}
       {confirmUrl ? (
         <a href={confirmUrl} style={joinUrl ? quiet : button}>
-          Accept or decline this time
+          Accept, change or decline this time
         </a>
       ) : null}
 

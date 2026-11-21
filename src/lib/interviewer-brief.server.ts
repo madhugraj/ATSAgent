@@ -133,7 +133,8 @@ export async function sendInterviewerBrief(
         .limit(1);
       if (sent) return;
     }
-    if (c.state === "pending")
+    // Accepted panelists keep the link: it is where they move the time or step down.
+    if (c.state === "pending" || c.state === "accepted")
       confirmUrl = `${env.PUBLIC_SITE_URL.replace(/\/$/, "")}/confirm/${c.token}`;
   } catch {
     /* the brief goes out either way */
