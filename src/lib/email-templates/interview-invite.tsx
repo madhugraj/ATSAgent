@@ -1,7 +1,7 @@
 import * as React from "react";
 
 import type { TemplateEntry } from "./registry";
-import { EmailLayout, layoutStyles } from "./email-layout";
+import { BRAND, EmailLayout, layoutStyles, primaryButton } from "./email-layout";
 
 interface Props {
   candidateName?: string;
@@ -23,11 +23,14 @@ interface Props {
   transcribed?: string;
   /** Private link to confirm the time or say it does not work. */
   confirmUrl?: string;
+  /** The time the candidate was told before, when the round has moved. */
+  previousText?: string;
 }
 
 const { text, detail, link } = layoutStyles;
 const button = {
-  backgroundColor: "#0f172a",
+  ...primaryButton,
+  backgroundColor: BRAND,
   color: "#ffffff",
   fontSize: "14px",
   fontWeight: "bold" as const,
@@ -50,17 +53,31 @@ const Email = ({
   agenda,
   transcribed,
   confirmUrl,
+  previousText,
 }: Props) => (
   <EmailLayout
-    preview={`${roundLabel} scheduled for ${jobTitle}`}
+    preview={
+      previousText
+        ? `A new time for your ${roundLabel} for ${jobTitle}`
+        : `${roundLabel} scheduled for ${jobTitle}`
+    }
     orgName={orgName}
-    heading={`You are invited: ${roundLabel}`}
+    heading={previousText ? `A new time for your ${roundLabel}` : `You are invited: ${roundLabel}`}
     greeting={candidateName ? `Hi ${candidateName},` : "Hello,"}
   >
-    <p style={text}>
-      <strong>{orgName}</strong> would like to schedule your <strong>{roundLabel}</strong> for{" "}
-      <strong>{jobTitle}</strong>.
-    </p>
+    {previousText ? (
+      <p style={text}>
+        We are sorry to change your <strong>{roundLabel}</strong> for <strong>{jobTitle}</strong>.
+        It was set for {previousText}; something came up on our side, and we would be grateful if
+        the new time below works for you. If it does not, please let us know — we will find one that
+        does.
+      </p>
+    ) : (
+      <p style={text}>
+        <strong>{orgName}</strong> would like to schedule your <strong>{roundLabel}</strong> for{" "}
+        <strong>{jobTitle}</strong>.
+      </p>
+    )}
     {scheduledAtText ? <p style={detail}>When: {scheduledAtText}</p> : null}
     {durationMins ? <p style={detail}>Duration: {durationMins} minutes</p> : null}
     {modeLabel ? <p style={detail}>Mode: {modeLabel}</p> : null}
@@ -87,11 +104,18 @@ const Email = ({
       </p>
     ) : null}
     {confirmUrl ? (
-      <p style={text}>
-        <a href={confirmUrl} style={button}>
-          Confirm or change this time
-        </a>
-      </p>
+      <>
+        <p style={text}>
+          <a href={confirmUrl} style={button}>
+            {previousText ? "This time works" : "Confirm this time"}
+          </a>
+        </p>
+        <p style={text}>
+          <a href={`${confirmUrl}?change=1`} style={link}>
+            {previousText ? "I need a different time" : "This time doesn't work for me"}
+          </a>
+        </p>
+      </>
     ) : (
       <p style={text}>
         A calendar invite (.ics) is attached — please accept it so the slot is held for you. If the
@@ -104,10 +128,15 @@ const Email = ({
 export const template = {
   component: Email,
   subject: (data: Props) =>
-    `Interview invitation — ${data["jobTitle"] ?? ""} at ${data["orgName"] ?? ""}`.replace(
-      /\s+/g,
-      " ",
-    ),
+    data["previousText"]
+      ? `New interview time — ${data["jobTitle"] ?? ""} at ${data["orgName"] ?? ""}`.replace(
+          /\s+/g,
+          " ",
+        )
+      : `Interview invitation — ${data["jobTitle"] ?? ""} at ${data["orgName"] ?? ""}`.replace(
+          /\s+/g,
+          " ",
+        ),
   displayName: "Candidate interview invitation",
   previewData: {
     candidateName: "Asha",

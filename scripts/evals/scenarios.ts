@@ -41,7 +41,12 @@ const call = (id: string, name: string, args: unknown): AgentStepResult => ({
 const tool = <I>(t: AgentTool<I>) => t as unknown as AgentTool<never>;
 
 export function scenarios(): ScriptedScenario[] {
-  const draft = { id: "REQ-1", title: "Platform SRE", skills: [] as string[], status: "draft" };
+  const draft = {
+    id: "7c1e2a4b-3d5f-4a6b-8c9d-0e1f2a3b4c5d",
+    title: "Platform SRE",
+    skills: [] as string[],
+    status: "draft",
+  };
 
   return [
     {
@@ -93,7 +98,7 @@ export function scenarios(): ScriptedScenario[] {
           },
         }),
       ],
-      goal: "Requisition REQ-1 has no skills listed. Complete it with sensible skills for a platform SRE and get it to the department head for approval.",
+      goal: "Requisition 7c1e2a4b-3d5f-4a6b-8c9d-0e1f2a3b4c5d has no skills listed. Complete it with sensible skills for a platform SRE and get it to the department head for approval.",
       autonomy: "act_and_notify",
       decide: (t) =>
         t.kind === "clarification"
@@ -111,18 +116,22 @@ export function scenarios(): ScriptedScenario[] {
         maxSteps: 10,
       },
       script: [
-        call("a", "get_requisition", { id: "REQ-1" }),
+        call("a", "get_requisition", { id: "7c1e2a4b-3d5f-4a6b-8c9d-0e1f2a3b4c5d" }),
         call("b", "update_requisition_draft", {
-          id: "REQ-1",
+          id: "7c1e2a4b-3d5f-4a6b-8c9d-0e1f2a3b4c5d",
           skills: ["Kubernetes", "Terraform", "Go"],
         }),
-        call("c", "submit_requisition_for_approval", { id: "REQ-1" }),
+        call("c", "submit_requisition_for_approval", {
+          id: "7c1e2a4b-3d5f-4a6b-8c9d-0e1f2a3b4c5d",
+        }),
         call("d", "request_approval", {
-          title: "Approve REQ-1 Platform SRE",
+          title: "Approve 7c1e2a4b-3d5f-4a6b-8c9d-0e1f2a3b4c5d Platform SRE",
           summary: "Skills completed; submitted.",
           assignee_role: "department_head",
         }),
-        say("REQ-1 is complete, submitted and approved by the department head."),
+        say(
+          "7c1e2a4b-3d5f-4a6b-8c9d-0e1f2a3b4c5d is complete, submitted and approved by the department head.",
+        ),
       ],
     },
     {
@@ -992,6 +1001,90 @@ export function scenarios(): ScriptedScenario[] {
               toolResult(m, "list_substitutes")["options"] as { memberId: string }[]
             )[0]!.memberId,
             reason: "Dev is on leave; the stand-in is free at the booked time.",
+          }),
+        say("A stand-in was approved; Kiran keeps the booked time."),
+      ],
+    },
+    {
+      name: "interview: keeps the booked time when a panellist steps down under the SLA",
+      agentType: "interview",
+      setup: async ({ orgId, userId }) => {
+        const requisitionId = await seedRequisition(orgId, userId, "approved");
+        const app = await seedApplication(orgId, requisitionId, "Kiran", "l1", 81);
+        const { db } = await import("../../src/server/db");
+        const { interviews, memberInterviewerProfiles, orgMembers, requisitions, rolePanels } =
+          await import("../../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const [me] = await db
+          .select({ id: orgMembers.id })
+          .from(orgMembers)
+          .where(eq(orgMembers.userId, userId));
+        // The approved L1 panel is Dev, who now can't make Kiran's booked interview.
+        const [dev] = await db
+          .insert(orgMembers)
+          .values({
+            orgId,
+            email: `dev-${orgId.slice(0, 8)}@eval.local`,
+            fullName: "Dev",
+            status: "active",
+          } as never)
+          .returning({ id: orgMembers.id, email: orgMembers.email });
+        await db
+          .insert(rolePanels)
+          .values({ orgId, requisitionId, level: 1, memberIds: [dev!.id] });
+        await db.insert(memberInterviewerProfiles).values({
+          orgId,
+          memberId: me!.id,
+          active: true,
+          areas: ["Kubernetes"],
+          rounds: [1, 2, 3],
+        });
+        await db
+          .update(requisitions)
+          .set({ hiringManagerMemberId: me!.id })
+          .where(eq(requisitions.id, requisitionId));
+        await db.insert(interviews).values({
+          orgId,
+          applicationId: app,
+          level: 1,
+          interviewer: "Dev",
+          interviewerEmail: dev!.email,
+          scheduledAt: new Date(Date.now() + 3 * 86_400_000),
+          status: "scheduled",
+          unavailable: [
+            {
+              email: dev!.email,
+              note: "Customer escalation all week",
+              at: new Date().toISOString(),
+            },
+          ],
+        } as never);
+        return { requisitionId, app, dev: dev!.id };
+      },
+      goal: (d) =>
+        `Dev (memberId ${d["dev"]}) stepped down from the booked L1 interview of candidate application ${d["app"]} ("Customer escalation all week"): no time within the hiring SLA suited the whole panel, so the booked time stands. Arrange the round so it still happens on time. app=${d["app"]} dev=${d["dev"]}\n\nRequisition id: ${d["requisitionId"]}`,
+      decide: () => ({ status: "approved" }),
+      expect: {
+        status: "done",
+        calls: ["list_substitutes", "propose_substitute"],
+        neverCalls: ["offer_interview_slots", "schedule_interview", "propose_panel"],
+      },
+      script: [
+        (m) =>
+          call("s", "list_substitutes", {
+            applicationId: fromGoal(m, "app"),
+            level: 1,
+            replaceMemberId: fromGoal(m, "dev"),
+          }),
+        (m) =>
+          call("ps", "propose_substitute", {
+            applicationId: fromGoal(m, "app"),
+            level: 1,
+            replaceMemberId: fromGoal(m, "dev"),
+            withMemberId: (
+              toolResult(m, "list_substitutes")["options"] as { memberId: string }[]
+            )[0]!.memberId,
+            reason: "Dev stepped down; the stand-in is free at the booked time, so the SLA holds.",
           }),
         say("A stand-in was approved; Kiran keeps the booked time."),
       ],

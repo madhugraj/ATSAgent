@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { z } from "zod";
 
@@ -7,7 +7,9 @@ import {
   aiInterviews,
   applications,
   candidates,
+  emailOutbox,
   evaluations,
+  interviewConfirmations,
   interviews,
   orgMembers,
   panelists,
@@ -94,6 +96,8 @@ export type MyInterview = {
   waiting_for: string[];
   /** I said I cannot make this booked round (a stand-in is being arranged). */
   i_cannot_make_it: boolean;
+  /** My accepted confirmation link token: changing the time or scorecard uses it. */
+  change_token: string | null;
 };
 
 /** Every interview assigned to the signed-in user, newest first. */
@@ -133,6 +137,24 @@ export const myInterviews = createServerFn({ method: "GET" })
     if (!mine.length) return [];
 
     const appIds = [...new Set(mine.map((r) => r.applicationId))];
+    const tokens = await db
+      .select({
+        interviewId: interviewConfirmations.interviewId,
+        token: interviewConfirmations.token,
+      })
+      .from(interviewConfirmations)
+      .where(
+        and(
+          eq(interviewConfirmations.orgId, context.orgId),
+          inArray(
+            interviewConfirmations.interviewId,
+            mine.map((r) => r.id),
+          ),
+          eq(interviewConfirmations.party, "panelist"),
+          eq(interviewConfirmations.state, "accepted"),
+          sql`lower(${interviewConfirmations.email}) = ${email}`,
+        ),
+      );
     const [apps, evals] = await Promise.all([
       db
         .select({
@@ -206,6 +228,7 @@ export const myInterviews = createServerFn({ method: "GET" })
           .filter((m) => !by.includes(m.email.toLowerCase()))
           .map((m) => m.name ?? m.email),
         i_cannot_make_it: (r.unavailable ?? []).some((u) => u.email === email),
+        change_token: tokens.find((t) => t.interviewId === r.id)?.token ?? null,
       };
     });
   });
@@ -1113,6 +1136,24 @@ export const scheduleInterviewCore = createServerOnlyFn(async function scheduleI
         .limit(1);
       if (tx?.transcription === "requested") templateData["transcribed"] = "yes";
       if (data.agenda?.trim()) templateData["agenda"] = data.agenda.trim();
+      // Already told another time for this round? Say sorry and name it.
+      const [told] = await db
+        .select({ data: emailOutbox.templateData })
+        .from(emailOutbox)
+        .where(
+          and(
+            eq(emailOutbox.orgId, ctx.orgId),
+            eq(emailOutbox.applicationId, app.id),
+            eq(emailOutbox.kind, "interview_invite"),
+            eq(emailOutbox.status, "sent"),
+            sql`${emailOutbox.templateData}->>'roundLabel' = ${roundLabel}`,
+          ),
+        )
+        .orderBy(desc(emailOutbox.sentAt))
+        .limit(1);
+      const before = (told?.data as Record<string, unknown> | undefined)?.["scheduledAtText"];
+      if (typeof before === "string" && before !== templateData["scheduledAtText"])
+        templateData["previousText"] = before;
       if (candidateToken && !picked)
         templateData["confirmUrl"] =
           `${(await import("../server/env")).env.PUBLIC_SITE_URL.replace(/\/$/, "")}/confirm/${candidateToken}`;

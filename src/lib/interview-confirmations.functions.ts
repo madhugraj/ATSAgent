@@ -97,3 +97,48 @@ export const overdueScorecards = createServerFn({ method: "GET" })
       due.map((d) => d.id),
     );
   });
+
+/* Panel liberty (src/lib/panel-changes.server.ts): public, token-keyed. */
+
+export const getChangeOptions = createServerFn({ method: "GET" })
+  .validator((d: unknown) =>
+    z.object({ token: Token, durationMins: z.number().int().min(15).max(240).optional() }).parse(d),
+  )
+  .handler(async ({ data }) => {
+    const { changeOptions } = await import("./panel-changes.server");
+    return changeOptions(data.token, Date.now(), data.durationMins);
+  });
+
+export const changeInterviewTime = createServerFn({ method: "POST" })
+  .validator((d: unknown) =>
+    z
+      .object({
+        token: Token,
+        reason: z.string().max(500),
+        to: z.string().datetime({ offset: true }).nullable(),
+        durationMins: z.number().int().min(15).max(240).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data }) => {
+    const { changeTime } = await import("./panel-changes.server");
+    return changeTime(data.token, {
+      reason: data.reason,
+      to: data.to,
+      durationMins: data.durationMins,
+    });
+  });
+
+export const getRoundScorecard = createServerFn({ method: "GET" })
+  .validator((d: unknown) => z.object({ token: Token }).parse(d))
+  .handler(async ({ data }) => {
+    const { publicRound } = await import("./panel-changes.server");
+    return publicRound(data.token);
+  });
+
+export const proposeScorecardChange = createServerFn({ method: "POST" })
+  .validator((d: unknown) => z.object({ token: Token, change: z.unknown() }).parse(d))
+  .handler(async ({ data }) => {
+    const { proposePlanChange } = await import("./panel-changes.server");
+    return proposePlanChange(data.token, data.change);
+  });

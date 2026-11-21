@@ -7,9 +7,12 @@ import { CalendarCheck, CheckCircle2, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { ChangeTime, ScorecardChange } from "@/components/interviews/PanelChanges";
 import { answerTime, getConfirmation } from "@/lib/interview-confirmations.functions";
 
 export const Route = createFileRoute("/confirm/$token")({
+  validateSearch: (s: Record<string, unknown>): { change?: true } =>
+    [1, "1", true, "true"].includes(s["change"] as never) ? { change: true } : {},
   head: () => ({
     meta: [{ title: "Interview time" }, { name: "robots", content: "noindex" }],
   }),
@@ -39,10 +42,11 @@ function Shell({ children }: { children: React.ReactNode }) {
 
 function ConfirmPage() {
   const { token } = Route.useParams();
+  const { change } = Route.useSearch();
   const load = useServerFn(getConfirmation);
   const answer = useServerFn(answerTime);
   const [busy, setBusy] = useState(false);
-  const [noOpen, setNoOpen] = useState(false);
+  const [noOpen, setNoOpen] = useState(change === true);
   const [note, setNote] = useState("");
   /** Offer times NOT ticked (all are ticked to start). */
   const [unticked, setUnticked] = useState<string[]>([]);
@@ -94,6 +98,16 @@ function ConfirmPage() {
                 : "The hiring team will be in touch about another time."}
           </p>
         </div>
+        {panelist && !offer && c.state === "accepted" && !c.closed ? (
+          <div className="mt-6 space-y-3 border-t border-border pt-4">
+            <ChangeTime
+              token={token}
+              onDone={() => void q.refetch()}
+              defaultOpen={change === true}
+            />
+            <ScorecardChange token={token} />
+          </div>
+        ) : null}
       </Shell>
     );
   if (c.closed)
@@ -213,10 +227,18 @@ function ConfirmPage() {
               </div>
             ))}
           </div>
-          <Button className="mt-4 w-full" disabled={busy} onClick={() => void send(true)}>
-            {busy ? <Loader2 className="size-4 animate-spin" /> : null}
-            Yes, I&apos;ll be there
-          </Button>
+          {noOpen ? null : (
+            <Button
+              autoFocus
+              size="lg"
+              className="mt-4 w-full ring-4 ring-primary/20"
+              disabled={busy}
+              onClick={() => void send(true)}
+            >
+              {busy ? <Loader2 className="size-4 animate-spin" /> : null}
+              {panelist ? "Accept" : "Confirm this time"}
+            </Button>
+          )}
           {noOpen ? (
             <div className="mt-4 space-y-2">
               {panelist ? (
@@ -238,6 +260,13 @@ function ConfirmPage() {
               >
                 Send to the hiring team
               </Button>
+              <button
+                type="button"
+                className="w-full text-center text-xs text-muted-foreground underline"
+                onClick={() => setNoOpen(false)}
+              >
+                {panelist ? "Accept instead" : "Keep this time"}
+              </button>
             </div>
           ) : (
             <button
@@ -245,7 +274,7 @@ function ConfirmPage() {
               className="mt-3 w-full text-center text-xs text-muted-foreground underline"
               onClick={() => setNoOpen(true)}
             >
-              I can&apos;t make this time
+              {panelist ? "I can't make it or need another time" : "This time doesn't work for me"}
             </button>
           )}
         </>

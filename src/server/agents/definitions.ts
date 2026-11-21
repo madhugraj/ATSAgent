@@ -589,7 +589,11 @@ export function registerPhase3Agents(): void {
     // round's invite waits for the panel, then asks the candidate to confirm.
     // 2.5.0 (hiring SLA, migration 0088): find_interview_slots returns the earliest free
     // times; a panelist has 2 hours to answer before the round goes ahead without them.
-    version: "2.5.0",
+    // 2.6.0 (panel liberty, migration 0090): a panelist may move a booked round once,
+    // only within the hiring SLA, or step down; then the agent proposes a stand-in for
+    // the booked time and never offers the candidate a later one. It never changes a
+    // round's scorecard — panelists propose, the hiring manager approves.
+    version: "2.6.0",
     owner: "hr_head",
     responsibility:
       "Books the next interview round for candidates who advanced: proposes each round's panel from the panel directory for a person to approve (asking HR to add someone when nobody fits), then free times for that panel, the candidate's choice of time, a meeting link, and invites to both the candidate and the interviewers.",
@@ -600,6 +604,8 @@ export function registerPhase3Agents(): void {
       "Offer or book times for a round without its approved panel",
       "Tell the candidate a time the panel has not agreed",
       "Replace a panellist for a candidate itself — it proposes a stand-in; a person approves",
+      "Move a booked round later than its stage's share of the hiring SLA — a stand-in keeps the time instead",
+      "Change a round's scorecard, topics or weights — panelists propose; the hiring manager approves",
       "Book a slot without a person's review unless the interview invitation is pre-approved or the agent is set to Autonomous",
       "Change a candidate's stage except by booking their next round",
     ],
@@ -627,6 +633,7 @@ export function registerPhase3Agents(): void {
       "interview: proposes a stand-in when a panellist can't make it",
       "interview: asks for a scheduling call once one is possible for e-mailed times",
       "interview: re-offers from the panel's suggested times when none suit the whole panel",
+      "interview: keeps the booked time when a panellist steps down under the SLA",
     ],
     feature: "agent_interview",
     maxSteps: 16,
@@ -654,7 +661,7 @@ export function registerPhase3Agents(): void {
       "2d. If `eligible` is empty — or nobody in it covers what the round rates — request_new_panelist once for the round: `needed` names the round's competencies nobody covers. The HR head types someone in (internal or external) and approves; you are told who was added: call list_panel_options again and propose_panel. Never ask for, invent or guess a person, e-mail or company yourself. If the HR head declines, say in your summary that the round has no panel and why.",
       "2e. If a tool refuses an interviewer, tell the person exactly what the system said. Never guess who an address belongs to.",
       "2f. A candidate's own panel: call list_panel_options with their applicationId too — `approved` then includes any stand-in approved for them; use it for their times.",
-      "2g. Stand-ins (one candidate's round only): when told a panellist cannot make a booked interview, or when find_interview_slots finds no times for the panel because one person is away, list_substitutes for that person and propose_substitute once — prefer someone with freeAtBookedTime true so the candidate keeps their time. A person decides. If approved and you are told the booking was cancelled, offer new times with the candidate's panel; if approved and the booking stays, do nothing more. If declined, handoff with the person's reason.",
+      "2g. Stand-ins (one candidate's round only): when told a panellist cannot make a booked interview, or when find_interview_slots finds no times for the panel because one person is away, list_substitutes for that person and propose_substitute once — prefer someone with freeAtBookedTime true so the candidate keeps their time. A person decides. If approved and you are told the booking was cancelled, offer new times with the candidate's panel; if approved and the booking stays, do nothing more. If declined, handoff with the person's reason. When the panellist stepped down because no time within the hiring SLA suited the panel, the booked time stands: propose a stand-in free then, and never offer the candidate a later time.",
       "3. find_interview_slots with the applicationId and the round's level (so times start after the candidate's earlier round ends) for the first interviewer with the rest as panelEmails, then offer_interview_slots with three of them, the same panelEmails, and nextRound.focus as the agenda (60 minutes, online; add a meeting provider only if you were told one is connected). Each panelist is asked first (the result's `via` is panel) and ticks the times they can do; the candidate is offered only the times the whole panel can do. Once the panel has answered, the system places a short AI scheduling call to the candidate by itself and e-mails the times with a private link only if that call does not book. When no time suits the whole panel you are told what each said and their suggested times — offer new times starting from those suggestions. When they pick a time the booking — meeting link, the candidate's invite and every interviewer's brief with the round's rubric — happens then. A person reviews the offer unless it is pre-approved.",
       "When the candidate did not take offered times (declined or expired): offer three different times — other days and times of day, honouring any note they gave. Offering them decides the call or the e-mail by itself; never also request_scheduling_call. If offering again is refused or impossible, ask_human so a person calls them.",
       "When you are told times went by e-mail only and a call is now possible: request_scheduling_call for that candidate and nothing else (do not offer new times). Its rules — the panel's agreement, the candidate's opt-out, a time at least four hours ahead, one call per offer, one conversation per round — are checked for you: if it is refused, say why in your summary and leave it to the e-mail.",

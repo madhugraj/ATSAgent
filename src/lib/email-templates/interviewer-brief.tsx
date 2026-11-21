@@ -1,7 +1,7 @@
 import * as React from "react";
 
 import type { TemplateEntry } from "./registry";
-import { EmailLayout, layoutStyles } from "./email-layout";
+import { BRAND, EmailLayout, layoutStyles, primaryButton } from "./email-layout";
 
 interface Props {
   interviewerName?: string;
@@ -36,6 +36,10 @@ interface Props {
   scorecardUrl?: string;
   /** Accept the time or say it does not work (absent once accepted). */
   confirmUrl?: string;
+  /** The latest the round can move to under the hiring SLA. */
+  latestText?: string;
+  /** "yes" when they already accepted this time (e.g. they moved it here). */
+  confirmed?: string;
 }
 
 const { text, detail } = layoutStyles;
@@ -56,7 +60,8 @@ const label = {
 };
 const value = { fontSize: "14px", color: "#0f172a", padding: "3px 0", verticalAlign: "top" };
 const button = {
-  backgroundColor: "#0f172a",
+  ...primaryButton,
+  backgroundColor: BRAND,
   color: "#ffffff",
   fontSize: "14px",
   fontWeight: "bold" as const,
@@ -66,6 +71,7 @@ const button = {
   display: "inline-block",
   margin: "0 8px 8px 0",
 };
+const secondary = { color: BRAND, fontSize: "14px", textDecoration: "underline" };
 const quiet = {
   ...button,
   backgroundColor: "#ffffff",
@@ -104,6 +110,8 @@ const Email = ({
   candidateUrl,
   scorecardUrl,
   confirmUrl,
+  latestText,
+  confirmed,
 }: Props) => {
   const joinUrl = whereText?.startsWith("http") ? whereText : undefined;
   const rounds = earlierRounds ? earlierRounds.split("\n").filter(Boolean) : [];
@@ -131,17 +139,40 @@ const Email = ({
           <Row k="Where" v={joinUrl ? undefined : whereText} />
           <Row k="Panel" v={panelText} />
           <Row k="Time set" v={bookedText} />
+          <Row
+            k="Latest by"
+            v={
+              latestText ? (
+                <span style={{ color: "#b45309", fontWeight: "bold" }}>{latestText}</span>
+              ) : undefined
+            }
+          />
         </tbody>
       </table>
-      {joinUrl ? (
-        <a href={joinUrl} style={button}>
-          Join meeting
-        </a>
-      ) : null}
       {confirmUrl ? (
-        <a href={confirmUrl} style={joinUrl ? quiet : button}>
-          Accept or decline this time
-        </a>
+        <>
+          {confirmed === "yes" ? (
+            <p style={{ ...text, fontWeight: "bold", color: "#0f172a" }}>
+              You&apos;re confirmed for this time.
+            </p>
+          ) : (
+            <a href={confirmUrl} style={button}>
+              Accept this time
+            </a>
+          )}
+          <p style={{ ...text, margin: "10px 0 16px" }}>
+            <a href={`${confirmUrl}?change=1`} style={secondary}>
+              I can&apos;t make it or need another time
+            </a>
+          </p>
+        </>
+      ) : null}
+      {joinUrl ? (
+        <p style={{ ...text, margin: "0 0 16px" }}>
+          <a href={joinUrl} style={confirmUrl ? quiet : button}>
+            Join meeting
+          </a>
+        </p>
       ) : null}
 
       {roundFocus || competencies ? <p style={section}>This round</p> : null}
@@ -205,5 +236,6 @@ export const template = {
     candidateUrl: "https://example.com/candidates/abc",
     scorecardUrl: "https://example.com/interviews/mine",
     confirmUrl: "https://example.com/confirm/abc",
+    latestText: "Wednesday, 14 October 2026 at 18:00 IST",
   },
 } satisfies TemplateEntry;

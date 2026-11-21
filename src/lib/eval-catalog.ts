@@ -311,6 +311,17 @@ export const EVAL_CATALOG: Record<string, EvalExplainer> = {
       "Kiran keeps the booked time; it does not offer new times.",
     ],
   },
+  "interview: keeps the booked time when a panellist steps down under the SLA": {
+    title: "Keeps the time when an interviewer steps down under the SLA",
+    situation:
+      "Dev stepped down from Kiran's booked interview; no time within the hiring SLA suited the whole panel.",
+    checks: [
+      "It looks for registered interviewers who are free at the booked time.",
+      "It proposes one as a stand-in — a person approves it.",
+      "It never offers Kiran a later time, so the hiring SLA holds.",
+    ],
+  },
+
   "interview: proposes a panel for a round and waits for a person": {
     title: "Proposes a round's panel and waits for a person",
     situation:

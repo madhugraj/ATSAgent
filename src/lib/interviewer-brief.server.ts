@@ -8,6 +8,7 @@
  */
 import { and, asc, desc, eq, lt } from "drizzle-orm";
 
+import { latestRoundTime, type Stage } from "./lifecycle";
 import { db } from "../server/db";
 import {
   applications,
@@ -70,6 +71,8 @@ export async function sendInterviewerBrief(
       years: candidates.experienceYears,
       location: candidates.location,
       skills: candidates.skills,
+      appliedAt: applications.appliedAt,
+      slaDays: organizations.hiringSlaDays,
     })
     .from(applications)
     .innerJoin(requisitions, eq(requisitions.id, applications.requisitionId))
@@ -107,6 +110,7 @@ export async function sendInterviewerBrief(
   // Their own accept / can't-make-it link for this round and time.
   let confirmUrl: string | undefined;
   let confirmToken = "";
+  let confirmed = false;
   try {
     const { panelistConfirmation } = await import("./interview-confirmations.server");
     const c = await panelistConfirmation(orgId, r.interviewId, r.scheduledAt, {
@@ -133,7 +137,9 @@ export async function sendInterviewerBrief(
         .limit(1);
       if (sent) return;
     }
-    if (c.state === "pending")
+    // Accepted panelists keep the link: it is where they move the time or step down.
+    confirmed = c.state === "accepted";
+    if (c.state === "pending" || c.state === "accepted")
       confirmUrl = `${env.PUBLIC_SITE_URL.replace(/\/$/, "")}/confirm/${c.token}`;
   } catch {
     /* the brief goes out either way */
@@ -175,6 +181,11 @@ export async function sendInterviewerBrief(
       jobTitle: ctx.jobTitle,
       roundLabel,
       scheduledAtText: formatInOrgTZ(r.scheduledAt, tz),
+      // The hiring SLA's latest time for this round: a move never goes past it.
+      latestText: formatInOrgTZ(
+        latestRoundTime(`l${r.level}` as Stage, ctx.appliedAt, r.scheduledAt, ctx.slaDays),
+        tz,
+      ),
       durationMins: String(r.durationMins),
       modeLabel,
       whereText: r.meetingLink ?? undefined,
@@ -190,6 +201,7 @@ export async function sendInterviewerBrief(
           : undefined,
       bookedText: await bookedTextFor(orgId, r),
       confirmUrl,
+      confirmed: confirmed ? "yes" : undefined,
       earlierRounds: external ? undefined : await earlierRoundsOf(orgId, r.applicationId, r.level),
       ...(r.panelNames && r.panelNames.length > 1
         ? { panelText: r.panelNames.filter(Boolean).join(", ") }

@@ -18,6 +18,8 @@ import { STAGE_LABEL } from "@/lib/lifecycle";
 import { EmptyState, PageHeader, StageBadge } from "@/components/ats";
 import { CompetencyRating, OverallReadout } from "@/components/CompetencyRating";
 import { PanelBriefView } from "@/components/PanelBriefView";
+import { ChangeTime, ScorecardChange } from "@/components/interviews/PanelChanges";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useOrg } from "@/hooks/useOrg";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -84,6 +86,7 @@ function MyInterviewsPage() {
     setForm({ ratings: {}, verdict: "select", focus: "", comments: "", reason: "" });
   }
 
+  const [changing, setChanging] = useState<MyInterview | null>(null);
   const cannot = useServerFn(interviewerUnavailable);
   async function cannotMakeIt(round: MyInterview) {
     const note = window.prompt(
@@ -167,6 +170,27 @@ function MyInterviewsPage() {
 
   return (
     <>
+      <Dialog open={!!changing} onOpenChange={(o) => !o && setChanging(null)}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {changing ? `L${changing.level} · ${changing.candidate_name}` : ""}
+            </DialogTitle>
+          </DialogHeader>
+          {changing?.change_token ? (
+            <div className="space-y-4">
+              <ChangeTime
+                token={changing.change_token}
+                onDone={() => {
+                  setChanging(null);
+                  void qc.invalidateQueries({ queryKey: ["my_interviews"] });
+                }}
+              />
+              <ScorecardChange token={changing.change_token} />
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
       <PageHeader
         eyebrow="Interviewer"
         title="My interviews"
@@ -288,6 +312,10 @@ function MyInterviewsPage() {
                         <span className="text-xs text-muted-foreground">
                           You can&apos;t make it — a stand-in is being arranged
                         </span>
+                      ) : round.change_token ? (
+                        <Button variant="outline" size="sm" onClick={() => setChanging(round)}>
+                          Change time or scorecard
+                        </Button>
                       ) : (
                         <Button
                           variant="outline"
