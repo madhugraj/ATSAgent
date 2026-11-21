@@ -39,13 +39,15 @@ export function ChangeTime({
   const [open, setOpen] = useState(defaultOpen);
   const [reason, setReason] = useState("");
   const [to, setTo] = useState<string | null>(null);
+  const [length, setLength] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const load = useServerFn(getChangeOptions);
   const change = useServerFn(changeInterviewTime);
   const q = useQuery({
-    queryKey: ["change_options", token],
-    queryFn: () => load({ data: { token } }),
+    queryKey: ["change_options", token, length],
+    queryFn: () => load({ data: length ? { token, durationMins: length } : { token } }),
     enabled: open,
+    placeholderData: (prev) => prev,
   });
   if (!open)
     return (
@@ -61,7 +63,11 @@ export function ChangeTime({
   async function send(target: string | null) {
     setBusy(true);
     try {
-      const r = await change({ data: { token, reason, to: target } });
+      const r = await change({
+        data: length
+          ? { token, reason, to: target, durationMins: length }
+          : { token, reason, to: target },
+      });
       if (!r.ok) toast.error(r.error);
       else {
         toast.success(
@@ -87,7 +93,29 @@ export function ChangeTime({
           <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">
             <Clock className="size-3.5" /> Latest by {short(o.latest)}
           </span>
+          <div
+            className="flex flex-wrap items-center gap-1.5"
+            role="radiogroup"
+            aria-label="Length"
+          >
+            {o.durations.map((m) => (
+              <button
+                key={m}
+                type="button"
+                role="radio"
+                aria-checked={o.durationMins === m}
+                onClick={() => {
+                  setLength(m);
+                  setTo(null);
+                }}
+                className={`rounded-full border px-3 py-1 text-xs tabular-nums ${o.durationMins === m ? "border-primary bg-primary font-semibold text-primary-foreground" : "border-border"}`}
+              >
+                {m} min
+              </button>
+            ))}
+          </div>
           <SlotCalendar
+            key={o.durationMins}
             times={o.times}
             latest={o.latest}
             current={o.current}
@@ -109,7 +137,7 @@ export function ChangeTime({
           disabled={busy || !to || reason.trim().length < 10}
           onClick={() => void send(to)}
         >
-          {to ? `Move to ${short(to)}` : "Pick a time"}
+          {to ? `Move to ${short(to)} · ${o.durationMins} min` : "Pick a time"}
         </Button>
       ) : null}
       {o ? (

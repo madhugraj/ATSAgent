@@ -148,12 +148,34 @@ describe("changing a time after accepting", () => {
       await pc.changeTime(mine.token, { reason: "A customer escalation", to: tooLate }),
     ).toMatchObject({ ok: false });
 
+    // A reason that is not genuine is refused, and nothing moves.
+    const notGenuine = async () => ({ genuine: false, why: "That is not a reason." });
+    const fun = await pc.changeTime(
+      mine.token,
+      { reason: "Just for fun, testing", to: o.times[0]! },
+      Date.now(),
+      notGenuine,
+    );
+    expect(fun).toMatchObject({ ok: false });
+    expect((fun as { error: string }).error).toContain("Give the real reason");
+    // A different length is offered from the list and booked.
+    const o45 = await pc.changeOptions(mine.token, Date.now(), 45);
+    if (!o45.can) throw new Error(o45.why);
+    expect(o45.durationMins).toBe(45);
+    expect(o45.durations).toContain(120);
+    const genuine = async () => ({ genuine: true, why: "" });
     expect(
-      await pc.changeTime(mine.token, { reason: "A customer escalation", to: o.times[0]! }),
+      await pc.changeTime(
+        mine.token,
+        { reason: "A customer escalation", to: o.times[0]!, durationMins: 45 },
+        Date.now(),
+        genuine,
+      ),
     ).toEqual({ ok: true, moved: true });
     const [i] = await db.select().from(interviews).where(eq(interviews.id, roundId));
     expect(i!.scheduledAt!.toISOString()).toBe(new Date(o.times[0]!).toISOString());
     expect(i!.panelChanges).toHaveLength(1);
+    expect(i!.durationMins).toBe(45);
     // Their own new time counts as accepted; the rest of the panel is asked again.
     expect((await tokenOf(roundId, lead)).state).toBe("accepted");
     expect((await tokenOf(roundId, second)).state).toBe("pending");

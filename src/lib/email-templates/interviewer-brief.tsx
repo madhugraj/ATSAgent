@@ -38,6 +38,8 @@ interface Props {
   confirmUrl?: string;
   /** The latest the round can move to under the hiring SLA. */
   latestText?: string;
+  /** "yes" when they already accepted this time (e.g. they moved it here). */
+  confirmed?: string;
 }
 
 const { text, detail } = layoutStyles;
@@ -109,6 +111,7 @@ const Email = ({
   scorecardUrl,
   confirmUrl,
   latestText,
+  confirmed,
 }: Props) => {
   const joinUrl = whereText?.startsWith("http") ? whereText : undefined;
   const rounds = earlierRounds ? earlierRounds.split("\n").filter(Boolean) : [];
@@ -148,9 +151,15 @@ const Email = ({
       </table>
       {confirmUrl ? (
         <>
-          <a href={confirmUrl} style={button}>
-            Accept this time
-          </a>
+          {confirmed === "yes" ? (
+            <p style={{ ...text, fontWeight: "bold", color: "#0f172a" }}>
+              You&apos;re confirmed for this time.
+            </p>
+          ) : (
+            <a href={confirmUrl} style={button}>
+              Accept this time
+            </a>
+          )}
           <p style={{ ...text, margin: "10px 0 16px" }}>
             <a href={`${confirmUrl}?change=1`} style={secondary}>
               I can&apos;t make it or need another time
