@@ -482,7 +482,7 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
     const fixing = st === "draft" || st === "rejected" || st === "on_hold";
     if (backs.length)
       substeps.push({
-        label: `Sent back ${backs.length === 1 ? "once" : `${backs.length} times`}`,
+        label: `Returned for changes ${backs.length === 1 ? "once" : `${backs.length} times`}`,
         state: fixing ? "back" : "done",
         ...(lastBack?.comment ? { note: `Last: “${lastBack.comment}”` } : {}),
       });
