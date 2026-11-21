@@ -297,7 +297,7 @@ export const IN_APPROVAL: ReqStatus[] = ["pending_dh", "pending_hr", "pending_cb
  */
 export async function sendBackRequisitionCore(
   actor: LifecycleActor,
-  input: { id: string; reason: string },
+  input: { id: string; reason: string; reopen?: boolean | undefined },
 ): Promise<{ from: ReqStatus; code: string }> {
   const reason = input.reason.replace(/\s+/g, " ").trim().slice(0, 1000);
   if (reason.length < 3)
@@ -314,13 +314,25 @@ export async function sendBackRequisitionCore(
     .limit(1);
   if (!current) throw new Error("Requisition not found.");
   const from = current.status as ReqStatus;
-  if (!IN_APPROVAL.includes(from))
+  // Reopen: a declined or paused requisition goes back to draft with the
+  // change, the same way a send-back does (the person who raised it, the HR
+  // head or the CBO).
+  const reopening = !!input.reopen && (from === "rejected" || from === "on_hold");
+  if (reopening) {
+    if (current.createdBy !== actor.userId)
+      await assertRole(
+        actor.userId,
+        actor.orgId,
+        ["hr_head", "president_cbo"],
+        "Only the person who raised it, the HR head or the CBO can reopen it.",
+      );
+  } else if (!IN_APPROVAL.includes(from))
     throw new Error(
       from === "draft"
         ? "This requisition is a draft — change it directly."
         : `A requisition that is ${from.replace(/_/g, " ")} cannot be sent back; only one in approval can.`,
     );
-  if (current.createdBy !== actor.userId) {
+  if (!reopening && current.createdBy !== actor.userId) {
     const approver = APPROVER_ROLE[from]!;
     await assertRole(
       actor.userId,
@@ -335,7 +347,7 @@ export async function sendBackRequisitionCore(
       from,
       to: "draft",
       actor: actor.memberEmail,
-      decision: "sent_back",
+      decision: reopening ? "reopened" : "sent_back",
       comment: reason,
       at: new Date().toISOString(),
       ...(actor.via ? { via: actor.via } : {}),
@@ -358,7 +370,7 @@ export async function sendBackRequisitionCore(
     actor: actor.memberEmail,
     actorUserId: actor.userId,
     orgId: actor.orgId,
-    action: "requisition.sent_back",
+    action: reopening ? "requisition.reopened" : "requisition.sent_back",
     entityType: "requisition",
     entityId: input.id,
     detail: { code: current.code, from, reason, ...(actor.via ? { via: actor.via } : {}) },

@@ -619,7 +619,13 @@ export const editRequisitionInApproval = createServerFn({ method: "POST" })
 export const sendBackRequisition = createServerFn({ method: "POST" })
   .middleware([requireOrg])
   .validator((data: unknown) =>
-    z.object({ id: z.string().uuid(), reason: z.string().min(3).max(1000) }).parse(data),
+    z
+      .object({
+        id: z.string().uuid(),
+        reason: z.string().min(3).max(1000),
+        reopen: z.boolean().optional(),
+      })
+      .parse(data),
   )
   .handler(async ({ data, context }) => {
     const { sendBackRequisitionCore } = await import("./requisitions.server");

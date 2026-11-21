@@ -169,7 +169,11 @@ export function AgentTaskCard({
               }
             >
               <X className="size-4" />{" "}
-              {task.subjectType === "panel_review" ? "Decline — put on hold" : "Decline"}
+              {task.subjectType === "panel_review"
+                ? "Decline — put on hold"
+                : task.subjectType === "requisition"
+                  ? "Decline — closes the requisition"
+                  : "Decline"}
             </Button>
             {task.subjectType === "panel_review" ? (
               // A panel review may end with rejecting the candidate: the HR head's decision, with a reason.

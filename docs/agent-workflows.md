@@ -82,7 +82,9 @@ HR head, CBO and owner. A finished run shows the end it reached ("Workflow compl
 When a run waits on a requisition approval, the approver at that step answers it in the run's thread: the card
 shows the requisition summary and offers **Approve**, **Edit** (the approver corrects role, openings, location,
 experience, CTC band, skills or responsibilities; it stays at its step and the change goes on the approval trail
-and audit log) and **Ask for changes** (sent back to draft with the reason).
+and audit log) and **Ask for changes** (sent back to draft with the reason). A send-back goes to the Requisition agent, which
+makes the change and resubmits or asks in the thread. A declined requisition can be **reopened with changes** (the
+person who raised it, the HR head or the CBO): back to draft with the change, handed to the same agent.
 
 Each granted workflow has its own app page in the organisation: **`/w/<workflowId>`** (Agent settings →
 Workflows → **Open**). It shows only that workflow: what starts it, whether it is Live, a **Start** box for a
