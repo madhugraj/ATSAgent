@@ -123,6 +123,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
     title: "3. First-time configuration",
     summary: "Three pages get a fresh tenant production-ready.",
     steps: [
+      "Finding your way: the left menu has one entry per area — Home, Agents, Pipeline, Candidates, Sourcing and Insights, with Settings, Platform and Help at the foot. Each area opens on its first page and lists its other pages as tabs across the top, so Pipeline holds Requisitions & JD, JD ↔ CV matching, Screening calls, Interviews and Offers. Agent and Manual mode decide which areas and tabs you see; ⌘K jumps straight to any page.",
       "Screen space: collapse the left People Excellence menu with the arrow button beside its title. The choice is remembered on that browser, and the icons stay clickable while collapsed.",
       "Master data (/masters): departments, skills, locations, education levels and industries. Everything else picks from these lists, so fill them first.",
       "Integrations (/integrations) is split into five tabs: Candidate sources, Interview meetings, HRMS sync, Candidate emails and AI model. Each row is closed until you click it, so the page stays short; open a row to paste credentials, press Save and then Test.",

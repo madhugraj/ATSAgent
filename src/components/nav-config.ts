@@ -24,14 +24,16 @@ import {
   Plug,
   ShieldCheck,
   Target,
+  Settings,
   Users,
+  Workflow,
 } from "lucide-react";
 
 import type { NavCtx } from "@/hooks/useNavCtx";
 
 /**
- * Role-scoped journey. Each item carries its own visibility predicate; groups give the
- * sidebar its sections. Predicates mirror — never replace — the server-side role
+ * Role-scoped journey. Each item carries its own visibility predicate; groups are hubs —
+ * one sidebar entry each, with the hub's pages as tabs above the page. Predicates mirror — never replace — the server-side role
  * enforcement on every server function. Shared by the sidebar (AppShell) and the ⌘K
  * command palette (CommandPalette).
  *
@@ -50,11 +52,21 @@ export type NavItem = {
   /** Search params for links into a tab of a page (e.g. Agent activity). */
   search?: Record<string, string>;
 };
-export type NavGroup = { heading: string | null; items: NavItem[] };
+/**
+ * A hub: one sidebar entry whose pages show as tabs across the top of the page.
+ * `bottom` hubs (settings, platform, help) sit at the foot of the sidebar.
+ */
+export type NavGroup = {
+  heading: string;
+  icon: typeof LayoutDashboard;
+  items: NavItem[];
+  bottom?: boolean;
+};
 
 export const NAV_GROUPS: NavGroup[] = [
   {
-    heading: null,
+    heading: "Home",
+    icon: LayoutDashboard,
     items: [
       { to: "/", label: "Dashboard", icon: LayoutDashboard, show: (c) => c.inOrg },
       // Interviewers submit scorecards in either way of working.
@@ -62,7 +74,8 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    heading: "Hiring with agents",
+    heading: "Agents",
+    icon: Bot,
     items: [
       {
         to: "/desk",
@@ -80,11 +93,6 @@ export const NAV_GROUPS: NavGroup[] = [
         show: (c) => c.inOrg,
         mode: "agent",
       },
-    ],
-  },
-  {
-    heading: "Agent administration",
-    items: [
       {
         to: "/agents/settings",
         label: "Agent settings",
@@ -110,19 +118,13 @@ export const NAV_GROUPS: NavGroup[] = [
   },
   {
     heading: "Pipeline",
+    icon: Workflow,
     items: [
       {
         to: "/requisitions",
         label: "Requisitions & JD",
         icon: Briefcase,
         show: (c) => c.inOrg,
-        mode: "manual",
-      },
-      {
-        to: "/candidates",
-        label: "Talent pool",
-        icon: Users,
-        show: (c) => c.recruiterView,
         mode: "manual",
       },
       // Matching is a hiring-team tool: recruiters run it, hiring managers and
@@ -155,6 +157,19 @@ export const NAV_GROUPS: NavGroup[] = [
         show: (c) => c.recruiterView,
         mode: "manual",
       },
+    ],
+  },
+  {
+    heading: "Candidates",
+    icon: Users,
+    items: [
+      {
+        to: "/candidates",
+        label: "Talent pool",
+        icon: Users,
+        show: (c) => c.recruiterView,
+        mode: "manual",
+      },
       {
         to: "/collaboration",
         label: "Team & sharing",
@@ -166,6 +181,7 @@ export const NAV_GROUPS: NavGroup[] = [
   },
   {
     heading: "Sourcing",
+    icon: Megaphone,
     items: [
       {
         to: "/inbox",
@@ -191,7 +207,8 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    heading: "Intelligence",
+    heading: "Insights",
+    icon: BarChart3,
     items: [
       {
         to: "/reports",
@@ -223,7 +240,9 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    heading: "Administration",
+    heading: "Settings",
+    icon: Settings,
+    bottom: true,
     items: [
       { to: "/team", label: "Users & roles", icon: ShieldCheck, show: (c) => c.governance },
       { to: "/organisation", label: "Organisation", icon: Building2, show: (c) => c.isOwner },
@@ -241,6 +260,13 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: LayoutTemplate,
         show: (c) => c.governance,
       },
+    ],
+  },
+  {
+    heading: "Platform",
+    icon: Globe2,
+    bottom: true,
+    items: [
       {
         to: "/platform",
         label: "Platform console",
@@ -274,7 +300,9 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    heading: null,
+    heading: "Help",
+    icon: BookOpen,
+    bottom: true,
     items: [{ to: "/help", label: "User manual", icon: BookOpen, show: () => true }],
   },
 ];
@@ -288,4 +316,18 @@ export function modeForPath(pathname: string): WorkMode | null {
     if (hit && to.length > best.len) best = { len: to.length, mode: item.mode ?? null };
   }
   return best.mode;
+}
+
+function matches(to: string, pathname: string) {
+  return to === "/" ? pathname === "/" : pathname === to || pathname.startsWith(`${to}/`);
+}
+
+/** The hub a page belongs to, by longest matching path (null when none). */
+export function hubForPath(pathname: string): NavGroup | null {
+  let best: { len: number; hub: NavGroup | null } = { len: -1, hub: null };
+  for (const hub of NAV_GROUPS)
+    for (const item of hub.items)
+      if (matches(item.to, pathname) && item.to.length > best.len)
+        best = { len: item.to.length, hub };
+  return best.hub;
 }
