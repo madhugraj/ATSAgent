@@ -100,7 +100,6 @@ export function AgentTaskCard({
       {task.body ? (
         <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{task.body}</p>
       ) : null}
-      <p className="mt-2 text-xs text-muted-foreground">Goal: {task.goal}</p>
 
       {task.action ? (
         // The title says what the agent will do in plain words; the exact
