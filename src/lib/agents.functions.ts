@@ -7,7 +7,7 @@
 import { CEILING_MESSAGE, LEG_LIMIT_MESSAGE } from "../server/agents/run-messages";
 import { taskIsLive } from "../server/agents/task-liveness";
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
-import { and, desc, eq, inArray, or } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, or } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../server/db";
@@ -82,7 +82,11 @@ export const listWorkflowRunTasks = createServerFn({ method: "GET" })
   .handler(async ({ data, context }): Promise<AgentTaskView[]> => {
     const { workflowRuns } = await import("@db/schema");
     const [wr] = await db
-      .select({ context: workflowRuns.context, waitingRunId: workflowRuns.waitingRunId })
+      .select({
+        context: workflowRuns.context,
+        waitingRunId: workflowRuns.waitingRunId,
+        createdAt: workflowRuns.createdAt,
+      })
       .from(workflowRuns)
       .where(and(eq(workflowRuns.id, data.workflowRunId), eq(workflowRuns.orgId, context.orgId)))
       .limit(1);
@@ -91,6 +95,23 @@ export const listWorkflowRunTasks = createServerFn({ method: "GET" })
       ...(((wr.context as { runs?: string[] } | null)?.runs ?? []) as string[]),
       ...(wr.waitingRunId ? [wr.waitingRunId] : []),
     ]);
+    // While it waits on its requisition, agents working on that requisition
+    // (e.g. revising it after a send-back) ask their questions in this thread too.
+    const subject = (wr.context as { subject?: { type?: string; id?: string } } | null)?.subject;
+    if (subject?.type === "requisition" && subject.id) {
+      const linked = await db
+        .select({ id: agentRuns.id })
+        .from(agentRuns)
+        .where(
+          and(
+            eq(agentRuns.orgId, context.orgId),
+            eq(agentRuns.subjectType, "requisition"),
+            eq(agentRuns.subjectId, subject.id),
+            gte(agentRuns.createdAt, wr.createdAt),
+          ),
+        );
+      for (const l of linked) ids.add(l.id);
+    }
     return ids.size ? openTasks(context, [...ids]) : [];
   });
 

@@ -175,6 +175,7 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
 
   const dispatch = async (
     agent:
+      | "requisition"
       | "jd"
       | "publishing"
       | "distribution"
@@ -251,6 +252,20 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
   ) {
     const { onRequisitionEnded } = await import("../desk/desk.server");
     await onRequisitionEnded(e.orgId, req.id, payload.to, e.actorUserId);
+  }
+
+  // An approver sent the requisition back with what should change: the
+  // Requisition agent applies it (pay terms, band, skills…) and resubmits, or
+  // asks a person when it cannot — nobody is left wondering why nothing moved.
+  if (
+    e.type === "requisition.status_changed" &&
+    payload.to === "draft" &&
+    (e.payload as { sentBack?: boolean }).sentBack
+  ) {
+    await dispatch(
+      "requisition",
+      `An approver sent requisition ${req.code} "${req.title}" back to draft with this change: "${String(payload.comment ?? "").slice(0, 500)}". Read get_requisition, make exactly that change (set_pay_terms then set_compensation for pay or currency; update_requisition_draft for other fields), say in one line what you changed, then submit_requisition_for_approval. If the change is unclear or you cannot make it, ask a person instead of resubmitting it unchanged.`,
+    );
   }
 
   if (e.type === "requisition.status_changed" && payload.to === "approved") {
