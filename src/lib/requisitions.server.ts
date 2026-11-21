@@ -710,8 +710,9 @@ export type ApproverEdit = {
 };
 
 /**
- * Correct a requisition while it waits for approval: only the current step's
- * approver (owners pass). It stays at its step; what changed goes on the
+ * Correct a requisition while it waits for approval (only the current step's
+ * approver) or after it was sent back (the person who raised it, the HR head
+ * or the CBO); owners pass. It stays at its step; what changed goes on the
  * approval trail (built here) and the audit log, so the next approver sees it.
  */
 export async function editRequisitionInApprovalCore(
@@ -726,14 +727,23 @@ export async function editRequisitionInApprovalCore(
     .limit(1);
   if (!current) throw new Error("Requisition not found.");
   const from = current.status as ReqStatus;
-  if (!IN_APPROVAL.includes(from))
-    throw new Error("Only a requisition waiting for approval can be corrected here.");
-  await assertRole(
-    actor.userId,
-    actor.orgId,
-    APPROVER_ROLE[from]!,
-    "Only the approver at this step can correct it.",
-  );
+  const returned = from === "draft" || from === "rejected" || from === "on_hold";
+  if (!IN_APPROVAL.includes(from) && !returned)
+    throw new Error("Only a requisition in approval or sent back can be corrected here.");
+  if (IN_APPROVAL.includes(from))
+    await assertRole(
+      actor.userId,
+      actor.orgId,
+      APPROVER_ROLE[from]!,
+      "Only the approver at this step can correct it.",
+    );
+  else if (current.createdBy !== actor.userId)
+    await assertRole(
+      actor.userId,
+      actor.orgId,
+      ["hr_head", "president_cbo"],
+      "Only the person who raised it, the HR head or the CBO can correct it.",
+    );
   if (
     (patch.experienceMin ?? current.experienceMin) > (patch.experienceMax ?? current.experienceMax)
   )
