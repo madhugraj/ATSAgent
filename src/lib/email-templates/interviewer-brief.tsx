@@ -1,7 +1,7 @@
 import * as React from "react";
 
 import type { TemplateEntry } from "./registry";
-import { EmailLayout, layoutStyles } from "./email-layout";
+import { BRAND, EmailLayout, layoutStyles, primaryButton } from "./email-layout";
 
 interface Props {
   interviewerName?: string;
@@ -56,7 +56,8 @@ const label = {
 };
 const value = { fontSize: "14px", color: "#0f172a", padding: "3px 0", verticalAlign: "top" };
 const button = {
-  backgroundColor: "#0f172a",
+  ...primaryButton,
+  backgroundColor: BRAND,
   color: "#ffffff",
   fontSize: "14px",
   fontWeight: "bold" as const,
@@ -66,6 +67,7 @@ const button = {
   display: "inline-block",
   margin: "0 8px 8px 0",
 };
+const secondary = { color: BRAND, fontSize: "14px", textDecoration: "underline" };
 const quiet = {
   ...button,
   backgroundColor: "#ffffff",
@@ -133,15 +135,24 @@ const Email = ({
           <Row k="Time set" v={bookedText} />
         </tbody>
       </table>
-      {joinUrl ? (
-        <a href={joinUrl} style={button}>
-          Join meeting
-        </a>
-      ) : null}
       {confirmUrl ? (
-        <a href={confirmUrl} style={joinUrl ? quiet : button}>
-          Accept, change or decline this time
-        </a>
+        <>
+          <a href={confirmUrl} style={button}>
+            Accept this time
+          </a>
+          <p style={{ ...text, margin: "10px 0 16px" }}>
+            <a href={`${confirmUrl}?change=1`} style={secondary}>
+              I can&apos;t make it or need another time
+            </a>
+          </p>
+        </>
+      ) : null}
+      {joinUrl ? (
+        <p style={{ ...text, margin: "0 0 16px" }}>
+          <a href={joinUrl} style={confirmUrl ? quiet : button}>
+            Join meeting
+          </a>
+        </p>
       ) : null}
 
       {roundFocus || competencies ? <p style={section}>This round</p> : null}

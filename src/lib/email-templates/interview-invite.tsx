@@ -1,7 +1,7 @@
 import * as React from "react";
 
 import type { TemplateEntry } from "./registry";
-import { EmailLayout, layoutStyles } from "./email-layout";
+import { BRAND, EmailLayout, layoutStyles, primaryButton } from "./email-layout";
 
 interface Props {
   candidateName?: string;
@@ -29,7 +29,8 @@ interface Props {
 
 const { text, detail, link } = layoutStyles;
 const button = {
-  backgroundColor: "#0f172a",
+  ...primaryButton,
+  backgroundColor: BRAND,
   color: "#ffffff",
   fontSize: "14px",
   fontWeight: "bold" as const,
@@ -103,11 +104,18 @@ const Email = ({
       </p>
     ) : null}
     {confirmUrl ? (
-      <p style={text}>
-        <a href={confirmUrl} style={button}>
-          Confirm or change this time
-        </a>
-      </p>
+      <>
+        <p style={text}>
+          <a href={confirmUrl} style={button}>
+            {previousText ? "This time works" : "Confirm this time"}
+          </a>
+        </p>
+        <p style={text}>
+          <a href={`${confirmUrl}?change=1`} style={link}>
+            {previousText ? "I need a different time" : "This time doesn't work for me"}
+          </a>
+        </p>
+      </>
     ) : (
       <p style={text}>
         A calendar invite (.ics) is attached — please accept it so the slot is held for you. If the
