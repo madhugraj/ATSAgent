@@ -623,7 +623,7 @@ function RequisitionApprovalCard({
       [
         "CTC band",
         q["ctc_band_min"] || q["ctc_band_max"]
-          ? `₹${money(q["ctc_band_min"])} – ₹${money(q["ctc_band_max"])}`
+          ? `${money(q["ctc_band_min"])} – ${money(q["ctc_band_max"])} ${str(q["pay_currency"]) || "INR"}${q["pay_basis"] ? ` · ${str(q["pay_basis"])}` : ""}`
           : "",
       ],
       ["Hiring manager", str(q["hiring_manager"])],
@@ -760,8 +760,12 @@ function RequisitionApprovalCard({
           </label>
           {field("experienceMin", "Experience from (yrs)", { type: "number" })}
           {field("experienceMax", "Experience to (yrs)", { type: "number" })}
-          {field("ctcBandMin", "CTC band from (₹)", { type: "number" })}
-          {field("ctcBandMax", "CTC band to (₹)", { type: "number" })}
+          {field("ctcBandMin", `CTC band from (${str(q["pay_currency"]) || "INR"})`, {
+            type: "number",
+          })}
+          {field("ctcBandMax", `CTC band to (${str(q["pay_currency"]) || "INR"})`, {
+            type: "number",
+          })}
           <div className="sm:col-span-2">{field("mustHaveSkills", "Must-have skills")}</div>
           <div className="sm:col-span-2">{field("goodToHaveSkills", "Good to have")}</div>
           <div className="sm:col-span-2">
