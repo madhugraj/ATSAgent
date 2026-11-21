@@ -347,10 +347,17 @@ function DeskWorkflowStart({
 /** One workflow run, shown like a desk conversation with its journey alongside. */
 function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: string }) {
   const qc = useQueryClient();
-  const { canApprove } = useRoles();
+  const { canApprove, roles, isAdmin } = useRoles();
   const app = useWorkflowApp(workflowId);
   const v = app.data;
   const r = v?.runs.find((x) => x.id === runId);
+  const reqId = r?.requisition?.id;
+  const reqFull = useQuery({
+    queryKey: ["requisition", reqId],
+    queryFn: () => getRequisition({ data: { id: reqId! } }),
+    enabled: !!reqId,
+    refetchInterval: 15_000,
+  });
   if (!v) return <section className="panel p-6 text-sm text-muted-foreground">Loading…</section>;
   if (!r)
     return <section className="panel p-6 text-sm text-muted-foreground">Run not found.</section>;
@@ -371,7 +378,7 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
           : h.note === "Ended."
             ? "This workflow has ended."
             : h.note.startsWith("Waiting for")
-              ? "Waiting for the approval."
+              ? "Waiting for the approvals."
               : h.note.endsWith(" happened.")
                 ? "Approved — moving on."
                 : h.note;
@@ -379,6 +386,44 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
     if (prev && prev.node === h.node) prev.text = text;
     else updates.push({ node: h.node, at: h.at, text });
   }
+  // What people did on the requisition since the run began, as thread messages.
+  const trail = (
+    Array.isArray((reqFull.data as Record<string, unknown> | null)?.["approval_trail"])
+      ? ((reqFull.data as Record<string, unknown>)["approval_trail"] as {
+          at?: string;
+          to?: string;
+          from?: string;
+          actor?: string;
+          decision?: string;
+          comment?: string | null;
+        }[])
+      : []
+  ).filter((t) => t.at && t.at >= r.createdAt);
+  const WHO: Record<string, string> = {
+    pending_dh: "Department head",
+    pending_hr: "HR head",
+    pending_cbo: "CBO",
+  };
+  const trailText = (t: (typeof trail)[number]) => {
+    const by = t.actor ? ` (${t.actor})` : "";
+    const note = t.comment ? ` — “${t.comment}”` : "";
+    if (t.decision === "edited")
+      return `Corrected by ${WHO[t.from ?? ""] ?? "a person"}${by}${note}`;
+    if (t.to === "rejected" || t.to === "draft")
+      return `Sent back by the ${WHO[t.from ?? ""] ?? "approver"}${by}${note}`;
+    if (t.to === "approved") return `Approved by the CBO${by}${note}`;
+    if (t.from === "rejected" || t.from === "draft" || t.from === "on_hold")
+      return `Corrected and resubmitted${by}${note}`;
+    return `Approved by the ${WHO[t.from ?? ""] ?? "approver"}${by}${note}`;
+  };
+  const reqStatus = r.requisition?.status;
+  const returned =
+    r.status === "waiting" &&
+    !!r.requisition &&
+    (reqStatus === "rejected" || reqStatus === "draft" || reqStatus === "on_hold");
+  const canFix =
+    returned &&
+    (isAdmin || roles.includes("hr_head") || roles.includes("president_cbo") || !!v.canStart);
   // A requisition waiting for an approval this person can give is answered
   // here, in the thread, like every other desk decision.
   const reqPending =
@@ -387,7 +432,12 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
       : null;
   const reqApprovable = !!reqPending && canApprove(reqPending.status);
   const needsYou =
-    r.waitingOn?.kind === "person" || r.waitingOn?.kind === "stopped" || reqApprovable;
+    r.waitingOn?.kind === "person" || r.waitingOn?.kind === "stopped" || reqApprovable || canFix;
+  const waitWords = returned
+    ? `${r.requisition!.code} was sent back — waiting for it to be corrected and resubmitted.`
+    : reqPending
+      ? `Waiting for the ${REQ_NEXT[reqPending.status]!.who} to approve ${reqPending.code}.`
+      : r.waitingOn?.text.replace(/^Waiting for (.+?) (\(until .*\))?$/, "Waiting — $1.");
   const showAction = () => {
     const el = document.getElementById(`wf-action-${r.id}`);
     el?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -424,9 +474,21 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
               body={u.text}
             />
           ))}
+          {trail.map((t, i) => (
+            <Bubble key={`t${i}`} role="agent" who={r.requisition!.code} body={trailText(t)} />
+          ))}
           {r.error ? <p className="text-xs text-destructive">{r.error}</p> : null}
           {needsYou ? (
             <div id={`wf-action-${r.id}`} className="rounded-lg transition-shadow">
+              {canFix ? (
+                <RequisitionApprovalCard
+                  requisition={r.requisition!}
+                  returned
+                  onDone={() =>
+                    void qc.invalidateQueries({ queryKey: ["workflow_app", workflowId] })
+                  }
+                />
+              ) : null}
               {reqApprovable && reqPending ? (
                 <RequisitionApprovalCard
                   requisition={reqPending}
@@ -465,12 +527,14 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
             >
               {r.waitingOn?.kind === "stopped"
                 ? "A step stopped in this run — show"
-                : reqApprovable && r.waitingOn?.kind !== "person"
-                  ? "1 approval waiting for you in this run — show"
-                  : `${r.waitingOn?.text.replace(/^.* — /, "") ?? "Requests"} waiting for you in this run — show`}
+                : canFix && r.waitingOn?.kind !== "person"
+                  ? "A requisition to correct and resubmit — show"
+                  : reqApprovable && r.waitingOn?.kind !== "person"
+                    ? "1 approval waiting for you in this run — show"
+                    : `${r.waitingOn?.text.replace(/^.* — /, "") ?? "Requests"} waiting for you in this run — show`}
             </button>
-          ) : r.waitingOn ? (
-            <p className="px-1 text-sm text-muted-foreground">{r.waitingOn.text}</p>
+          ) : waitWords ? (
+            <p className="px-1 text-sm text-muted-foreground">{waitWords}</p>
           ) : null}
         </footer>
       </section>
@@ -488,12 +552,14 @@ const REQ_NEXT: Record<string, { next: "pending_hr" | "pending_cbo" | "approved"
 function RequisitionApprovalCard({
   requisition,
   onDone,
+  returned = false,
 }: {
   requisition: { id: string; code: string; status: string };
   onDone: () => void;
+  returned?: boolean;
 }) {
   const qc = useQueryClient();
-  const step = REQ_NEXT[requisition.status]!;
+  const step = REQ_NEXT[requisition.status] ?? { next: "approved" as const, who: "" };
   const full = useQuery({
     queryKey: ["requisition", requisition.id],
     queryFn: () => getRequisition({ data: { id: requisition.id } }),
@@ -619,10 +685,14 @@ function RequisitionApprovalCard({
   return (
     <div className="rounded-lg border border-primary/40 p-3 text-sm">
       <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-primary">
-        {step.who} approval
+        {returned ? "Sent back" : `${step.who} approval`}
       </p>
       <div className="flex flex-wrap items-center gap-2">
-        <p className="font-medium">Approve requisition {requisition.code}</p>
+        <p className="font-medium">
+          {returned
+            ? `Correct and resubmit ${requisition.code}`
+            : `Approve requisition ${requisition.code}`}
+        </p>
         <Badge className="ml-auto">Waiting for you</Badge>
       </div>
       {full.isLoading ? (
@@ -673,7 +743,7 @@ function RequisitionApprovalCard({
           ))}
         </ul>
       ) : null}
-      {mode !== "edit" ? (
+      {mode !== "edit" && !returned ? (
         <Textarea
           className="mt-2"
           rows={2}
@@ -709,6 +779,27 @@ function RequisitionApprovalCard({
             </Button>
             <Button size="sm" variant="ghost" disabled={busy} onClick={() => setMode("view")}>
               Cancel
+            </Button>
+          </>
+        ) : returned ? (
+          <>
+            <Button size="sm" variant="outline" disabled={busy} onClick={startEdit}>
+              Edit
+            </Button>
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() =>
+                void run(
+                  () =>
+                    advanceRequisition({
+                      data: { id: requisition.id, status: "pending_dh", comment: null },
+                    }),
+                  "Resubmitted for approval",
+                )
+              }
+            >
+              Resubmit for approval
             </Button>
           </>
         ) : (
