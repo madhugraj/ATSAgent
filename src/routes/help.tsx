@@ -1,9 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { Search } from "lucide-react";
+import { Download, Search } from "lucide-react";
 
 import { MANUAL_SECTIONS } from "@/lib/user-manual";
 import { PageHeader } from "@/components/ats";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 export const Route = createFileRoute("/help")({
@@ -45,6 +46,14 @@ function Help() {
         eyebrow="Help"
         title="User manual"
         description="How to configure and run the platform, from organisation registration to hires. The HR copilot answers from this same manual."
+        actions={
+          <Button
+            variant="outline"
+            onClick={() => void import("@/lib/manual-export").then((m) => m.downloadManualPdf())}
+          >
+            <Download className="size-4" /> Download PDF
+          </Button>
+        }
       />
 
       <div className="relative max-w-md">
