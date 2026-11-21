@@ -1,6 +1,7 @@
 # Voice scheduling call — plan (stage 1.2)
 
-Status: **S0–S2 built; a real call booked an interview** (2026-10-25); S3–S4 to come. Decisions confirmed: the
+Status: **S0–S2 built; a real call booked an interview** (2026-10-25); **voice first since
+2026-11-17** (see "Voice first" below — it replaces the e-mail-first triggers); S3–S4 to come. Decisions confirmed: the
 recommended defaults below. Builds on the AI screening call
 (`docs/voice-screening-agent.md`, `docs/voice-screening-stage1.1-plan.md`).
 
@@ -16,9 +17,41 @@ e-mails, and every miss costs days.
 The scheduling call is a **short AI phone call that does what the link does** —
 nothing more. It never replaces the e-mail; it follows up on one.
 
-## When it calls
+## Voice first (2026-11-17, migration 0069)
 
-The call is a follow-up to an open e-mail offer, never the first contact about
+The e-mail-first design waited a day (the organisation's wait) before any call,
+so a candidate the team had just phoned for screening sat on an unread e-mail.
+The flow is now:
+
+1. The coordinator offers times (`offer_interview_slots` → `offerSlotsCore`).
+2. **The system** (not the agent) arranges the scheduling call at once
+   (`requestSchedulingCall`, `callFirst`), due at the next calling-window start.
+   The private link is **held**: `interview_slot_offers.link_emailed_at` stays
+   null.
+3. The call books a time → confirmation and invites only; no link e-mail.
+4. The call ends without a booking (not now, declined, wrong person, opt-out,
+   no answer, could not reach) → the link is e-mailed at once
+   (`releaseOfferLinkAfterCall`, from both the live `settle` and the text-mode
+   `endSchedulingCall`). A missed first attempt still gets its one retry.
+   "None of these work" goes down the decline path; the coordinator re-offers,
+   and as the assistant has already spoken about the round, the new times go
+   by e-mail.
+5. Safety net (agent tick, `releaseHeldOfferLinks`): a held link with no live
+   call, held more than 6 h, or within 12 h of closing is e-mailed regardless.
+6. No call possible when the times are offered (switched off, no line or voice
+   key, no Indian mobile, opted out, already spoken about this round) → e-mailed
+   straight away; the reason is returned (`callRefused`) and audited. If calls
+   become possible later, `raiseUnansweredOffers` asks the coordinator to
+   request one (no wait).
+
+The organisation's wait (`scheduling_wait_hours`) is retired: the column stays
+for old rows but is no longer read or shown. Approving the offer (or its
+pre-approval) covers the call. Health rule `scheduling_call.not_dialled`
+(serious) flags a call still undialled 30 minutes after it was due.
+
+## When it calls (original e-mail-first design, superseded above)
+
+The call was a follow-up to an open e-mail offer, never the first contact about
 the round.
 
 | Trigger | Default | Notes |

@@ -232,26 +232,98 @@ export function nextAction(stage: Stage): string {
   }
 }
 
-/** Stale-pipeline hygiene: how long a stage may sit untouched before it's flagged. */
-const SLA_DAYS: Partial<Record<Stage, number>> = {
-  sourced: 5,
-  applied: 5,
-  ai_screened: 5,
-  shortlisted: 7,
-  l1: 7,
-  l2: 7,
-  l3: 7,
-  offer_pending: 5,
+/** The default end-to-end hiring SLA: days from application to a released offer. */
+export const DEFAULT_HIRING_SLA_DAYS = 5;
+
+/**
+ * Each stage's share of the hiring SLA, in funnel order (they add up to 1): by a
+ * 5-day SLA, screening has a day, the shortlist half a day, each interview round
+ * a day or less, and the offer the rest.
+ */
+export const SLA_SHARE: Partial<Record<Stage, number>> = {
+  sourced: 0.2,
+  applied: 0.2,
+  ai_screened: 0.2,
+  shortlisted: 0.1,
+  l1: 0.2,
+  l2: 0.2,
+  l3: 0.15,
+  offer_pending: 0.15,
+};
+/** Where each stage's share ends, as a fraction of the SLA (screening stages share one). */
+const SLA_END: Partial<Record<Stage, number>> = {
+  sourced: 0.2,
+  applied: 0.2,
+  ai_screened: 0.2,
+  shortlisted: 0.3,
+  l1: 0.5,
+  l2: 0.7,
+  l3: 0.85,
+  offer_pending: 1,
+};
+/** After the offer is out the candidate decides: those stages keep their own days. */
+const AFTER_OFFER_DAYS: Partial<Record<Stage, number>> = {
   offer_released: 7,
   offer_accepted: 30,
 };
 
+/**
+ * Stale-pipeline hygiene: days a candidate has sat untouched beyond their
+ * stage's share of the hiring SLA (null = within it).
+ */
 export function stalledDays(
   stage: Stage,
   lastActivityAt: string | null | undefined,
+  slaDays: number = DEFAULT_HIRING_SLA_DAYS,
+  now: number = Date.now(),
 ): number | null {
-  const sla = SLA_DAYS[canonical(stage)];
-  if (!sla || !lastActivityAt) return null;
-  const days = Math.floor((Date.now() - new Date(lastActivityAt).getTime()) / 86_400_000);
-  return days > sla ? days : null;
+  const s = canonical(stage);
+  const budget =
+    SLA_SHARE[s] !== undefined ? SLA_SHARE[s]! * slaDays : (AFTER_OFFER_DAYS[s] ?? null);
+  if (budget === null || !lastActivityAt) return null;
+  const idle = (now - new Date(lastActivityAt).getTime()) / 86_400_000;
+  return idle > budget ? Math.max(1, Math.floor(idle)) : null;
+}
+
+export type SlaState = "on_track" | "at_risk" | "breached";
+
+/**
+ * Where a candidate stands against the end-to-end hiring SLA (pure). The clock
+ * runs from the application until an offer is released; `at_risk` = behind the
+ * pace for their stage, `breached` = past the SLA. Null once the offer is out or
+ * the candidate has left the funnel.
+ */
+export function hiringSla(
+  stage: Stage,
+  appliedAt: string | Date | null | undefined,
+  slaDays: number = DEFAULT_HIRING_SLA_DAYS,
+  now: number = Date.now(),
+): { state: SlaState; elapsedDays: number; daysLeft: number } | null {
+  const end = SLA_END[canonical(stage)];
+  if (end === undefined || !appliedAt) return null;
+  const elapsed = (now - new Date(appliedAt).getTime()) / 86_400_000;
+  const state: SlaState =
+    elapsed > slaDays ? "breached" : elapsed > end * slaDays ? "at_risk" : "on_track";
+  return {
+    state,
+    elapsedDays: Math.round(elapsed * 10) / 10,
+    daysLeft: Math.round((slaDays - elapsed) * 10) / 10,
+  };
+}
+
+/**
+ * The latest a booked interview round may move to without slowing the hiring
+ * SLA (pure): the end of its stage's share of the SLA, or the time it is
+ * booked for now when that is later (moving earlier never hurts).
+ */
+export function latestRoundTime(
+  stage: Stage,
+  appliedAt: string | Date | null | undefined,
+  bookedAt: Date,
+  slaDays: number = DEFAULT_HIRING_SLA_DAYS,
+): Date {
+  const end = SLA_END[canonical(stage)];
+  if (end === undefined || !appliedAt) return bookedAt;
+  const due = new Date(new Date(appliedAt).getTime() + end * slaDays * 86_400_000);
+  return due > bookedAt ? due : bookedAt;
 }

@@ -1433,12 +1433,15 @@ export async function onTaskOpened(
                       ?.subject?.type === "panel_substitute"
                   ? "A panellist can't make an interview — approve the stand-in, or decline and say who instead."
                   : (task.proposedAction as { args?: { subject?: { type?: string } } } | null)?.args
-                        ?.subject?.type === "expert_brief"
-                    ? "The role's expert brief, written from the hiring manager's answers — the hiring manager approves it or says what to change."
+                        ?.subject?.type === "new_panelist"
+                    ? "Nobody in the panel directory fits this round — type who should interview (inside or outside the organisation) and approve."
                     : (task.proposedAction as { args?: { subject?: { type?: string } } } | null)
-                          ?.args?.subject?.type === "panel_review"
-                      ? "The panel and the round's panel agent see this candidate differently — both views are below; the decision is yours."
-                      : "This needs a decision."
+                          ?.args?.subject?.type === "expert_brief"
+                      ? "The role's expert brief, written from the hiring manager's answers — the hiring manager approves it or says what to change."
+                      : (task.proposedAction as { args?: { subject?: { type?: string } } } | null)
+                            ?.args?.subject?.type === "panel_review"
+                        ? "The panel and the round's panel agent see this candidate differently — both views are below; the decision is yours."
+                        : "This needs a decision."
           : revision
             ? `Revised as you asked ("${revision.reason}")${
                 revision.changes.length
@@ -1465,6 +1468,7 @@ export async function onTaskOpened(
                 requisitionId?: string;
                 level?: number;
                 memberIds?: string[];
+                needed?: string;
               };
             };
           } | null
@@ -1478,6 +1482,8 @@ export async function onTaskOpened(
             level: subj.level,
             memberIds: subj.memberIds,
           };
+        if (subj.type === "new_panelist")
+          return { subjectType: subj.type, level: subj.level, needed: subj.needed };
         return subj.type === "screening_decision"
           ? {
               subjectType: subj.type,

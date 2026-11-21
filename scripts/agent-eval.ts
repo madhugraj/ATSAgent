@@ -33,6 +33,32 @@ process.env["SECRET_ENCRYPTION_KEY"] ??= Buffer.alloc(32, 7).toString("base64");
 
 const { setEvalModelOverride } = await import("../src/server/agents/runtime.server");
 const { resetRegistry } = await import("../src/server/agents/registry");
+const tools = [
+  await import("../src/server/agents/tools").then((m) => m.registerPhase1Tools),
+  await import("../src/server/agents/tools-phase2").then((m) => m.registerPhase2Tools),
+  await import("../src/server/agents/tools-phase3").then((m) => m.registerPhase3Tools),
+  await import("../src/server/agents/tools-phase4").then((m) => m.registerPhase4Tools),
+  await import("../src/server/agents/tools-sourcing").then((m) => m.registerSourcingTools),
+  await import("../src/server/agents/tools-distribution").then((m) => m.registerDistributionTools),
+  await import("../src/server/agents/tools-org").then((m) => m.registerOrgTools),
+  await import("../src/server/agents/tools-expert").then((m) => m.registerExpertTools),
+  await import("../src/server/agents/tools-panel").then((m) => m.registerPanelTools),
+];
+const defs = await import("../src/server/agents/definitions");
+/** Every real agent and tool, as production registers them (scenarios that
+ * bring their own agent start from an empty registry instead). */
+const registerReal = () => {
+  resetRegistry();
+  for (const r of tools) r();
+  defs.registerPhase1Agents();
+  defs.registerPhase2Agents();
+  defs.registerPhase3Agents();
+  defs.registerPhase4Agents();
+  defs.registerPhase6Agents();
+  defs.registerOrgAgents();
+  defs.registerExpertAgents();
+  defs.registerPanelAgents();
+};
 const { runScenario } = await import("../src/server/agents/eval.server");
 const { scenarios } = await import("./evals/scenarios");
 const { sql } = await import("../src/server/db");
@@ -41,7 +67,8 @@ setEvalModelOverride({ provider, model, apiKey });
 let failed = 0;
 const only = process.env["EVAL_ONLY"]?.toLowerCase();
 for (const s of scenarios().filter((x) => !only || x.name.toLowerCase().includes(only))) {
-  resetRegistry();
+  if (s.agent) resetRegistry();
+  else registerReal();
   const r = await runScenario(s);
   if (!r.passed) failed++;
   console.log(

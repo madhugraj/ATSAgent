@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-100 tables across 9 domains.
+105 tables across 9 domains.
 
 ## Identity & access
 
@@ -88,6 +88,7 @@ erDiagram
     text hq_city "nullable"
     text employee_band "nullable"
     text currency
+    smallint hiring_sla_days
     smallint fiscal_year_start_month
     text careers_email "nullable"
     text onboarding_step
@@ -420,6 +421,7 @@ erDiagram
     appStageEnum stage
     text source
     timestamptz applied_at
+    text sla_flag "nullable"
     timestamptz last_activity_at
     text stage_reason "nullable"
     text stage_note "nullable"
@@ -657,6 +659,7 @@ erDiagram
     text outcome_note "nullable"
     timestamptz completed_at "nullable"
     jsonb unavailable
+    jsonb panel_changes
     text meeting_provider "nullable"
     text meeting_external_id "nullable"
     text transcription
@@ -1237,6 +1240,9 @@ erDiagram
 | `inbox_messages` | `org_id` | `organizations` | cascade |
 | `integration_credentials` | `integration_id` | `source_integrations` | cascade |
 | `integration_credentials` | `org_id` | `organizations` | cascade |
+| `interview_confirmations` | `interview_id` | `interviews` | cascade |
+| `interview_confirmations` | `offer_id` | `interview_slot_offers` | cascade |
+| `interview_confirmations` | `org_id` | `organizations` | cascade |
 | `interview_slot_offers` | `application_id` | `applications` | cascade |
 | `interview_slot_offers` | `interview_id` | `interviews` | no action |
 | `interview_slot_offers` | `org_id` | `organizations` | cascade |
@@ -1296,8 +1302,18 @@ erDiagram
 | `panel_assessments` | `interview_id` | `interviews` | cascade |
 | `panel_assessments` | `org_id` | `organizations` | cascade |
 | `panel_assessments` | `reviewed_by` | `users` | no action |
+| `panelist_scorecard_links` | `interview_id` | `interviews` | cascade |
+| `panelist_scorecard_links` | `org_id` | `organizations` | cascade |
+| `panelist_scorecard_links` | `panelist_id` | `panelists` | cascade |
+| `panelists` | `added_by` | `users` | no action |
+| `panelists` | `approved_by` | `users` | no action |
+| `panelists` | `member_id` | `org_members` | cascade |
+| `panelists` | `org_id` | `organizations` | cascade |
 | `phone_screening_settings` | `org_id` | `organizations` | cascade |
 | `phone_screening_settings` | `updated_by` | `users` | no action |
+| `plan_change_proposals` | `interview_id` | `interviews` | no action |
+| `plan_change_proposals` | `org_id` | `organizations` | cascade |
+| `plan_change_proposals` | `requisition_id` | `requisitions` | cascade |
 | `requisition_board_postings` | `org_id` | `organizations` | cascade |
 | `requisition_board_postings` | `requisition_id` | `requisitions` | cascade |
 | `requisitions` | `created_by` | `users` | no action |
@@ -1311,9 +1327,13 @@ erDiagram
 | `round_substitutes` | `approved_by` | `users` | no action |
 | `round_substitutes` | `org_id` | `organizations` | cascade |
 | `round_substitutes` | `replace_member_id` | `org_members` | cascade |
+| `round_substitutes` | `replace_panelist_id` | `panelists` | cascade |
 | `round_substitutes` | `with_member_id` | `org_members` | cascade |
+| `round_substitutes` | `with_panelist_id` | `panelists` | cascade |
 | `salary_benchmarks` | `org_id` | `organizations` | cascade |
 | `salary_benchmarks` | `requisition_id` | `requisitions` | no action |
+| `scorecard_chases` | `interview_id` | `interviews` | cascade |
+| `scorecard_chases` | `org_id` | `organizations` | cascade |
 | `screening_calls` | `agent_run_id` | `agent_runs` | no action |
 | `screening_calls` | `application_id` | `applications` | no action |
 | `screening_calls` | `candidate_id` | `candidates` | cascade |
@@ -1392,7 +1412,7 @@ erDiagram
 | `ai_redteam_checks` | — | 8 | — |
 | `ai_settings` | Communications & AI settings | 11 | (org_id) |
 | `ai_usage_events` | Communications & AI settings | 19 | — |
-| `applications` | Candidates & pipeline | 10 | (requisitionId+candidateId) |
+| `applications` | Candidates & pipeline | 11 | (requisitionId+candidateId) |
 | `assessment_settings` | — | 8 | — |
 | `audit_log` | Identity & access | 10 | — |
 | `board_sync_state` | — | 11 | (integration_id) |
@@ -1421,9 +1441,10 @@ erDiagram
 | `hrms_sync_state` | — | 12 | (integrationId+entity) |
 | `inbox_messages` | Sourcing & integrations | 16 | — |
 | `integration_credentials` | Sourcing & integrations | 4 | — |
-| `interview_slot_offers` | — | 22 | (token) |
+| `interview_confirmations` | — | 17 | (token) |
+| `interview_slot_offers` | — | 23 | (token) |
 | `interview_transcripts` | — | 8 | (interview_id) |
-| `interviews` | Screening & interviews | 24 | — |
+| `interviews` | Screening & interviews | 25 | — |
 | `job_descriptions` | Requisitions & job content | 17 | — |
 | `job_index_notifications` | — | 10 | — |
 | `master_items` | Organisations & masters | 8 | — |
@@ -1442,18 +1463,22 @@ erDiagram
 | `org_pool_shares` | Organisations & masters | 10 | (ownerOrg+partnerOrg) |
 | `org_profile_versions` | Organisations & masters | 16 | (orgId+version) |
 | `org_profiles` | Organisations & masters | 12 | — |
-| `organizations` | Organisations & masters | 27 | (slug), (capture_token), (capture_token_hash), (distribution_token_hash) |
+| `organizations` | Organisations & masters | 28 | (slug), (capture_token), (capture_token_hash), (distribution_token_hash) |
 | `panel_agent_settings` | — | 5 | — |
 | `panel_assessments` | — | 23 | (interview_id) |
+| `panelist_scorecard_links` | — | 8 | (interviewId+panelistId), (token_hash) |
+| `panelists` | — | 18 | — |
 | `phone_screening_settings` | Screening & interviews | 16 | — |
+| `plan_change_proposals` | — | 16 | — |
 | `platform_admins` | Identity & access | 6 | (email) |
 | `product_catalogue_commercials` | Organisations & masters | 8 | — |
 | `rate_limit_hits` | — | 3 | — |
 | `requisition_board_postings` | — | 16 | (requisitionId+provider) |
 | `requisitions` | Requisitions & job content | 44 | (orgId+code) |
-| `role_panels` | — | 8 | (requisitionId+level) |
-| `round_substitutes` | — | 9 | — |
+| `role_panels` | — | 9 | (requisitionId+level) |
+| `round_substitutes` | — | 11 | — |
 | `salary_benchmarks` | Intelligence | 15 | — |
+| `scorecard_chases` | — | 7 | (interviewId+email) |
 | `screening_calls` | Screening & interviews | 34 | — |
 | `screening_kits` | Screening & interviews | 11 | — |
 | `screening_prep_jobs` | Screening & interviews | 10 | (application_id) |

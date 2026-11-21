@@ -311,6 +311,17 @@ export const EVAL_CATALOG: Record<string, EvalExplainer> = {
       "Kiran keeps the booked time; it does not offer new times.",
     ],
   },
+  "interview: keeps the booked time when a panellist steps down under the SLA": {
+    title: "Keeps the time when an interviewer steps down under the SLA",
+    situation:
+      "Dev stepped down from Kiran's booked interview; no time within the hiring SLA suited the whole panel.",
+    checks: [
+      "It looks for registered interviewers who are free at the booked time.",
+      "It proposes one as a stand-in — a person approves it.",
+      "It never offers Kiran a later time, so the hiring SLA holds.",
+    ],
+  },
+
   "interview: proposes a panel for a round and waits for a person": {
     title: "Proposes a round's panel and waits for a person",
     situation:
@@ -321,9 +332,30 @@ export const EVAL_CATALOG: Record<string, EvalExplainer> = {
       "It offers Asha times with exactly the approved panel.",
     ],
   },
-  "interview: asks for a scheduling call when e-mailed times go unanswered": {
-    title: "Asks for a scheduling call when e-mailed times go unanswered",
-    situation: "Meera has not picked one of the interview times e-mailed 30 hours ago.",
+  "interview: asks HR for a new panellist when nobody fits the round": {
+    title: "Asks HR for a new panellist when nobody fits the round",
+    situation:
+      "Ravi is ready for his first interview round, and nobody in the panel directory takes that round.",
+    checks: [
+      "It asks the HR head to add someone — it never invents a person or an e-mail.",
+      "The HR head types an external panellist in and approves; they join the panel directory.",
+      "It then proposes the round's panel with that person.",
+    ],
+  },
+  "interview: re-offers from the panel's suggested times when none suit the whole panel": {
+    title: "Re-offers from the panel's suggested times",
+    situation:
+      "No proposed time suited Leela's whole L1 panel; the panelist suggested another time, and Leela has not been contacted.",
+    checks: [
+      "It offers new times with the same panel, starting from the suggested time.",
+      "It never books a time itself or changes the panel.",
+      "The panel is asked again before Leela hears.",
+    ],
+  },
+  "interview: asks for a scheduling call once one is possible for e-mailed times": {
+    title: "Asks for a scheduling call once one is possible",
+    situation:
+      "Meera's interview times went only by e-mail because no call could be placed then; a call is possible now.",
     checks: [
       "It asks for a scheduling call — a person approves it.",
       "It does not offer new times or book one itself.",

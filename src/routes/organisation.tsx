@@ -66,6 +66,7 @@ function OrganisationSettings() {
     currency: "INR",
     careersEmail: "",
     fiscalYearStartMonth: 4,
+    hiringSlaDays: 5,
   });
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState(false);
@@ -83,6 +84,7 @@ function OrganisationSettings() {
       currency: org.currency,
       careersEmail: org.careers_email ?? "",
       fiscalYearStartMonth: org.fiscal_year_start_month,
+      hiringSlaDays: org.hiring_sla_days ?? 5,
     });
   }, [org]);
 
@@ -154,6 +156,20 @@ function OrganisationSettings() {
               disabled={!isOwner}
               value={form.fiscalYearStartMonth}
               onChange={(e) => setForm({ ...form, fiscalYearStartMonth: Number(e.target.value) })}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="sla" className="text-xs">
+              Hiring SLA (days, application to offer)
+            </Label>
+            <Input
+              id="sla"
+              type="number"
+              min={2}
+              max={60}
+              disabled={!isOwner}
+              value={form.hiringSlaDays}
+              onChange={(e) => setForm({ ...form, hiringSlaDays: Number(e.target.value) })}
             />
           </div>
         </div>

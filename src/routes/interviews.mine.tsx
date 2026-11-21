@@ -3,18 +3,24 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { toast } from "sonner";
-import { CalendarPlus, Loader2, Lock, Video } from "lucide-react";
+import { CalendarPlus, FileText, Loader2, Lock, Video } from "lucide-react";
 
 import {
   interviewerUnavailable,
   markInterviewOutcome,
   myInterviews,
+  myRoundBrief,
   submitScorecard,
   type MyInterview,
 } from "@/lib/interviews.functions";
 import { buildIcs, downloadIcs } from "@/lib/ics";
 import { STAGE_LABEL } from "@/lib/lifecycle";
 import { EmptyState, PageHeader, StageBadge } from "@/components/ats";
+import { CompetencyRating, OverallReadout } from "@/components/CompetencyRating";
+import { PanelBriefView } from "@/components/PanelBriefView";
+import { ChangeTime, ScorecardChange } from "@/components/interviews/PanelChanges";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useOrg } from "@/hooks/useOrg";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -61,6 +67,8 @@ function MyInterviewsPage() {
   const submit = useServerFn(submitScorecard);
 
   const mine = useQuery({ queryKey: ["my_interviews"], queryFn: () => fetchMine({}) });
+  const { panelOnly } = useOrg();
+  const [briefId, setBriefId] = useState<string | null>(null);
   const rounds = (mine.data ?? []) as MyInterview[];
 
   const [openId, setOpenId] = useState<string | null>(null);
@@ -78,6 +86,7 @@ function MyInterviewsPage() {
     setForm({ ratings: {}, verdict: "select", focus: "", comments: "", reason: "" });
   }
 
+  const [changing, setChanging] = useState<MyInterview | null>(null);
   const cannot = useServerFn(interviewerUnavailable);
   async function cannotMakeIt(round: MyInterview) {
     const note = window.prompt(
@@ -115,16 +124,14 @@ function MyInterviewsPage() {
     const competencies = names
       .filter((n) => form.ratings[n])
       .map((n) => ({ name: n, rating: form.ratings[n]! }));
-    if (competencies.length === 0) {
-      toast.error("Rate at least one competency");
+    if (competencies.length < names.length) {
+      toast.error("Rate every competency");
       return;
     }
     if (form.verdict !== "select" && !form.reason.trim() && !form.comments.trim()) {
       toast.error("A hold or reject needs a written reason");
       return;
     }
-    const avg = Math.round(competencies.reduce((s, c) => s + c.rating, 0) / competencies.length);
-
     setBusy(true);
     try {
       const res = await submit({
@@ -133,7 +140,6 @@ function MyInterviewsPage() {
           applicationId: round.application_id,
           level: round.level,
           focusArea: form.focus || null,
-          rating: Math.max(1, Math.min(5, avg)),
           verdict: form.verdict,
           comments: form.comments || null,
           reason: form.reason || null,
@@ -164,14 +170,37 @@ function MyInterviewsPage() {
 
   return (
     <>
+      <Dialog open={!!changing} onOpenChange={(o) => !o && setChanging(null)}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {changing ? `L${changing.level} · ${changing.candidate_name}` : ""}
+            </DialogTitle>
+          </DialogHeader>
+          {changing?.change_token ? (
+            <div className="space-y-4">
+              <ChangeTime
+                token={changing.change_token}
+                onDone={() => {
+                  setChanging(null);
+                  void qc.invalidateQueries({ queryKey: ["my_interviews"] });
+                }}
+              />
+              <ScorecardChange token={changing.change_token} />
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
       <PageHeader
         eyebrow="Interviewer"
         title="My interviews"
         description="Your rounds, including panels you sit on. Rate the role's own competencies and give your verdict once — it locks and is attributed to you. When everyone on the panel has scored, the round completes; the hiring manager makes the hiring decision."
         actions={
-          <Button variant="outline" asChild>
-            <Link to="/interviews">Recruiter view</Link>
-          </Button>
+          panelOnly ? null : (
+            <Button variant="outline" asChild>
+              <Link to="/interviews">Recruiter view</Link>
+            </Button>
+          )
         }
       />
 
@@ -200,13 +229,17 @@ function MyInterviewsPage() {
                 <div className="flex flex-wrap items-center gap-4 p-5">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <Link
-                        to="/candidates/$id"
-                        params={{ id: round.candidate_id }}
-                        className="font-semibold hover:underline"
-                      >
-                        {round.candidate_name}
-                      </Link>
+                      {panelOnly ? (
+                        <span className="font-semibold">{round.candidate_name}</span>
+                      ) : (
+                        <Link
+                          to="/candidates/$id"
+                          params={{ id: round.candidate_id }}
+                          className="font-semibold hover:underline"
+                        >
+                          {round.candidate_name}
+                        </Link>
+                      )}
                       {round.stage !== `l${round.level}` ? (
                         <span className="text-xs text-muted-foreground">now</span>
                       ) : null}
@@ -238,6 +271,14 @@ function MyInterviewsPage() {
                     ) : null}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      aria-expanded={briefId === round.id}
+                      onClick={() => setBriefId(briefId === round.id ? null : round.id)}
+                    >
+                      <FileText className="size-4" /> Brief & CV
+                    </Button>
                     {round.teams_link ? (
                       <Button variant="ghost" size="sm" asChild>
                         <a href={round.teams_link} target="_blank" rel="noreferrer noopener">
@@ -271,6 +312,10 @@ function MyInterviewsPage() {
                         <span className="text-xs text-muted-foreground">
                           You can&apos;t make it — a stand-in is being arranged
                         </span>
+                      ) : round.change_token ? (
+                        <Button variant="outline" size="sm" onClick={() => setChanging(round)}>
+                          Change time or scorecard
+                        </Button>
                       ) : (
                         <Button
                           variant="outline"
@@ -316,31 +361,23 @@ function MyInterviewsPage() {
                     )}
                   </div>
                 </div>
+                {briefId === round.id ? <RoundBrief interviewId={round.id} /> : null}
 
                 {isOpen && !round.submitted && (
                   <div className="grid gap-4 border-t border-border bg-surface-2 p-5 md:grid-cols-2">
                     <div className="space-y-3">
                       {names.map((name) => (
-                        <div key={name} className="flex items-center justify-between gap-3">
-                          <Label className="text-xs text-muted-foreground">{name}</Label>
-                          <div className="flex gap-1">
-                            {[1, 2, 3, 4, 5].map((n) => (
-                              <Button
-                                key={n}
-                                type="button"
-                                size="sm"
-                                variant={form.ratings[name] === n ? "default" : "outline"}
-                                className="num size-8 p-0"
-                                onClick={() =>
-                                  setForm((f) => ({ ...f, ratings: { ...f.ratings, [name]: n } }))
-                                }
-                              >
-                                {n}
-                              </Button>
-                            ))}
-                          </div>
-                        </div>
+                        <CompetencyRating
+                          key={name}
+                          name={name}
+                          rubric={round}
+                          value={form.ratings[name] ?? 0}
+                          onChange={(n) =>
+                            setForm((f) => ({ ...f, ratings: { ...f.ratings, [name]: n } }))
+                          }
+                        />
                       ))}
+                      <OverallReadout ratings={form.ratings} rubric={round} />
                       <div>
                         <Label className="mb-1.5 block text-xs text-muted-foreground">
                           Focus area covered
@@ -412,5 +449,26 @@ function MyInterviewsPage() {
         </div>
       )}
     </>
+  );
+}
+
+function RoundBrief({ interviewId }: { interviewId: string }) {
+  const fetchBrief = useServerFn(myRoundBrief);
+  const q = useQuery({
+    queryKey: ["round_brief", interviewId],
+    queryFn: () => fetchBrief({ data: { interviewId } }),
+  });
+  return (
+    <div className="border-t border-border p-5">
+      {q.isLoading ? (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" /> Loading…
+        </div>
+      ) : q.data ? (
+        <PanelBriefView brief={q.data} />
+      ) : (
+        <p className="text-sm text-destructive">{(q.error as Error | null)?.message}</p>
+      )}
+    </div>
   );
 }

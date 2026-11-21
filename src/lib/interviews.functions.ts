@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { z } from "zod";
 
@@ -7,13 +7,16 @@ import {
   aiInterviews,
   applications,
   candidates,
+  emailOutbox,
   evaluations,
+  interviewConfirmations,
   interviews,
   orgMembers,
+  panelists,
   organizations,
   requisitions,
 } from "@db/schema";
-import { assertRole, requireOrg } from "./auth.middleware";
+import { assertRole, requireOrg, requirePanel } from "./auth.middleware";
 import { canMove, REASON_REQUIRED, STAGE_LABEL, type Stage } from "./lifecycle";
 import { buildIcs } from "./ics";
 import { meetingRefOf, type MeetingRef } from "./meeting-ref";
@@ -84,17 +87,22 @@ export type MyInterview = {
   /** This round's name and competencies from the role's interview plan. */
   round_name: string | null;
   competencies: string[];
+  /** The round's rubric: weight (missing = 1) and what a 1, 3 and 5 look like. */
+  weights: Record<string, number>;
+  anchors: Record<string, { low: string; mid: string; high: string }>;
   /** Everyone on the panel (names or emails). */
   panel: string[];
   /** Panel members who have not scored yet (when I have). */
   waiting_for: string[];
   /** I said I cannot make this booked round (a stand-in is being arranged). */
   i_cannot_make_it: boolean;
+  /** My accepted confirmation link token: changing the time or scorecard uses it. */
+  change_token: string | null;
 };
 
 /** Every interview assigned to the signed-in user, newest first. */
 export const myInterviews = createServerFn({ method: "GET" })
-  .middleware([requireOrg])
+  .middleware([requirePanel])
   .handler(async ({ context }): Promise<MyInterview[]> => {
     const email = actorOf(context).toLowerCase();
 
@@ -129,6 +137,24 @@ export const myInterviews = createServerFn({ method: "GET" })
     if (!mine.length) return [];
 
     const appIds = [...new Set(mine.map((r) => r.applicationId))];
+    const tokens = await db
+      .select({
+        interviewId: interviewConfirmations.interviewId,
+        token: interviewConfirmations.token,
+      })
+      .from(interviewConfirmations)
+      .where(
+        and(
+          eq(interviewConfirmations.orgId, context.orgId),
+          inArray(
+            interviewConfirmations.interviewId,
+            mine.map((r) => r.id),
+          ),
+          eq(interviewConfirmations.party, "panelist"),
+          eq(interviewConfirmations.state, "accepted"),
+          sql`lower(${interviewConfirmations.email}) = ${email}`,
+        ),
+      );
     const [apps, evals] = await Promise.all([
       db
         .select({
@@ -195,11 +221,14 @@ export const myInterviews = createServerFn({ method: "GET" })
         submitted: by.includes(email),
         round_name: round?.name ?? null,
         competencies: round?.competencies ?? [],
+        weights: round?.weights ?? {},
+        anchors: round?.anchors ?? {},
         panel: members.map((m) => m.name ?? m.email),
         waiting_for: members
           .filter((m) => !by.includes(m.email.toLowerCase()))
           .map((m) => m.name ?? m.email),
         i_cannot_make_it: (r.unavailable ?? []).some((u) => u.email === email),
+        change_token: tokens.find((t) => t.interviewId === r.id)?.token ?? null,
       };
     });
   });
@@ -211,7 +240,12 @@ const ScorecardInput = z.object({
   applicationId: z.string().uuid(),
   level: z.number().min(1).max(3),
   focusArea: z.string().optional().nullable(),
-  rating: z.number().min(1).max(5),
+  /**
+   * Ignored when competencies are rated: the overall is then the weighted
+   * average the server computes from the role's rubric. Only a legacy card
+   * with no competencies uses it.
+   */
+  rating: z.number().min(1).max(5).optional(),
   verdict: z.enum(["select", "hold", "reject"]),
   comments: z.string().optional().nullable(),
   reason: z.string().optional().nullable(),
@@ -247,7 +281,8 @@ export type ScorecardResult = {
  * round.
  */
 export const submitScorecardCore = createServerOnlyFn(async function submitScorecardCore(
-  ctx: { orgId: string; userId: string; email: string; actor: string; isOwner?: boolean },
+  /** userId is null for an external panelist scoring through their private link. */
+  ctx: { orgId: string; userId: string | null; email: string; actor: string; isOwner?: boolean },
   data: z.infer<typeof ScorecardInput>,
 ): Promise<ScorecardResult> {
   const actor = ctx.actor;
@@ -300,6 +335,7 @@ export const submitScorecardCore = createServerOnlyFn(async function submitScore
     const { emailsOf } = await import("./interview-plan.server");
     const panel = emailsOf(r);
     if (panel.length && !panel.includes(me)) {
+      if (!ctx.userId) throw new Error("Only the interviewers on this round can score it.");
       await assertRole(
         ctx.userId,
         ctx.orgId,
@@ -325,6 +361,26 @@ export const submitScorecardCore = createServerOnlyFn(async function submitScore
     throw new Error("A hold or reject needs a written reason.");
   }
 
+  // One overall rule for every way of scoring: the weighted average of the
+  // competency ratings under the role's rubric — never a client-sent number.
+  let overall: number;
+  if (data.competencies.length) {
+    const { planFor } = await import("./interview-plan.server");
+    const { overallRating, roundOf } = await import("./interview-plan");
+    const planRound = app.requisitionId
+      ? roundOf((await planFor(ctx.orgId, app.requisitionId)).plan, data.level)
+      : null;
+    if (planRound) {
+      const asked = new Set(planRound.competencies.map((c) => c.toLowerCase()));
+      const rated = new Set(data.competencies.map((c) => c.name.toLowerCase()));
+      if (data.competencies.some((c) => !asked.has(c.name.toLowerCase())))
+        throw new Error("Rate only the competencies this round's rubric lists.");
+      if ([...asked].some((c) => !rated.has(c))) throw new Error("Rate every competency.");
+    }
+    overall = overallRating(data.competencies, planRound);
+  } else if (data.rating) overall = data.rating;
+  else throw new Error("Rate at least one competency.");
+
   const [evaluation] = await db
     .insert(evaluations)
     .values({
@@ -335,7 +391,7 @@ export const submitScorecardCore = createServerOnlyFn(async function submitScore
       evaluator: actor,
       evaluatorEmail: me,
       focusArea: data.focusArea?.trim() || null,
-      rating: data.rating,
+      rating: overall,
       recommendation: data.verdict,
       comments: [data.comments?.trim(), data.reason?.trim()].filter(Boolean).join("\n\n") || null,
       competencies: data.competencies,
@@ -352,7 +408,7 @@ export const submitScorecardCore = createServerOnlyFn(async function submitScore
       orgId: ctx.orgId,
       source: "scorecard",
       label: data.verdict,
-      rating: data.rating,
+      rating: overall,
       reason: data.comments?.trim() || null,
       corrected: {
         level: data.level,
@@ -442,7 +498,13 @@ export const submitScorecardCore = createServerOnlyFn(async function submitScore
     ? `On hold for the HR head: the L${data.level} panel agent's independent view of the call disagrees with the panel.`
     : null;
   const reason = data.reason?.trim() || `L${data.level} verdict: ${verdict}`;
-  if (target && HR_CONTROLLED_TARGETS.has(target)) {
+  // A scorecard sent through a private link (no account) never moves anyone
+  // into the offer pipeline — the HR head does.
+  const external = !ctx.userId && Boolean(target && HR_CONTROLLED_TARGETS.has(target));
+  if (external)
+    blocked =
+      "Waiting for the HR head: a verdict sent through a private scorecard link cannot open an offer.";
+  if (target && HR_CONTROLLED_TARGETS.has(target) && ctx.userId) {
     await assertRole(
       ctx.userId,
       ctx.orgId,
@@ -450,7 +512,7 @@ export const submitScorecardCore = createServerOnlyFn(async function submitScore
       "Only the HR head or an owner can move a candidate into the offer pipeline.",
     );
   }
-  if (target && from !== target && canMove(from, target)) {
+  if (target && !external && from !== target && canMove(from, target)) {
     await db
       .update(applications)
       .set({
@@ -543,8 +605,37 @@ export const submitScorecardCore = createServerOnlyFn(async function submitScore
   };
 });
 
+/**
+ * The brief for one round the caller sits on: candidate profile, CV, the
+ * round's focus and rubric, and (members only) match and screening highlights.
+ * Refused unless the caller's email is on the round.
+ */
+export const myRoundBrief = createServerFn({ method: "GET" })
+  .middleware([requirePanel])
+  .validator((d: unknown) => z.object({ interviewId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const [r] = await db
+      .select({
+        interviewer: interviews.interviewer,
+        interviewerEmail: interviews.interviewerEmail,
+        panel: interviews.panel,
+      })
+      .from(interviews)
+      .where(and(eq(interviews.id, data.interviewId), eq(interviews.orgId, context.orgId)))
+      .limit(1);
+    const { emailsOf } = await import("./interview-plan.server");
+    const me = actorOf(context).toLowerCase();
+    // Same membership test as myInterviews: interviewer, interviewer email or panel.
+    if (!r || !(emailsOf(r).includes(me) || r.interviewer?.toLowerCase() === me))
+      throw new Error("You are not on this interview's panel.");
+    const { panelBrief } = await import("./panel-brief.server");
+    const brief = await panelBrief(context.orgId, data.interviewId, { internal: true });
+    if (!brief) throw new Error("Interview not found.");
+    return brief;
+  });
+
 export const submitScorecard = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requirePanel])
   .validator((data: unknown) => ScorecardInput.parse(data))
   .handler(async ({ data, context }): Promise<ScorecardResult> =>
     submitScorecardCore(
@@ -650,7 +741,7 @@ export const markInterviewOutcomeCore = createServerOnlyFn(async function markIn
 });
 
 export const markInterviewOutcome = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requirePanel])
   .validator((data: unknown) => OutcomeInput.parse(data))
   .handler(async ({ data, context }) =>
     markInterviewOutcomeCore(
@@ -769,7 +860,7 @@ export const interviewerUnavailableCore = createServerOnlyFn(
 );
 
 export const interviewerUnavailable = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requirePanel])
   .validator((data: unknown) => UnavailableInput.parse(data))
   .handler(async ({ data, context }) =>
     interviewerUnavailableCore(
@@ -961,6 +1052,32 @@ export const scheduleInterviewCore = createServerOnlyFn(async function scheduleI
     }
   }
 
+  /* Confirmations: on a round a person booked, the candidate's invite waits
+   * until every panelist accepts, then asks the candidate to confirm. A time the
+   * candidate picked is theirs already (interview-confirmations.server.ts). */
+  const panelPeople = [
+    ...(row.interviewerEmail ? [{ name: row.interviewer, email: row.interviewerEmail }] : []),
+    ...row.panel,
+  ];
+  const confirmations = await import("./interview-confirmations.server");
+  const picked = confirmations.candidatePicked(actor);
+  const holdInvite = !picked && panelPeople.length > 0;
+  let candidateToken: string | null = null;
+  if (interviewId) {
+    try {
+      await confirmations.supersedeForInterview(ctx.orgId, interviewId, scheduledAt);
+      candidateToken = await confirmations.candidateConfirmation(
+        ctx.orgId,
+        interviewId,
+        scheduledAt,
+        { name: candidateName, email: candidateEmail },
+        picked ? "accepted" : "pending",
+      );
+    } catch {
+      /* best-effort: without a row the invite simply goes out as before */
+    }
+  }
+
   /* Invite email with calendar attachment — best-effort, both create and
    * reschedule. The .ics UID is the interview id so reschedules update the
    * same calendar entry. */
@@ -1019,9 +1136,31 @@ export const scheduleInterviewCore = createServerOnlyFn(async function scheduleI
         .limit(1);
       if (tx?.transcription === "requested") templateData["transcribed"] = "yes";
       if (data.agenda?.trim()) templateData["agenda"] = data.agenda.trim();
+      // Already told another time for this round? Say sorry and name it.
+      const [told] = await db
+        .select({ data: emailOutbox.templateData })
+        .from(emailOutbox)
+        .where(
+          and(
+            eq(emailOutbox.orgId, ctx.orgId),
+            eq(emailOutbox.applicationId, app.id),
+            eq(emailOutbox.kind, "interview_invite"),
+            eq(emailOutbox.status, "sent"),
+            sql`${emailOutbox.templateData}->>'roundLabel' = ${roundLabel}`,
+          ),
+        )
+        .orderBy(desc(emailOutbox.sentAt))
+        .limit(1);
+      const before = (told?.data as Record<string, unknown> | undefined)?.["scheduledAtText"];
+      if (typeof before === "string" && before !== templateData["scheduledAtText"])
+        templateData["previousText"] = before;
+      if (candidateToken && !picked)
+        templateData["confirmUrl"] =
+          `${(await import("../server/env")).env.PUBLIC_SITE_URL.replace(/\/$/, "")}/confirm/${candidateToken}`;
       await enqueueEmail({
         orgId: ctx.orgId,
         kind: "interview_invite",
+        hold: holdInvite && Boolean(candidateToken),
         templateName: "interview_invite",
         toEmail: candidateEmail,
         applicationId: app.id,
@@ -1033,7 +1172,8 @@ export const scheduleInterviewCore = createServerOnlyFn(async function scheduleI
             contentType: "text/calendar",
           },
         ],
-        idempotencyKey: `interview-invite:${interviewId}:${scheduledAt.toISOString()}`,
+        // Each booking is its own invite: going back to an earlier time sends it again.
+        idempotencyKey: `interview-invite:${interviewId}:${scheduledAt.toISOString()}${candidateToken ? `:${candidateToken.slice(0, 12)}` : ""}`,
       });
     }
   } catch {
@@ -1042,10 +1182,7 @@ export const scheduleInterviewCore = createServerOnlyFn(async function scheduleI
 
   /* Every interviewer's own invite and brief — best-effort too. */
   if (interviewId) {
-    const members = [
-      ...(row.interviewerEmail ? [{ name: row.interviewer, email: row.interviewerEmail }] : []),
-      ...row.panel,
-    ];
+    const members = panelPeople;
     for (const m of members) {
       try {
         const { sendInterviewerBrief } = await import("./interviewer-brief.server");
@@ -1062,10 +1199,17 @@ export const scheduleInterviewCore = createServerOnlyFn(async function scheduleI
           meetingLink: row.teamsLink,
           agenda: row.agenda,
           panelNames: members.map((x) => x.name ?? x.email),
+          bookedBy: actor,
         });
       } catch {
         /* the round stands even if a brief cannot be queued */
       }
+    }
+    // Everyone already agreed this time (e.g. on the offered times): send it now.
+    try {
+      await confirmations.releaseIfAgreed(ctx.orgId, interviewId);
+    } catch {
+      /* the team can release it from the Interviews page */
     }
   }
 
@@ -1139,7 +1283,10 @@ export const saveAiInterview = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
-/** Validate further panel members: active members of the organisation, no repeats. */
+/**
+ * Validate further panel members: active members of the organisation or active
+ * entries of its panel directory (internal or external), no repeats.
+ */
 const panelOf = createServerOnlyFn(async function panelOf(
   orgId: string,
   primary: string | null,
@@ -1159,11 +1306,25 @@ const panelOf = createServerOnlyFn(async function panelOf(
         inArray(sql`lower(${orgMembers.email})`, wanted),
       ),
     );
-  const found = rows.map((r) => ({ name: r.name ?? null, email: r.email.toLowerCase() }));
+  const directory = await db
+    .select({ name: panelists.fullName, email: panelists.email })
+    .from(panelists)
+    .where(
+      and(
+        eq(panelists.orgId, orgId),
+        eq(panelists.active, true),
+        inArray(sql`lower(${panelists.email})`, wanted),
+      ),
+    );
+  const found: { name: string | null; email: string }[] = [];
+  for (const r of [...rows, ...directory]) {
+    const email = r.email.toLowerCase();
+    if (!found.some((f) => f.email === email)) found.push({ name: r.name ?? null, email });
+  }
   const unknown = wanted.filter((e) => !found.some((f) => f.email === e));
   if (unknown.length)
     throw new Error(
-      `Panel members must be active members of the organisation: ${unknown.join(", ")}.`,
+      `Panel members must be active members of the organisation or in its panel directory: ${unknown.join(", ")}.`,
     );
   return found;
 });

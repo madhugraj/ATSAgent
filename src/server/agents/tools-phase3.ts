@@ -206,7 +206,7 @@ export function registerPhase3Tools(): void {
         ...(registered
           ? {}
           : {
-              note: "No interviewers are registered on the Team page; every active member is listed.",
+              note: "No interviewers are registered on the Team page; every active member (and everyone in the panel directory who takes this round) is listed.",
             }),
       };
     },
@@ -247,6 +247,37 @@ export function registerPhase3Tools(): void {
     },
     run: async () => {
       throw new Error("A panel is decided by a person.");
+    },
+  });
+
+  registerTool({
+    name: "request_new_panelist",
+    description:
+      "When nobody in list_panel_options' eligible list fits a round (empty, or no one covers what the round rates), ask the HR head in the hiring desk to add someone to the panel directory: `needed` says what the round needs that nobody covers (from the round's competencies — never a name, e-mail or company you were not given). The HR head types the person in — internal or external — and approves; you are told who was added, then call list_panel_options again and propose the panel. Never invent a person or an e-mail.",
+    input: z.object({
+      requisitionId: z.string().uuid(),
+      level: z.number().int().min(1).max(3),
+      needed: z.string().min(5).max(300),
+      reason: z.string().min(10).max(600),
+    }),
+    risk: "write",
+    describe: (i) => `A new panellist for L${i.level}`,
+    proposes: async (ctx, i) => {
+      await assertRequisitionInOrg(i.requisitionId, ctx.orgId);
+      return {
+        title: `Someone new for the L${i.level} panel?`,
+        summary: i.reason,
+        subject: {
+          type: "new_panelist",
+          requisitionId: i.requisitionId,
+          level: i.level,
+          needed: i.needed,
+          reason: i.reason,
+        },
+      };
+    },
+    run: async () => {
+      throw new Error("A person adds people to the panel directory.");
     },
   });
 
@@ -303,7 +334,7 @@ export function registerPhase3Tools(): void {
   registerTool({
     name: "schedule_interview",
     description:
-      "Book an interview round and email the candidate the invite with a calendar file. The interviewer must be an active member of the organisation. Optionally creates a Zoom / Google Meet / Teams link when that integration is connected. There is no calendar free/busy check: propose a working-hours slot at least one day ahead; a person reviews it unless the interview invitation is pre-approved.",
+      "Book an interview round. Each panelist gets their brief and accepts or declines the time; the candidate's invite (with a calendar file and a confirm link) is sent once the whole panel accepts. The interviewer must be an active member of the organisation. Optionally creates a Zoom / Google Meet / Teams link when that integration is connected. There is no calendar free/busy check: propose a working-hours slot at least one day ahead; a person reviews it unless the interview invitation is pre-approved.",
     input: AppId.extend({
       level: z.number().int().min(1).max(3),
       interviewerEmail: z.string().email(),
@@ -314,7 +345,7 @@ export function registerPhase3Tools(): void {
       mode: z.enum(["online", "onsite", "phone"]).default("online"),
       meetingProvider: z.enum(["zoom", "google_meet", "teams"]).optional(),
       agenda: z.string().max(2000).optional(),
-      /** Further interviewers on the panel (active members). */
+      /** Further interviewers on the panel (active members or directory panelists). */
       panelEmails: z.array(z.string().email()).max(2).optional(),
     }),
     risk: "external",
@@ -328,23 +359,23 @@ export function registerPhase3Tools(): void {
         throw new Error("Schedule at least 12 hours ahead.");
       if (when.getTime() > Date.now() + 60 * 864e5)
         throw new Error("Schedule within the next 60 days.");
-      const [member] = await db
-        .select({ name: orgMembers.fullName, email: orgMembers.email })
-        .from(orgMembers)
-        .where(
-          and(
-            eq(orgMembers.orgId, ctx.orgId),
-            eq(orgMembers.status, "active"),
-            sql`lower(${orgMembers.email}) = ${i.interviewerEmail.toLowerCase()}`,
-          ),
-        )
-        .limit(1);
-      if (!member) throw new Error("Interviewers must be active members of the organisation.");
+      const { activeInterviewer } = await import("@/lib/panelists.server");
+      const member = await activeInterviewer(ctx.orgId, i.interviewerEmail);
+      if (!member)
+        throw new Error(
+          `${i.interviewerEmail} is not an active member of the organisation or in its panel directory.`,
+        );
       const app = await loadApplication(ctx.orgId, i.applicationId);
       const { assertAfterEarlierRounds } = await import("@/lib/calendar-availability.server");
       await assertAfterEarlierRounds(ctx.orgId, i.applicationId, i.level, [when]);
 
       let meetingLink: string | null = null;
+      // An online round gets a link from the connected provider unless one was named.
+      if (i.mode === "online" && !i.meetingProvider) {
+        const { connectedMeetingProvider } = await import("@/lib/slot-offers.server");
+        const p = await connectedMeetingProvider(ctx.orgId);
+        if (p) i = { ...i, meetingProvider: p };
+      }
       if (i.mode === "online" && i.meetingProvider) {
         const [integration] = await db
           .select({ enabled: sourceIntegrations.enabled, ready: sourceIntegrations.hasCredentials })
@@ -367,7 +398,7 @@ export function registerPhase3Tools(): void {
           topic: `L${i.level} interview: ${app.jobTitle}`,
           startIso: when.toISOString(),
           durationMins: i.durationMins,
-          attendees: [member.email],
+          attendees: [member.email, ...(i.panelEmails ?? [])],
           agenda: i.agenda ?? null,
         });
         meetingLink = meeting.joinUrl;
@@ -403,7 +434,7 @@ export function registerPhase3Tools(): void {
   registerTool({
     name: "find_interview_slots",
     description:
-      "Free interview times for an interviewer and the rest of the panel (times that suit everyone): weekdays 10:00–17:00 in the organisation's time zone, at least 18 hours ahead, spread over different days, avoiding their calendar's busy time (when Google or Microsoft 365 calendar is connected), rounds already booked in ATSIQ and times already offered to another candidate. slotsLocal gives each time in the organisation's time zone — quote those to people, never UTC. Pass the applicationId and level of the round being booked so its times start after the candidate's earlier rounds end. Says whether the calendar was actually checked.",
+      "Free interview times for an interviewer and the rest of the panel (times that suit everyone): weekdays 10:00–17:00 in the organisation's time zone, at least 18 hours ahead, the earliest free ones first (the hiring SLA is days, not weeks), avoiding their calendar's busy time (when Google or Microsoft 365 calendar is connected), rounds already booked in ATSIQ and times already offered to another candidate. slotsLocal gives each time in the organisation's time zone — quote those to people, never UTC. Pass the applicationId and level of the round being booked so its times start after the candidate's earlier rounds end. Says whether the calendar was actually checked.",
     input: z.object({
       /** The candidate's application and round: times start after their earlier rounds end. */
       applicationId: z.string().uuid().optional(),
@@ -431,6 +462,7 @@ export function registerPhase3Tools(): void {
         durationMins: i.durationMins,
         count: i.count,
         timeZone,
+        earliest: true,
       });
       return { ...r, slotsLocal: r.slots.map((x) => localWhen(x, timeZone)), timeZone };
     },
@@ -439,7 +471,7 @@ export function registerPhase3Tools(): void {
   registerTool({
     name: "offer_interview_slots",
     description:
-      "Email the candidate 2–5 interview times (for the interviewer and any further panel members) to choose from, through a private link. Nothing is booked yet: when they pick a time, the round is booked with a meeting link (if a provider is given and connected) and both the candidate and the interviewer get their invites; if none work, the team is told. Every time is re-checked as free. Leaves the organisation, so a person approves it unless the interview time-choice email is pre-approved.",
+      "Offer the candidate 2–5 interview times (for the interviewer and any further panel members). The panel goes first (`via` is panel): each panelist ticks the times they can do and may suggest another; the candidate is offered only the times every panelist can do, and when none are in common the offer is cancelled and you are told the panel's suggestions. Once the panel has answered, voice goes first: the system places a short AI scheduling call in the calling window to let the candidate pick one, and e-mails the times with a private link only if that call does not book (or when no call is possible). Nothing is booked until they pick: the round is then booked with a meeting link (if a provider is given and connected) and both the candidate and the interviewer get their invites; if none work, the team is told. Every time is re-checked as free. Leaves the organisation, so a person approves it unless the interview time-choice e-mail is pre-approved.",
     input: AppId.extend({
       level: z.number().int().min(1).max(3),
       interviewerEmail: z.string().email(),
@@ -494,6 +526,9 @@ export function registerPhase3Tools(): void {
         slotsLocal: r.slots.map((x) => localWhen(x, tz)),
         expiresAt: r.expiresAt,
         expiresLocal: r.expiresAt ? localWhen(r.expiresAt, tz) : null,
+        via: r.via,
+        callAtLocal: r.callDueAt ? localWhen(r.callDueAt, tz) : null,
+        callRefused: r.callRefused,
       };
     },
   });

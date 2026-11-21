@@ -274,6 +274,8 @@ export async function findFreeSlots(
     timeZone: string;
     /** Only times starting at or after this (e.g. the end of the previous round). */
     notBefore?: Date | null;
+    /** The earliest free times (the hiring SLA) rather than one per day. */
+    earliest?: boolean;
   },
 ): Promise<{ slots: string[]; checkedWith: "google" | "microsoft" | null; note: string | null }> {
   const emails = [input.interviewerEmail, ...(input.panelEmails ?? [])]
@@ -328,10 +330,11 @@ export async function findFreeSlots(
   const free = candidates.filter(
     (at) => !blocked.some((b) => overlaps(b, { start: at, end: at + input.durationMins * 60_000 })),
   );
-  // One per day first (varied times), then fill.
-  const picked: number[] = [];
+  // The earliest free times keep the hiring SLA; otherwise one per day first
+  // (varied times), then fill.
+  const picked: number[] = input.earliest ? free.slice(0, input.count) : [];
   const days = new Set<string>();
-  for (const at of free) {
+  for (const at of input.earliest ? [] : free) {
     const { y, m, d } = wallDate(at, input.timeZone);
     const key = `${y}-${m}-${d}`;
     if (days.has(key)) continue;

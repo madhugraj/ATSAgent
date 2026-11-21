@@ -526,6 +526,23 @@ describe("scheduling call health", () => {
       } as never);
     await evaluate();
     expect(await ruleOf("ai_call.opt_outs")).toMatchObject({ severity: "warning" });
+
+    // Voice first: a call due when the times were offered and never dialled.
+    expect(await ruleOf("scheduling_call.not_dialled")).toBeUndefined();
+    await db.insert(screeningCalls).values({
+      orgId,
+      candidateId: cand!.id,
+      applicationId: app!.id,
+      purpose: "scheduling",
+      slotOfferId: offer!.id,
+      status: "approved",
+      dueAt: new Date(Date.now() - (HEALTH.schedulingCallStuckMins + 5) * 60_000),
+    });
+    await evaluate();
+    expect(await ruleOf("scheduling_call.not_dialled")).toMatchObject({
+      agentType: "scheduling_call",
+      severity: "serious",
+    });
     await db.delete(screeningCalls).where(eq(screeningCalls.applicationId, app!.id));
     await db.delete(applications).where(eq(applications.id, app!.id));
     await db.delete(candidates).where(eq(candidates.id, cand!.id));
@@ -901,6 +918,56 @@ describe("interview panels", () => {
   });
 });
 
+describe("a request for a new panellist", () => {
+  test("left unanswered past the limit, it names the held-up round", async () => {
+    const { requisitions } = await import("../drizzle/schema");
+    const [req] = await db
+      .insert(requisitions)
+      .values({
+        orgId,
+        code: `H-NP-${stamp}`,
+        title: "New Panellist Test",
+        status: "approved",
+      } as never)
+      .returning({ id: requisitions.id });
+    const id = await run("interview", { status: "awaiting_human" });
+    const subject = {
+      type: "new_panelist",
+      requisitionId: req!.id,
+      level: 2,
+      needed: "Data governance",
+      reason: "Nobody covers it.",
+    };
+    const [task] = await db
+      .insert(agentTasks)
+      .values({
+        orgId,
+        runId: id,
+        kind: "gate",
+        title: "Someone new for the L2 panel?",
+        proposedAction: { name: "request_new_panelist", args: { subject } },
+        createdAt: ago(HEALTH.newPanelistWaitingHours * 60 - 60),
+      } as never)
+      .returning({ id: agentTasks.id });
+    const rule = async () =>
+      (await open()).find((i) => i.rule === "interview.new_panelist_waiting");
+    await evaluate();
+    expect(await rule()).toBeUndefined();
+    await db
+      .update(agentTasks)
+      .set({ createdAt: ago((HEALTH.newPanelistWaitingHours + 2) * 60) })
+      .where(eq(agentTasks.id, task!.id));
+    await evaluate();
+    expect(await rule()).toMatchObject({
+      agentType: "interview",
+      severity: "warning",
+      title: `H-NP-${stamp} L2 has waited ${HEALTH.newPanelistWaitingHours + 2} hours for a new panellist`,
+    });
+    await db.delete(agentTasks).where(eq(agentTasks.id, task!.id));
+    await db.delete(requisitions).where(eq(requisitions.id, req!.id));
+  });
+});
+
 describe("interviewers who can't make it", () => {
   test("a booked interview within a day with an interviewer who can't make it is critical", async () => {
     const { applications, candidates, interviews, requisitions } =
@@ -946,6 +1013,106 @@ describe("interviewers who can't make it", () => {
       .where(eq(interviews.id, r!.id));
     await evaluate();
     expect(await rule()).toBeUndefined();
+    await db.delete(requisitions).where(eq(requisitions.id, req!.id));
+    await db.delete(candidates).where(eq(candidates.id, cand!.id));
+  });
+});
+
+describe("panel not answering", () => {
+  test("a candidate e-mail held for the panel over a day is flagged; cleared once it goes", async () => {
+    const { emailOutbox } = await import("../drizzle/schema");
+    const key = `interview-invite:health-${stamp}:x`;
+    await db.insert(emailOutbox).values({
+      orgId,
+      kind: "interview_invite",
+      templateName: "interview_invite",
+      toEmail: `held-${stamp}@cand.local`,
+      idempotencyKey: key,
+      status: "held",
+      createdAt: new Date(Date.now() - 30 * 3600_000),
+    } as never);
+    const rule = async () => (await open()).find((i) => i.rule === "interview.panel_not_answering");
+    await evaluate();
+    expect(await rule()).toMatchObject({ agentType: "interview", severity: "warning" });
+    await db
+      .update(emailOutbox)
+      .set({ status: "queued" })
+      .where(eq(emailOutbox.idempotencyKey, key));
+    await evaluate();
+    expect(await rule()).toBeUndefined();
+    await db.delete(emailOutbox).where(eq(emailOutbox.idempotencyKey, key));
+  });
+});
+
+describe("panel liberty", () => {
+  test("a scorecard proposal left undecided is flagged; cleared once decided", async () => {
+    const { planChangeProposals, requisitions } = await import("../drizzle/schema");
+    const [req] = await db
+      .insert(requisitions)
+      .values({ orgId, code: `H-P-${stamp}`, title: "Proposal Test", status: "approved" } as never)
+      .returning({ id: requisitions.id });
+    const round = { level: 1, name: "Skills", focus: "", competencies: ["Go"], panelSize: 1 };
+    const [p] = await db
+      .insert(planChangeProposals)
+      .values({
+        orgId,
+        requisitionId: req!.id,
+        level: 1,
+        email: "pan@x.test",
+        before: round,
+        round,
+        reason: "Testing the wait",
+        status: "awaiting_approval",
+        createdAt: new Date(Date.now() - (HEALTH.planProposalHours + 1) * 3600_000),
+      } as never)
+      .returning({ id: planChangeProposals.id });
+    const rule = async () =>
+      (await open()).find((i) => i.rule === "interview.plan_proposal_waiting");
+    await evaluate();
+    expect(await rule()).toMatchObject({ agentType: "interview", severity: "warning" });
+    await db
+      .update(planChangeProposals)
+      .set({ status: "approved" })
+      .where(eq(planChangeProposals.id, p!.id));
+    await evaluate();
+    expect(await rule()).toBeUndefined();
+    await db.delete(requisitions).where(eq(requisitions.id, req!.id));
+  });
+
+  test("a panelist who keeps changing booked rounds is flagged", async () => {
+    const { applications, candidates, interviews, requisitions } =
+      await import("../drizzle/schema");
+    const [req] = await db
+      .insert(requisitions)
+      .values({ orgId, code: `H-C-${stamp}`, title: "Change Test", status: "approved" } as never)
+      .returning({ id: requisitions.id });
+    const [cand] = await db
+      .insert(candidates)
+      .values({ orgId, fullName: "Moved", email: `moved-${stamp}@cand.local` } as never)
+      .returning({ id: candidates.id });
+    const [app] = await db
+      .insert(applications)
+      .values({ orgId, requisitionId: req!.id, candidateId: cand!.id, stage: "l1" } as never)
+      .returning({ id: applications.id });
+    const change = {
+      email: `mover-${stamp}@x.test`,
+      from: new Date().toISOString(),
+      to: null,
+      reason: "Clash",
+      at: new Date().toISOString(),
+    };
+    for (let n = 0; n < HEALTH.panelChangesPerPerson; n++)
+      await db.insert(interviews).values({
+        orgId,
+        applicationId: app!.id,
+        level: 1,
+        scheduledAt: new Date(Date.now() + (n + 1) * 864e5),
+        status: "scheduled",
+        panelChanges: [change],
+      } as never);
+    const rule = async () => (await open()).find((i) => i.rule === "interview.panel_changes_often");
+    await evaluate();
+    expect(await rule()).toMatchObject({ agentType: "interview", severity: "warning" });
     await db.delete(requisitions).where(eq(requisitions.id, req!.id));
     await db.delete(candidates).where(eq(candidates.id, cand!.id));
   });

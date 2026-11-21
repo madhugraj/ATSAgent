@@ -2,7 +2,7 @@ import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { and, desc, eq, ilike, inArray, isNotNull, or } from "drizzle-orm";
 import { z } from "zod";
 
-import { requireIdentity } from "@/lib/auth.middleware";
+import { assertNotPanelOnly, requireIdentity } from "@/lib/auth.middleware";
 import { db } from "../server/db";
 import {
   applications,
@@ -38,6 +38,7 @@ const membership = createServerOnlyFn(async function membership(userId: string) 
     .orderBy(orgMembers.createdAt)
     .limit(1);
   if (!row) throw new Error("You are not a member of an organisation yet.");
+  await assertNotPanelOnly(userId, row.orgId, row.isOwner);
   return row;
 });
 
