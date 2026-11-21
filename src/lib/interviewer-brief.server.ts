@@ -8,6 +8,7 @@
  */
 import { and, asc, desc, eq, lt } from "drizzle-orm";
 
+import { latestRoundTime, type Stage } from "./lifecycle";
 import { db } from "../server/db";
 import {
   applications,
@@ -70,6 +71,8 @@ export async function sendInterviewerBrief(
       years: candidates.experienceYears,
       location: candidates.location,
       skills: candidates.skills,
+      appliedAt: applications.appliedAt,
+      slaDays: organizations.hiringSlaDays,
     })
     .from(applications)
     .innerJoin(requisitions, eq(requisitions.id, applications.requisitionId))
@@ -176,6 +179,11 @@ export async function sendInterviewerBrief(
       jobTitle: ctx.jobTitle,
       roundLabel,
       scheduledAtText: formatInOrgTZ(r.scheduledAt, tz),
+      // The hiring SLA's latest time for this round: a move never goes past it.
+      latestText: formatInOrgTZ(
+        latestRoundTime(`l${r.level}` as Stage, ctx.appliedAt, r.scheduledAt, ctx.slaDays),
+        tz,
+      ),
       durationMins: String(r.durationMins),
       modeLabel,
       whereText: r.meetingLink ?? undefined,

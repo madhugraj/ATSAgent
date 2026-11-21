@@ -44,7 +44,8 @@ export const PANEL_CHANGE = {
   /** A panelist can move the round themselves until this long before it. */
   cutoffHours: 12,
   /** Times offered to move to. */
-  options: 4,
+  /** Free times offered on the calendar (every free slot up to the deadline, capped). */
+  options: 60,
 } as const;
 
 export const PLAN_CHANGE = {
@@ -83,7 +84,8 @@ async function roundByToken(token: string) {
 }
 
 export type ChangeOptions =
-  { can: false; why: string } | { can: true; times: string[]; latest: string };
+  | { can: false; why: string }
+  | { can: true; times: string[]; latest: string; current: string; timeZone: string };
 
 /** Why this panelist cannot move the round themselves, or null. */
 function blocker(x: Round, now: number): string | null {
@@ -121,7 +123,7 @@ async function allowedTimes(x: Round): Promise<{ times: string[]; latest: Date }
     interviewerEmail: panel[0]!,
     panelEmails: panel.slice(1),
     durationMins: x.i.durationMins,
-    count: 40,
+    count: 120,
     timeZone: (await getOrgEmailSettings(x.r.orgId)).timezone,
     notBefore,
     earliest: true,
@@ -142,7 +144,14 @@ export async function changeOptions(token: string, now = Date.now()): Promise<Ch
   const why = blocker(x, now);
   if (why) return { can: false, why };
   const { times, latest } = await allowedTimes(x);
-  return { can: true, times, latest: latest.toISOString() };
+  const { getOrgEmailSettings } = await import("./email-outbox.server");
+  return {
+    can: true,
+    times,
+    latest: latest.toISOString(),
+    current: x.i.scheduledAt!.toISOString(),
+    timeZone: (await getOrgEmailSettings(x.r.orgId)).timezone,
+  };
 }
 
 export type ChangeResult = { ok: true; moved: boolean } | { ok: false; error: string };

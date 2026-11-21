@@ -36,6 +36,8 @@ interface Props {
   scorecardUrl?: string;
   /** Accept the time or say it does not work (absent once accepted). */
   confirmUrl?: string;
+  /** The latest the round can move to under the hiring SLA. */
+  latestText?: string;
 }
 
 const { text, detail } = layoutStyles;
@@ -106,6 +108,7 @@ const Email = ({
   candidateUrl,
   scorecardUrl,
   confirmUrl,
+  latestText,
 }: Props) => {
   const joinUrl = whereText?.startsWith("http") ? whereText : undefined;
   const rounds = earlierRounds ? earlierRounds.split("\n").filter(Boolean) : [];
@@ -133,6 +136,14 @@ const Email = ({
           <Row k="Where" v={joinUrl ? undefined : whereText} />
           <Row k="Panel" v={panelText} />
           <Row k="Time set" v={bookedText} />
+          <Row
+            k="Latest by"
+            v={
+              latestText ? (
+                <span style={{ color: "#b45309", fontWeight: "bold" }}>{latestText}</span>
+              ) : undefined
+            }
+          />
         </tbody>
       </table>
       {confirmUrl ? (
@@ -216,5 +227,6 @@ export const template = {
     candidateUrl: "https://example.com/candidates/abc",
     scorecardUrl: "https://example.com/interviews/mine",
     confirmUrl: "https://example.com/confirm/abc",
+    latestText: "Wednesday, 14 October 2026 at 18:00 IST",
   },
 } satisfies TemplateEntry;
