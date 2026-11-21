@@ -106,4 +106,4 @@ The E2E harness under `scripts/local-e2e/` uses a disposable PostgreSQL fixture.
 
 ## Roles
 
-Tenant roles are recruiter, hiring manager, department head, HR head and president/CBO. Organisation ownership and the platform super-admin allowlist are separate controls. Role grants are stored separately from user identity records.
+Tenant roles are recruiter, hiring manager, department head, HR head, president/CBO and interviewer — a member whose only role is `interviewer` is panel-only: they see just their own rounds on My interviews, and the server refuses them everything else. Organisation ownership and the platform super-admin allowlist are separate controls. Role grants are stored separately from user identity records.
