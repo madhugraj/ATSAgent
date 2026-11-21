@@ -25,6 +25,7 @@ import {
   ShieldCheck,
   Target,
   Settings,
+  SlidersHorizontal,
   Users,
   Workflow,
 } from "lucide-react";
@@ -93,6 +94,13 @@ export const NAV_GROUPS: NavGroup[] = [
         show: (c) => c.inOrg,
         mode: "agent",
       },
+    ],
+  },
+  {
+    // Configuring and overseeing the agents — governance roles only.
+    heading: "Agent admin",
+    icon: SlidersHorizontal,
+    items: [
       {
         to: "/agents/settings",
         label: "Agent settings",
