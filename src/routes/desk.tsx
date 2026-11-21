@@ -39,6 +39,8 @@ import { EmptyState, PageHeader } from "@/components/ats";
 import { WorkflowJourney } from "@/components/agents/WorkflowApp";
 import { WorkflowRunRequests } from "@/components/agents/AgentTaskCard";
 import { StoppedStepActions } from "@/components/agents/StoppedStepActions";
+import { useRoles } from "@/hooks/useRoles";
+import { advanceRequisition } from "@/lib/requisitions.functions";
 import {
   deskWorkflows,
   orgWorkflowApp,
@@ -392,6 +394,7 @@ function DeskWorkflowStart({
 /** One workflow run, shown like a desk conversation with its journey alongside. */
 function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: string }) {
   const qc = useQueryClient();
+  const { canApprove } = useRoles();
   const app = useWorkflowApp(workflowId);
   const v = app.data;
   const r = v?.runs.find((x) => x.id === runId);
@@ -423,7 +426,15 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
     if (prev && prev.node === h.node) prev.text = text;
     else updates.push({ node: h.node, at: h.at, text });
   }
-  const needsYou = r.waitingOn?.kind === "person" || r.waitingOn?.kind === "stopped";
+  // A requisition waiting for an approval this person can give is answered
+  // here, in the thread, like every other desk decision.
+  const reqPending =
+    r.status === "waiting" && r.requisition && REQ_NEXT[r.requisition.status]
+      ? r.requisition
+      : null;
+  const reqApprovable = !!reqPending && canApprove(reqPending.status);
+  const needsYou =
+    r.waitingOn?.kind === "person" || r.waitingOn?.kind === "stopped" || reqApprovable;
   const showAction = () => {
     const el = document.getElementById(`wf-action-${r.id}`);
     el?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -463,6 +474,14 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
           {r.error ? <p className="text-xs text-destructive">{r.error}</p> : null}
           {needsYou ? (
             <div id={`wf-action-${r.id}`} className="rounded-lg transition-shadow">
+              {reqApprovable && reqPending ? (
+                <RequisitionApprovalCard
+                  requisition={reqPending}
+                  onDone={() =>
+                    void qc.invalidateQueries({ queryKey: ["workflow_app", workflowId] })
+                  }
+                />
+              ) : null}
               {r.waitingOn?.kind === "stopped" ? (
                 <div className="space-y-2 rounded-lg border border-amber-500/50 bg-amber-500/10 p-3 text-sm">
                   <p>{r.waitingOn.text}</p>
@@ -473,14 +492,14 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
                     />
                   ) : null}
                 </div>
-              ) : (
+              ) : r.waitingOn?.kind === "person" ? (
                 <WorkflowRunRequests
                   workflowRunId={r.id}
                   onDecided={() =>
                     void qc.invalidateQueries({ queryKey: ["workflow_app", workflowId] })
                   }
                 />
-              )}
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -493,13 +512,96 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
             >
               {r.waitingOn?.kind === "stopped"
                 ? "A step stopped in this run — show"
-                : `${r.waitingOn?.text.replace(/^.* — /, "") ?? "Requests"} waiting for you in this run — show`}
+                : reqApprovable && r.waitingOn?.kind !== "person"
+                  ? "1 approval waiting for you in this run — show"
+                  : `${r.waitingOn?.text.replace(/^.* — /, "") ?? "Requests"} waiting for you in this run — show`}
             </button>
           ) : r.waitingOn ? (
             <p className="px-1 text-sm text-muted-foreground">{r.waitingOn.text}</p>
           ) : null}
         </footer>
       </section>
+    </div>
+  );
+}
+
+const REQ_NEXT: Record<string, { next: "pending_hr" | "pending_cbo" | "approved"; who: string }> = {
+  pending_dh: { next: "pending_hr", who: "Department head" },
+  pending_hr: { next: "pending_cbo", who: "HR head" },
+  pending_cbo: { next: "approved", who: "CBO" },
+};
+
+/** A requisition approval answered in the thread; the server checks the role and writes the trail. */
+function RequisitionApprovalCard({
+  requisition,
+  onDone,
+}: {
+  requisition: { id: string; code: string; status: string };
+  onDone: () => void;
+}) {
+  const step = REQ_NEXT[requisition.status]!;
+  const [comment, setComment] = useState("");
+  const [declining, setDeclining] = useState(false);
+  const [busy, setBusy] = useState(false);
+  async function go(status: "pending_hr" | "pending_cbo" | "approved" | "rejected") {
+    if (status === "rejected" && !comment.trim()) {
+      toast.error("Say why — it goes on the approval trail");
+      return;
+    }
+    setBusy(true);
+    try {
+      await withStepUp(() =>
+        advanceRequisition({
+          data: { id: requisition.id, status, comment: comment.trim() || null },
+        }),
+      );
+      toast.success(status === "rejected" ? "Requisition declined" : "Approved");
+      setComment("");
+      setDeclining(false);
+      onDone();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not record the decision");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="rounded-lg border border-primary/40 p-3 text-sm">
+      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-primary">
+        {step.who} approval
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="font-medium">Approve requisition {requisition.code}</p>
+        <Badge className="ml-auto">Waiting for you</Badge>
+      </div>
+      <Textarea
+        className="mt-2"
+        rows={2}
+        value={comment}
+        onChange={(e) => setComment(e.target.value)}
+        placeholder={declining ? "Why are you declining?" : "Comment (optional)"}
+      />
+      <div className="mt-2 flex flex-wrap gap-2">
+        {declining ? (
+          <>
+            <Button size="sm" variant="destructive" disabled={busy} onClick={() => go("rejected")}>
+              Decline
+            </Button>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => setDeclining(false)}>
+              Cancel
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button size="sm" disabled={busy} onClick={() => go(step.next)}>
+              Approve
+            </Button>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => setDeclining(true)}>
+              Decline
+            </Button>
+          </>
+        )}
+      </div>
     </div>
   );
 }
