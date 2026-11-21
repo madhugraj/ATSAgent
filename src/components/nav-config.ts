@@ -66,6 +66,8 @@ export type NavGroup = {
   icon: typeof LayoutDashboard;
   items: NavItem[];
   bottom?: boolean;
+  /** Word dropped from page labels on this hub's tabs ("Agent settings" → "Settings"). */
+  tabPrefix?: string;
 };
 
 export const NAV_GROUPS: NavGroup[] = [
@@ -81,6 +83,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     heading: "Agents",
     icon: Bot,
+    tabPrefix: "Agent",
     items: [
       {
         to: "/desk",
@@ -104,6 +107,7 @@ export const NAV_GROUPS: NavGroup[] = [
     // Configuring and overseeing the agents — governance roles only.
     heading: "Agent admin",
     icon: SlidersHorizontal,
+    tabPrefix: "Agent",
     items: [
       {
         to: "/agents/settings",
@@ -389,4 +393,12 @@ export function hubForPath(pathname: string): NavGroup | null {
       if (matches(item.to, pathname) && item.to.length > best.len)
         best = { len: item.to.length, hub };
   return best.hub;
+}
+
+/** A page's label on its hub's tab strip, without the hub's repeated prefix word. */
+export function tabLabel(hub: NavGroup, item: NavItem): string {
+  const pre = hub.tabPrefix ? `${hub.tabPrefix} ` : "";
+  if (!pre || !item.label.startsWith(pre)) return item.label;
+  const rest = item.label.slice(pre.length);
+  return rest.charAt(0).toUpperCase() + rest.slice(1);
 }
