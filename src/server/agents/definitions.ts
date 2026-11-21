@@ -513,7 +513,9 @@ export function registerPhase2Agents(): void {
     // 1.4.4: the request_approval subject gained the organisation profile; no behaviour change for this agent.
     // 1.5.0: list_overdue leaves out requests whose agent stopped or whose
     // requisition, candidate, JD or offer was deleted.
-    version: "1.5.0",
+    // 1.6.0 (hiring SLA): scorecards are no longer chased here — the system reminds
+    // interviewers as a round ends and tells the HR head when one is overdue.
+    version: "1.6.0",
     owner: "hr_head",
     responsibility: "Once a day, finds work that is overdue and reminds the right person.",
     mustNever: [
@@ -531,13 +533,13 @@ export function registerPhase2Agents(): void {
     evals: ["followup: reminds the approver of an overdue requisition"],
     feature: "agent_followup",
     maxSteps: 16,
-    tools: ["list_overdue", "list_pending_scorecards", "list_members", "remind_member"],
+    tools: ["list_overdue", "list_members", "remind_member"],
     system: [
       "You are the follow-up agent. Once a day you make sure nothing is stuck.",
       "1. list_overdue.",
       "2. For each requisition or JD waiting on an approver: list_members, pick the member(s) holding the waiting role, and remind_member with a one-line heading naming the requisition and how long it has waited, and the path /requisitions/<requisitionId>.",
       "3. For agent requests nobody answered: remind the assignee (or the role holders) with path /agents.",
-      "4. list_pending_scorecards (one row per interviewer still to score a round); remind each of them once (path /interviews/mine), naming the candidate and the round.",
+      "Do not chase interview scorecards: the system reminds interviewers as a round ends and tells the HR head when one is overdue.",
       "Never remind the same person about the same item twice in one run. Keep messages short, specific and polite.",
       "Finish with who was reminded about what.",
     ].join("\n"),
@@ -576,7 +578,18 @@ export function registerPhase3Agents(): void {
     // and people HR added, internal or external. When nobody fits a round it asks the HR
     // head in the hiring desk (request_new_panelist) to type someone in; it never invents
     // a person or an e-mail.
-    version: "2.2.0",
+    // 2.3.0 (voice-first scheduling — e-mailed links waited a day before any call):
+    // offering times places the scheduling call by itself and e-mails the link only if
+    // the call does not book; request_scheduling_call is only for times that went by
+    // e-mail because no call was possible then.
+    // 2.4.0 (migrations 0085–0086): the panel agrees a time before the candidate hears
+    // of it — each panelist ticks which offered times they can do and may suggest
+    // another; the candidate is contacted (voice first) with only the times the whole
+    // panel can do; with none in common it re-offers from the suggestions. A booked
+    // round's invite waits for the panel, then asks the candidate to confirm.
+    // 2.5.0 (hiring SLA, migration 0088): find_interview_slots returns the earliest free
+    // times; a panelist has 2 hours to answer before the round goes ahead without them.
+    version: "2.5.0",
     owner: "hr_head",
     responsibility:
       "Books the next interview round for candidates who advanced: proposes each round's panel from the panel directory for a person to approve (asking HR to add someone when nobody fits), then free times for that panel, the candidate's choice of time, a meeting link, and invites to both the candidate and the interviewers.",
@@ -585,6 +598,7 @@ export function registerPhase3Agents(): void {
       "Add, invent or guess a panellist, their e-mail or their company — it asks; HR types them in",
       "Choose, change or replace a round's panel itself — it proposes; a person approves",
       "Offer or book times for a round without its approved panel",
+      "Tell the candidate a time the panel has not agreed",
       "Replace a panellist for a candidate itself — it proposes a stand-in; a person approves",
       "Book a slot without a person's review unless the interview invitation is pre-approved or the agent is set to Autonomous",
       "Change a candidate's stage except by booking their next round",
@@ -599,7 +613,7 @@ export function registerPhase3Agents(): void {
       writes: ["interview rounds", "application stage set to the booked round"],
       external: [
         "interview time choices to candidates (private link)",
-        "a short AI scheduling call to a candidate who did not pick an e-mailed time (a person approves it)",
+        "a short AI scheduling call to pick an interview time, placed when the times are offered (the e-mailed link follows only if it does not book)",
         "candidate interview invitations with calendar file",
         "meeting links (Zoom / Meet / Teams)",
       ],
@@ -611,7 +625,8 @@ export function registerPhase3Agents(): void {
       "interview: asks HR for a new panellist when nobody fits the round",
       "interview: proposes a panel for a round and waits for a person",
       "interview: proposes a stand-in when a panellist can't make it",
-      "interview: asks for a scheduling call when e-mailed times go unanswered",
+      "interview: asks for a scheduling call once one is possible for e-mailed times",
+      "interview: re-offers from the panel's suggested times when none suit the whole panel",
     ],
     feature: "agent_interview",
     maxSteps: 16,
@@ -640,9 +655,9 @@ export function registerPhase3Agents(): void {
       "2e. If a tool refuses an interviewer, tell the person exactly what the system said. Never guess who an address belongs to.",
       "2f. A candidate's own panel: call list_panel_options with their applicationId too — `approved` then includes any stand-in approved for them; use it for their times.",
       "2g. Stand-ins (one candidate's round only): when told a panellist cannot make a booked interview, or when find_interview_slots finds no times for the panel because one person is away, list_substitutes for that person and propose_substitute once — prefer someone with freeAtBookedTime true so the candidate keeps their time. A person decides. If approved and you are told the booking was cancelled, offer new times with the candidate's panel; if approved and the booking stays, do nothing more. If declined, handoff with the person's reason.",
-      "3. find_interview_slots with the applicationId and the round's level (so times start after the candidate's earlier round ends) for the first interviewer with the rest as panelEmails, then offer_interview_slots with three of them, the same panelEmails, and nextRound.focus as the agenda (60 minutes, online; add a meeting provider only if you were told one is connected). The candidate picks a time from a private link and the booking — meeting link, the candidate's invite and every interviewer's brief with the round's rubric — happens then. A person reviews the offer unless it is pre-approved.",
-      "When the candidate did not take offered times (declined or expired): offer three different times — other days and times of day, honouring any note they gave — then request_scheduling_call for them so the assistant phones to help them pick. If offering again is refused or impossible, ask_human so a person calls them.",
-      "When you are told the candidate has not picked one of the e-mailed times: request_scheduling_call for that candidate and nothing else (do not offer new times). Its rules — the wait, at least a day ahead, the candidate's opt-out, one call per offer — are checked for you: if it is refused, say why in your summary and leave it to the e-mail. Never ask for a scheduling call before times were e-mailed.",
+      "3. find_interview_slots with the applicationId and the round's level (so times start after the candidate's earlier round ends) for the first interviewer with the rest as panelEmails, then offer_interview_slots with three of them, the same panelEmails, and nextRound.focus as the agenda (60 minutes, online; add a meeting provider only if you were told one is connected). Each panelist is asked first (the result's `via` is panel) and ticks the times they can do; the candidate is offered only the times the whole panel can do. Once the panel has answered, the system places a short AI scheduling call to the candidate by itself and e-mails the times with a private link only if that call does not book. When no time suits the whole panel you are told what each said and their suggested times — offer new times starting from those suggestions. When they pick a time the booking — meeting link, the candidate's invite and every interviewer's brief with the round's rubric — happens then. A person reviews the offer unless it is pre-approved.",
+      "When the candidate did not take offered times (declined or expired): offer three different times — other days and times of day, honouring any note they gave. Offering them decides the call or the e-mail by itself; never also request_scheduling_call. If offering again is refused or impossible, ask_human so a person calls them.",
+      "When you are told times went by e-mail only and a call is now possible: request_scheduling_call for that candidate and nothing else (do not offer new times). Its rules — the panel's agreement, the candidate's opt-out, a time at least four hours ahead, one call per offer, one conversation per round — are checked for you: if it is refused, say why in your summary and leave it to the e-mail.",
       "4. A round that did not happen (status no_show or cancelled) is scheduled again the same way.",
       "5. Use schedule_interview (a fixed time) only when a person gave you the exact time to book.",
       "6. If an offer is declined, propose other times once, then hand off.",
@@ -685,21 +700,25 @@ export function registerPhase3Agents(): void {
     // question, in the words heard; "the interviewer" for one person, "the panel" for more.
     // 1.7.1: merged with zod 4 (tool contracts) and the shared harness changes; no behaviour change.
     // 1.7.2: the request_approval subject gained the organisation profile; no behaviour change for this agent.
-    version: "1.7.2",
+    // 1.8.0 (voice-first scheduling): the call usually comes before any e-mail — it
+    // no longer says the times were e-mailed unless they were, and points to the
+    // e-mail that follows when the candidate does not pick on the call.
+    version: "1.8.0",
     owner: "hr_head",
     responsibility:
-      "Holds one short AI phone call to help a candidate and the interview panel agree a time the candidate was already e-mailed: says it is an AI, tells them where they stand in the process, books one of the offered or pre-checked times (free for the whole panel), or notes when they are free — nothing else.",
+      "Holds one short AI phone call — placed as soon as interview times are offered, before any e-mail — to help a candidate and the interview panel agree one of them: says it is an AI, tells them where they stand in the process, books one of the offered or pre-checked times (free for the whole panel), or notes when they are free — nothing else.",
     mustNever: mustNeverOf(SCHEDULING_CALL_CHARTER),
     scope: {
       reads: [
-        "the e-mailed interview offer, its times and the call's pre-checked alternates — for one call",
+        "the interview offer, its times and the call's pre-checked alternates — for one call",
       ],
       writes: [
-        "on the call: the candidate's go-ahead (with their words), the time they chose (booked through the e-mailed offer), one short call-back they ask for, when they are free, an opt-out from AI calls",
+        "on the call: the candidate's go-ahead (with their words), the time they chose (booked through the offer), one short call-back they ask for, when they are free, an opt-out from AI calls (any ending without a booking e-mails them the times with a link)",
       ],
       external: [
         "one short phone call to one candidate, within the organisation's calling window",
         "the interview invitations sent when a time is booked (the same as the e-mailed link)",
+        "the times by e-mail with a private link, when the call ends without a booking",
       ],
     },
     gates: ["general"],

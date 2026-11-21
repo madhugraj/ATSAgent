@@ -383,6 +383,9 @@ export async function performSubstituteGate(
         isLead ? sub.name : booked.interviewer,
         ...panel.map((m) => m.name ?? m.email),
       ];
+      // The one stood down no longer holds up the candidate's invite.
+      const confirmations = await import("@/lib/interview-confirmations.server");
+      await confirmations.supersedePanelist(orgId, booked.id, out.email);
       try {
         const { sendInterviewerBrief } = await import("@/lib/interviewer-brief.server");
         await sendInterviewerBrief(orgId, {
@@ -402,6 +405,7 @@ export async function performSubstituteGate(
       } catch {
         /* the swap stands even if the brief cannot be queued */
       }
+      await confirmations.releaseIfAgreed(orgId, booked.id).catch(() => false);
     } else {
       outcome = "re-offer";
       const { markInterviewOutcomeCore } = await import("@/lib/interviews.functions");

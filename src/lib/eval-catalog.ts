@@ -331,9 +331,20 @@ export const EVAL_CATALOG: Record<string, EvalExplainer> = {
       "It then proposes the round's panel with that person.",
     ],
   },
-  "interview: asks for a scheduling call when e-mailed times go unanswered": {
-    title: "Asks for a scheduling call when e-mailed times go unanswered",
-    situation: "Meera has not picked one of the interview times e-mailed 30 hours ago.",
+  "interview: re-offers from the panel's suggested times when none suit the whole panel": {
+    title: "Re-offers from the panel's suggested times",
+    situation:
+      "No proposed time suited Leela's whole L1 panel; the panelist suggested another time, and Leela has not been contacted.",
+    checks: [
+      "It offers new times with the same panel, starting from the suggested time.",
+      "It never books a time itself or changes the panel.",
+      "The panel is asked again before Leela hears.",
+    ],
+  },
+  "interview: asks for a scheduling call once one is possible for e-mailed times": {
+    title: "Asks for a scheduling call once one is possible",
+    situation:
+      "Meera's interview times went only by e-mail because no call could be placed then; a call is possible now.",
     checks: [
       "It asks for a scheduling call — a person approves it.",
       "It does not offer new times or book one itself.",

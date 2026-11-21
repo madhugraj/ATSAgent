@@ -423,7 +423,7 @@ describe("A. orchestrator handoffs (every agent on)", () => {
       edge: "H10",
       type: "interview.slots_unanswered" as const,
       payload: { level: 2, why: "none_work", note: "Only evenings" },
-      carries: ["L2", "none of them work", "Only evenings", "request_scheduling_call"],
+      carries: ["L2", "none of them work", "Only evenings", "places the scheduling call"],
       from: "interview (times declined)",
     },
     {

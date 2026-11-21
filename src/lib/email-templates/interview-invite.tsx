@@ -21,9 +21,21 @@ interface Props {
   agenda?: string;
   /** "yes" when the call is transcribed for the silent panel agent. */
   transcribed?: string;
+  /** Private link to confirm the time or say it does not work. */
+  confirmUrl?: string;
 }
 
 const { text, detail, link } = layoutStyles;
+const button = {
+  backgroundColor: "#0f172a",
+  color: "#ffffff",
+  fontSize: "14px",
+  fontWeight: "bold" as const,
+  textDecoration: "none",
+  padding: "10px 18px",
+  borderRadius: "6px",
+  display: "inline-block",
+};
 
 const Email = ({
   candidateName,
@@ -37,6 +49,7 @@ const Email = ({
   withText,
   agenda,
   transcribed,
+  confirmUrl,
 }: Props) => (
   <EmailLayout
     preview={`${roundLabel} scheduled for ${jobTitle}`}
@@ -73,10 +86,18 @@ const Email = ({
         the interview and we will switch it off; it will not affect how you are assessed.
       </p>
     ) : null}
-    <p style={text}>
-      A calendar invite (.ics) is attached — please accept it so the slot is held for you. If the
-      time does not work, reply to this email and the team will reschedule.
-    </p>
+    {confirmUrl ? (
+      <p style={text}>
+        <a href={confirmUrl} style={button}>
+          Confirm or change this time
+        </a>
+      </p>
+    ) : (
+      <p style={text}>
+        A calendar invite (.ics) is attached — please accept it so the slot is held for you. If the
+        time does not work, reply to this email and the team will reschedule.
+      </p>
+    )}
   </EmailLayout>
 );
 

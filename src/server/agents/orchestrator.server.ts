@@ -340,6 +340,22 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
     );
   }
 
+  if (e.type === "interview.panel_times_rejected" && applicationId) {
+    const p = e.payload as {
+      level?: number;
+      interviewerEmail?: string | null;
+      panelEmails?: string[];
+      suggested?: { email: string; at: string }[];
+      said?: string;
+    };
+    const sugg = (p.suggested ?? []).map((x) => x.at);
+    await dispatch(
+      "interview",
+      `No proposed L${p.level ?? "?"} interview time suits the whole panel for candidate application ${applicationId} (${req.code} "${req.title}"); the candidate was not contacted. What the panel said: ${String(p.said ?? "").slice(0, 600)}. Offer new times with the same panel (interviewerEmail ${p.interviewerEmail ?? "?"}${p.panelEmails?.length ? `, panelEmails ${p.panelEmails.join(", ")}` : ""}): ${sugg.length ? `start from the suggested times ${sugg.join(", ")} and add free times from find_interview_slots` : "use find_interview_slots"}. The panel is asked again before the candidate hears.`,
+      { type: "application", id: applicationId },
+    );
+  }
+
   if (e.type === "interview.missed" && applicationId) {
     const p = e.payload as { level?: number; outcome?: string };
     await dispatch(
@@ -353,7 +369,7 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
     const p = e.payload as { level?: number; why?: string; note?: string | null };
     await dispatch(
       "interview",
-      `Candidate application ${applicationId} (${req.code} "${req.title}") did not take the offered L${p.level ?? "?"} interview times (${p.why === "expired" ? "the link expired unanswered" : "none of them work"}${p.note ? `: "${String(p.note).slice(0, 300)}"` : ""}). Offer different times — other days and times of day, honouring what they said — or ask a person if that is not possible. Once the new times are offered, ask for a scheduling call (request_scheduling_call) so the assistant phones them to pick one; if it is refused, leave it to the e-mail.`,
+      `Candidate application ${applicationId} (${req.code} "${req.title}") did not take the offered L${p.level ?? "?"} interview times (${p.why === "expired" ? "the link expired unanswered" : "none of them work"}${p.note ? `: "${String(p.note).slice(0, 300)}"` : ""}). Offer different times — other days and times of day, honouring what they said — or ask a person if that is not possible. Offering them places the scheduling call (or e-mails them) by itself.`,
       { type: "application", id: applicationId },
     );
   }
@@ -362,7 +378,7 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
     const p = e.payload as { level?: number };
     await dispatch(
       "interview",
-      `Candidate application ${applicationId} (${req.code} "${req.title}") has not picked one of the L${p.level ?? "?"} interview times e-mailed to them. Ask for a scheduling call (request_scheduling_call) so the assistant phones them to pick one. If it is refused, leave it to the e-mail — do not offer new times.`,
+      `Candidate application ${applicationId} (${req.code} "${req.title}") was e-mailed the L${p.level ?? "?"} interview times because no call could be placed then; a call is possible now. Ask for a scheduling call (request_scheduling_call) so the assistant phones them to pick one. If it is refused, leave it to the e-mail — do not offer new times.`,
       { type: "application", id: applicationId },
     );
   }
@@ -858,8 +874,38 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
   } catch (err) {
     log.warn("interview.slot_expiry_failed", { error: err as Error });
   }
-  // E-mailed interview times unanswered past the organisation's wait: the
-  // Interview coordinator may ask for a scheduling call (once per offer).
+  // The end-to-end hiring SLA: the desk hears once when a candidate falls behind.
+  try {
+    const { sweepHiringSla } = await import("../hiring-sla.server");
+    await sweepHiringSla(opts.orgId);
+  } catch (err) {
+    log.warn("hiring.sla_sweep_failed", { error: err as Error });
+  }
+  // Scorecards are due 2 hours after a round: reminders, then the HR head.
+  try {
+    const { sweepScorecards } = await import("@/lib/scorecard-chase.server");
+    await sweepScorecards(opts.orgId);
+  } catch (err) {
+    log.warn("interview.scorecard_sweep_failed", { error: err as Error });
+  }
+  // The panel's answer window: a reminder, then a default so a silent panelist
+  // never holds the candidate up past the hiring SLA.
+  try {
+    const { sweepPanelAnswers } = await import("@/lib/interview-confirmations.server");
+    await sweepPanelAnswers(opts.orgId);
+  } catch (err) {
+    log.warn("interview.panel_answer_sweep_failed", { error: err as Error });
+  }
+  // Interview links held for the scheduling call that went first: e-mailed once
+  // that call ended without a booking, never got going, or ran out of time.
+  try {
+    const { releaseHeldOfferLinks } = await import("@/lib/slot-offers.server");
+    await releaseHeldOfferLinks(opts.orgId);
+  } catch (err) {
+    log.warn("interview.link_release_failed", { error: err as Error });
+  }
+  // Times that could only be e-mailed (no call was possible when offered): once a
+  // call is possible, the Interview coordinator asks for one (once per offer).
   try {
     const { raiseUnansweredOffers } = await import("../voice/scheduling-request.server");
     await raiseUnansweredOffers(Date.now(), opts.orgId);

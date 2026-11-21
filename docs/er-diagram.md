@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-102 tables across 9 domains.
+104 tables across 9 domains.
 
 ## Identity & access
 
@@ -88,6 +88,7 @@ erDiagram
     text hq_city "nullable"
     text employee_band "nullable"
     text currency
+    smallint hiring_sla_days
     smallint fiscal_year_start_month
     text careers_email "nullable"
     text onboarding_step
@@ -420,6 +421,7 @@ erDiagram
     appStageEnum stage
     text source
     timestamptz applied_at
+    text sla_flag "nullable"
     timestamptz last_activity_at
     text stage_reason "nullable"
     text stage_note "nullable"
@@ -1237,6 +1239,9 @@ erDiagram
 | `inbox_messages` | `org_id` | `organizations` | cascade |
 | `integration_credentials` | `integration_id` | `source_integrations` | cascade |
 | `integration_credentials` | `org_id` | `organizations` | cascade |
+| `interview_confirmations` | `interview_id` | `interviews` | cascade |
+| `interview_confirmations` | `offer_id` | `interview_slot_offers` | cascade |
+| `interview_confirmations` | `org_id` | `organizations` | cascade |
 | `interview_slot_offers` | `application_id` | `applications` | cascade |
 | `interview_slot_offers` | `interview_id` | `interviews` | no action |
 | `interview_slot_offers` | `org_id` | `organizations` | cascade |
@@ -1323,6 +1328,8 @@ erDiagram
 | `round_substitutes` | `with_panelist_id` | `panelists` | cascade |
 | `salary_benchmarks` | `org_id` | `organizations` | cascade |
 | `salary_benchmarks` | `requisition_id` | `requisitions` | no action |
+| `scorecard_chases` | `interview_id` | `interviews` | cascade |
+| `scorecard_chases` | `org_id` | `organizations` | cascade |
 | `screening_calls` | `agent_run_id` | `agent_runs` | no action |
 | `screening_calls` | `application_id` | `applications` | no action |
 | `screening_calls` | `candidate_id` | `candidates` | cascade |
@@ -1401,7 +1408,7 @@ erDiagram
 | `ai_redteam_checks` | — | 8 | — |
 | `ai_settings` | Communications & AI settings | 11 | (org_id) |
 | `ai_usage_events` | Communications & AI settings | 19 | — |
-| `applications` | Candidates & pipeline | 10 | (requisitionId+candidateId) |
+| `applications` | Candidates & pipeline | 11 | (requisitionId+candidateId) |
 | `assessment_settings` | — | 8 | — |
 | `audit_log` | Identity & access | 10 | — |
 | `board_sync_state` | — | 11 | (integration_id) |
@@ -1430,7 +1437,8 @@ erDiagram
 | `hrms_sync_state` | — | 12 | (integrationId+entity) |
 | `inbox_messages` | Sourcing & integrations | 16 | — |
 | `integration_credentials` | Sourcing & integrations | 4 | — |
-| `interview_slot_offers` | — | 22 | (token) |
+| `interview_confirmations` | — | 17 | (token) |
+| `interview_slot_offers` | — | 23 | (token) |
 | `interview_transcripts` | — | 8 | (interview_id) |
 | `interviews` | Screening & interviews | 24 | — |
 | `job_descriptions` | Requisitions & job content | 17 | — |
@@ -1451,7 +1459,7 @@ erDiagram
 | `org_pool_shares` | Organisations & masters | 10 | (ownerOrg+partnerOrg) |
 | `org_profile_versions` | Organisations & masters | 16 | (orgId+version) |
 | `org_profiles` | Organisations & masters | 12 | — |
-| `organizations` | Organisations & masters | 27 | (slug), (capture_token), (capture_token_hash), (distribution_token_hash) |
+| `organizations` | Organisations & masters | 28 | (slug), (capture_token), (capture_token_hash), (distribution_token_hash) |
 | `panel_agent_settings` | — | 5 | — |
 | `panel_assessments` | — | 23 | (interview_id) |
 | `panelist_scorecard_links` | — | 8 | (interviewId+panelistId), (token_hash) |
@@ -1465,6 +1473,7 @@ erDiagram
 | `role_panels` | — | 9 | (requisitionId+level) |
 | `round_substitutes` | — | 11 | — |
 | `salary_benchmarks` | Intelligence | 15 | — |
+| `scorecard_chases` | — | 7 | (interviewId+email) |
 | `screening_calls` | Screening & interviews | 34 | — |
 | `screening_kits` | Screening & interviews | 11 | — |
 | `screening_prep_jobs` | Screening & interviews | 10 | (application_id) |

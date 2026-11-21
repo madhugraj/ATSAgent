@@ -177,6 +177,8 @@ export const organizations = pgTable(
     hqCity: text("hq_city"),
     employeeBand: text("employee_band"),
     currency: text("currency").notNull().default("INR"),
+    /** End-to-end hiring SLA: days from application to offer (migration 0088). */
+    hiringSlaDays: smallint("hiring_sla_days").notNull().default(5),
     fiscalYearStartMonth: smallint("fiscal_year_start_month").notNull().default(4),
     careersEmail: text("careers_email"),
     onboardingStep: text("onboarding_step").notNull().default("profile"),
@@ -717,6 +719,8 @@ export const applications = pgTable(
     stage: appStageEnum("stage").notNull().default("applied"),
     source: text("source").notNull().default("direct"),
     appliedAt: timestamp("applied_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Last hiring-SLA state posted to the desk: at_risk | breached (migration 0088). */
+    slaFlag: text("sla_flag").$type<"at_risk" | "breached">(),
     lastActivityAt: timestamp("last_activity_at", { withTimezone: true }).notNull().defaultNow(),
     stageReason: text("stage_reason"),
     stageNote: text("stage_note"),
@@ -1027,6 +1031,12 @@ export const interviewSlotOffers = pgTable(
     /** The candidate's own words when none of the times work (untrusted). */
     candidateNote: text("candidate_note"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    /**
+     * When the private link was e-mailed. Null while it is held back for the
+     * scheduling call that goes first (docs/voice-scheduling-call-plan.md):
+     * released when that call ends without a booking, or cannot happen in time.
+     */
+    linkEmailedAt: timestamp("link_emailed_at", { withTimezone: true }),
     createdBy: uuid("created_by"),
     agentRunId: uuid("agent_run_id"),
     /** Further interviewers on the panel: [{ name, email }]. */
@@ -1041,7 +1051,74 @@ export const interviewSlotOffers = pgTable(
     uniqueIndex("interview_slot_offers_token_key").on(t.token),
     index("interview_slot_offers_open_idx").on(t.orgId, t.status, t.expiresAt),
     index("interview_slot_offers_application_idx").on(t.applicationId),
+    index("interview_slot_offers_held_idx")
+      .on(t.orgId, t.status)
+      .where(sql`${t.linkEmailedAt} is null`),
   ],
+);
+
+/**
+ * A panelist's or candidate's answer to an interview time (migration 0085):
+ * for a booked round (`interviewId`) or for the times about to be e-mailed to
+ * the candidate (`offerId`). `party`: panelist | candidate. `state`: pending |
+ * accepted | declined | superseded. `note` is the person's own words (untrusted).
+ */
+export const interviewConfirmations = pgTable(
+  "interview_confirmations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    interviewId: uuid("interview_id").references(() => interviews.id, { onDelete: "cascade" }),
+    offerId: uuid("offer_id").references(() => interviewSlotOffers.id, { onDelete: "cascade" }),
+    party: text("party").$type<"panelist" | "candidate">().notNull(),
+    email: text("email").notNull(),
+    name: text("name"),
+    token: text("token").notNull(),
+    state: text("state")
+      .$type<"pending" | "accepted" | "declined" | "superseded" | "lapsed">()
+      .notNull()
+      .default("pending"),
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
+    note: text("note"),
+    /** Offers: the offered times (ISO) this panelist can do (migration 0086). */
+    okSlots: jsonb("ok_slots").$type<string[]>(),
+    /** Another time this person suggests (migration 0086). */
+    suggestedAt: timestamp("suggested_at", { withTimezone: true }),
+    /** The answer window (migration 0088): when reminded, and when it closed unanswered. */
+    remindedAt: timestamp("reminded_at", { withTimezone: true }),
+    lapsedAt: timestamp("lapsed_at", { withTimezone: true }),
+    respondedAt: timestamp("responded_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("interview_confirmations_token_key").on(t.token),
+    index("interview_confirmations_interview_idx").on(t.orgId, t.interviewId),
+    index("interview_confirmations_offer_idx").on(t.orgId, t.offerId),
+  ],
+);
+
+/**
+ * How far a missing scorecard has been chased (migration 0089): 1 reminded as
+ * the round ended, 2 reminded again, 3 the HR head told, 4+ daily escalation.
+ */
+export const scorecardChases = pgTable(
+  "scorecard_chases",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    interviewId: uuid("interview_id")
+      .notNull()
+      .references(() => interviews.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    step: smallint("step").notNull().default(0),
+    lastAt: timestamp("last_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("scorecard_chases_round_person_key").on(t.interviewId, t.email)],
 );
 
 export const evaluations = pgTable(
@@ -1379,8 +1456,11 @@ export type EmailOutboxKind =
   | "compensation_form"
   | "offer_negotiation"
   | "screening_call_booked"
-  | "panel_summary";
-export type EmailOutboxStatus = "queued" | "sent" | "failed" | "suppressed";
+  | "panel_summary"
+  | "panel_time_check"
+  | "panel_reminder";
+/** `held`: waiting on interview confirmations (migration 0085) — released to `queued`. */
+export type EmailOutboxStatus = "queued" | "held" | "sent" | "failed" | "suppressed";
 export type EmailOutboxAttachment = {
   filename: string;
   contentBase64: string;
@@ -3308,6 +3388,7 @@ export const phoneScreeningSettings = pgTable(
     /** Scheduling calls (a follow-up to an unanswered interview-time e-mail) switched on. */
     schedulingEnabled: boolean("scheduling_enabled").notNull().default(false),
     /** Hours an e-mailed interview-time offer waits unanswered before a scheduling call. */
+    /** Retired: voice goes first now (no e-mail wait). Kept for old rows; not read. */
     schedulingWaitHours: integer("scheduling_wait_hours").notNull().default(24),
     /** Pay negotiation calls (docs/negotiator-voice-agent.md) switched on (0058). */
     negotiationEnabled: boolean("negotiation_enabled").notNull().default(false),

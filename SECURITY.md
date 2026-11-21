@@ -66,10 +66,12 @@ We credit reporters in release notes on request.
   fixed rule in code; the HR head's review card is built by the system (the agent cannot write
   it), and the decision runs as the HR head with `assertRole` — no agent moves a candidate.
   Reconciliations and decisions are audited (`panel_review.reconciled`, `panel_review.decided`).
-  A scheduling call books only the e-mailed times or up to three alternates checked free when it
+  A scheduling call books only the offered times or up to three alternates checked free when it
   is arranged — by number, never a free-form time — through the same booking core as the
-  candidate's link (one booking per offer); a person approves each call (audited
-  `scheduling_call.requested`).
+  candidate's link (one booking per offer). Voice goes first: the system (never the agent)
+  arranges the call when times are offered, under the offer's approval, and e-mails the link
+  only if the call does not book (audited `scheduling_call.requested` with `callFirst`, and
+  `interview.slots_offered` with `via`).
   Staff are confidential to candidates: the interview invite e-mail, its calendar file and the
   time-choice page say only who an interview is with ("the hiring team" / "a panel of N from the
   hiring team", `src/lib/interview-with.ts`), never a name; and on calls neither voice agent names or describes the hiring manager,
@@ -193,6 +195,14 @@ offered times, it can book one of those times once (the offer is claimed before 
 time is re-checked as free), and its server functions are rate-limited with all other RPCs.
 Calendar access for availability is free/busy only — event titles and details are never read.
 
+The interview-time confirmation page (`/confirm/<token>`) is public in the same way: one 64-hex
+token per person per time asked, it returns only the round, role, organisation and time(s) (the
+candidate's name only to a panelist), it records one answer (accept — for offered times, which of
+them — or decline, with an optional suggested time validated server-side and an optional note
+stored as plain text and never sent to an AI model), every answer is written to `audit_log`,
+and its server functions are rate-limited with all other RPCs. A re-schedule supersedes old
+tokens. The hiring team's "Send invite now" is behind `requireOrg`, scoped by `org_id`, and audited.
+
 An external panellist's scorecard page (`/scorecard/<token>`, docs/panel-directory.md) is public in
 the same way, for people on an interview panel who have no account (a client, an advisor). The
 token is 64 hex characters derived with HMAC-SHA-256 from the server secret and the interview,
@@ -210,7 +220,7 @@ score, screening result and the candidate page. Panel directory entries are adde
 approving them, recorded as self-approved in `panelist.added`.
 
 **Panel-only members (`interviewer` role, migration 0081).** A colleague who only sits on interview
-panels is invited with the Interviewer role. A member whose *only* role is `interviewer` (and who is
+panels is invited with the Interviewer role. A member whose _only_ role is `interviewer` (and who is
 not the owner) is denied by default: `activeOrgOf` resolves them to no organisation, so
 `requireOrg`, `requireRole`, `requireOrgOwner` and `assertRole` all refuse them, and the few places
 that read membership directly (`orgOf` in org.functions, collaboration, notifications) check

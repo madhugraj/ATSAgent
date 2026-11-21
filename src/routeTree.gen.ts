@@ -47,6 +47,7 @@ import { Route as AssessTokenRouteImport } from './routes/assess.$token'
 import { Route as AuthResetRouteImport } from './routes/auth.reset'
 import { Route as CandidatesIndexRouteImport } from './routes/candidates.index'
 import { Route as CandidatesIdRouteImport } from './routes/candidates.$id'
+import { Route as ConfirmTokenRouteImport } from './routes/confirm.$token'
 import { Route as InterviewsIndexRouteImport } from './routes/interviews.index'
 import { Route as InterviewsMineRouteImport } from './routes/interviews.mine'
 import { Route as NegotiateTokenRouteImport } from './routes/negotiate.$token'
@@ -271,6 +272,11 @@ const CandidatesIdRoute = CandidatesIdRouteImport.update({
   path: '/candidates/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ConfirmTokenRoute = ConfirmTokenRouteImport.update({
+  id: '/confirm/$token',
+  path: '/confirm/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const InterviewsIndexRoute = InterviewsIndexRouteImport.update({
   id: '/interviews/',
   path: '/interviews/',
@@ -481,6 +487,7 @@ export interface FileRoutesByFullPath {
   '/assess/$token': typeof AssessTokenRoute
   '/auth/reset': typeof AuthResetRoute
   '/candidates/$id': typeof CandidatesIdRoute
+  '/confirm/$token': typeof ConfirmTokenRoute
   '/interviews/mine': typeof InterviewsMineRoute
   '/negotiate/$token': typeof NegotiateTokenRoute
   '/offer/$token': typeof OfferTokenRoute
@@ -554,6 +561,7 @@ export interface FileRoutesByTo {
   '/assess/$token': typeof AssessTokenRoute
   '/auth/reset': typeof AuthResetRoute
   '/candidates/$id': typeof CandidatesIdRoute
+  '/confirm/$token': typeof ConfirmTokenRoute
   '/interviews/mine': typeof InterviewsMineRoute
   '/negotiate/$token': typeof NegotiateTokenRoute
   '/offer/$token': typeof OfferTokenRoute
@@ -628,6 +636,7 @@ export interface FileRoutesById {
   '/assess/$token': typeof AssessTokenRoute
   '/auth/reset': typeof AuthResetRoute
   '/candidates/$id': typeof CandidatesIdRoute
+  '/confirm/$token': typeof ConfirmTokenRoute
   '/interviews/mine': typeof InterviewsMineRoute
   '/negotiate/$token': typeof NegotiateTokenRoute
   '/offer/$token': typeof OfferTokenRoute
@@ -703,6 +712,7 @@ export interface FileRouteTypes {
     | '/assess/$token'
     | '/auth/reset'
     | '/candidates/$id'
+    | '/confirm/$token'
     | '/interviews/mine'
     | '/negotiate/$token'
     | '/offer/$token'
@@ -776,6 +786,7 @@ export interface FileRouteTypes {
     | '/assess/$token'
     | '/auth/reset'
     | '/candidates/$id'
+    | '/confirm/$token'
     | '/interviews/mine'
     | '/negotiate/$token'
     | '/offer/$token'
@@ -849,6 +860,7 @@ export interface FileRouteTypes {
     | '/assess/$token'
     | '/auth/reset'
     | '/candidates/$id'
+    | '/confirm/$token'
     | '/interviews/mine'
     | '/negotiate/$token'
     | '/offer/$token'
@@ -923,6 +935,7 @@ export interface RootRouteChildren {
   AssessTokenRoute: typeof AssessTokenRoute
   AuthResetRoute: typeof AuthResetRoute
   CandidatesIdRoute: typeof CandidatesIdRoute
+  ConfirmTokenRoute: typeof ConfirmTokenRoute
   InterviewsMineRoute: typeof InterviewsMineRoute
   NegotiateTokenRoute: typeof NegotiateTokenRoute
   OfferTokenRoute: typeof OfferTokenRoute
@@ -1228,6 +1241,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CandidatesIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/confirm/$token': {
+      id: '/confirm/$token'
+      path: '/confirm/$token'
+      fullPath: '/confirm/$token'
+      preLoaderRoute: typeof ConfirmTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/interviews/': {
       id: '/interviews/'
       path: '/interviews'
@@ -1499,6 +1519,7 @@ const rootRouteChildren: RootRouteChildren = {
   AssessTokenRoute: AssessTokenRoute,
   AuthResetRoute: AuthResetRoute,
   CandidatesIdRoute: CandidatesIdRoute,
+  ConfirmTokenRoute: ConfirmTokenRoute,
   InterviewsMineRoute: InterviewsMineRoute,
   NegotiateTokenRoute: NegotiateTokenRoute,
   OfferTokenRoute: OfferTokenRoute,

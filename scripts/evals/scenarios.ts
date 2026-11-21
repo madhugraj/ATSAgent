@@ -788,6 +788,57 @@ export function scenarios(): ScriptedScenario[] {
       ],
     },
     {
+      name: "interview: re-offers from the panel's suggested times when none suit the whole panel",
+      agentType: "interview",
+      setup: async ({ orgId, userId }) => {
+        const requisitionId = await seedRequisition(orgId, userId, "approved");
+        const app = await seedApplication(orgId, requisitionId, "Leela", "l1", 83);
+        const { db } = await import("../../src/server/db");
+        const { orgMembers, rolePanels } = await import("../../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const [m] = await db
+          .select({ id: orgMembers.id, email: orgMembers.email })
+          .from(orgMembers)
+          .where(eq(orgMembers.userId, userId));
+        await db.insert(rolePanels).values({ orgId, requisitionId, level: 1, memberIds: [m!.id] });
+        // The panelist ticked none of the proposed times and suggested another:
+        // a working-hours time two weekdays out.
+        const d = new Date(Date.now() + 2 * 864e5);
+        while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d.setTime(d.getTime() + 864e5);
+        d.setUTCHours(6, 0, 0, 0); // 11:30 IST / 06:00 UTC
+        return { requisitionId, app, interviewer: m!.email, suggested: d.toISOString() };
+      },
+      goal: (d) =>
+        `No proposed L1 interview time suits the whole panel for candidate application ${d["app"]}; the candidate was not contacted. What the panel said: ${d["interviewer"]}: none of them; suggests ${d["suggested"]}. Offer new times with the same panel (interviewerEmail ${d["interviewer"]}): start from the suggested times ${d["suggested"]} and add free times from find_interview_slots. The panel is asked again before the candidate hears. app=${d["app"]} interviewer=${d["interviewer"]} suggested=${d["suggested"]}\n\nRequisition id: ${d["requisitionId"]}`,
+      decide: () => ({ status: "approved" }),
+      expect: {
+        status: "done",
+        calls: ["find_interview_slots", "offer_interview_slots"],
+        neverCalls: ["schedule_interview", "propose_panel"],
+      },
+      script: [
+        (m) =>
+          call("f", "find_interview_slots", {
+            applicationId: fromGoal(m, "app"),
+            level: 1,
+            interviewerEmail: firstUserMsg(m).match(/interviewer=(\S+)/)![1]!,
+          }),
+        (m) =>
+          call("o", "offer_interview_slots", {
+            applicationId: fromGoal(m, "app"),
+            level: 1,
+            interviewerEmail: firstUserMsg(m).match(/interviewer=(\S+)/)![1]!,
+            slots: [
+              firstUserMsg(m).match(/suggested=(\S+)/)![1]!,
+              ...(toolResult(m, "find_interview_slots")["slots"] as string[]).slice(0, 2),
+            ],
+          }),
+        say(
+          "Offered Leela's L1 again, starting from the panel's suggested time; the panel is asked first.",
+        ),
+      ],
+    },
+    {
       name: "interview: asks HR for a new panellist when nobody fits the round",
       agentType: "interview",
       setup: async ({ orgId, userId }) => {
@@ -1775,7 +1826,7 @@ export function scenarios(): ScriptedScenario[] {
       ],
     },
     {
-      name: "interview: asks for a scheduling call when e-mailed times go unanswered",
+      name: "interview: asks for a scheduling call once one is possible for e-mailed times",
       agentType: "interview",
       setup: async ({ orgId, userId }) => {
         const requisitionId = await seedRequisition(orgId, userId, "approved");
@@ -1785,7 +1836,7 @@ export function scenarios(): ScriptedScenario[] {
         return { requisitionId, app };
       },
       goal: (d) =>
-        `Candidate application ${d["app"]} has not picked one of the L1 interview times e-mailed to them. Ask for a scheduling call (request_scheduling_call) so the assistant phones them to pick one. If it is refused, leave it to the e-mail — do not offer new times. app=${d["app"]}\n\nRequisition id: ${d["requisitionId"]}`,
+        `Candidate application ${d["app"]} was e-mailed the L1 interview times because no call could be placed then; a call is possible now. Ask for a scheduling call (request_scheduling_call) so the assistant phones them to pick one. If it is refused, leave it to the e-mail — do not offer new times. app=${d["app"]}\n\nRequisition id: ${d["requisitionId"]}`,
       decide: () => ({ status: "approved" }),
       expect: {
         status: "done",
@@ -2998,6 +3049,7 @@ async function seedOffer(
       token: `eval-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`,
       expiresAt: new Date(Date.now() + 2 * 864e5),
       createdAt: created,
+      linkEmailedAt: created,
       createdBy: userId,
     })
     .returning({ id: interviewSlotOffers.id });
@@ -3127,7 +3179,7 @@ async function seedSchedulingCall(
     third: said[2]!,
     alternate: said[3]!,
     options: said
-      .map((x, i) => `${i + 1}. ${x}${i === 3 ? " (not in the e-mail — also free)" : ""}`)
+      .map((x, i) => `${i + 1}. ${x}${i === 3 ? " (an extra time — also free)" : ""}`)
       .join(" "),
   };
 }

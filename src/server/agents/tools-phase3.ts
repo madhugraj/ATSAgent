@@ -334,7 +334,7 @@ export function registerPhase3Tools(): void {
   registerTool({
     name: "schedule_interview",
     description:
-      "Book an interview round and email the candidate the invite with a calendar file. The interviewer must be an active member of the organisation. Optionally creates a Zoom / Google Meet / Teams link when that integration is connected. There is no calendar free/busy check: propose a working-hours slot at least one day ahead; a person reviews it unless the interview invitation is pre-approved.",
+      "Book an interview round. Each panelist gets their brief and accepts or declines the time; the candidate's invite (with a calendar file and a confirm link) is sent once the whole panel accepts. The interviewer must be an active member of the organisation. Optionally creates a Zoom / Google Meet / Teams link when that integration is connected. There is no calendar free/busy check: propose a working-hours slot at least one day ahead; a person reviews it unless the interview invitation is pre-approved.",
     input: AppId.extend({
       level: z.number().int().min(1).max(3),
       interviewerEmail: z.string().email(),
@@ -434,7 +434,7 @@ export function registerPhase3Tools(): void {
   registerTool({
     name: "find_interview_slots",
     description:
-      "Free interview times for an interviewer and the rest of the panel (times that suit everyone): weekdays 10:00–17:00 in the organisation's time zone, at least 18 hours ahead, spread over different days, avoiding their calendar's busy time (when Google or Microsoft 365 calendar is connected), rounds already booked in ATSIQ and times already offered to another candidate. slotsLocal gives each time in the organisation's time zone — quote those to people, never UTC. Pass the applicationId and level of the round being booked so its times start after the candidate's earlier rounds end. Says whether the calendar was actually checked.",
+      "Free interview times for an interviewer and the rest of the panel (times that suit everyone): weekdays 10:00–17:00 in the organisation's time zone, at least 18 hours ahead, the earliest free ones first (the hiring SLA is days, not weeks), avoiding their calendar's busy time (when Google or Microsoft 365 calendar is connected), rounds already booked in ATSIQ and times already offered to another candidate. slotsLocal gives each time in the organisation's time zone — quote those to people, never UTC. Pass the applicationId and level of the round being booked so its times start after the candidate's earlier rounds end. Says whether the calendar was actually checked.",
     input: z.object({
       /** The candidate's application and round: times start after their earlier rounds end. */
       applicationId: z.string().uuid().optional(),
@@ -462,6 +462,7 @@ export function registerPhase3Tools(): void {
         durationMins: i.durationMins,
         count: i.count,
         timeZone,
+        earliest: true,
       });
       return { ...r, slotsLocal: r.slots.map((x) => localWhen(x, timeZone)), timeZone };
     },
@@ -470,7 +471,7 @@ export function registerPhase3Tools(): void {
   registerTool({
     name: "offer_interview_slots",
     description:
-      "Email the candidate 2–5 interview times (for the interviewer and any further panel members) to choose from, through a private link. Nothing is booked yet: when they pick a time, the round is booked with a meeting link (if a provider is given and connected) and both the candidate and the interviewer get their invites; if none work, the team is told. Every time is re-checked as free. Leaves the organisation, so a person approves it unless the interview time-choice email is pre-approved.",
+      "Offer the candidate 2–5 interview times (for the interviewer and any further panel members). The panel goes first (`via` is panel): each panelist ticks the times they can do and may suggest another; the candidate is offered only the times every panelist can do, and when none are in common the offer is cancelled and you are told the panel's suggestions. Once the panel has answered, voice goes first: the system places a short AI scheduling call in the calling window to let the candidate pick one, and e-mails the times with a private link only if that call does not book (or when no call is possible). Nothing is booked until they pick: the round is then booked with a meeting link (if a provider is given and connected) and both the candidate and the interviewer get their invites; if none work, the team is told. Every time is re-checked as free. Leaves the organisation, so a person approves it unless the interview time-choice e-mail is pre-approved.",
     input: AppId.extend({
       level: z.number().int().min(1).max(3),
       interviewerEmail: z.string().email(),
@@ -525,6 +526,9 @@ export function registerPhase3Tools(): void {
         slotsLocal: r.slots.map((x) => localWhen(x, tz)),
         expiresAt: r.expiresAt,
         expiresLocal: r.expiresAt ? localWhen(r.expiresAt, tz) : null,
+        via: r.via,
+        callAtLocal: r.callDueAt ? localWhen(r.callDueAt, tz) : null,
+        callRefused: r.callRefused,
       };
     },
   });
