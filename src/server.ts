@@ -93,10 +93,42 @@ function isH3SwallowedErrorBody(body: string): boolean {
 const AGENT_API_KEY_LIMIT = 30;
 
 function isAgentApiPath(path: string): boolean {
-  return path.startsWith("/api/agents/") || path === "/api/mcp";
+  return path.startsWith("/api/agents/") || path === "/api/mcp" || isWorkflowApiPath(path);
+}
+
+/** Workflow app API (src/server/agents/workflow-app.server.ts): an organisation's own workflow keys. */
+function isWorkflowApiPath(path: string): boolean {
+  return path.startsWith("/api/workflows/");
+}
+
+async function workflowApiResponse(request: Request, url: URL): Promise<Response> {
+  const api = await import("./server/agents/workflow-app.server");
+  const { bearerKey } = await import("./server/agents/hosted-api.server");
+  const key = bearerKey(request);
+  if (!key) return api.workflowUnauthorized();
+  if (
+    !(await allowRequest(
+      `workflow-key:${api.hashWorkflowKey(key)}`,
+      Date.now(),
+      AGENT_API_KEY_LIMIT,
+    ))
+  )
+    return tooManyRequests();
+  try {
+    const resolved = await api.resolveWorkflowKey(key);
+    if (!resolved) return api.workflowUnauthorized();
+    return await api.handleWorkflowApi(request, url, resolved);
+  } catch (error) {
+    log.error("workflow_api.unhandled", { error: error instanceof Error ? error : String(error) });
+    return new Response(JSON.stringify({ error: "Internal error." }), {
+      status: 500,
+      headers: { "content-type": "application/json" },
+    });
+  }
 }
 
 async function agentApiResponse(request: Request, url: URL): Promise<Response> {
+  if (isWorkflowApiPath(url.pathname)) return workflowApiResponse(request, url);
   const api = await import("./server/agents/hosted-api.server");
   const key = api.bearerKey(request);
   if (!key) return api.unauthorized();

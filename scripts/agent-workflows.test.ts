@@ -117,6 +117,30 @@ describe("conditions and goals", () => {
   });
 });
 
+describe("step goals and agents that cannot be steps", () => {
+  const ctx = {
+    event: { type: "manual", subjectType: "requisition", subjectId: "" },
+    payload: { need: "1 fullstack developer in Chennai" },
+    last: { status: "done", result: "Team Engineering; React, Node.js; 3-5 years" },
+  };
+  test("each step gets the hiring need and the previous step's result", () => {
+    const g = w.stepGoal("Draft the requisition and submit it.", ctx);
+    expect(g).toStartWith("Draft the requisition and submit it.");
+    expect(g).toContain("Hiring need: 1 fullstack developer in Chennai");
+    expect(g).toContain("What the previous step produced:\nTeam Engineering");
+  });
+  test("nothing is repeated when the goal already uses them", () => {
+    const g = w.stepGoal("Need: {{payload.need}}. Inputs: {{last.result}}", ctx);
+    expect(g.match(/1 fullstack developer/g)).toHaveLength(1);
+    expect(g).not.toContain("What the previous step produced");
+  });
+  test("the copilot (Aditi) is refused as a step", () => {
+    const g = flow();
+    g.nodes[1]!.data.agentType = "copilot";
+    expect(w.graphProblems(g, known).join(" ")).toContain("cannot be a workflow step");
+  });
+});
+
 describe("dry-run tests", () => {
   test("the path follows each agent's outcome", () => {
     const g = flow();
@@ -212,13 +236,16 @@ const schema = await import("../drizzle/schema");
 const {
   agentEvents,
   agentPolicies,
+  agentTasks,
   agentRuns,
   agentWorkflowGrants,
   agentWorkflows,
   agentWorkflowVersions,
+  orgMembers,
   organizations,
   requisitions,
   users,
+  workflowApiKeys,
   workflowRuns,
 } = schema;
 const registry = await import("../src/server/agents/registry");
@@ -410,6 +437,159 @@ describe("engine", () => {
     expect(after!.history.map((h) => h.node).slice(-2)).toEqual(["c", "e"]);
   });
 
+  test("an older run still open on the role: the flow waits for it, then starts its own", async () => {
+    const { cancelRun } = await import("../src/server/agents/runtime.server");
+    const [r5] = await db
+      .insert(requisitions)
+      .values({
+        orgId,
+        code: `WF5-${stamp}`,
+        title: "Data",
+        status: "approved",
+        createdBy: userId,
+      } as never)
+      .returning({ id: requisitions.id });
+    const [old] = await db
+      .insert(agentRuns)
+      .values({
+        orgId,
+        agentType: "jd",
+        status: "awaiting_human",
+        subjectType: "requisition",
+        subjectId: r5!.id,
+        goal: "Earlier work on this role",
+        principalUserId: userId,
+        createdAt: new Date(Date.now() - 2 * 864e5),
+      } as never)
+      .returning({ id: agentRuns.id });
+    await emit(orgId, r5!.id);
+    await processAgentEvents({ orgId });
+    const mineWr = async () =>
+      (await db.select().from(workflowRuns).where(eq(workflowRuns.workflowId, workflowId))).find(
+        (r) => (r.context as { subject?: { id: string } }).subject?.id === r5!.id,
+      )!;
+    const queued = await mineWr();
+    expect(queued.status).toBe("waiting");
+    expect(queued.waitingRunId).toBe(old!.id);
+    expect(queued.history.at(-1)!.note).toContain("Waiting for an earlier jd run");
+
+    // What it waits for, in plain words: an agent working, then a person's question.
+    const working = (await w.waitingOnFor([queued])).get(queued.id)!;
+    expect(working.kind).toBe("agent");
+    expect(working.text).toContain("An earlier");
+    await db.insert(agentTasks).values({
+      orgId,
+      runId: old!.id,
+      kind: "clarification",
+      status: "open",
+      title: "The agent has a question",
+      body: "Which team is this for?",
+      assigneeRole: "hiring_manager",
+    } as never);
+    const asked = (await w.waitingOnFor([queued], true)).get(queued.id)!;
+    expect(asked.kind).toBe("person");
+    expect(asked.text).toContain("waiting for you — 1 question");
+    expect(asked.first!.body).toBe("Which team is this for?");
+    expect((await w.waitingOnFor([queued])).get(queued.id)!.first).toBeNull();
+
+    await cancelRun({ orgId, runId: old!.id, userId });
+    const after = await mineWr();
+    expect(after.status).toBe("waiting");
+    expect(after.currentNode).toBe("a");
+    expect(after.waitingRunId).not.toBe(old!.id);
+    const [mine] = await db.select().from(agentRuns).where(eq(agentRuns.id, after.waitingRunId!));
+    expect(mine!.goal).toContain("Draft the JD for");
+    expect(after.history.map((h) => h.note).join(" ")).toContain("starting this step's own run");
+  });
+
+  test("a missed finish signal: the tick's sweep moves the flow on", async () => {
+    const [r6] = await db
+      .insert(requisitions)
+      .values({
+        orgId,
+        code: `WF6-${stamp}`,
+        title: "Infra",
+        status: "approved",
+        createdBy: userId,
+      } as never)
+      .returning({ id: requisitions.id });
+    await emit(orgId, r6!.id);
+    await processAgentEvents({ orgId });
+    const find = async () =>
+      (await db.select().from(workflowRuns).where(eq(workflowRuns.workflowId, workflowId))).find(
+        (r) => (r.context as { subject?: { id: string } }).subject?.id === r6!.id,
+      )!;
+    const wr = await find();
+    expect(wr.status).toBe("waiting");
+    // The run ends without the hook firing (as if the server restarted mid-way).
+    await db
+      .update(agentRuns)
+      .set({ status: "done", result: "no draft", finishedAt: new Date() })
+      .where(eq(agentRuns.id, wr.waitingRunId!));
+    expect(await w.resumeFinishedRunWaits()).toBeGreaterThan(0);
+    const after = await find();
+    expect(after.status).toBe("done");
+    expect(after.history.map((h) => h.node).slice(-2)).toEqual(["c", "e"]);
+  });
+
+  test("a step stopped at its run limit pauses for Retry or Skip", async () => {
+    const { LEG_LIMIT_MESSAGE } = await import("../src/server/agents/run-messages");
+    const mk = async (code: string) => {
+      const [r] = await db
+        .insert(requisitions)
+        .values({
+          orgId,
+          code: `${code}-${stamp}`,
+          title: "Ops",
+          status: "approved",
+          createdBy: userId,
+        } as never)
+        .returning({ id: requisitions.id });
+      await emit(orgId, r!.id);
+      await processAgentEvents({ orgId });
+      return (
+        await db.select().from(workflowRuns).where(eq(workflowRuns.workflowId, workflowId))
+      ).find((x) => (x.context as { subject?: { id: string } }).subject?.id === r!.id)!;
+    };
+    const stop = async (runId: string) => {
+      await db
+        .update(agentRuns)
+        .set({ status: "failed", lastError: LEG_LIMIT_MESSAGE, finishedAt: new Date() })
+        .where(eq(agentRuns.id, runId));
+      await w.onAgentRunFinished({ id: runId, orgId, status: "failed", result: null });
+    };
+    const reload = async (id: string) =>
+      (await db.select().from(workflowRuns).where(eq(workflowRuns.id, id)))[0]!;
+
+    // Retry: the step starts again, told to pick up what was done.
+    const a = await mk("WF7");
+    const first = a.waitingRunId!;
+    await stop(first);
+    let now = await reload(a.id);
+    expect(now.status).toBe("waiting");
+    expect(now.waitingRunId).toBeNull();
+    expect((await w.waitingOnFor([now])).get(now.id)!.kind).toBe("stopped");
+    expect(await w.resumeFinishedRunWaits()).toBeGreaterThanOrEqual(0);
+    expect((await reload(a.id)).status).toBe("waiting");
+    await w.resolveStoppedStep({ workflowRunId: a.id, orgId, userId, action: "retry" });
+    now = await reload(a.id);
+    expect(now.waitingRunId).not.toBe(first);
+    const [again] = await db.select().from(agentRuns).where(eq(agentRuns.id, now.waitingRunId!));
+    expect(again!.goal).toContain("stopped at its turn limit");
+    expect(now.currentNode).toBe("a");
+
+    // Skip: the step counts as failed and the flow follows its way out.
+    const b = await mk("WF8");
+    await stop(b.waitingRunId!);
+    await w.resolveStoppedStep({ workflowRunId: b.id, orgId, userId, action: "skip" });
+    now = await reload(b.id);
+    expect(now.status).toBe("done");
+    expect(now.history.map((h) => h.node).slice(-2)).toEqual(["c", "e"]);
+    await expect(
+      w.resolveStoppedStep({ workflowRunId: b.id, orgId, userId, action: "retry" }),
+    ).rejects.toThrow("not paused");
+  });
+
   test("an organisation without a grant never runs it", async () => {
     await emit(otherOrgId, otherReqId);
     await processAgentEvents({ orgId: otherOrgId });
@@ -439,6 +619,20 @@ describe("engine", () => {
       .from(workflowRuns)
       .where(and(eq(workflowRuns.workflowId, workflowId), eq(workflowRuns.status, "failed")));
     expect(wr!.error).toContain("switched off");
+  });
+
+  test("go-live check: granted workflows and what each organisation still needs", async () => {
+    const granted = await w.grantedWorkflows(orgId);
+    expect(granted.map((g) => g.id)).toEqual([workflowId]);
+    expect(await w.grantedWorkflows(otherOrgId)).toHaveLength(0);
+    const r = await w.workflowReadiness(orgId, granted[0]!.graph);
+    const by = Object.fromEntries(r.items.map((i) => [i.key, i]));
+    expect(r.ready).toBe(false);
+    expect(by["ai_key"]!.ok).toBe(false);
+    expect(by["agent:jd"]!.ok).toBe(false);
+    expect(by["agent:publishing"]!.ok).toBe(true);
+    expect(by["agent:publishing"]!.detail).toContain("On");
+    expect(w.agentsOf(granted[0]!.graph)).toEqual(["jd", "publishing"]);
   });
 });
 
@@ -641,5 +835,139 @@ describe("hiring need, waits and reports", () => {
     expect(wr!.status).toBe("done");
     expect((wr!.context as { wait: { status: string } }).wait.status).toBe("timed_out");
     expect(wr!.history.map((h) => h.node).slice(-3)).toEqual(["ok", "rep", "e"]);
+  });
+
+  test("approved before the wait began: the wait sees it and moves straight on", async () => {
+    const { startWorkflowManually } = await import("../src/server/agents/workflows.server");
+    await db.delete(workflowRuns).where(eq(workflowRuns.workflowId, workflowId));
+    await startWorkflowManually({ workflowId, orgId, userId, need: "One designer" });
+    let [wr] = await wfr();
+    const reqRun = wr!.waitingRunId!;
+    const [req] = await db
+      .insert(requisitions)
+      .values({
+        orgId,
+        code: `WFN2-${stamp}`,
+        title: "Designer",
+        status: "draft",
+        createdBy: userId,
+      } as never)
+      .returning({ id: requisitions.id });
+    await event("requisition.created", req!.id, {}, reqRun);
+    // People approve it while the Requisition agent is still working.
+    await event("requisition.status_changed", req!.id, { from: "pending_cbo", to: "approved" });
+    await processAgentEvents({ orgId });
+    [wr] = await wfr();
+    expect(wr!.currentNode).toBe("req");
+    await finishAgent(reqRun, "Submitted and approved.");
+    [wr] = await wfr();
+    expect(wr!.currentNode).toBe("jd");
+    expect((wr!.context as { wait: { status: string } }).wait.status).toBe("happened");
+  });
+
+  test("the role is learned from the agent's own events; a hand-off is not done", async () => {
+    const { startWorkflowManually } = await import("../src/server/agents/workflows.server");
+    await db.delete(workflowRuns).where(eq(workflowRuns.workflowId, workflowId));
+    await startWorkflowManually({ workflowId, orgId, userId, need: "One marketer" });
+    let [wr] = await wfr();
+    const reqRun = wr!.waitingRunId!;
+    const [req] = await db
+      .insert(requisitions)
+      .values({
+        orgId,
+        code: `WFN3-${stamp}`,
+        title: "Marketer",
+        status: "draft",
+        createdBy: userId,
+      } as never)
+      .returning({ id: requisitions.id });
+    // Its "created" event is already handled elsewhere, so the live link is missed.
+    await db.insert(agentEvents).values({
+      orgId,
+      type: "requisition.created",
+      subjectType: "requisition",
+      subjectId: req!.id,
+      actorUserId: userId,
+      payload: {},
+      sourceRunId: reqRun,
+      status: "done",
+    } as never);
+    await finishAgent(reqRun, "Drafted and submitted.");
+    [wr] = await wfr();
+    expect((wr!.context as { subject: { id: string } }).subject.id).toBe(req!.id);
+    await event("requisition.status_changed", req!.id, { from: "pending_cbo", to: "approved" });
+    await processAgentEvents({ orgId });
+    [wr] = await wfr();
+    const [jdRun] = await db.select().from(agentRuns).where(eq(agentRuns.id, wr!.waitingRunId!));
+    expect(jdRun!.subjectId).toBe(req!.id);
+    await finishAgent(jdRun!.id, "Handed off: I cannot find the role.");
+    [wr] = await wfr();
+    expect((wr!.context as { last: { status: string } }).last.status).toBe("handed_off");
+  });
+
+  test("workflow API: a key starts and reads runs of its own workflow only", async () => {
+    const app = await import("../src/server/agents/workflow-app.server");
+    await db.delete(workflowRuns).where(eq(workflowRuns.workflowId, workflowId));
+    const k = app.newWorkflowKey();
+    const [row] = await db
+      .insert(workflowApiKeys)
+      .values({
+        workflowId,
+        orgId,
+        label: "HRMS",
+        keyPrefix: k.prefix,
+        keyHash: k.hash,
+        principalUserId: userId,
+      })
+      .returning({ id: workflowApiKeys.id });
+    // The person who issued it must be an active member.
+    expect(await app.resolveWorkflowKey(k.key)).toBeNull();
+    await db.insert(orgMembers).values({
+      orgId,
+      userId,
+      email: `wfapi-${stamp}@test.local`,
+      status: "active",
+    } as never);
+    const key = (await app.resolveWorkflowKey(k.key))!;
+    expect(key.workflowId).toBe(workflowId);
+    expect(await app.resolveWorkflowKey("atsw_nope")).toBeNull();
+
+    const call = (method: string, path: string, body?: unknown) =>
+      app.handleWorkflowApi(
+        new Request(`http://x${path}`, {
+          method,
+          ...(body
+            ? { body: JSON.stringify(body), headers: { "content-type": "application/json" } }
+            : {}),
+        }),
+        new URL(`http://x${path}`),
+        key,
+      );
+    const started = await call("POST", `/api/workflows/${workflowId}/runs`, {
+      need: "Two data engineers in Pune",
+    });
+    expect(started.status).toBe(201);
+    const view = (await started.json()) as { runId: string; status: string; waitingOn: unknown };
+    expect(view.status).toBe("waiting");
+    expect(JSON.stringify(view)).not.toMatch(/"(model|provider|engine)"/i);
+
+    const read = await call("GET", `/api/workflows/runs/${view.runId}`);
+    expect(((await read.json()) as { runId: string }).runId).toBe(view.runId);
+    const list = await call("GET", `/api/workflows/${workflowId}/runs`);
+    expect(((await list.json()) as { runs: unknown[] }).runs).toHaveLength(1);
+
+    expect(
+      (await call("POST", `/api/workflows/${crypto.randomUUID()}/runs`, { need: "xxxxx" })).status,
+    ).toBe(403);
+    expect((await call("POST", `/api/workflows/${workflowId}/runs`, { need: "x" })).status).toBe(
+      400,
+    );
+    expect((await call("GET", `/api/workflows/runs/${crypto.randomUUID()}`)).status).toBe(404);
+
+    await db
+      .update(workflowApiKeys)
+      .set({ revokedAt: new Date() })
+      .where(eq(workflowApiKeys.id, row!.id));
+    expect(await app.resolveWorkflowKey(k.key)).toBeNull();
   });
 });

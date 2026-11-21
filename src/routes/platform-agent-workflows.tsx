@@ -34,11 +34,14 @@ import {
   FlaskConical,
   GitBranch,
   KeyRound,
+  MessageSquare,
+  SendHorizontal,
   Plus,
   Rocket,
   ShieldCheck,
   Trash2,
   Zap,
+  Link2,
 } from "lucide-react";
 
 import { EmptyState, PageHeader } from "@/components/ats";
@@ -57,9 +60,13 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { usePlatform } from "@/hooks/usePlatform";
+import { WorkflowRunRequests } from "@/components/agents/AgentTaskCard";
+import { RunFlow } from "@/components/agents/RunFlow";
+import { StoppedStepActions } from "@/components/agents/StoppedStepActions";
 import { AGENT_LABEL } from "@/lib/agents.catalog";
 import {
   approveWorkflow,
+  assistWorkflow,
   archiveWorkflow,
   createWorkflowFromTemplate,
   grantWorkflow,
@@ -70,7 +77,10 @@ import {
   platformWorkflowReport,
   runWorkflowNow,
   workflowBuilder,
+  workflowOrgReadiness,
+  type OrgReadinessRow,
   type SaveWorkflowInput,
+  type WorkflowAssistResult,
   type WorkflowBuilderView,
   type WorkflowRow,
 } from "@/lib/platform-agent-workflows.functions";
@@ -282,8 +292,18 @@ function WorkflowsPage() {
     queryFn: () => workflowBuilder(),
     enabled: isSuperUser,
     retry: false,
+    // Live runs move on their own: keep the Runs tab current while any is live.
+    refetchInterval: (query) =>
+      query.state.data?.runs.some((r) => r.status === "waiting" || r.status === "running")
+        ? 10_000
+        : false,
   });
   const [open, setOpen] = useState<string | "new" | null>(null);
+  const [chat, setChat] = useState<ChatTurn[]>([]);
+  const openWorkflow = (id: string | "new" | null) => {
+    if (id !== open) setChat([]);
+    setOpen(id);
+  };
   const refresh = () => qc.invalidateQueries({ queryKey: ["platform_agent_workflows"] });
 
   if (isLoading) return <p className="text-sm text-muted-foreground">Checking platform access…</p>;
@@ -310,13 +330,15 @@ function WorkflowsPage() {
           existing={editing}
           onBack={() => {
             refresh();
-            setOpen(null);
+            openWorkflow(null);
           }}
           onSaved={(id) => {
             refresh();
             setOpen(id);
           }}
           onChanged={refresh}
+          chat={chat}
+          setChat={setChat}
         />
       </ReactFlowProvider>
     );
@@ -329,7 +351,7 @@ function WorkflowsPage() {
         title="Agent workflows"
         description="Draw how agents follow each other, test the flow, approve and publish it to the organisations you pick."
         actions={
-          <Button size="sm" onClick={() => setOpen("new")}>
+          <Button size="sm" onClick={() => openWorkflow("new")}>
             <Plus className="size-4" /> New workflow
           </Button>
         }
@@ -356,7 +378,7 @@ function WorkflowsPage() {
                       const r = await createWorkflowFromTemplate({ data: { templateId: t.id } });
                       toast.success("Draft created");
                       await refresh();
-                      setOpen(r.id);
+                      openWorkflow(r.id);
                     } catch (e) {
                       toast.error(errorText(e, "Could not create"));
                     }
@@ -392,7 +414,7 @@ function WorkflowsPage() {
                 <tr
                   key={w.id}
                   className="cursor-pointer border-t hover:bg-muted/30"
-                  onClick={() => setOpen(w.id)}
+                  onClick={() => openWorkflow(w.id)}
                 >
                   <td className="px-4 py-2.5 font-medium">{w.name}</td>
                   <td className="px-4 py-2.5">
@@ -454,12 +476,16 @@ function Editor({
   onBack,
   onSaved,
   onChanged,
+  chat,
+  setChat,
 }: {
   view: WorkflowBuilderView;
   existing: WorkflowRow | undefined;
   onBack: () => void;
   onSaved: (id: string) => void;
   onChanged: () => void;
+  chat: ChatTurn[];
+  setChat: React.Dispatch<React.SetStateAction<ChatTurn[]>>;
 }) {
   const initial = useMemo(() => toFlow(existing), [existing]);
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>(initial.nodes);
@@ -471,7 +497,22 @@ function Editor({
   const [problems, setProblems] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState("");
+  const [chatOpen, setChatOpen] = useState(chat.length > 0);
+  const [dirty, setDirty] = useState(false);
   const flow = useReactFlow();
+
+  const applyDraft = (d: WorkflowAssistResult) => {
+    const f = toFlow({ graph: d.graph } as WorkflowRow);
+    setNodes(f.nodes);
+    setEdges(f.edges);
+    setTests(d.testScenarios);
+    if (d.name) setName(d.name);
+    if (d.description) setDescription(d.description);
+    setProblems(d.problems);
+    setSelected(null);
+    setDirty(true);
+    window.setTimeout(() => flow.fitView({ padding: 0.2 }), 50);
+  };
 
   const onConnect = useCallback(
     (c: Connection) =>
@@ -558,6 +599,7 @@ function Editor({
         data: { id: existing?.id, name, description, graph: graph(), testScenarios: tests },
       });
       toast.success("Saved as a draft");
+      setDirty(false);
       onSaved(r.id);
     }, "Could not save");
 
@@ -629,11 +671,18 @@ function Editor({
           </div>
         ) : null}
         <div className="ml-auto flex gap-2">
+          <Button
+            size="sm"
+            variant={chatOpen ? "secondary" : "outline"}
+            onClick={() => setChatOpen((o) => !o)}
+          >
+            <MessageSquare className="size-4" /> Build with chat
+          </Button>
           <Button size="sm" disabled={busy} onClick={save}>
-            Save draft
+            Save draft{dirty ? " •" : ""}
           </Button>
           {existing ? (
-            <Button size="sm" variant="outline" disabled={busy} onClick={test}>
+            <Button size="sm" variant="outline" disabled={busy || dirty} onClick={test}>
               <FlaskConical className="size-4" /> Test v{existing.version}
             </Button>
           ) : null}
@@ -681,6 +730,17 @@ function Editor({
             <li key={p}>{p}</li>
           ))}
         </ul>
+      ) : null}
+
+      {chatOpen ? (
+        <WorkflowChat
+          view={view}
+          workflowId={existing?.id}
+          chat={chat}
+          setChat={setChat}
+          current={graph}
+          onDraft={applyDraft}
+        />
       ) : null}
 
       <Tabs defaultValue="canvas">
@@ -834,6 +894,149 @@ function Editor({
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+/* ---------------------------------------------------------- build with chat */
+
+type ChatTurn = { role: "user" | "assistant"; text: string; passed?: boolean; problems?: string[] };
+
+function WorkflowChat({
+  view,
+  workflowId,
+  chat,
+  setChat,
+  current,
+  onDraft,
+}: {
+  view: WorkflowBuilderView;
+  workflowId: string | undefined;
+  chat: ChatTurn[];
+  setChat: React.Dispatch<React.SetStateAction<ChatTurn[]>>;
+  current: () => SaveWorkflowInput["graph"];
+  onDraft: (d: WorkflowAssistResult) => void;
+}) {
+  const [org, setOrg] = useState(view.owned[0]?.id ?? "");
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const send = async () => {
+    const msg = text.trim();
+    if (!msg || busy || !org) return;
+    const turns: ChatTurn[] = [...chat, { role: "user", text: msg }];
+    setChat(turns);
+    setText("");
+    setBusy(true);
+    try {
+      const g = current();
+      const d = await assistWorkflow({
+        data: {
+          orgId: org,
+          ...(workflowId ? { workflowId } : {}),
+          messages: turns.map(({ role, text: t }) => ({ role, text: t })),
+          current: g.nodes.some((n) => n.kind !== "trigger" || n.data.event) ? g : null,
+        },
+      });
+      onDraft(d);
+      setChat((c) => [
+        ...c,
+        { role: "assistant", text: d.reply, passed: d.testsPassed, problems: d.problems },
+      ]);
+    } catch (e) {
+      setChat((c) => [...c, { role: "assistant", text: errorText(e, "Could not draft that.") }]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="rounded-lg border p-3">
+      <div className="mb-2 flex items-center gap-2">
+        <MessageSquare className="size-4 text-primary" />
+        <h2 className="text-sm font-semibold">Build with chat</h2>
+        {view.owned.length > 1 ? (
+          <Select value={org} onValueChange={setOrg}>
+            <SelectTrigger className="ml-auto h-7 w-56 text-xs" aria-label="AI key from">
+              <SelectValue placeholder="Organisation" />
+            </SelectTrigger>
+            <SelectContent>
+              {view.owned.map((o) => (
+                <SelectItem key={o.id} value={o.id}>
+                  {o.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : null}
+      </div>
+      {!view.owned.length ? (
+        <p className="text-xs text-muted-foreground">
+          Own an organisation with an AI key to build with chat.
+        </p>
+      ) : (
+        <>
+          {chat.length ? (
+            <ol className="mb-2 max-h-56 space-y-2 overflow-y-auto text-sm">
+              {chat.map((m, i) => (
+                <li
+                  key={i}
+                  className={
+                    m.role === "user"
+                      ? "ml-auto w-fit max-w-[80%] rounded-lg bg-primary px-3 py-1.5 text-primary-foreground"
+                      : "w-fit max-w-[80%] rounded-lg bg-muted px-3 py-1.5"
+                  }
+                >
+                  {m.text}
+                  {m.role === "assistant" && m.passed !== undefined ? (
+                    <div className="mt-1 flex items-center gap-1 text-xs">
+                      {m.passed ? (
+                        <>
+                          <CircleCheck className="size-3.5 text-emerald-600" /> Dry-run tests pass
+                        </>
+                      ) : (
+                        <>
+                          <CircleX className="size-3.5 text-destructive" />{" "}
+                          {m.problems?.[0] ?? "Tests not passing"}
+                        </>
+                      )}
+                    </div>
+                  ) : null}
+                </li>
+              ))}
+              {busy ? (
+                <li className="w-fit rounded-lg bg-muted px-3 py-1.5 text-muted-foreground">
+                  Drafting…
+                </li>
+              ) : null}
+            </ol>
+          ) : null}
+          <div className="flex gap-2">
+            <Textarea
+              rows={2}
+              className="min-h-0 resize-none text-sm"
+              placeholder="When candidates are shortlisted, screen them; if screening fails, have the follow-up agent remind the team"
+              value={text}
+              maxLength={4000}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void send();
+                }
+              }}
+            />
+            <Button
+              size="icon"
+              aria-label="Send"
+              disabled={busy || !text.trim() || !org}
+              onClick={() => void send()}
+            >
+              <SendHorizontal className="size-4" />
+            </Button>
+          </div>
+        </>
+      )}
+    </section>
   );
 }
 
@@ -1253,27 +1456,79 @@ function Orgs({
   workflow: WorkflowRow;
   onChanged: () => void;
 }) {
+  const readiness = useQuery({
+    queryKey: ["workflow_org_readiness", workflow.id, workflow.publishedVersion],
+    queryFn: () => workflowOrgReadiness({ data: { id: workflow.id } }),
+  });
+  const byOrg = new Map((readiness.data ?? []).map((r) => [r.orgId, r]));
   const set = async (orgId: string, on: boolean) => {
     try {
       if (on) await grantWorkflow({ data: { id: workflow.id, orgId } });
       else await revokeWorkflow({ data: { id: workflow.id, orgId } });
-      toast.success(on ? "Granted" : "Withdrawn");
+      const r = byOrg.get(orgId);
+      if (on && r && !r.ready)
+        toast.warning("Granted — it will not run there until the missing items are fixed");
+      else toast.success(on ? "Granted" : "Withdrawn");
       onChanged();
     } catch (e) {
       toast.error(errorText(e, "Could not change"));
     }
   };
   return (
-    <ul className="max-w-xl divide-y rounded-md border text-sm">
-      {view.organisations.map((o) => (
-        <li key={o.id} className="flex items-center gap-3 px-3 py-2">
-          <Checkbox
-            checked={workflow.grants.includes(o.id)}
-            onCheckedChange={(v) => set(o.id, Boolean(v))}
-            aria-label={`Grant to ${o.name}`}
-          />
-          <span className="flex-1">{o.name}</span>
-          {o.status !== "active" ? <Badge variant="outline">{o.status}</Badge> : null}
+    <ul className="max-w-3xl divide-y rounded-md border text-sm">
+      {view.organisations.map((o) => {
+        const r = byOrg.get(o.id);
+        return (
+          <li key={o.id} className="px-3 py-2">
+            <div className="flex items-center gap-3">
+              <Checkbox
+                checked={workflow.grants.includes(o.id)}
+                onCheckedChange={(v) => set(o.id, Boolean(v))}
+                aria-label={`Grant to ${o.name}`}
+              />
+              <span className="flex-1 font-medium">{o.name}</span>
+              {workflow.grants.includes(o.id) ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7"
+                  onClick={() =>
+                    void navigator.clipboard
+                      .writeText(`${window.location.origin}/desk?workflow=${workflow.id}`)
+                      .then(() => toast.success(`Link copied — share it with ${o.name}'s HR or TA`))
+                  }
+                >
+                  <Link2 className="size-3.5" /> Copy link
+                </Button>
+              ) : null}
+              {o.status !== "active" ? (
+                <Badge variant="outline">{o.status}</Badge>
+              ) : r ? (
+                <Badge variant={r.ready ? "default" : "outline"}>
+                  {r.ready ? "Ready" : "Not ready"}
+                </Badge>
+              ) : null}
+            </div>
+            {r ? <ReadinessList items={r.items} /> : null}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function ReadinessList({ items }: { items: OrgReadinessRow["items"] }) {
+  return (
+    <ul className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 pl-7 text-xs">
+      {items.map((i) => (
+        <li key={i.key} className="flex items-center gap-1">
+          {i.ok ? (
+            <CircleCheck className="size-3.5 text-emerald-600" />
+          ) : (
+            <CircleX className="size-3.5 text-destructive" />
+          )}
+          <span>{i.label}</span>
+          <span className="text-muted-foreground">· {i.detail}</span>
         </li>
       ))}
     </ul>
@@ -1398,9 +1653,45 @@ function Runs({
                   </Button>
                 </div>
               </div>
-              <div className="text-xs text-muted-foreground">
-                {r.history.map((h) => `${label(h.node)}: ${h.note}`).join(" → ")}
-              </div>
+              {r.waitingOn ? (
+                <div
+                  className={`text-xs font-medium ${r.waitingOn.kind === "person" || r.waitingOn.kind === "stopped" ? "text-amber-700" : "text-foreground"}`}
+                >
+                  {r.waitingOn.text}
+                </div>
+              ) : null}
+              <RunFlow
+                run={r}
+                graph={r.graph ?? workflow.graph}
+                label={(id) => {
+                  const n = (r.graph ?? workflow.graph).nodes.find((x) => x.id === id);
+                  return n ? n.data.label || n.data.agentType || n.kind : label(id);
+                }}
+              />
+              {r.waitingOn?.kind === "stopped" && view.owned.some((o) => o.id === r.orgId) ? (
+                <StoppedStepActions
+                  workflowRunId={r.id}
+                  invalidate={["platform_agent_workflows"]}
+                />
+              ) : null}
+              {r.waitingOn?.kind === "person" && view.owned.some((o) => o.id === r.orgId) ? (
+                <WorkflowRunRequests
+                  workflowRunId={r.id}
+                  onDecided={() =>
+                    void qc.invalidateQueries({ queryKey: ["platform_agent_workflows"] })
+                  }
+                />
+              ) : null}
+              <details className="text-xs text-muted-foreground">
+                <summary className="cursor-pointer">History</summary>
+                <ol className="mt-1 space-y-0.5">
+                  {r.history.map((h, i) => (
+                    <li key={i}>
+                      {new Date(h.at).toLocaleTimeString()} · {label(h.node)}: {h.note}
+                    </li>
+                  ))}
+                </ol>
+              </details>
               {r.error ? <div className="text-xs text-destructive">{r.error}</div> : null}
             </li>
           ))}

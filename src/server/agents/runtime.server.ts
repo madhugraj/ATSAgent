@@ -1668,8 +1668,9 @@ export async function runAgentTick(
       const { scheduleSweeps } = await import("./orchestrator.server");
       await scheduleSweeps(opts.orgId ? { orgId: opts.orgId } : {});
       // Agent workflows waiting past their time move on (wait.status = timed_out).
-      const { expireWorkflowWaits } = await import("./workflows.server");
+      const { expireWorkflowWaits, resumeFinishedRunWaits } = await import("./workflows.server");
       await expireWorkflowWaits();
+      await resumeFinishedRunWaits();
     } catch (e) {
       log.error("agent.orchestrator.failed", { error: e instanceof Error ? e : String(e) });
     }

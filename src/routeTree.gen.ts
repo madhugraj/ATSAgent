@@ -48,7 +48,6 @@ import { Route as AgentsIntelligenceRouteImport } from './routes/agents.intellig
 import { Route as AgentsObservabilityRouteImport } from './routes/agents.observability'
 import { Route as AgentsRegisterRouteImport } from './routes/agents.register'
 import { Route as AgentsSettingsRouteImport } from './routes/agents.settings'
-import { Route as AgentsWorkflowsRouteImport } from './routes/agents.workflows'
 import { Route as ApplyIdRouteImport } from './routes/apply.$id'
 import { Route as AssessTokenRouteImport } from './routes/assess.$token'
 import { Route as AuthResetRouteImport } from './routes/auth.reset'
@@ -62,6 +61,7 @@ import { Route as PayTokenRouteImport } from './routes/pay.$token'
 import { Route as RequisitionsIndexRouteImport } from './routes/requisitions.index'
 import { Route as RequisitionsIdRouteImport } from './routes/requisitions.$id'
 import { Route as ScheduleTokenRouteImport } from './routes/schedule.$token'
+import { Route as WWorkflowIdRouteImport } from './routes/w.$workflowId'
 import { Route as ApiAuthChangePasswordRouteImport } from './routes/api/auth/change-password'
 import { Route as ApiAuthConfirmRouteImport } from './routes/api/auth/confirm'
 import { Route as ApiAuthLoginRouteImport } from './routes/api/auth/login'
@@ -282,11 +282,6 @@ const AgentsSettingsRoute = AgentsSettingsRouteImport.update({
   path: '/agents/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AgentsWorkflowsRoute = AgentsWorkflowsRouteImport.update({
-  id: '/agents/workflows',
-  path: '/agents/workflows',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ApplyIdRoute = ApplyIdRouteImport.update({
   id: '/apply/$id',
   path: '/apply/$id',
@@ -350,6 +345,11 @@ const RequisitionsIdRoute = RequisitionsIdRouteImport.update({
 const ScheduleTokenRoute = ScheduleTokenRouteImport.update({
   id: '/schedule/$token',
   path: '/schedule/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WWorkflowIdRoute = WWorkflowIdRouteImport.update({
+  id: '/w/$workflowId',
+  path: '/w/$workflowId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiAuthChangePasswordRoute = ApiAuthChangePasswordRouteImport.update({
@@ -519,7 +519,6 @@ export interface FileRoutesByFullPath {
   '/agents/observability': typeof AgentsObservabilityRoute
   '/agents/register': typeof AgentsRegisterRoute
   '/agents/settings': typeof AgentsSettingsRoute
-  '/agents/workflows': typeof AgentsWorkflowsRoute
   '/apply/$id': typeof ApplyIdRoute
   '/assess/$token': typeof AssessTokenRoute
   '/auth/reset': typeof AuthResetRoute
@@ -530,6 +529,7 @@ export interface FileRoutesByFullPath {
   '/pay/$token': typeof PayTokenRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
   '/schedule/$token': typeof ScheduleTokenRoute
+  '/w/$workflowId': typeof WWorkflowIdRoute
   '/agents/': typeof AgentsIndexRoute
   '/candidates/': typeof CandidatesIndexRoute
   '/interviews/': typeof InterviewsIndexRoute
@@ -598,7 +598,6 @@ export interface FileRoutesByTo {
   '/agents/observability': typeof AgentsObservabilityRoute
   '/agents/register': typeof AgentsRegisterRoute
   '/agents/settings': typeof AgentsSettingsRoute
-  '/agents/workflows': typeof AgentsWorkflowsRoute
   '/apply/$id': typeof ApplyIdRoute
   '/assess/$token': typeof AssessTokenRoute
   '/auth/reset': typeof AuthResetRoute
@@ -609,6 +608,7 @@ export interface FileRoutesByTo {
   '/pay/$token': typeof PayTokenRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
   '/schedule/$token': typeof ScheduleTokenRoute
+  '/w/$workflowId': typeof WWorkflowIdRoute
   '/agents': typeof AgentsIndexRoute
   '/candidates': typeof CandidatesIndexRoute
   '/interviews': typeof InterviewsIndexRoute
@@ -678,7 +678,6 @@ export interface FileRoutesById {
   '/agents/observability': typeof AgentsObservabilityRoute
   '/agents/register': typeof AgentsRegisterRoute
   '/agents/settings': typeof AgentsSettingsRoute
-  '/agents/workflows': typeof AgentsWorkflowsRoute
   '/apply/$id': typeof ApplyIdRoute
   '/assess/$token': typeof AssessTokenRoute
   '/auth/reset': typeof AuthResetRoute
@@ -689,6 +688,7 @@ export interface FileRoutesById {
   '/pay/$token': typeof PayTokenRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
   '/schedule/$token': typeof ScheduleTokenRoute
+  '/w/$workflowId': typeof WWorkflowIdRoute
   '/agents/': typeof AgentsIndexRoute
   '/candidates/': typeof CandidatesIndexRoute
   '/interviews/': typeof InterviewsIndexRoute
@@ -759,7 +759,6 @@ export interface FileRouteTypes {
     | '/agents/observability'
     | '/agents/register'
     | '/agents/settings'
-    | '/agents/workflows'
     | '/apply/$id'
     | '/assess/$token'
     | '/auth/reset'
@@ -770,6 +769,7 @@ export interface FileRouteTypes {
     | '/pay/$token'
     | '/requisitions/$id'
     | '/schedule/$token'
+    | '/w/$workflowId'
     | '/agents/'
     | '/candidates/'
     | '/interviews/'
@@ -838,7 +838,6 @@ export interface FileRouteTypes {
     | '/agents/observability'
     | '/agents/register'
     | '/agents/settings'
-    | '/agents/workflows'
     | '/apply/$id'
     | '/assess/$token'
     | '/auth/reset'
@@ -849,6 +848,7 @@ export interface FileRouteTypes {
     | '/pay/$token'
     | '/requisitions/$id'
     | '/schedule/$token'
+    | '/w/$workflowId'
     | '/agents'
     | '/candidates'
     | '/interviews'
@@ -917,7 +917,6 @@ export interface FileRouteTypes {
     | '/agents/observability'
     | '/agents/register'
     | '/agents/settings'
-    | '/agents/workflows'
     | '/apply/$id'
     | '/assess/$token'
     | '/auth/reset'
@@ -928,6 +927,7 @@ export interface FileRouteTypes {
     | '/pay/$token'
     | '/requisitions/$id'
     | '/schedule/$token'
+    | '/w/$workflowId'
     | '/agents/'
     | '/candidates/'
     | '/interviews/'
@@ -997,7 +997,6 @@ export interface RootRouteChildren {
   AgentsObservabilityRoute: typeof AgentsObservabilityRoute
   AgentsRegisterRoute: typeof AgentsRegisterRoute
   AgentsSettingsRoute: typeof AgentsSettingsRoute
-  AgentsWorkflowsRoute: typeof AgentsWorkflowsRoute
   ApplyIdRoute: typeof ApplyIdRoute
   AssessTokenRoute: typeof AssessTokenRoute
   AuthResetRoute: typeof AuthResetRoute
@@ -1008,6 +1007,7 @@ export interface RootRouteChildren {
   PayTokenRoute: typeof PayTokenRoute
   RequisitionsIdRoute: typeof RequisitionsIdRoute
   ScheduleTokenRoute: typeof ScheduleTokenRoute
+  WWorkflowIdRoute: typeof WWorkflowIdRoute
   AgentsIndexRoute: typeof AgentsIndexRoute
   CandidatesIndexRoute: typeof CandidatesIndexRoute
   InterviewsIndexRoute: typeof InterviewsIndexRoute
@@ -1313,13 +1313,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsSettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/agents/workflows': {
-      id: '/agents/workflows'
-      path: '/agents/workflows'
-      fullPath: '/agents/workflows'
-      preLoaderRoute: typeof AgentsWorkflowsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/apply/$id': {
       id: '/apply/$id'
       path: '/apply/$id'
@@ -1409,6 +1402,13 @@ declare module '@tanstack/react-router' {
       path: '/schedule/$token'
       fullPath: '/schedule/$token'
       preLoaderRoute: typeof ScheduleTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/w/$workflowId': {
+      id: '/w/$workflowId'
+      path: '/w/$workflowId'
+      fullPath: '/w/$workflowId'
+      preLoaderRoute: typeof WWorkflowIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/auth/change-password': {
@@ -1621,7 +1621,6 @@ const rootRouteChildren: RootRouteChildren = {
   AgentsObservabilityRoute: AgentsObservabilityRoute,
   AgentsRegisterRoute: AgentsRegisterRoute,
   AgentsSettingsRoute: AgentsSettingsRoute,
-  AgentsWorkflowsRoute: AgentsWorkflowsRoute,
   ApplyIdRoute: ApplyIdRoute,
   AssessTokenRoute: AssessTokenRoute,
   AuthResetRoute: AuthResetRoute,
@@ -1632,6 +1631,7 @@ const rootRouteChildren: RootRouteChildren = {
   PayTokenRoute: PayTokenRoute,
   RequisitionsIdRoute: RequisitionsIdRoute,
   ScheduleTokenRoute: ScheduleTokenRoute,
+  WWorkflowIdRoute: WWorkflowIdRoute,
   AgentsIndexRoute: AgentsIndexRoute,
   CandidatesIndexRoute: CandidatesIndexRoute,
   InterviewsIndexRoute: InterviewsIndexRoute,
@@ -1667,13 +1667,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
