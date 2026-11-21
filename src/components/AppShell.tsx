@@ -14,6 +14,7 @@ import { useWorkMode } from "@/hooks/useWorkMode";
 import {
   NAV_GROUPS,
   hubForPath,
+  tabLabel,
   modeForPath,
   type NavGroup,
   type NavItem,
@@ -46,7 +47,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // in Manual mode switches to Agent mode, and the other way round.
   const pageMode = modeForPath(pathname);
   const currentHub = hubForPath(pathname);
-  const tabs = hubs.find((h) => h.heading === currentHub?.heading)?.items ?? [];
+  const tabHub = hubs.find((h) => h.heading === currentHub?.heading);
+  const tabs = tabHub?.items ?? [];
   useEffect(() => {
     if (modeReady && pageMode && pageMode !== mode) setMode(pageMode);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- follow the page (once the saved mode is known)
@@ -266,7 +268,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 activeOptions={activeOptions(item.to)}
                 className="-mb-px whitespace-nowrap border-b-2 border-transparent px-3 py-2.5 text-sm text-muted-foreground transition-colors hover:text-foreground data-[status=active]:border-primary data-[status=active]:font-medium data-[status=active]:text-foreground"
               >
-                {item.label}
+                {tabHub ? tabLabel(tabHub, item) : item.label}
               </Link>
             ))}
           </nav>
