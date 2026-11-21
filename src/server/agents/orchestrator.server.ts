@@ -264,7 +264,7 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
   ) {
     await dispatch(
       "requisition",
-      `An approver sent requisition ${req.code} "${req.title}" back to draft with this change: "${String(payload.comment ?? "").slice(0, 500)}". Read get_requisition, make exactly that change (set_pay_terms then set_compensation for pay or currency; update_requisition_draft for other fields), say in one line what you changed, then submit_requisition_for_approval. If the change is unclear or you cannot make it, ask a person instead of resubmitting it unchanged.`,
+      `An approver sent requisition ${req.code} "${req.title}" back to draft with this change: "${String(payload.comment ?? "").slice(0, 500)}". Read get_requisition, make exactly that change (set_pay_terms then set_compensation for pay or currency; update_requisition_draft for other fields), say in one line what you changed, then submit_requisition_for_approval. Never assume what the change leaves open: if it gives pay without saying per month, per year or per hour, or a currency or basis different from the role's current one without saying which, or the new band is far from the current one, ask_human first with the exact choice (e.g. "Is 2,000–5,000 USD per month or per year?") and make the change only after the answer. If the change is unclear or you cannot make it, ask a person instead of resubmitting it unchanged.`,
     );
   }
 
