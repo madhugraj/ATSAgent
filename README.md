@@ -15,6 +15,7 @@ ATSIQ by Yavar AI is an enterprise recruiting intelligence platform. It combines
 
 ## Product scope
 
+- Navigation by area: the sidebar lists hubs (Home, Agents, Pipeline, Candidates, Sourcing, Insights; Settings, Platform and Help at the foot) and each hub's pages show as tabs above the page; page URLs and role visibility are unchanged (`src/components/nav-config.ts`)
 - Organisation registration, platform approval, role-based access and tenant lifecycle controls
 - Versioned Terms of Service, Privacy Policy and Data Processing Agreement (`src/lib/legal/`, `/terms`, `/privacy`, `/dpa`): accepted by a named signatory at registration, re-accepted by the owner when a version changes, recorded in `org_agreements`, audited and visible on the platform console
 - Requisition, JD and offer approval workflows with immutable decision trails
@@ -103,6 +104,8 @@ bun run dev
 Required configuration is documented in `.env.example`. Never commit passwords, encryption keys, OAuth secrets or AI provider keys.
 
 ## Quality gates
+
+`bun install` turns on a pre-commit hook (`.githooks/pre-commit`) that formats staged files with Prettier and runs ESLint on them, so formatting and lint errors are caught before a push instead of in CI. Worktrees share the setting; `git commit --no-verify` skips it once.
 
 ```sh
 bun run typecheck

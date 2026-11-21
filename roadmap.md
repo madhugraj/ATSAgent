@@ -125,6 +125,11 @@
 - [x] Screening call 1.12.0 (16 November): the echo of the assistant's last words is no longer passed on as the candidate (it must go on 400 ms past the assistant stopping); "Hello? Can you hear me?" is answered and the call carries on; "the first week of December" is a clear date; a call whose 3 minutes run out after consent ends `fell_back` (`time_limit`) so the written assessment follows instead of a fresh call
 - [ ] Cross-organisation role emergence on the platform view (anonymised)
 
+## Navigation by area (2026-11-21)
+
+- [x] Sidebar regrouped from ~34 links into hubs (Home, Agents, Pipeline, Candidates, Sourcing, Insights; Settings, Platform, Help at the foot); each hub's pages show as a tab strip above the page. URLs, role predicates and Agent/Manual mode filtering unchanged
+- [ ] Next: counts on tabs (screening calls today, waiting for you); optional pinned row for power users
+
 ## Prompt-injection guardrails — P0 (2026-11-01)
 
 - [x] `docs/guardrails.md`: every security control by layer, the v2.0 threat landscape mapped attack by attack, open items, how it is verified

@@ -833,7 +833,11 @@ export async function raiseUnavailable(
   }
 }
 
-export async function tellDesk(orgId: string, applicationId: string, body: (cand: string) => string) {
+export async function tellDesk(
+  orgId: string,
+  applicationId: string,
+  body: (cand: string) => string,
+) {
   try {
     const [a] = await db
       .select({ requisitionId: applications.requisitionId, name: candidates.fullName })
