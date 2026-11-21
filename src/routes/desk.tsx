@@ -41,6 +41,7 @@ import { WorkflowRunRequests } from "@/components/agents/AgentTaskCard";
 import { StoppedStepActions } from "@/components/agents/StoppedStepActions";
 import { useRoles } from "@/hooks/useRoles";
 import { advanceRequisition } from "@/lib/requisitions.functions";
+import { getRequisition } from "@/lib/queries.functions";
 import {
   deskWorkflows,
   orgWorkflowApp,
@@ -540,12 +541,42 @@ function RequisitionApprovalCard({
   onDone: () => void;
 }) {
   const step = REQ_NEXT[requisition.status]!;
+  const full = useQuery({
+    queryKey: ["requisition", requisition.id],
+    queryFn: () => getRequisition({ data: { id: requisition.id } }),
+  });
+  const q = (full.data ?? {}) as Record<string, unknown>;
+  const list = (v: unknown) =>
+    Array.isArray(v) ? v.map(String).filter(Boolean).join(", ") : v ? String(v) : "";
+  const range = (a: unknown, b: unknown, unit = "") =>
+    a || b ? `${a ?? "?"}–${b ?? "?"}${unit}` : "";
+  const facts: [string, string][] = (
+    [
+      ["Role", list(q["title"])],
+      ["Type", list(q["req_type"]).replace(/_/g, " ")],
+      ["Openings", list(q["openings"])],
+      ["Location", [list(q["location"]), list(q["work_mode"])].filter(Boolean).join(" · ")],
+      ["Experience", range(q["experience_min"], q["experience_max"], " yrs")],
+      ["CTC band", range(q["ctc_band_min"], q["ctc_band_max"]) || list(q["budget_ctc"])],
+      ["Hiring manager", list(q["hiring_manager"])],
+      ["Needed by", q["needed_by"] ? new Date(String(q["needed_by"])).toLocaleDateString() : ""],
+      ["Must-have skills", list(q["must_have_skills"])],
+      ["Good to have", list(q["good_to_have_skills"])],
+      ["Responsibilities", list(q["responsibilities"])],
+    ] as [string, string][]
+  ).filter(([, v]) => v);
+  const trail = (Array.isArray(q["approval_trail"]) ? q["approval_trail"] : []) as {
+    actor?: string;
+    comment?: string | null;
+    to?: string;
+  }[];
+  const notes = trail.filter((t) => t.comment);
   const [comment, setComment] = useState("");
   const [declining, setDeclining] = useState(false);
   const [busy, setBusy] = useState(false);
   async function go(status: "pending_hr" | "pending_cbo" | "approved" | "rejected") {
     if (status === "rejected" && !comment.trim()) {
-      toast.error("Say why — it goes on the approval trail");
+      toast.error("Say what needs to change — it goes on the approval trail");
       return;
     }
     setBusy(true);
@@ -555,7 +586,7 @@ function RequisitionApprovalCard({
           data: { id: requisition.id, status, comment: comment.trim() || null },
         }),
       );
-      toast.success(status === "rejected" ? "Requisition declined" : "Approved");
+      toast.success(status === "rejected" ? "Sent back for changes" : "Approved");
       setComment("");
       setDeclining(false);
       onDone();
@@ -574,18 +605,39 @@ function RequisitionApprovalCard({
         <p className="font-medium">Approve requisition {requisition.code}</p>
         <Badge className="ml-auto">Waiting for you</Badge>
       </div>
+      {full.isLoading ? (
+        <p className="mt-2 text-xs text-muted-foreground">Loading…</p>
+      ) : (
+        <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-md bg-muted/40 p-2 text-xs">
+          {facts.map(([k, v]) => (
+            <Fragment key={k}>
+              <dt className="text-muted-foreground">{k}</dt>
+              <dd className="whitespace-pre-wrap">{v}</dd>
+            </Fragment>
+          ))}
+        </dl>
+      )}
+      {notes.length ? (
+        <ul className="mt-2 space-y-1 text-xs">
+          {notes.map((t, i) => (
+            <li key={i}>
+              <span className="text-muted-foreground">{t.actor ?? "Approver"}:</span> {t.comment}
+            </li>
+          ))}
+        </ul>
+      ) : null}
       <Textarea
         className="mt-2"
         rows={2}
         value={comment}
         onChange={(e) => setComment(e.target.value)}
-        placeholder={declining ? "Why are you declining?" : "Comment (optional)"}
+        placeholder={declining ? "What needs to change?" : "Comment (optional)"}
       />
       <div className="mt-2 flex flex-wrap gap-2">
         {declining ? (
           <>
-            <Button size="sm" variant="destructive" disabled={busy} onClick={() => go("rejected")}>
-              Decline
+            <Button size="sm" disabled={busy} onClick={() => go("rejected")}>
+              Send back
             </Button>
             <Button size="sm" variant="ghost" disabled={busy} onClick={() => setDeclining(false)}>
               Cancel
@@ -597,7 +649,7 @@ function RequisitionApprovalCard({
               Approve
             </Button>
             <Button size="sm" variant="outline" disabled={busy} onClick={() => setDeclining(true)}>
-              Decline
+              Ask for changes
             </Button>
           </>
         )}
