@@ -19,7 +19,8 @@
     "eval:agents": "bun scripts/agent-eval.ts",
     "eval:matching": "bun scripts/matching-eval.ts",
     "test:e2e": "bun scripts/local-e2e/e2e-check.ts",
-    "bias-report": "bun scripts/bias-report.ts"
+    "bias-report": "bun scripts/bias-report.ts",
+    "prepare": "git config core.hooksPath .githooks || true"
   },
   "overrides": {
     "rolldown": "1.2.1",

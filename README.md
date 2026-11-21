@@ -95,6 +95,8 @@ Required configuration is documented in `.env.example`. Never commit passwords, 
 
 ## Quality gates
 
+`bun install` turns on a pre-commit hook (`.githooks/pre-commit`) that formats staged files with Prettier and runs ESLint on them, so formatting and lint errors are caught before a push instead of in CI. Worktrees share the setting; `git commit --no-verify` skips it once.
+
 ```sh
 bun run typecheck
 bun test
