@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { Clock, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -78,9 +78,24 @@ export function ChangeTime({
     }
   }
   return (
-    <div className="space-y-2 text-sm">
+    <div className="space-y-3 text-sm">
       <h2 className="font-medium">Move it or step down</h2>
       {q.isLoading ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
+      {o && !o.can ? <p className="text-xs text-muted-foreground">{o.why}</p> : null}
+      {o && o.can ? (
+        <>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">
+            <Clock className="size-3.5" /> Latest by {short(o.latest)}
+          </span>
+          <SlotCalendar
+            times={o.times}
+            latest={o.latest}
+            current={o.current}
+            value={to}
+            onChange={setTo}
+          />
+        </>
+      ) : null}
       <Textarea
         rows={2}
         maxLength={500}
@@ -88,31 +103,14 @@ export function ChangeTime({
         onChange={(e) => setReason(e.target.value)}
         placeholder="Why does the time have to change?"
       />
-      {o && !o.can ? <p className="text-xs text-muted-foreground">{o.why}</p> : null}
       {o && o.can && o.times.length ? (
-        <div className="space-y-1.5" role="radiogroup" aria-label="New time">
-          {o.times.map((t) => (
-            <label
-              key={t}
-              className="flex cursor-pointer items-center gap-3 rounded-md border border-border px-3 py-2"
-            >
-              <input type="radio" name="to" checked={to === t} onChange={() => setTo(t)} />
-              {fmt(t)}
-            </label>
-          ))}
-          <Button
-            className="w-full"
-            disabled={busy || !to || reason.trim().length < 10}
-            onClick={() => void send(to)}
-          >
-            Move the round
-          </Button>
-        </div>
-      ) : null}
-      {o && o.can && !o.times.length ? (
-        <p className="text-xs text-muted-foreground">
-          No time before {fmt(o.latest)} suits the whole panel.
-        </p>
+        <Button
+          className="w-full"
+          disabled={busy || !to || reason.trim().length < 10}
+          onClick={() => void send(to)}
+        >
+          {to ? `Move to ${short(to)}` : "Pick a time"}
+        </Button>
       ) : null}
       {o ? (
         <Button
@@ -124,6 +122,150 @@ export function ChangeTime({
           I can&apos;t take this round
         </Button>
       ) : null}
+    </div>
+  );
+}
+
+/** "Mon 23 Nov, 11:30" in the reader's zone. */
+function short(iso: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(iso));
+}
+const dayKey = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
+/**
+ * The panel's free times on a calendar: weeks from today to the deadline,
+ * free days tinted, the booked day outlined, days past the deadline hatched.
+ */
+export function SlotCalendar({
+  times,
+  latest,
+  current,
+  value,
+  onChange,
+}: {
+  times: string[];
+  latest: string;
+  current: string;
+  value: string | null;
+  onChange: (iso: string) => void;
+}) {
+  const byDay = new Map<string, string[]>();
+  for (const t of times) {
+    const k = dayKey(new Date(t));
+    byDay.set(k, [...(byDay.get(k) ?? []), t]);
+  }
+  const firstFree = times[0] ? dayKey(new Date(times[0])) : null;
+  const [day, setDay] = useState<string | null>(value ? dayKey(new Date(value)) : firstFree);
+  const today = startOfDay(new Date());
+  const last = startOfDay(new Date(Math.max(Date.parse(latest), Date.parse(current))));
+  const start = new Date(today);
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7)); // Monday
+  const cells: Date[] = [];
+  for (let d = new Date(start); d <= last || cells.length % 7; d.setDate(d.getDate() + 1))
+    cells.push(new Date(d));
+  const deadlineKey = dayKey(new Date(latest));
+  const bookedKey = dayKey(new Date(current));
+  const months = [
+    ...new Set(
+      cells.map((d) => d.toLocaleDateString(undefined, { month: "long", year: "numeric" })),
+    ),
+  ];
+  const dayTimes = (day ? byDay.get(day) : undefined) ?? [];
+  return (
+    <div className="space-y-3">
+      <p className="text-center text-xs font-semibold">{months.join(" – ")}</p>
+      <div className="grid grid-cols-7 gap-1 text-center text-xs">
+        {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
+          <span key={d} className="py-1 text-[11px] text-muted-foreground">
+            {d}
+          </span>
+        ))}
+        {cells.map((d) => {
+          const k = dayKey(d);
+          const past = d < today;
+          const after = k > deadlineKey;
+          const free = byDay.has(k);
+          const sel = k === day;
+          return (
+            <button
+              key={k}
+              type="button"
+              disabled={!free}
+              onClick={() => setDay(k)}
+              aria-pressed={sel}
+              aria-label={d.toDateString()}
+              className={[
+                "relative flex h-9 items-center justify-center rounded-md tabular-nums",
+                past ? "text-muted-foreground/40" : "",
+                after
+                  ? "bg-[repeating-linear-gradient(135deg,transparent_0_4px,var(--color-muted)_4px_8px)] text-muted-foreground/40"
+                  : "",
+                free && !sel ? "bg-primary/10 font-semibold text-foreground" : "",
+                sel ? "bg-primary font-semibold text-primary-foreground" : "",
+                k === bookedKey && !sel ? "ring-2 ring-inset ring-primary" : "",
+                k === deadlineKey ? "shadow-[inset_-3px_0_0_theme(colors.amber.500)]" : "",
+                !free && !past && !after ? "text-muted-foreground" : "",
+              ].join(" ")}
+            >
+              {d.getDate()}
+              {free ? (
+                <span
+                  className={`absolute bottom-1 size-1 rounded-full ${sel ? "bg-primary-foreground" : "bg-primary"}`}
+                />
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+      <div className="flex flex-wrap gap-3 text-[11px] text-muted-foreground">
+        <span className="flex items-center gap-1">
+          <i className="size-2.5 rounded-sm bg-primary/15" /> Panel free
+        </span>
+        <span className="flex items-center gap-1">
+          <i className="size-2.5 rounded-sm ring-2 ring-inset ring-primary" /> Booked now
+        </span>
+        <span className="flex items-center gap-1">
+          <i className="size-2.5 rounded-sm bg-[repeating-linear-gradient(135deg,transparent_0_2px,var(--color-muted-foreground)_2px_3px)] opacity-50" />{" "}
+          Past the deadline
+        </span>
+      </div>
+      {day && dayTimes.length ? (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold">
+            {new Date(dayTimes[0]!).toLocaleDateString(undefined, {
+              weekday: "long",
+              day: "numeric",
+              month: "long",
+            })}
+          </p>
+          <div className="grid grid-cols-4 gap-1.5" role="radiogroup" aria-label="Time">
+            {dayTimes.map((t) => (
+              <button
+                key={t}
+                type="button"
+                role="radio"
+                aria-checked={value === t}
+                onClick={() => onChange(t)}
+                className={`rounded-md border py-2 text-xs tabular-nums ${value === t ? "border-primary bg-primary font-semibold text-primary-foreground" : "border-border"}`}
+              >
+                {new Date(t).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          No time before {short(latest)} suits the whole panel.
+        </p>
+      )}
     </div>
   );
 }
