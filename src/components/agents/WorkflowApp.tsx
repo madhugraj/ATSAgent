@@ -548,15 +548,27 @@ function JourneyRun({
 }
 
 /** The run's steps as the desk's hiring journey: done, now, to come (no actions). */
+export type JourneySubstep = {
+  label: string;
+  state: "done" | "now" | "todo" | "back";
+  note?: string;
+};
+
 export function WorkflowJourney({
   run,
   graph,
   onReview,
+  substeps,
+  needsYou,
 }: {
   run: AppRun;
   graph: Graph;
   /** Shows the run's waiting request in the conversation. */
   onReview?: () => void;
+  /** What is happening inside the current step (e.g. the approval chain). */
+  substeps?: JourneySubstep[];
+  /** Something in this run waits on the viewer (highlight + Review). */
+  needsYou?: boolean;
 }) {
   const steps = journeySteps(graph, run);
   const done = new Set(
@@ -602,16 +614,51 @@ export function WorkflowJourney({
                   <span className="num mr-1 text-xs text-muted-foreground">{i + 1}.</span>
                   {s.label}
                 </p>
+                {isNow && substeps?.length ? (
+                  <ul className="mt-1.5 space-y-1 border-l border-border pl-3">
+                    {substeps.map((x, j) => (
+                      <li key={j} className="text-xs">
+                        <span
+                          className={
+                            x.state === "done"
+                              ? "text-foreground"
+                              : x.state === "now"
+                                ? "font-semibold text-foreground"
+                                : x.state === "back"
+                                  ? "text-amber-700"
+                                  : "text-muted-foreground"
+                          }
+                        >
+                          {x.state === "done"
+                            ? "✓ "
+                            : x.state === "now"
+                              ? "● "
+                              : x.state === "back"
+                                ? "↩ "
+                                : "○ "}
+                          {x.label}
+                        </span>
+                        {x.note ? (
+                          <span className="block pl-3 text-muted-foreground">{x.note}</span>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
                 {isNow && run.waitingOn ? (
                   <div
                     className={`mt-1.5 flex items-start gap-2 rounded-md border-l-[3px] p-2 text-xs ${
-                      run.waitingOn.kind === "person" || run.waitingOn.kind === "stopped"
+                      needsYou ||
+                      run.waitingOn.kind === "person" ||
+                      run.waitingOn.kind === "stopped"
                         ? "border-l-amber-500 bg-amber-500/10"
                         : "border-l-border bg-muted/40"
                     }`}
                   >
                     <p className="min-w-0 flex-1 text-foreground">{run.waitingOn.text}</p>
-                    {(run.waitingOn.kind === "person" || run.waitingOn.kind === "stopped") &&
+                    {(needsYou ||
+                      run.waitingOn.kind === "person" ||
+                      run.waitingOn.kind === "stopped") &&
                     onReview ? (
                       <Button
                         size="sm"

@@ -36,7 +36,7 @@ import {
 } from "lucide-react";
 
 import { EmptyState, PageHeader } from "@/components/ats";
-import { WorkflowJourney } from "@/components/agents/WorkflowApp";
+import { WorkflowJourney, type JourneySubstep } from "@/components/agents/WorkflowApp";
 import { WorkflowRunRequests } from "@/components/agents/AgentTaskCard";
 import { StoppedStepActions } from "@/components/agents/StoppedStepActions";
 import { useRoles } from "@/hooks/useRoles";
@@ -522,6 +522,41 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
         : reqPending
           ? `Waiting for the ${REQ_NEXT[reqPending.status]!.who} to approve ${reqPending.code}.`
           : r.waitingOn?.text.replace(/^Waiting for (.+?) (\(until .*\))?$/, "Waiting — $1.");
+  // Inside the requisition step: the approval chain this round, send-backs and
+  // the agent's open question — the journey mirrors the thread.
+  const substeps: JourneySubstep[] = [];
+  if (r.requisition && r.status === "waiting" && kind(r.currentNode ?? "") === "wait") {
+    const st = r.requisition.status;
+    const backs = trail.filter(
+      (t) => t.decision === "sent_back" || t.decision === "reopened" || t.to === "rejected",
+    );
+    const lastBack = backs.at(-1);
+    const fixing = st === "draft" || st === "rejected" || st === "on_hold";
+    if (backs.length)
+      substeps.push({
+        label: `Sent back ${backs.length === 1 ? "once" : `${backs.length} times`}`,
+        state: fixing ? "back" : "done",
+        ...(lastBack?.comment ? { note: `Last: “${lastBack.comment}”` } : {}),
+      });
+    if (fixing)
+      substeps.push({
+        label: agentAsking
+          ? "Requisition agent is asking you a question"
+          : agentFixing
+            ? "Requisition agent is making the change"
+            : st === "rejected"
+              ? "Declined — reopen with changes"
+              : "Waiting to be corrected and resubmitted",
+        state: "now",
+      });
+    const order = ["pending_dh", "pending_hr", "pending_cbo"] as const;
+    const at = order.indexOf(st as (typeof order)[number]);
+    for (const [i, s2] of order.entries())
+      substeps.push({
+        label: `${WHO[s2]} approval`,
+        state: st === "approved" || (at >= 0 && i < at) ? "done" : i === at ? "now" : "todo",
+      });
+  }
   const showAction = () => {
     const el = document.getElementById(`wf-action-${r.id}`);
     el?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -532,6 +567,8 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
       <div className="xl:order-2">
         <WorkflowJourney
+          substeps={substeps}
+          needsYou={needsYou}
           run={
             r.waitingOn && waitWords ? { ...r, waitingOn: { ...r.waitingOn, text: waitWords } } : r
           }
