@@ -49,19 +49,57 @@ export const COST_STAGES: { stage: string; features: string[] }[] = [
       "assessment_generate",
       "assessment_score",
       "agent_screening",
+      "screening_call",
+      "agent_screening_call",
+      // Call reviews and chasing happen overwhelmingly around screening calls.
+      "agent_voice_guard",
+      "agent_followup",
     ],
   },
-  { stage: "Interviews", features: ["agent_interview"] },
+  {
+    stage: "Interviews",
+    features: [
+      "agent_interview",
+      "scheduling_call",
+      "agent_scheduling_call",
+      "agent_panel_l1",
+      "agent_panel_l2",
+      "agent_panel_l3",
+      "panel_assess",
+      "panel_summary",
+    ],
+  },
   { stage: "Evaluation", features: ["agent_evaluation"] },
   {
     stage: "Offer",
-    features: ["agent_offer", "offer_letter", "salary_research", "market_benchmark"],
+    features: [
+      "agent_offer",
+      "offer_letter",
+      "salary_research",
+      "market_benchmark",
+      "offer_policy_check",
+      "agent_labour_policy",
+      "labour_policy_ocr",
+      "negotiation_call",
+      "agent_negotiation_call",
+    ],
   },
   { stage: "Pre-onboarding", features: ["agent_onboarding", "doc_extract"] },
 ];
 const stageOf = (feature: string) =>
   COST_STAGES.find((s) => s.features.includes(feature))?.stage ?? "Other";
 const STAGE_ORDER = [...COST_STAGES.map((s) => s.stage), "Other"];
+/** The three phases a hiring manager reads cost in; every stage folds into one (or Other). */
+const PHASE_OF: Record<string, string> = {
+  "Reading & checking the CV": "Screening",
+  Matching: "Screening",
+  Screening: "Screening",
+  Interviews: "Interview",
+  Evaluation: "Interview",
+  Offer: "Offer",
+  "Pre-onboarding": "Offer",
+};
+const PHASES = ["Screening", "Interview", "Offer", "Other"];
 const HIRED = ["offer_accepted", "hired", "joined"];
 const NOT_HIRED = ["rejected", "withdrawn", "offer_declined"];
 
@@ -350,6 +388,8 @@ export type OrgHiringCost = Pricing & {
   total: CostLine;
   /** AI work not tied to any role (talent pool, copilot, organisation set-up). */
   notTiedToRole: CostLine;
+  /** AI work on requisitions that have since been deleted — still real spend. */
+  deletedRoles: CostLine & { count: number };
   hires: number;
   costPerHire: CostLine | null;
   months: (CostLine & { month: string; hires: number; costPerHire: CostLine | null })[];
@@ -364,6 +404,10 @@ export type OrgHiringCost = Pricing & {
     shared: CostLine;
     /** Average direct cost of a candidate on this role. */
     perCandidate: CostLine | null;
+    /** Average direct tokens per candidate in each phase; sums to perCandidate.tokens. */
+    perCandidateByPhase: { phase: string; tokens: number }[];
+    /** Middle candidate's direct tokens — less swayed than the average by one heavy candidate. */
+    medianPerCandidate: number | null;
     costPerHire: CostLine | null;
   }[];
   stages: (CostLine & { stage: string })[];
@@ -374,6 +418,13 @@ export type OrgHiringCost = Pricing & {
 };
 
 const monthOf = (day: string) => day.slice(0, 7);
+
+function median(xs: number[]): number | null {
+  if (!xs.length) return null;
+  const v = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(v.length / 2);
+  return Math.round(v.length % 2 ? v[m]! : (v[m - 1]! + v[m]!) / 2);
+}
 
 /**
  * Hiring cost across every role over the last `months` calendar months
@@ -442,8 +493,27 @@ export async function orgHiringCost(
 
   const total = acc();
   const loose = acc();
+  const liveReqs = new Set(reqs.map((r) => r.id));
+  const deleted = acc();
+  const deletedIds = new Set<string>();
   const byMonth = new Map<string, Acc>();
-  const byReq = new Map<string, { all: Acc; shared: Acc; direct: Acc; apps: Set<string> }>();
+  type ReqAcc = {
+    all: Acc;
+    shared: Acc;
+    direct: Acc;
+    apps: Set<string>;
+    appTokens: Map<string, number>;
+    phases: Map<string, number>;
+  };
+  const byReq = new Map<string, ReqAcc>();
+  const emptyReq = (): ReqAcc => ({
+    all: acc(),
+    shared: acc(),
+    direct: acc(),
+    apps: new Set(),
+    appTokens: new Map(),
+    phases: new Map(),
+  });
   const byStage = new Map<string, Acc>();
   const outcomes = { hired: acc(), notHired: acc(), inProgress: acc() };
   const groundingByMonth = new Map<string, number>();
@@ -462,15 +532,25 @@ export async function orgHiringCost(
       loose.add(b, rate, pricing);
       continue;
     }
+    if (!liveReqs.has(b.reqId)) {
+      deleted.add(b, rate, pricing);
+      deletedIds.add(b.reqId);
+      continue;
+    }
     let r = byReq.get(b.reqId);
-    if (!r) byReq.set(b.reqId, (r = { all: acc(), shared: acc(), direct: acc(), apps: new Set() }));
+    if (!r) byReq.set(b.reqId, (r = emptyReq()));
     r.all.add(b, rate, pricing);
-    if (!b.appId) {
+    // Work for an application that no longer exists (or is not on file) stays with the
+    // role, as on the role's own page — it is not another candidate to average over.
+    if (!b.appId || !appStage.has(b.appId)) {
       r.shared.add(b, rate, pricing);
       continue;
     }
     r.direct.add(b, rate, pricing);
     r.apps.add(b.appId);
+    r.appTokens.set(b.appId, (r.appTokens.get(b.appId) ?? 0) + b.tokens);
+    const phase = PHASE_OF[stageOf(b.feature)] ?? "Other";
+    r.phases.set(phase, (r.phases.get(phase) ?? 0) + b.tokens);
     bump(byStage, stageOf(b.feature)).add(b, rate, pricing);
     const st = appStage.get(b.appId) ?? "";
     (HIRED.includes(st)
@@ -505,6 +585,7 @@ export async function orgHiringCost(
     window: { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10), months },
     total: total.line(),
     notTiedToRole: loose.line(),
+    deletedRoles: { ...deleted.line(), count: deletedIds.size },
     hires,
     costPerHire: total.per(hires),
     months: monthKeys.map((m) => {
@@ -514,7 +595,7 @@ export async function orgHiringCost(
     }),
     roles: reqs
       .map((r) => {
-        const x = byReq.get(r.id) ?? { all: acc(), shared: acc(), direct: acc(), apps: new Set() };
+        const x = byReq.get(r.id) ?? emptyReq();
         return {
           id: r.id,
           code: r.code,
@@ -525,6 +606,13 @@ export async function orgHiringCost(
           total: x.all.line(),
           shared: x.shared.line(),
           perCandidate: x.direct.per(x.apps.size),
+          medianPerCandidate: median([...x.appTokens.values()]),
+          perCandidateByPhase: x.apps.size
+            ? PHASES.filter((ph) => ph !== "Other" || x.phases.get(ph)).map((ph) => ({
+                phase: ph,
+                tokens: Math.round((x.phases.get(ph) ?? 0) / x.apps.size),
+              }))
+            : [],
           costPerHire: x.all.per(r.hires),
         };
       })
