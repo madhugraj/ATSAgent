@@ -420,8 +420,10 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
     const note = t.comment ? ` — “${t.comment}”` : "";
     if (t.decision === "edited")
       return `Corrected by ${WHO[t.from ?? ""] ?? "a person"}${by}${note}`;
-    if (t.to === "rejected" || t.to === "draft")
-      return `Sent back by the ${WHO[t.from ?? ""] ?? "approver"}${by}${note}`;
+    if (t.decision === "reopened") return `Reopened with changes${by}${note}`;
+    if (t.to === "rejected")
+      return `Declined by the ${WHO[t.from ?? ""] ?? "approver"}${by}${note}`;
+    if (t.to === "draft") return `Sent back by the ${WHO[t.from ?? ""] ?? "approver"}${by}${note}`;
     if (t.to === "approved") return `Approved by the CBO${by}${note}`;
     if (t.from === "draft") return `Submitted for approval${by}${note}`;
     if (t.from === "rejected" || t.from === "on_hold")
@@ -630,7 +632,7 @@ function RequisitionApprovalCard({
     comment?: string | null;
   }[];
   const notes = trail.filter((t) => t.comment);
-  const [mode, setMode] = useState<"view" | "edit" | "changes">("view");
+  const [mode, setMode] = useState<"view" | "edit" | "changes" | "reopen">("view");
   const [comment, setComment] = useState("");
   const [f, setF] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -779,13 +781,17 @@ function RequisitionApprovalCard({
           ))}
         </ul>
       ) : null}
-      {mode !== "edit" && !returned ? (
+      {mode !== "edit" && (!returned || mode === "reopen") ? (
         <Textarea
           className="mt-2"
           rows={2}
           value={comment}
           onChange={(e) => setComment(e.target.value)}
-          placeholder={mode === "changes" ? "What should change?" : "Comment (optional)"}
+          placeholder={
+            mode === "changes" || mode === "reopen"
+              ? "What should change? The requisition agent makes it and resubmits."
+              : "Comment (optional)"
+          }
         />
       ) : null}
       <div className="mt-2 flex flex-wrap gap-2">
@@ -817,8 +823,34 @@ function RequisitionApprovalCard({
               Cancel
             </Button>
           </>
+        ) : returned && mode === "reopen" ? (
+          <>
+            <Button
+              size="sm"
+              disabled={busy || comment.trim().length < 3}
+              onClick={() =>
+                void run(
+                  () =>
+                    sendBackRequisition({
+                      data: { id: requisition.id, reason: comment.trim(), reopen: true },
+                    }),
+                  "Reopened — the requisition agent is making the change",
+                )
+              }
+            >
+              Reopen
+            </Button>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => setMode("view")}>
+              Cancel
+            </Button>
+          </>
         ) : returned ? (
           <>
+            {requisition.status !== "draft" ? (
+              <Button size="sm" disabled={busy} onClick={() => setMode("reopen")}>
+                Reopen with changes
+              </Button>
+            ) : null}
             <Button size="sm" variant="outline" disabled={busy} onClick={startEdit}>
               Edit
             </Button>
