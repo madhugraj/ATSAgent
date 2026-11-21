@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { z } from "zod";
 
@@ -7,6 +7,7 @@ import {
   aiInterviews,
   applications,
   candidates,
+  emailOutbox,
   evaluations,
   interviewConfirmations,
   interviews,
@@ -1135,6 +1136,24 @@ export const scheduleInterviewCore = createServerOnlyFn(async function scheduleI
         .limit(1);
       if (tx?.transcription === "requested") templateData["transcribed"] = "yes";
       if (data.agenda?.trim()) templateData["agenda"] = data.agenda.trim();
+      // Already told another time for this round? Say sorry and name it.
+      const [told] = await db
+        .select({ data: emailOutbox.templateData })
+        .from(emailOutbox)
+        .where(
+          and(
+            eq(emailOutbox.orgId, ctx.orgId),
+            eq(emailOutbox.applicationId, app.id),
+            eq(emailOutbox.kind, "interview_invite"),
+            eq(emailOutbox.status, "sent"),
+            sql`${emailOutbox.templateData}->>'roundLabel' = ${roundLabel}`,
+          ),
+        )
+        .orderBy(desc(emailOutbox.sentAt))
+        .limit(1);
+      const before = (told?.data as Record<string, unknown> | undefined)?.["scheduledAtText"];
+      if (typeof before === "string" && before !== templateData["scheduledAtText"])
+        templateData["previousText"] = before;
       if (candidateToken && !picked)
         templateData["confirmUrl"] =
           `${(await import("../server/env")).env.PUBLIC_SITE_URL.replace(/\/$/, "")}/confirm/${candidateToken}`;
