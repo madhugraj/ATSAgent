@@ -566,6 +566,7 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
               ) : null}
               {reqApprovable && reqPending ? (
                 <RequisitionApprovalCard
+                  key={reqPending.status}
                   requisition={reqPending}
                   onDone={() =>
                     void qc.invalidateQueries({ queryKey: ["workflow_app", workflowId] })
@@ -932,11 +933,11 @@ function RequisitionApprovalCard({
                         comment: comment.trim() || null,
                       },
                     }),
-                  "Approved",
+                  `Approved as ${step.who} — next: ${step.next === "approved" ? "done" : (REQ_NEXT[step.next]?.who ?? "")}`,
                 )
               }
             >
-              Approve
+              Approve as {step.who}
             </Button>
             <Button size="sm" variant="outline" disabled={busy} onClick={startEdit}>
               Edit
