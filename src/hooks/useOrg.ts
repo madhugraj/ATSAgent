@@ -27,6 +27,8 @@ export function useOrg() {
     membership: q.data?.membership ?? null,
     roles: q.data?.roles ?? [],
     isOwner: Boolean(q.data?.membership?.isOwner),
+    /** Interviewer role only: the app shows the panel view and nothing else. */
+    panelOnly: Boolean(q.data?.panelOnly),
     isLoading: q.isLoading,
     isError: q.isError,
     error: q.error as Error | null,

@@ -97,6 +97,8 @@ export const appRoleEnum = pgEnum("app_role", [
   "department_head",
   "hr_head",
   "president_cbo",
+  /** Panel only: their own interview rounds and scorecards (migration 0081). */
+  "interviewer",
 ]);
 
 /* ------------------------------------------------------- identity (new) */

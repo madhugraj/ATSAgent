@@ -32,12 +32,15 @@ keeps working on the same database (`member_ids` is still written for members).
 
 ## External panellists' scorecards
 
-External panellists have no account. Their interviewer brief carries a private link,
+External panellists — and internal ones without a login — have no account. Their interviewer
+brief and the L1–L3 panel summary carry a private link,
 `/scorecard/<token>`, for that round only:
 
 - the token is an HMAC of the server secret, interview, panellist and booked time — only its
   SHA-256 is stored; a resent brief carries the same link and a reschedule replaces it;
-- the page shows the round, role, candidate name and the round's competencies — nothing else;
+- the page shows the round, role, candidate name, the round's focus and competencies and, while
+  the link is valid, the candidate's profile, skills and CV text — no match, screening, pay or
+  notes; nothing about the candidate once it has expired;
 - it opens once the interview has started and closes seven days after it; one scorecard, final;
 - an external scorecard never moves a candidate into the offer pipeline — that waits for the
   HR head;

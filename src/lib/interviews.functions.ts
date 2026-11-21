@@ -14,7 +14,7 @@ import {
   organizations,
   requisitions,
 } from "@db/schema";
-import { assertRole, requireOrg } from "./auth.middleware";
+import { assertRole, requireOrg, requirePanel } from "./auth.middleware";
 import { canMove, REASON_REQUIRED, STAGE_LABEL, type Stage } from "./lifecycle";
 import { buildIcs } from "./ics";
 import { meetingRefOf, type MeetingRef } from "./meeting-ref";
@@ -95,7 +95,7 @@ export type MyInterview = {
 
 /** Every interview assigned to the signed-in user, newest first. */
 export const myInterviews = createServerFn({ method: "GET" })
-  .middleware([requireOrg])
+  .middleware([requirePanel])
   .handler(async ({ context }): Promise<MyInterview[]> => {
     const email = actorOf(context).toLowerCase();
 
@@ -552,8 +552,37 @@ export const submitScorecardCore = createServerOnlyFn(async function submitScore
   };
 });
 
+/**
+ * The brief for one round the caller sits on: candidate profile, CV, the
+ * round's focus and rubric, and (members only) match and screening highlights.
+ * Refused unless the caller's email is on the round.
+ */
+export const myRoundBrief = createServerFn({ method: "GET" })
+  .middleware([requirePanel])
+  .validator((d: unknown) => z.object({ interviewId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const [r] = await db
+      .select({
+        interviewer: interviews.interviewer,
+        interviewerEmail: interviews.interviewerEmail,
+        panel: interviews.panel,
+      })
+      .from(interviews)
+      .where(and(eq(interviews.id, data.interviewId), eq(interviews.orgId, context.orgId)))
+      .limit(1);
+    const { emailsOf } = await import("./interview-plan.server");
+    const me = actorOf(context).toLowerCase();
+    // Same membership test as myInterviews: interviewer, interviewer email or panel.
+    if (!r || !(emailsOf(r).includes(me) || r.interviewer?.toLowerCase() === me))
+      throw new Error("You are not on this interview's panel.");
+    const { panelBrief } = await import("./panel-brief.server");
+    const brief = await panelBrief(context.orgId, data.interviewId, { internal: true });
+    if (!brief) throw new Error("Interview not found.");
+    return brief;
+  });
+
 export const submitScorecard = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requirePanel])
   .validator((data: unknown) => ScorecardInput.parse(data))
   .handler(async ({ data, context }): Promise<ScorecardResult> =>
     submitScorecardCore(
@@ -659,7 +688,7 @@ export const markInterviewOutcomeCore = createServerOnlyFn(async function markIn
 });
 
 export const markInterviewOutcome = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requirePanel])
   .validator((data: unknown) => OutcomeInput.parse(data))
   .handler(async ({ data, context }) =>
     markInterviewOutcomeCore(
@@ -778,7 +807,7 @@ export const interviewerUnavailableCore = createServerOnlyFn(
 );
 
 export const interviewerUnavailable = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requirePanel])
   .validator((data: unknown) => UnavailableInput.parse(data))
   .handler(async ({ data, context }) =>
     interviewerUnavailableCore(

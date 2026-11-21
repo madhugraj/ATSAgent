@@ -9,6 +9,7 @@ import { AgentPopup } from "@/components/AgentPopup";
 import { AccountMenu } from "@/components/AccountMenu";
 import { CommandPalette } from "@/components/CommandPalette";
 import { useNavCtx } from "@/hooks/useNavCtx";
+import { useOrg } from "@/hooks/useOrg";
 import { useWorkMode } from "@/hooks/useWorkMode";
 import { NAV_GROUPS, modeForPath, type NavItem, type WorkMode } from "@/components/nav-config";
 
@@ -16,8 +17,12 @@ import { NAV_GROUPS, modeForPath, type NavItem, type WorkMode } from "@/componen
 const MODE_HOME: Record<WorkMode, string> = { agent: "/desk", manual: "/requisitions" };
 import { BrandFooter, BrandLogo } from "@/components/Brand";
 
+/** Where a panel-only member (interviewer role) lives: their rounds and scorecards. */
+const PANEL_HOME = "/interviews/mine";
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const ctx = useNavCtx();
+  const { panelOnly } = useOrg();
   const [mode, setMode, modeReady] = useWorkMode();
   const visible = (i: NavItem) => i.show(ctx) && (!i.mode || i.mode === mode);
   const nav = NAV_GROUPS.flatMap((g) => g.items).filter(visible);
@@ -52,6 +57,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       return next;
     });
   }
+
+  // A panel-only member sees one page; every other path sends them there
+  // (cosmetic — the server refuses them everywhere else regardless).
+  useEffect(() => {
+    if (panelOnly && pathname !== PANEL_HOME) void navigate({ to: PANEL_HOME, replace: true });
+  }, [panelOnly, pathname, navigate]);
+  if (panelOnly)
+    return (
+      <div className="flex min-h-screen flex-col bg-background">
+        <header className="flex h-14 items-center justify-between border-b border-border px-5">
+          <Link to={PANEL_HOME} aria-label="My interviews">
+            <BrandLogo className="h-6" />
+          </Link>
+          <AccountMenu />
+        </header>
+        <main className="mx-auto w-full max-w-5xl flex-1 p-6">
+          {pathname === PANEL_HOME ? children : null}
+        </main>
+      </div>
+    );
 
   function renderLink({ to, label, icon: Icon, search }: NavItem) {
     // /interviews and /agents must not stay highlighted on their sub-pages;
