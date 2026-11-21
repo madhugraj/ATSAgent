@@ -155,7 +155,7 @@ export function OntologyGraph3D({
         </div>
       )}
 
-      <div className="pointer-events-none absolute bottom-3 left-3 flex flex-wrap gap-3 text-[11px] text-muted-foreground">
+      <div className="pointer-events-none absolute bottom-3 left-3 flex flex-wrap gap-3 text-[0.6875rem] text-muted-foreground">
         <span className="flex items-center gap-1.5">
           <i className="inline-block size-2.5 rounded-full" style={{ background: COLOR.healthy }} />{" "}
           healthy supply

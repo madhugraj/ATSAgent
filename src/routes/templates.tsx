@@ -501,7 +501,7 @@ function TemplateEditor({ editor, onClose }: { editor: EditorState; onClose: () 
             )}
           </div>
           {analysisNote && <p className="mt-2 text-xs text-muted-foreground">{analysisNote}</p>}
-          <p className="mt-1.5 text-[10px] text-muted-foreground">
+          <p className="mt-1.5 text-[0.625rem] text-muted-foreground">
             The AI only proposes a format — nothing is saved until you press Save. The original file
             is kept with the template for reference.
           </p>
@@ -766,7 +766,7 @@ function TemplateEditor({ editor, onClose }: { editor: EditorState; onClose: () 
                 <div className="mb-3 grid grid-cols-4 gap-2">
                   {(["x", "y", "w", "h", "fontSize"] as const).map((field) => (
                     <div key={field}>
-                      <Label className="mb-1 block text-[10px] uppercase text-muted-foreground">
+                      <Label className="mb-1 block text-[0.625rem] uppercase text-muted-foreground">
                         {field}
                       </Label>
                       <Input
@@ -782,7 +782,7 @@ function TemplateEditor({ editor, onClose }: { editor: EditorState; onClose: () 
                     </div>
                   ))}
                   <div>
-                    <Label className="mb-1 block text-[10px] uppercase text-muted-foreground">
+                    <Label className="mb-1 block text-[0.625rem] uppercase text-muted-foreground">
                       align
                     </Label>
                     <select
@@ -853,7 +853,7 @@ function TemplateEditor({ editor, onClose }: { editor: EditorState; onClose: () 
                       Remove zone
                     </Button>
                   )}
-                  <span className="text-[10px] text-muted-foreground">
+                  <span className="text-[0.625rem] text-muted-foreground">
                     Drag boxes on the preview to match the artwork's text areas.
                   </span>
                 </div>

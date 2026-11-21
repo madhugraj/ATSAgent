@@ -689,7 +689,7 @@ function LinkedinOneClick() {
         <summary className="cursor-pointer text-xs font-medium">
           Ask LinkedIn to switch on data access for ATSIQ — ready-to-send request
         </summary>
-        <pre className="mt-3 whitespace-pre-wrap rounded-md bg-surface-2 p-3 text-[11px] leading-relaxed text-muted-foreground">
+        <pre className="mt-3 whitespace-pre-wrap rounded-md bg-surface-2 p-3 text-[0.6875rem] leading-relaxed text-muted-foreground">
           {LINKEDIN_ACCESS_REQUEST}
         </pre>
         <Button

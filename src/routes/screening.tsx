@@ -278,7 +278,7 @@ function ScreeningWorkspace() {
                 }
               >
                 {b.label}
-                <span className="num ml-1.5 text-[11px]">{counts ? counts[b.key] : "—"}</span>
+                <span className="num ml-1.5 text-[0.6875rem]">{counts ? counts[b.key] : "—"}</span>
               </button>
             ))}
           </div>
@@ -417,12 +417,12 @@ function QueueRowButton({
         <span className="flex items-center gap-2">
           <span className="truncate font-medium">{row.candidate_name}</span>
           {row.red_flag_count > 0 ? (
-            <span className="num shrink-0 rounded border border-destructive/30 px-1 text-[10px] text-destructive">
+            <span className="num shrink-0 rounded border border-destructive/30 px-1 text-[0.625rem] text-destructive">
               {row.red_flag_count} flag{row.red_flag_count === 1 ? "" : "s"}
             </span>
           ) : null}
           {row.screening_score !== null ? (
-            <span className="num shrink-0 text-[11px] text-muted-foreground">
+            <span className="num shrink-0 text-[0.6875rem] text-muted-foreground">
               screen {row.screening_score}
             </span>
           ) : null}
