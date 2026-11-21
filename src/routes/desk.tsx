@@ -464,7 +464,8 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
     if (t.to === "rejected" || t.to === "draft")
       return `Sent back by the ${WHO[t.from ?? ""] ?? "approver"}${by}${note}`;
     if (t.to === "approved") return `Approved by the CBO${by}${note}`;
-    if (t.from === "rejected" || t.from === "draft" || t.from === "on_hold")
+    if (t.from === "draft") return `Submitted for approval${by}${note}`;
+    if (t.from === "rejected" || t.from === "on_hold")
       return `Corrected and resubmitted${by}${note}`;
     return `Approved by the ${WHO[t.from ?? ""] ?? "approver"}${by}${note}`;
   };
