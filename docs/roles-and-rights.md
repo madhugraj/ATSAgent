@@ -9,29 +9,39 @@ in `src/lib/*.functions.ts` / `src/lib/auth.middleware.ts` — the sidebar/menu 
 - **Account owner** — the creator of the organisation (`org_members.is_owner`). Passes every
   role check (`assertRole`/`requireRole` semantics, auth.middleware.ts:54/111). Transferable,
   not grantable to two people.
-- **Five grantable roles** (`AppRole`): `recruiter`, `hiring_manager`, `department_head`,
-  `hr_head`, `president_cbo`. A member can hold several; a member with **no roles gets the
-  recruiter (TA) journey**.
+- **Six grantable roles** (`AppRole`): `recruiter`, `hiring_manager`, `department_head`,
+  `hr_head`, `president_cbo`, `interviewer` (migration 0081). A member can hold several; a
+  member with **no roles gets the recruiter (TA) journey**. A member whose **only** role is
+  `interviewer` (and who is not the owner) is **panel-only — denied by default** (see the
+  note under the surfaces table).
 - **Platform super admin** — separate, cross-tenant (platform console / AI usage only).
-- **Golden rule:** reads are **organisation-wide** — every active member can *see* the org's
-  requisitions, JDs, candidates (incl. CV text), applications, scores, interviews, screening
-  and offers. Roles gate **actions**, not reads. Two read exceptions below (HR performance,
-  ROI).
+- **Golden rule:** reads are **organisation-wide** — every active member (except a panel-only
+  `interviewer`) can *see* the org's requisitions, JDs, candidates (incl. CV text),
+  applications, scores, interviews, screening and offers. Roles gate **actions**, not reads.
+  Two read exceptions below (HR performance, ROI).
 
 ## Roles → surfaces (visibility)
 
-| Surface | owner | hr_head | president_cbo | recruiter | dept_head | hiring_manager |
-|---|---|---|---|---|---|---|
-| Dashboard (executive band: ROI, org health, HR team governance) | ✅ | ✅ | ✅ | — | — | — |
-| Dashboard (Priority workspace + "Needs you today") | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| JD↔CV matching (hiring-team tool — run it, review results) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Talent pool, Screening calls, Interviews, Offers, Careers inbox, Internal postings | ✅ | ✅ | ✅ | ✅ | — | — |
-| Requisitions & JD library | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Reports | ✅ | ✅ | ✅ | — | ✅ | ✅ |
-| Return on Individual, Talent Brain | ✅ | ✅ | ✅ | — | — | — |
-| Users & roles, Integrations, Master data, Content templates | ✅ | ✅ | ✅ | — | — | — |
-| Organisation settings | ✅ | — | — | — | — | — |
-| Platform console / AI usage | — | — | — | — | — | — | (platform super admin only)
+| Surface | owner | hr_head | president_cbo | recruiter | dept_head | hiring_manager | interviewer (panel-only) |
+|---|---|---|---|---|---|---|---|
+| Dashboard (executive band: ROI, org health, HR team governance) | ✅ | ✅ | ✅ | — | — | — | — |
+| Dashboard (Priority workspace + "Needs you today") | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| JD↔CV matching (hiring-team tool — run it, review results) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Talent pool, Screening calls, Interviews, Offers, Careers inbox, Internal postings | ✅ | ✅ | ✅ | ✅ | — | — | — |
+| Requisitions & JD library | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Reports | ✅ | ✅ | ✅ | — | ✅ | ✅ | — |
+| Return on Individual, Talent Brain | ✅ | ✅ | ✅ | — | — | — | — |
+| Users & roles, Integrations, Master data, Content templates | ✅ | ✅ | ✅ | — | — | — | — |
+| Organisation settings | ✅ | — | — | — | — | — | — |
+| My interviews only — own rounds, brief & CV, scorecard (`requirePanel`) | — | — | — | — | — | — | ✅ |
+| Platform console / AI usage | — | — | — | — | — | — | — | (platform super admin only)
+
+A **panel-only** member (`interviewer` as the only role, never the owner) is denied by default:
+`activeOrgOf` resolves them to no organisation, so `requireOrg`, `requireRole`,
+`requireOrgOwner` and `assertRole` all refuse; only `requirePanel` functions admit them (My
+interviews, scorecard submission, "can't make it", "didn't happen", `myRoundBrief`), each
+limited to rounds whose interviewer or panel is the caller's own email. Any other role
+alongside `interviewer` restores normal access (auth.middleware.ts).
 
 ## Actions matrix (server-enforced)
 
@@ -60,7 +70,8 @@ in `src/lib/*.functions.ts` / `src/lib/auth.middleware.ts` — the sidebar/menu 
 | Action | Who |
 |---|---|
 | Schedule / reschedule an interview | any member (reschedule needs a reason) |
-| Submit a scorecard | the assigned evaluator (locks on submit) |
+| Submit a scorecard | the assigned evaluator, or a directory panellist without a login through the private expiring link (locks on submit) |
+| Add a Team → Panel directory entry | `hr_head` or owner; on the coordinator's desk card, typing the person in is the approval (self-approved, audited) |
 | Move a candidate through applied → ai_screened → shortlisted → L1 → L2 → L3 | any member (legal transitions only; reasons required on closes) |
 | Move into the offer pipeline (`offer_pending/released/accepted`) or `joined` | `hr_head` or `president_cbo` |
 
@@ -103,6 +114,16 @@ already-correct: **ROI** was server-gated to owner / president_cbo / hr_head all
 (roi.functions.ts:112-120). Matching and screening remain org-gated on purpose — the whole
 hiring team works them; hiring managers and department heads get the matching view without
 the sourcing tools (pool, screening, offers, inbox).
+
+Panel-only members (2026-11, migration 0081): `activeOrgOf` resolves a member whose only role
+is `interviewer` (and who is not the owner) to no organisation, so every
+`requireOrg`/`requireRole`/`requireOrgOwner`/`assertRole` path refuses them; code that reads
+membership directly checks `assertNotPanelOnly`/`isPanelOnly` (org.functions, collaboration,
+notifications). Only `requirePanel` functions admit them, each limited to the caller's own
+rounds by email. The external panellist's scorecard link is the other restricted surface added
+with the panel directory: HMAC token with only its hash stored, valid from the interview's
+start until seven days after, one final scorecard, never moves a candidate into the offer
+pipeline (SECURITY.md, docs/panel-directory.md).
 
 ## Demo logins (local stack, password `demo1234`)
 
