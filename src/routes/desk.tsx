@@ -487,7 +487,13 @@ function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: str
     r.status === "waiting" &&
     !!r.requisition &&
     (reqStatus === "rejected" || reqStatus === "draft" || reqStatus === "on_hold");
-  const agentFixing = returned && !!r.requisition?.agentBusy;
+  // Just sent back or reopened: the agent is being handed it — no resubmit race.
+  const last = trail.at(-1);
+  const handingOff =
+    !!last &&
+    (last.decision === "sent_back" || last.decision === "reopened") &&
+    Date.now() - new Date(last.at ?? 0).getTime() < 2 * 60_000;
+  const agentFixing = returned && (!!r.requisition?.agentBusy || handingOff);
   const canFix =
     returned &&
     !agentFixing &&
