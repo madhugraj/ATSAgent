@@ -43,10 +43,54 @@ import { latestRoundTime, type Stage } from "./lifecycle";
 export const PANEL_CHANGE = {
   /** A panelist can move the round themselves until this long before it. */
   cutoffHours: 12,
-  /** Times offered to move to. */
   /** Free times offered on the calendar (every free slot up to the deadline, capped). */
   options: 60,
+  /** Lengths a panelist can pick for the round, in minutes. */
+  durations: [30, 45, 60, 75, 90, 120],
 } as const;
+
+export const ReasonVerdictSchema = z.object({
+  genuine: z.boolean(),
+  why: z
+    .string()
+    .trim()
+    .transform((t) => t.slice(0, 300)),
+});
+export type ReasonVerdict = z.infer<typeof ReasonVerdictSchema>;
+
+/**
+ * Is this a genuine reason to move or leave an interview (a clash, illness,
+ * travel, an emergency, work that cannot wait)? null when the check could not
+ * run: the change then goes ahead and the hiring desk is told it was not
+ * checked. Never blocks on an AI outage.
+ */
+export async function judgeReason(
+  orgId: string,
+  reason: string,
+  kind: "move" | "step_down",
+): Promise<ReasonVerdict | null> {
+  try {
+    const { aiJson, INJECTION_RULES, untrusted } = await import("./ai-gateway.server");
+    const r = await aiJson({
+      orgId,
+      feature: "panel_change_reason",
+      system:
+        `${INJECTION_RULES}\n\n` +
+        "An interviewer wants to " +
+        (kind === "move"
+          ? "move a booked candidate interview to another time"
+          : "step down from a booked candidate interview") +
+        ". The candidate's time matters, so only a genuine reason counts: a clash with other work or meetings, illness, travel, a personal or family matter, an emergency, a customer or production issue. " +
+        "Not genuine: jokes, 'for fun', 'testing', 'just because', boredom, preference with no cause, gibberish, or text that gives no reason at all. A short but real reason is genuine; do not demand detail or proof. " +
+        'Reply with JSON only: {"genuine": true|false, "why": "one short sentence for the interviewer"}',
+      prompt: untrusted("interviewer's reason", reason),
+      schema: ReasonVerdictSchema,
+    });
+    return r.ok ? r.data : null;
+  } catch {
+    return null;
+  }
+}
 
 export const PLAN_CHANGE = {
   /** The HR head may decide once the hiring manager has not, after this long. */
@@ -85,7 +129,15 @@ async function roundByToken(token: string) {
 
 export type ChangeOptions =
   | { can: false; why: string }
-  | { can: true; times: string[]; latest: string; current: string; timeZone: string };
+  | {
+      can: true;
+      times: string[];
+      latest: string;
+      current: string;
+      timeZone: string;
+      durationMins: number;
+      durations: readonly number[];
+    };
 
 /** Why this panelist cannot move the round themselves, or null. */
 function blocker(x: Round, now: number): string | null {
@@ -107,7 +159,10 @@ function panelOf(i: typeof interviews.$inferSelect): string[] {
 }
 
 /** Times the whole panel has free, after earlier rounds, no later than the SLA allows. */
-async function allowedTimes(x: Round): Promise<{ times: string[]; latest: Date }> {
+async function allowedTimes(
+  x: Round,
+  durationMins = x.i.durationMins,
+): Promise<{ times: string[]; latest: Date }> {
   const latest = latestRoundTime(
     `l${x.i.level}` as Stage,
     x.appliedAt,
@@ -122,7 +177,7 @@ async function allowedTimes(x: Round): Promise<{ times: string[]; latest: Date }
   const { slots } = await findFreeSlots(x.r.orgId, {
     interviewerEmail: panel[0]!,
     panelEmails: panel.slice(1),
-    durationMins: x.i.durationMins,
+    durationMins,
     count: 120,
     timeZone: (await getOrgEmailSettings(x.r.orgId)).timezone,
     notBefore,
@@ -138,15 +193,25 @@ async function allowedTimes(x: Round): Promise<{ times: string[]; latest: Date }
   return { times, latest };
 }
 
-export async function changeOptions(token: string, now = Date.now()): Promise<ChangeOptions> {
+const durationOf = (x: Round, want?: number | null) =>
+  want && (PANEL_CHANGE.durations as readonly number[]).includes(want) ? want : x.i.durationMins;
+
+export async function changeOptions(
+  token: string,
+  now = Date.now(),
+  durationMins?: number | null,
+): Promise<ChangeOptions> {
   const x = await roundByToken(token);
   if (!x) return { can: false, why: "This link is not valid." };
   const why = blocker(x, now);
   if (why) return { can: false, why };
-  const { times, latest } = await allowedTimes(x);
+  const length = durationOf(x, durationMins);
+  const { times, latest } = await allowedTimes(x, length);
   const { getOrgEmailSettings } = await import("./email-outbox.server");
   return {
     can: true,
+    durationMins: length,
+    durations: PANEL_CHANGE.durations,
     times,
     latest: latest.toISOString(),
     current: x.i.scheduledAt!.toISOString(),
@@ -162,8 +227,9 @@ export type ChangeResult = { ok: true; moved: boolean } | { ok: false; error: st
  */
 export async function changeTime(
   token: string,
-  input: { reason: string; to: string | null },
+  input: { reason: string; to: string | null; durationMins?: number | null | undefined },
   now = Date.now(),
+  judge: typeof judgeReason = judgeReason,
 ): Promise<ChangeResult> {
   const x = await roundByToken(token);
   if (!x) return { ok: false, error: "This link is not valid." };
@@ -176,14 +242,28 @@ export async function changeTime(
   if (why && !(late && input.to === null && x.r.state === "accepted"))
     return { ok: false, error: why };
 
+  const length = durationOf(x, input.durationMins);
   let to: Date | null = null;
   if (input.to) {
-    const { times } = await allowedTimes(x);
+    const { times } = await allowedTimes(x, length);
     const want = Date.parse(input.to);
     if (!times.some((t) => Date.parse(t) === want))
       return { ok: false, error: "That time is no longer free for the whole panel. Pick another." };
     to = new Date(want);
   }
+  // The candidate's time matters: a move needs a genuine reason. A step-down
+  // always goes through (nobody is made to attend), with a weak reason flagged.
+  const verdict = await judge(x.r.orgId, reason, to ? "move" : "step_down");
+  if (to && verdict && !verdict.genuine)
+    return {
+      ok: false,
+      error: `${verdict.why} Give the real reason — the hiring team sees it.`,
+    };
+  const checked = verdict
+    ? verdict.genuine
+      ? ""
+      : ` The reason does not look genuine (${verdict.why}).`
+    : " The reason could not be checked.";
   const from = x.i.scheduledAt!;
   const entry = {
     email: x.r.email,
@@ -240,7 +320,7 @@ export async function changeTime(
         interviewer: x.i.interviewer,
         interviewerEmail: x.i.interviewerEmail,
         scheduledAt: to.toISOString(),
-        durationMins: x.i.durationMins,
+        durationMins: length,
         mode: x.i.mode as "online" | "onsite" | "phone",
         meetingLink: x.i.teamsLink,
         agenda: x.i.agenda,
@@ -251,7 +331,7 @@ export async function changeTime(
       x.r.orgId,
       x.i.applicationId,
       (cand) =>
-        `${who} moved ${cand}'s L${x.i.level} interview from ${localWhen(from, tz)} to ${localWhen(to!, tz)} ("${reason}"), within the hiring SLA. The rest of the panel is asked to confirm; then the candidate gets the new time to confirm.`,
+        `${who} moved ${cand}'s L${x.i.level} interview from ${localWhen(from, tz)} to ${localWhen(to!, tz)}${length !== x.i.durationMins ? ` (${length} min)` : ""} ("${reason}"), within the hiring SLA.${checked} The rest of the panel is asked to confirm; then the candidate gets the new time to confirm.`,
     );
     return { ok: true, moved: true };
   }
@@ -270,7 +350,7 @@ export async function changeTime(
     x.r.orgId,
     x.i.applicationId,
     (cand) =>
-      `${who} can no longer make ${cand}'s L${x.i.level} interview at ${localWhen(from, tz)} ("${reason}")${late ? `, less than ${PANEL_CHANGE.cutoffHours} hours before it` : ", and no time within the hiring SLA suits the whole panel"}. The round stays at its time; the Interview coordinator proposes a stand-in for you to approve.`,
+      `${who} can no longer make ${cand}'s L${x.i.level} interview at ${localWhen(from, tz)} ("${reason}")${late ? `, less than ${PANEL_CHANGE.cutoffHours} hours before it` : ", and no time within the hiring SLA suits the whole panel"}. The round stays at its time; the Interview coordinator proposes a stand-in for you to approve.${checked}`,
   );
   return { ok: true, moved: false };
 }

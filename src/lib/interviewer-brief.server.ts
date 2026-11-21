@@ -110,6 +110,7 @@ export async function sendInterviewerBrief(
   // Their own accept / can't-make-it link for this round and time.
   let confirmUrl: string | undefined;
   let confirmToken = "";
+  let confirmed = false;
   try {
     const { panelistConfirmation } = await import("./interview-confirmations.server");
     const c = await panelistConfirmation(orgId, r.interviewId, r.scheduledAt, {
@@ -137,6 +138,7 @@ export async function sendInterviewerBrief(
       if (sent) return;
     }
     // Accepted panelists keep the link: it is where they move the time or step down.
+    confirmed = c.state === "accepted";
     if (c.state === "pending" || c.state === "accepted")
       confirmUrl = `${env.PUBLIC_SITE_URL.replace(/\/$/, "")}/confirm/${c.token}`;
   } catch {
@@ -199,6 +201,7 @@ export async function sendInterviewerBrief(
           : undefined,
       bookedText: await bookedTextFor(orgId, r),
       confirmUrl,
+      confirmed: confirmed ? "yes" : undefined,
       earlierRounds: external ? undefined : await earlierRoundsOf(orgId, r.applicationId, r.level),
       ...(r.panelNames && r.panelNames.length > 1
         ? { panelText: r.panelNames.filter(Boolean).join(", ") }
