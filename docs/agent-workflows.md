@@ -79,6 +79,10 @@ next to the organisation (Builder → Organisations) and sends it to that organi
 sidebar (with a count of live runs, amber when one needs a person), and the workflow opens inline there.
 HR head, CBO, owner and recruiters (TA) start runs and retry or skip a stopped step; API keys stay with the
 HR head, CBO and owner. A finished run shows the end it reached ("Workflow completed", "Stopped early").
+When a run waits on a requisition approval, the approver at that step answers it in the run's thread: the card
+shows the requisition summary and offers **Approve**, **Edit** (the approver corrects role, openings, location,
+experience, CTC band, skills or responsibilities; it stays at its step and the change goes on the approval trail
+and audit log) and **Ask for changes** (sent back to draft with the reason).
 
 Each granted workflow has its own app page in the organisation: **`/w/<workflowId>`** (Agent settings →
 Workflows → **Open**). It shows only that workflow: what starts it, whether it is Live, a **Start** box for a

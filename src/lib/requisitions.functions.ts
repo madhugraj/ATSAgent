@@ -595,3 +595,49 @@ export const applyInternally = createServerFn({ method: "POST" })
     });
     return { ok: true as const, candidateId };
   });
+
+/** The approver at the current step corrects a requisition in approval. */
+export const editRequisitionInApproval = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((data: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        title: z.string().trim().min(2).max(200).optional(),
+        openings: z.number().int().min(1).max(500).optional(),
+        location: z.string().trim().max(200).optional(),
+        workMode: z.enum(["onsite", "hybrid", "remote"]).optional(),
+        experienceMin: z.number().int().min(0).max(50).optional(),
+        experienceMax: z.number().int().min(0).max(60).optional(),
+        ctcBandMin: z.number().min(0).nullable().optional(),
+        ctcBandMax: z.number().min(0).nullable().optional(),
+        mustHaveSkills: z.array(z.string().trim().min(1).max(100)).max(50).optional(),
+        goodToHaveSkills: z.array(z.string().trim().min(1).max(100)).max(50).optional(),
+        responsibilities: z.string().max(8000).optional(),
+      })
+      .parse(data),
+  )
+  .handler(async ({ data, context }) => {
+    const { editRequisitionInApprovalCore } = await import("./requisitions.server");
+    const { id, ...patch } = data;
+    return editRequisitionInApprovalCore(
+      { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
+      id,
+      patch,
+    );
+  });
+
+/** Send a requisition in approval back to draft with what should change. */
+export const sendBackRequisition = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((data: unknown) =>
+    z.object({ id: z.string().uuid(), reason: z.string().min(3).max(1000) }).parse(data),
+  )
+  .handler(async ({ data, context }) => {
+    const { sendBackRequisitionCore } = await import("./requisitions.server");
+    await sendBackRequisitionCore(
+      { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
+      data,
+    );
+    return { ok: true as const };
+  });
