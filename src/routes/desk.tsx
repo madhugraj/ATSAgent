@@ -2178,22 +2178,25 @@ function TaskCard({
   // One decision at a time: a role-level request waits while a newer open
   // request (a follow-up question, a fresh approval) sits below it — answering
   // both at once raced. Per-candidate decisions stay independent.
-  const PER_CANDIDATE = new Set([
-    "screening_decision",
-    "panel_approval",
-    "panel_review",
-    "panel_substitute",
-  ]);
-  const roleLevel = (c: DeskCardView) => !PER_CANDIDATE.has(String(c["subjectType"] ?? ""));
+  // Role-level decisions (requisition, JD, profile, brief) wait while a newer
+  // question or a newer request on the same thing sits below; per-candidate
+  // requests (calls, screening, panels) stay independent.
+  const ROLE_LEVEL = new Set(["requisition", "jd", "org_profile", "expert_brief"]);
+  const subjectOf = (c: DeskCardView) =>
+    String(c["subjectType"] ?? conv.taskSubjects[String(c["taskId"])] ?? "");
   const locked = (() => {
-    if (status !== "open" || !roleLevel(card)) return false;
+    if (status !== "open" || kind !== "gate" || !ROLE_LEVEL.has(subjectOf(card))) return false;
     const cards = conv.messages
       .map((m) => m.card)
       .filter((c): c is DeskCardView => !!c && c.type === "task");
     const at = cards.findIndex((c) => String(c["taskId"]) === taskId);
     return cards
       .slice(at + 1)
-      .some((c) => roleLevel(c) && (conv.tasks[String(c["taskId"])] ?? "open") === "open");
+      .some(
+        (c) =>
+          (conv.tasks[String(c["taskId"])] ?? "open") === "open" &&
+          (String(c["kind"]) === "clarification" || subjectOf(c) === subjectOf(card)),
+      );
   })();
   const details =
     conv.taskDetails[taskId] ??
