@@ -128,7 +128,7 @@ const Email = ({
       greeting={memberName ? `Hi ${memberName},` : "Hello,"}
     >
       <p style={text}>
-        {dayLabel ? `Here is ${dayLabel} at ${orgName}. ` : ""}
+        {dayLabel ? `${dayLabel}: ` : ""}
         {summaryLine(reminders.length, critical, serious)}
       </p>
 

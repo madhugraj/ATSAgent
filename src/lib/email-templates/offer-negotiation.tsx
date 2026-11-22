@@ -1,7 +1,7 @@
 import * as React from "react";
 
 import type { TemplateEntry } from "./registry";
-import { EmailLayout, layoutStyles } from "./email-layout";
+import { EmailAction, EmailLayout, layoutStyles } from "./email-layout";
 
 interface Props {
   candidateName?: string;
@@ -41,10 +41,10 @@ const Email = ({
         </p>
       ))}
     {responseUrl ? (
-      <p style={text}>
-        Let us know what you think here — accept, suggest another figure, or ask for a call:{" "}
-        <a href={responseUrl}>{responseUrl}</a>
-      </p>
+      <>
+        <p style={text}>Accept it, suggest another figure, or ask for a call:</p>
+        <EmailAction href={responseUrl} label="Respond to the offer" />
+      </>
     ) : null}
     {dueDate ? <p style={text}>It would help to hear from you by {dueDate}.</p> : null}
   </EmailLayout>
