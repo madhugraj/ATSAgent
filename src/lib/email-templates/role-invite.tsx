@@ -1,7 +1,7 @@
 import * as React from "react";
 
 import type { TemplateEntry } from "./registry";
-import { EmailLayout, layoutStyles } from "./email-layout";
+import { EmailAction, EmailLayout, layoutStyles } from "./email-layout";
 
 interface Props {
   candidateName?: string;
@@ -35,11 +35,7 @@ const Email = ({
       {location ? ` (${location})` : ""} at <strong>{orgName}</strong> that looks like a good fit
       for your experience.
     </p>
-    {applyUrl ? (
-      <p style={text}>
-        If you are interested, you can apply here: <a href={applyUrl}>{applyUrl}</a>
-      </p>
-    ) : null}
+    {applyUrl ? <EmailAction href={applyUrl} label="View the role and apply" /> : null}
     <p style={text}>
       No pressure — if the timing is not right, simply ignore this email. Reply if you would rather
       not hear from us about future roles.

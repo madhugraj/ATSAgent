@@ -1,6 +1,7 @@
 import * as React from "react";
 import {
   Body,
+  Button,
   Container,
   Head,
   Heading,
@@ -19,6 +20,8 @@ interface EmailLayoutProps {
   siteUrl?: string;
   heading: string;
   greeting?: string;
+  /** Mail from ATSIQ itself (sign-up, password, tenant approval), not from an organisation. */
+  platform?: boolean;
   children?: React.ReactNode;
 }
 
@@ -129,6 +132,7 @@ export function EmailLayout({
   siteUrl = "https://atsiq.yavar.ai",
   heading,
   greeting,
+  platform = false,
   children,
 }: EmailLayoutProps) {
   const { logoSrc } = React.useContext(EmailBrandCtx);
@@ -140,7 +144,19 @@ export function EmailLayout({
         <Container style={frame}>
           <Section style={rule}>&nbsp;</Section>
           <Section style={header}>
-            {logoSrc ? (
+            {platform ? (
+              <Text
+                style={{
+                  margin: 0,
+                  fontSize: "18px",
+                  fontWeight: 800,
+                  color: BRAND,
+                  letterSpacing: "0.04em",
+                }}
+              >
+                {siteName}
+              </Text>
+            ) : logoSrc ? (
               <Img
                 src={logoSrc}
                 alt={orgName}
@@ -159,16 +175,36 @@ export function EmailLayout({
             {greeting === "" ? null : <Text style={text}>{greeting ?? "Hello,"}</Text>}
             {children}
           </Section>
-          <Text style={foot}>
-            Sent by {orgName} through{" "}
-            <Link href={siteUrl} style={{ color: muted, textDecoration: "underline" }}>
-              {siteName}
-            </Link>
-            . If you were not expecting this e-mail, you can ignore it.
-          </Text>
+          {platform ? (
+            <Text style={foot}>
+              {siteName} by Yavar AI ·{" "}
+              <Link href={siteUrl} style={{ color: muted, textDecoration: "underline" }}>
+                {siteUrl.replace(/^https?:\/\//, "")}
+              </Link>
+            </Text>
+          ) : (
+            <Text style={foot}>
+              Sent by {orgName} through{" "}
+              <Link href={siteUrl} style={{ color: muted, textDecoration: "underline" }}>
+                {siteName}
+              </Link>
+              . If you were not expecting this e-mail, you can ignore it.
+            </Text>
+          )}
         </Container>
       </Body>
     </Html>
+  );
+}
+
+/** The one main action of an e-mail, as a button in the brand colour. */
+export function EmailAction({ href, label }: { href: string; label: string }) {
+  return (
+    <Section style={{ margin: "22px 0" }}>
+      <Button href={href} style={primaryButton}>
+        {label}
+      </Button>
+    </Section>
   );
 }
 
