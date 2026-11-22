@@ -62,7 +62,12 @@ export async function sendTemplateEmail(
     throw new Error("Email is not configured: set SMTP_URL");
   }
 
-  const transporter = nodemailer.createTransport(smtpUrl);
+  // Test runs share .env.local, whose SMTP relay reaches real inboxes: render
+  // and "send" in memory instead, so a test never e-mails a real person.
+  const transporter =
+    process.env["NODE_ENV"] === "test"
+      ? nodemailer.createTransport({ jsonTransport: true })
+      : nodemailer.createTransport(smtpUrl);
   await transporter.sendMail({
     from,
     to: recipient,
