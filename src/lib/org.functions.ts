@@ -88,11 +88,13 @@ const notifyInvitedMember = createServerOnlyFn(async function notifyInvitedMembe
   inviteeName?: string | null;
   inviterName?: string | null;
   memberId?: string | null;
+  orgId?: string | null;
 }) {
   try {
     const { sendTemplateEmail } = await import("@/lib/email-templates/send-email");
     await sendTemplateEmail("member-invited", args.email, {
       idempotencyKey: `member-invited:${args.memberId ?? args.email}`,
+      orgId: args.orgId ?? null,
       templateData: {
         orgName: args.orgName,
         roleLabel: ROLE_LABELS[args.role],
@@ -446,6 +448,7 @@ export const createOrganization = createServerFn({ method: "POST" })
         })
         .returning({ id: orgMembers.id });
       await notifyInvitedMember({
+        orgId: org.id,
         email: invite.email.toLowerCase(),
         orgName: org.name,
         role: invite.role,
@@ -690,6 +693,7 @@ export const inviteMemberCore = createServerOnlyFn(async function inviteMemberCo
     .where(and(eq(orgMembers.userId, context.userId), eq(orgMembers.orgId, orgId)))
     .limit(1);
   await notifyInvitedMember({
+    orgId,
     email,
     orgName: orgRow?.name ?? "your organisation",
     role: data.role,

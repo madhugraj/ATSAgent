@@ -305,6 +305,7 @@ export async function processEmailOutbox(opts: { max?: number } = {}): Promise<O
       await sendTemplateEmail(row.templateName, row.toEmail, {
         templateData: row.templateData,
         idempotencyKey: `outbox:${row.id}`,
+        orgId: row.orgId,
         ...(row.replyTo ? { replyTo: row.replyTo } : {}),
         ...(row.attachments.length ? { attachments: row.attachments } : {}),
       });

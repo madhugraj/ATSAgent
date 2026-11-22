@@ -1,7 +1,9 @@
 import * as React from "react";
 
 import type { TemplateEntry } from "./registry";
-import { EmailLayout, layoutStyles } from "./email-layout";
+import { Button, Section } from "@react-email/components";
+
+import { EmailLayout, layoutStyles, primaryButton } from "./email-layout";
 
 /** Internal nudge to a member (approvals, scorecards) sent by the Follow-up agent. */
 interface Props {
@@ -29,9 +31,11 @@ const Email = ({
   >
     {message ? <p style={text}>{message}</p> : null}
     {actionUrl ? (
-      <p style={text}>
-        Open it here: <a href={actionUrl}>{actionUrl}</a>
-      </p>
+      <Section style={{ margin: "22px 0 8px" }}>
+        <Button href={actionUrl} style={primaryButton}>
+          Open in ATSIQ
+        </Button>
+      </Section>
     ) : null}
   </EmailLayout>
 );

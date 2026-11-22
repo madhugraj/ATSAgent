@@ -18,11 +18,7 @@ import {
   ScrollText,
 } from "lucide-react";
 
-import {
-  archiveOwnOrganization,
-  listMembers,
-  updateOrganization,
-} from "@/lib/org.functions";
+import { archiveOwnOrganization, listMembers, updateOrganization } from "@/lib/org.functions";
 import { getAiSettings } from "@/lib/ai-settings.functions";
 import { getOrgProfileGate } from "@/lib/org-profile.functions";
 import { getPaySettings } from "@/lib/pay-settings.functions";
@@ -42,6 +38,7 @@ import { PhoneScreeningCard } from "@/components/PhoneScreeningCard";
 import { PayConventionsCard } from "@/components/PayConventionsCard";
 import { LabourPolicyCard } from "@/components/LabourPolicyCard";
 import { SilentPanelCard } from "@/components/SilentPanelCard";
+import { EmailBrandCard } from "@/components/EmailBrandCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -122,13 +119,14 @@ function SettingsRow({
         <span className="text-muted-foreground">{icon}</span>
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-semibold">{title}</span>
-          <span className="block truncate text-xs text-muted-foreground sm:hidden">
-            {summary}
-          </span>
+          <span className="block truncate text-xs text-muted-foreground sm:hidden">{summary}</span>
         </span>
         <span className="hidden text-xs text-muted-foreground sm:block">{summary}</span>
         <ChevronDown
-          className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")}
+          className={cn(
+            "size-4 shrink-0 text-muted-foreground transition-transform",
+            open && "rotate-180",
+          )}
         />
       </button>
       {open ? <div className="border-t p-4">{children}</div> : null}
@@ -151,12 +149,18 @@ function OrganisationSettings() {
 
   // Shared with the cards: each read here feeds a summary line or a setup step,
   // and the same query key keeps the card's own copy in one cache entry.
-  const ai = useQuery({ queryKey: ["ai_settings"], queryFn: () => getAiSettings({ data: undefined }) });
+  const ai = useQuery({
+    queryKey: ["ai_settings"],
+    queryFn: () => getAiSettings({ data: undefined }),
+  });
   const gate = useQuery({ queryKey: ["org_profile_gate"], queryFn: () => getOrgProfileGate() });
   const members = useQuery({ queryKey: ["org_members"], queryFn: () => listMembersFn({}) });
   const pay = useQuery({ queryKey: ["pay_settings"], queryFn: () => getPaySettings() });
   const labour = useQuery({ queryKey: ["labour_policy"], queryFn: () => getLabourPolicy() });
-  const assessment = useQuery({ queryKey: ["assessment_policy"], queryFn: () => getAssessmentPolicy() });
+  const assessment = useQuery({
+    queryKey: ["assessment_policy"],
+    queryFn: () => getAssessmentPolicy(),
+  });
   const phone = useQuery({ queryKey: ["phone_screening"], queryFn: () => getPhoneScreening() });
   const panel = useQuery({ queryKey: ["panel_agent"], queryFn: () => getPanelAgent() });
   const training = useQuery({ queryKey: ["training_status"], queryFn: () => getTrainingStatus() });
@@ -402,7 +406,9 @@ function OrganisationSettings() {
                     max={12}
                     disabled={!isOwner}
                     value={form.fiscalYearStartMonth}
-                    onChange={(e) => setForm({ ...form, fiscalYearStartMonth: Number(e.target.value) })}
+                    onChange={(e) =>
+                      setForm({ ...form, fiscalYearStartMonth: Number(e.target.value) })
+                    }
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -441,6 +447,7 @@ function OrganisationSettings() {
               ) : null}
             </div>
           </SettingsRow>
+          <EmailBrandCard canEdit={navCtx.governance} />
         </div>
       )}
 

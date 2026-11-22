@@ -214,6 +214,11 @@ export const organizations = pgTable(
      * replayed against candidate capture (2026-11 audit N-15).
      */
     distributionTokenHash: text("distribution_token_hash"),
+    /** E-mail branding (migration 0091): logo object key under `${orgId}/branding/`. */
+    brandLogoPath: text("brand_logo_path"),
+    brandLogoContentType: text("brand_logo_content_type"),
+    /** E-mail brand colour, "#rrggbb"; null = the ATSIQ default. */
+    brandColor: text("brand_color"),
   },
   (t) => [
     uniqueIndex("organizations_slug_key").on(t.slug),
