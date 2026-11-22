@@ -138,7 +138,9 @@ We credit reporters in release notes on request.
   per-tenant AI visibility without exposing model identities to tenant users — vendor and model
   names stay inside the organisation's own integrations settings.
 - Files: CVs and screening recordings remain private in S3-compatible storage and are served through
-  authorised application paths rather than public object URLs.
+  authorised application paths rather than public object URLs. E-mail brand logos stay private
+  too: they are embedded in each e-mail as an inline `cid:` attachment, never linked by URL, and
+  uploads are checked as real PNG/JPEG (magic bytes, 1 MB cap); changes are audited.
 - CI: typecheck, lint, `bun audit --level high`, gitleaks, integration tests (`.github/workflows/ci.yml`).
   Actions are pinned by commit SHA and base images by digest; Dependabot proposes updates; the CI
   token is read-only; deployed images carry an SBOM and SLSA provenance and are deployed by digest.
