@@ -97,6 +97,31 @@ describe("end-of-day digest", () => {
     expect(await mail("agent-digest:")).toHaveLength(1);
   });
 
+  test("a member's reminders are held and arrive in their one summary, never alone", async () => {
+    const { enqueueEmail } = await import("../src/lib/email-outbox.server");
+    for (const h of ["REQ-1 waits for approval", "REQ-2 waits for approval"])
+      await enqueueEmail({
+        orgId,
+        kind: "member_reminder",
+        templateName: "member_reminder",
+        toEmail: ownerEmail,
+        idempotencyKey: `reminder:${userId}:${h.toLowerCase()}:${stamp}`,
+        templateData: { heading: h, message: "m", actionUrl: "https://x.test/r" },
+        hold: true,
+      });
+    expect((await mail("reminder:")).map((m) => m.status)).toEqual(["held", "held"]);
+    expect((await dispatchAgentDigests(afterEod, { orgId })).digests).toBe(1);
+    const [sent] = await mail("agent-digest:");
+    const rows = JSON.parse(sent!.templateData!["remindersJson"]!) as { heading: string }[];
+    expect(rows.map((r) => r.heading).sort()).toEqual([
+      "REQ-1 waits for approval",
+      "REQ-2 waits for approval",
+    ]);
+    expect(JSON.parse(sent!.templateData!["issuesJson"]!)).toEqual([]);
+    expect(sent!.templateData!["heading"]).toBe("Today: 2 waiting for you");
+    expect((await mail("reminder:")).map((m) => m.status)).toEqual(["suppressed", "suppressed"]);
+  });
+
   test("no open serious issue, no digest", async () => {
     const [i] = await issue("context.policy_waiting_past_effective", "serious");
     await db.update(agentIssues).set({ status: "resolved" }).where(eq(agentIssues.id, i!.id));

@@ -234,15 +234,17 @@ export function localDayHour(now: Date, timeZone: string): { day: string; hour: 
 }
 
 /**
- * End-of-day digest: one e-mail per person per organisation with a table of
- * every serious / critical issue still open. Sent once per local day after
- * DIGEST_HOUR; nothing open, nothing sent. Idempotent (outbox key per day).
+ * End-of-day summary: one e-mail per person per organisation, sent once per
+ * local day after DIGEST_HOUR. The owner, HR heads and CBOs get a table of
+ * every serious / critical agent issue still open; anyone an agent reminded
+ * that day (remind_member, parked as `held` outbox rows) gets a "waiting for
+ * you" table. Nothing to say, nothing sent. Idempotent (outbox key per day).
  */
 export async function dispatchAgentDigests(
   now = new Date(),
   opts: { orgId?: string } = {},
 ): Promise<{ digests: number }> {
-  const orgs = await db
+  const withIssues = await db
     .selectDistinct({ orgId: agentIssues.orgId })
     .from(agentIssues)
     .where(
@@ -252,12 +254,23 @@ export async function dispatchAgentDigests(
         inArray(agentIssues.severity, ["serious", "critical"]),
       ),
     );
-  if (!orgs.length) return { digests: 0 };
+  const withReminders = await db
+    .selectDistinct({ orgId: emailOutbox.orgId })
+    .from(emailOutbox)
+    .where(
+      and(
+        opts.orgId ? eq(emailOutbox.orgId, opts.orgId) : undefined,
+        eq(emailOutbox.status, "held"),
+        sql`${emailOutbox.idempotencyKey} like 'reminder:%'`,
+      ),
+    );
+  const orgIds = [...new Set([...withIssues, ...withReminders].map((o) => o.orgId))];
+  if (!orgIds.length) return { digests: 0 };
   const { enqueueEmail, getOrgEmailSettings, formatInOrgTZ } =
     await import("@/lib/email-outbox.server");
   const base = env.PUBLIC_SITE_URL.replace(/\/$/, "");
   let digests = 0;
-  for (const { orgId } of orgs) {
+  for (const orgId of orgIds) {
     const emailSettings = await getOrgEmailSettings(orgId);
     const tz = emailSettings.timezone || "UTC";
     const { day, hour } = localDayHour(now, tz);
@@ -271,63 +284,112 @@ export async function dispatchAgentDigests(
       )
       .limit(1);
     if (already) continue;
+
     const [settings] = await db
       .select({ on: agentTelemetrySettings.alertEmailEnabled })
       .from(agentTelemetrySettings)
       .where(eq(agentTelemetrySettings.orgId, orgId))
       .limit(1);
-    if (settings?.on === false) continue;
-    const issues = await db
-      .select()
-      .from(agentIssues)
-      .where(
-        and(
-          eq(agentIssues.orgId, orgId),
-          ne(agentIssues.status, "resolved"),
-          inArray(agentIssues.severity, ["serious", "critical"]),
-        ),
-      );
-    if (!issues.length) continue;
+    const issues =
+      settings?.on === false
+        ? []
+        : await db
+            .select()
+            .from(agentIssues)
+            .where(
+              and(
+                eq(agentIssues.orgId, orgId),
+                ne(agentIssues.status, "resolved"),
+                inArray(agentIssues.severity, ["serious", "critical"]),
+              ),
+            );
     issues.sort(
       (a, b) =>
         (a.severity === "critical" ? 0 : 1) - (b.severity === "critical" ? 0 : 1) ||
         a.firstSeenAt.getTime() - b.firstSeenAt.getTime(),
     );
-    const rows = issues.slice(0, 40).map((i) => ({
+    const issueRows = issues.slice(0, 40).map((i) => ({
       severity: i.severity,
       agent: i.agentType === "*" ? "Orchestrator" : i.agentType,
       title: i.title.slice(0, 200),
       since: formatInOrgTZ(i.firstSeenAt, tz),
     }));
+    const held = await db
+      .select()
+      .from(emailOutbox)
+      .where(
+        and(
+          eq(emailOutbox.orgId, orgId),
+          eq(emailOutbox.status, "held"),
+          sql`${emailOutbox.idempotencyKey} like 'reminder:%'`,
+        ),
+      );
+
+    const people = new Map<string, { name: string | null; issues: boolean }>();
+    if (issueRows.length)
+      for (const r of await alertRecipients(orgId))
+        people.set(r.email.toLowerCase(), { name: r.name, issues: true });
+    for (const h of held)
+      if (!people.has(h.toEmail))
+        people.set(h.toEmail, { name: h.templateData?.["memberName"] ?? null, issues: false });
+    if (!people.size) continue;
+
     const [org] = await db
       .select({ name: organizations.name })
       .from(organizations)
       .where(eq(organizations.id, orgId))
       .limit(1);
-    const heading = `${issues.length} agent issue${issues.length === 1 ? "" : "s"} open today`;
-    for (const r of await alertRecipients(orgId)) {
+    for (const [email, p] of people) {
+      const mine = held
+        .filter((h) => h.toEmail === email)
+        .slice(0, 40)
+        .map((h) => ({
+          heading: (h.templateData?.["heading"] ?? "").slice(0, 180),
+          message: (h.templateData?.["message"] ?? "").slice(0, 400),
+          url: h.templateData?.["actionUrl"] ?? "",
+        }));
+      const rowsForMe = p.issues ? issueRows : [];
+      if (!mine.length && !rowsForMe.length) continue;
+      const parts = [
+        mine.length ? `${mine.length} waiting for you` : "",
+        rowsForMe.length
+          ? `${rowsForMe.length} agent issue${rowsForMe.length === 1 ? "" : "s"} open`
+          : "",
+      ].filter(Boolean);
       await enqueueEmail({
         orgId,
         kind: "member_reminder",
         templateName: "agent_digest",
-        toEmail: r.email,
-        idempotencyKey: `${prefix}${r.email.toLowerCase()}`,
+        toEmail: email,
+        idempotencyKey: `${prefix}${email}`,
         templateData: {
-          memberName: r.name ?? undefined,
+          memberName: p.name ?? undefined,
           orgName: org?.name ?? undefined,
-          heading,
-          issuesJson: JSON.stringify(rows),
-          actionUrl: `${base}/agents/observability`,
+          heading: `Today: ${parts.join(", ")}`,
+          issuesJson: JSON.stringify(rowsForMe),
+          remindersJson: JSON.stringify(mine),
+          actionUrl: rowsForMe.length ? `${base}/agents/observability` : undefined,
         },
       });
     }
+    // The reminders now travel in the summary; never send them on their own.
+    if (held.length)
+      await db
+        .update(emailOutbox)
+        .set({ status: "suppressed" })
+        .where(
+          inArray(
+            emailOutbox.id,
+            held.map((h) => h.id),
+          ),
+        );
     await writeAudit({
       actor: "system:agent-health",
       orgId,
       action: "agent.issue.digest",
       entityType: "organization",
       entityId: orgId,
-      detail: { day, issues: issues.length },
+      detail: { day, issues: issues.length, reminders: held.length, people: people.size },
     });
     digests++;
   }
