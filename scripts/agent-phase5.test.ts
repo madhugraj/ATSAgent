@@ -461,7 +461,7 @@ describe("autonomy recommendations", () => {
 /* ---------------------------------------------------------------- alerting */
 
 describe("alert delivery", () => {
-  test("a serious issue is alerted once, by e-mail and a signed webhook", async () => {
+  test("a serious issue is pushed once by signed webhook; its e-mail waits for the daily digest", async () => {
     await db.insert(agentTelemetrySettings).values({
       orgId,
       alertWebhookUrl: "https://hooks.example.test/agents",
@@ -497,7 +497,7 @@ describe("alert delivery", () => {
     expect(body.issue).toMatchObject({ id: issue!.id, rule: "harness.failures" });
 
     const [alerted] = await audits("agent.issue.alerted");
-    expect((alerted!.detail as { channels: string[] }).channels).toEqual(["email", "webhook"]);
+    expect((alerted!.detail as { channels: string[] }).channels).toEqual(["webhook"]);
 
     // Warnings are not pushed, and nothing is sent twice.
     posted.length = 0;
