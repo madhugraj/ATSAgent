@@ -134,6 +134,8 @@ jobs:
         run: bun test scripts/assessment-timeline.test.ts
       - name: Pay & availability before an offer (form, entry, offer readiness)
         run: bun test scripts/compensation.test.ts
+      - name: Offer stages recorded as stage events
+        run: bun test scripts/offer-stage-events.test.ts
       - name: Pay discussion before the offer (negotiation)
         run: bun test scripts/negotiation.test.ts
       - name: Hiring desk clarity (agent text, overtaken cards, thread order)
