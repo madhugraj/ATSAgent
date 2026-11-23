@@ -1,6 +1,7 @@
 # Voice scheduling call — plan (stage 1.2)
 
-Status: **S0–S2 built; a real call booked an interview** (2026-10-25); S3–S4 to come. Decisions confirmed: the
+Status: **S0–S2 built; a real call booked an interview** (2026-10-25); **voice first since
+2026-11-17** (see "Voice first" below — it replaces the e-mail-first triggers); S3–S4 to come. Decisions confirmed: the
 recommended defaults below. Builds on the AI screening call
 (`docs/voice-screening-agent.md`, `docs/voice-screening-stage1.1-plan.md`).
 
@@ -16,16 +17,48 @@ e-mails, and every miss costs days.
 The scheduling call is a **short AI phone call that does what the link does** —
 nothing more. It never replaces the e-mail; it follows up on one.
 
-## When it calls
+## Voice first (2026-11-17, migration 0069)
 
-The call is a follow-up to an open e-mail offer, never the first contact about
+The e-mail-first design waited a day (the organisation's wait) before any call,
+so a candidate the team had just phoned for screening sat on an unread e-mail.
+The flow is now:
+
+1. The coordinator offers times (`offer_interview_slots` → `offerSlotsCore`).
+2. **The system** (not the agent) arranges the scheduling call at once
+   (`requestSchedulingCall`, `callFirst`), due at the next calling-window start.
+   The private link is **held**: `interview_slot_offers.link_emailed_at` stays
+   null.
+3. The call books a time → confirmation and invites only; no link e-mail.
+4. The call ends without a booking (not now, declined, wrong person, opt-out,
+   no answer, could not reach) → the link is e-mailed at once
+   (`releaseOfferLinkAfterCall`, from both the live `settle` and the text-mode
+   `endSchedulingCall`). A missed first attempt still gets its one retry.
+   "None of these work" goes down the decline path; the coordinator re-offers,
+   and as the assistant has already spoken about the round, the new times go
+   by e-mail.
+5. Safety net (agent tick, `releaseHeldOfferLinks`): a held link with no live
+   call, held more than 6 h, or within 12 h of closing is e-mailed regardless.
+6. No call possible when the times are offered (switched off, no line or voice
+   key, no Indian mobile, opted out, already spoken about this round) → e-mailed
+   straight away; the reason is returned (`callRefused`) and audited. If calls
+   become possible later, `raiseUnansweredOffers` asks the coordinator to
+   request one (no wait).
+
+The organisation's wait (`scheduling_wait_hours`) is retired: the column stays
+for old rows but is no longer read or shown. Approving the offer (or its
+pre-approval) covers the call. Health rule `scheduling_call.not_dialled`
+(serious) flags a call still undialled 30 minutes after it was due.
+
+## When it calls (original e-mail-first design, superseded above)
+
+The call was a follow-up to an open e-mail offer, never the first contact about
 the round.
 
-| Trigger | Default | Notes |
-|---|---|---|
-| The e-mailed offer is open and unanswered | after **24 hours** (org setting) | only while the earliest offered time is still ≥ 24 h away |
-| The candidate declined by e-mail, or the link expired | instead of a second e-mail offer | the coordinator calls with fresh times |
-| The candidate asked to be phoned (screening call or a note) | as soon as the offer is sent | recorded preference, not inferred |
+| Trigger                                                     | Default                          | Notes                                                     |
+| ----------------------------------------------------------- | -------------------------------- | --------------------------------------------------------- |
+| The e-mailed offer is open and unanswered                   | after **24 hours** (org setting) | only while the earliest offered time is still ≥ 24 h away |
+| The candidate declined by e-mail, or the link expired       | instead of a second e-mail offer | the coordinator calls with fresh times                    |
+| The candidate asked to be phoned (screening call or a note) | as soon as the offer is sent     | recorded preference, not inferred                         |
 
 It never calls when:
 
@@ -175,13 +208,13 @@ and the call.
 
 ## Milestones
 
-| Step | What | Done when |
-|---|---|---|
-| S0 | Migration, settings switch, opt-out, `chooseSlot` by offer id | tests pass; the card shows the switch |
-| S1 | Scheduling call agent (prompt, tools, evals); `request_scheduling_call`; triggers | text-mode evals pass |
-| S2 | Worker: place a real scheduling call to the test number | a real call books a slot and both invites arrive |
-| S3 | Desk post, interviews board, candidate page | HR follows it from the thread alone |
-| S4 | Pilot on one requisition with HR listening to the first calls | — |
+| Step | What                                                                              | Done when                                        |
+| ---- | --------------------------------------------------------------------------------- | ------------------------------------------------ |
+| S0   | Migration, settings switch, opt-out, `chooseSlot` by offer id                     | tests pass; the card shows the switch            |
+| S1   | Scheduling call agent (prompt, tools, evals); `request_scheduling_call`; triggers | text-mode evals pass                             |
+| S2   | Worker: place a real scheduling call to the test number                           | a real call books a slot and both invites arrive |
+| S3   | Desk post, interviews board, candidate page                                       | HR follows it from the thread alone              |
+| S4   | Pilot on one requisition with HR listening to the first calls                     | —                                                |
 
 ## S0 — built (2026-10-25)
 
@@ -189,7 +222,7 @@ and the call.
   `slot_offer_id` (required for a scheduling call) and `alternates` (≤ 3);
   `phone_screening_settings.scheduling_enabled` / `scheduling_wait_hours`
   (2–96, default 24); `candidates.ai_call_opt_out_at`.
-- Organisation → Phone screening: an *Interview scheduling calls* switch and
+- Organisation → Phone screening: an _Interview scheduling calls_ switch and
   the wait in hours, saved and audited with the rest of the policy; the card
   says it is used once scheduling calls are released.
 - The opt-out (`src/server/voice/opt-out.server.ts`): recorded from a call or
@@ -227,7 +260,7 @@ and the call.
 - **Triggers:** the agent tick raises `interview.slots_no_reply` once per offer
   unanswered past the wait → the coordinator asks for the call (and nothing
   else); after a decline or expiry the coordinator re-offers times and asks
-  for the call straight away. *Asked to be phoned* is not built: there is no
+  for the call straight away. _Asked to be phoned_ is not built: there is no
   place yet where a candidate's preference for a call is recorded (S3 can add
   it to the time-choice page).
 - Screening queries (desk, board, health, the Screening agent's status, the
@@ -371,8 +404,8 @@ clearly where they stand. Scheduling call agent 1.5.0:
 With a second named member (Arun Kumar) the call ran as designed: the hello
 answered with who it is, the note and purpose, where she stands, "a panel of two
 people from the hiring team, led by Arun Kumar", the times, and her reason kept
-when none suited. Her reason exposed a real gap: *"I have not even completed my
-first level of interview"* — the test had offered L2 times while she was still
+when none suited. Her reason exposed a real gap: _"I have not even completed my
+first level of interview"_ — the test had offered L2 times while she was still
 in L1, and nothing refused it. Now:
 
 - Times are offered only for the round the candidate is in — the one a person

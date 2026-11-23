@@ -13,16 +13,13 @@ import {
   CircleDashed,
   Coins,
   ListChecks,
+  Mail,
   Phone,
   Scale,
   ScrollText,
 } from "lucide-react";
 
-import {
-  archiveOwnOrganization,
-  listMembers,
-  updateOrganization,
-} from "@/lib/org.functions";
+import { archiveOwnOrganization, listMembers, updateOrganization } from "@/lib/org.functions";
 import { getAiSettings } from "@/lib/ai-settings.functions";
 import { getOrgProfileGate } from "@/lib/org-profile.functions";
 import { getPaySettings } from "@/lib/pay-settings.functions";
@@ -42,6 +39,7 @@ import { PhoneScreeningCard } from "@/components/PhoneScreeningCard";
 import { PayConventionsCard } from "@/components/PayConventionsCard";
 import { LabourPolicyCard } from "@/components/LabourPolicyCard";
 import { SilentPanelCard } from "@/components/SilentPanelCard";
+import { EmailBrandCard } from "@/components/EmailBrandCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -122,13 +120,14 @@ function SettingsRow({
         <span className="text-muted-foreground">{icon}</span>
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-semibold">{title}</span>
-          <span className="block truncate text-xs text-muted-foreground sm:hidden">
-            {summary}
-          </span>
+          <span className="block truncate text-xs text-muted-foreground sm:hidden">{summary}</span>
         </span>
         <span className="hidden text-xs text-muted-foreground sm:block">{summary}</span>
         <ChevronDown
-          className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")}
+          className={cn(
+            "size-4 shrink-0 text-muted-foreground transition-transform",
+            open && "rotate-180",
+          )}
         />
       </button>
       {open ? <div className="border-t p-4">{children}</div> : null}
@@ -151,12 +150,18 @@ function OrganisationSettings() {
 
   // Shared with the cards: each read here feeds a summary line or a setup step,
   // and the same query key keeps the card's own copy in one cache entry.
-  const ai = useQuery({ queryKey: ["ai_settings"], queryFn: () => getAiSettings({ data: undefined }) });
+  const ai = useQuery({
+    queryKey: ["ai_settings"],
+    queryFn: () => getAiSettings({ data: undefined }),
+  });
   const gate = useQuery({ queryKey: ["org_profile_gate"], queryFn: () => getOrgProfileGate() });
   const members = useQuery({ queryKey: ["org_members"], queryFn: () => listMembersFn({}) });
   const pay = useQuery({ queryKey: ["pay_settings"], queryFn: () => getPaySettings() });
   const labour = useQuery({ queryKey: ["labour_policy"], queryFn: () => getLabourPolicy() });
-  const assessment = useQuery({ queryKey: ["assessment_policy"], queryFn: () => getAssessmentPolicy() });
+  const assessment = useQuery({
+    queryKey: ["assessment_policy"],
+    queryFn: () => getAssessmentPolicy(),
+  });
   const phone = useQuery({ queryKey: ["phone_screening"], queryFn: () => getPhoneScreening() });
   const panel = useQuery({ queryKey: ["panel_agent"], queryFn: () => getPanelAgent() });
   const training = useQuery({ queryKey: ["training_status"], queryFn: () => getTrainingStatus() });
@@ -171,6 +176,7 @@ function OrganisationSettings() {
     currency: "INR",
     careersEmail: "",
     fiscalYearStartMonth: 4,
+    hiringSlaDays: 5,
   });
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState(false);
@@ -194,6 +200,7 @@ function OrganisationSettings() {
       currency: org.currency,
       careersEmail: org.careers_email ?? "",
       fiscalYearStartMonth: org.fiscal_year_start_month,
+      hiringSlaDays: org.hiring_sla_days ?? 5,
     });
   }, [org]);
 
@@ -400,7 +407,23 @@ function OrganisationSettings() {
                     max={12}
                     disabled={!isOwner}
                     value={form.fiscalYearStartMonth}
-                    onChange={(e) => setForm({ ...form, fiscalYearStartMonth: Number(e.target.value) })}
+                    onChange={(e) =>
+                      setForm({ ...form, fiscalYearStartMonth: Number(e.target.value) })
+                    }
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="sla" className="text-xs">
+                    Hiring SLA (days, application to offer)
+                  </Label>
+                  <Input
+                    id="sla"
+                    type="number"
+                    min={2}
+                    max={60}
+                    disabled={!isOwner}
+                    value={form.hiringSlaDays}
+                    onChange={(e) => setForm({ ...form, hiringSlaDays: Number(e.target.value) })}
                   />
                 </div>
               </div>
@@ -424,6 +447,15 @@ function OrganisationSettings() {
                 </Button>
               ) : null}
             </div>
+          </SettingsRow>
+          <SettingsRow
+            icon={<Mail className="size-4" />}
+            title="E-mail branding"
+            summary="Logo and brand colour on candidate e-mails"
+            open={openRows["email-brand"] ?? false}
+            onToggle={() => toggleRow("email-brand")}
+          >
+            <EmailBrandCard canEdit={navCtx.governance} />
           </SettingsRow>
         </div>
       )}

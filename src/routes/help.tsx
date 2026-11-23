@@ -1,10 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, BookOpen, List, Search } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, Download, List, Search } from "lucide-react";
 
 import { MANUAL_SECTIONS, type ManualSection } from "@/lib/user-manual";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 export const Route = createFileRoute("/help")({
   head: () => ({
@@ -87,9 +87,7 @@ function Help() {
       if (target && ["INPUT", "TEXTAREA"].includes(target.tagName)) return;
       if (e.key === "ArrowLeft") setOpen((o) => (o === null ? o : Math.max(0, o - 1)));
       if (e.key === "ArrowRight")
-        setOpen((o) =>
-          o === null ? o : Math.min(MANUAL_SECTIONS.length - 1, o + 1),
-        );
+        setOpen((o) => (o === null ? o : Math.min(MANUAL_SECTIONS.length - 1, o + 1)));
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -115,9 +113,7 @@ function Help() {
   if (openSection && !searching) {
     const prev = open !== null && open > 0 ? MANUAL_SECTIONS[open - 1] : null;
     const next =
-      open !== null && open < MANUAL_SECTIONS.length - 1
-        ? MANUAL_SECTIONS[open + 1]
-        : null;
+      open !== null && open < MANUAL_SECTIONS.length - 1 ? MANUAL_SECTIONS[open + 1] : null;
     return (
       <div className="mx-auto max-w-3xl">
         <div className="mb-4 flex items-center justify-between">
@@ -125,9 +121,7 @@ function Help() {
             <List className="size-4" />
             Contents
           </Button>
-          <p className="text-xs text-muted-foreground">
-            Use ← and → to turn the pages
-          </p>
+          <p className="text-xs text-muted-foreground">Use ← and → to turn the pages</p>
         </div>
 
         <article
@@ -214,10 +208,7 @@ function Help() {
             const idx = MANUAL_SECTIONS.indexOf(section);
             return (
               <section key={section.id} className="space-y-3">
-                <button
-                  onClick={() => setOpen(idx)}
-                  className="group block w-full text-left"
-                >
+                <button onClick={() => setOpen(idx)} className="group block w-full text-left">
                   <p className="font-book text-xs tracking-[0.25em] text-muted-foreground uppercase">
                     {chapterEyebrow(section)}
                   </p>
@@ -266,13 +257,19 @@ function Help() {
   // The book: cover, then table of contents.
   return (
     <div className="mx-auto max-w-3xl">
-      <div className="mb-10 flex justify-end">{searchBox}</div>
+      <div className="mb-10 flex justify-end gap-2">
+        <Button
+          variant="outline"
+          onClick={() => void import("@/lib/manual-export").then((m) => m.downloadManualPdf())}
+        >
+          <Download className="size-4" /> Download PDF
+        </Button>
+        {searchBox}
+      </div>
 
       {/* Cover */}
       <div className="panel flex min-h-72 flex-col items-center justify-center gap-4 rounded-none border-y px-8 py-16 text-center shadow-sm">
-        <p className="font-book text-xs tracking-[0.3em] text-muted-foreground uppercase">
-          Help
-        </p>
+        <p className="font-book text-xs tracking-[0.3em] text-muted-foreground uppercase">Help</p>
         <h1 className="font-display text-4xl font-semibold text-balance sm:text-5xl">
           User manual
         </h1>
@@ -282,8 +279,8 @@ function Help() {
           <span className="h-px flex-1 bg-border" />
         </div>
         <p className="font-book max-w-xl text-base leading-relaxed text-muted-foreground italic">
-          How to configure and run the platform, from organisation registration
-          to hires. The HR copilot answers from this same manual.
+          How to configure and run the platform, from organisation registration to hires. The HR
+          copilot answers from this same manual.
         </p>
         <p className="font-book text-xs tracking-widest text-muted-foreground uppercase">
           {MANUAL_SECTIONS.length} chapters

@@ -248,7 +248,7 @@ export function AgentGovernancePanel({ h }: { h: Harness }) {
           </span>
         </div>
         <HandoffMap nodes={ho.nodes} edges={ho.edges} />
-        <div className="flex flex-wrap gap-x-6 gap-y-1 border-t border-border px-4 py-2.5 text-[13px] text-muted-foreground">
+        <div className="flex flex-wrap gap-x-6 gap-y-1 border-t border-border px-4 py-2.5 text-[0.8125rem] text-muted-foreground">
           <span>
             <b className="text-foreground">{ho.chainedRuns}</b> run{ho.chainedRuns === 1 ? "" : "s"}{" "}
             started by another agent
@@ -279,7 +279,7 @@ export function AgentGovernancePanel({ h }: { h: Harness }) {
         title="Agents"
         hint={`${rows.length} shown${hidden ? ` · ${hidden} switched off and never run (hidden)` : ""} · click a row for details`}
       >
-        <table className="mt-2 w-full text-[13px]">
+        <table className="mt-2 w-full text-[0.8125rem]">
           <thead>
             <tr className="border-b border-border text-xs text-muted-foreground">
               <th className="px-4 py-2 text-left font-medium">Agent</th>
@@ -302,7 +302,7 @@ export function AgentGovernancePanel({ h }: { h: Harness }) {
                 >
                   <td className="px-4 py-2.5 font-semibold capitalize">
                     {nice(a.agent)}{" "}
-                    <span className="text-[10px] text-muted-foreground">
+                    <span className="text-[0.625rem] text-muted-foreground">
                       {open === a.agent ? "▴" : "▾"}
                     </span>
                   </td>
@@ -322,7 +322,7 @@ export function AgentGovernancePanel({ h }: { h: Harness }) {
                       <div className="grid grid-cols-2 gap-3 text-xs md:grid-cols-5">
                         {CHECKS.map((c) => (
                           <div key={c.key}>
-                            <p className="mb-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                            <p className="mb-0.5 flex items-center gap-1.5 text-[0.6875rem] text-muted-foreground">
                               <Dot status={TONE_STATUS[a.checks[c.key]]} />
                               {c.label}
                             </p>

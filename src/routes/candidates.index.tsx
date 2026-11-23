@@ -35,7 +35,7 @@ import { getResumeDownloadUrl } from "@/lib/resume.functions";
 import { downloadResume } from "@/lib/resume-download";
 import { createCandidate, deleteCandidates } from "@/lib/candidates.functions";
 import { sourceLabel as channelSourceLabel, UPLOAD_SOURCES } from "@/lib/job-channels";
-import { intakeCvs, type IntakeStatus } from "@/lib/cv-intake";
+import { CvUpload } from "@/components/CvUpload";
 import { normalizeExternalUrl } from "@/lib/external-links";
 import { canonical, nextAction, stalledDays, STAGE_LABEL, type Stage } from "@/lib/lifecycle";
 import { computeCareerMetrics, type EmploymentRow } from "@/lib/career";
@@ -205,13 +205,13 @@ function ColumnFilter({
       </PopoverTrigger>
       <PopoverContent align="start" className="w-60 p-2">
         <div className="mb-1 flex items-center justify-between px-1">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <p className="text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground">
             Filter: {title}
           </p>
           {active && (
             <button
               type="button"
-              className="text-[11px] font-medium text-primary hover:underline"
+              className="text-[0.6875rem] font-medium text-primary hover:underline"
               onClick={() => onChange(new Set())}
             >
               Clear
@@ -319,8 +319,6 @@ function Candidates() {
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkReqId, setBulkReqId] = useState("");
   const [bulkSource, setBulkSource] = useState("direct");
-  const [bulkBusy, setBulkBusy] = useState(false);
-  const [bulkLog, setBulkLog] = useState<IntakeStatus[]>([]);
   const [form, setForm] = useState({
     full_name: "",
     email: "",
@@ -340,33 +338,6 @@ function Candidates() {
     source: "direct",
   });
   const [willingToRelocate, setWillingToRelocate] = useState<"yes" | "no" | "unknown">("unknown");
-
-  /** Bulk CV intake: read each file locally, AI-parse it, then upsert the candidate. */
-  async function bulkUpload(files: FileList | null) {
-    if (!files || files.length === 0) return;
-    const list = Array.from(files);
-    setBulkBusy(true);
-    setBulkLog(list.map((f) => ({ file: f.name, state: "pending" as const, message: "Queued" })));
-    try {
-      const summary = await intakeCvs({
-        files: list,
-        parse,
-        source: bulkSource,
-        requisitionId: bulkReqId || null,
-        onUpdate: (i, patch) =>
-          setBulkLog((l) => l.map((row, idx) => (idx === i ? { ...row, ...patch } : row))),
-      });
-      await qc.invalidateQueries({ queryKey: ["candidates"] });
-      await qc.invalidateQueries({ queryKey: ["applications"] });
-      if (summary.failed === 0)
-        toast.success(`${summary.ok} CV${summary.ok === 1 ? "" : "s"} added to the talent pool`);
-      else toast.warning(`${summary.ok} parsed · ${summary.failed} failed — see the list`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Bulk upload failed");
-    } finally {
-      setBulkBusy(false);
-    }
-  }
 
   // Pool hygiene is computed client-side and is fully explainable: which two rows
   // look like the same person, and why.
@@ -819,49 +790,12 @@ function Candidates() {
                   </div>
                 </div>
 
-                <div>
-                  <Label className="mb-1.5 block text-xs text-muted-foreground">Resume files</Label>
-                  <Input
-                    type="file"
-                    multiple
-                    disabled={bulkBusy}
-                    accept=".pdf,.docx,.txt,.md"
-                    onChange={(e) => {
-                      bulkUpload(e.target.files);
-                      e.target.value = "";
-                    }}
-                  />
-                  <p className="mt-1.5 text-xs text-muted-foreground">
-                    Text-based PDF, DOCX, TXT or MD. Scanned/image-only PDFs cannot be read — export
-                    a text PDF.
-                  </p>
-                </div>
-
-                {bulkLog.length > 0 && (
-                  <>
-                    <p className="num text-xs text-muted-foreground">
-                      {bulkLog.filter((l) => l.state === "ok").length} parsed ·{" "}
-                      {bulkLog.filter((l) => l.state === "error").length} failed · {bulkLog.length}{" "}
-                      total
-                    </p>
-                    <ul className="max-h-56 space-y-1 overflow-y-auto text-xs">
-                      {bulkLog.map((l, i) => (
-                        <li
-                          key={i}
-                          className={
-                            l.state === "error"
-                              ? "text-destructive"
-                              : l.state === "ok"
-                                ? "text-muted-foreground"
-                                : "text-foreground"
-                          }
-                        >
-                          <span className="font-medium">{l.file}</span> — {l.message}
-                        </li>
-                      ))}
-                    </ul>
-                  </>
-                )}
+                <CvUpload
+                  label="Resume files"
+                  source={bulkSource}
+                  requisitionId={bulkReqId || null}
+                  destination="the talent pool"
+                />
 
                 <DialogFooter>
                   <Button variant="outline" onClick={() => setBulkOpen(false)}>
@@ -1133,7 +1067,7 @@ function Candidates() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              <div className="flex items-center gap-1.5 text-[0.6875rem] text-muted-foreground">
                 <Filter className="size-3" />
                 <span>Value filters:</span>
                 <ColumnFilter
@@ -1164,7 +1098,7 @@ function Candidates() {
             </div>
 
             <div className="max-h-96 flex-1 overflow-y-auto lg:max-h-none">
-              <div className="flex items-center gap-2 border-b border-border px-3 py-1.5 text-[11px] text-muted-foreground">
+              <div className="flex items-center gap-2 border-b border-border px-3 py-1.5 text-[0.6875rem] text-muted-foreground">
                 <Checkbox
                   checked={allChecked}
                   onCheckedChange={toggleAll}
@@ -1221,17 +1155,17 @@ function Candidates() {
                       {r.stage ? (
                         <StageBadge stage={r.stage} />
                       ) : (
-                        <span className="rounded-md border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                        <span className="rounded-md border border-border px-1.5 py-0.5 text-[0.625rem] font-medium text-muted-foreground">
                           Pool only
                         </span>
                       )}
-                      <span className="text-[11px] text-muted-foreground">
+                      <span className="text-[0.6875rem] text-muted-foreground">
                         {sourceLabel(c.source)}
                       </span>
                       {v ? (
                         <span
                           className={
-                            "num inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold " +
+                            "num inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[0.625rem] font-semibold " +
                             (v.authenticity_score >= 70
                               ? "bg-emerald-500/10 text-emerald-600"
                               : v.authenticity_score >= 45
@@ -1244,14 +1178,14 @@ function Candidates() {
                       ) : null}
                       {dup ? (
                         <span
-                          className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-700 dark:text-amber-400"
+                          className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[0.625rem] text-amber-700 dark:text-amber-400"
                           title={`Possible duplicate (${dup.confidence}) — matched on ${dup.reasons.join(", ")}`}
                         >
                           <Copy className="size-3" /> dup ×{dup.members.length}
                         </span>
                       ) : null}
                       {r.stalled !== null ? (
-                        <span className="inline-flex items-center gap-1 text-[11px] text-amber-600">
+                        <span className="inline-flex items-center gap-1 text-[0.6875rem] text-amber-600">
                           <AlertTriangle className="size-3" /> stalled {r.stalled}d
                         </span>
                       ) : null}
@@ -1322,7 +1256,7 @@ function Candidates() {
                           </span>
                           {c.pool_use === "role_only" ? (
                             <span
-                              className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400"
+                              className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[0.625rem] font-medium text-amber-700 dark:text-amber-400"
                               title={`${sourceLabel(c.pool_use_source)}'s terms limit this CV to the role it came for: it is not offered for other roles or shared, and it is erased (with the HR head's approval) once that role is over.`}
                             >
                               Role only
@@ -1391,7 +1325,7 @@ function Candidates() {
                       </div>
                       <div className="flex flex-col items-end gap-2">
                         <div className="flex items-center gap-2">
-                          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                          <span className="text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">
                             Match
                           </span>
                           {activeRow.score !== null ? (
@@ -1502,25 +1436,27 @@ function Candidates() {
                         </h3>
                         <dl className="grid grid-cols-2 gap-3 text-sm">
                           <div>
-                            <dt className="text-[11px] uppercase text-muted-foreground">
+                            <dt className="text-[0.6875rem] uppercase text-muted-foreground">
                               Current CTC
                             </dt>
                             <dd className="num">{money(c.current_ctc as number | null)}</dd>
                           </div>
                           <div>
-                            <dt className="text-[11px] uppercase text-muted-foreground">
+                            <dt className="text-[0.6875rem] uppercase text-muted-foreground">
                               Expected
                             </dt>
                             <dd className="num">{money(c.expected_ctc as number | null)}</dd>
                           </div>
                           <div>
-                            <dt className="text-[11px] uppercase text-muted-foreground">Notice</dt>
+                            <dt className="text-[0.6875rem] uppercase text-muted-foreground">
+                              Notice
+                            </dt>
                             <dd className="num">
                               {c.notice_period_days !== null ? `${c.notice_period_days} days` : "—"}
                             </dd>
                           </div>
                           <div>
-                            <dt className="text-[11px] uppercase text-muted-foreground">
+                            <dt className="text-[0.6875rem] uppercase text-muted-foreground">
                               Relocation
                             </dt>
                             <dd>

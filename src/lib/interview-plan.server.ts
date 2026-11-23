@@ -12,6 +12,7 @@ import {
   defaultPlan,
   finalLevel,
   InterviewPlanSchema,
+  pruneRubric,
   roundVerdict,
   type InterviewPlan,
   type Verdict,
@@ -39,7 +40,7 @@ export async function savePlan(
   requisitionId: string,
   plan: unknown,
 ): Promise<InterviewPlan> {
-  const parsed = InterviewPlanSchema.parse(plan);
+  const parsed = pruneRubric(InterviewPlanSchema.parse(plan));
   const inUse = await roundsInUse(orgId, requisitionId);
   if (parsed.rounds.length < inUse)
     throw new Error(

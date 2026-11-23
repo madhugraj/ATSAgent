@@ -175,7 +175,7 @@ describe("change control", () => {
     registerExpertTools();
     registerPanelTools();
     registerOntologyTools();
-  registerVoiceGuardTools();
+    registerVoiceGuardTools();
     registerPhase1Agents();
     registerPhase2Agents();
     registerPhase3Agents();
@@ -185,7 +185,7 @@ describe("change control", () => {
     registerLabourAgents();
     registerExpertAgents();
     registerPanelAgents();
-  registerVoiceGuardAgent();
+    registerVoiceGuardAgent();
     const lock = JSON.parse(
       readFileSync(new URL("./agents.lock.json", import.meta.url), "utf8"),
     ) as Record<string, { version: string; hash: string }>;

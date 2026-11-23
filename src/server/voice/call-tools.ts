@@ -332,7 +332,10 @@ export function applyCallTool(
       const input = { ...(parsed.data as CallDetailsInput) };
       // "Not allowed" only where an approved labour rule forbids asking current pay.
       const notAllowed = (input.not_given ?? []).filter((n) => n.why === "not_allowed");
-      if (notAllowed.length && (!state.payHistoryBanned || notAllowed.some((n) => n.item !== "current_pay")))
+      if (
+        notAllowed.length &&
+        (!state.payHistoryBanned || notAllowed.some((n) => n.item !== "current_pay"))
+      )
         return {
           ok: false,
           error: state.payHistoryBanned

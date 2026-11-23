@@ -23,6 +23,7 @@ import {
   orgMembers,
   organizations,
   requisitions,
+  sourceIntegrations,
 } from "@db/schema";
 import { env } from "../server/env";
 import { writeAudit } from "../server/audit";
@@ -34,8 +35,8 @@ export const SLOT_OFFER = {
   leadHours: 12,
   /** …and when picked (hours). */
   pickLeadHours: 2,
-  /** How long the link works at most (hours) — never past the first slot. */
-  expiresHours: 72,
+  /** How long the link works at most (hours) — never past the first slot; the hiring SLA closes the slot within a day. */
+  expiresHours: 24,
 } as const;
 
 export type OfferInput = {
@@ -47,18 +48,61 @@ export type OfferInput = {
   mode: "online" | "onsite" | "phone";
   meetingProvider?: "zoom" | "google_meet" | "teams" | undefined;
   agenda?: string | undefined;
-  /** Further interviewers on the panel (active members). */
+  /** Further interviewers on the panel (active members or directory panelists). */
   panelEmails?: string[] | undefined;
 };
 
 const site = () => env.PUBLIC_SITE_URL.replace(/\/$/, "");
 
-/** Offer interview times to the candidate and email them the private link. */
+type MeetingProvider = "zoom" | "google_meet" | "teams";
+
+/**
+ * The meeting provider an online round uses when none was named: the one the
+ * organisation has connected (Teams first, then Google Meet, then Zoom), or
+ * null when none is — then the round is booked without a link.
+ */
+export async function connectedMeetingProvider(orgId: string): Promise<MeetingProvider | null> {
+  const rows = await db
+    .select({
+      provider: sourceIntegrations.provider,
+      enabled: sourceIntegrations.enabled,
+      ready: sourceIntegrations.hasCredentials,
+    })
+    .from(sourceIntegrations)
+    .where(
+      and(
+        eq(sourceIntegrations.orgId, orgId),
+        inArray(sourceIntegrations.provider, ["teams", "google_meet", "zoom"]),
+      ),
+    );
+  for (const p of ["teams", "google_meet", "zoom"] as const)
+    if (rows.some((r) => r.provider === p && r.enabled && r.ready)) return p;
+  return null;
+}
+
+/**
+ * Offer interview times: each panelist agrees them first, then the AI
+ * scheduling call goes to the candidate and the private link is e-mailed if
+ * that call does not book (or cannot happen).
+ */
 export async function offerSlotsCore(
   orgId: string,
   by: { userId: string | null; runId: string | null },
   input: OfferInput,
-): Promise<{ offerId: string; slots: string[]; expiresAt: string; checkedWith: string | null }> {
+): Promise<{
+  offerId: string;
+  slots: string[];
+  expiresAt: string;
+  checkedWith: string | null;
+  /**
+   * `panel`: waiting for every panelist to agree the times; then the candidate
+   * is contacted voice first (the AI call, else the e-mailed link).
+   */
+  via: "call" | "email" | "panel";
+  callDueAt: string | null;
+  /** Why no call went first (the link was e-mailed instead). */
+  callRefused: string | null;
+}> {
   const slots = [
     ...new Set(
       input.slots
@@ -76,34 +120,21 @@ export async function offerSlotsCore(
     throw new Error(`Every time must be at least ${SLOT_OFFER.leadHours} hours ahead.`);
   if (slots.some((d) => d.getTime() > now + 60 * 864e5))
     throw new Error("Offer times within the next 60 days.");
-  const [member] = await db
-    .select({ name: orgMembers.fullName, email: orgMembers.email })
-    .from(orgMembers)
-    .where(
-      and(
-        eq(orgMembers.orgId, orgId),
-        eq(orgMembers.status, "active"),
-        sql`lower(${orgMembers.email}) = ${input.interviewerEmail.toLowerCase()}`,
-      ),
-    )
-    .limit(1);
-  if (!member) throw new Error("Interviewers must be active members of the organisation.");
+  const { activeInterviewer } = await import("./panelists.server");
+  const member = await activeInterviewer(orgId, input.interviewerEmail);
+  if (!member)
+    throw new Error(
+      `${input.interviewerEmail} is not an active member of the organisation or in its panel directory — add them on the Team page (Panel directory) first.`,
+    );
   const panel: { name: string | null; email: string }[] = [];
   for (const e of [...new Set((input.panelEmails ?? []).map((x) => x.trim().toLowerCase()))]) {
-    if (e === member.email.toLowerCase()) continue;
-    const [m] = await db
-      .select({ name: orgMembers.fullName, email: orgMembers.email })
-      .from(orgMembers)
-      .where(
-        and(
-          eq(orgMembers.orgId, orgId),
-          eq(orgMembers.status, "active"),
-          sql`lower(${orgMembers.email}) = ${e}`,
-        ),
-      )
-      .limit(1);
-    if (!m) throw new Error(`Panel members must be active members of the organisation: ${e}.`);
-    panel.push({ name: m.name ?? null, email: m.email.toLowerCase() });
+    if (e === member.email) continue;
+    const m = await activeInterviewer(orgId, e);
+    if (!m)
+      throw new Error(
+        `Panel members must be active members of the organisation or in its panel directory: ${e}.`,
+      );
+    panel.push(m);
   }
   if (panel.length > 2) throw new Error("A panel has at most three interviewers.");
   const [app] = await db
@@ -198,7 +229,9 @@ export async function offerSlotsCore(
       interviewerEmail: member.email.toLowerCase(),
       durationMins: input.durationMins,
       mode: input.mode,
-      meetingProvider: input.meetingProvider ?? null,
+      meetingProvider:
+        input.meetingProvider ??
+        (input.mode === "online" ? await connectedMeetingProvider(orgId) : null),
       agenda: input.agenda?.trim() || null,
       panel,
       slots: slots.map((d) => d.toISOString()),
@@ -209,6 +242,118 @@ export async function offerSlotsCore(
     })
     .returning({ id: interviewSlotOffers.id });
 
+  // The panel agrees the times first (interview-confirmations.server.ts); only
+  // then is the candidate contacted — voice first (contactCandidate).
+  const { askPanelAboutOffer } = await import("./interview-confirmations.server");
+  await askPanelAboutOffer(orgId, {
+    id: offer!.id,
+    level: input.level,
+    durationMins: input.durationMins,
+    slots,
+    applicationId: app.id,
+    people: [{ name: member.name ?? null, email: member.email }, ...panel],
+  });
+  await writeAudit({
+    actor: by.runId ? `agent:interview:${by.runId}` : `user:${by.userId ?? "?"}`,
+    actorUserId: by.userId,
+    orgId,
+    action: "interview.slots_offered",
+    entityType: "application",
+    entityId: app.id,
+    detail: { offerId: offer!.id, level: input.level, slots: slots.length, via: "panel" },
+  });
+  return {
+    offerId: offer!.id,
+    slots: slots.map((d) => d.toISOString()),
+    expiresAt: expiresAt.toISOString(),
+    checkedWith: probe.source,
+    via: "panel",
+    callDueAt: null,
+    callRefused: null,
+  };
+}
+
+/**
+ * Once the panel has agreed the times: voice first — the AI scheduling call
+ * goes out now and the e-mailed link is held until that call ends without a
+ * booking. When no call can be placed (switched off, no mobile, opted out,
+ * already spoken about this round…), the link is e-mailed straight away. The
+ * system decides — never the agent.
+ */
+export async function contactCandidate(
+  orgId: string,
+  offerId: string,
+): Promise<{ via: "call" | "email"; callDueAt: string | null; callRefused: string | null }> {
+  const [o] = await db
+    .select({
+      applicationId: interviewSlotOffers.applicationId,
+      createdBy: interviewSlotOffers.createdBy,
+      agentRunId: interviewSlotOffers.agentRunId,
+    })
+    .from(interviewSlotOffers)
+    .where(and(eq(interviewSlotOffers.id, offerId), eq(interviewSlotOffers.orgId, orgId)))
+    .limit(1);
+  if (!o) return { via: "email", callDueAt: null, callRefused: "offer not found" };
+  let call: { callId: string; dueAt: Date } | null = null;
+  let callRefused: string | null = null;
+  try {
+    const { requestSchedulingCall } = await import("../server/voice/scheduling-request.server");
+    const r = await requestSchedulingCall({
+      orgId,
+      applicationId: o.applicationId,
+      requestedBy: o.createdBy,
+      requestedRunId: o.agentRunId,
+      actor: o.agentRunId ? `agent:interview:${o.agentRunId}` : `user:${o.createdBy ?? "?"}`,
+      now: Date.now(),
+      callFirst: true,
+    });
+    call = { callId: r.callId, dueAt: r.dueAt };
+  } catch (e) {
+    callRefused = (e as Error).message;
+  }
+  if (!call) await sendOfferLink(orgId, offerId);
+  return {
+    via: call ? "call" : "email",
+    callDueAt: call ? call.dueAt.toISOString() : null,
+    callRefused,
+  };
+}
+
+/**
+ * E-mail the candidate the offer's private link, once. Claims the offer
+ * atomically (link_emailed_at), so the call-end path and the sweep can both
+ * call it safely. Only an open offer is e-mailed — a time booked or declined on
+ * the call needs no link. Returns whether this call sent it.
+ */
+export async function sendOfferLink(orgId: string, offerId: string): Promise<boolean> {
+  const [o] = await db
+    .update(interviewSlotOffers)
+    .set({ linkEmailedAt: new Date(), updatedAt: new Date() })
+    .where(
+      and(
+        eq(interviewSlotOffers.id, offerId),
+        eq(interviewSlotOffers.orgId, orgId),
+        eq(interviewSlotOffers.status, "offered"),
+        sql`${interviewSlotOffers.linkEmailedAt} is null`,
+        sql`${interviewSlotOffers.expiresAt} > now()`,
+      ),
+    )
+    .returning();
+  if (!o) return false;
+  const [app] = await db
+    .select({
+      candidateName: candidates.fullName,
+      candidateEmail: candidates.email,
+      jobTitle: requisitions.title,
+      orgName: organizations.name,
+    })
+    .from(applications)
+    .innerJoin(candidates, eq(candidates.id, applications.candidateId))
+    .innerJoin(requisitions, eq(requisitions.id, applications.requisitionId))
+    .innerJoin(organizations, eq(organizations.id, applications.orgId))
+    .where(and(eq(applications.id, o.applicationId), eq(applications.orgId, orgId)))
+    .limit(1);
+  if (!app?.candidateEmail) return false;
   const { enqueueEmail, formatInOrgTZ, getOrgEmailSettings } =
     await import("./email-outbox.server");
   const tz = (await getOrgEmailSettings(orgId)).timezone;
@@ -220,8 +365,8 @@ export async function offerSlotsCore(
     .where(
       and(
         eq(interviews.orgId, orgId),
-        eq(interviews.applicationId, app.id),
-        eq(interviews.level, input.level),
+        eq(interviews.applicationId, o.applicationId),
+        eq(interviews.level, o.level),
         eq(interviews.status, "cancelled"),
         sql`${interviews.scheduledAt} > now()`,
       ),
@@ -233,36 +378,70 @@ export async function offerSlotsCore(
     kind: "interview_slots",
     templateName: "interview_slots",
     toEmail: app.candidateEmail,
-    applicationId: app.id,
-    idempotencyKey: `interview-slots:${offer!.id}`,
+    applicationId: o.applicationId,
+    idempotencyKey: `interview-slots:${o.id}`,
     templateData: {
       candidateName: app.candidateName,
       orgName: app.orgName,
       jobTitle: app.jobTitle,
-      roundLabel: `L${input.level} interview`,
-      durationMins: String(input.durationMins),
-      modeLabel: input.mode === "online" ? "Online" : input.mode === "onsite" ? "Onsite" : "Phone",
-      slotsText: slots.map((d) => formatInOrgTZ(d, tz)).join("\n"),
-      chooseUrl: `${site()}/schedule/${token}`,
-      expiresText: formatInOrgTZ(expiresAt, tz),
+      roundLabel: `L${o.level} interview`,
+      durationMins: String(o.durationMins),
+      modeLabel: o.mode === "online" ? "Online" : o.mode === "onsite" ? "Onsite" : "Phone",
+      slotsText: o.slots.map((d) => formatInOrgTZ(new Date(d), tz)).join("\n"),
+      chooseUrl: `${site()}/schedule/${o.token}`,
+      expiresText: formatInOrgTZ(o.expiresAt, tz),
       ...(dropped?.at ? { replacesText: formatInOrgTZ(dropped.at, tz) } : {}),
     },
   });
-  await writeAudit({
-    actor: by.runId ? `agent:interview:${by.runId}` : `user:${by.userId ?? "?"}`,
-    actorUserId: by.userId,
-    orgId,
-    action: "interview.slots_offered",
-    entityType: "application",
-    entityId: app.id,
-    detail: { offerId: offer!.id, level: input.level, slots: slots.length },
-  });
-  return {
-    offerId: offer!.id,
-    slots: slots.map((d) => d.toISOString()),
-    expiresAt: expiresAt.toISOString(),
-    checkedWith: probe.source,
-  };
+  return true;
+}
+
+/** Scheduling-call states during which the e-mailed link stays held. */
+const CALL_LIVE = ["requested", "approved", "dialling", "in_progress", "callback"];
+/** The link goes out by e-mail at the latest this long before it would close. */
+export const LINK_HOLD_BEFORE_EXPIRY_MS = 12 * 3600_000;
+/** …and never held longer than this after the offer, whatever the call is doing. */
+export const LINK_HOLD_MAX_MS = 6 * 3600_000;
+
+/**
+ * Release held links (run by the agent tick): the scheduling call that went first
+ * ended without a booking, never got going, or is taking too long — the
+ * candidate then has the e-mail. Returns how many were sent.
+ */
+export async function releaseHeldOfferLinks(orgId?: string, now = Date.now()): Promise<number> {
+  const at = new Date(now).toISOString();
+  const rows = (await db.execute(sql`
+    select o.id, o.org_id from interview_slot_offers o
+    where o.status = 'offered' and o.link_emailed_at is null
+      -- Never before the panel has agreed the times.
+      and not exists (
+        select 1 from interview_confirmations k
+        where k.offer_id = o.id and k.state in ('pending','declined'))
+      and o.expires_at > ${at}::timestamptz
+      ${orgId ? sql`and o.org_id = ${orgId}` : sql``}
+      and (
+        o.created_at <= ${at}::timestamptz - make_interval(secs => ${LINK_HOLD_MAX_MS / 1000})
+        or o.expires_at <= ${at}::timestamptz + make_interval(secs => ${LINK_HOLD_BEFORE_EXPIRY_MS / 1000})
+        or not exists (
+          select 1 from screening_calls c
+          where c.slot_offer_id = o.id and c.status in (${sql.join(
+            CALL_LIVE.map((x) => sql`${x}`),
+            sql`, `,
+          )})))
+    limit 200`)) as unknown as { id: string; org_id: string }[];
+  let sent = 0;
+  for (const r of rows) if (await sendOfferLink(r.org_id, r.id)) sent++;
+  return sent;
+}
+
+/** A scheduling call ended: if it left the offer open, e-mail the link now. */
+export async function releaseOfferLinkAfterCall(
+  orgId: string,
+  offerId: string | null,
+  callStatus: string,
+): Promise<void> {
+  if (!offerId || CALL_LIVE.includes(callStatus)) return;
+  await sendOfferLink(orgId, offerId);
 }
 
 /**
@@ -291,7 +470,7 @@ export async function withdrawOfferEmails(orgId: string, offerIds: string[]): Pr
     .where(
       and(
         eq(emailOutbox.orgId, orgId),
-        eq(emailOutbox.status, "queued"),
+        inArray(emailOutbox.status, ["queued", "held"]),
         inArray(
           emailOutbox.idempotencyKey,
           offerIds.map((id) => `interview-slots:${id}`),
@@ -470,8 +649,16 @@ async function bookOfferSlot(
             agenda: offer.agenda,
           })
         ).joinUrl;
-      } catch {
-        meetingLink = null; // the round is booked; the team adds a link if it failed
+      } catch (e) {
+        // The round is booked; the team adds a link — but never silently.
+        meetingLink = null;
+        const { log } = await import("../server/log");
+        log.warn("slot_offer.meeting_link_failed", {
+          org_id: offer.orgId,
+          offer_id: offer.id,
+          provider: offer.meetingProvider,
+          error: e as Error,
+        });
       }
     }
     const { scheduleInterviewCore } = await import("./interviews.functions");

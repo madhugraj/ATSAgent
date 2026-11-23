@@ -266,7 +266,9 @@ export function PayConventionsCard() {
                 value={zone.name}
                 onChange={(e) => {
                   const name = e.target.value;
-                  const match = c.zones.find((x) => x.name.toLowerCase() === name.trim().toLowerCase());
+                  const match = c.zones.find(
+                    (x) => x.name.toLowerCase() === name.trim().toLowerCase(),
+                  );
                   if (match)
                     setZone({
                       ...zone,

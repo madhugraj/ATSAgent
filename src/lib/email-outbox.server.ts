@@ -45,6 +45,10 @@ const KIND_TOGGLE: Record<
   screening_call_booked: "stageEnabled",
   // The silent panel agent's summary to the panel: internal mail to members.
   panel_summary: null,
+  // Asking a panelist whether offered times work: internal mail to members.
+  panel_time_check: null,
+  // Reminding a panelist to answer an interview time: internal mail.
+  panel_reminder: null,
 };
 
 export async function getOrgEmailSettings(orgId: string): Promise<EmailSettingsEffective> {
@@ -141,6 +145,39 @@ export interface EnqueueEmailInput {
   attachments?: EmailOutboxAttachment[];
   idempotencyKey: string;
   availableAt?: Date;
+  /** Park it as `held` until `releaseHeldEmails` (interview confirmations). */
+  hold?: boolean;
+}
+
+/** Queue held emails whose key starts with this prefix; returns how many. */
+export async function releaseHeldEmails(orgId: string, keyPrefix: string): Promise<number> {
+  const rows = await db
+    .update(emailOutbox)
+    .set({ status: "queued", availableAt: new Date() })
+    .where(
+      and(
+        eq(emailOutbox.orgId, orgId),
+        eq(emailOutbox.status, "held"),
+        sql`${emailOutbox.idempotencyKey} like ${`${keyPrefix.replace(/[%_\\]/g, "\\$&")}%`}`,
+      ),
+    )
+    .returning({ id: emailOutbox.id });
+  if (rows.length) void processEmailOutbox().catch(() => {});
+  return rows.length;
+}
+
+/** Drop held (never sent) emails whose key starts with this prefix. */
+export async function dropHeldEmails(orgId: string, keyPrefix: string): Promise<void> {
+  await db
+    .update(emailOutbox)
+    .set({ status: "suppressed" })
+    .where(
+      and(
+        eq(emailOutbox.orgId, orgId),
+        eq(emailOutbox.status, "held"),
+        sql`${emailOutbox.idempotencyKey} like ${`${keyPrefix.replace(/[%_\\]/g, "\\$&")}%`}`,
+      ),
+    );
 }
 
 export async function enqueueEmail(input: EnqueueEmailInput): Promise<void> {
@@ -151,7 +188,7 @@ export async function enqueueEmail(input: EnqueueEmailInput): Promise<void> {
   const toggle = KIND_TOGGLE[input.kind];
   if (!settings.enabled || (toggle && !settings[toggle])) return;
 
-  let status: EmailOutboxStatus = "queued";
+  let status: EmailOutboxStatus = input.hold ? "held" : "queued";
   if (input.kind === "ack") {
     // Public apply endpoint — cap acks per org per hour so abuse lands as
     // suppressed rows instead of a send storm.
@@ -268,6 +305,7 @@ export async function processEmailOutbox(opts: { max?: number } = {}): Promise<O
       await sendTemplateEmail(row.templateName, row.toEmail, {
         templateData: row.templateData,
         idempotencyKey: `outbox:${row.id}`,
+        orgId: row.orgId,
         ...(row.replyTo ? { replyTo: row.replyTo } : {}),
         ...(row.attachments.length ? { attachments: row.attachments } : {}),
       });

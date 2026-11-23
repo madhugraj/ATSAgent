@@ -1,7 +1,7 @@
 import * as React from "react";
 
 import type { TemplateEntry } from "./registry";
-import { EmailLayout, layoutStyles } from "./email-layout";
+import { EmailAction, EmailLayout, layoutStyles } from "./email-layout";
 
 interface Props {
   candidateName?: string;
@@ -34,11 +34,7 @@ const Email = ({
       As the next step for <strong>{jobTitle}</strong> with <strong>{orgName}</strong>, please
       complete a short written assessment. It takes about 20 minutes.
     </p>
-    {assessmentUrl ? (
-      <p style={text}>
-        Open it here: <a href={assessmentUrl}>{assessmentUrl}</a>
-      </p>
-    ) : null}
+    {assessmentUrl ? <EmailAction href={assessmentUrl} label="Start the assessment" /> : null}
     {dueDate ? <p style={text}>Please complete it by {dueDate}.</p> : null}
     <p style={text}>The link is personal to you — please do not share it.</p>
   </EmailLayout>

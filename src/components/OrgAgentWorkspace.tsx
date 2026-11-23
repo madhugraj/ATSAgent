@@ -433,7 +433,7 @@ function ChatMessage({
         {!isQuestion && !isGate ? (
           <div className="rounded-2xl rounded-tl-sm bg-muted px-3 py-2 text-sm">
             <AgentMarkdown text={m.body} />
-            <p className="mt-1 text-[10px] text-muted-foreground">{at(m.at)}</p>
+            <p className="mt-1 text-[0.625rem] text-muted-foreground">{at(m.at)}</p>
           </div>
         ) : null}
         {isQuestion ? (
@@ -877,14 +877,14 @@ function SectionBlock({
               <span className="min-w-0 flex-1">
                 {i.text}
                 <span
-                  className="ml-1.5 text-[11px] text-muted-foreground"
+                  className="ml-1.5 text-[0.6875rem] text-muted-foreground"
                   title={i.source.quote ? `“${i.source.quote}”` : undefined}
                 >
                   · {from}
                 </span>
               </span>
               {fresh ? (
-                <span className="shrink-0 rounded-full bg-emerald-500/15 px-1.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
+                <span className="shrink-0 rounded-full bg-emerald-500/15 px-1.5 text-[0.625rem] font-medium text-emerald-700 dark:text-emerald-400">
                   new
                 </span>
               ) : null}

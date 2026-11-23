@@ -410,7 +410,7 @@ function IntelligencePage() {
               <AgentMap nodes={b.nodes} edges={b.edges} onSelect={setSelected} />
             </div>
             {selected && (
-              <div className="border-t border-border bg-muted/30 px-4 py-3 text-[13px]">
+              <div className="border-t border-border bg-muted/30 px-4 py-3 text-[0.8125rem]">
                 <div className="flex items-start justify-between gap-3">
                   <p className="font-semibold capitalize">{nice(selected.name)}</p>
                   <button
@@ -441,7 +441,7 @@ function IntelligencePage() {
             title="Agents"
             hint={`${rows.length} shown${idle.length && !showIdle ? ` · ${idle.length} never run (hidden)` : ""}`}
           >
-            <table className="mt-2 w-full text-[13px] tabular-nums">
+            <table className="mt-2 w-full text-[0.8125rem] tabular-nums">
               <thead>
                 <tr className="border-b border-border text-left text-xs text-muted-foreground">
                   <th className="px-4 py-2 font-medium">Agent</th>
@@ -506,7 +506,7 @@ function IntelligencePage() {
           {b.rejects.length > 0 && (
             <div id="declined" className="scroll-mt-4">
               <Panel title="What people declined" hint="Grouped by proposal">
-                <ul className="divide-y divide-border text-[13px]">
+                <ul className="divide-y divide-border text-[0.8125rem]">
                   {b.rejects.map((r, i) => (
                     <li key={i} className="flex items-center justify-between gap-3 px-4 py-2.5">
                       <span className="flex items-center gap-2">

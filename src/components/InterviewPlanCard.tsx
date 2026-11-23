@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getInterviewPlan, saveInterviewPlan } from "@/lib/interview-plan.functions";
-import type { InterviewPlan } from "@/lib/interview-plan";
+import { pruneRubric, weightOf, type InterviewPlan } from "@/lib/interview-plan";
+import { PlanProposals } from "./PlanProposals";
 
 /** The role's interview rounds, rubric, panel size and verdict policy — view and edit. */
 export function InterviewPlanCard({ requisitionId }: { requisitionId: string }) {
@@ -56,6 +57,7 @@ export function InterviewPlanCard({ requisitionId }: { requisitionId: string }) 
           <span className="text-xs text-muted-foreground">Default from the must-haves</span>
         ) : null}
       </div>
+      {editing ? null : <PlanProposals requisitionId={requisitionId} />}
       <ol className="space-y-3">
         {plan.rounds.map((r, i) => (
           <li key={r.level} className="rounded-md border border-border p-3">
@@ -101,6 +103,7 @@ export function InterviewPlanCard({ requisitionId }: { requisitionId: string }) 
                     }
                   />
                 </Label>
+                <RubricEditor round={r} onChange={(patch) => setRound(i, patch)} />
               </div>
             ) : (
               <>
@@ -111,7 +114,12 @@ export function InterviewPlanCard({ requisitionId }: { requisitionId: string }) 
                   </span>
                 </p>
                 {r.focus ? <p className="text-xs text-muted-foreground">{r.focus}</p> : null}
-                <p className="mt-1 text-xs">Rated on: {r.competencies.join(", ")}</p>
+                <p className="mt-1 text-xs">
+                  Rated on:{" "}
+                  {r.competencies
+                    .map((c) => (weightOf(r, c) > 1 ? `${c} ×${weightOf(r, c)}` : c))
+                    .join(", ")}
+                </p>
               </>
             )}
           </li>
@@ -162,7 +170,7 @@ export function InterviewPlanCard({ requisitionId }: { requisitionId: string }) 
             A hold or reject from the interviewers is a recommendation — the hiring manager decides
           </Label>
           <div className="flex gap-2">
-            <Button size="sm" disabled={busy} onClick={() => void save(plan)}>
+            <Button size="sm" disabled={busy} onClick={() => void save(pruneRubric(plan))}>
               {busy ? <Loader2 className="size-4 animate-spin" /> : null} Save plan
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setDraft(null)}>
@@ -182,6 +190,80 @@ export function InterviewPlanCard({ requisitionId }: { requisitionId: string }) 
           ) : null}
         </div>
       )}
+    </div>
+  );
+}
+
+type Round = InterviewPlan["rounds"][number];
+
+/** Per competency: its weight toward the overall and what a 1, 3 and 5 look like. */
+function RubricEditor({
+  round,
+  onChange,
+}: {
+  round: Round;
+  onChange: (patch: Partial<Round>) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const anchorOf = (c: string) => round.anchors?.[c] ?? { low: "", mid: "", high: "" };
+  return (
+    <div>
+      <button
+        type="button"
+        className="text-xs font-medium text-primary"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {open ? "Hide" : "Weights and rating guide"}
+      </button>
+      {open ? (
+        <div className="mt-2 space-y-3">
+          {round.competencies.map((c) => {
+            const a = anchorOf(c);
+            const setAnchor = (k: "low" | "mid" | "high", v: string) =>
+              onChange({ anchors: { ...round.anchors, [c]: { ...a, [k]: v } } });
+            return (
+              <div key={c} className="space-y-1.5 rounded border border-border p-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-medium">{c}</span>
+                  <select
+                    className="rounded-md border border-border bg-background px-2 py-1 text-xs"
+                    value={weightOf(round, c)}
+                    aria-label={`${c} weight`}
+                    onChange={(e) =>
+                      onChange({ weights: { ...round.weights, [c]: Number(e.target.value) } })
+                    }
+                  >
+                    {[...new Set([1, 2, 3, 4, 5, weightOf(round, c)])].map((n) => (
+                      <option key={n} value={n}>
+                        ×{n}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {(
+                  [
+                    ["low", "1"],
+                    ["mid", "3"],
+                    ["high", "5"],
+                  ] as const
+                ).map(([k, label]) => (
+                  <div key={k} className="flex items-center gap-2">
+                    <span className="w-3 text-xs font-medium text-muted-foreground">{label}</span>
+                    <Input
+                      className="h-8 text-xs"
+                      maxLength={200}
+                      value={a[k]}
+                      aria-label={`${c}: what a ${label} looks like`}
+                      onChange={(e) => setAnchor(k, e.target.value)}
+                    />
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
     </div>
   );
 }

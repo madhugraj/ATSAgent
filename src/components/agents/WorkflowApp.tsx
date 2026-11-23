@@ -663,7 +663,7 @@ export function WorkflowJourney({
                       <Button
                         size="sm"
                         variant="outline"
-                        className="h-6 px-2 text-[11px]"
+                        className="h-6 px-2 text-[0.6875rem]"
                         onClick={onReview}
                       >
                         Review

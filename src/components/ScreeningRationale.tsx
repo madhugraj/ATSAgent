@@ -164,7 +164,7 @@ function Rationale({ r }: { r: ScreeningRationale }) {
               <div className="flex flex-wrap items-baseline gap-2">
                 <span className="num text-xs text-muted-foreground">Q{i + 1}</span>
                 {x.focus ? (
-                  <Badge variant="outline" className="text-[10px]">
+                  <Badge variant="outline" className="text-[0.625rem]">
                     {FOCUS[x.focus] ?? x.focus}
                   </Badge>
                 ) : null}

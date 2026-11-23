@@ -679,12 +679,12 @@ function Requisitions() {
                       const chip = jd ? JD_CHIP[jd] : null;
                       return chip ? (
                         <span
-                          className={`whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium ${chip.className}`}
+                          className={`whitespace-nowrap rounded-full border px-2 py-0.5 text-[0.6875rem] font-medium ${chip.className}`}
                         >
                           {chip.label}
                         </span>
                       ) : (
-                        <span className="whitespace-nowrap rounded-full border border-dashed border-border px-2 py-0.5 text-[11px] text-muted-foreground">
+                        <span className="whitespace-nowrap rounded-full border border-dashed border-border px-2 py-0.5 text-[0.6875rem] text-muted-foreground">
                           No JD yet
                         </span>
                       );
@@ -701,7 +701,7 @@ function Requisitions() {
                         >
                           <input
                             autoFocus
-                            className="h-6 w-36 rounded border border-border bg-background px-1.5 text-[11px]"
+                            className="h-6 w-36 rounded border border-border bg-background px-1.5 text-[0.6875rem]"
                             placeholder="Reason (audit trail)"
                             value={deletingDraft.reason}
                             onChange={(e) =>

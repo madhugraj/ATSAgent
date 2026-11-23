@@ -280,14 +280,14 @@ function TalentBrainPage() {
 
           {d.narrative && (
             <section className="rounded-xl border border-border border-l-2 border-l-primary bg-card p-4">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              <p className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">
                 Executive reading
               </p>
               <p className="mt-1 text-sm leading-relaxed">{d.narrative}</p>
             </section>
           )}
 
-          <details className="rounded-xl border border-border bg-card px-4 py-3 text-[13px]">
+          <details className="rounded-xl border border-border bg-card px-4 py-3 text-[0.8125rem]">
             <summary className="cursor-pointer font-semibold">Read this page in 30 seconds</summary>
             <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
               <li>Bigger bubbles carry more people and more open-role demand.</li>
@@ -333,7 +333,7 @@ function TalentBrainPage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Find a skill or capability family"
-                className="h-8 pl-9 text-[13px]"
+                className="h-8 pl-9 text-[0.8125rem]"
               />
             </div>
             {d.nodes.length === 0 ? (
@@ -351,7 +351,7 @@ function TalentBrainPage() {
               </div>
             )}
             {sel && (
-              <div className="border-t border-border bg-muted/30 px-4 py-3 text-[13px]">
+              <div className="border-t border-border bg-muted/30 px-4 py-3 text-[0.8125rem]">
                 <div className="flex items-start justify-between gap-3">
                   <p className="font-semibold">
                     {sel.name}{" "}
@@ -407,7 +407,7 @@ function TalentBrainPage() {
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
             <Panel title="Changes in this period" hint={rw.label}>
-              <div className="space-y-2 px-4 py-3 text-[13px]">
+              <div className="space-y-2 px-4 py-3 text-[0.8125rem]">
                 <p>
                   <b>{newInPeriod.length}</b> skill{newInPeriod.length === 1 ? "" : "s"} first seen
                   {newInPeriod.length > 0 && (
@@ -445,7 +445,7 @@ function TalentBrainPage() {
             </Panel>
 
             <Panel title="Skills" hint="Most pressured first">
-              <table className="mt-2 w-full text-[13px] tabular-nums">
+              <table className="mt-2 w-full text-[0.8125rem] tabular-nums">
                 <thead>
                   <tr className="border-b border-border text-left text-xs text-muted-foreground">
                     <th className="px-4 py-2 font-medium">Skill</th>

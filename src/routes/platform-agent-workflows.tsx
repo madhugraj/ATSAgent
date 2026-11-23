@@ -163,7 +163,7 @@ function Box({
         <span className="truncate">{title}</span>
       </div>
       {sub ? (
-        <div className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">{sub}</div>
+        <div className="mt-0.5 line-clamp-2 text-[0.6875rem] text-muted-foreground">{sub}</div>
       ) : null}
     </div>
   );
@@ -219,7 +219,7 @@ function ConditionNode({ data, selected }: NodeProps<FlowNode>) {
       />
       <Handle id="yes" type="source" position={Position.Bottom} style={{ left: "30%" }} />
       <Handle id="no" type="source" position={Position.Bottom} style={{ left: "70%" }} />
-      <div className="pointer-events-none flex justify-between px-6 text-[10px] text-muted-foreground">
+      <div className="pointer-events-none flex justify-between px-6 text-[0.625rem] text-muted-foreground">
         <span>yes</span>
         <span>no</span>
       </div>
@@ -362,7 +362,7 @@ function WorkflowsPage() {
           <div className="mt-2 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {data.templates.map((t) => (
               <article key={t.id} className="glass-card flex flex-col p-3.5">
-                <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <div className="flex items-center gap-1.5 text-[0.6875rem] text-muted-foreground">
                   <Zap className="size-3 text-amber-500" />
                   {eventLabel(t.trigger)} · {t.steps} steps
                 </div>
@@ -659,7 +659,7 @@ function Editor({
             {LIFECYCLE.map((l, i) => (
               <span
                 key={l}
-                className={`rounded-full px-2 py-0.5 text-[11px] ${
+                className={`rounded-full px-2 py-0.5 text-[0.6875rem] ${
                   i <= stage ? "bg-foreground text-background" : "bg-muted text-muted-foreground"
                 }`}
               >
@@ -792,7 +792,7 @@ function Editor({
                   </div>
                 ))}
               </div>
-              <Label className="mt-1 text-[11px] text-muted-foreground">Agents</Label>
+              <Label className="mt-1 text-[0.6875rem] text-muted-foreground">Agents</Label>
               <Input
                 className="h-7 text-xs"
                 placeholder="Filter"
@@ -817,7 +817,7 @@ function Editor({
                     <Bot className="size-3.5 text-primary" />
                     <span className="truncate">{AGENT_LABEL[a.type] ?? a.name}</span>
                     {a.studio ? (
-                      <Badge variant="secondary" className="ml-auto px-1 text-[9px]">
+                      <Badge variant="secondary" className="ml-auto px-1 text-[0.5625rem]">
                         studio
                       </Badge>
                     ) : null}
@@ -1196,7 +1196,7 @@ function Properties({
               maxLength={2000}
               onChange={(e) => setData({ goal: e.target.value })}
             />
-            <p className="mt-1 font-mono text-[10px] text-muted-foreground">
+            <p className="mt-1 font-mono text-[0.625rem] text-muted-foreground">
               {"{{payload.need}} {{payload.<field>}} {{last.result}}"}
             </p>
           </div>

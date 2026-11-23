@@ -18,6 +18,7 @@ import { AuthGate } from "@/components/AuthGate";
 import { AppShell } from "@/components/AppShell";
 import { OrgGate } from "@/components/OrgGate";
 import { Toaster } from "@/components/ui/sonner";
+import { APPEARANCE_BOOT_SCRIPT } from "@/lib/appearance";
 import { StepUpDialog } from "@/components/StepUpDialog";
 
 function NotFoundComponent() {
@@ -114,9 +115,10 @@ const REACT_DEVTOOLS_HOOK_SHIM = `(function(){if(window.__REACT_DEVTOOLS_GLOBAL_
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: REACT_DEVTOOLS_HOOK_SHIM }} />
+        <script dangerouslySetInnerHTML={{ __html: APPEARANCE_BOOT_SCRIPT }} />
         <HeadContent />
       </head>
       <body>
@@ -139,7 +141,9 @@ function RootComponent() {
     pathname.startsWith("/pay/") ||
     pathname.startsWith("/negotiate/") ||
     pathname.startsWith("/schedule/") ||
+    pathname.startsWith("/confirm/") ||
     pathname.startsWith("/offer/") ||
+    pathname.startsWith("/scorecard/") ||
     pathname.startsWith("/apply/") ||
     LEGAL_PATHS.has(pathname);
   const isLegal = LEGAL_PATHS.has(pathname);

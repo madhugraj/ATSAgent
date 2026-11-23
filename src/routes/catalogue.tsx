@@ -69,7 +69,8 @@ function Catalogue() {
         m.category.toLowerCase().includes(needle) ||
         m.audience.toLowerCase().includes(needle) ||
         m.summary.toLowerCase().includes(needle) ||
-        m.capabilities.some((c) => c.toLowerCase().includes(needle))
+        m.overview.toLowerCase().includes(needle) ||
+        m.capabilities.some((c) => `${c.name} ${c.detail}`.toLowerCase().includes(needle))
       );
     });
   }, [cat.data, q, tier]);
@@ -92,7 +93,7 @@ function Catalogue() {
     <div className="space-y-6 p-6">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-[11px] font-mono uppercase tracking-widest text-primary">
+          <p className="text-[0.6875rem] font-mono uppercase tracking-widest text-primary">
             Product owner
           </p>
           <h1 className="font-display text-2xl">Product catalogue</h1>
@@ -168,7 +169,7 @@ function Catalogue() {
 function Figure({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border bg-card p-4">
-      <p className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground">
+      <p className="text-[0.6875rem] font-mono uppercase tracking-widest text-muted-foreground">
         {label}
       </p>
       <p className="mt-1 truncate font-display text-lg">{value}</p>
@@ -239,9 +240,12 @@ function ModuleCard({ m }: { m: CatalogueRow }) {
 
       <ul className="mt-4 grid gap-1.5 sm:grid-cols-2">
         {m.capabilities.map((c) => (
-          <li key={c} className="flex gap-2 text-sm">
+          <li key={c.name} className="flex gap-2 text-sm">
             <span aria-hidden className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary" />
-            <span>{c}</span>
+            <span>
+              <span className="font-medium">{c.name}</span>
+              <span className="text-muted-foreground"> — {c.detail}</span>
+            </span>
           </li>
         ))}
       </ul>

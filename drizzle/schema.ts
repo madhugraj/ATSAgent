@@ -97,6 +97,8 @@ export const appRoleEnum = pgEnum("app_role", [
   "department_head",
   "hr_head",
   "president_cbo",
+  /** Panel only: their own interview rounds and scorecards (migration 0081). */
+  "interviewer",
 ]);
 
 /* ------------------------------------------------------- identity (new) */
@@ -187,6 +189,8 @@ export const organizations = pgTable(
       .default(sql`'{permanent}'::text[]`),
     /** Over a band's ceiling by more than this % is a blocker; less is a flag (0074). */
     payFarAbovePct: integer("pay_far_above_pct").notNull().default(20),
+    /** End-to-end hiring SLA: days from application to offer (migration 0088). */
+    hiringSlaDays: smallint("hiring_sla_days").notNull().default(5),
     fiscalYearStartMonth: smallint("fiscal_year_start_month").notNull().default(4),
     careersEmail: text("careers_email"),
     onboardingStep: text("onboarding_step").notNull().default("profile"),
@@ -210,6 +214,11 @@ export const organizations = pgTable(
      * replayed against candidate capture (2026-11 audit N-15).
      */
     distributionTokenHash: text("distribution_token_hash"),
+    /** E-mail branding (migration 0091): logo object key under `${orgId}/branding/`. */
+    brandLogoPath: text("brand_logo_path"),
+    brandLogoContentType: text("brand_logo_content_type"),
+    /** E-mail brand colour, "#rrggbb"; null = the ATSIQ default. */
+    brandColor: text("brand_color"),
   },
   (t) => [
     uniqueIndex("organizations_slug_key").on(t.slug),
@@ -323,6 +332,63 @@ export const memberInterviewerProfiles = pgTable(
       sql`${t.rounds} <@ array[1,2,3] and cardinality(${t.rounds}) >= 1`,
     ),
     check("member_interviewer_profiles_areas_check", sql`cardinality(${t.areas}) <= 20`),
+  ],
+);
+
+/**
+ * The panel directory (docs/panel-directory.md, migration 0070): everyone who may
+ * sit on an interview panel — internal (an org member, or an employee without a
+ * login) or external (a client, an advisor). Added in the hiring desk when the
+ * Interview coordinator asks for someone new; whoever types them in approves them
+ * (self-approval recorded). Every org member is an internal panelist.
+ */
+export const panelists = pgTable(
+  "panelists",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<"internal" | "external">().notNull().default("internal"),
+    /** The org member this panelist is (internal panelists with a login). */
+    memberId: uuid("member_id").references(() => orgMembers.id, { onDelete: "cascade" }),
+    fullName: text("full_name").notNull(),
+    email: text("email").notNull(),
+    title: text("title"),
+    /** For external panelists: their organisation. */
+    company: text("company"),
+    areas: text("areas")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    rounds: integer("rounds")
+      .array()
+      .notNull()
+      .default(sql`'{1,2,3}'::integer[]`),
+    weeklyCap: integer("weekly_cap").notNull().default(4),
+    active: boolean("active").notNull().default(true),
+    addedBy: uuid("added_by").references(() => users.id, { onDelete: "set null" }),
+    approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    /** The person who typed them in also approved them. */
+    selfApproved: boolean("self_approved").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("panelists_org_email_key").on(t.orgId, sql`lower(${t.email})`),
+    uniqueIndex("panelists_member_key")
+      .on(t.memberId)
+      .where(sql`${t.memberId} is not null`),
+    index("panelists_org_idx").on(t.orgId, t.active),
+    check("panelists_kind_check", sql`${t.kind} in ('internal', 'external')`),
+    check("panelists_external_member_check", sql`${t.kind} = 'internal' or ${t.memberId} is null`),
+    check(
+      "panelists_rounds_check",
+      sql`${t.rounds} <@ array[1,2,3] and cardinality(${t.rounds}) >= 1`,
+    ),
+    check("panelists_weekly_cap_check", sql`${t.weeklyCap} between 1 and 20`),
+    check("panelists_areas_check", sql`cardinality(${t.areas}) <= 20`),
   ],
 );
 
@@ -515,7 +581,13 @@ export const rolePanels = pgTable(
       .notNull()
       .references(() => requisitions.id, { onDelete: "cascade" }),
     level: integer("level").notNull(),
-    memberIds: uuid("member_ids").array().notNull(),
+    /** Superseded by panelistIds (migration 0070); kept for code that predates it. */
+    memberIds: uuid("member_ids")
+      .array()
+      .notNull()
+      .default(sql`'{}'::uuid[]`),
+    /** The panel, in order: panel directory ids (panelists.id). */
+    panelistIds: uuid("panelist_ids").array(),
     approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
     approvedAt: timestamp("approved_at", { withTimezone: true }).notNull().defaultNow(),
     version: integer("version").notNull().default(1),
@@ -524,7 +596,10 @@ export const rolePanels = pgTable(
     uniqueIndex("role_panels_requisition_level_key").on(t.requisitionId, t.level),
     index("role_panels_org_idx").on(t.orgId),
     check("role_panels_level_check", sql`${t.level} between 1 and 3`),
-    check("role_panels_members_check", sql`cardinality(${t.memberIds}) between 1 and 3`),
+    check(
+      "role_panels_panelists_check",
+      sql`${t.panelistIds} is null or cardinality(${t.panelistIds}) between 1 and 3`,
+    ),
   ],
 );
 
@@ -686,6 +761,8 @@ export const applications = pgTable(
     stage: appStageEnum("stage").notNull().default("applied"),
     source: text("source").notNull().default("direct"),
     appliedAt: timestamp("applied_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Last hiring-SLA state posted to the desk: at_risk | breached (migration 0088). */
+    slaFlag: text("sla_flag").$type<"at_risk" | "breached">(),
     lastActivityAt: timestamp("last_activity_at", { withTimezone: true }).notNull().defaultNow(),
     stageReason: text("stage_reason"),
     stageNote: text("stage_note"),
@@ -845,6 +922,14 @@ export const interviews = pgTable(
       .notNull()
       .default(sql`'[]'::jsonb`),
     /**
+     * Time changes a panelist made after accepting — one each per round, never
+     * past the stage's SLA deadline (migration 0090).
+     */
+    panelChanges: jsonb("panel_changes")
+      .$type<{ email: string; from: string; to: string | null; reason: string; at: string }[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /**
      * The meeting's provider and the reference its API finds it by after the
      * call (Zoom id, Meet code, Teams join link) — read from the link when the
      * round is booked (src/lib/meeting-ref.ts, migration 0059).
@@ -901,12 +986,17 @@ export const roundSubstitutes = pgTable(
       .notNull()
       .references(() => applications.id, { onDelete: "cascade" }),
     level: integer("level").notNull(),
-    replaceMemberId: uuid("replace_member_id")
-      .notNull()
-      .references(() => orgMembers.id, { onDelete: "cascade" }),
-    withMemberId: uuid("with_member_id")
-      .notNull()
-      .references(() => orgMembers.id, { onDelete: "cascade" }),
+    /** Superseded by the panelist columns (migration 0070). */
+    replaceMemberId: uuid("replace_member_id").references(() => orgMembers.id, {
+      onDelete: "cascade",
+    }),
+    withMemberId: uuid("with_member_id").references(() => orgMembers.id, { onDelete: "cascade" }),
+    replacePanelistId: uuid("replace_panelist_id").references(() => panelists.id, {
+      onDelete: "cascade",
+    }),
+    withPanelistId: uuid("with_panelist_id").references(() => panelists.id, {
+      onDelete: "cascade",
+    }),
     reason: text("reason"),
     approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
     approvedAt: timestamp("approved_at", { withTimezone: true }).notNull().defaultNow(),
@@ -919,7 +1009,43 @@ export const roundSubstitutes = pgTable(
     ),
     index("round_substitutes_org_idx").on(t.orgId),
     check("round_substitutes_level_check", sql`${t.level} between 1 and 3`),
-    check("round_substitutes_distinct_check", sql`${t.replaceMemberId} <> ${t.withMemberId}`),
+    uniqueIndex("round_substitutes_round_panelist_key")
+      .on(t.applicationId, t.level, t.replacePanelistId)
+      .where(sql`${t.replacePanelistId} is not null`),
+    check(
+      "round_substitutes_panelist_distinct_check",
+      sql`${t.replacePanelistId} is null or ${t.replacePanelistId} <> ${t.withPanelistId}`,
+    ),
+  ],
+);
+
+/**
+ * An external panelist's private scorecard link for one interview (migration
+ * 0070): /scorecard/<token>, expiring, one per panelist per round. Only the
+ * SHA-256 of the token is stored.
+ */
+export const panelistScorecardLinks = pgTable(
+  "panelist_scorecard_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    interviewId: uuid("interview_id")
+      .notNull()
+      .references(() => interviews.id, { onDelete: "cascade" }),
+    panelistId: uuid("panelist_id")
+      .notNull()
+      .references(() => panelists.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("panelist_scorecard_links_token_key").on(t.tokenHash),
+    uniqueIndex("panelist_scorecard_links_round_key").on(t.interviewId, t.panelistId),
+    index("panelist_scorecard_links_org_idx").on(t.orgId),
   ],
 );
 
@@ -955,6 +1081,12 @@ export const interviewSlotOffers = pgTable(
     /** The candidate's own words when none of the times work (untrusted). */
     candidateNote: text("candidate_note"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    /**
+     * When the private link was e-mailed. Null while it is held back for the
+     * scheduling call that goes first (docs/voice-scheduling-call-plan.md):
+     * released when that call ends without a booking, or cannot happen in time.
+     */
+    linkEmailedAt: timestamp("link_emailed_at", { withTimezone: true }),
     createdBy: uuid("created_by"),
     agentRunId: uuid("agent_run_id"),
     /** Further interviewers on the panel: [{ name, email }]. */
@@ -969,6 +1101,117 @@ export const interviewSlotOffers = pgTable(
     uniqueIndex("interview_slot_offers_token_key").on(t.token),
     index("interview_slot_offers_open_idx").on(t.orgId, t.status, t.expiresAt),
     index("interview_slot_offers_application_idx").on(t.applicationId),
+    index("interview_slot_offers_held_idx")
+      .on(t.orgId, t.status)
+      .where(sql`${t.linkEmailedAt} is null`),
+  ],
+);
+
+/**
+ * A panelist's or candidate's answer to an interview time (migration 0085):
+ * for a booked round (`interviewId`) or for the times about to be e-mailed to
+ * the candidate (`offerId`). `party`: panelist | candidate. `state`: pending |
+ * accepted | declined | superseded. `note` is the person's own words (untrusted).
+ */
+export const interviewConfirmations = pgTable(
+  "interview_confirmations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    interviewId: uuid("interview_id").references(() => interviews.id, { onDelete: "cascade" }),
+    offerId: uuid("offer_id").references(() => interviewSlotOffers.id, { onDelete: "cascade" }),
+    party: text("party").$type<"panelist" | "candidate">().notNull(),
+    email: text("email").notNull(),
+    name: text("name"),
+    token: text("token").notNull(),
+    state: text("state")
+      .$type<"pending" | "accepted" | "declined" | "superseded" | "lapsed">()
+      .notNull()
+      .default("pending"),
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
+    note: text("note"),
+    /** Offers: the offered times (ISO) this panelist can do (migration 0086). */
+    okSlots: jsonb("ok_slots").$type<string[]>(),
+    /** Another time this person suggests (migration 0086). */
+    suggestedAt: timestamp("suggested_at", { withTimezone: true }),
+    /** The answer window (migration 0088): when reminded, and when it closed unanswered. */
+    remindedAt: timestamp("reminded_at", { withTimezone: true }),
+    lapsedAt: timestamp("lapsed_at", { withTimezone: true }),
+    respondedAt: timestamp("responded_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("interview_confirmations_token_key").on(t.token),
+    index("interview_confirmations_interview_idx").on(t.orgId, t.interviewId),
+    index("interview_confirmations_offer_idx").on(t.orgId, t.offerId),
+  ],
+);
+
+/**
+ * How far a missing scorecard has been chased (migration 0089): 1 reminded as
+ * the round ended, 2 reminded again, 3 the HR head told, 4+ daily escalation.
+ */
+export const scorecardChases = pgTable(
+  "scorecard_chases",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    interviewId: uuid("interview_id")
+      .notNull()
+      .references(() => interviews.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    step: smallint("step").notNull().default(0),
+    lastAt: timestamp("last_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("scorecard_chases_round_person_key").on(t.interviewId, t.email)],
+);
+
+/**
+ * A panelist's proposed change to their round's scorecard (topics, competencies,
+ * weights) for a role. Checked against the role's must-haves by fixed rules,
+ * reviewed by the AI against the job, and applied only when the hiring manager
+ * (or, failing them, the HR head) approves (migration 0090).
+ */
+export const planChangeProposals = pgTable(
+  "plan_change_proposals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    requisitionId: uuid("requisition_id")
+      .notNull()
+      .references(() => requisitions.id, { onDelete: "cascade" }),
+    interviewId: uuid("interview_id").references(() => interviews.id, { onDelete: "set null" }),
+    level: smallint("level").notNull(),
+    email: text("email").notNull(),
+    name: text("name"),
+    /** The round as it stood when proposed, and as proposed. */
+    before: jsonb("before").$type<import("../src/lib/interview-plan").PlanRoundT>().notNull(),
+    round: jsonb("round").$type<import("../src/lib/interview-plan").PlanRoundT>().notNull(),
+    reason: text("reason").notNull(),
+    /** reviewing | awaiting_approval | approved | rejected | stale */
+    status: text("status")
+      .$type<"reviewing" | "awaiting_approval" | "approved" | "rejected" | "stale">()
+      .notNull()
+      .default("reviewing"),
+    review: jsonb("review").$type<import("../src/lib/interview-plan").PlanReview>(),
+    decidedBy: uuid("decided_by"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decisionNote: text("decision_note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("plan_change_proposals_req_idx").on(t.orgId, t.requisitionId, t.status),
+    check(
+      "plan_change_proposals_status_check",
+      sql`${t.status} in ('reviewing','awaiting_approval','approved','rejected','stale')`,
+    ),
   ],
 );
 
@@ -1329,8 +1572,11 @@ export type EmailOutboxKind =
   | "compensation_form"
   | "offer_negotiation"
   | "screening_call_booked"
-  | "panel_summary";
-export type EmailOutboxStatus = "queued" | "sent" | "failed" | "suppressed";
+  | "panel_summary"
+  | "panel_time_check"
+  | "panel_reminder";
+/** `held`: waiting on interview confirmations (migration 0085) — released to `queued`. */
+export type EmailOutboxStatus = "queued" | "held" | "sent" | "failed" | "suppressed";
 export type EmailOutboxAttachment = {
   filename: string;
   contentBase64: string;
@@ -3698,6 +3944,7 @@ export const phoneScreeningSettings = pgTable(
     /** Scheduling calls (a follow-up to an unanswered interview-time e-mail) switched on. */
     schedulingEnabled: boolean("scheduling_enabled").notNull().default(false),
     /** Hours an e-mailed interview-time offer waits unanswered before a scheduling call. */
+    /** Retired: voice goes first now (no e-mail wait). Kept for old rows; not read. */
     schedulingWaitHours: integer("scheduling_wait_hours").notNull().default(24),
     /** Pay negotiation calls (docs/negotiator-voice-agent.md) switched on (0058). */
     negotiationEnabled: boolean("negotiation_enabled").notNull().default(false),

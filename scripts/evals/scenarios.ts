@@ -45,7 +45,12 @@ const call = (id: string, name: string, args: unknown): AgentStepResult => ({
 const tool = <I>(t: AgentTool<I>) => t as unknown as AgentTool<never>;
 
 export function scenarios(): ScriptedScenario[] {
-  const draft = { id: "REQ-1", title: "Platform SRE", skills: [] as string[], status: "draft" };
+  const draft = {
+    id: "7c1e2a4b-3d5f-4a6b-8c9d-0e1f2a3b4c5d",
+    title: "Platform SRE",
+    skills: [] as string[],
+    status: "draft",
+  };
 
   return [
     {
@@ -97,7 +102,7 @@ export function scenarios(): ScriptedScenario[] {
           },
         }),
       ],
-      goal: "Requisition REQ-1 has no skills listed. Complete it with sensible skills for a platform SRE and get it to the department head for approval.",
+      goal: "Requisition 7c1e2a4b-3d5f-4a6b-8c9d-0e1f2a3b4c5d has no skills listed. Complete it with sensible skills for a platform SRE and get it to the department head for approval.",
       autonomy: "act_and_notify",
       decide: (t) =>
         t.kind === "clarification"
@@ -115,18 +120,22 @@ export function scenarios(): ScriptedScenario[] {
         maxSteps: 10,
       },
       script: [
-        call("a", "get_requisition", { id: "REQ-1" }),
+        call("a", "get_requisition", { id: "7c1e2a4b-3d5f-4a6b-8c9d-0e1f2a3b4c5d" }),
         call("b", "update_requisition_draft", {
-          id: "REQ-1",
+          id: "7c1e2a4b-3d5f-4a6b-8c9d-0e1f2a3b4c5d",
           skills: ["Kubernetes", "Terraform", "Go"],
         }),
-        call("c", "submit_requisition_for_approval", { id: "REQ-1" }),
+        call("c", "submit_requisition_for_approval", {
+          id: "7c1e2a4b-3d5f-4a6b-8c9d-0e1f2a3b4c5d",
+        }),
         call("d", "request_approval", {
-          title: "Approve REQ-1 Platform SRE",
+          title: "Approve 7c1e2a4b-3d5f-4a6b-8c9d-0e1f2a3b4c5d Platform SRE",
           summary: "Skills completed; submitted.",
           assignee_role: "department_head",
         }),
-        say("REQ-1 is complete, submitted and approved by the department head."),
+        say(
+          "7c1e2a4b-3d5f-4a6b-8c9d-0e1f2a3b4c5d is complete, submitted and approved by the department head.",
+        ),
       ],
     },
     {
@@ -906,6 +915,137 @@ export function scenarios(): ScriptedScenario[] {
       ],
     },
     {
+      name: "interview: re-offers from the panel's suggested times when none suit the whole panel",
+      agentType: "interview",
+      setup: async ({ orgId, userId }) => {
+        const requisitionId = await seedRequisition(orgId, userId, "approved");
+        const app = await seedApplication(orgId, requisitionId, "Leela", "l1", 83);
+        const { db } = await import("../../src/server/db");
+        const { orgMembers, rolePanels } = await import("../../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const [m] = await db
+          .select({ id: orgMembers.id, email: orgMembers.email })
+          .from(orgMembers)
+          .where(eq(orgMembers.userId, userId));
+        await db.insert(rolePanels).values({ orgId, requisitionId, level: 1, memberIds: [m!.id] });
+        // The panelist ticked none of the proposed times and suggested another:
+        // a working-hours time two weekdays out.
+        const d = new Date(Date.now() + 2 * 864e5);
+        while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d.setTime(d.getTime() + 864e5);
+        d.setUTCHours(6, 0, 0, 0); // 11:30 IST / 06:00 UTC
+        return { requisitionId, app, interviewer: m!.email, suggested: d.toISOString() };
+      },
+      goal: (d) =>
+        `No proposed L1 interview time suits the whole panel for candidate application ${d["app"]}; the candidate was not contacted. What the panel said: ${d["interviewer"]}: none of them; suggests ${d["suggested"]}. Offer new times with the same panel (interviewerEmail ${d["interviewer"]}): start from the suggested times ${d["suggested"]} and add free times from find_interview_slots. The panel is asked again before the candidate hears. app=${d["app"]} interviewer=${d["interviewer"]} suggested=${d["suggested"]}\n\nRequisition id: ${d["requisitionId"]}`,
+      decide: () => ({ status: "approved" }),
+      expect: {
+        status: "done",
+        calls: ["find_interview_slots", "offer_interview_slots"],
+        neverCalls: ["schedule_interview", "propose_panel"],
+      },
+      script: [
+        (m) =>
+          call("f", "find_interview_slots", {
+            applicationId: fromGoal(m, "app"),
+            level: 1,
+            interviewerEmail: firstUserMsg(m).match(/interviewer=(\S+)/)![1]!,
+          }),
+        (m) =>
+          call("o", "offer_interview_slots", {
+            applicationId: fromGoal(m, "app"),
+            level: 1,
+            interviewerEmail: firstUserMsg(m).match(/interviewer=(\S+)/)![1]!,
+            slots: [
+              firstUserMsg(m).match(/suggested=(\S+)/)![1]!,
+              ...(toolResult(m, "find_interview_slots")["slots"] as string[]).slice(0, 2),
+            ],
+          }),
+        say(
+          "Offered Leela's L1 again, starting from the panel's suggested time; the panel is asked first.",
+        ),
+      ],
+    },
+    {
+      name: "interview: asks HR for a new panellist when nobody fits the round",
+      agentType: "interview",
+      setup: async ({ orgId, userId }) => {
+        const requisitionId = await seedRequisition(orgId, userId, "approved");
+        const app = await seedApplication(orgId, requisitionId, "Ravi", "l1", 80);
+        const { db } = await import("../../src/server/db");
+        const { memberInterviewerProfiles, orgMembers, requisitions } =
+          await import("../../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const [m] = await db
+          .select({ id: orgMembers.id })
+          .from(orgMembers)
+          .where(eq(orgMembers.userId, userId));
+        // The only registered interviewer takes L2 and L3: nobody in the directory fits L1.
+        await db.insert(memberInterviewerProfiles).values({
+          orgId,
+          memberId: m!.id,
+          active: true,
+          areas: ["Kubernetes"],
+          rounds: [2, 3],
+        });
+        await db
+          .update(requisitions)
+          .set({ hiringManagerMemberId: m!.id })
+          .where(eq(requisitions.id, requisitionId));
+        return { requisitionId, app };
+      },
+      goal: (d) => `Book next rounds. app=${d["app"]}\n\nRequisition id: ${d["requisitionId"]}`,
+      // The HR head types an external panellist on the card; then the panel is approved.
+      decide: (t) =>
+        t.title.includes("Someone new")
+          ? {
+              status: "approved",
+              args: {
+                panelist: {
+                  fullName: "Leela Rao",
+                  email: "leela.rao@client.example",
+                  kind: "external",
+                  company: "Client Co",
+                  areas: ["Kubernetes", "Go"],
+                  rounds: [1],
+                },
+              },
+            }
+          : { status: "approved" },
+      expect: {
+        status: "done",
+        calls: [
+          "list_panel_options",
+          "request_new_panelist",
+          "list_panel_options",
+          "propose_panel",
+        ],
+        neverCalls: ["schedule_interview"],
+      },
+      script: [
+        (m) => call("p", "get_interview_plan", { applicationId: fromGoal(m, "app") }),
+        (m) => call("l", "list_panel_options", { requisitionId: idFromGoal(m), level: 1 }),
+        (m) =>
+          call("n", "request_new_panelist", {
+            requisitionId: idFromGoal(m),
+            level: 1,
+            needed: "An L1 interviewer for Kubernetes and Go",
+            reason: "Nobody in the panel directory takes L1 for this role.",
+          }),
+        (m) => call("l2", "list_panel_options", { requisitionId: idFromGoal(m), level: 1 }),
+        (m) =>
+          call("pp", "propose_panel", {
+            requisitionId: idFromGoal(m),
+            level: 1,
+            memberIds: [
+              (toolResult(m, "list_panel_options")["eligible"] as { memberId: string }[])[0]!
+                .memberId,
+            ],
+            reason: "Leela assesses Kubernetes and Go, the round's competencies.",
+          }),
+        say("HR added Leela Rao (external, Client Co); the L1 panel with her is approved."),
+      ],
+    },
+    {
       name: "interview: proposes a stand-in when a panellist can't make it",
       agentType: "interview",
       setup: async ({ orgId, userId }) => {
@@ -979,6 +1119,90 @@ export function scenarios(): ScriptedScenario[] {
               toolResult(m, "list_substitutes")["options"] as { memberId: string }[]
             )[0]!.memberId,
             reason: "Dev is on leave; the stand-in is free at the booked time.",
+          }),
+        say("A stand-in was approved; Kiran keeps the booked time."),
+      ],
+    },
+    {
+      name: "interview: keeps the booked time when a panellist steps down under the SLA",
+      agentType: "interview",
+      setup: async ({ orgId, userId }) => {
+        const requisitionId = await seedRequisition(orgId, userId, "approved");
+        const app = await seedApplication(orgId, requisitionId, "Kiran", "l1", 81);
+        const { db } = await import("../../src/server/db");
+        const { interviews, memberInterviewerProfiles, orgMembers, requisitions, rolePanels } =
+          await import("../../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const [me] = await db
+          .select({ id: orgMembers.id })
+          .from(orgMembers)
+          .where(eq(orgMembers.userId, userId));
+        // The approved L1 panel is Dev, who now can't make Kiran's booked interview.
+        const [dev] = await db
+          .insert(orgMembers)
+          .values({
+            orgId,
+            email: `dev-${orgId.slice(0, 8)}@eval.local`,
+            fullName: "Dev",
+            status: "active",
+          } as never)
+          .returning({ id: orgMembers.id, email: orgMembers.email });
+        await db
+          .insert(rolePanels)
+          .values({ orgId, requisitionId, level: 1, memberIds: [dev!.id] });
+        await db.insert(memberInterviewerProfiles).values({
+          orgId,
+          memberId: me!.id,
+          active: true,
+          areas: ["Kubernetes"],
+          rounds: [1, 2, 3],
+        });
+        await db
+          .update(requisitions)
+          .set({ hiringManagerMemberId: me!.id })
+          .where(eq(requisitions.id, requisitionId));
+        await db.insert(interviews).values({
+          orgId,
+          applicationId: app,
+          level: 1,
+          interviewer: "Dev",
+          interviewerEmail: dev!.email,
+          scheduledAt: new Date(Date.now() + 3 * 86_400_000),
+          status: "scheduled",
+          unavailable: [
+            {
+              email: dev!.email,
+              note: "Customer escalation all week",
+              at: new Date().toISOString(),
+            },
+          ],
+        } as never);
+        return { requisitionId, app, dev: dev!.id };
+      },
+      goal: (d) =>
+        `Dev (memberId ${d["dev"]}) stepped down from the booked L1 interview of candidate application ${d["app"]} ("Customer escalation all week"): no time within the hiring SLA suited the whole panel, so the booked time stands. Arrange the round so it still happens on time. app=${d["app"]} dev=${d["dev"]}\n\nRequisition id: ${d["requisitionId"]}`,
+      decide: () => ({ status: "approved" }),
+      expect: {
+        status: "done",
+        calls: ["list_substitutes", "propose_substitute"],
+        neverCalls: ["offer_interview_slots", "schedule_interview", "propose_panel"],
+      },
+      script: [
+        (m) =>
+          call("s", "list_substitutes", {
+            applicationId: fromGoal(m, "app"),
+            level: 1,
+            replaceMemberId: fromGoal(m, "dev"),
+          }),
+        (m) =>
+          call("ps", "propose_substitute", {
+            applicationId: fromGoal(m, "app"),
+            level: 1,
+            replaceMemberId: fromGoal(m, "dev"),
+            withMemberId: (
+              toolResult(m, "list_substitutes")["options"] as { memberId: string }[]
+            )[0]!.memberId,
+            reason: "Dev stepped down; the stand-in is free at the booked time, so the SLA holds.",
           }),
         say("A stand-in was approved; Kiran keeps the booked time."),
       ],
@@ -1813,7 +2037,7 @@ export function scenarios(): ScriptedScenario[] {
       ],
     },
     {
-      name: "interview: asks for a scheduling call when e-mailed times go unanswered",
+      name: "interview: asks for a scheduling call once one is possible for e-mailed times",
       agentType: "interview",
       setup: async ({ orgId, userId }) => {
         const requisitionId = await seedRequisition(orgId, userId, "approved");
@@ -1823,7 +2047,7 @@ export function scenarios(): ScriptedScenario[] {
         return { requisitionId, app };
       },
       goal: (d) =>
-        `Candidate application ${d["app"]} has not picked one of the L1 interview times e-mailed to them. Ask for a scheduling call (request_scheduling_call) so the assistant phones them to pick one. If it is refused, leave it to the e-mail — do not offer new times. app=${d["app"]}\n\nRequisition id: ${d["requisitionId"]}`,
+        `Candidate application ${d["app"]} was e-mailed the L1 interview times because no call could be placed then; a call is possible now. Ask for a scheduling call (request_scheduling_call) so the assistant phones them to pick one. If it is refused, leave it to the e-mail — do not offer new times. app=${d["app"]}\n\nRequisition id: ${d["requisitionId"]}`,
       decide: () => ({ status: "approved" }),
       expect: {
         status: "done",
@@ -3434,6 +3658,7 @@ async function seedOffer(
       token: `eval-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`,
       expiresAt: new Date(Date.now() + 2 * 864e5),
       createdAt: created,
+      linkEmailedAt: created,
       createdBy: userId,
     })
     .returning({ id: interviewSlotOffers.id });
@@ -3563,7 +3788,7 @@ async function seedSchedulingCall(
     third: said[2]!,
     alternate: said[3]!,
     options: said
-      .map((x, i) => `${i + 1}. ${x}${i === 3 ? " (not in the e-mail — also free)" : ""}`)
+      .map((x, i) => `${i + 1}. ${x}${i === 3 ? " (an extra time — also free)" : ""}`)
       .join(" "),
   };
 }

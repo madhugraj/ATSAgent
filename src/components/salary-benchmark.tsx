@@ -190,7 +190,7 @@ export function MarketBenchmark({
                     <TableCell className="px-1.5 py-2 text-xs font-medium">
                       {level.label}
                       {level.key === suggested && (
-                        <span className="ml-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                        <span className="ml-1 text-[0.625rem] uppercase tracking-wide text-muted-foreground">
                           req.
                         </span>
                       )}
@@ -213,7 +213,7 @@ export function MarketBenchmark({
                     <TableCell className="px-1.5 py-2">
                       <Badge
                         variant={CONFIDENCE_VARIANT[level.confidence]}
-                        className="px-1.5 text-[10px]"
+                        className="px-1.5 text-[0.625rem]"
                       >
                         {CONFIDENCE_LABEL[level.confidence]}
                       </Badge>
@@ -223,7 +223,7 @@ export function MarketBenchmark({
               })}
             </TableBody>
           </Table>
-          <p className="text-[10px] text-muted-foreground">
+          <p className="text-[0.625rem] text-muted-foreground">
             Click a row to set the budget CTC to its median — the band fills with low/high.
           </p>
 
@@ -245,7 +245,7 @@ export function MarketBenchmark({
               </CollapsibleContent>
             </Collapsible>
           )}
-          <p className="num text-[10px] text-muted-foreground">
+          <p className="num text-[0.625rem] text-muted-foreground">
             {new Date(shown.created_at).toLocaleString()}
           </p>
         </div>

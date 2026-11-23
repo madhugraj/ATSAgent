@@ -73,10 +73,12 @@ We credit reporters in release notes on request.
   fixed rule in code; the HR head's review card is built by the system (the agent cannot write
   it), and the decision runs as the HR head with `assertRole` — no agent moves a candidate.
   Reconciliations and decisions are audited (`panel_review.reconciled`, `panel_review.decided`).
-  A scheduling call books only the e-mailed times or up to three alternates checked free when it
+  A scheduling call books only the offered times or up to three alternates checked free when it
   is arranged — by number, never a free-form time — through the same booking core as the
-  candidate's link (one booking per offer); a person approves each call (audited
-  `scheduling_call.requested`).
+  candidate's link (one booking per offer). Voice goes first: the system (never the agent)
+  arranges the call when times are offered, under the offer's approval, and e-mails the link
+  only if the call does not book (audited `scheduling_call.requested` with `callFirst`, and
+  `interview.slots_offered` with `via`).
   Staff are confidential to candidates: the interview invite e-mail, its calendar file and the
   time-choice page say only who an interview is with ("the hiring team" / "a panel of N from the
   hiring team", `src/lib/interview-with.ts`), never a name; and on calls neither voice agent names or describes the hiring manager,
@@ -157,7 +159,9 @@ We credit reporters in release notes on request.
   per-tenant AI visibility without exposing model identities to tenant users — vendor and model
   names stay inside the organisation's own integrations settings.
 - Files: CVs and screening recordings remain private in S3-compatible storage and are served through
-  authorised application paths rather than public object URLs.
+  authorised application paths rather than public object URLs. E-mail brand logos stay private
+  too: they are embedded in each e-mail as an inline `cid:` attachment, never linked by URL, and
+  uploads are checked as real PNG/JPEG (magic bytes, 1 MB cap); changes are audited.
 - CI: typecheck, lint, `bun audit --level high`, gitleaks, integration tests (`.github/workflows/ci.yml`).
   Actions are pinned by commit SHA and base images by digest; Dependabot proposes updates; the CI
   token is read-only; deployed images carry an SBOM and SLSA provenance and are deployed by digest.
@@ -213,6 +217,51 @@ characters, it returns only the round, role, organisation, the interviewer's fir
 offered times, it can book one of those times once (the offer is claimed before booking and every
 time is re-checked as free), and its server functions are rate-limited with all other RPCs.
 Calendar access for availability is free/busy only — event titles and details are never read.
+
+The interview-time confirmation page (`/confirm/<token>`) is public in the same way: one 64-hex
+token per person per time asked, it returns only the round, role, organisation and time(s) (the
+candidate's name only to a panelist), it records one answer (accept — for offered times, which of
+them — or decline, with an optional suggested time validated server-side and an optional note
+stored as plain text and never sent to an AI model), every answer is written to `audit_log`,
+and its server functions are rate-limited with all other RPCs. A re-schedule supersedes old
+tokens. The hiring team's "Send invite now" is behind `requireOrg`, scoped by `org_id`, and audited.
+A panelist who accepted can, from the same token, move the round once or step down (the new time
+is re-checked server-side against the panel's free times, the earlier rounds and the hiring SLA —
+the client's list is never trusted; one change per panelist per round is claimed atomically; both
+audited), and propose a change to the round's scorecard. A proposal is validated server-side
+against the role's must-haves and the 10-point share limit, reviewed by the AI through the gateway
+(`plan_change_review`, with the proposal and the job description fenced by `untrusted(...)` and
+the reply zod-validated), and applied only when the role's hiring manager, the owner, or the HR
+head after 4 hours approves it behind `requireOrg` (re-checked against the plan at that moment;
+proposal, approval and rejection audited).
+
+An external panellist's scorecard page (`/scorecard/<token>`, docs/panel-directory.md) is public in
+the same way, for people on an interview panel who have no account (a client, an advisor). The
+token is 64 hex characters derived with HMAC-SHA-256 from the server secret and the interview,
+panellist and booked time (a resent brief carries the same link; a reschedule replaces it); only
+its SHA-256 is stored (`panelist_scorecard_links.token_hash`). It returns only the round, role,
+candidate name, the panellist's own name, the round's focus and competencies, and — while the link
+is valid — the candidate's profile, skills and CV text (never pay, offers, notes, match or
+screening; nothing about the candidate once it has expired); it accepts one final
+scorecard, only once the interview has started and until seven days after it; an external
+scorecard never moves a candidate into the offer pipeline (that waits for the HR head); its server
+functions are rate-limited with all other RPCs; the submission is audited
+(`scorecard.submitted_by_link`). The external panellist's brief leaves out internal material — match
+score, screening result and the candidate page. Panel directory entries are added by the HR head
+(Team page or the hiring desk card the Interview coordinator raises); typing someone in is
+approving them, recorded as self-approved in `panelist.added`.
+
+**Panel-only members (`interviewer` role, migration 0081).** A colleague who only sits on interview
+panels is invited with the Interviewer role. A member whose _only_ role is `interviewer` (and who is
+not the owner) is denied by default: `activeOrgOf` resolves them to no organisation, so
+`requireOrg`, `requireRole`, `requireOrgOwner` and `assertRole` all refuse them, and the few places
+that read membership directly (`orgOf` in org.functions, collaboration, notifications) check
+`assertNotPanelOnly` / `isPanelOnly`. Only functions using `requirePanel` admit them — My
+interviews, scorecard submission, "can't make it", "didn't happen" and `myRoundBrief` — and each is
+limited to rounds whose interviewer or panel is the caller's own email. Their brief includes match
+and screening highlights (they are internal); the app shell shows them only My interviews. Any
+other role alongside `interviewer` restores normal access. Use `requirePanel` only for functions
+already limited to the caller's own rounds.
 
 Job-board application webhooks (`/api/public/boards/<provider>/<token>`) authenticate on two
 factors: a per-connection delivery token (24 random bytes, stored encrypted with a SHA-256 hash

@@ -12,6 +12,7 @@ import { template as interviewInviteTemplate } from "./interview-invite";
 import { template as offerReleasedTemplate } from "./offer-released";
 import { template as assessmentInviteTemplate } from "./assessment-invite";
 import { template as memberReminderTemplate } from "./member-reminder";
+import { template as agentDigestTemplate } from "./agent-digest";
 import { template as documentRequestTemplate } from "./document-request";
 import { template as roleInviteTemplate } from "./role-invite";
 import { template as interviewerBriefTemplate } from "./interviewer-brief";
@@ -20,6 +21,8 @@ import { template as compensationFormTemplate } from "./compensation-form";
 import { template as offerNegotiationTemplate } from "./offer-negotiation";
 import { template as screeningCallBookedTemplate } from "./screening-call-booked";
 import { template as panelSummaryTemplate } from "./panel-summary";
+import { template as panelTimeCheckTemplate } from "./panel-time-check";
+import { template as panelReminderTemplate } from "./panel-reminder";
 
 /**
  * Dynamic template-data bag passed to every template renderer and subject
@@ -69,6 +72,7 @@ export const TEMPLATES: Record<string, TemplateEntry> = {
   offer_released: offerReleasedTemplate,
   assessment_invite: assessmentInviteTemplate,
   member_reminder: memberReminderTemplate,
+  agent_digest: agentDigestTemplate,
   document_request: documentRequestTemplate,
   role_invite: roleInviteTemplate,
   interviewer_brief: interviewerBriefTemplate,
@@ -77,4 +81,6 @@ export const TEMPLATES: Record<string, TemplateEntry> = {
   interview_slots: interviewSlotsTemplate,
   screening_call_booked: screeningCallBookedTemplate,
   panel_summary: panelSummaryTemplate,
+  panel_time_check: panelTimeCheckTemplate,
+  panel_reminder: panelReminderTemplate,
 };

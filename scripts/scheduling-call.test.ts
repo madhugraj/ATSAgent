@@ -4,7 +4,7 @@
  *  - the in-call tools' rules (pure): permission first, the AI disclosure,
  *    booking by option number only, outcomes;
  *  - the bookable options and the prompt;
- *  - when a call may be asked for: switched on, the wait (or a repeat offer),
+ *  - when a call may be placed: switched on (no e-mail wait — voice goes first),
  *    a day ahead, the opt-out, one per offer — and the alternates it carries;
  *  - the trigger: unanswered offers raise one event each;
  *  - the text-mode tools: a chosen option is really booked through the offer,
@@ -142,8 +142,9 @@ async function candidateApp(o: { phone?: string | null } = {}) {
 
 async function offer(
   appId: string,
-  o: { ageHours?: number; slots?: string[]; status?: string } = {},
+  o: { ageHours?: number; slots?: string[]; status?: string; emailed?: boolean } = {},
 ) {
+  const createdAt = new Date(Date.now() - (o.ageHours ?? 30) * H);
   const [row] = await db
     .insert(interviewSlotOffers)
     .values({
@@ -156,7 +157,9 @@ async function offer(
       token: `t-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`,
       status: o.status ?? "offered",
       expiresAt: new Date(Date.now() + 3 * 864e5),
-      createdAt: new Date(Date.now() - (o.ageHours ?? 30) * H),
+      createdAt,
+      // Voice first: null while the link is held for the call.
+      linkEmailedAt: o.emailed === false ? null : createdAt,
     })
     .returning();
   return row!;
@@ -341,7 +344,8 @@ describe("the in-call tools", () => {
       "no_answer",
     );
     expect(outcome.scheduledEnd("voicemail", 1)).toBe("retry");
-    expect(outcome.scheduledEnd("voicemail", 2)).toBe("fell_back");
+    expect(outcome.scheduledEnd("voicemail", 2)).toBe("retry");
+    expect(outcome.scheduledEnd("voicemail", 3)).toBe("fell_back");
     expect(outcome.scheduledEnd("opt_out", 1)).toBe("completed");
   });
 
@@ -358,6 +362,7 @@ describe("the in-call tools", () => {
       maxMinutes: 4,
       isCallback: false,
       callbackAllowed: true,
+      emailed: false,
     };
     const p = prompt.schedulingSystemPrompt({ ...base, panelSize: 3 });
     expect(p).toContain("with a panel of 3 from the hiring team.");
@@ -435,8 +440,13 @@ describe("the in-call tools", () => {
       maxMinutes: 4,
       isCallback: false,
       callbackAllowed: true,
+      emailed: false,
     });
     expect(p).toContain("1. Tuesday 27 October at 11:00");
+    // Voice first: the call is the first they hear; the e-mail follows only if it does not book.
+    expect(p).toContain("This call is the first they hear of these times");
+    expect(p).not.toContain("We also e-mailed them");
+    expect(p).toContain("we will e-mail them these times with a link to choose");
     expect(p).toContain("call_back_later");
     expect(p).toContain("2c. Questions about where they stand");
     expect(p).toContain("Never send these to e-mail.");
@@ -456,7 +466,7 @@ describe("the in-call tools", () => {
     expect(p).toContain("never an AI");
     expect(p).toMatch(/record_availability with exactly their words/);
     expect(p).toContain("Repeat yourself.");
-    expect(p).toContain("2. Thursday 29 October at 15:00 (not in the e-mail — also free)");
+    expect(p).toContain("2. Thursday 29 October at 15:00 (an extra time — also free)");
     expect(p).toContain("AI recruiting assistant");
     expect(p).toMatch(/Book, suggest or agree any time that is not in your list/);
     expect(p).toMatch(/Discuss pay, screening results/);
@@ -472,18 +482,14 @@ describe("asking for a scheduling call", () => {
       ok: false,
       reason: expect.stringMatching(/No interview times are waiting/),
     });
-    // Sent 3 hours ago: waits for the organisation's 24 hours.
-    const fresh = await offer(appId, { ageHours: 3 });
+    // Voice first: no e-mail wait — a call is allowed the moment times are offered.
+    const fresh = await offer(appId, { ageHours: 0, emailed: false });
     expect(await request.checkSchedulingCall(orgId, appId)).toMatchObject({
-      ok: false,
-      reason: expect.stringMatching(/has not had its chance yet; .* about 21 hours/),
+      ok: true,
+      repeat: false,
     });
-    // A person arranging the call may call sooner; an agent never may.
-    expect(
-      await request.checkSchedulingCall(orgId, appId, Date.now(), { byPerson: true }),
-    ).toMatchObject({ ok: true, repeat: false });
     await db.delete(interviewSlotOffers).where(eq(interviewSlotOffers.id, fresh.id));
-    // A repeat offer (the earlier one was declined) is called about at once.
+    // A repeat offer (the earlier one was declined) is called about too.
     await offer(appId, { ageHours: 50, status: "declined" });
     const repeat = await offer(appId, { ageHours: 1 });
     expect(await request.checkSchedulingCall(orgId, appId)).toMatchObject({
@@ -606,37 +612,65 @@ describe("asking for a scheduling call", () => {
     });
   });
 
-  test("timing: the organisation's wait, or six hours before the link closes — never within two hours", () => {
-    const t0 = new Date("2026-10-26T05:00:00Z");
-    const at = (createdAt: Date, expiresAt: Date) =>
-      new Date(request.callableAt({ createdAt, expiresAt }, 24)).toISOString();
-    // A link open for days: after the 24-hour wait.
-    expect(at(t0, new Date(t0.getTime() + 72 * H))).toBe("2026-10-27T05:00:00.000Z");
-    // A link closing in 21 h (first time tomorrow morning): 6 h before it closes.
-    expect(at(t0, new Date(t0.getTime() + 21 * H))).toBe("2026-10-26T20:00:00.000Z");
-    // A link closing in 7 h: never sooner than 2 h after the e-mail.
-    expect(at(t0, new Date(t0.getTime() + 7 * H))).toBe("2026-10-26T07:00:00.000Z");
+  test("offered times wait for the panel; then the call goes first and holds the e-mail; no call → e-mail at once", async () => {
+    const offers = await import("../src/lib/slot-offers.server");
+    const offerFor = (appId: string) =>
+      offers.offerSlotsCore(
+        orgId,
+        { userId, runId: null },
+        {
+          applicationId: appId,
+          level: 1,
+          interviewerEmail: interviewer,
+          slots: [weekday(3), weekday(4), weekday(5)],
+          durationMins: 60,
+          mode: "online",
+        },
+      );
+    const linkOf = async (id: string) =>
+      (
+        await db
+          .select({ at: interviewSlotOffers.linkEmailedAt })
+          .from(interviewSlotOffers)
+          .where(eq(interviewSlotOffers.id, id))
+      )[0]!.at;
+    const callsOf = (id: string) =>
+      db
+        .select({ status: screeningCalls.status, purpose: screeningCalls.purpose })
+        .from(screeningCalls)
+        .where(eq(screeningCalls.slotOfferId, id));
+    // Nothing reaches the candidate before the panel agrees.
+    const a = await candidateApp();
+    const r = await offerFor(a.appId);
+    expect(r).toMatchObject({ via: "panel", callDueAt: null });
+    expect(await linkOf(r.offerId)).toBeNull();
+    expect(await callsOf(r.offerId)).toEqual([]);
+    // Callable: once agreed, the call is arranged and the link waits.
+    await panelAgrees(r.offerId);
+    expect(await callsOf(r.offerId)).toEqual([{ status: "approved", purpose: "scheduling" }]);
+    expect(await linkOf(r.offerId)).toBeNull();
+    // No mobile to dial: e-mailed straight away once agreed.
+    const b = await candidateApp({ phone: null });
+    const e = await offerFor(b.appId);
+    expect(await linkOf(e.offerId)).toBeNull();
+    await panelAgrees(e.offerId);
+    expect(await linkOf(e.offerId)).not.toBeNull();
   });
 
-  test("an offer whose link closes soon is called about before the wait is over", async () => {
+  test("a held link (the call goes first) never raises the e-mail recovery event", async () => {
     const { appId } = await candidateApp();
-    const o = await offer(appId, { ageHours: 3 });
-    await db
-      .update(interviewSlotOffers)
-      .set({ expiresAt: new Date(Date.now() + 5 * H) })
-      .where(eq(interviewSlotOffers.id, o.id));
-    expect(await request.checkSchedulingCall(orgId, appId)).toMatchObject({ ok: true });
+    const o = await offer(appId, { ageHours: 0, emailed: false });
     await request.raiseUnansweredOffers(Date.now(), orgId);
     const ev = await db
       .select({ payload: agentEvents.payload })
       .from(agentEvents)
       .where(and(eq(agentEvents.orgId, orgId), eq(agentEvents.type, "interview.slots_no_reply")));
-    expect(ev.map((e) => (e.payload as { offerId: string }).offerId)).toContain(o.id);
+    expect(ev.map((e) => (e.payload as { offerId: string }).offerId)).not.toContain(o.id);
   });
 
-  test("the trigger: an offer unanswered past the wait raises one event", async () => {
+  test("recovery: times e-mailed when no call was possible raise one event once a call is", async () => {
     const { appId } = await candidateApp();
-    const o = await offer(appId, { ageHours: 30 });
+    const o = await offer(appId, { ageHours: 0 });
     expect(await request.raiseUnansweredOffers(Date.now(), orgId)).toBeGreaterThanOrEqual(1);
     expect(await request.raiseUnansweredOffers(Date.now(), orgId)).toBe(0);
     const ev = await db
@@ -650,9 +684,9 @@ describe("asking for a scheduling call", () => {
 /* ------------------------------------------------------ the text-mode tools */
 
 describe("on the call (text mode)", () => {
-  async function liveCall(o: { permission?: boolean } = {}) {
+  async function liveCall(o: { permission?: boolean; held?: boolean } = {}) {
     const { appId, candidateId } = await candidateApp();
-    const of = await offer(appId);
+    const of = await offer(appId, o.held ? { ageHours: 0, emailed: false } : {});
     const [call] = await db
       .insert(screeningCalls)
       .values({
@@ -724,6 +758,39 @@ describe("on the call (text mode)", () => {
       .from(candidates)
       .where(eq(candidates.id, b.candidateId));
     expect(cand!.at).not.toBeNull();
+  });
+
+  test("voice first: the held link is e-mailed when the call ends without a booking", async () => {
+    const offers = await import("../src/lib/slot-offers.server");
+    const { call, offer: of } = await liveCall({ permission: true, held: true });
+    const linkOf = async () =>
+      (
+        await db
+          .select({ at: interviewSlotOffers.linkEmailedAt })
+          .from(interviewSlotOffers)
+          .where(eq(interviewSlotOffers.id, of.id))
+      )[0]!.at;
+    // While the call is live, the sweep keeps the link held.
+    await offers.releaseHeldOfferLinks(orgId);
+    expect(await linkOf()).toBeNull();
+    const runId = await newRun();
+    await run("end_scheduling_call", { reason: "not_now" }, runId);
+    expect(await linkOf()).not.toBeNull();
+    // Once only: a second release sends nothing.
+    expect(await offers.sendOfferLink(orgId, of.id)).toBe(false);
+    void call;
+  });
+
+  test("voice first: a held link with no live call is released by the sweep", async () => {
+    const offers = await import("../src/lib/slot-offers.server");
+    const { appId } = await candidateApp();
+    const of = await offer(appId, { ageHours: 0, emailed: false });
+    expect(await offers.releaseHeldOfferLinks(orgId)).toBeGreaterThanOrEqual(1);
+    const [o] = await db
+      .select({ at: interviewSlotOffers.linkEmailedAt })
+      .from(interviewSlotOffers)
+      .where(eq(interviewSlotOffers.id, of.id));
+    expect(o!.at).not.toBeNull();
   });
 });
 
@@ -1004,7 +1071,7 @@ describe("a whole scheduling call (fake line)", () => {
     expect(c!.consentWords).toBe("Yes, go ahead.");
   });
 
-  test("voicemail: tried once more, then the e-mailed link stands", async () => {
+  test("voicemail: tried hourly the same day, then the e-mailed link stands", async () => {
     const steps: Step[] = [
       { say: "ai", text: "The talent acquisition team will try again later. Goodbye." },
       { tool: "end_scheduling_call", args: { reason: "voicemail" } },
@@ -1016,9 +1083,15 @@ describe("a whole scheduling call (fake line)", () => {
     const [c1] = await db.select().from(screeningCalls).where(eq(screeningCalls.id, first.call.id));
     expect(c1!.dueAt).not.toBeNull();
     expect(c1!.transcript).toEqual([]); // nothing kept without their go-ahead
+    // The retry comes about an hour later (inside the calling window), not the next day.
+    expect(c1!.dueAt!.getTime() - Date.now()).toBeLessThan(20 * 3600_000);
     const second = await arranged({ attempt: 2 });
     expect(
       await place(second.call.id, new FakeLine(), scriptedVoice(steps, { results: [] })),
+    ).toMatchObject({ status: "no_answer" });
+    const third = await arranged({ attempt: 3 });
+    expect(
+      await place(third.call.id, new FakeLine(), scriptedVoice(steps, { results: [] })),
     ).toMatchObject({ status: "fell_back" });
   });
 
@@ -1222,3 +1295,14 @@ describe("who speaks first", () => {
     ]);
   }, 25_000);
 });
+
+/** The panel agrees an offer's times (each panelist accepts), as the confirm links would. */
+async function panelAgrees(offerId: string): Promise<void> {
+  const { interviewConfirmations } = await import("../drizzle/schema");
+  const conf = await import("../src/lib/interview-confirmations.server");
+  const rows = await db
+    .select({ token: interviewConfirmations.token })
+    .from(interviewConfirmations)
+    .where(eq(interviewConfirmations.offerId, offerId));
+  for (const r of rows) await conf.answerConfirmation(r.token, true, null);
+}

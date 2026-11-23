@@ -48,7 +48,7 @@ const logoSrc = (logo: LetterLogo) => `data:${logo.contentType};base64,${logo.ba
 /* Edit-mode field chrome — labelled controls inside the paper look. */
 function EditLabel({ children }: { children: React.ReactNode }) {
   return (
-    <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-violet-600">
+    <span className="mb-1 block text-[0.625rem] font-semibold uppercase tracking-wide text-violet-600">
       {children}
     </span>
   );
@@ -245,7 +245,7 @@ export function OfferLetterDialog({
         </DialogHeader>
 
         {letter && head && draft && editing ? (
-          <div className="mx-auto w-full space-y-3 rounded-md border bg-white p-6 text-[13px] leading-6 text-zinc-900">
+          <div className="mx-auto w-full space-y-3 rounded-md border bg-white p-6 text-[0.8125rem] leading-6 text-zinc-900">
             <div>
               <EditLabel>Letterhead lines (one per line)</EditLabel>
               <Textarea
@@ -367,7 +367,7 @@ export function OfferLetterDialog({
             </div>
           </div>
         ) : letter && head ? (
-          <div className="mx-auto w-full rounded-md border bg-white p-8 text-[13px] leading-6 text-zinc-900">
+          <div className="mx-auto w-full rounded-md border bg-white p-8 text-[0.8125rem] leading-6 text-zinc-900">
             <div className="text-center">
               {logo ? (
                 <img src={logoSrc(logo)} alt="" className="mx-auto mb-3 max-h-14 object-contain" />
@@ -431,7 +431,7 @@ export function OfferLetterDialog({
               <p className="mt-6">Authorised Signatory</p>
             </div>
             {letter.footerLines.length ? (
-              <div className="mt-8 border-t border-zinc-200 pt-2 text-center text-[10px] leading-4 text-zinc-500">
+              <div className="mt-8 border-t border-zinc-200 pt-2 text-center text-[0.625rem] leading-4 text-zinc-500">
                 {letter.footerLines.map((l, i) => (
                   <div key={i}>{l}</div>
                 ))}

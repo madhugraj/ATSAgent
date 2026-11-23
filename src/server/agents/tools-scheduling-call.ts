@@ -119,7 +119,7 @@ export function registerSchedulingCallTools(): void {
   registerTool({
     name: "request_scheduling_call",
     description:
-      "Ask for a short AI call to a candidate who has not picked one of the interview times e-mailed to them: the Scheduling call agent phones them inside the calling window and books one of those times (or up to three more that are free for the interviewers), or notes when they are free. Refused when scheduling calls are off, no e-mailed times are waiting, the times were sent less than the organisation's wait ago (a repeat offer after a decline or expiry is called about at once), the earliest time is less than a day away, the candidate has no Indian mobile or asked not to be called, or a call was already arranged — then leave it to the e-mail.",
+      "Ask for a short AI call to a candidate whose offered interview times went only by e-mail because no call could be placed when they were offered: the Scheduling call agent phones them inside the calling window and books one of those times (or up to three more that are free for the interviewers), or notes when they are free. Offering times normally places this call by itself — use this only when told a call is now possible. Refused when scheduling calls are off, no offered times are waiting, every time is less than four hours away, the candidate has no Indian mobile or asked not to be called, a call was already arranged, or the assistant already spoke with them about this round — then leave it to the e-mail.",
     input: z.object({ applicationId: z.string().uuid() }),
     risk: "external",
     templateOf: () => "scheduling_call",
@@ -139,7 +139,7 @@ export function registerSchedulingCallTools(): void {
       const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
       const tz = (await getOrgEmailSettings(ctx.orgId)).timezone;
       return [
-        `The AI assistant phones the candidate${c.repeat ? " now (they did not take the earlier times)" : " (the e-mailed times have had no answer)"} and books one of these L${c.offer.level} interview times, or notes when they are free:`,
+        `The AI assistant phones the candidate${c.repeat ? " (they did not take the earlier times)" : " (the times went by e-mail only — no call was possible then)"} and books one of these L${c.offer.level} interview times, or notes when they are free:`,
         ...c.offer.slots.map((s) => `• ${spokenWhen(s, tz)}`),
         "…or up to three more times that are free for the interviewers, checked when the call is arranged.",
         "It cannot change the interviewer, length or format, and never discusses pay or results.",

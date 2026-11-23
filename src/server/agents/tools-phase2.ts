@@ -653,7 +653,7 @@ export function registerPhase2Tools(): void {
   registerTool({
     name: "remind_member",
     description:
-      "Email a member of the organisation a short reminder about something waiting for them, with a link to it. Internal only; at most one reminder per member per topic per day.",
+      "Remind a member of the organisation about something waiting for them, with a link to it. It reaches them in their one end-of-day summary e-mail. Internal only; at most one reminder per member per topic per day.",
     input: z.object({
       userId: z.string().uuid(),
       heading: z.string().min(5).max(140),
@@ -687,6 +687,8 @@ export function registerPhase2Tools(): void {
         templateName: "member_reminder",
         toEmail: m.email,
         idempotencyKey: `reminder:${i.userId}:${i.heading.toLowerCase().slice(0, 60)}:${day}`,
+        // Held for the person's end-of-day summary (dispatchAgentDigests).
+        hold: true,
         templateData: {
           memberName: m.name ?? undefined,
           orgName: await orgName(ctx.orgId),

@@ -2,10 +2,11 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { EmptyState, PageHeader } from "@/components/ats";
+import { EmptyState, PageHeader, StatCard } from "@/components/ats";
 import { CostFigure, PricingNote } from "@/components/HiringCost";
 import { AgentOptimisationTips } from "@/components/AgentUtilisation";
 import { fmtMoney, fmtTokens } from "@/lib/cost-format";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { getOrgHiringCost } from "@/lib/hiring-cost.functions";
 
 export const Route = createFileRoute("/hiring-cost")({
@@ -83,26 +84,33 @@ function HiringCostPage() {
         <div className="mt-6 space-y-6">
           {/* Headline numbers */}
           <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <Tile title="Spent on hiring" sub={`${c.total.requests} AI requests`}>
-              <CostFigure line={c.total} currency={c.currency} />
-            </Tile>
-            <Tile title="Cost per hire" sub={`${c.hires} offer(s) accepted in the period`}>
-              {c.costPerHire ? (
-                <CostFigure line={c.costPerHire} currency={c.currency} />
-              ) : (
-                <span className="text-muted-foreground">— no hire yet</span>
-              )}
-            </Tile>
-            <Tile title="Spent on candidates not hired" sub="rejected, withdrawn or declined">
-              <CostFigure line={c.outcomes.notHired} currency={c.currency} />
-            </Tile>
-            <Tile title="Not tied to a role" sub="talent pool, copilot, set-up">
-              <CostFigure line={c.notTiedToRole} currency={c.currency} />
-            </Tile>
+            <StatCard
+              label="Spent on hiring"
+              hint={`${c.total.requests} AI requests`}
+              value={<CostFigure line={c.total} currency={c.currency} />}
+            />
+            <StatCard
+              label="Cost per hire"
+              hint={`${c.hires} offer(s) accepted in the period`}
+              value={
+                c.costPerHire ? (
+                  <CostFigure line={c.costPerHire} currency={c.currency} />
+                ) : (
+                  <span className="text-muted-foreground">— no hire yet</span>
+                )
+              }
+            />
+            <StatCard
+              label="Spent on candidates not hired"
+              hint="rejected, withdrawn or declined"
+              value={<CostFigure line={c.outcomes.notHired} currency={c.currency} />}
+            />
+            <StatCard
+              label="Not tied to a role"
+              hint="talent pool, copilot, set-up"
+              value={<CostFigure line={c.notTiedToRole} currency={c.currency} />}
+            />
           </section>
-
-          {/* What to change to spend less — evidence from the agents' own ledgers */}
-          <AgentOptimisationTips />
 
           {/* Month by month */}
           <section className="panel p-5">
@@ -167,7 +175,7 @@ function HiringCostPage() {
           <section className="panel p-5">
             <h2 className="font-semibold">By role</h2>
             <div className="mt-3 overflow-x-auto">
-              <table className="w-full min-w-[720px] text-sm">
+              <table className="w-full min-w-[900px] text-sm">
                 <thead>
                   <tr className="border-b border-border text-left text-xs text-muted-foreground">
                     <th className="px-2 py-2 font-medium">Role</th>
@@ -177,6 +185,8 @@ function HiringCostPage() {
                     <th className="px-2 py-2 text-right font-medium">Spent</th>
                     <th className="px-2 py-2 text-right font-medium">Shared</th>
                     <th className="px-2 py-2 text-right font-medium">Per candidate</th>
+                    <th className="px-2 py-2 text-right font-medium">Tokens / candidate</th>
+                    <th className="px-2 py-2 text-right font-medium">Median / candidate</th>
                     <th className="px-2 py-2 text-right font-medium">Per hire</th>
                   </tr>
                 </thead>
@@ -204,10 +214,52 @@ function HiringCostPage() {
                         {r.perCandidate ? label(r.perCandidate) : "—"}
                       </td>
                       <td className="num px-2 py-2 text-right">
+                        {r.perCandidate ? (
+                          <TooltipProvider delayDuration={100}>
+                            <Tooltip>
+                              <TooltipTrigger className="cursor-help underline decoration-dotted underline-offset-4">
+                                {fmtTokens(r.perCandidate.tokens)}
+                              </TooltipTrigger>
+                              <TooltipContent side="left">
+                                <table className="text-xs">
+                                  <tbody>
+                                    {r.perCandidateByPhase.map((p) => (
+                                      <tr key={p.phase}>
+                                        <td className="pr-4">{p.phase}</td>
+                                        <td className="num text-right">{fmtTokens(p.tokens)}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td className="num px-2 py-2 text-right">
+                        {r.medianPerCandidate != null ? fmtTokens(r.medianPerCandidate) : "—"}
+                      </td>
+                      <td className="num px-2 py-2 text-right">
                         {r.costPerHire ? label(r.costPerHire) : "—"}
                       </td>
                     </tr>
                   ))}
+                  {c.deletedRoles.count > 0 ? (
+                    <tr className="border-b border-border/60 text-muted-foreground">
+                      <td className="px-2 py-2">Deleted roles ({c.deletedRoles.count})</td>
+                      <td className="px-2 py-2 text-xs">deleted</td>
+                      <td className="px-2 py-2 text-right">—</td>
+                      <td className="px-2 py-2 text-right">—</td>
+                      <td className="num px-2 py-2 text-right">{label(c.deletedRoles)}</td>
+                      <td className="px-2 py-2 text-right">—</td>
+                      <td className="px-2 py-2 text-right">—</td>
+                      <td className="px-2 py-2 text-right">—</td>
+                      <td className="px-2 py-2 text-right">—</td>
+                      <td className="px-2 py-2 text-right">—</td>
+                    </tr>
+                  ) : null}
                 </tbody>
               </table>
             </div>
@@ -233,19 +285,12 @@ function HiringCostPage() {
               Per role and per candidate detail is on each requisition and candidate page.
             </p>
           </section>
+
+          {/* What to change to spend less — evidence from the agents' own ledgers */}
+          <AgentOptimisationTips />
         </div>
       )}
     </>
-  );
-}
-
-function Tile({ title, sub, children }: { title: string; sub: string; children: React.ReactNode }) {
-  return (
-    <div className="panel p-4">
-      <p className="text-xs text-muted-foreground">{title}</p>
-      <div className="mt-1 text-lg">{children}</div>
-      <p className="text-xs text-muted-foreground">{sub}</p>
-    </div>
   );
 }
 
