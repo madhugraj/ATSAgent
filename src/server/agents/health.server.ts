@@ -128,6 +128,8 @@ export const HEALTH = {
   shortCalls7d: 3,
   /** Re-evaluate at most this often (minutes). */
   evaluateEveryMinutes: 5,
+  /** An issue resolves only after it has not been seen for this long (stops flapping). */
+  resolveAfterMinutes: 60,
   /** An approved organisation profile older than this is stale (days). */
   profileStaleDays: 180,
   /** A submitted profile version waiting longer than this for a decision (days). */
@@ -1576,7 +1578,16 @@ async function orgsToCheck(orgId?: string): Promise<string[]> {
 
 export type HealthCounts = { orgs: number; opened: number; resolved: number; seen: number };
 
-export async function evaluateAgentHealth(opts: { orgId?: string } = {}): Promise<HealthCounts> {
+/**
+ * `resolveAfterMinutes`: how long an issue must go unseen before it resolves.
+ * The scheduled sweep waits HEALTH.resolveAfterMinutes so a flapping rule does
+ * not reopen (and re-alert) every few minutes; an explicit single-org check
+ * (tests, "check now") resolves at once unless told otherwise.
+ */
+export async function evaluateAgentHealth(
+  opts: { orgId?: string; resolveAfterMinutes?: number } = {},
+): Promise<HealthCounts> {
+  const resolveAfter = opts.resolveAfterMinutes ?? (opts.orgId ? 0 : HEALTH.resolveAfterMinutes);
   const counts: HealthCounts = { orgs: 0, opened: 0, resolved: 0, seen: 0 };
   for (const orgId of await orgsToCheck(opts.orgId)) {
     counts.orgs++;
@@ -1645,7 +1656,8 @@ export async function evaluateAgentHealth(opts: { orgId?: string } = {}): Promis
         });
       }
     }
-    const cleared = active.filter((a) => !firing.has(a.id));
+    const quietSince = Date.now() - resolveAfter * 60_000;
+    const cleared = active.filter((a) => !firing.has(a.id) && a.lastSeenAt.getTime() < quietSince);
     if (cleared.length) {
       await db
         .update(agentIssues)
@@ -1703,6 +1715,9 @@ export async function heartbeatAndMaybeEvaluate(
   const { dispatchAgentAlerts } = await import("./alerts.server");
   const a = await dispatchAgentAlerts();
   if (a.alerted) log.info("agent.alerts", a);
+  const { dispatchAgentDigests } = await import("./alerts.server");
+  const d = await dispatchAgentDigests();
+  if (d.digests) log.info("agent.digests", d);
   // Platform SLO burn-rate alerts ride the same cadence (src/server/slo.server.ts).
   try {
     const { evaluateSloBurn } = await import("../slo.server");

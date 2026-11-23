@@ -1,7 +1,7 @@
 import * as React from "react";
 
 import type { TemplateEntry } from "./registry";
-import { EmailLayout, layoutStyles } from "./email-layout";
+import { EmailAction, EmailLayout, layoutStyles } from "./email-layout";
 
 interface Props {
   memberName?: string;
@@ -79,14 +79,7 @@ const Email = ({
       panel agent&apos;s own view stays hidden until all of you have scored, so please score from
       your own judgement.
     </p>
-    {scorecardUrl ? (
-      <p style={text}>
-        Submit your scorecard here:{" "}
-        <a href={scorecardUrl} style={link}>
-          {scorecardUrl}
-        </a>
-      </p>
-    ) : null}
+    {scorecardUrl ? <EmailAction href={scorecardUrl} label="Submit your scorecard" /> : null}
   </EmailLayout>
 );
 

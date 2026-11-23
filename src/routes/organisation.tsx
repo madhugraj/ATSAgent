@@ -14,6 +14,7 @@ import { TrainingDataCard } from "@/components/TrainingDataCard";
 import { AssessmentPolicyCard } from "@/components/AssessmentPolicyCard";
 import { PhoneScreeningCard } from "@/components/PhoneScreeningCard";
 import { SilentPanelCard } from "@/components/SilentPanelCard";
+import { EmailBrandCard } from "@/components/EmailBrandCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -193,6 +194,8 @@ function OrganisationSettings() {
           </Button>
         ) : null}
       </section>
+
+      <EmailBrandCard canEdit={navCtx.governance} />
 
       <AssessmentPolicyCard canEdit={navCtx.governance} />
 
