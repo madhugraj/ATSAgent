@@ -45,12 +45,12 @@ type PayBasis = "annual" | "monthly" | "daily" | "hourly";
 type PayTerms = {
   kind: KindOfWork;
   basis: PayBasis;
-  currency: string;          // ISO 4217: INR, USD, EUR, GBP…
+  currency: string; // ISO 4217: INR, USD, EUR, GBP…
   hoursPerWeek: number | null;
   daysPerWeek: number | null;
-  contractMonths: number | null;   // fixed_term / contract
+  contractMonths: number | null; // fixed_term / contract
   extendable: boolean | null;
-  neededBy: string | null;         // YYYY-MM-DD — the role's urgency
+  neededBy: string | null; // YYYY-MM-DD — the role's urgency
 };
 
 type Money = { amount: number; currency: string; basis: PayBasis };
@@ -97,6 +97,7 @@ card unaffected.
 ## Phase 3 — screening call and matching
 
 **Screening call** (version bump; charter updated):
+
 - Asks in the role's terms: "What is your current hourly rate?" / "current CTC
   per year?"; contract roles ask availability date and contract length
   accepted instead of notice period.
@@ -107,6 +108,7 @@ card unaffected.
 - Consequence line and required details unchanged in spirit.
 
 **Matching / logistics** (`logistics.ts`, `autoscore.server.ts`):
+
 - Reads the latest of CV data **and** the call's compensation record (call
   wins, newer wins) — fixes notice/joining/pay never reaching the check.
 - Band comparison via `pay-convert`; unconvertible → flag "pay in another
@@ -147,12 +149,12 @@ card unaffected.
 
 ## Order and size
 
-| Phase | Depends on | Rough size |
-|---|---|---|
-| 1 Foundation | — | 1–2 days |
-| 2 Owners | 1 | 2 days |
-| 3 Call + matching | 1, 2 | 3 days |
-| 4 Downstream | 1, 2 | 3–4 days |
+| Phase             | Depends on | Rough size |
+| ----------------- | ---------- | ---------- |
+| 1 Foundation      | —          | 1–2 days   |
+| 2 Owners          | 1          | 2 days     |
+| 3 Call + matching | 1, 2       | 3 days     |
+| 4 Downstream      | 1, 2       | 3–4 days   |
 
 Phases 3 and 4 can run in parallel once 2 lands.
 
@@ -162,11 +164,11 @@ An organisation like Accenture hires in 50 countries through many legal
 entities. Three currencies are in play for one figure, and they must never be
 confused:
 
-| Currency | Whose | Example |
-|---|---|---|
-| **Quoted** | what the candidate said | Milan candidate: "€52,000 RAL" |
-| **Pay** | what the role is paid in — set by where the job is, not where the requisition was raised | Milan role → EUR |
-| **Reporting** | what the organisation normalises to for budgets and comparisons across regions | USD |
+| Currency      | Whose                                                                                    | Example                        |
+| ------------- | ---------------------------------------------------------------------------------------- | ------------------------------ |
+| **Quoted**    | what the candidate said                                                                  | Milan candidate: "€52,000 RAL" |
+| **Pay**       | what the role is paid in — set by where the job is, not where the requisition was raised | Milan role → EUR               |
+| **Reporting** | what the organisation normalises to for budgets and comparisons across regions           | USD                            |
 
 Every figure is **stored as said** (quoted), and **derived** into pay and
 reporting currency with the rate, its source and its date kept beside it.
@@ -193,8 +195,8 @@ Through the organisation chat (HR-head approved, versioned — as today):
    - a geo pay factor against a reference zone, when the organisation pays by
      location for remote roles.
 3. **Regions for pooling** — named groups of zones (EMEA, South Europe, India
-   South) and the pooling rule per role kind: *same zone*, *same region*,
-   *anywhere the entity can employ*, or *global remote*.
+   South) and the pooling rule per role kind: _same zone_, _same region_,
+   _anywhere the entity can employ_, or _global remote_.
 4. **Exchange rates** — the source (an organisation rate table, its treasury
    rates, or a rates service), refresh cadence, and a rate lock at offer time
    (the offer letter uses the rate on the day it was approved).
@@ -211,7 +213,7 @@ storing pay figures stands; bands live on requisitions as today.
    currency and basis**; the reporting-currency view is shown beside it,
    derived. A role open in several locations has one band per zone.
 2. **Pooling** — the candidate pool for a role is filtered by the role's
-   pooling rule *before* matching: a Milan role on *same region* draws from
+   pooling rule _before_ matching: a Milan role on _same region_ draws from
    South Europe candidates and those who said they will relocate there, with
    work authorisation for the entity's country. Others are not hidden — they
    appear as "outside the role's region" with the reason, never scored down.
@@ -229,47 +231,57 @@ storing pay figures stands; bands live on requisitions as today.
 
 ### Scenarios this has to get right
 
-| # | Situation | Handling |
-|---|---|---|
-| 1 | Milan role, org reports in USD, candidate says €52k | Stored €52k annual; pay EUR = as said; USD derived at the dated rate. Band check in EUR. |
-| 2 | Same role, candidate quotes in $ "because the posting said $" | Stored as said in USD; converted to EUR for the band; flagged "quoted in another currency" so a person sees it. |
-| 3 | Italian candidate quotes monthly net ("€2,400 a month") | Net is never converted to gross by us: recorded, flagged "net figure — ask gross"; the call asks once for gross RAL. |
-| 4 | 13th/14th month: "€45k over 14" vs "€3,200 × 14" | Payments a year from the zone; monthly × payments = annual; both kept. |
-| 5 | India CTC vs US base | Zone rule says what is included; comparison only within the same definition; cross-zone view labelled "different pay definitions". |
-| 6 | Remote role, pay by candidate's location | Pay zone = candidate's zone; band = reference band × geo factor; set on the role as "pays by location". |
-| 7 | Remote role, one global band in USD | Pay currency USD for everyone; local quotes converted to USD; noted on the offer. |
-| 8 | Candidate relocating Bangalore → Milan | Current pay in INR (as said), expectation asked in EUR for Milan; hike % computed only after converting with a cost-of-living note, never raw. |
-| 9 | UK contractor, day rate outside IR35 | Kind contract, basis daily, £; compared with a day-rate band; never with a permanent salary band. |
-| 10 | US hourly W-2 vs 1099 vs C2C | Contract type stored; bands per type; a 1099 rate is not compared with a W-2 band without the zone's loading factor. |
-| 11 | Gulf: tax-free + housing/transport | Components kept separately; band defines whether allowances are inside it. |
-| 12 | Volatile currency (ARS, TRY) | Short rate validity; stale rate → comparison refused until refreshed; reporting view labelled with rate age. |
-| 13 | Exchange rate moves between screening and offer | Decisions are made in pay currency, so the move does not flip a decision; the reporting view updates; offer locks its rate. |
-| 14 | Candidate says a range, or "k", or "lakhs", or "1.2 M" | Parsed per zone vocabulary; a range records its lower end and the range in words (as built on 11 November). |
-| 15 | Candidate with no currency ("ninety thousand") | Assumed the candidate's current zone **only for display**; flagged "currency not said"; the call confirms. |
-| 16 | Requisition raised in India HQ for a Milan opening | Pay zone from the job's location, not the requester's; the requisition agent confirms. |
-| 17 | One requisition, openings in Pune and Kraków | One band per zone; pooling per opening; reports per zone and in reporting currency. |
-| 18 | Hourly part-time 20 h/week vs full-time annual | Conversion uses the role's hours, not the zone default; shown as an equivalent, never as the offer. |
-| 19 | Candidate works abroad, wants to return home | Current pay in their current zone's currency; expectation in the role's zone; no hike % across currencies without conversion. |
-| 20 | Org changes reporting currency | Derived values recomputed; originals untouched; audit entry. |
+| #   | Situation                                                     | Handling                                                                                                                                       |
+| --- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Milan role, org reports in USD, candidate says €52k           | Stored €52k annual; pay EUR = as said; USD derived at the dated rate. Band check in EUR.                                                       |
+| 2   | Same role, candidate quotes in $ "because the posting said $" | Stored as said in USD; converted to EUR for the band; flagged "quoted in another currency" so a person sees it.                                |
+| 3   | Italian candidate quotes monthly net ("€2,400 a month")       | Net is never converted to gross by us: recorded, flagged "net figure — ask gross"; the call asks once for gross RAL.                           |
+| 4   | 13th/14th month: "€45k over 14" vs "€3,200 × 14"              | Payments a year from the zone; monthly × payments = annual; both kept.                                                                         |
+| 5   | India CTC vs US base                                          | Zone rule says what is included; comparison only within the same definition; cross-zone view labelled "different pay definitions".             |
+| 6   | Remote role, pay by candidate's location                      | Pay zone = candidate's zone; band = reference band × geo factor; set on the role as "pays by location".                                        |
+| 7   | Remote role, one global band in USD                           | Pay currency USD for everyone; local quotes converted to USD; noted on the offer.                                                              |
+| 8   | Candidate relocating Bangalore → Milan                        | Current pay in INR (as said), expectation asked in EUR for Milan; hike % computed only after converting with a cost-of-living note, never raw. |
+| 9   | UK contractor, day rate outside IR35                          | Kind contract, basis daily, £; compared with a day-rate band; never with a permanent salary band.                                              |
+| 10  | US hourly W-2 vs 1099 vs C2C                                  | Contract type stored; bands per type; a 1099 rate is not compared with a W-2 band without the zone's loading factor.                           |
+| 11  | Gulf: tax-free + housing/transport                            | Components kept separately; band defines whether allowances are inside it.                                                                     |
+| 12  | Volatile currency (ARS, TRY)                                  | Short rate validity; stale rate → comparison refused until refreshed; reporting view labelled with rate age.                                   |
+| 13  | Exchange rate moves between screening and offer               | Decisions are made in pay currency, so the move does not flip a decision; the reporting view updates; offer locks its rate.                    |
+| 14  | Candidate says a range, or "k", or "lakhs", or "1.2 M"        | Parsed per zone vocabulary; a range records its lower end and the range in words (as built on 11 November).                                    |
+| 15  | Candidate with no currency ("ninety thousand")                | Assumed the candidate's current zone **only for display**; flagged "currency not said"; the call confirms.                                     |
+| 16  | Requisition raised in India HQ for a Milan opening            | Pay zone from the job's location, not the requester's; the requisition agent confirms.                                                         |
+| 17  | One requisition, openings in Pune and Kraków                  | One band per zone; pooling per opening; reports per zone and in reporting currency.                                                            |
+| 18  | Hourly part-time 20 h/week vs full-time annual                | Conversion uses the role's hours, not the zone default; shown as an equivalent, never as the offer.                                            |
+| 19  | Candidate works abroad, wants to return home                  | Current pay in their current zone's currency; expectation in the role's zone; no hike % across currencies without conversion.                  |
+| 20  | Org changes reporting currency                                | Derived values recomputed; originals untouched; audit entry.                                                                                   |
 
 ### Changes to the shapes
 
 ```ts
 type PayZone = {
-  id: string; name: string; countries: string[]; cities?: string[];
-  currency: string; basis: PayBasis; paymentsPerYear: number;
-  includes: string[];            // "employer_pf", "gratuity", "bonus", "allowances"…
-  hoursPerWeek: number; workingDaysPerYear: number;
-  kinds: KindOfWork[]; contractTypes: string[]; entity: string | null;
-  geoFactor: number | null;      // vs the reference zone
+  id: string;
+  name: string;
+  countries: string[];
+  cities?: string[];
+  currency: string;
+  basis: PayBasis;
+  paymentsPerYear: number;
+  includes: string[]; // "employer_pf", "gratuity", "bonus", "allowances"…
+  hoursPerWeek: number;
+  workingDaysPerYear: number;
+  kinds: KindOfWork[];
+  contractTypes: string[];
+  entity: string | null;
+  geoFactor: number | null; // vs the reference zone
 };
 
 type Money = {
-  amount: number; currency: string; basis: PayBasis;
-  gross: boolean | null;          // null: not said
+  amount: number;
+  currency: string;
+  basis: PayBasis;
+  gross: boolean | null; // null: not said
   paymentsPerYear: number | null;
   includes: string[] | null;
-  saidAs: string;                 // their words
+  saidAs: string; // their words
 };
 
 type Derived = { money: Money; rate: number; rateSource: string; rateAt: string };
@@ -300,7 +312,7 @@ time.
 2. **Joining after "needed by":** a blocker a person overrides (recommended),
    or a high-risk flag only.
 3. **Kinds of work:** the five above, or your own list.
-4. **Pooling default:** *same region* with "outside the region" shown but not
-   matched (recommended), or *same zone* strictly.
+4. **Pooling default:** _same region_ with "outside the region" shown but not
+   matched (recommended), or _same zone_ strictly.
 5. **Net figures:** always ask for gross (recommended), or allow a
    zone-specific net-to-gross estimate (we advise against — it is a guess).

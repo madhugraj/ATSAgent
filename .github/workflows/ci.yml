@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:14  # same major as production (Cloud SQL POSTGRES_14)
+        image: postgres:14 # same major as production (Cloud SQL POSTGRES_14)
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -40,6 +40,8 @@ jobs:
         run: bun run typecheck
       - name: Lint
         run: bun run lint
+      - name: Format check
+        run: bunx prettier --check .
       - name: Dependency audit (high+ blocks)
         run: bun audit --audit-level=high
         continue-on-error: false

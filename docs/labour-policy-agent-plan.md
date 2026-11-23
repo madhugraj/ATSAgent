@@ -39,13 +39,13 @@ A governed hiring agent, `labour_policy` — **Labour law & policy agent**.
 
 Sources are an **allow-list per pay zone**, never open web search:
 
-| Level | Examples (seeded, organisation edits) |
-|---|---|
-| Global / regional | ILO NATLEX, EUR-Lex (directives), EU-OSHA |
-| Country | IN: labour.gov.in, epfindia.gov.in, egazette.gov.in · UK: legislation.gov.uk, gov.uk/employment · US: dol.gov, eeoc.gov, federalregister.gov · IT: lavoro.gov.it, gazzettaufficiale.it, inps.it · DE: bmas.de · AE: mohre.gov.ae · SG: mom.gov.sg |
-| State / city | US states' labour departments (CA, NY, WA…), NYC DCWP, Indian state labour departments and Shops & Establishments |
-| Domain | Regulators for the organisation's domain pack (nursing councils, RBI/SEBI/IRDAI, FINRA, FCA) |
-| Organisation | its own policy documents (uploaded), its handbook pages on its own host |
+| Level             | Examples (seeded, organisation edits)                                                                                                                                                                                                             |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Global / regional | ILO NATLEX, EUR-Lex (directives), EU-OSHA                                                                                                                                                                                                         |
+| Country           | IN: labour.gov.in, epfindia.gov.in, egazette.gov.in · UK: legislation.gov.uk, gov.uk/employment · US: dol.gov, eeoc.gov, federalregister.gov · IT: lavoro.gov.it, gazzettaufficiale.it, inps.it · DE: bmas.de · AE: mohre.gov.ae · SG: mom.gov.sg |
+| State / city      | US states' labour departments (CA, NY, WA…), NYC DCWP, Indian state labour departments and Shops & Establishments                                                                                                                                 |
+| Domain            | Regulators for the organisation's domain pack (nursing councils, RBI/SEBI/IRDAI, FINRA, FCA)                                                                                                                                                      |
+| Organisation      | its own policy documents (uploaded), its handbook pages on its own host                                                                                                                                                                           |
 
 Rules for sources (`src/server/safe-fetch.ts`, as the organisation agent):
 
@@ -90,16 +90,16 @@ Rules for sources (`src/server/safe-fetch.ts`, as the organisation agent):
 
 ## What it feeds
 
-| Consumer | What changes on approval |
-|---|---|
-| Organisation agent / profile | Zone rules, policies, must-never list per zone |
-| Pay zones (`pay-terms-plan.md`) | Minimum wage, payments a year, mandatory components, hours, contract types |
-| Requisition agent | Probation / notice limits, fixed-term limits, pay-range-in-posting duty |
-| JD / Publishing | Pay-range disclosure where law requires; prohibited wording |
-| Screening call & Voice charter | Zone-specific must-never-ask (salary history bans, age, marital status), AI-call disclosure and consent wording, recording consent |
-| Matching | Lawful vs unlawful filters (e.g. no age-based filtering) |
-| Offer / Onboarding | Mandatory clauses, notice and probation terms, document checks |
-| Retention / erasure | Per-zone retention periods for candidate data |
+| Consumer                        | What changes on approval                                                                                                           |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Organisation agent / profile    | Zone rules, policies, must-never list per zone                                                                                     |
+| Pay zones (`pay-terms-plan.md`) | Minimum wage, payments a year, mandatory components, hours, contract types                                                         |
+| Requisition agent               | Probation / notice limits, fixed-term limits, pay-range-in-posting duty                                                            |
+| JD / Publishing                 | Pay-range disclosure where law requires; prohibited wording                                                                        |
+| Screening call & Voice charter  | Zone-specific must-never-ask (salary history bans, age, marital status), AI-call disclosure and consent wording, recording consent |
+| Matching                        | Lawful vs unlawful filters (e.g. no age-based filtering)                                                                           |
+| Offer / Onboarding              | Mandatory clauses, notice and probation terms, document checks                                                                     |
+| Retention / erasure             | Per-zone retention periods for candidate data                                                                                      |
 
 The voice charter's fixed rules become **charter + zone overlay**: the call
 for a California role loads "never ask current or past pay" and skips the
@@ -112,16 +112,16 @@ Before the Offer agent's letter goes for approval, the labour policy agent runs
 an **offer check** for the role's pay zone and kind of work (`submit_offer_check`;
 it never approves or sends the offer):
 
-| Checked | Examples |
-|---|---|
-| Pay meets the floor | minimum wage for the zone and kind; hourly rate × hours |
-| Mandatory components present | IT 13th/14th month and TFR; IN PF, gratuity, bonus Act; BR 13th salary; Gulf end-of-service |
-| Contract terms lawful | probation length cap; notice period limits; fixed-term length and renewals (IT reason over 12 months); IR35 status stated for UK contractors |
-| Mandatory clauses | working hours and overtime, leave entitlement, governing law, entity name and address, collective agreement (CCNL) where it applies |
-| Prohibited terms | non-competes where void (e.g. California), over-broad restraint periods, deductions not allowed by law |
-| Pay transparency | the offered pay sits inside the posted range where law requires |
-| Disclosures and consent | data-protection notice, background-check consent wording for the zone |
-| Language | letter in the language the zone requires, with the official version named |
+| Checked                      | Examples                                                                                                                                     |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pay meets the floor          | minimum wage for the zone and kind; hourly rate × hours                                                                                      |
+| Mandatory components present | IT 13th/14th month and TFR; IN PF, gratuity, bonus Act; BR 13th salary; Gulf end-of-service                                                  |
+| Contract terms lawful        | probation length cap; notice period limits; fixed-term length and renewals (IT reason over 12 months); IR35 status stated for UK contractors |
+| Mandatory clauses            | working hours and overtime, leave entitlement, governing law, entity name and address, collective agreement (CCNL) where it applies          |
+| Prohibited terms             | non-competes where void (e.g. California), over-broad restraint periods, deductions not allowed by law                                       |
+| Pay transparency             | the offered pay sits inside the posted range where law requires                                                                              |
+| Disclosures and consent      | data-protection notice, background-check consent wording for the zone                                                                        |
+| Language                     | letter in the language the zone requires, with the official version named                                                                    |
 
 Results on the offer: **pass**, **fix needed** (with the clause, the rule's quote
 and source, and suggested wording), or **needs counsel** (no current rule for
@@ -171,12 +171,12 @@ One migration, ER diagram regenerated.
 
 ## Milestones
 
-| | What | Depends on |
-|---|---|---|
-| L0 | Sources, reads, diff; allow-list UI; health rules | pay zones (pay-terms Phase 1) |
-| L1 | Findings with quotes, relevance, desk cards, HR e-mail | L0 |
-| L2 | `propose_policy_update` → org profile draft; approval → publish | L1, org agent |
-| L3 | Offer check before every offer letter; overlays: charter per zone, JD disclosure, requisition limits, notices to owners | L2, pay-terms Phases 2–4 |
+|     | What                                                                                                                    | Depends on                    |
+| --- | ----------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| L0  | Sources, reads, diff; allow-list UI; health rules                                                                       | pay zones (pay-terms Phase 1) |
+| L1  | Findings with quotes, relevance, desk cards, HR e-mail                                                                  | L0                            |
+| L2  | `propose_policy_update` → org profile draft; approval → publish                                                         | L1, org agent                 |
+| L3  | Offer check before every offer letter; overlays: charter per zone, JD disclosure, requisition limits, notices to owners | L2, pay-terms Phases 2–4      |
 
 ## Decisions needed
 
