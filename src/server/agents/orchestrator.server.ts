@@ -991,11 +991,32 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
           and(
             eq(requisitions.orgId, orgId),
             eq(requisitions.status, "approved"),
-            sql`exists (
-              select 1 from ${applications} a
-              left join ${matchScores} m on m.application_id = a.id
-              where a.requisition_id = ${requisitions.id}
-                and (m.id is null or a.stage = 'ai_screened')
+            // Something new to review: an unscored application, or a candidate
+            // put on hold since the last review. A hold that is only waiting for
+            // a person is not new — re-reviewing it every cooldown spent a full
+            // run (and a pool top-up) each time while nothing had changed.
+            sql`(
+              exists (
+                select 1 from ${applications} a
+                left join ${matchScores} m on m.application_id = a.id
+                where a.requisition_id = ${requisitions.id} and m.id is null
+              )
+              or exists (
+                select 1 from ${applications} a
+                where a.org_id = ${orgId}
+                  and a.requisition_id = ${requisitions.id}
+                  and a.stage = 'ai_screened'
+                  and coalesce(
+                    (select max(se.created_at) from stage_events se
+                     where se.org_id = ${orgId} and se.application_id = a.id
+                       and se.to_stage = 'ai_screened'),
+                    a.applied_at
+                  ) > coalesce((
+                    select max(ar.created_at) from ${agentRuns} ar
+                    where ar.org_id = ${orgId} and ar.agent_type = 'intake'
+                      and ar.subject_id = ${requisitions.id} and ar.mode = 'live'
+                  ), 'epoch'::timestamptz)
+              )
             )`,
           ),
         )
@@ -1004,11 +1025,21 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
         if (await recentRun(orgId, "intake", INTAKE_COOLDOWN_HOURS, r.id)) continue;
         const principal = r.createdBy ?? (await ownerOf(orgId));
         if (!principal) continue;
+        // While candidates wait on a person, more candidates from the pool only
+        // add to the queue (and to the role's cost) — hold the top-up until then.
+        const [held] = (await db.execute(sql`
+          select count(*)::int as n from ${applications}
+          where org_id = ${orgId} and requisition_id = ${r.id} and stage = 'ai_screened'`)) as unknown as {
+          n: number;
+        }[];
+        const topUp = held?.n
+          ? `do not add candidates from the talent pool — ${held.n} held candidate(s) are still waiting for a person to decide`
+          : "top up from the talent pool if the shortlist is thin";
         await startRun({
           orgId,
           agentType: "intake",
           principalUserId: principal,
-          goal: `Review the pipeline for ${r.code} "${r.title}": score new applications, review held candidates, propose rejections for a person to confirm, and top up from the talent pool if the shortlist is thin.\n\nRequisition id: ${r.id}`,
+          goal: `Review the pipeline for ${r.code} "${r.title}": score new applications, review held candidates, propose rejections for a person to confirm, and ${topUp}.\n\nRequisition id: ${r.id}`,
           subjectType: "requisition",
           subjectId: r.id,
         });
