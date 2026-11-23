@@ -107,6 +107,16 @@ describe("event lineage", () => {
 });
 
 describe("governance chains", () => {
+  /**
+   * computeHarness's default window is `to: new Date()` — a JS clock
+   * snapshot — while rows written microseconds earlier carry `createdAt`
+   * from the Postgres clock. When the two land in the same millisecond, the
+   * `lte(createdAt, to)` filter drops the just-written run and the chain
+   * read looks broken. Read with an explicit window that extends past every
+   * row this test wrote (flake root cause, proven 2026-11-23).
+   */
+  const harnessWindow = () =>
+    computeHarness(orgId, { from: new Date(0), to: new Date(Date.now() + 60_000), agent: null });
   async function chained(publisherRun: string, agentType: string) {
     await agentRunScope.run({ runId: publisherRun, orgId, agentType: "x" }, () => emit(orgId));
     const evs = await db
@@ -120,7 +130,7 @@ describe("governance chains", () => {
     const a = await run("requisition");
     const b = await chained(a, "jd");
     await chained(b, "publishing");
-    const h = await computeHarness(orgId);
+    const h = await harnessWindow();
     expect(h.handoffs.chainedRuns).toBe(2);
     expect(h.handoffs.longest?.path).toEqual(["requisition", "jd", "publishing"]);
     expect(h.handoffs.loops).toHaveLength(0);
@@ -131,7 +141,7 @@ describe("governance chains", () => {
     const a = await run("requisition");
     const b = await chained(a, "jd");
     await chained(b, "requisition");
-    const h = await computeHarness(orgId);
+    const h = await harnessWindow();
     expect(h.handoffs.loops).toHaveLength(1);
     expect(h.handoffs.loops[0]!.path).toEqual(["requisition", "jd", "requisition"]);
     expect(h.questions.find((q) => q.key === "handoffs")?.tone).toBe("bad");
