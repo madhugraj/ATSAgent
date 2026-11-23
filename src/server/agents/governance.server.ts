@@ -147,7 +147,12 @@ export async function computeHarness(
   orgId: string,
   win: { from: Date; to: Date; agent: string | null; modality?: ModalityFilter } = {
     from: new Date(0),
-    to: new Date(),
+    // "Up to now" with a 1s cushion: rows carry createdAt from the Postgres
+    // clock while this default is a JS Date, and a same-millisecond write can
+    // otherwise land after `to` and be dropped from the read (the
+    // agent-event-lineage flake root cause, 2026-11-23). Harmless for a
+    // governance read model; explicit windows are unaffected.
+    to: new Date(Date.now() + 1_000),
     agent: null,
   },
 ): Promise<Harness> {
