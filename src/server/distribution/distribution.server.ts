@@ -101,6 +101,8 @@ export async function loadJob(
       responsibilities: requisitions.responsibilities,
       clientName: requisitions.clientName,
       openedAt: requisitions.openedAt,
+      kindOfWork: requisitions.kindOfWork,
+      contractMonths: requisitions.contractMonths,
       company: organizations.name,
       hqCountry: organizations.hqCountry,
     })
@@ -146,6 +148,8 @@ export async function loadJob(
     countryName: r.hqCountry?.trim() || null,
     postedAt: posting?.publishedAt ?? r.openedAt,
     forClient: Boolean(r.clientName?.trim()),
+    kindOfWork: r.kindOfWork,
+    contractMonths: r.contractMonths,
   };
 }
 

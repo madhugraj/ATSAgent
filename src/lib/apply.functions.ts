@@ -19,7 +19,7 @@ import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { db } from "../server/db";
-import { applications, candidates, organizations, requisitions } from "@db/schema";
+import { applications, candidates, organizations, orgProfiles, requisitions } from "@db/schema";
 import { looksLikeInjection } from "../server/agents/injection";
 import { aiJson, INJECTION_RULES, untrusted } from "./ai-gateway.server";
 import { resolveSource } from "./job-channels";
@@ -233,8 +233,9 @@ export const submitApplicationImpl = createServerOnlyFn(async function submitApp
       if (createdApp && r.orgId) {
         const { enqueueEmail } = await import("./email-outbox.server");
         const [org] = await db
-          .select({ name: organizations.name })
+          .select({ name: organizations.name, websiteUrl: orgProfiles.websiteUrl })
           .from(organizations)
+          .leftJoin(orgProfiles, eq(orgProfiles.orgId, organizations.id))
           .where(eq(organizations.id, r.orgId))
           .limit(1);
         await enqueueEmail({
@@ -246,6 +247,7 @@ export const submitApplicationImpl = createServerOnlyFn(async function submitApp
           templateData: {
             candidateName: fullName,
             orgName: org?.name,
+            websiteUrl: org?.websiteUrl ?? undefined,
             jobTitle: r.title,
           },
           idempotencyKey: `ack:${createdApp.id}`,

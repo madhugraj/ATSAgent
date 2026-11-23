@@ -58,7 +58,9 @@ export default defineConfig(({ command }) => ({
         _importer: string | undefined,
         options: { ssr?: boolean | undefined },
       ) {
-        if (options?.ssr && BROWSER_ONLY_3D.has(source)) return BROWSER_3D_STUB;
+        // three's add-ons (three/examples/…) as well: they import from three.
+        if (options?.ssr && (BROWSER_ONLY_3D.has(source) || source.startsWith("three/")))
+          return BROWSER_3D_STUB;
         return null;
       },
     },

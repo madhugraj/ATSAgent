@@ -1,23 +1,28 @@
-import type { AgentType } from "@db/schema";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
   ArrowDownRight,
-  ArrowUp,
+  ArrowRight,
   ArrowUpRight,
   ChevronRight,
+  CircleCheck,
+  CircleX,
   Loader2,
-  PauseCircle,
+  Pause,
+  Search,
   Radio,
   ShieldCheck,
 } from "lucide-react";
 
 import { PageHeader } from "@/components/ats";
+import { orgWorkflows, type OrgWorkflowRow } from "@/lib/org-workflows.functions";
+import { WorkflowRunRequests } from "@/components/agents/AgentTaskCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -27,10 +32,25 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
-import { AGENT_CATALOG, AUTONOMY_OPTIONS, WHITELISTABLE_TEMPLATES } from "@/lib/agents.catalog";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  AGENT_CATALOG,
+  AUTONOMY_OPTIONS,
+  WHITELISTABLE_TEMPLATES,
+  whitelistableFor,
+  type AgentInfo,
+} from "@/lib/agents.catalog";
 import {
   agentSettings,
+  startStudioAgentRun,
   runModelSafetyCheck,
   saveAgentPolicy,
   type AgentPolicyInput,
@@ -96,25 +116,20 @@ function AgentSettingsPage() {
             </p>
           ) : null}
 
-          <section className="panel mt-4 flex flex-wrap items-center gap-3 p-5">
-            <PauseCircle className="size-5 text-muted-foreground" />
-            <div className="min-w-0 flex-1">
-              <p className="font-medium">Pause all agents</p>
-              <p className="text-sm text-muted-foreground">
-                Stops every agent in this organisation from picking up work. Runs already waiting
-                for a person stay where they are.
-              </p>
-            </div>
-            <Switch
-              checked={data.allPaused}
-              disabled={!data.canEdit}
-              onCheckedChange={(paused) => save({ agentType: "*", enabled: !paused })}
-            />
-          </section>
-
           <SafetyCheckSection check={data.safetyCheck} canEdit={data.canEdit} />
 
-          <AgentList agents={data.agents} canEdit={data.canEdit} onSave={save} />
+          <WorkflowsSection
+            canEdit={data.canEdit}
+            onSwitchOn={(agentType) => save({ agentType, enabled: true })}
+          />
+
+          <AgentList
+            agents={data.agents}
+            allPaused={data.allPaused}
+            canEdit={data.canEdit}
+            onSave={save}
+            onPause={(paused) => save({ agentType: "*", enabled: !paused })}
+          />
 
           <TelemetrySection />
         </>
@@ -125,143 +140,345 @@ function AgentSettingsPage() {
 
 const anchorOf = (type: string) => `agent-${type}`;
 
+const FILTERS = ["all", "on", "off", "not_live"] as const;
+type AgentFilter = (typeof FILTERS)[number];
+const FILTER_LABEL: Record<AgentFilter, string> = {
+  all: "All",
+  on: "On",
+  off: "Off",
+  not_live: "Not live",
+};
+const LEVELS = AUTONOMY_OPTIONS.map((o) => o.value);
+
+type Item = { info: (typeof AGENT_CATALOG)[number]; row: Row };
+
+const stateOf = (row: Row): Exclude<AgentFilter, "all"> =>
+  !row.live ? "not_live" : row.enabled ? "on" : "off";
+
 /**
- * Every agent's settings, behind an index (jump to an agent), a filter and
- * collapsible cards — the page was one long scroll. A card's Enabled switch
- * stays in its header, so agents can be switched on and off without opening it.
+ * Every agent as a card in a grid (status, autonomy and the Enabled switch at a
+ * glance); a card opens that agent's full settings in a side panel.
  */
 function AgentList({
   agents,
+  allPaused,
   canEdit,
   onSave,
+  onPause,
 }: {
   agents: Row[];
+  allPaused: boolean;
   canEdit: boolean;
   onSave: (input: AgentPolicyInput) => Promise<void>;
+  onPause: (paused: boolean) => void;
 }) {
-  const [filter, setFilter] = useState("");
-  const [open, setOpen] = useState<Set<string>>(new Set());
-  const items = AGENT_CATALOG.flatMap((info) => {
-    const row = agents.find((a) => a.type === info.type);
-    return row ? [{ info, row }] : [];
-  });
-  const words = filter.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const shown = items.filter(({ info, row }) =>
-    words.every((w) =>
-      [info.label, row.type, info.description].join(" ").toLowerCase().includes(w),
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<AgentFilter>("all");
+  const [openType, setOpenType] = useState<string | null>(null);
+  const items: Item[] = [
+    ...AGENT_CATALOG.flatMap((info) => {
+      const row = agents.find((a) => a.type === info.type);
+      return row ? [{ info, row }] : [];
+    }),
+    // Agent studio agents the platform granted this organisation.
+    ...agents.flatMap((row) =>
+      row.studio
+        ? [
+            {
+              info: {
+                type: row.type as AgentInfo["type"],
+                label: row.studio.label,
+                description: row.studio.description,
+                phase: 4 as const,
+              },
+              row,
+            },
+          ]
+        : [],
     ),
+  ];
+  const count = (f: AgentFilter) =>
+    f === "all" ? items.length : items.filter((x) => stateOf(x.row) === f).length;
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = items.filter(
+    ({ info, row }) =>
+      (filter === "all" || stateOf(row) === filter) &&
+      words.every((w) =>
+        [info.label, row.type, info.description].join(" ").toLowerCase().includes(w),
+      ),
   );
-  const toggle = (type: string) =>
-    setOpen((o) => {
-      const n = new Set(o);
-      if (n.has(type)) n.delete(type);
-      else n.add(type);
-      return n;
-    });
-  const reveal = (type: string) => setOpen((o) => (o.has(type) ? o : new Set(o).add(type)));
+  const opened = items.find((x) => x.row.type === openType) ?? null;
+
   useEffect(() => {
     const fromHash = () => {
       const h = window.location.hash.replace(/^#agent-/, "");
-      if (h && h !== "index" && agents.some((a) => a.type === h)) reveal(h);
+      if (h && agents.some((a) => a.type === h)) setOpenType(h);
     };
     fromHash();
     window.addEventListener("hashchange", fromHash);
     return () => window.removeEventListener("hashchange", fromHash);
   }, [agents]);
+
   return (
     <>
-      <nav id="agent-index" aria-label="Agent index" className="panel mt-4 scroll-mt-20 p-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold">
-            Index{" "}
-            <span className="num font-normal text-muted-foreground">
-              {shown.length === items.length
-                ? `· ${items.length} agents · ${items.filter((x) => x.row.enabled).length} on`
-                : `· ${shown.length} of ${items.length}`}
-            </span>
-          </h2>
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-8"
-              onClick={() => setOpen(new Set(shown.map((x) => x.row.type)))}
+      <div className="mt-6 flex flex-wrap items-center gap-3">
+        <h2 className="text-base font-semibold">Agents</h2>
+        <div
+          role="radiogroup"
+          aria-label="Show agents"
+          className="inline-flex rounded-full border bg-muted/40 p-0.5"
+        >
+          {FILTERS.map((f) => (
+            <button
+              key={f}
+              type="button"
+              role="radio"
+              aria-checked={filter === f}
+              onClick={() => setFilter(f)}
+              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                filter === f
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
             >
-              Expand all
-            </Button>
-            <Button size="sm" variant="ghost" className="h-8" onClick={() => setOpen(new Set())}>
-              Collapse all
-            </Button>
-          </div>
+              {FILTER_LABEL[f]} <span className="num text-muted-foreground">{count(f)}</span>
+            </button>
+          ))}
+        </div>
+        <label
+          title="Stops every agent from picking up work. Runs already waiting for a person stay where they are."
+          className={`ml-auto flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+            allPaused
+              ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <Pause className="size-3.5" />
+          {allPaused ? "All agents paused" : "Pause all"}
+          <Switch
+            className="scale-75"
+            aria-label="Pause all agents"
+            checked={allPaused}
+            disabled={!canEdit}
+            onCheckedChange={onPause}
+          />
+        </label>
+        <div className="relative w-full sm:w-72">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
-            aria-label="Filter agents"
-            placeholder="Filter by name or what it does"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            className="h-8 w-full sm:w-72"
+            aria-label="Search agents"
+            placeholder="Search agents"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="h-8 pl-8"
           />
         </div>
-        {shown.length ? (
-          <ul className="mt-3 grid gap-x-6 gap-y-1.5 sm:grid-cols-2 xl:grid-cols-3">
-            {shown.map(({ info, row }) => (
-              <li key={row.type} className="flex items-baseline gap-2 text-sm">
-                <a
-                  href={`#${anchorOf(row.type)}`}
-                  onClick={() => reveal(row.type)}
-                  className="text-primary underline-offset-2 hover:underline"
-                >
-                  {info.label}
-                </a>
-                <span className="shrink-0 text-[0.6875rem] text-muted-foreground">
-                  {!row.live
-                    ? "not live"
-                    : row.enabled
-                      ? `on · ${(LEVEL_LABEL[row.autonomy] ?? row.autonomy).toLowerCase()}`
-                      : "off"}
-                </span>
-                {row.recommendation && row.enabled ? (
-                  <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[0.625rem]">
-                    recommendation
-                  </Badge>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="mt-3 text-sm text-muted-foreground">No agent matches “{filter}”.</p>
-        )}
-      </nav>
-      <div className="mt-4 space-y-2">
-        {shown.map(({ info, row }) => (
-          <AgentRow
-            key={row.type}
-            info={info}
-            row={row}
-            canEdit={canEdit}
-            onSave={onSave}
-            open={open.has(row.type)}
-            onToggle={() => toggle(row.type)}
-          />
-        ))}
       </div>
+
+      {shown.length ? (
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          {shown.map((item) => (
+            <AgentCard
+              key={item.row.type}
+              {...item}
+              allPaused={allPaused}
+              canEdit={canEdit}
+              onSave={onSave}
+              selected={openType === item.row.type}
+              onOpen={() => setOpenType(item.row.type)}
+            />
+          ))}
+        </div>
+      ) : (
+        <p className="mt-4 text-sm text-muted-foreground">No agent matches.</p>
+      )}
+
+      <Sheet
+        open={!!opened}
+        onOpenChange={(o) => {
+          if (o) return;
+          setOpenType(null);
+          if (window.location.hash.startsWith("#agent-"))
+            history.replaceState(null, "", window.location.pathname + window.location.search);
+        }}
+      >
+        <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
+          {opened ? (
+            <AgentSettingsPanel
+              key={opened.row.type}
+              {...opened}
+              canEdit={canEdit}
+              onSave={onSave}
+            />
+          ) : null}
+        </SheetContent>
+      </Sheet>
     </>
   );
 }
 
-function AgentRow({
+const STATE_STYLE: Record<
+  Exclude<AgentFilter, "all"> | "paused",
+  { label: string; dot: string; bar: string; chip: string }
+> = {
+  on: {
+    label: "On",
+    dot: "bg-emerald-500",
+    bar: "bg-emerald-500",
+    chip: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  },
+  paused: {
+    label: "Paused",
+    dot: "bg-amber-500",
+    bar: "bg-amber-500",
+    chip: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  },
+  off: {
+    label: "Off",
+    dot: "bg-muted-foreground/50",
+    bar: "bg-muted-foreground/30",
+    chip: "bg-muted text-muted-foreground",
+  },
+  not_live: {
+    label: "Not live",
+    dot: "bg-sky-500",
+    bar: "bg-sky-500/60",
+    chip: "bg-sky-500/10 text-sky-700 dark:text-sky-400",
+  },
+};
+
+function AgentCard({
+  info,
+  row,
+  allPaused,
+  canEdit,
+  onSave,
+  selected,
+  onOpen,
+}: Item & {
+  allPaused: boolean;
+  canEdit: boolean;
+  onSave: (input: AgentPolicyInput) => Promise<void>;
+  selected: boolean;
+  onOpen: () => void;
+}) {
+  const state = stateOf(row);
+  const style = STATE_STYLE[state === "on" && allPaused ? "paused" : state];
+  const level = LEVELS.indexOf(row.autonomy);
+  const rec = row.enabled ? row.recommendation : null;
+  const active = row.live && row.enabled;
+  return (
+    <article
+      id={anchorOf(row.type)}
+      onClick={onOpen}
+      className={`glass-card group flex cursor-pointer flex-col overflow-hidden p-3.5 pb-4 ${
+        selected ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : ""
+      }`}
+    >
+      <div className="flex items-center gap-2 text-[0.6875rem]">
+        <span className="num font-medium text-muted-foreground">
+          {row.studio ? `Studio · v${row.studio.version}` : `Phase ${info.phase}`}
+        </span>
+        <span
+          className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-medium ${style.chip}`}
+        >
+          <span className={`size-1.5 rounded-full ${style.dot}`} />
+          {style.label}
+        </span>
+        {rec?.to ? (
+          <span
+            className={`ml-auto inline-flex items-center gap-0.5 font-medium ${
+              rec.action === "lower" ? "text-destructive" : "text-primary"
+            }`}
+            title={`Recommended: ${rec.action} to ${LEVEL_LABEL[rec.to]}`}
+          >
+            {rec.action === "lower" ? (
+              <ArrowDownRight className="size-3.5" />
+            ) : (
+              <ArrowUpRight className="size-3.5" />
+            )}
+            {LEVEL_LABEL[rec.to]}
+          </span>
+        ) : null}
+      </div>
+
+      <h3 className="mt-2.5 text-sm font-semibold leading-snug">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpen();
+          }}
+          className="text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
+        >
+          {info.label}
+        </button>
+      </h3>
+      <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{info.description}</p>
+
+      <div className="mt-auto pt-3">
+        <div className="flex items-center justify-between text-[0.6875rem]">
+          <span className="text-muted-foreground">Autonomy</span>
+          <span className={active ? "font-medium" : "text-muted-foreground"}>
+            {LEVEL_LABEL[row.autonomy] ?? row.autonomy}
+          </span>
+        </div>
+        <div className="mt-1.5 grid grid-cols-3 gap-1" aria-hidden>
+          {LEVELS.map((l, i) => (
+            <span
+              key={l}
+              className={`h-1.5 rounded-full ${
+                i <= level ? (active ? "bg-foreground" : "bg-muted-foreground/40") : "bg-muted"
+              }`}
+            />
+          ))}
+        </div>
+
+        <div className="mt-3 flex items-center gap-2 border-t border-foreground/5 pt-3">
+          <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+            <Switch
+              id={`en-${row.type}`}
+              checked={row.enabled}
+              disabled={!canEdit || !row.live}
+              onCheckedChange={(enabled) =>
+                onSave({
+                  agentType: row.type,
+                  enabled,
+                  autonomy: row.autonomy,
+                  whitelistedTemplates: row.whitelistedTemplates,
+                })
+              }
+            />
+            <Label htmlFor={`en-${row.type}`} className="text-xs text-muted-foreground">
+              Enabled
+            </Label>
+          </div>
+          <Button
+            size="icon"
+            className="ml-auto size-6 shrink-0 rounded-full"
+            aria-label={`Open ${info.label} settings`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpen();
+            }}
+          >
+            <ArrowRight className="size-3.5" />
+          </Button>
+        </div>
+      </div>
+      <span className={`absolute inset-x-3.5 bottom-0 h-1 rounded-t-full ${style.bar}`} />
+    </article>
+  );
+}
+
+function AgentSettingsPanel({
   info,
   row,
   canEdit,
   onSave,
-  open,
-  onToggle,
-}: {
-  info: (typeof AGENT_CATALOG)[number];
-  row: Row;
+}: Item & {
   canEdit: boolean;
   onSave: (input: AgentPolicyInput) => Promise<void>;
-  open: boolean;
-  onToggle: () => void;
 }) {
   const [budget, setBudget] = useState(row.monthlyTokenBudget?.toString() ?? "");
   const [legSteps, setLegSteps] = useState(row.maxStepsPerLeg?.toString() ?? "");
@@ -275,205 +492,171 @@ function AgentRow({
   };
 
   return (
-    <section id={anchorOf(row.type)} className={`panel scroll-mt-20 ${open ? "p-5" : "px-5 py-3"}`}>
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-expanded={open}
-          aria-controls={`${anchorOf(row.type)}-body`}
-          className="flex items-center gap-2 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <ChevronRight
-            className={`size-4 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
-          />
-          <h3 className="font-semibold">{info.label}</h3>
-        </button>
-        {row.enabled && row.live ? (
-          <Badge variant="secondary" className="font-normal">
-            {LEVEL_LABEL[row.autonomy] ?? row.autonomy}
-          </Badge>
-        ) : null}
-        {row.recommendation && row.enabled ? (
-          <Badge variant="outline" className="font-normal">
-            Recommendation
-          </Badge>
-        ) : null}
-        {row.live ? (
-          <Badge>Live</Badge>
-        ) : (
-          <Badge variant="outline">Not live yet — arrives in phase {info.phase}</Badge>
-        )}
-        <div className="ml-auto flex items-center gap-2">
-          <Label htmlFor={`en-${row.type}`} className="text-xs text-muted-foreground">
-            Enabled
-          </Label>
-          <Switch
-            id={`en-${row.type}`}
-            checked={row.enabled}
-            disabled={!canEdit || !row.live}
-            onCheckedChange={(enabled) => onSave({ ...base, enabled })}
-          />
-          <a
-            href="#agent-index"
-            className="inline-flex items-center gap-0.5 text-[0.6875rem] text-primary underline-offset-2 hover:underline"
-          >
-            <ArrowUp className="size-3" /> Index
-          </a>
+    <>
+      <SheetHeader className="pr-8 text-left">
+        <div className="flex flex-wrap items-center gap-2">
+          <SheetTitle>{info.label}</SheetTitle>
+          {row.studio ? <Badge variant="secondary">Studio · v{row.studio.version}</Badge> : null}
+          {row.live ? (
+            <Badge>Live</Badge>
+          ) : (
+            <Badge variant="outline">Not live yet — arrives in phase {info.phase}</Badge>
+          )}
         </div>
+        <SheetDescription>{info.description}</SheetDescription>
+      </SheetHeader>
+
+      <div className="mt-4 flex items-center justify-between rounded-lg border px-4 py-3">
+        <Label htmlFor={`sheet-en-${row.type}`} className="font-medium">
+          Enabled
+        </Label>
+        <Switch
+          id={`sheet-en-${row.type}`}
+          checked={row.enabled}
+          disabled={!canEdit || !row.live}
+          onCheckedChange={(enabled) => onSave({ ...base, enabled })}
+        />
       </div>
-      {!open ? (
-        <p className="mt-1 truncate pl-6 text-xs text-muted-foreground">{info.description}</p>
-      ) : (
-        <div id={`${anchorOf(row.type)}-body`}>
-          <p className="mt-1 text-sm text-muted-foreground">{info.description}</p>
 
-          {row.recommendation && row.enabled ? (
-            <Recommendation row={row} canEdit={canEdit} onSave={onSave} base={base} />
-          ) : null}
+      {row.recommendation && row.enabled ? (
+        <Recommendation row={row} canEdit={canEdit} onSave={onSave} base={base} />
+      ) : null}
 
-          <div className="mt-4 grid gap-4 md:grid-cols-3">
-            <div>
-              <Label className="text-xs">Autonomy</Label>
-              <Select
-                value={row.autonomy}
-                disabled={!canEdit}
-                onValueChange={(v) => onSave({ ...base, autonomy: v as Row["autonomy"] })}
-              >
-                <SelectTrigger className="mt-1">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {AUTONOMY_OPTIONS.map((o) => (
-                    <SelectItem key={o.value} value={o.value}>
-                      {o.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {hint ? <p className="mt-1 text-xs text-muted-foreground">{hint}</p> : null}
-            </div>
+      <div className="mt-5 space-y-6">
+        <div>
+          <Label className="text-xs">Autonomy</Label>
+          <Select
+            value={row.autonomy}
+            disabled={!canEdit}
+            onValueChange={(v) => onSave({ ...base, autonomy: v as Row["autonomy"] })}
+          >
+            <SelectTrigger className="mt-1">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {AUTONOMY_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {hint ? <p className="mt-1 text-xs text-muted-foreground">{hint}</p> : null}
+        </div>
 
-            <div>
-              {(["email", "board"] as const)
-                .filter((g) => g === "email" || row.type === "publishing")
-                .map((group) => (
-                  <div key={group} className={group === "board" ? "mt-3" : ""}>
-                    <Label className="text-xs">
-                      {group === "email"
-                        ? "Pre-approved candidate emails"
-                        : "Pre-approved job boards"}
-                    </Label>
-                    <div className="mt-2 space-y-1.5">
-                      {WHITELISTABLE_TEMPLATES.filter(
-                        (t) =>
-                          t.group === group &&
-                          (!t.agents || t.agents.includes(row.type as AgentType)),
-                      ).map((t) => {
-                        const on = row.whitelistedTemplates.includes(t.id);
-                        return (
-                          <label key={t.id} className="flex items-center gap-2 text-sm">
-                            <Checkbox
-                              checked={on}
-                              disabled={!canEdit}
-                              onCheckedChange={(v) =>
-                                onSave({
-                                  ...base,
-                                  whitelistedTemplates: v
-                                    ? [...row.whitelistedTemplates, t.id]
-                                    : row.whitelistedTemplates.filter((x) => x !== t.id),
-                                })
-                              }
-                            />
-                            {t.label}
-                          </label>
-                        );
-                      })}
-                    </div>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {group === "email"
-                        ? "Used at Act and notify. At Autonomous every candidate email template sends on its own."
-                        : "Used at Autonomous only. Otherwise every post goes to the HR head for approval, and is published as that HR head."}
-                    </p>
-                  </div>
-                ))}
-            </div>
+        {row.studio ? <StudioRun row={row} canEdit={canEdit} /> : null}
 
-            <div>
-              <Label className="text-xs" htmlFor={`budget-${row.type}`}>
-                Monthly token budget
+        {(["email", "board"] as const)
+          .map((group) => [group, whitelistableFor(row.type, group)] as const)
+          .filter(([, items]) => items.length > 0)
+          .map(([group, items]) => (
+            <div key={group}>
+              <Label className="text-xs">
+                {group === "email" ? "Pre-approved candidate emails" : "Pre-approved job boards"}
               </Label>
-              <div className="mt-1 flex gap-2">
-                <Input
-                  id={`budget-${row.type}`}
-                  inputMode="numeric"
-                  placeholder="No limit"
-                  value={budget}
-                  disabled={!canEdit}
-                  onChange={(e) => setBudget(e.target.value.replace(/[^0-9]/g, ""))}
-                />
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={!canEdit}
-                  onClick={() =>
-                    onSave({ ...base, monthlyTokenBudget: budget ? Number(budget) : null })
-                  }
-                >
-                  Save
-                </Button>
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground">Leave empty for no limit.</p>
-            </div>
-
-            <div>
-              <Label className="text-xs" htmlFor={`legsteps-${row.type}`}>
-                Run limits (per stretch of work)
-              </Label>
-              <div className="mt-1 grid grid-cols-[1fr_1fr_auto] gap-2">
-                <Input
-                  id={`legsteps-${row.type}`}
-                  inputMode="numeric"
-                  aria-label="AI turns per stretch"
-                  placeholder={`${row.defaultStepsPerLeg} AI turns`}
-                  value={legSteps}
-                  disabled={!canEdit}
-                  onChange={(e) => setLegSteps(e.target.value.replace(/[^0-9]/g, ""))}
-                />
-                <Input
-                  inputMode="numeric"
-                  aria-label="Tokens per stretch"
-                  placeholder="200000 tokens"
-                  value={legTokens}
-                  disabled={!canEdit}
-                  onChange={(e) => setLegTokens(e.target.value.replace(/[^0-9]/g, ""))}
-                />
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={!canEdit}
-                  onClick={() =>
-                    onSave({
-                      ...base,
-                      maxStepsPerLeg: legSteps ? Number(legSteps) : null,
-                      maxTokensPerLeg: legTokens ? Number(legTokens) : null,
-                    })
-                  }
-                >
-                  Save
-                </Button>
+              <div className="mt-2 space-y-1.5">
+                {items.map((t) => {
+                  const on = row.whitelistedTemplates.includes(t.id);
+                  return (
+                    <label key={t.id} className="flex items-center gap-2 text-sm">
+                      <Checkbox
+                        checked={on}
+                        disabled={!canEdit}
+                        onCheckedChange={(v) =>
+                          onSave({
+                            ...base,
+                            whitelistedTemplates: v
+                              ? [...row.whitelistedTemplates, t.id]
+                              : row.whitelistedTemplates.filter((x) => x !== t.id),
+                          })
+                        }
+                      />
+                      {t.label}
+                    </label>
+                  );
+                })}
               </div>
               <p className="mt-1 text-xs text-muted-foreground">
-                A stretch is the work between two decisions by a person; each decision gives a fresh
-                allowance, and a run stops for good at four stretches&apos; worth (a loop guard).
-                Turns 4–60, tokens 20,000–1,000,000; leave empty for the agent&apos;s default. The
-                monthly token budget is still the cost limit.
+                {group === "email"
+                  ? "Used at Act and notify. At Autonomous every candidate email template sends on its own."
+                  : "Used at Autonomous only. Otherwise every post goes to the HR head for approval, and is published as that HR head."}
               </p>
             </div>
+          ))}
+
+        <div>
+          <Label className="text-xs" htmlFor={`budget-${row.type}`}>
+            Monthly token budget
+          </Label>
+          <div className="mt-1 flex gap-2">
+            <Input
+              id={`budget-${row.type}`}
+              inputMode="numeric"
+              placeholder="No limit"
+              value={budget}
+              disabled={!canEdit}
+              onChange={(e) => setBudget(e.target.value.replace(/[^0-9]/g, ""))}
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!canEdit}
+              onClick={() =>
+                onSave({ ...base, monthlyTokenBudget: budget ? Number(budget) : null })
+              }
+            >
+              Save
+            </Button>
           </div>
+          <p className="mt-1 text-xs text-muted-foreground">Leave empty for no limit.</p>
         </div>
-      )}
-    </section>
+
+        <div>
+          <Label className="text-xs" htmlFor={`legsteps-${row.type}`}>
+            Run limits (per stretch of work)
+          </Label>
+          <div className="mt-1 grid grid-cols-[1fr_1fr_auto] gap-2">
+            <Input
+              id={`legsteps-${row.type}`}
+              inputMode="numeric"
+              aria-label="AI turns per stretch"
+              placeholder={`${row.defaultStepsPerLeg} AI turns`}
+              value={legSteps}
+              disabled={!canEdit}
+              onChange={(e) => setLegSteps(e.target.value.replace(/[^0-9]/g, ""))}
+            />
+            <Input
+              inputMode="numeric"
+              aria-label="Tokens per stretch"
+              placeholder="200000 tokens"
+              value={legTokens}
+              disabled={!canEdit}
+              onChange={(e) => setLegTokens(e.target.value.replace(/[^0-9]/g, ""))}
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!canEdit}
+              onClick={() =>
+                onSave({
+                  ...base,
+                  maxStepsPerLeg: legSteps ? Number(legSteps) : null,
+                  maxTokensPerLeg: legTokens ? Number(legTokens) : null,
+                })
+              }
+            >
+              Save
+            </Button>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            A stretch is the work between two decisions by a person; each decision gives a fresh
+            allowance, and a run stops for good at four stretches&apos; worth (a loop guard). Turns
+            4–60, tokens 20,000–1,000,000; leave empty for the agent&apos;s default. The monthly
+            token budget is still the cost limit.
+          </p>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -645,12 +828,18 @@ function TelemetryForm({ t, onSaved }: { t: AgentTelemetryView; onSaved: () => v
 
   const disabled = !t.canEdit || busy;
   return (
-    <section className="panel mt-6 p-5">
-      <div className="flex items-center gap-2">
-        <Radio className="size-4 text-primary" />
-        <h3 className="font-semibold">Trace export and alerts</h3>
-      </div>
-      <p className="mt-1 text-sm text-muted-foreground">
+    <Fold
+      className="mt-6"
+      icon={<Radio className="size-4 text-primary" />}
+      title="Trace export and alerts"
+      summary={
+        <span className="text-xs text-muted-foreground">
+          Traces {t.otlpEnabled ? "on" : "off"} · Alert e-mail {t.alertEmailEnabled ? "on" : "off"}
+          {t.alertWebhookUrl ? " · Webhook" : ""}
+        </span>
+      }
+    >
+      <p className="text-sm text-muted-foreground">
         Send each finished agent run to your own OpenTelemetry collector as a trace (ids, steps,
         timings and token counts only — no candidate content or prompts), and choose how serious and
         critical agent health issues reach you besides the notification bell.
@@ -782,7 +971,44 @@ function TelemetryForm({ t, onSaved }: { t: AgentTelemetryView; onSaved: () => v
           </Button>
         </div>
       ) : null}
-    </section>
+    </Fold>
+  );
+}
+
+/** A settings panel that opens on its header; the summary and actions stay visible when closed. */
+function Fold({
+  icon,
+  title,
+  summary,
+  actions,
+  className = "",
+  children,
+}: {
+  icon: ReactNode;
+  title: string;
+  summary?: ReactNode;
+  actions?: ReactNode;
+  className?: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} asChild>
+      <section className={`panel ${className}`}>
+        <div className="flex flex-wrap items-center gap-3 px-5 py-3.5">
+          <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-2.5 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <ChevronRight
+              className={`size-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
+            />
+            {icon}
+            <span className="font-medium">{title}</span>
+            {summary}
+          </CollapsibleTrigger>
+          {actions}
+        </div>
+        <CollapsibleContent className="border-t px-5 pb-5 pt-4">{children}</CollapsibleContent>
+      </section>
+    </Collapsible>
   );
 }
 
@@ -825,27 +1051,29 @@ function SafetyCheckSection({
   }
 
   return (
-    <section className="panel mt-4 p-5">
-      <div className="flex flex-wrap items-center gap-3">
-        <ShieldCheck className="size-5 text-muted-foreground" />
-        <div className="min-w-0 flex-1">
-          <p className="font-medium">Model safety check</p>
-          <p className="text-sm text-muted-foreground">
-            Plants {check.results.length || 6} known attacks in a test CV — hidden instructions,
-            fake system messages, requests to leak data or reveal instructions — and checks your AI
-            model ignores them with this product&apos;s defences on. An agent can be set to
-            Autonomous only after a pass for the model you use now; it is valid for 30 days.
-          </p>
-        </div>
+    <Fold
+      className="mt-4"
+      icon={<ShieldCheck className="size-4 text-muted-foreground" />}
+      title="Model safety check"
+      summary={
         <Badge
           variant={s.tone === "ok" ? "default" : s.tone === "bad" ? "destructive" : "secondary"}
         >
           {s.text}
         </Badge>
+      }
+      actions={
         <Button size="sm" variant="outline" onClick={run} disabled={!canEdit || busy}>
           {busy ? <Loader2 className="size-3.5 animate-spin" /> : null} Run check
         </Button>
-      </div>
+      }
+    >
+      <p className="text-sm text-muted-foreground">
+        Plants {check.results.length || 6} known attacks in a test CV — hidden instructions, fake
+        system messages, requests to leak data or reveal instructions — and checks your AI model
+        ignores them with this product&apos;s defences on. An agent can be set to Autonomous only
+        after a pass for the model you use now; it is valid for 30 days.
+      </p>
       {check.results.length ? (
         <ul className="mt-3 grid gap-1 text-sm sm:grid-cols-2">
           {check.results.map((r) => (
@@ -869,6 +1097,177 @@ function SafetyCheckSection({
           ))}
         </ul>
       ) : null}
+    </Fold>
+  );
+}
+
+/** A granted Agent studio agent runs when a person starts it here (workflows come later). */
+function StudioRun({ row, canEdit }: { row: Row; canEdit: boolean }) {
+  const [goal, setGoal] = useState("");
+  const [busy, setBusy] = useState(false);
+  if (!canEdit) return null;
+  const start = async () => {
+    setBusy(true);
+    try {
+      await startStudioAgentRun({ data: { agentType: row.type, goal } });
+      toast.success("Started — follow it in Agent activity");
+      setGoal("");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not start");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div>
+      <Label className="text-xs" htmlFor={`studio-goal-${row.type}`}>
+        Start a run
+      </Label>
+      <Textarea
+        id={`studio-goal-${row.type}`}
+        className="mt-1 min-h-20"
+        placeholder="What should it do?"
+        value={goal}
+        maxLength={4000}
+        onChange={(e) => setGoal(e.target.value)}
+      />
+      <Button
+        size="sm"
+        className="mt-2"
+        disabled={busy || !row.enabled || goal.trim().length < 5}
+        onClick={start}
+      >
+        {busy ? "Starting…" : "Start"}
+      </Button>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------- workflows */
+
+const triggerLabel = (t: string) =>
+  t === "manual"
+    ? "Started by the platform team (hiring need)"
+    : `Starts on ${t.replace(/[._]/g, " ")}`;
+
+/**
+ * Workflows the platform granted this organisation: what each needs before it
+ * can run here, with a switch-on shortcut, and its latest runs.
+ */
+function WorkflowsSection({
+  canEdit,
+  onSwitchOn,
+}: {
+  canEdit: boolean;
+  onSwitchOn: (agentType: string) => Promise<void>;
+}) {
+  const qc = useQueryClient();
+  const q = useQuery({
+    queryKey: ["org_workflows"],
+    queryFn: () => orgWorkflows(),
+    retry: false,
+    enabled: canEdit,
+  });
+  if (!canEdit || !q.data?.length) return null;
+  const switchOn = async (type: string) => {
+    await onSwitchOn(type);
+    await qc.invalidateQueries({ queryKey: ["org_workflows"] });
+  };
+  return (
+    <section id="workflows" className="mt-6 space-y-3">
+      <h2 className="text-sm font-semibold">Workflows</h2>
+      {q.data.map((w) => (
+        <WorkflowCard key={w.id} w={w} onSwitchOn={switchOn} />
+      ))}
     </section>
+  );
+}
+
+function WorkflowCard({
+  w,
+  onSwitchOn,
+}: {
+  w: OrgWorkflowRow;
+  onSwitchOn: (agentType: string) => Promise<void>;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const qc = useQueryClient();
+  return (
+    <div className="panel p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium">{w.name}</span>
+        <Badge variant="secondary">v{w.version}</Badge>
+        <Badge variant={w.ready ? "default" : "outline"}>{w.ready ? "Live" : "Not ready"}</Badge>
+        <span className="ml-auto text-xs text-muted-foreground">{triggerLabel(w.trigger)}</span>
+        <Button asChild size="sm" className="h-7">
+          <Link to="/w/$workflowId" params={{ workflowId: w.id }}>
+            Open
+          </Link>
+        </Button>
+      </div>
+      {w.description ? <p className="mt-1 text-sm text-muted-foreground">{w.description}</p> : null}
+      <ul className="mt-3 divide-y rounded-md border text-sm">
+        {w.items.map((i) => {
+          const type = i.key.startsWith("agent:") ? i.key.slice(6) : null;
+          return (
+            <li key={i.key} className="flex items-center gap-2 px-3 py-1.5">
+              {i.ok ? (
+                <CircleCheck className="size-4 text-emerald-600" />
+              ) : (
+                <CircleX className="size-4 text-destructive" />
+              )}
+              <span className="flex-1">{i.label}</span>
+              <span className="text-xs text-muted-foreground">{i.detail}</span>
+              {!i.ok && type ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7"
+                  disabled={busy === type}
+                  onClick={async () => {
+                    setBusy(type);
+                    try {
+                      await onSwitchOn(type);
+                    } finally {
+                      setBusy(null);
+                    }
+                  }}
+                >
+                  Switch on
+                </Button>
+              ) : null}
+              {!i.ok && i.key === "ai_key" ? (
+                <Button asChild size="sm" variant="outline" className="h-7">
+                  <Link to="/integrations">Add key</Link>
+                </Button>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+      {w.runs.length ? (
+        <ul className="mt-3 space-y-1 text-xs">
+          {w.runs.map((r) => (
+            <li key={r.id} className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="h-5">
+                  {r.status}
+                </Badge>
+                <span className="text-muted-foreground">
+                  {new Date(r.createdAt).toLocaleString()}
+                </span>
+                <span className="truncate">{r.error ?? r.waitingOn?.text ?? r.lastNote ?? ""}</span>
+              </div>
+              {r.waitingOn?.kind === "person" ? (
+                <WorkflowRunRequests
+                  workflowRunId={r.id}
+                  onDecided={() => void qc.invalidateQueries({ queryKey: ["org_workflows"] })}
+                />
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   );
 }

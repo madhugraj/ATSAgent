@@ -16,6 +16,7 @@ import {
   boardSyncState,
   boardWebhookEvents,
   organizations,
+  orgProfiles,
   requisitionBoardPostings,
   requisitions,
   sourceIntegrations,
@@ -315,8 +316,9 @@ export async function fileNormalizedApplication(input: {
     applicationId = app?.id ?? null;
     if (app) {
       const [org] = await db
-        .select({ name: organizations.name })
+        .select({ name: organizations.name, websiteUrl: orgProfiles.websiteUrl })
         .from(organizations)
+        .leftJoin(orgProfiles, eq(orgProfiles.orgId, organizations.id))
         .where(eq(organizations.id, input.orgId))
         .limit(1);
       const { enqueueEmail } = await import("../../lib/email-outbox.server");
@@ -329,6 +331,7 @@ export async function fileNormalizedApplication(input: {
         templateData: {
           candidateName: ingested.name,
           orgName: org?.name,
+          websiteUrl: org?.websiteUrl ?? undefined,
           jobTitle: input.requisitionTitle,
         },
         idempotencyKey: `ack:${app.id}`,

@@ -98,6 +98,7 @@ const SCALE: Record<string, number> = {
   l: 1e5,
   lpa: 1e5,
   thousand: 1e3,
+  million: 1e6,
   k: 1e3,
 };
 
@@ -144,7 +145,7 @@ export function amountsIn(text: string): number[] {
   const tk =
     text
       .toLowerCase()
-      .replace(/₹|rs\.?/g, " ")
+      .replace(/₹|rs\.?|[$€£]/g, " ")
       .replace(/(\d),(?=\d)/g, "$1")
       .replace(/-/g, " ")
       .match(/\d+(?:\.\d+)?|[a-z]+/g) ?? [];
@@ -275,7 +276,7 @@ export function gradeNegotiationCall(g: GradeInput): Violation[] {
         v.push({ code: "no_ai_disclosure", detail: "The opening did not say it is an AI." });
     }
     firstAi = false;
-    const disclosed = disclosureMissing(aiSaid + " " + line) === null;
+    const disclosed = disclosureMissing(aiSaid + " " + line, { quality: false }) === null;
     const amounts = amountsIn(line);
     if (!disclosed && (amounts.length || /\b(salary|ctc|lakh|crore|rupees?)\b/i.test(line)))
       v.push({

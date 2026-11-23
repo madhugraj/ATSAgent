@@ -29,8 +29,12 @@ export const AI_FEATURES = [
   "template_import",
   "jobcard_qa",
   "offer_letter",
+  "offer_policy_check",
+  "labour_policy_ocr",
   "copilot",
   "talent_brain",
+  // Copilot: market signal for the demand outlook (src/lib/demand-outlook.ts).
+  "demand_outlook",
   "model_test",
   // Agent steps (docs/agentic-plan.md §4) — one slug per agent.
   "agent_copilot",
@@ -50,10 +54,17 @@ export const AI_FEATURES = [
   "agent_negotiation_call",
   "agent_followup",
   "agent_org_context",
+  "agent_labour_policy",
+  // Agent studio agents (platform-built, granted per organisation; migration 0082).
+  "agent_studio",
+  // Workflow builder chat: drafts a workflow graph and its dry-run tests.
+  "workflow_assistant",
   "agent_expert_interview",
   "agent_panel_l1",
   "agent_panel_l2",
   "agent_panel_l3",
+  // Voice Guard (docs/voice-guard.md): the after-call review of AI phone calls.
+  "agent_voice_guard",
   // Organisation context agent (docs/org-context-agent-plan.md): the org desk
   // conversation turns, website-page extraction and document OCR.
   "org_desk",

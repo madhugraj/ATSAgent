@@ -1,0 +1,21 @@
+# Database migrations — run once per release, before the rollout, inside the
+# cluster (Cloud SQL is private). Image: the `migrate` build stage
+# (MIGRATE_IMAGE_PLACEHOLDER). Idempotent; never use drizzle-kit migrate.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: scouts-migrate-RELEASE_PLACEHOLDER
+  namespace: scouts
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: MIGRATE_IMAGE_PLACEHOLDER
+          envFrom:
+            - secretRef: { name: scouts-env }
+          resources:
+            requests: { cpu: "250m", memory: "512Mi" }

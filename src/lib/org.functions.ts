@@ -7,6 +7,7 @@ import { db } from "../server/db";
 import { emailVerified } from "../server/claims";
 import { departments, masterItems, orgMembers, organizations, userRoles } from "@db/schema";
 import { registrableDomain, workEmailProblem } from "@/lib/work-email";
+import { isCurrencyCode } from "@/lib/iso";
 import { AgreementAcceptanceInput } from "@/lib/legal/acceptance";
 
 export type { AppRole } from "@/lib/auth.middleware";
@@ -230,7 +231,12 @@ export const CreateInput = z.object({
   hqCountry: z.string().trim().min(2, "HQ country is required").max(80),
   hqCity: z.string().trim().min(2, "HQ city is required").max(80),
   employeeBand: z.string().trim().min(1, "Headcount band is required").max(40),
-  currency: z.string().trim().min(1).max(8).default("INR"),
+  currency: z
+    .string()
+    .trim()
+    .regex(/^[A-Z]{3}$/)
+    .refine(isCurrencyCode, "a real ISO currency code")
+    .default("INR"),
   fiscalYearStartMonth: z.number().int().min(1).max(12).default(4),
   careersEmail: z.string().trim().email("A valid careers inbox is required").max(160),
   departments: z
@@ -472,7 +478,11 @@ export const updateOrganization = createServerFn({ method: "POST" })
         hqCountry: z.string().max(80).optional(),
         hqCity: z.string().max(80).optional(),
         employeeBand: z.string().max(40).optional(),
-        currency: z.string().max(8).optional(),
+        currency: z
+          .string()
+          .regex(/^[A-Z]{3}$/)
+          .refine(isCurrencyCode, "a real ISO currency code")
+          .optional(),
         fiscalYearStartMonth: z.number().int().min(1).max(12).optional(),
         hiringSlaDays: z.number().int().min(2).max(60).optional(),
         careersEmail: z.string().max(160).optional(),

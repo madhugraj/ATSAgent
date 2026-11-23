@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-105 tables across 9 domains.
+125 tables across 9 domains.
 
 ## Identity & access
 
@@ -88,6 +88,10 @@ erDiagram
     text hq_city "nullable"
     text employee_band "nullable"
     text currency
+    text pay_basis_default
+    numeric hours_per_week_default
+    text kinds_of_work
+    integer pay_far_above_pct
     smallint hiring_sla_days
     smallint fiscal_year_start_month
     text careers_email "nullable"
@@ -317,6 +321,17 @@ erDiagram
     jsonb job_card_overrides
     integer max_notice_period_days "nullable"
     text work_authorization_required "nullable"
+    text kind_of_work
+    text pay_basis
+    text pay_currency
+    uuid pay_zone_id FK
+    numeric hours_per_week "nullable"
+    numeric days_per_week "nullable"
+    integer contract_months "nullable"
+    boolean extendable "nullable"
+    text contract_type "nullable"
+    boolean pays_by_location
+    date needed_by "nullable"
   }
   job_descriptions {
     uuid id PK
@@ -360,6 +375,7 @@ erDiagram
   requisitions }o--o| departments : "department_id"
   requisitions }o--o| org_members : "hiring_manager_member_id"
   requisitions }o--o| users : "created_by"
+  requisitions }o--o| pay_zones : "pay_zone_id"
   job_descriptions }o--|| requisitions : "requisition_id · cascade"
   job_descriptions }o--o| organizations : "org_id · cascade"
   content_templates }o--|| organizations : "org_id · cascade"
@@ -771,6 +787,8 @@ erDiagram
     uuid slot_offer_id FK
     jsonb alternates
     uuid negotiation_id FK
+    jsonb call_stats "nullable"
+    text brief "nullable"
     text last_error "nullable"
     timestamptz created_at
     timestamptz updated_at
@@ -829,6 +847,16 @@ erDiagram
     integer revision
     timestamptz responded_at "nullable"
     timestamptz created_at
+    text currency
+    text pay_basis
+    text kind_of_work
+    date contract_end "nullable"
+    numeric reporting_amount "nullable"
+    text reporting_currency "nullable"
+    jsonb rate "nullable"
+    timestamptz rate_locked_at "nullable"
+    jsonb policy_check "nullable"
+    jsonb policy_override "nullable"
   }
   hr_incentive_schemes {
     uuid org_id PK,FK
@@ -976,6 +1004,7 @@ erDiagram
     uuid user_id
     text role
     text content
+    jsonb handoff "nullable"
     timestamptz created_at
   }
   skill_nodes {
@@ -1153,6 +1182,13 @@ erDiagram
 
 | From (child)                  | Column                     | To (parent)             | ON DELETE |
 | ----------------------------- | -------------------------- | ----------------------- | --------- |
+| `agent_blueprint_keys`        | `blueprint_id`             | `agent_blueprints`      | cascade   |
+| `agent_blueprint_keys`        | `created_by`               | `users`                 | no action |
+| `agent_blueprint_keys`        | `org_id`                   | `organizations`         | cascade   |
+| `agent_blueprint_keys`        | `principal_user_id`        | `users`                 | cascade   |
+| `agent_blueprints`            | `approved_by`              | `users`                 | no action |
+| `agent_blueprints`            | `created_by`               | `users`                 | no action |
+| `agent_blueprints`            | `workspace_org_id`         | `organizations`         | no action |
 | `agent_cost_rates`            | `org_id`                   | `organizations`         | cascade   |
 | `agent_cost_rates`            | `updated_by`               | `users`                 | no action |
 | `agent_events`                | `actor_user_id`            | `users`                 | no action |
@@ -1174,6 +1210,14 @@ erDiagram
 | `agent_tasks`                 | `run_id`                   | `agent_runs`            | cascade   |
 | `agent_telemetry_settings`    | `org_id`                   | `organizations`         | cascade   |
 | `agent_telemetry_settings`    | `updated_by`               | `users`                 | no action |
+| `agent_workflow_grants`       | `granted_by`               | `users`                 | no action |
+| `agent_workflow_grants`       | `org_id`                   | `organizations`         | cascade   |
+| `agent_workflow_grants`       | `workflow_id`              | `agent_workflows`       | cascade   |
+| `agent_workflow_versions`     | `approved_by`              | `users`                 | no action |
+| `agent_workflow_versions`     | `published_by`             | `users`                 | no action |
+| `agent_workflow_versions`     | `workflow_id`              | `agent_workflows`       | cascade   |
+| `agent_workflows`             | `approved_by`              | `users`                 | no action |
+| `agent_workflows`             | `created_by`               | `users`                 | no action |
 | `ai_interviews`               | `application_id`           | `applications`          | cascade   |
 | `ai_interviews`               | `org_id`                   | `organizations`         | cascade   |
 | `ai_provider_credentials`     | `org_id`                   | `organizations`         | cascade   |
@@ -1190,6 +1234,10 @@ erDiagram
 | `board_sync_state`            | `integration_id`           | `source_integrations`   | cascade   |
 | `board_sync_state`            | `org_id`                   | `organizations`         | cascade   |
 | `board_webhook_events`        | `org_id`                   | `organizations`         | no action |
+| `call_reviews`                | `acknowledged_by`          | `users`                 | no action |
+| `call_reviews`                | `agent_run_id`             | `agent_runs`            | no action |
+| `call_reviews`                | `call_id`                  | `screening_calls`       | cascade   |
+| `call_reviews`                | `org_id`                   | `organizations`         | cascade   |
 | `candidate_assessments`       | `application_id`           | `applications`          | no action |
 | `candidate_assessments`       | `candidate_id`             | `candidates`            | cascade   |
 | `candidate_assessments`       | `org_id`                   | `organizations`         | cascade   |
@@ -1219,6 +1267,8 @@ erDiagram
 | `compensation_requests`       | `org_id`                   | `organizations`         | cascade   |
 | `content_templates`           | `org_id`                   | `organizations`         | cascade   |
 | `copilot_messages`            | `org_id`                   | `organizations`         | cascade   |
+| `demand_outlooks`             | `generated_by`             | `users`                 | no action |
+| `demand_outlooks`             | `org_id`                   | `organizations`         | cascade   |
 | `departments`                 | `org_id`                   | `organizations`         | cascade   |
 | `email_outbox`                | `application_id`           | `applications`          | cascade   |
 | `email_outbox`                | `org_id`                   | `organizations`         | cascade   |
@@ -1226,6 +1276,8 @@ erDiagram
 | `evaluations`                 | `application_id`           | `applications`          | cascade   |
 | `evaluations`                 | `interview_id`             | `interviews`            | no action |
 | `evaluations`                 | `org_id`                   | `organizations`         | cascade   |
+| `exchange_rates`              | `entered_by`               | `users`                 | no action |
+| `exchange_rates`              | `org_id`                   | `organizations`         | cascade   |
 | `hiring_conversations`        | `created_by`               | `users`                 | cascade   |
 | `hiring_conversations`        | `deleted_by`               | `users`                 | no action |
 | `hiring_conversations`        | `org_id`                   | `organizations`         | cascade   |
@@ -1312,17 +1364,39 @@ erDiagram
 | `panelists`                   | `approved_by`              | `users`                 | no action |
 | `panelists`                   | `member_id`                | `org_members`           | cascade   |
 | `panelists`                   | `org_id`                   | `organizations`         | cascade   |
+| `pay_convention_drafts`       | `decided_by`               | `users`                 | no action |
+| `pay_convention_drafts`       | `org_id`                   | `organizations`         | cascade   |
+| `pay_convention_drafts`       | `proposed_by`              | `users`                 | no action |
+| `pay_figures`                 | `candidate_id`             | `candidates`            | cascade   |
+| `pay_figures`                 | `org_id`                   | `organizations`         | cascade   |
+| `pay_zones`                   | `org_id`                   | `organizations`         | cascade   |
+| `pay_zones`                   | `region_id`                | `pooling_regions`       | no action |
+| `pay_zones`                   | `updated_by`               | `users`                 | no action |
 | `phone_screening_settings`    | `org_id`                   | `organizations`         | cascade   |
 | `phone_screening_settings`    | `updated_by`               | `users`                 | no action |
 | `plan_change_proposals`       | `interview_id`             | `interviews`            | no action |
 | `plan_change_proposals`       | `org_id`                   | `organizations`         | cascade   |
 | `plan_change_proposals`       | `requisition_id`           | `requisitions`          | cascade   |
+| `policy_briefings`            | `decided_by`               | `users`                 | no action |
+| `policy_briefings`            | `org_id`                   | `organizations`         | cascade   |
+| `policy_findings`             | `briefing_id`              | `policy_briefings`      | no action |
+| `policy_findings`             | `decided_by`               | `users`                 | no action |
+| `policy_findings`             | `org_id`                   | `organizations`         | cascade   |
+| `policy_findings`             | `source_id`                | `policy_sources`        | no action |
+| `policy_findings`             | `zone_id`                  | `pay_zones`             | no action |
+| `policy_reads`                | `org_id`                   | `organizations`         | cascade   |
+| `policy_reads`                | `source_id`                | `policy_sources`        | cascade   |
+| `policy_sources`              | `added_by`                 | `users`                 | no action |
+| `policy_sources`              | `org_id`                   | `organizations`         | cascade   |
+| `policy_sources`              | `zone_id`                  | `pay_zones`             | cascade   |
+| `pooling_regions`             | `org_id`                   | `organizations`         | cascade   |
 | `requisition_board_postings`  | `org_id`                   | `organizations`         | cascade   |
 | `requisition_board_postings`  | `requisition_id`           | `requisitions`          | cascade   |
 | `requisitions`                | `created_by`               | `users`                 | no action |
 | `requisitions`                | `department_id`            | `departments`           | no action |
 | `requisitions`                | `hiring_manager_member_id` | `org_members`           | no action |
 | `requisitions`                | `org_id`                   | `organizations`         | cascade   |
+| `requisitions`                | `pay_zone_id`              | `pay_zones`             | no action |
 | `role_panels`                 | `approved_by`              | `users`                 | no action |
 | `role_panels`                 | `org_id`                   | `organizations`         | cascade   |
 | `role_panels`                 | `requisition_id`           | `requisitions`          | cascade   |
@@ -1372,6 +1446,12 @@ erDiagram
 | `source_integrations`         | `org_id`                   | `organizations`         | cascade   |
 | `stage_events`                | `application_id`           | `applications`          | cascade   |
 | `stage_events`                | `org_id`                   | `organizations`         | cascade   |
+| `studio_agent_grants`         | `blueprint_id`             | `agent_blueprints`      | cascade   |
+| `studio_agent_grants`         | `granted_by`               | `users`                 | no action |
+| `studio_agent_grants`         | `org_id`                   | `organizations`         | cascade   |
+| `studio_agent_versions`       | `approved_by`              | `users`                 | no action |
+| `studio_agent_versions`       | `blueprint_id`             | `agent_blueprints`      | cascade   |
+| `studio_agent_versions`       | `published_by`             | `users`                 | no action |
 | `talent_request_suggestions`  | `candidate_id`             | `candidates`            | cascade   |
 | `talent_request_suggestions`  | `org_id`                   | `organizations`         | no action |
 | `talent_request_suggestions`  | `request_id`               | `talent_requests`       | cascade   |
@@ -1394,22 +1474,34 @@ erDiagram
 | `training_settings`           | `org_id`                   | `organizations`         | cascade   |
 | `user_roles`                  | `org_id`                   | `organizations`         | cascade   |
 | `user_roles`                  | `user_id`                  | `users`                 | cascade   |
+| `workflow_api_keys`           | `org_id`                   | `organizations`         | cascade   |
+| `workflow_api_keys`           | `principal_user_id`        | `users`                 | cascade   |
+| `workflow_api_keys`           | `workflow_id`              | `agent_workflows`       | cascade   |
+| `workflow_runs`               | `org_id`                   | `organizations`         | cascade   |
+| `workflow_runs`               | `started_by`               | `users`                 | no action |
+| `workflow_runs`               | `trigger_event_id`         | `agent_events`          | no action |
+| `workflow_runs`               | `workflow_id`              | `agent_workflows`       | cascade   |
 
 ## Table inventory
 
 | Table                           | Domain                       | Columns | Unique constraints                                                       |
 | ------------------------------- | ---------------------------- | ------- | ------------------------------------------------------------------------ |
+| `agent_blueprint_keys`          | —                            | 11      | (key_hash)                                                               |
+| `agent_blueprints`              | —                            | 29      | (type_slug)                                                              |
 | `agent_cost_rates`              | —                            | 6       | —                                                                        |
 | `agent_definitions`             | —                            | 6       | (agentType+hash)                                                         |
-| `agent_events`                  | —                            | 12      | —                                                                        |
+| `agent_events`                  | —                            | 13      | —                                                                        |
 | `agent_issues`                  | —                            | 16      | —                                                                        |
 | `agent_metrics_daily`           | —                            | 17      | —                                                                        |
 | `agent_policies`                | —                            | 12      | (orgId+agentType)                                                        |
-| `agent_runs`                    | —                            | 34      | —                                                                        |
+| `agent_runs`                    | —                            | 36      | —                                                                        |
 | `agent_runtime_heartbeat`       | —                            | 4       | —                                                                        |
 | `agent_steps`                   | —                            | 17      | (runId+seq)                                                              |
 | `agent_tasks`                   | —                            | 16      | —                                                                        |
 | `agent_telemetry_settings`      | —                            | 12      | —                                                                        |
+| `agent_workflow_grants`         | —                            | 6       | —                                                                        |
+| `agent_workflow_versions`       | —                            | 11      | (workflowId+version)                                                     |
+| `agent_workflows`               | —                            | 14      | —                                                                        |
 | `ai_interviews`                 | Screening & interviews       | 8       | —                                                                        |
 | `ai_provider_credentials`       | Communications & AI settings | 4       | (orgId+provider)                                                         |
 | `ai_redteam_checks`             | —                            | 8       | —                                                                        |
@@ -1420,6 +1512,7 @@ erDiagram
 | `audit_log`                     | Identity & access            | 10      | —                                                                        |
 | `board_sync_state`              | —                            | 11      | (integration_id)                                                         |
 | `board_webhook_events`          | —                            | 15      | (dedupe_key)                                                             |
+| `call_reviews`                  | —                            | 22      | (call_id)                                                                |
 | `candidate_assessments`         | Candidates & pipeline        | 23      | (token)                                                                  |
 | `candidate_notes`               | Candidates & pipeline        | 8       | —                                                                        |
 | `candidate_ownership_events`    | Candidates & pipeline        | 8       | —                                                                        |
@@ -1431,11 +1524,13 @@ erDiagram
 | `compensation_details`          | —                            | 19      | —                                                                        |
 | `compensation_requests`         | —                            | 12      | (token)                                                                  |
 | `content_templates`             | Requisitions & job content   | 16      | —                                                                        |
-| `copilot_messages`              | Intelligence                 | 6       | —                                                                        |
+| `copilot_messages`              | Intelligence                 | 7       | —                                                                        |
+| `demand_outlooks`               | —                            | 4       | —                                                                        |
 | `departments`                   | Organisations & masters      | 8       | (orgId+name)                                                             |
 | `email_outbox`                  | Communications & AI settings | 16      | (idempotency_key)                                                        |
 | `email_settings`                | Communications & AI settings | 11      | (org_id)                                                                 |
 | `evaluations`                   | Candidates & pipeline        | 15      | —                                                                        |
+| `exchange_rates`                | —                            | 9       | —                                                                        |
 | `hiring_conversations`          | —                            | 15      | —                                                                        |
 | `hiring_messages`               | —                            | 8       | —                                                                        |
 | `hr_incentive_schemes`          | Offers & onboarding          | 9       | —                                                                        |
@@ -1455,7 +1550,7 @@ erDiagram
 | `member_interviewer_profiles`   | —                            | 9       | (member_id)                                                              |
 | `notification_states`           | —                            | 7       | —                                                                        |
 | `offer_negotiations`            | —                            | 24      | —                                                                        |
-| `offers`                        | Offers & onboarding          | 14      | —                                                                        |
+| `offers`                        | Offers & onboarding          | 24      | —                                                                        |
 | `onboarding_documents`          | Offers & onboarding          | 23      | —                                                                        |
 | `ontology_snapshots`            | Intelligence                 | 11      | —                                                                        |
 | `org_agreements`                | Organisations & masters      | 10      | —                                                                        |
@@ -1466,23 +1561,31 @@ erDiagram
 | `org_pool_shares`               | Organisations & masters      | 10      | (ownerOrg+partnerOrg)                                                    |
 | `org_profile_versions`          | Organisations & masters      | 16      | (orgId+version)                                                          |
 | `org_profiles`                  | Organisations & masters      | 12      | —                                                                        |
-| `organizations`                 | Organisations & masters      | 31      | (slug), (capture_token), (capture_token_hash), (distribution_token_hash) |
+| `organizations`                 | Organisations & masters      | 35      | (slug), (capture_token), (capture_token_hash), (distribution_token_hash) |
 | `panel_agent_settings`          | —                            | 5       | —                                                                        |
 | `panel_assessments`             | —                            | 23      | (interview_id)                                                           |
 | `panelist_scorecard_links`      | —                            | 8       | (interviewId+panelistId), (token_hash)                                   |
 | `panelists`                     | —                            | 18      | —                                                                        |
+| `pay_convention_drafts`         | —                            | 11      | —                                                                        |
+| `pay_figures`                   | —                            | 22      | —                                                                        |
+| `pay_zones`                     | —                            | 19      | (orgId+name)                                                             |
 | `phone_screening_settings`      | Screening & interviews       | 16      | —                                                                        |
 | `plan_change_proposals`         | —                            | 16      | —                                                                        |
 | `platform_admins`               | Identity & access            | 6       | (email)                                                                  |
+| `policy_briefings`              | —                            | 12      | —                                                                        |
+| `policy_findings`               | —                            | 18      | —                                                                        |
+| `policy_reads`                  | —                            | 10      | —                                                                        |
+| `policy_sources`                | —                            | 12      | (orgId+url)                                                              |
+| `pooling_regions`               | —                            | 5       | (orgId+name)                                                             |
 | `product_catalogue_commercials` | Organisations & masters      | 8       | —                                                                        |
 | `rate_limit_hits`               | —                            | 3       | —                                                                        |
 | `requisition_board_postings`    | —                            | 16      | (requisitionId+provider)                                                 |
-| `requisitions`                  | Requisitions & job content   | 44      | (orgId+code)                                                             |
+| `requisitions`                  | Requisitions & job content   | 55      | (orgId+code)                                                             |
 | `role_panels`                   | —                            | 9       | (requisitionId+level)                                                    |
 | `round_substitutes`             | —                            | 11      | —                                                                        |
 | `salary_benchmarks`             | Intelligence                 | 15      | —                                                                        |
 | `scorecard_chases`              | —                            | 7       | (interviewId+email)                                                      |
-| `screening_calls`               | Screening & interviews       | 34      | —                                                                        |
+| `screening_calls`               | Screening & interviews       | 36      | —                                                                        |
 | `screening_kits`                | Screening & interviews       | 11      | —                                                                        |
 | `screening_prep_jobs`           | Screening & interviews       | 10      | (application_id)                                                         |
 | `screening_runs`                | Screening & interviews       | 23      | —                                                                        |
@@ -1495,6 +1598,8 @@ erDiagram
 | `social_profiles`               | Candidates & pipeline        | 13      | (candidateId+provider)                                                   |
 | `source_integrations`           | Sourcing & integrations      | 17      | (orgId+provider)                                                         |
 | `stage_events`                  | Candidates & pipeline        | 9       | —                                                                        |
+| `studio_agent_grants`           | —                            | 6       | —                                                                        |
+| `studio_agent_versions`         | —                            | 11      | (blueprintId+version)                                                    |
 | `talent_request_suggestions`    | Candidates & pipeline        | 8       | (requestId+candidateId)                                                  |
 | `talent_requests`               | Candidates & pipeline        | 10      | —                                                                        |
 | `training_eval_results`         | —                            | 13      | —                                                                        |
@@ -1504,3 +1609,5 @@ erDiagram
 | `user_roles`                    | Identity & access            | 4       | —                                                                        |
 | `users`                         | Identity & access            | 8       | (email)                                                                  |
 | `voice_worker_heartbeat`        | —                            | 4       | —                                                                        |
+| `workflow_api_keys`             | —                            | 10      | (key_hash)                                                               |
+| `workflow_runs`                 | —                            | 17      | (workflowId+triggerEventId)                                              |

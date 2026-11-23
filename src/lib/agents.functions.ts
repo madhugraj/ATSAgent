@@ -7,12 +7,12 @@
 import { CEILING_MESSAGE, LEG_LIMIT_MESSAGE } from "../server/agents/run-messages";
 import { taskIsLive } from "../server/agents/task-liveness";
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
-import { and, desc, eq, inArray, or } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, or } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../server/db";
 import { plainPreview } from "../server/desk/desk.server";
-import { agentPolicies, agentRuns, agentTasks, userRoles } from "@db/schema";
+import { agentPolicies, agentRuns, agentTasks, userRoles, type AgentType } from "@db/schema";
 import { requireOrg } from "./auth.middleware";
 import { AGENT_CATALOG, WHITELISTABLE_TEMPLATES } from "./agents.catalog";
 
@@ -69,7 +69,57 @@ export type AgentTaskView = {
 /** Open agent requests the caller can act on (owner: all of the org's). */
 export const listAgentTasks = createServerFn({ method: "GET" })
   .middleware([requireOrg])
-  .handler(async ({ context }): Promise<AgentTaskView[]> => {
+  .handler(async ({ context }): Promise<AgentTaskView[]> => openTasks(context));
+
+/**
+ * The open requests of one workflow run's agents — answered and approved
+ * inside the workflow window instead of the whole inbox. Org-scoped; same
+ * visibility as Waiting for you (owner: all; others: theirs or their role's).
+ */
+export const listWorkflowRunTasks = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ workflowRunId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<AgentTaskView[]> => {
+    const { workflowRuns } = await import("@db/schema");
+    const [wr] = await db
+      .select({
+        context: workflowRuns.context,
+        waitingRunId: workflowRuns.waitingRunId,
+        createdAt: workflowRuns.createdAt,
+      })
+      .from(workflowRuns)
+      .where(and(eq(workflowRuns.id, data.workflowRunId), eq(workflowRuns.orgId, context.orgId)))
+      .limit(1);
+    if (!wr) return [];
+    const ids = new Set([
+      ...(((wr.context as { runs?: string[] } | null)?.runs ?? []) as string[]),
+      ...(wr.waitingRunId ? [wr.waitingRunId] : []),
+    ]);
+    // While it waits on its requisition, agents working on that requisition
+    // (e.g. revising it after a send-back) ask their questions in this thread too.
+    const subject = (wr.context as { subject?: { type?: string; id?: string } } | null)?.subject;
+    if (subject?.type === "requisition" && subject.id) {
+      const linked = await db
+        .select({ id: agentRuns.id })
+        .from(agentRuns)
+        .where(
+          and(
+            eq(agentRuns.orgId, context.orgId),
+            eq(agentRuns.subjectType, "requisition"),
+            eq(agentRuns.subjectId, subject.id),
+            gte(agentRuns.createdAt, wr.createdAt),
+          ),
+        );
+      for (const l of linked) ids.add(l.id);
+    }
+    return ids.size ? openTasks(context, [...ids]) : [];
+  });
+
+async function openTasks(
+  context: { userId: string; orgId: string; isOwner: boolean },
+  runIds?: string[],
+): Promise<AgentTaskView[]> {
+  {
     const roles = await rolesOf(context.userId, context.orgId);
     const mine = context.isOwner
       ? undefined
@@ -93,7 +143,13 @@ export const listAgentTasks = createServerFn({ method: "GET" })
       .from(agentTasks)
       .innerJoin(agentRuns, eq(agentRuns.id, agentTasks.runId))
       .where(
-        and(eq(agentTasks.orgId, context.orgId), eq(agentTasks.status, "open"), taskIsLive(), mine),
+        and(
+          eq(agentTasks.orgId, context.orgId),
+          eq(agentTasks.status, "open"),
+          taskIsLive(),
+          mine,
+          runIds ? inArray(agentTasks.runId, runIds) : undefined,
+        ),
       )
       .orderBy(agentTasks.createdAt)
       .limit(200);
@@ -122,13 +178,16 @@ export const listAgentTasks = createServerFn({ method: "GET" })
         createdAt: r.createdAt.toISOString(),
       };
     });
-  });
+  }
+}
 
 const Decision = z.discriminatedUnion("status", [
   z.object({
     status: z.literal("approved"),
     args: z.record(z.string(), z.unknown()).optional(),
     comment: z.string().max(2000).optional(),
+    /** A screening decision decided the other way: the person's call, with a comment. */
+    outcome: z.enum(["proceed", "hold"]).optional(),
   }),
   z.object({
     status: z.literal("rejected"),
@@ -277,6 +336,8 @@ export type AgentSettingsView = {
     defaultStepsPerLeg: number;
     /** Measured over 30 days; a person applies it (docs/agentic-plan.md §5.2). */
     recommendation: import("../server/agents/autonomy.server").AutonomyRecommendation | null;
+    /** An Agent studio agent granted to this organisation (its published version). */
+    studio?: { label: string; description: string; version: number; riskTier: string };
   }[];
 };
 
@@ -318,12 +379,40 @@ export const agentSettings = createServerFn({ method: "GET" })
           defaultStepsPerLeg: getAgent(a.type)?.maxSteps ?? 20,
           recommendation: recs[a.type] ?? null,
         };
-      }),
+      }).concat(
+        // Agent studio agents the platform granted this organisation (off until switched on).
+        (
+          await (
+            await import("../server/agents/blueprints.server")
+          ).grantedStudioAgents(context.orgId)
+        ).map((g) => {
+          const r = by.get(g.type);
+          return {
+            type: g.type,
+            live: true,
+            enabled: r?.enabled ?? false,
+            autonomy: r?.autonomy ?? "suggest",
+            whitelistedTemplates: [],
+            monthlyTokenBudget: r?.monthlyTokenBudget ?? null,
+            maxStepsPerLeg: r?.maxStepsPerLeg ?? null,
+            maxTokensPerLeg: r?.maxTokensPerLeg ?? null,
+            defaultStepsPerLeg: g.manifest.maxSteps,
+            recommendation: null,
+            studio: {
+              label: g.manifest.name,
+              description: g.manifest.responsibility,
+              version: g.manifest.version,
+              riskTier: g.manifest.riskTier,
+            },
+          };
+        }),
+      ),
     };
   });
 
 const PolicyInput = z.object({
-  agentType: z.enum(["*", ...AGENT_TYPES]),
+  // Stock agents, or an Agent studio agent (checked against the org's grants below).
+  agentType: z.union([z.enum(["*", ...AGENT_TYPES]), z.string().regex(/^studio:[a-z0-9_]{1,60}$/)]),
   enabled: z.boolean(),
   autonomy: z.enum(["suggest", "act_and_notify", "autonomous"]).optional(),
   whitelistedTemplates: z
@@ -373,6 +462,33 @@ export const saveAgentPolicy = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { assertRole } = await import("./auth.middleware");
     await assertRole(context.userId, context.orgId, [...SETTINGS_ROLES]);
+    if (data.agentType.startsWith("studio:")) {
+      const { publishedStudioAgent, hasGrant } = await import("../server/agents/blueprints.server");
+      const p = await publishedStudioAgent(data.agentType);
+      if (!p || !(await hasGrant(p.blueprintId, context.orgId)))
+        throw new Error("This agent is not available to your organisation.");
+      // Studio agents send nothing on their own: no pre-approved templates.
+      if (data.whitelistedTemplates?.length) data.whitelistedTemplates = [];
+    }
+    // Every AI phone call is reviewed: the Voice Guard stays on while a phone agent is.
+    if (data.agentType === "voice_guard" && !data.enabled) {
+      const { VOICE_CALL_AGENTS } = await import("../server/agents/policy");
+      const on = await db
+        .select({ t: agentPolicies.agentType })
+        .from(agentPolicies)
+        .where(
+          and(
+            eq(agentPolicies.orgId, context.orgId),
+            inArray(agentPolicies.agentType, [...VOICE_CALL_AGENTS]),
+            eq(agentPolicies.enabled, true),
+          ),
+        )
+        .limit(1);
+      if (on.length)
+        throw new Error(
+          "The Voice Guard reviews every AI phone call, so it stays on while an AI phone agent is on. Switch the phone agents off first.",
+        );
+    }
     // Autonomous needs a passed model safety check for the model in use
     // (docs/red-team.md). Checked when switching to it, never on other edits.
     if (data.agentType !== "*" && data.autonomy === "autonomous") {
@@ -575,7 +691,7 @@ export const askAgents = createServerFn({ method: "POST" })
     const { loadPolicy } = await import("../server/agents/policy");
     const policy = await loadPolicy(context.orgId, "copilot");
     if (!policy.enabled) {
-      throw new Error("Switch on the Copilot in Agent settings first.");
+      throw new Error("Switch on Aditi in Agent settings first.");
     }
     const { resolveAiConfig } = await import("./ai-gateway.server");
     const cfg = await resolveAiConfig(context.orgId);
@@ -588,6 +704,43 @@ export const askAgents = createServerFn({ method: "POST" })
       agentType: "copilot",
       principalUserId: context.userId,
       goal: data.message,
+    });
+    const { kickAgents } = await import("../server/agents/orchestrator.server");
+    kickAgents(context.orgId);
+    return { runId };
+  });
+
+/**
+ * Start a run of an Agent studio agent granted to this organisation (settings
+ * roles; the agent must be switched on). It acts as the person who starts it.
+ */
+export const startStudioAgentRun = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) =>
+    z
+      .object({
+        agentType: z.string().regex(/^studio:[a-z0-9_]{1,60}$/),
+        goal: z.string().trim().min(5).max(4000),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { assertRole } = await import("./auth.middleware");
+    await assertRole(context.userId, context.orgId, [...SETTINGS_ROLES]);
+    const { ensureAgentsRegistered } = await import("../server/agents");
+    ensureAgentsRegistered();
+    const { loadPolicy } = await import("../server/agents/policy");
+    const policy = await loadPolicy(context.orgId, data.agentType as AgentType);
+    if (!policy.enabled) throw new Error("Switch the agent on first.");
+    const { resolveAiConfig } = await import("./ai-gateway.server");
+    if (!(await resolveAiConfig(context.orgId)).apiKey)
+      throw new Error("Add your organisation's AI model key in Integrations first.");
+    const { startRun } = await import("../server/agents/runtime.server");
+    const { runId } = await startRun({
+      orgId: context.orgId,
+      agentType: data.agentType as AgentType,
+      principalUserId: context.userId,
+      goal: data.goal,
     });
     const { kickAgents } = await import("../server/agents/orchestrator.server");
     kickAgents(context.orgId);

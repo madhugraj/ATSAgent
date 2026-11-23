@@ -13,6 +13,7 @@ import { z } from "zod";
 import { db } from "../server/db";
 import { agentIssues } from "@db/schema";
 import { requireOrg } from "./auth.middleware";
+import { matchesModality, modalityFilterSchema, type ModalityFilter } from "./agent-modality";
 
 const GOVERNANCE_ROLES = ["hr_head", "president_cbo"] as const;
 
@@ -126,11 +127,14 @@ const nOrNull = (v: unknown) => (v == null ? null : Number(v));
 
 export const agentObservability = createServerFn({ method: "GET" })
   .middleware([requireOrg])
-  .handler(async ({ context }): Promise<ObservabilityView> => {
+  .validator((d: unknown) =>
+    z.object({ modality: modalityFilterSchema.default("all") }).parse(d ?? {}),
+  )
+  .handler(async ({ context, data }): Promise<ObservabilityView> => {
     const { assertRole } = await import("./auth.middleware");
     await assertRole(context.userId, context.orgId, [...GOVERNANCE_ROLES]);
     try {
-      return await buildObservability(context.orgId);
+      return await buildObservability(context.orgId, data.modality);
     } catch (e) {
       // Never show query text to the browser; keep the detail in the server log.
       const { log } = await import("../server/log");
@@ -141,6 +145,7 @@ export const agentObservability = createServerFn({ method: "GET" })
 
 const buildObservability = createServerOnlyFn(async function buildObservability(
   orgId: string,
+  modality: ModalityFilter = "all",
 ): Promise<ObservabilityView> {
   {
     const { ensureAgentsRegistered } = await import("../server/agents");
@@ -151,25 +156,34 @@ const buildObservability = createServerOnlyFn(async function buildObservability(
     const { monthTokens } = await import("../server/agents/runtime.server");
     const { HEALTH, RULES, schedulerStatus } = await import("../server/agents/health.server");
     const org = orgId;
+    const { modalitySql, modalityViaRun } = await import("../server/agents/modality.server");
+    // voice/text filter; steps and tasks follow their run
+    const onRuns = modalitySql("agent_type", modality);
+    const onR = modalitySql("r.agent_type", modality);
+    const onAr = modalitySql("ar.agent_type", modality);
+    const stepsOn = modalityViaRun("agent_steps", modality);
+    const tasksOn = modalityViaRun("agent_tasks", modality);
 
     const ruleText = new Map(RULES.map((r) => [r.id, r.description]));
     const issueRows = await db
       .select()
       .from(agentIssues)
       .where(and(eq(agentIssues.orgId, org), ne(agentIssues.status, "resolved")));
-    const issues: IssueView[] = issueRows.map((i) => ({
-      id: i.id,
-      agentType: i.agentType,
-      element: i.element,
-      rule: i.rule,
-      severity: i.severity,
-      status: i.status as "open" | "acknowledged",
-      title: i.title,
-      description: ruleText.get(i.rule) ?? "",
-      firstSeenAt: i.firstSeenAt.toISOString(),
-      lastSeenAt: i.lastSeenAt.toISOString(),
-      occurrences: i.occurrences,
-    }));
+    const issues: IssueView[] = issueRows
+      .filter((i) => i.agentType === "*" || matchesModality(i.agentType, modality))
+      .map((i) => ({
+        id: i.id,
+        agentType: i.agentType,
+        element: i.element,
+        rule: i.rule,
+        severity: i.severity,
+        status: i.status as "open" | "acknowledged",
+        title: i.title,
+        description: ruleText.get(i.rule) ?? "",
+        firstSeenAt: i.firstSeenAt.toISOString(),
+        lastSeenAt: i.lastSeenAt.toISOString(),
+        occurrences: i.occurrences,
+      }));
 
     const runStats = await q(sql`
       select agent_type,
@@ -237,16 +251,16 @@ const buildObservability = createServerOnlyFn(async function buildObservability(
       from agent_runs where org_id = ${org} and definition_hash is not null group by agent_type`);
     const orgTotals = await q(sql`
       select
-        (select count(*) from agent_runs where org_id = ${org} and created_at >= now() - interval '7 days')::int runs7d,
-        (select count(*) from agent_runs where org_id = ${org} and status = 'done' and finished_at >= now() - interval '7 days')::int done7d,
-        (select count(*) from agent_runs where org_id = ${org} and status = 'failed' and finished_at >= now() - interval '7 days')::int failed7d,
+        (select count(*) from agent_runs where org_id = ${org}${onRuns} and created_at >= now() - interval '7 days')::int runs7d,
+        (select count(*) from agent_runs where org_id = ${org}${onRuns} and status = 'done' and finished_at >= now() - interval '7 days')::int done7d,
+        (select count(*) from agent_runs where org_id = ${org}${onRuns} and status = 'failed' and finished_at >= now() - interval '7 days')::int failed7d,
         (select coalesce(sum(u.total_tokens), 0) from ai_usage_events u join agent_runs r on r.id = u.agent_run_id
-          where r.org_id = ${org} and u.created_at >= now() - interval '7 days')::bigint tokens7d,
-        (select count(*) from agent_tasks where org_id = ${org} and status = 'open')::int open_requests,
-        (select count(*) from agent_tasks where org_id = ${org} and status = 'open'
+          where r.org_id = ${org}${onR} and u.created_at >= now() - interval '7 days')::bigint tokens7d,
+        (select count(*) from agent_tasks where org_id = ${org}${tasksOn} and status = 'open')::int open_requests,
+        (select count(*) from agent_tasks where org_id = ${org}${tasksOn} and status = 'open'
           and created_at < now() - make_interval(hours => ${HEALTH.hitlSlaHours}))::int overdue,
         (select round((percentile_cont(0.5) within group (order by extract(epoch from (decided_at - created_at)) / 60))::numeric)
-          from agent_tasks where org_id = ${org} and decided_at >= now() - interval '7 days') median_wait`);
+          from agent_tasks where org_id = ${org}${tasksOn} and decided_at >= now() - interval '7 days') median_wait`);
 
     const trendRows = await q(sql`
       with d as (
@@ -258,7 +272,7 @@ const buildObservability = createServerOnlyFn(async function buildObservability(
           count(*) filter (where status = 'failed')::int failed,
           count(*) filter (where status in ('queued','running','awaiting_human'))::int in_progress,
           count(*) filter (where status = 'cancelled')::int stopped
-        from agent_runs where org_id = ${org} and mode = 'live'
+        from agent_runs where org_id = ${org}${onRuns} and mode = 'live'
           and created_at >= current_date - 13
         group by 1
       ),
@@ -267,25 +281,25 @@ const buildObservability = createServerOnlyFn(async function buildObservability(
           coalesce(sum(u.total_tokens), 0)::bigint tokens,
           percentile_cont(0.95) within group (order by u.duration_ms) p95
         from ai_usage_events u join agent_runs ar on ar.id = u.agent_run_id
-        where ar.org_id = ${org} and u.created_at >= current_date - 13
+        where ar.org_id = ${org}${onAr} and u.created_at >= current_date - 13
         group by 1
       ),
       s as (
         select (created_at at time zone 'utc')::date as day,
           count(*) filter (where status = 'ok')::int ok,
           count(*) filter (where status = 'error' and coalesce(output ->> 'refused', 'false') <> 'true')::int errors
-        from agent_steps where org_id = ${org} and kind = 'tool' and status in ('ok','error')
+        from agent_steps where org_id = ${org}${stepsOn} and kind = 'tool' and status in ('ok','error')
           and created_at >= current_date - 13
         group by 1
       ),
       o as (
         select (created_at at time zone 'utc')::date as day, count(*)::int opened
-        from agent_tasks where org_id = ${org} and created_at >= current_date - 13 group by 1
+        from agent_tasks where org_id = ${org}${tasksOn} and created_at >= current_date - 13 group by 1
       ),
       dc as (
         select (decided_at at time zone 'utc')::date as day, count(*)::int decided,
           percentile_cont(0.5) within group (order by extract(epoch from (decided_at - created_at)) / 3600) wait_h
-        from agent_tasks where org_id = ${org} and decided_at >= current_date - 13 group by 1
+        from agent_tasks where org_id = ${org}${tasksOn} and decided_at >= current_date - 13 group by 1
       )
       select d.day::text as day,
         coalesce(r.completed, 0) completed, coalesce(r.failed, 0) failed,
@@ -315,7 +329,7 @@ const buildObservability = createServerOnlyFn(async function buildObservability(
     const by = <T extends Row>(rows: T[], type: string) =>
       rows.filter((r) => r["agent_type"] === type);
     const agents: AgentObservability[] = [];
-    for (const def of listAgents()) {
+    for (const def of listAgents().filter((d) => matchesModality(d.type, modality))) {
       const policy = await loadPolicy(org, def.type);
       const rs = by(runStats, def.type)[0] ?? {};
       const hs = by(hitlStats, def.type)[0] ?? {};

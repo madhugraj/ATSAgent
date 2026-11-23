@@ -14,7 +14,7 @@
  *  - third-party text in tool output is fenced with untrusted();
  *  - every write/external action and every human decision is audited.
  */
-import { rupees } from "@/lib/money";
+import { money } from "@/lib/money";
 import { candidateVisible, diffSections } from "@/lib/org-profile";
 import type { OrgProfileItemRow } from "@db/schema";
 import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
@@ -52,10 +52,16 @@ import {
   type AgentType,
 } from "@db/schema";
 import { agentRunScope } from "./context";
+import {
+  aliasToReal,
+  isStudioType,
+  runDefinition,
+  studioTestDefinitions,
+} from "./blueprints.server";
 import { ensureDefinition, manifestHash, RUNTIME_RULES } from "./manifest.server";
 import { looksLikeInjection } from "./injection";
 import { decideToolCall, loadPolicy } from "./policy";
-import { getAgent, getTool, type ToolContext } from "./registry";
+import { getTool, type ToolContext } from "./registry";
 import { LIVE_RUN_STATUSES, runSubjectGone, staleReasonSql } from "./task-liveness";
 
 /**
@@ -228,10 +234,18 @@ type DocumentValidationSubject = {
 };
 /** An organisation profile version waiting for the HR head or owner (docs/org-context-agent-plan.md). */
 type OrgProfileSubject = { type: "org_profile"; versionId: string; expects?: string };
+/** Pay conventions the organisation agent proposed (docs/pay-terms-plan.md, Phase 2). */
+type PayConventionsSubject = { type: "pay_conventions"; draftId: string; expects?: string };
+/** A labour policy finding (docs/labour-policy-agent-plan.md). */
+type PolicyFindingSubject = { type: "policy_finding"; findingId: string; expects?: string };
+type PolicyBriefingSubject = { type: "policy_briefing"; briefingId: string; expects?: string };
 type GateSubject =
   | ExpertBriefSubject
   | import("../panel/review.server").PanelReviewSubject
   | OrgProfileSubject
+  | PayConventionsSubject
+  | PolicyFindingSubject
+  | PolicyBriefingSubject
   | PanelApprovalSubject
   | PanelSubstituteSubject
   | NewPanelistSubject
@@ -279,13 +293,15 @@ type GateInfo = {
 export function agreedLine(
   ctc: number,
   agreed: { agreedCtc: number; joiningBonus: number | null; cboApproved: boolean } | null,
+  currency = "INR",
 ): string {
   if (!agreed) return "";
+  const amount = (n: number) => money(n, currency);
   const match =
     ctc === agreed.agreedCtc
       ? "this offer matches it"
-      : `this offer is ${rupees(Math.abs(ctc - agreed.agreedCtc))} ${ctc > agreed.agreedCtc ? "above" : "below"} it`;
-  return ` Agreed with the candidate in a pay discussion: ${rupees(agreed.agreedCtc)}${agreed.joiningBonus ? ` plus a ${rupees(agreed.joiningBonus)} joining bonus` : ""}${agreed.cboApproved ? " (ceiling approved by the CBO)" : ""}; ${match}.`;
+      : `this offer is ${amount(Math.abs(ctc - agreed.agreedCtc))} ${ctc > agreed.agreedCtc ? "above" : "below"} it`;
+  return ` Agreed with the candidate in a pay discussion: ${amount(agreed.agreedCtc)}${agreed.joiningBonus ? ` plus a ${amount(agreed.joiningBonus)} joining bonus` : ""}${agreed.cboApproved ? " (ceiling approved by the CBO)" : ""}; ${match}.`;
 }
 
 export function expectationLine(
@@ -297,7 +313,9 @@ export function expectationLine(
     competingOffers: boolean | null;
     source: string | null;
   },
+  currency = "INR",
 ): string {
+  const amount = (n: number | null) => money(n, currency);
   if (pay.expectedCtc == null)
     return "\n\nThe candidate's expected CTC is not on record — this offer was not checked against what they asked for.";
   const gap = ctc - pay.expectedCtc;
@@ -305,8 +323,8 @@ export function expectationLine(
     gap === 0
       ? "meets it exactly"
       : gap > 0
-        ? `is ${rupees(gap)} (${Math.round((gap / pay.expectedCtc) * 100)}%) above it`
-        : `is ${rupees(-gap)} (${Math.round((-gap / pay.expectedCtc) * 100)}%) below it`;
+        ? `is ${amount(gap)} (${Math.round((gap / pay.expectedCtc) * 100)}%) above it`
+        : `is ${amount(-gap)} (${Math.round((-gap / pay.expectedCtc) * 100)}%) below it`;
   const from =
     pay.source === "candidate_form"
       ? "the candidate's form"
@@ -317,9 +335,9 @@ export function expectationLine(
           : "the candidate profile";
   const hike =
     pay.currentTotal && pay.currentTotal > 0
-      ? ` Current CTC ${rupees(pay.currentTotal)}; this offer is a ${Math.round(((ctc - pay.currentTotal) / pay.currentTotal) * 100)}% change.`
+      ? ` Current CTC ${amount(pay.currentTotal)}; this offer is a ${Math.round(((ctc - pay.currentTotal) / pay.currentTotal) * 100)}% change.`
       : " Current CTC not on record.";
-  return `\n\nThe candidate expects ${rupees(pay.expectedCtc)} (from ${from}); this offer ${where}.${hike}${pay.noticePeriodDays != null ? ` Notice period ${pay.noticePeriodDays} days.` : ""}${pay.competingOffers ? " They have other offers in hand." : ""}`;
+  return `\n\nThe candidate expects ${amount(pay.expectedCtc)} (from ${from}); this offer ${where}.${hike}${pay.noticePeriodDays != null ? ` Notice period ${pay.noticePeriodDays} days.` : ""}${pay.competingOffers ? " They have other offers in hand." : ""}`;
 }
 
 /**
@@ -382,6 +400,61 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
       subject: { type: "org_profile", versionId: subject.versionId, expects: "pending" },
     };
   }
+  if (subject.type === "policy_briefing") {
+    const { briefingFor, briefingWords } = await import("@/lib/labour-policy.server");
+    const b = await briefingFor(orgId, subject.briefingId);
+    if (!b) return { error: "Policy briefing not found." };
+    if (b.status !== "pending")
+      return { error: `This briefing is ${b.status}, not waiting for a decision.` };
+    return {
+      role: "hr_head",
+      status: "pending",
+      detail: briefingWords(b),
+      subject: { type: "policy_briefing", briefingId: b.id, expects: "pending" },
+    };
+  }
+  if (subject.type === "policy_finding") {
+    const { findingFor, markProposed } = await import("@/lib/labour-policy.server");
+    const f = await findingFor(orgId, subject.findingId);
+    if (!f) return { error: "Policy finding not found." };
+    if (f.status !== "new" && f.status !== "proposed")
+      return { error: `This finding is ${f.status}, not waiting for a decision.` };
+    await markProposed(orgId, f.id);
+    return {
+      role: "hr_head",
+      status: "proposed",
+      detail: [
+        `What changed (${f.area.replace(/_/g, " ")}${f.effectiveDate ? `, effective ${f.effectiveDate}` : ""}): ${f.summary}`,
+        `The source says: "${f.quote}"`,
+        `Source: ${f.url}`,
+        `The rule if approved: ${f.rule}`,
+        f.impact ? `What it changes in hiring: ${f.impact}` : "",
+        "",
+        "Approve to make it one of the organisation's rules every agent works within; decline with why it does not apply. This is not legal advice — check with counsel where it matters.",
+      ]
+        .filter((l) => l !== "")
+        .join("\n"),
+      subject: { type: "policy_finding", findingId: f.id, expects: "proposed" },
+    };
+  }
+  if (subject.type === "pay_conventions") {
+    const { pendingConventions } = await import("@/lib/pay-settings.server");
+    const d = await pendingConventions(orgId, subject.draftId);
+    if (!d) return { error: "Pay conventions proposal not found." };
+    if (d.status !== "pending")
+      return { error: `This proposal is ${d.status.replace("_", " ")}, not waiting for approval.` };
+    return {
+      role: "hr_head",
+      status: "pending",
+      detail: [
+        "What changes if approved:",
+        ...d.summary.split("\n").map((l) => `• ${l}`),
+        "",
+        "Approve to apply these pay conventions; send back with what to change; or decline.",
+      ].join("\n"),
+      subject: { type: "pay_conventions", draftId: subject.draftId, expects: "pending" },
+    };
+  }
   if (subject.type === "panel_approval") return panelGateFor(orgId, subject);
   if (subject.type === "expert_brief") return expertBriefGateFor(orgId, subject);
   if (subject.type === "panel_substitute") return substituteGateFor(orgId, subject);
@@ -403,6 +476,10 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
         budget: requisitions.budgetCtc,
         bandMin: requisitions.ctcBandMin,
         bandMax: requisitions.ctcBandMax,
+        currency: offers.currency,
+        payBasis: offers.payBasis,
+        policyCheck: offers.policyCheck,
+        policyOverride: offers.policyOverride,
       })
       .from(offers)
       .innerJoin(applications, eq(applications.id, offers.applicationId))
@@ -417,19 +494,20 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
       // Stated by the system, not left to the agent: where the CTC sits
       // against the role's approved budget and band.
       const ctc = Number(o.ctc);
+      const cur = o.currency;
       const budget = Number(o.budget ?? 0);
       const [lo, hi] = [Number(o.bandMin ?? 0), Number(o.bandMax ?? 0)];
       const vsBudget =
         budget > 0
           ? ctc > budget
-            ? ` Above the role's budget of ${rupees(budget)} by ${rupees(ctc - budget)} (${Math.round(((ctc - budget) / budget) * 100)}%).`
-            : ` Within the role's budget of ${rupees(budget)}.`
+            ? ` Above the role's budget of ${money(budget, cur)} by ${money(ctc - budget, cur)} (${Math.round(((ctc - budget) / budget) * 100)}%).`
+            : ` Within the role's budget of ${money(budget, cur)}.`
           : "";
       const vsBand =
         hi > 0
           ? ctc > hi || ctc < lo
-            ? ` Outside the approved band ${rupees(lo)}–${rupees(hi)}.`
-            : ` Inside the approved band ${rupees(lo)}–${rupees(hi)}.`
+            ? ` Outside the approved band ${money(lo, cur)}–${money(hi, cur)}.`
+            : ` Inside the approved band ${money(lo, cur)}–${money(hi, cur)}.`
           : "";
       const { detailsFor, offerTermsMissing, listWords } =
         await import("@/lib/compensation.server");
@@ -441,7 +519,7 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
       return {
         role,
         status: o.status,
-        detail: `Offer for ${o.name} (${o.title}): ${rupees(ctc)} CTC — ${o.status}.${vsBudget}${vsBand}${expectationLine(ctc, await detailsFor(orgId, o.applicationId))}${agreedLine(ctc, await (await import("@/lib/negotiation.server")).agreedTerms(orgId, o.applicationId))}${
+        detail: `Offer for ${o.name} (${o.title}): ${money(ctc, cur, o.payBasis)} — ${o.status}.${vsBudget}${vsBand}${(await import("@/lib/offer-check.server")).checkWords(o.policyCheck, o.policyOverride)}${expectationLine(ctc, await detailsFor(orgId, o.applicationId), cur)}${agreedLine(ctc, await (await import("@/lib/negotiation.server")).agreedTerms(orgId, o.applicationId), cur)}${
           missing.length
             ? `\n\nThis offer cannot be approved yet: ${listWords(missing)} ${missing.length > 1 ? "are" : "is"} missing. Decline it with that reason — it goes back to draft and the Offer agent collects them.`
             : ""
@@ -552,7 +630,11 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
       return { error: "The candidate is already on hold." };
     // Stated by the system, not left to the agent: the graded result it rests on.
     const [graded] = await db
-      .select({ score: screeningRuns.screeningScore, coverage: screeningRuns.coverage })
+      .select({
+        score: screeningRuns.screeningScore,
+        coverage: screeningRuns.coverage,
+        inputKind: screeningRuns.inputKind,
+      })
       .from(screeningRuns)
       .where(
         and(eq(screeningRuns.orgId, orgId), eq(screeningRuns.applicationId, subject.applicationId)),
@@ -580,7 +662,36 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
       .limit(1);
     if (waiting)
       return { error: "A screening decision for this candidate is already waiting for a person." };
-    const { coverageWords } = await import("@/lib/screening-coverage");
+    // Practical blockers from what they said (relocation, notice, pay): stated
+    // by the system, and no recommendation to proceed past them — a person may.
+    const { screeningLogistics } = await import("@/lib/screening-logistics.server");
+    const logistics = await screeningLogistics(orgId, subject.applicationId);
+    const blockerText = logistics.blockers
+      .map((b) =>
+        b === "Location mismatch and candidate will not relocate" && logistics.location
+          ? `${row.name} ${logistics.location}`
+          : b,
+      )
+      .join("; ");
+    // A phone screen with too little evidence never holds anyone: one or two
+    // answered questions cannot carry a hold — proceed and probe, or ask for
+    // the written assessment. A practical blocker (above) may still hold.
+    const { phoneScreenTooThin, coverageWords } = await import("@/lib/screening-coverage");
+    if (
+      subject.recommendation === "hold" &&
+      !logistics.blockers.length &&
+      graded.inputKind === "phone_ai" &&
+      phoneScreenTooThin(graded.coverage)
+    )
+      return {
+        error: `The phone screen rests on too little to hold anyone (${
+          graded.coverage ? coverageWords(graded.coverage) : "coverage not recorded"
+        }). Recommend proceed and name what L1 should probe, or send the written assessment first.`,
+      };
+    if (subject.recommendation === "proceed" && logistics.blockers.length)
+      return {
+        error: `Do not recommend proceeding: ${blockerText}. Recommend hold and state this in the rationale — a person may still move them on.`,
+      };
     const rests = graded.coverage
       ? ` (${coverageWords(graded.coverage)}; ${graded.coverage.confidence} confidence)`
       : "";
@@ -588,7 +699,7 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
       role: null,
       status: row.stage,
       toPrincipal: true,
-      detail: `Screening decision for ${row.name} (${row.code} ${row.title}).\nRecommendation: ${subject.recommendation === "proceed" ? "PROCEED to the first interview round" : "HOLD"}\nScreening score: ${graded.score}/100${rests}\nWhy: ${subject.rationale}\n\n${
+      detail: `Screening decision for ${row.name} (${row.code} ${row.title}).\nRecommendation: ${subject.recommendation === "proceed" ? "PROCEED to the first interview round" : "HOLD"}\nScreening score: ${graded.score}/100${rests}\n${blockerText ? `Blocker: ${blockerText}\n` : ""}Why: ${subject.rationale}\n\n${
         subject.recommendation === "proceed"
           ? "Approve to move them to the first interview round — the Interview coordinator then books it."
           : "Approve to put them on hold."
@@ -688,6 +799,54 @@ async function performGate(
         note: note ?? "",
       });
     }
+    return;
+  }
+  if (subject.type === "policy_briefing") {
+    const { decideBriefingCore } = await import("@/lib/labour-policy.server");
+    if (decision.status === "approved")
+      await decideBriefingCore(actor, {
+        briefingId: subject.briefingId,
+        decision: "approve",
+        note: decision.comment ?? null,
+      });
+    else if (decision.status === "rejected")
+      await decideBriefingCore(actor, {
+        briefingId: subject.briefingId,
+        decision: "reject",
+        note: decision.reason?.trim() || "Declined without a reason.",
+      });
+    return;
+  }
+  if (subject.type === "policy_finding") {
+    const { decideFindingCore } = await import("@/lib/labour-policy.server");
+    if (decision.status === "approved")
+      await decideFindingCore(actor, {
+        findingId: subject.findingId,
+        decision: "approve",
+        note: decision.comment ?? null,
+      });
+    else if (decision.status === "rejected")
+      await decideFindingCore(actor, {
+        findingId: subject.findingId,
+        decision: "reject",
+        note: decision.reason?.trim() || "Declined without a reason.",
+      });
+    return;
+  }
+  if (subject.type === "pay_conventions") {
+    const { decideConventionsCore } = await import("@/lib/pay-settings.server");
+    if (decision.status === "approved")
+      await decideConventionsCore(actor, {
+        draftId: subject.draftId,
+        decision: "approve",
+        note: decision.comment ?? null,
+      });
+    else if (decision.status === "rejected")
+      await decideConventionsCore(actor, {
+        draftId: subject.draftId,
+        decision: decision.changes ? "send_back" : "decline",
+        note: decision.reason?.trim() || "No reason given.",
+      });
     return;
   }
   if (subject.type === "panel_approval") return performPanelGate(orgId, userId, subject, decision);
@@ -813,11 +972,19 @@ async function performGate(
     if (decision.status === "approved") {
       // A person's decision, made as that person: into L1 raises
       // application.advanced and the Interview coordinator books the round.
+      // They may decide the other way from the recommendation — with why.
+      const outcome = decision.outcome ?? subject.recommendation;
+      const overruled = outcome !== subject.recommendation;
+      const comment = decision.comment?.trim() || null;
+      if (overruled && !comment)
+        throw new Error("Say why you are deciding differently from the recommendation.");
       await pipeline.moveStageCore(actor, {
         applicationId: subject.applicationId,
-        toStage: subject.recommendation === "proceed" ? "l1" : "on_hold",
-        reason: subject.rationale,
-        note: decision.comment?.trim() || null,
+        toStage: outcome === "proceed" ? "l1" : "on_hold",
+        reason: overruled
+          ? `${outcome === "proceed" ? "Moved to L1" : "Put on hold"} against the ${subject.recommendation} recommendation: ${comment}`
+          : subject.rationale,
+        note: comment,
       });
       return;
     }
@@ -1039,8 +1206,16 @@ export async function startRun(input: {
   /** Hiring-desk thread; defaults to the thread of the subject's requisition. */
   conversationId?: string | null;
 }): Promise<{ runId: string }> {
-  const def = getAgent(input.agentType);
-  if (!def) throw new Error(`Unknown agent: ${input.agentType}`);
+  // Studio agents (`studio:<slug>`) resolve to their published version, and
+  // only in an organisation the super admin granted them to.
+  const resolved = await runDefinition(input.orgId, input.agentType);
+  if (!resolved)
+    throw new Error(
+      isStudioType(input.agentType)
+        ? "This agent is not available to this organisation."
+        : `Unknown agent: ${input.agentType}`,
+    );
+  const def = resolved.def;
   const definition = await ensureDefinition(def);
   let conversationId = input.conversationId ?? null;
   if (!conversationId && input.subjectId) {
@@ -1074,8 +1249,24 @@ export async function startRun(input: {
         subjectType: input.subjectType ?? null,
         subjectId: input.subjectId ?? null,
         triggerEventId: input.triggerEventId ?? null,
-        maxSteps: input.maxSteps ?? startPolicy.maxStepsPerLeg ?? def.maxSteps ?? 20,
-        ...(startPolicy.maxTokensPerLeg ? { maxTokens: startPolicy.maxTokensPerLeg } : {}),
+        // A studio agent never takes more steps than its approved version allows.
+        maxSteps: isStudioType(input.agentType)
+          ? Math.min(
+              input.maxSteps ?? startPolicy.maxStepsPerLeg ?? def.maxSteps ?? 20,
+              def.maxSteps ?? 20,
+            )
+          : (input.maxSteps ?? startPolicy.maxStepsPerLeg ?? def.maxSteps ?? 20),
+        ...(resolved.blueprintId
+          ? { blueprintId: resolved.blueprintId, blueprintVersion: resolved.blueprintVersion }
+          : {}),
+        ...(startPolicy.maxTokensPerLeg || def.maxTokens
+          ? {
+              maxTokens: Math.min(
+                startPolicy.maxTokensPerLeg ?? def.maxTokens!,
+                RUN_LIMITS.maxTokensPerLeg,
+              ),
+            }
+          : {}),
         conversationId,
         transcript: [{ role: "user", content: input.goal } satisfies AgentMessage],
         // Started from an HTTP request: join its trace, so the request ID finds the run.
@@ -1149,9 +1340,9 @@ export async function startReplay(input: {
   if (!orig) throw new Error("Run not found");
   if (orig.mode !== "live") throw new Error("Replay the original run, not a replay.");
   if (!REPLAYABLE.has(orig.status)) throw new Error("Only finished runs can be replayed.");
-  const def = getAgent(orig.agentType);
-  if (!def) throw new Error(`Unknown agent: ${orig.agentType}`);
-  const definition = await ensureDefinition(def);
+  const resolved = await runDefinition(orig.orgId, orig.agentType, orig.blueprintVersion);
+  if (!resolved) throw new Error(`Unknown agent: ${orig.agentType}`);
+  const definition = await ensureDefinition(resolved.def);
   const [run] = await db
     .insert(agentRuns)
     .values({
@@ -1166,6 +1357,8 @@ export async function startReplay(input: {
       subjectType: orig.subjectType,
       subjectId: orig.subjectId,
       maxSteps: orig.maxSteps,
+      blueprintId: resolved.blueprintId,
+      blueprintVersion: resolved.blueprintVersion,
       mode: "replay",
       replayOf: orig.id,
       transcript: [{ role: "user", content: orig.goal } satisfies AgentMessage],
@@ -1190,7 +1383,13 @@ export async function startReplay(input: {
 }
 
 export type TaskDecision =
-  | { status: "approved"; args?: unknown; comment?: string | undefined }
+  | {
+      status: "approved";
+      args?: unknown;
+      comment?: string | undefined;
+      /** A screening decision decided the other way (proceed instead of hold, or the reverse). */
+      outcome?: "proceed" | "hold" | undefined;
+    }
   | {
       status: "rejected";
       reason?: string | undefined;
@@ -1212,6 +1411,16 @@ export type ResolveOutcome =
  * org owner passes) or be its named assignee. A request whose run has stopped
  * or whose subject was deleted is closed instead, and the caller is told so.
  */
+async function isLiveStudioTestRun(runId: string, orgId: string): Promise<boolean> {
+  const [run] = await db
+    .select({ agentType: agentRuns.agentType, orgId: agentRuns.orgId })
+    .from(agentRuns)
+    .where(eq(agentRuns.id, runId))
+    .limit(1);
+  if (!run || run.orgId !== orgId || !run.agentType.startsWith("studio:test_")) return false;
+  return studioTestDefinitions.get(run.agentType)?.orgId === orgId;
+}
+
 export async function resolveTask(input: {
   orgId: string;
   taskId: string;
@@ -1225,14 +1434,19 @@ export async function resolveTask(input: {
     .limit(1);
   if (!task) throw new Error("Task not found");
   if (task.status !== "open") throw new Error("This task has already been decided.");
-  if (task.assigneeUserId && task.assigneeUserId !== input.userId) {
+  // An Agent studio test answers its own test run's requests (as the super admin
+  // running it): only while that test is registered in this process, for its own
+  // run in its own organisation — no caller can ask for this.
+  const studioTest = await isLiveStudioTestRun(task.runId, input.orgId);
+  if (!studioTest && task.assigneeUserId && task.assigneeUserId !== input.userId) {
     // The named person decides; the organisation's owner may too (as the desk shows).
     const { activeOrgOf } = await import("@/lib/auth.middleware");
     const org = await activeOrgOf(input.userId);
     if (!org || org.orgId !== input.orgId || !org.isOwner)
       throw new Error("This task is assigned to someone else.");
   }
-  if (task.assigneeRole) await assertRole(input.userId, input.orgId, task.assigneeRole as AppRole);
+  if (task.assigneeRole && !studioTest)
+    await assertRole(input.userId, input.orgId, task.assigneeRole as AppRole);
   const { decision } = input;
   if (task.kind === "clarification" && decision.status !== "answered") {
     throw new Error("Answer the question to continue.");
@@ -1241,7 +1455,9 @@ export async function resolveTask(input: {
     throw new Error("Approve or reject this request.");
   }
 
-  const stale = await staleReasonOf(task.id);
+  // A studio test's sample data names records that do not exist in the test
+  // organisation, so only its run's own state can make its request stale.
+  const stale = studioTest ? await runEndedReasonOf(task.runId) : await staleReasonOf(task.id);
   if (stale) {
     await closeTasks(
       [{ id: task.id, runId: task.runId, orgId: task.orgId }],
@@ -1311,6 +1527,7 @@ export async function resolveTask(input: {
       run_id: task.runId,
       kind: task.kind,
       edited: decision.status === "approved" && decision.args !== undefined,
+      ...(decision.status === "approved" && decision.outcome ? { outcome: decision.outcome } : {}),
     },
   });
 
@@ -1331,7 +1548,7 @@ export async function resolveTask(input: {
         decision.status === "answered"
           ? "answered"
           : decision.status === "approved"
-            ? decision.args !== undefined
+            ? decision.args !== undefined || decision.outcome !== undefined
               ? "edited"
               : "approved"
             : decision.changes
@@ -1347,9 +1564,11 @@ export async function resolveTask(input: {
       corrected:
         decision.status === "answered"
           ? { answer: decision.answer }
-          : decision.status === "approved" && decision.args !== undefined
-            ? { args: decision.args }
-            : undefined,
+          : decision.status === "approved" && decision.outcome !== undefined
+            ? { recommendation: decision.outcome }
+            : decision.status === "approved" && decision.args !== undefined
+              ? { args: decision.args }
+              : undefined,
       agentRunId: task.runId,
       agentTaskId: task.id,
       proposedAt: task.createdAt,
@@ -1390,6 +1609,22 @@ export async function cancelRun(input: { orgId: string; runId: string; userId: s
     entityType: "agent_run",
     entityId: input.runId,
   });
+  await moveWorkflowsOn({ id: input.runId, orgId: input.orgId, status: "cancelled", result: null });
+}
+
+/** An agent workflow waiting on a run that ended moves on (never blocks the caller). */
+async function moveWorkflowsOn(run: {
+  id: string;
+  orgId: string;
+  status: string;
+  result: string | null;
+}): Promise<void> {
+  try {
+    const { onAgentRunFinished } = await import("./workflows.server");
+    await onAgentRunFinished(run);
+  } catch (e) {
+    log.warn("workflow.advance_failed", { run_id: run.id, error: e as Error });
+  }
 }
 
 export type TickCounts = {
@@ -1440,6 +1675,10 @@ export async function runAgentTick(
       counts.events = (await processAgentEvents(opts.orgId ? { orgId: opts.orgId } : {})).processed;
       const { scheduleSweeps } = await import("./orchestrator.server");
       await scheduleSweeps(opts.orgId ? { orgId: opts.orgId } : {});
+      // Agent workflows waiting past their time move on (wait.status = timed_out).
+      const { expireWorkflowWaits, resumeFinishedRunWaits } = await import("./workflows.server");
+      await expireWorkflowWaits();
+      await resumeFinishedRunWaits();
     } catch (e) {
       log.error("agent.orchestrator.failed", { error: e instanceof Error ? e : String(e) });
     }
@@ -1508,7 +1747,8 @@ export async function runAgentTick(
         sql`(${agentRuns.leaseUntil} is null or ${agentRuns.leaseUntil} < now())`,
         sql`not exists (${paused})`,
         // A dry-run replay changes nothing, so it does not need the agent switched on.
-        sql`(${agentRuns.mode} = 'replay' or exists (${switchedOn}))`,
+        // The Voice Guard is on whenever an AI phone agent is (mandatory review).
+        sql`(${agentRuns.mode} = 'replay' or exists (${switchedOn}) or (${agentRuns.agentType} = 'voice_guard' and exists (select 1 from agent_policies vp where vp.org_id = ${agentRuns.orgId} and vp.agent_type in ('screening_call', 'scheduling_call', 'negotiation_call') and vp.enabled)))`,
         opts.orgId ? eq(agentRuns.orgId, opts.orgId) : undefined,
         opts.onlyRunId ? eq(agentRuns.id, opts.onlyRunId) : undefined,
       ),
@@ -1604,11 +1844,20 @@ async function renewLease(run: AgentRun): Promise<boolean> {
 }
 
 async function driveRun(run: AgentRun): Promise<"done" | "awaiting" | "yielded" | "failed"> {
-  const def = getAgent(run.agentType);
+  // Studio agents run their published version (granted orgs only); stock agents their code.
+  const def = (await runDefinition(run.orgId, run.agentType, run.blueprintVersion))?.def;
   if (!def) {
     await finish(run, "failed", null, `Unknown agent: ${run.agentType}`);
     return "failed";
   }
+  // Blueprints rename tools: the model sees the alias, the runtime runs the
+  // real tool. Identity for stock agents.
+  const toReal = aliasToReal(def);
+  const aliasOf = (name: string) => def.toolAliases?.[name]?.name ?? name;
+  const shownAs = (m: AgentMessage): AgentMessage =>
+    m.role === "tool" && "name" in m && typeof m.name === "string"
+      ? { ...m, name: aliasOf(m.name) }
+      : m;
   const policy = await loadPolicy(run.orgId, run.agentType);
   const ctx: ToolContext = {
     orgId: run.orgId,
@@ -1627,7 +1876,7 @@ async function driveRun(run: AgentRun): Promise<"done" | "awaiting" | "yielded" 
     for (const p of run.pending as PendingCall[]) {
       const [task] = await db.select().from(agentTasks).where(eq(agentTasks.id, p.taskId)).limit(1);
       const message = await applyDecision(ctx, task, p.call, seq++);
-      transcript.push(message);
+      transcript.push(shownAs(message));
     }
     // A person decided: the next stretch of work gets a fresh allowance.
     if ((run.pending as PendingCall[]).length) {
@@ -1644,7 +1893,16 @@ async function driveRun(run: AgentRun): Promise<"done" | "awaiting" | "yielded" 
   const specs: AgentToolSpec[] = [
     ...def.tools.flatMap((name) => {
       const t = getTool(name);
-      return t ? [{ name, description: t.description, parameters: toolParameters(t.input) }] : [];
+      const shown = def.toolAliases?.[name];
+      return t
+        ? [
+            {
+              name: shown?.name ?? name,
+              description: shown?.description ?? t.description,
+              parameters: toolParameters(t.input),
+            },
+          ]
+        : [];
     }),
     ...(Object.keys(HITL_TOOLS) as HitlName[]).map((name) => ({
       name,
@@ -1802,9 +2060,10 @@ async function driveRun(run: AgentRun): Promise<"done" | "awaiting" | "yielded" 
     }
 
     const pending: PendingCall[] = [];
-    for (const call of res.toolCalls) {
+    for (const shownCall of res.toolCalls) {
+      const call = { ...shownCall, name: toReal.get(shownCall.name) ?? shownCall.name };
       const outcome = await handleCall(run, ctx, policy, allowed, call, seq++);
-      if (outcome.kind === "message") transcript.push(outcome.message);
+      if (outcome.kind === "message") transcript.push(shownAs(outcome.message));
       else if (outcome.kind === "pending") pending.push({ taskId: outcome.taskId, call });
       else {
         // handoff: close the turn so the transcript stays well-formed.
@@ -2419,6 +2678,18 @@ async function recordStep(
   });
 }
 
+/** A JSON value with every NUL character removed from its strings. */
+export function withoutNul<T>(value: T): T {
+  if (typeof value === "string")
+    return (value.includes("\0") ? value.replaceAll("\0", "") : value) as T;
+  if (Array.isArray(value)) return value.map(withoutNul) as T;
+  if (value && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, withoutNul(v)]),
+    ) as T;
+  return value;
+}
+
 async function save(
   run: AgentRun,
   transcript: AgentMessage[],
@@ -2429,7 +2700,9 @@ async function save(
   await db
     .update(agentRuns)
     .set({
-      transcript: transcript as never,
+      // A NUL anywhere (a tool's output, an error quoting one) makes Postgres refuse
+      // the whole JSON row and fail the run: store the transcript without them.
+      transcript: withoutNul(transcript) as never,
       pending: pending as never,
       stepCount,
       tokensUsed,
@@ -2471,6 +2744,8 @@ async function finish(
       error: error ? error.slice(0, 300) : null,
     },
   });
+  // An agent workflow waiting on this run moves to its next step.
+  await moveWorkflowsOn({ id: run.id, orgId: run.orgId, status, result });
   if (run.conversationId) {
     try {
       const { onRunFinished } = await import("../desk/desk.server");
@@ -2706,6 +2981,19 @@ async function closeRunTasks(run: { id: string; orgId: string }, reason: string)
   await closeTasks(open, reason, "system:run-ended");
 }
 
+/** Why a run's requests can no longer be decided because the run ended, or null. */
+async function runEndedReasonOf(runId: string): Promise<string | null> {
+  const [run] = await db
+    .select({ status: agentRuns.status })
+    .from(agentRuns)
+    .where(eq(agentRuns.id, runId))
+    .limit(1);
+  if (!run) return "the agent working on it is gone";
+  return (LIVE_RUN_STATUSES as readonly string[]).includes(run.status)
+    ? null
+    : "the agent working on it has already finished";
+}
+
 /** Why an open request can no longer be decided, or null while it can. */
 async function staleReasonOf(taskId: string): Promise<string | null> {
   const [row] = await db
@@ -2739,6 +3027,8 @@ export async function closeStaleTasks(opts: { orgId?: string } = {}): Promise<nu
       orgId: agentRuns.orgId,
       subjectType: agentRuns.subjectType,
     });
+  for (const r of stopped)
+    await moveWorkflowsOn({ id: r.id, orgId: r.orgId, status: "cancelled", result: null });
   for (const r of stopped) {
     await writeAudit({
       actor: "system:subject-deleted",

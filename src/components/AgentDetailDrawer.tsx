@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { agentObservabilityDetail, type AgentDetail } from "@/lib/agents-observability.functions";
-import { ROLE_NAME } from "@/lib/agents.catalog";
+import { ROLE_NAME, WHITELISTABLE_TEMPLATES } from "@/lib/agents.catalog";
 
 export type DrawerTab =
   "identity" | "tools" | "skills" | "harness" | "hitl" | "evals" | "audit" | "issues";
@@ -190,6 +190,9 @@ export function AgentDetailDrawer({
 
 function IdentityTab({ d }: { d: AgentDetail }) {
   const i = d.identity;
+  const preApprovable = WHITELISTABLE_TEMPLATES.filter((t) =>
+    (t.agents as string[]).includes(i.type),
+  );
   return (
     <>
       <Section title="Identity">
@@ -215,7 +218,17 @@ function IdentityTab({ d }: { d: AgentDetail }) {
           rows={[
             ["Status", i.policy.enabled ? "On" : "Off"],
             ["Autonomy", i.policy.autonomy.replace(/_/g, " ")],
-            ["Pre-approved emails", i.policy.whitelistedTemplates.join(", ") || "none"],
+            ...(preApprovable.length
+              ? [
+                  [
+                    "Pre-approved",
+                    preApprovable
+                      .filter((t) => i.policy.whitelistedTemplates.includes(t.id))
+                      .map((t) => t.label)
+                      .join(", ") || "none",
+                  ] as [string, string],
+                ]
+              : []),
             ["Monthly token budget", i.policy.monthlyTokenBudget?.toLocaleString() ?? "no cap"],
           ]}
         />

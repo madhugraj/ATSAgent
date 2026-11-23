@@ -5,6 +5,7 @@
  * the rules. Facts come from the organisation's own records; the candidate's
  * words on the call are the only untrusted input, and the rules say so.
  */
+import { callPayWords, type KindOfWork, type PayBasis } from "@/lib/pay-terms";
 import { and, desc, eq } from "drizzle-orm";
 
 import {
@@ -27,8 +28,12 @@ import type { PhoneScreeningPolicy } from "./settings.server";
 export {
   type BriefFacts,
   type CallQuestion,
+  callQuestionCount,
   callSystemPrompt,
   questionsForCall,
+  CONSEQUENCE_LINE,
+  SOURCE_LINE,
+  spokenQuestion,
 } from "./call-prompt";
 
 /** Everything the call needs from the database for one application. */
@@ -53,6 +58,11 @@ export async function loadBriefFacts(input: {
       candidateYears: candidates.experienceYears,
       candidateSkills: candidates.skills,
       requisitionId: requisitions.id,
+      kindOfWork: requisitions.kindOfWork,
+      payZoneId: requisitions.payZoneId,
+      payBasis: requisitions.payBasis,
+      payCurrency: requisitions.payCurrency,
+      contractMonths: requisitions.contractMonths,
       roleTitle: requisitions.title,
       roleCode: requisitions.code,
       location: requisitions.location,
@@ -102,9 +112,11 @@ export async function loadBriefFacts(input: {
 
   const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
   const { detailsFor } = await import("@/lib/compensation.server");
-  const [email, pay] = await Promise.all([
+  const { callRulesFor } = await import("@/lib/labour-policy.server");
+  const [email, pay, rules] = await Promise.all([
     getOrgEmailSettings(input.orgId),
     detailsFor(input.orgId, input.applicationId),
+    callRulesFor(input.orgId, row.payZoneId),
   ]);
 
   return {
@@ -134,8 +146,16 @@ export async function loadBriefFacts(input: {
       currentPay: pay.currentTotal != null,
       expectedPay: pay.expectedCtc != null,
     },
+    pay: callPayWords({
+      kind: row.kindOfWork as KindOfWork,
+      basis: row.payBasis as PayBasis,
+      currency: row.payCurrency,
+      contractMonths: row.contractMonths,
+    }),
+    placeRules: rules.lines,
+    payHistoryBanned: rules.payHistoryBanned,
     emailDomain: row.candidateEmail?.split("@")[1]?.toLowerCase() || null,
-    questions: questionsForCall(kitQuestions),
+    questions: questionsForCall(kitQuestions, input.policy.maxMinutes),
     maxMinutes: input.policy.maxMinutes,
     nextSteps:
       input.policy.nextStepsText ||

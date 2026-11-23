@@ -256,6 +256,8 @@ export const readReturnOnIndividual = createServerFn({ method: "POST" })
         experienceYears: candidates.experienceYears,
         requisitionTitle: requisitions.title,
         budgetCtc: requisitions.budgetCtc,
+        payCurrency: requisitions.payCurrency,
+        payBasis: requisitions.payBasis,
         department: departments.name,
       })
       .from(applications)
@@ -287,6 +289,10 @@ export const readReturnOnIndividual = createServerFn({ method: "POST" })
             offeredCtc: offers.offeredCtc,
             joiningDate: offers.joiningDate,
             status: offers.status,
+            currency: offers.currency,
+            payBasis: offers.payBasis,
+            reportingAmount: offers.reportingAmount,
+            reportingCurrency: offers.reportingCurrency,
           })
           .from(offers)
           .where(and(eq(offers.orgId, orgId), inArray(offers.applicationId, appIds)))
@@ -294,12 +300,28 @@ export const readReturnOnIndividual = createServerFn({ method: "POST" })
     const offerBy = new Map(offerRows.map((o) => [o.applicationId, o]));
 
     const { nodes, open } = await loadCapabilities(orgId);
+    // Costs are summed in the organisation's reporting currency only: an offer in
+    // another currency counts at the rate fixed on its approval, else not at all
+    // (docs/pay-terms-plan.md, Phase 4) — never a silent mix of currencies.
+    const [orgRow] = await db
+      .select({ currency: organizations.currency })
+      .from(organizations)
+      .where(eq(organizations.id, orgId))
+      .limit(1);
+    const reporting = orgRow?.currency ?? "INR";
 
     const hires: RoiHireInput[] = rows.map((r) => {
       const score = scoreBy.get(r.applicationId);
       const offer = offerBy.get(r.applicationId);
-      const offered = offer ? Number(offer.offeredCtc ?? 0) : 0;
-      const budget = Number(r.budgetCtc ?? 0);
+      const offered = !offer
+        ? 0
+        : offer.currency === reporting && offer.payBasis === "annual"
+          ? Number(offer.offeredCtc ?? 0)
+          : offer.reportingCurrency === reporting && offer.reportingAmount != null
+            ? Number(offer.reportingAmount)
+            : 0;
+      const budget =
+        r.payCurrency === reporting && r.payBasis === "annual" ? Number(r.budgetCtc ?? 0) : 0;
       return {
         applicationId: r.applicationId,
         candidateId: r.candidateId,

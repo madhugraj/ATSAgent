@@ -370,11 +370,13 @@ async function insertDetails(
   source: CompensationSource,
   enteredBy: string | null,
   requestId: string | null,
+  currency?: string | null,
 ) {
   const [row] = await db
     .insert(compensationDetails)
     .values({
       orgId,
+      ...(currency ? { currency } : {}),
       applicationId: app.id,
       candidateId: app.candidateId,
       currentFixed: data.currentFixed != null ? String(data.currentFixed) : null,
@@ -583,6 +585,13 @@ export const CallDetailsFields = z
     openToRelocate: z.boolean().nullable().optional(),
     /** Pay said in words, not figures ("a 30% hike", "plus ₹10L in shares"). */
     note: z.string().trim().max(1000).nullable().optional(),
+    /** The currency and basis the figures were said in (docs/pay-terms-plan.md, Phase 3). */
+    currency: z
+      .string()
+      .regex(/^[A-Z]{3}$/)
+      .nullable()
+      .optional(),
+    payBasis: z.enum(["annual", "monthly", "daily", "hourly"]).nullable().optional(),
   })
   .strict();
 export type CallDetails = z.infer<typeof CallDetailsFields>;
@@ -603,7 +612,43 @@ export async function recordCallDetails(
   if (!fields.length) return { recorded: [] };
   if (joiningDateProblem(data.earliestJoining, now)) delete data.earliestJoining;
   const app = await loadApp(orgId, applicationId);
-  const detailId = await insertDetails(orgId, app, data, "screening_call", null, null);
+  const { currency, payBasis, ...details } = data;
+  const detailId = await insertDetails(orgId, app, details, "screening_call", null, null, currency);
+  // Each figure as said, with its currency and basis and what it comes to in the
+  // role's terms (pay_figures; docs/pay-terms-plan.md, Phase 3).
+  if (currency) {
+    const { recordPayFigures } = await import("./pay-context.server");
+    const { Money } = await import("./pay-terms");
+    const said = (
+      amount: number | null | undefined,
+      figure: "current_fixed" | "current_variable" | "expected",
+    ) =>
+      amount != null
+        ? [
+            {
+              figure,
+              money: Money.parse({
+                amount,
+                currency,
+                basis: payBasis ?? "annual",
+                gross: true,
+                saidAs: data.note ?? "",
+              }),
+            },
+          ]
+        : [];
+    await recordPayFigures(
+      orgId,
+      { id: app.id, candidateId: app.candidateId, requisitionId: app.requisitionId },
+      [
+        ...said(data.currentFixed, "current_fixed"),
+        ...said(data.currentVariable, "current_variable"),
+        ...said(data.expectedCtc, "expected"),
+      ],
+      "screening_call",
+      now,
+    );
+  }
   const { writeAudit } = await import("../server/audit");
   await writeAudit({
     actor: "agent:screening_call",

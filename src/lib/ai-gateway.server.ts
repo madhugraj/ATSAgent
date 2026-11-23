@@ -1107,6 +1107,8 @@ type Loose = any;
 
 const AGENT_STEP_TIMEOUT_MS = 120_000;
 const AGENT_MAX_OUTPUT_TOKENS = 8192;
+/** Agent turns on models whose thinking shares the output budget: room to think and answer. */
+const GEMINI_AGENT_MAX_OUTPUT_TOKENS = 24_576;
 
 /**
  * JSON Schema for a tool's input, from a zod schema.
@@ -1146,6 +1148,7 @@ function openAiAgentBody(
   system: string,
   messages: AgentMessage[],
   tools: AgentToolSpec[],
+  maxOutputTokens?: number,
 ) {
   const out: unknown[] = [{ role: "system", content: system }];
   for (const m of messages) {
@@ -1175,6 +1178,7 @@ function openAiAgentBody(
   return {
     model: cfg.model,
     messages: out,
+    ...(maxOutputTokens ? { max_completion_tokens: maxOutputTokens } : {}),
     ...(tools.length
       ? {
           tools: tools.map((t) => ({
@@ -1222,6 +1226,7 @@ function anthropicAgentBody(
   system: string,
   messages: AgentMessage[],
   tools: AgentToolSpec[],
+  maxOutputTokens?: number,
 ) {
   // Anthropic requires every tool_result for one assistant turn in a single
   // user message, and strictly alternating roles — fold consecutive turns.
@@ -1249,7 +1254,7 @@ function anthropicAgentBody(
   }
   return {
     model: cfg.model,
-    max_tokens: AGENT_MAX_OUTPUT_TOKENS,
+    max_tokens: maxOutputTokens ?? AGENT_MAX_OUTPUT_TOKENS,
     system,
     messages: out,
     ...(tools.length
@@ -1296,7 +1301,12 @@ function parseAnthropicAgent(json: Loose): Omit<Extract<AgentStepResult, { ok: t
 
 /* Google Gemini dialect */
 
-function googleAgentBody(system: string, messages: AgentMessage[], tools: AgentToolSpec[]) {
+function googleAgentBody(
+  system: string,
+  messages: AgentMessage[],
+  tools: AgentToolSpec[],
+  maxOutputTokens?: number,
+) {
   const contents: { role: "user" | "model"; parts: unknown[] }[] = [];
   const push = (role: "user" | "model", part: unknown) => {
     const last = contents[contents.length - 1];
@@ -1326,7 +1336,9 @@ function googleAgentBody(system: string, messages: AgentMessage[], tools: AgentT
   return {
     systemInstruction: { parts: [{ text: system }] },
     contents,
-    generationConfig: { maxOutputTokens: AGENT_MAX_OUTPUT_TOKENS },
+    // Thinking counts against maxOutputTokens on these models: at 8k an agent turn
+    // (Voice Guard reviewing a call) spent all of it thinking and returned nothing.
+    generationConfig: { maxOutputTokens: maxOutputTokens ?? GEMINI_AGENT_MAX_OUTPUT_TOKENS },
     ...(tools.length
       ? {
           tools: [
@@ -1387,6 +1399,8 @@ async function aiAgentStepCall(opts: {
   orgId?: string | null | undefined;
   config?: AiConfig;
   feature: string;
+  /** Output cap for this step (default 8192). Thinking models spend part of it on reasoning. */
+  maxOutputTokens?: number;
 }): Promise<AgentStepResult> {
   const cfg = opts.config ?? (await resolveAiConfig(opts.orgId));
   if (!cfg.apiKey) return NO_KEY_ERROR;
@@ -1412,15 +1426,15 @@ async function aiAgentStepCall(opts: {
   if (cfg.provider === "anthropic") {
     url = ANTHROPIC_ENDPOINT;
     headers = { ...headers, "x-api-key": cfg.apiKey, "anthropic-version": "2023-06-01" };
-    body = anthropicAgentBody(cfg, opts.system, opts.messages, tools);
+    body = anthropicAgentBody(cfg, opts.system, opts.messages, tools, opts.maxOutputTokens);
   } else if (cfg.provider === "google") {
     url = `${GOOGLE_ENDPOINT}/${encodeURIComponent(cfg.model)}:generateContent`;
     headers = { ...headers, "x-goog-api-key": cfg.apiKey };
-    body = googleAgentBody(opts.system, opts.messages, tools);
+    body = googleAgentBody(opts.system, opts.messages, tools, opts.maxOutputTokens);
   } else {
     url = OPENAI_ENDPOINT;
     headers = { ...headers, Authorization: `Bearer ${cfg.apiKey}` };
-    body = openAiAgentBody(cfg, opts.system, opts.messages, tools);
+    body = openAiAgentBody(cfg, opts.system, opts.messages, tools, opts.maxOutputTokens);
   }
 
   let res: Response;
@@ -1648,6 +1662,8 @@ export type VoiceSessionEvents = {
   onInterrupted?: () => void;
   /** A finished transcript line (either side). */
   onTurn?: (turn: VoiceTurn) => void;
+  /** The model has started transcribing a new utterance of the caller's — it heard them. */
+  onHeard?: () => void;
   /**
    * The assistant's words so far in its current turn, as they are transcribed —
    * before the turn ends (a live guard can stop a line while it is spoken).
@@ -1672,6 +1688,10 @@ export type VoiceSession = {
   sendAudio(pcm16k: Int16Array): void;
   /** A text nudge to the model (e.g. "the person has picked up"). */
   sendText(text: string): void;
+  /** Manual turns: the caller started speaking (their audio follows). */
+  activityStart?(): void;
+  /** Manual turns: the caller finished — the model replies now. */
+  activityEnd?(): void;
   /** Close and wait for the ledger row; returns what was said and done. */
   close(): Promise<VoiceSessionSummary>;
   /** Resolves when the session ends for any reason. */
@@ -1724,6 +1744,12 @@ export type VoiceTurnTaking = {
   endOfSpeech: "low" | "high";
   /** Audio kept from just before speech is detected (ms). */
   prefixPaddingMs: number;
+  /**
+   * Our line decides the turns: the provider's own speech detection is off, and the
+   * session marks each caller utterance with activityStart / activityEnd (the other
+   * fields are then unused). Its detection missed short replies and waited 1.6 s.
+   */
+  manual?: boolean;
 };
 
 /** The setup frame for a live session; `model` is the full resource name (exported for tests). */
@@ -1764,14 +1790,16 @@ export function voiceSetupMessage(opts: {
       ...(opts.turnTaking
         ? {
             realtimeInputConfig: {
-              automaticActivityDetection: {
-                endOfSpeechSensitivity:
-                  opts.turnTaking.endOfSpeech === "low"
-                    ? "END_SENSITIVITY_LOW"
-                    : "END_SENSITIVITY_HIGH",
-                silenceDurationMs: opts.turnTaking.silenceMs,
-                prefixPaddingMs: opts.turnTaking.prefixPaddingMs,
-              },
+              automaticActivityDetection: opts.turnTaking.manual
+                ? { disabled: true }
+                : {
+                    endOfSpeechSensitivity:
+                      opts.turnTaking.endOfSpeech === "low"
+                        ? "END_SENSITIVITY_LOW"
+                        : "END_SENSITIVITY_HIGH",
+                    silenceDurationMs: opts.turnTaking.silenceMs,
+                    prefixPaddingMs: opts.turnTaking.prefixPaddingMs,
+                  },
             },
           }
         : {}),
@@ -1881,7 +1909,19 @@ export async function openVoiceSession(opts: {
       send({
         realtimeInput: { audio: { data: pcm16ToBase64(pcm), mimeType: "audio/pcm;rate=16000" } },
       }),
-    sendText: (text) => send({ realtimeInput: { text } }),
+    sendText: (text) => {
+      // Timing only — never the words (VOICE_DEBUG_FILE).
+      voiceDebug({ kind: "client_text", chars: text.length });
+      send({ realtimeInput: { text } });
+    },
+    activityStart: () => {
+      voiceDebug({ kind: "activity_start" });
+      send({ realtimeInput: { activityStart: {} } });
+    },
+    activityEnd: () => {
+      voiceDebug({ kind: "activity_end" });
+      send({ realtimeInput: { activityEnd: {} } });
+    },
     close: async () => {
       closedBy = "client";
       ws.close(1000);
@@ -1913,6 +1953,7 @@ export async function openVoiceSession(opts: {
         return;
       }
       if (msg.setupComplete !== undefined && !isReady) {
+        voiceDebug({ kind: "setup_complete" });
         isReady = true;
         opts.ready(session);
       }
@@ -1920,6 +1961,11 @@ export async function openVoiceSession(opts: {
       const sc = msg.serverContent;
       if (sc) {
         if (sc.inputTranscription?.text) {
+          // When the model first heard this utterance of the caller's (timing only).
+          if (!heard) {
+            voiceDebug({ kind: "heard_text" });
+            opts.events.onHeard?.();
+          }
           if (!heard) heardSince = Date.now();
           heard += sc.inputTranscription.text;
         }
@@ -1959,12 +2005,15 @@ export async function openVoiceSession(opts: {
         const call: VoiceToolCall = { id: fc.id ?? "", name: fc.name ?? "", args: fc.args ?? {} };
         toolCalls.push(call);
         let response: Record<string, unknown>;
+        voiceDebug({ kind: "tool_call", name: call.name });
         try {
           response = (await opts.events.onToolCall?.(call)) ?? { ok: true };
         } catch (e) {
           response = { ok: false, error: (e as Error).message };
         }
         send({ toolResponse: { functionResponses: [{ id: call.id, name: call.name, response }] } });
+        // Names and outcome only — never arguments or results (candidate data).
+        voiceDebug({ kind: "tool_response", name: call.name, ok: response["ok"] !== false });
       }
       if (msg.goAway) opts.events.onGoAway?.(msg.goAway.timeLeft ?? "");
       if (msg.error?.message) error = msg.error.message;

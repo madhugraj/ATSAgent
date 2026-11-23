@@ -1,37 +1,50 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { ArrowUp, BookOpen, BrainCircuit, ChevronRight, Compass, RotateCcw, X } from "lucide-react";
-import { Link } from "@tanstack/react-router";
+import { ArrowUp, BookOpen, ChevronRight, Compass, RotateCcw, X } from "lucide-react";
+import { Link, useRouter } from "@tanstack/react-router";
 import { toast } from "sonner";
 
 import {
   askCopilot,
   clearCopilot,
   copilotHistory,
+  startCopilotHandoff,
   type CopilotMessage,
 } from "@/lib/copilot.functions";
 import { FIRST_RUN_JOURNEY } from "@/lib/user-manual";
 import { useMe } from "@/hooks/useMe";
 import { useNavCtx } from "@/hooks/useNavCtx";
 import { useOrg } from "@/hooks/useOrg";
+import { AditiMark } from "@/components/AditiMark";
+import { AgentMarkdown } from "@/components/AgentMarkdown";
 import { Button } from "@/components/ui/button";
 
 const PROMPTS = [
-  "Which open requisitions are at risk this week?",
-  "Where is my pipeline leaking the most?",
-  "Which skills are scarce in my talent pool?",
-  "What should I fix in my offer stage?",
+  "What is waiting on my approval?",
+  "Do we have enough people in the pool for our open roles?",
+  "Which roles are likely to be in demand next quarter?",
+  "Which roles are emerging in our ontology?",
 ];
 
-/** Always-available HR copilot: one ongoing conversation, stored in the database. */
+/** Aditi, the always-available HR copilot: one ongoing conversation, stored in the database. */
 export function Copilot() {
   const qc = useQueryClient();
   const fetchHistory = useServerFn(copilotHistory);
   const ask = useServerFn(askCopilot);
   const reset = useServerFn(clearCopilot);
+  const handoff = useServerFn(startCopilotHandoff);
 
   const [open, setOpen] = useState(false);
+  const router = useRouter();
+  /** In-app links in an answer navigate inside the app and close the panel. */
+  const followAppLink = (e: MouseEvent) => {
+    const a = (e.target as HTMLElement).closest("a[data-internal]");
+    if (!a || e.metaKey || e.ctrlKey || e.shiftKey) return;
+    e.preventDefault();
+    setOpen(false);
+    void router.navigate({ href: a.getAttribute("href")! });
+  };
   const [guideOpen, setGuideOpen] = useState(false);
   const [showWelcome, setShowWelcome] = useState(false);
   const [draft, setDraft] = useState("");
@@ -67,12 +80,22 @@ export function Copilot() {
           id: `tmp-${Date.now()}`,
           role: "user",
           content: message,
+          handoff: null,
           createdAt: new Date().toISOString(),
         },
       ]);
     },
     onSettled: () => qc.invalidateQueries({ queryKey: ["copilot"] }),
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Copilot failed"),
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Aditi could not answer"),
+  });
+
+  const startAgents = useMutation({
+    mutationFn: (messageId: string) => handoff({ data: { messageId } }),
+    onSuccess: () => {
+      toast.success("The agents have started — follow them in Agents.");
+      qc.invalidateQueries({ queryKey: ["copilot"] });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Could not start the agents"),
   });
 
   const messages = history.data ?? [];
@@ -100,13 +123,13 @@ export function Copilot() {
       <Button
         type="button"
         onClick={() => setOpen(true)}
-        aria-label="Open HR copilot"
+        aria-label="Ask Aditi, the AI copilot"
         className="group fixed bottom-5 right-5 z-50 flex items-center gap-2 rounded-full bg-foreground/90 px-4 py-3 text-sm font-medium text-background shadow-[0_10px_30px_-12px_color-mix(in_oklab,var(--foreground)_60%,transparent)] backdrop-blur-xl transition-all hover:bg-foreground hover:shadow-[0_16px_40px_-14px_color-mix(in_oklab,var(--primary)_55%,transparent)]"
       >
-        <span className="relative flex size-5 items-center justify-center rounded-full bg-primary/90">
-          <BrainCircuit className="size-3 text-primary-foreground" />
+        <span className="relative flex size-6 items-center justify-center rounded-full bg-primary/90">
+          <AditiMark className="size-4 text-primary-foreground" />
         </span>
-        Copilot
+        Ask Aditi
       </Button>
     );
   }
@@ -121,13 +144,13 @@ export function Copilot() {
 
       <header className="relative flex items-center justify-between border-b border-border/50 px-4 py-3">
         <div className="flex items-center gap-2">
-          <span className="flex size-6 items-center justify-center rounded-full bg-primary/90 shadow-[inset_0_1px_0_color-mix(in_oklab,white_45%,transparent)]">
-            <BrainCircuit className="size-3.5 text-primary-foreground" />
+          <span className="flex size-7 items-center justify-center rounded-full bg-primary/90 shadow-[inset_0_1px_0_color-mix(in_oklab,white_45%,transparent)]">
+            <AditiMark className="size-[1.125rem] text-primary-foreground" />
           </span>
           <span className="leading-tight">
-            <span className="block text-sm font-semibold tracking-tight">HR copilot</span>
+            <span className="block text-sm font-semibold tracking-tight">Aditi</span>
             <span className="block text-[0.6875rem] text-muted-foreground">
-              Help and questions ·{" "}
+              AI copilot ·{" "}
               <Link to="/desk" className="text-primary underline" onClick={() => setOpen(false)}>
                 hire with agents
               </Link>
@@ -163,7 +186,7 @@ export function Copilot() {
             type="button"
             variant="ghost"
             size="icon"
-            aria-label="Close copilot"
+            aria-label="Close Aditi"
             className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
             onClick={() => setOpen(false)}
           >
@@ -240,8 +263,9 @@ export function Copilot() {
         {messages.length === 0 ? (
           <div className="space-y-4">
             <p className="text-[0.8125rem] leading-relaxed text-muted-foreground">
-              Ask about your live pipeline, pool health, interviews or offers — every answer is
-              grounded in your organisation's own data.
+              Ask about requisitions and approvals, your pipeline, the role ontology, pool coverage
+              or future demand — answers use your organisation's live data, limited to what your
+              role can see.
             </p>
             <div className="space-y-2">
               {PROMPTS.map((p) => (
@@ -268,11 +292,27 @@ export function Copilot() {
               {m.content}
             </div>
           ) : (
-            <div
-              key={m.id}
-              className="max-w-[94%] whitespace-pre-wrap leading-relaxed text-foreground"
-            >
-              {m.content}
+            <div key={m.id} className="max-w-[94%] space-y-2">
+              <div className="leading-relaxed text-foreground" onClick={followAppLink}>
+                <AgentMarkdown text={m.content} />
+              </div>
+              {m.handoff ? (
+                <div className="rounded-xl border border-primary/30 bg-primary/5 p-2.5">
+                  <p className="text-xs font-medium text-foreground">{m.handoff.summary}</p>
+                  <p className="mt-1 line-clamp-4 text-[0.6875rem] leading-snug text-muted-foreground">
+                    {m.handoff.goal}
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="mt-2 h-7 text-xs"
+                    disabled={startAgents.isPending}
+                    onClick={() => startAgents.mutate(m.id)}
+                  >
+                    Hand to the agents
+                  </Button>
+                </div>
+              ) : null}
             </div>
           ),
         )}
@@ -306,7 +346,7 @@ export function Copilot() {
                 submit(draft);
               }
             }}
-            placeholder="Ask your copilot…"
+            placeholder="Ask Aditi…"
             className="min-h-[3rem] w-full resize-none bg-transparent px-3.5 py-2.5 pr-12 text-sm outline-none placeholder:text-muted-foreground"
           />
           <Button

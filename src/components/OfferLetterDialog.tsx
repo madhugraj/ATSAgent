@@ -4,6 +4,7 @@
  * org default), persisted on the offer row, editable inline, and reused for
  * every preview and download until regenerated or saved over.
  */
+import { OfferPolicyCheck } from "@/components/OfferPolicyCheck";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -447,6 +448,7 @@ export function OfferLetterDialog({
           </div>
         )}
 
+        <OfferPolicyCheck offerId={offer.id} hasLetter={Boolean(letter)} />
         <DialogFooter className="gap-3 sm:justify-between">
           {deleting ? (
             <div className="w-full sm:w-96">

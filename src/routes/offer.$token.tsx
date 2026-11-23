@@ -21,12 +21,19 @@ export const Route = createFileRoute("/offer/$token")({
   component: OfferPage,
 });
 
-const inr = (n: number) =>
-  new Intl.NumberFormat("en-IN", {
+/** The offer in its own currency (rupees keep Indian grouping). */
+const amount = (n: number, currency: string) =>
+  new Intl.NumberFormat(currency === "INR" ? "en-IN" : "en-GB", {
     style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0,
+    currency,
+    maximumFractionDigits: Number.isInteger(n) ? 0 : 2,
   }).format(n);
+const PAY_LABEL: Record<string, string> = {
+  annual: "a year",
+  monthly: "a month",
+  daily: "a day",
+  hourly: "an hour",
+};
 
 type Answer =
   | { action: "accept" }
@@ -125,8 +132,13 @@ function OfferPage() {
           <dd className="font-medium">{o.jobTitle}</dd>
         </div>
         <div>
-          <dt className="text-xs text-muted-foreground">Annual CTC</dt>
-          <dd className="num font-medium">{inr(o.offeredCtc)}</dd>
+          <dt className="text-xs text-muted-foreground">
+            {o.currency === "INR" && o.payBasis === "annual" ? "Annual CTC" : "Pay"}
+          </dt>
+          <dd className="num font-medium">
+            {amount(o.offeredCtc, o.currency)}
+            {o.payBasis !== "annual" ? ` ${PAY_LABEL[o.payBasis] ?? ""}` : ""}
+          </dd>
         </div>
         {o.joiningDate ? (
           <div>
@@ -166,7 +178,8 @@ function OfferPage() {
         <div className="mt-6 space-y-3 rounded-md border border-border p-3 text-sm">
           <p>
             You are accepting the offer for <span className="font-medium">{o.jobTitle}</span> at{" "}
-            <span className="num font-medium">{inr(o.offeredCtc)}</span> a year
+            <span className="num font-medium">{amount(o.offeredCtc, o.currency)}</span>{" "}
+            {PAY_LABEL[o.payBasis] ?? "a year"}
             {o.joiningDate ? `, joining on ${o.joiningDate}` : ""}. This is your final answer to
             this offer.
           </p>

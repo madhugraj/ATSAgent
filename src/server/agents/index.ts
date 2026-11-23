@@ -10,8 +10,10 @@ import {
   registerPhase4Agents,
   registerPhase6Agents,
   registerOrgAgents,
+  registerLabourAgents,
   registerExpertAgents,
   registerPanelAgents,
+  registerVoiceGuardAgent,
 } from "./definitions";
 import { registerPhase1Tools } from "./tools";
 import { registerPhase2Tools } from "./tools-phase2";
@@ -20,8 +22,11 @@ import { registerPhase4Tools } from "./tools-phase4";
 import { registerSourcingTools } from "./tools-sourcing";
 import { registerDistributionTools } from "./tools-distribution";
 import { registerOrgTools } from "./tools-org";
+import { registerLabourTools } from "./tools-labour";
 import { registerExpertTools } from "./tools-expert";
 import { registerPanelTools } from "./tools-panel";
+import { registerOntologyTools } from "./tools-ontology";
+import { registerVoiceGuardTools } from "./tools-voice-guard";
 import type { AgentType } from "@db/schema";
 
 let registered = false;
@@ -37,16 +42,21 @@ export function ensureAgentsRegistered(): void {
   registerSourcingTools();
   registerDistributionTools();
   registerOrgTools();
+  registerLabourTools();
   registerExpertTools();
   registerPanelTools();
+  registerOntologyTools();
+  registerVoiceGuardTools();
   registerPhase1Agents();
   registerPhase2Agents();
   registerPhase3Agents();
   registerPhase4Agents();
   registerPhase6Agents();
   registerOrgAgents();
+  registerLabourAgents();
   registerExpertAgents();
   registerPanelAgents();
+  registerVoiceGuardAgent();
 }
 
 ensureAgentsRegistered();

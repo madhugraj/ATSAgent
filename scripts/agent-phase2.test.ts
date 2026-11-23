@@ -571,6 +571,39 @@ describe("screening agent", () => {
     expect(await stageOf(id)).toBe("l1");
   });
 
+  test("a screening call still arranged (a callback they asked for) refuses the move and says so; it never rings after a move", async () => {
+    const id = await application("Jaya", "shortlisted", 88, ["Kubernetes"]);
+    const [app] = await db.select().from(applications).where(eq(applications.id, id));
+    const due = new Date(Date.now() - 60_000);
+    const [call] = await db
+      .insert(schema.screeningCalls)
+      .values({
+        orgId,
+        candidateId: app!.candidateId,
+        applicationId: id,
+        requisitionId: reqId,
+        status: "callback",
+        dueAt: due,
+        callbackAt: due,
+      } as never)
+      .returning({ id: schema.screeningCalls.id });
+    const actor = { orgId, userId: recruiter, memberEmail: recruiterEmail };
+    await expect(
+      moveStageCore(actor, { applicationId: id, toStage: "l1", note: "Cleared screening" }),
+    ).rejects.toThrow(/Jaya's screening is not finished — they asked to be called back — due /);
+    expect(await stageOf(id)).toBe("shortlisted");
+
+    // Moved some other way (or rejected): the due callback is no longer dialled.
+    const { dueCalls } = await import("../src/server/voice/dispatcher.server");
+    const isDue = async () =>
+      ((await dueCalls(new Date(), 500)) as unknown as { id: string }[]).some(
+        (r) => r.id === call!.id,
+      );
+    expect(await isDue()).toBe(true);
+    await db.update(applications).set({ stage: "l1" }).where(eq(applications.id, id));
+    expect(await isDue()).toBe(false);
+  });
+
   test("send_assessment waits for approval under suggest, then creates the assessment and queues the email", async () => {
     await enable("screening", "suggest");
     await application("Fay", "shortlisted", 82, ["Kubernetes"]);

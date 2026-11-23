@@ -30,12 +30,19 @@ import {
   closeCallRun,
   DEFAULT_LIMITS,
   openCallRun,
+  OPENING_REPLY_CUE_MS,
   openingWatch,
   setCall,
 } from "./call-session.server";
 import { dialNumber } from "./phone";
 import { Resampler } from "./resample";
-import { Vad } from "./vad";
+import { CallStatsTracker } from "./call-stats";
+import { voiceDebug } from "./debug";
+import { ECHO_TAIL_MS, TurnDetector } from "./turn-detector";
+import { readsOutWorkings, WORKINGS_CORRECTION } from "./spoken-guard";
+import { GREETING_WAIT_MS, greetingCue, ReadyGreeting } from "./greeting";
+import { TURN_TIMING, TurnKeeper } from "./turns";
+import { rms, Vad } from "./vad";
 import { localNow, nextWindowStart } from "./schedule";
 import {
   applySchedulingTool,
@@ -55,16 +62,18 @@ import {
   SCHEDULING_MAX_ATTEMPTS,
   SCHEDULING_RETRY_MS,
 } from "./scheduling-outcome.server";
-import { schedulingSystemPrompt } from "./scheduling-prompt";
+import { schedulingSystemPrompt, schedulingFirstWords } from "./scheduling-prompt";
 import { phoneScreeningPolicyOf } from "./settings.server";
 
 type Call = typeof screeningCalls.$inferSelect;
 
 /** After the candidate's hello ends, cue the assistant if it has not begun by then. */
-export const SCHEDULING_REPLY_CUE_MS = 1_200;
+export const SCHEDULING_REPLY_CUE_MS = OPENING_REPLY_CUE_MS;
 
 /** Turn-taking for a scheduling call: end of speech after half a second, high sensitivity. */
 export const SCHEDULING_TURN_TAKING = {
+  // Our line decides the turns (turn-detector.ts); the rest is kept for the record.
+  manual: true,
   silenceMs: 500,
   endOfSpeech: "high" as const,
   prefixPaddingMs: 300,
@@ -158,24 +167,56 @@ async function place(
   let aiSpoke = false;
   // Real clock (not the injectable one): when the candidate's voice was last heard.
   let lastHeardAt: number | null = null;
+  /** When the line's voice detection last heard the candidate (not the transcript). */
+  let lineHeardAt: number | null = null;
+  /** When the line last heard them after the greeting finished — their reply to it. */
+  let answerHeardAt: number | null = null;
   // What the assistant has said so far: a "yes" counts only after the disclosure.
   let aiSaid = "";
+  // Turn-taking on the line, kept on the call for the Voice Guard (no words).
+  const stats = new CallStatsTracker(now);
   // What the candidate said since the assistant's latest question after its
   // disclosure (null until it has asked one) — the go-ahead comes from here.
   let heardAfterAsk: string | null = null;
+  // Who owes the next words (src/server/voice/turns.ts): set once the session is open.
+  let keeper: TurnKeeper | null = null;
   let agentEnded!: () => void;
   const agentEnd = new Promise<void>((r) => (agentEnded = r));
 
-  const events: VoiceSessionEvents = {
-    onAudio: (pcm) => {
+  // The first words, ready while the phone rings (src/server/voice/greeting.ts).
+  const greeting = new ReadyGreeting({
+    play: (pcm) => {
       aiSpoke = true;
       lastActivity = now();
+      stats.aiAudio();
+      keeper?.aiAudio();
       line.play(down.process(pcm));
     },
-    onInterrupted: () => line.clear(),
+  });
+  // The assistant reading out a tool call, code or its reasoning is stopped mid-line
+  // (src/server/voice/spoken-guard.ts) — set once the session is open.
+  let stopWorkings: (() => void) | null = null;
+  let workingsStopped = false;
+  const events: VoiceSessionEvents = {
+    onAudio: (pcm) => greeting.audio(pcm),
+    // The model heard them: the turn manager waits its usual time before a reply cue.
+    onHeard: () => keeper?.heard(),
+    onSaying: (soFar) => {
+      if (!workingsStopped && readsOutWorkings(soFar)) {
+        workingsStopped = true;
+        stopWorkings?.();
+      }
+    },
+    onInterrupted: () => {
+      stats.bargeIn();
+      line.clear();
+    },
     onTurn: (t) => {
       if (t.who === "ai") {
+        greeting.turnDone();
+        workingsStopped = false;
         aiSaid += ` ${t.text}`;
+        keeper?.aiTurn(t.text);
         if (t.text.includes("?") && !disclosureMissing(aiSaid)) heardAfterAsk = "";
       } else if (heardAfterAsk !== null) heardAfterAsk += ` ${t.text}`;
       lastActivity = now();
@@ -193,6 +234,7 @@ async function place(
         aiSaid,
         heardAfterAsk ?? "",
       );
+      keeper?.tool(c.name, out.ok);
       if (!out.ok) return out;
       if (c.name === "record_permission") {
         await setCall(call.id, orgId, {
@@ -256,7 +298,25 @@ async function place(
       lastError: opened.message,
     });
   const session: VoiceSession = opened.session;
+  stopWorkings = () => {
+    // Drop what is queued: the rest of the line never reaches the candidate.
+    line.clear();
+    log.error("scheduling_call.read_out_workings", { call_id: call.id });
+    voiceDebug({ kind: "workings_stopped" });
+    session.sendText(WORKINGS_CORRECTION);
+  };
+  keeper = new TurnKeeper({
+    send: (text) => session.sendText(text),
+    onCue: (reason) => log.warn("scheduling_call.cue", { call_id: call.id, reason }),
+    recordTools: new Set(["record_availability", "record_permission"]),
+    endTools: new Set(["end_scheduling_call"]),
+    // Manual turns: the model always gets the end of their words, so no early cue.
+    timing: { unheardMs: TURN_TIMING.replyMs },
+  });
   await setCall(call.id, orgId, { phoneLast4: number.last4 });
+  // Ready while it rings: played the moment their hello ends.
+  greeting.asked();
+  session.sendText(greetingCue(schedulingFirstWords(brief.facts)));
 
   try {
     await line.dial(number.dial, limits.ringMs);
@@ -272,30 +332,67 @@ async function place(
   }
 
   const answeredAt = now();
-  await setCall(call.id, orgId, { status: "in_progress", startedAt: new Date(answeredAt) });
+  stats.answered();
+  // The instructions and facts this call ran with — what the Voice Guard checks it against.
+  await setCall(call.id, orgId, {
+    status: "in_progress",
+    startedAt: new Date(answeredAt),
+    brief: system,
+  });
   // The caller's line through a debounced VAD (see call-session.server.ts).
   const vad = new Vad();
+  let assistantUntil = 0;
+  const detector = new TurnDetector({
+    start: () => {
+      session.activityStart?.();
+      keeper?.caller("start", true);
+    },
+    audio: (p) => session.sendAudio(up.process(p)),
+    end: () => {
+      session.activityEnd?.();
+      keeper?.caller("end", false);
+    },
+    // They cut in: the rest of the assistant's line is dropped.
+    bargeIn: () => line.clear(),
+  });
   line.onAudio((pcm) => {
-    if (vad.process(pcm) === "start") candidateSpoke = true;
+    const heard = vad.process(pcm);
+    if (heard) voiceDebug({ kind: "caller", vad: heard });
+    stats.caller(heard);
+    if (heard === "start") candidateSpoke = true;
     if (vad.isActive()) {
+      lineHeardAt = Date.now();
       lastHeardAt = Date.now();
       lastActivity = now();
     }
-    // While the assistant is playing, upstream gets only real speech — noise and
-    // echo read as an interruption and cut the assistant off mid-word.
-    if (line.pendingSeconds() > 0 && !vad.isActive()) return;
-    session.sendAudio(up.process(pcm));
+    // Their hello ended: the greeting plays; the hello itself never reaches the model.
+    if (heard === "end") greeting.release("hello");
+    if (!greeting.isReleased) return;
+    if (greeting.played && vad.isActive() && line.pendingSeconds() === 0)
+      answerHeardAt = Date.now();
+    // Our line decides the turns (src/server/voice/turn-detector.ts): the model gets
+    // each utterance marked start and end, and echo of its own voice never cuts it off.
+    const playing = line.pendingSeconds() > 0;
+    if (playing) assistantUntil = Date.now() + ECHO_TAIL_MS;
+    detector.frame(pcm, rms(pcm), playing || Date.now() < assistantUntil);
   });
   lastActivity = now();
   // They speak first; the assistant answers (or greets them if they stay quiet).
   const stopOpening = openingWatch({
     session,
-    lastHeard: () => lastHeardAt,
-    aiSpoke: () => aiSpoke,
+    // The line's voice detection only — the hello's late transcript restarted the wait.
+    // After the greeting, the watch is on their reply to it (a test call waited 10 s).
+    lastHeard: () => (greeting.played ? answerHeardAt : lineHeardAt),
+    aiSpoke: () => (greeting.played ? greeting.repliedSince : aiSpoke),
     callerFirstMs: limits.callerFirstMs,
     // Real calls: the model often did not answer a plain "hello" on its own —
     // cue it soon after they stop (its own turn-taking ends a turn after 0.5 s).
-    replyNudgeMs: SCHEDULING_REPLY_CUE_MS,
+    // Manual turns: the end of their reply makes the model answer — no cue unless
+    // the greeting never played.
+    replyNudgeMs: () => (greeting.played ? 60_000 : SCHEDULING_REPLY_CUE_MS),
+    // Nothing while the greeting is held or prepared; after it, nothing until they reply.
+    wait: () =>
+      !greeting.isReleased || greeting.preparing() || (greeting.played && answerHeardAt === null),
     tag: "scheduling_call",
     callId: call.id,
   });
@@ -304,9 +401,16 @@ async function place(
   const limitHit = new Promise<string>((resolve) => {
     watchdog = setInterval(() => {
       const t = now();
+      // They said nothing (or are still talking) a few seconds in: greet them anyway.
+      if (
+        !greeting.isReleased &&
+        t - answeredAt >= (candidateSpoke ? GREETING_WAIT_MS : limits.callerFirstMs)
+      )
+        greeting.release("silence");
       if (t - answeredAt > brief.facts.maxMinutes * 60_000) resolve("time_limit");
       else if (!candidateSpoke && t - answeredAt > limits.firstWordsMs) resolve("no_response");
       else if (t - lastActivity > limits.silenceMs) resolve("silence");
+      keeper?.tick(line.pendingSeconds() > 0);
     }, 250);
   });
   const why = await Promise.race([
@@ -316,9 +420,11 @@ async function place(
     limitHit,
   ]);
   if (watchdog) clearInterval(watchdog);
+  keeper.end();
   stopOpening();
   await line.hangup().catch(() => undefined);
   log.info("scheduling_call.vad", { call_id: call.id, segments: vad.segments });
+  const audio = line.audioStats?.() ?? null;
   line.close();
   const summary = await session.close();
 
@@ -330,6 +436,7 @@ async function place(
     extra: {
       startedAt: new Date(answeredAt),
       endedAt: new Date(endedAt),
+      callStats: stats.finish({ languageCode: "en-IN", audio, cues: keeper.counts }),
       durationS: Math.round((endedAt - answeredAt) / 1000),
       // The transcript is kept only when they agreed to a note of the call.
       transcript: state.permission === true ? (summary.transcript as ScreeningCallTurn[]) : [],

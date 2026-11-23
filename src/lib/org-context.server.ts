@@ -142,14 +142,22 @@ export async function orgContextFor(input: {
           .limit(1)
       )[0]
     : undefined;
-  if (!version)
+  // Labour and hiring rules the HR head approved (docs/labour-policy-agent-plan.md):
+  // every agent works within them, profile or not.
+  const { approvedRuleLines } = await import("./labour-policy.server");
+  const labourRules = await approvedRuleLines(input.orgId);
+  if (!version) {
+    const blocks = labourRules.length
+      ? `${NO_PROFILE_LINE}\n\nRules:\n${labourRules.map((l) => `- ${l.replace(/^• /, "")}`).join("\n")}`
+      : NO_PROFILE_LINE;
     return {
       versionId: null,
       version: null,
-      blocks: NO_PROFILE_LINE,
-      words: words(NO_PROFILE_LINE),
+      blocks,
+      words: words(blocks),
       sectionsIncluded: [],
     };
+  }
 
   const sections = (version.sections ?? {}) as OrgProfileSections;
   // Soft-deleted sources: their items stay visible but are marked.
@@ -194,6 +202,7 @@ export async function orgContextFor(input: {
   const cap = ORG_CONTEXT_WORD_CAPS[input.purpose];
   const kept = [...factLines];
   const head = `Organisation profile (approved version ${version.version} — the only facts about the employer you may use):`;
+  ruleLines.push(...labourRules);
   const ruleBlock = ruleLines.length
     ? `Rules:\n${ruleLines.map((l) => `- ${l.replace(/^• /, "")}`).join("\n")}`
     : "";

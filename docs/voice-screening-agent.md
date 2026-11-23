@@ -107,14 +107,289 @@ other candidates, band) or mark their own answers.
 
 In-call tools (function calls the live model may make; each validated server-side):
 
-| tool                                  | effect                                                                                         |
-| ------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `record_consent(granted)`             | stamps `consent_at`; if declined → polite end, transcript discarded, status `consent_declined` |
-| `record_answer(question_id, summary)` | must be a kit question id; stored in `answers`                                                 |
-| `request_callback(when)`              | parsed in the org's time zone, clamped to calling hours → status `callback`                    |
-| `end_call(reason)`                    | goodbye already spoken; hang up                                                                |
+| tool                                  | effect                                                                                                |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `record_consent(granted)`             | stamps `consent_at`; if declined → polite end, transcript discarded, status `consent_declined`        |
+| `record_answer(question_id, summary)` | must be a kit question id; stored in `answers`                                                        |
+| `request_callback(when)`              | parsed in the org's time zone, clamped to calling hours → status `callback`                           |
+| `end_call(reason)`                    | goodbye already spoken; hang up                                                                       |
+| `record_details(...)`                 | practical details; `not_given` notes a required one they would not give (or current pay, not working) |
 
-Hard limits enforced by the worker, not the prompt: 15 min max, 20 s silence →
+Consent counts only after the assistant said it is an AI, makes notes for the
+hiring team and that the call is checked for quality (Screening call agent
+1.4.0; the Voice Guard reviews every answered call, `docs/voice-guard.md`).
+After an answer it says only a short acknowledgement — never a summary or
+read-back of what the candidate said.
+
+Consent is the candidate's answer to the assistant's latest question, saved in
+the words heard; `record_consent` is refused when that answer raised a concern
+("I never applied", "how did you get my number?") until it is answered
+(Screening call agent 1.5.0). The shared turn manager (`src/server/voice/turns.ts`)
+cues the assistant when it goes quiet after a tool result or a statement, and
+when it says it noted something it did not record. Every ending — a goodbye,
+silence or a hang-up — reports the required details still to get to the hiring
+desk and the Screening agent.
+
+Screening call agent 1.6.0, from the organisation's review of a test call on
+10 November:
+
+- **The source is never mentioned.** The call says only that it is about the
+  role, never where, when or whether the candidate applied or was referred. If
+  asked, it says the profile was shared with the talent acquisition team and the
+  hiring team can tell them more (`SOURCE_LINE`).
+- **Consent is asked once more at most.** After a concern it answers in one
+  sentence and asks only "Shall we go ahead?", never the disclosure again.
+- **"Why them" is a fact from the CV,** never "a great fit" or praise, and no
+  detail is asked in the same turn.
+- **Each practical detail is its own question:** title and company, years,
+  location.
+- **The four required details are their own step:** notice period, the date
+  they could join, current CTC and expected CTC. The candidate is told once
+  that without a clear answer to each the application cannot be considered
+  (`REQUIRED_LINE`). An unclear answer ("around three months", "you can
+  calculate it", "as per the norms") is asked once more. A date or figure is
+  never worked out for them, and nothing is asked a third time. From 1.6.2 the
+  code holds the second ask. `record_details` refuses a declined required
+  detail until the assistant has said, since its last record, that without it
+  the hiring team cannot consider the application. A test call had taken "I
+  will talk to the HR" for both pays at once. A total CTC
+  with no split is recorded as fixed pay with a note.
+- **Long answers are cut short politely.** An answer past 60 s (90 s before 1.7.0) is cut short at
+  the candidate's next pause by the shared turn manager: "Thank you — in the
+  interest of time, let me move on."
+- **The opening reply comes sooner.** The opening cue now comes 0.5 s after the
+  candidate's hello ends, timed from the line's own voice detection. The hello's
+  late transcript had restarted the wait, and the test call took 3.9 s to answer
+  "Hello". This applies to all three calls. A repeated cue now waits 6 s, not 3 s, for all three
+  calls and mid-call. A cue interrupts the reply the model is preparing, and a
+  later test call cued at 3, 6 and 9 s stayed silent for 11 s.
+
+Screening call agent 1.7.0 keeps the call's AI cost down. The live voice model
+re-reads its instructions and the whole call so far on every turn, so every word
+and every second of a long answer is paid for many times. Two test calls of
+about 7 minutes on 10 November used 234k and 388k tokens.
+
+- **Shorter instructions.** They are about 30% shorter (about 5k → 3.5k tokens),
+  with the same rules: explanations and repeats are gone, and the never-list
+  lives in the charter printed after them.
+- **Shorter answers.**
+  - The candidate is asked for about a minute per answer.
+  - There is a follow-up only when an answer is short or general.
+  - The turn manager cuts in at 60 s.
+
+Screening call agent 1.8.0: **the call is about 3 minutes** (the organisation's
+rule). The setting `max_minutes` is now the call's planned length: 2–5 minutes,
+default 3, migration 0072. A value saved earlier is planned at most 5.
+
+| Time      | Part (1.9.0 order)                                                          |
+| --------- | --------------------------------------------------------------------------- |
+| 0:00–0:20 | Greeting (ready before pickup); once they confirm, who, disclosure, consent |
+| 0:20–0:35 | The role in one sentence; "Would you like to explore it?"                   |
+| 0:35–1:30 | Notice period, joining date, current CTC, expected CTC — asked directly     |
+| 1:30–1:50 | Location and relocation ("I'll think about it" is an answer)                |
+| 1:50–2:40 | One screening question, about 45 s (cut short at 45 s)                      |
+| 2:40–3:00 | Close: their questions go to the hiring team by e-mail                      |
+
+- **Not asked any more:** title, company and years (they are on the CV), "why
+  them", the second question, and "Do you have any questions for me?".
+- **The turn manager closes the call on time.** It tells the assistant to close
+  30 s before the planned length, at the first pause, never while the candidate
+  is speaking.
+- **The call is ended a minute after the planned length** (`time_limit`).
+- **The grade rests on one answer.**
+
+**The first words are ready before pickup** (screening 1.8.1, scheduling 1.8.4,
+negotiation 0.8.4; `src/server/voice/greeting.ts`).
+
+- **Why:** the voice model's first reply after the candidate's hello sometimes
+  took 9 s or more, and a second cue restarted it. Two test calls on 10 November
+  first spoke 13.9 s and 12.0 s after pickup, and were hung up on.
+- **What happens now:**
+  - While the phone rings, the assistant is asked to say its fixed first line.
+  - The audio is held and played the moment the candidate's hello ends, or
+    after the usual wait if they say nothing.
+  - The hello itself is not passed to the voice model, so it does not greet them
+    twice.
+- **The opening cue holds off** while the greeting is held or still being
+  prepared (up to 8 s).
+- **Tracing:** `VOICE_DEBUG_FILE` now traces the greeting (asked, ready, played)
+  and each opening cue.
+- **The reply to the greeting is watched too** (screening 1.8.2, scheduling 1.8.5,
+  negotiation 0.8.5). Once the greeting has played, the opening cue waits for
+  the candidate's reply and cues the assistant 0.5 s after they stop. A test call
+  had played the greeting at once, then waited 10 s to answer "yes, speaking".
+- **More tracing, timing only:** the trace also records:
+  - the candidate's speech starting and stopping on the line (`caller`);
+  - when the voice model first transcribed each of their utterances
+    (`heard_text`);
+  - every text sent to the model (`client_text`).
+
+Screening call 1.9.0, from the organisation's review of a 3-minute test call:
+
+- **Who, the disclosure and consent come in one turn** as soon as the candidate
+  confirms who they are. It had waited for an "okay" in between.
+- **The four required details are asked directly.** No list is read out first.
+  The "cannot be considered" reason is said with the second ask for an unclear
+  answer, and `record_details` still refuses a decline until it has been said.
+- **Location is the last question before the technical one.** "I'll think about
+  it" is recorded as an answer, never asked again, and support is never offered.
+- **Missed answers get a quicker cue.** When the voice model has not started
+  transcribing within 3 s of the candidate stopping, the shared turn manager cues
+  a reply, asking them to say it again if it was missed. It used to wait 7 s. A
+  0.6 s "Okay" had been lost that way.
+
+**It never reads out its workings** (screening 1.9.1, scheduling 1.8.7,
+negotiation 0.8.7). A test call on 10 November spoke a block of code and its
+reasoning ("Wait, I shouldn't call record_details here…") to the candidate.
+
+- **The line is cut off live.** All three calls watch the assistant's words as
+  they are transcribed (`src/server/voice/spoken-guard.ts`). When they contain a
+  tool name, code or a reasoning label, the line is cleared and the assistant is
+  told to say "Sorry about that — let me say that again" and ask again in plain
+  words.
+- **The instructions** say to call tools silently.
+- **Afterwards,** the Voice Guard flags any such call as critical, and the
+  health rule `voice_guard.read_out_workings` raises it.
+
+**Our line decides the turns** (screening 1.9.2, scheduling 1.8.8, negotiation
+0.8.8; `src/server/voice/turn-detector.ts`).
+
+- **Why:** the voice service's own speech detection waited 1.6 s of silence, missed
+  short replies ("Okay", "Yes"), and took the assistant's own voice echoing back
+  as the candidate cutting in. Every pause and stall on 10 November's test calls
+  came back to one of those.
+- **How it works now:** the service's detection is off (manual turns). Our
+  line's detector, which heard every utterance, marks each one with a start and
+  an end.
+  - **Reply time:** on the real service the model replies about 0.9 s after the
+    end. It was 1.8–2.4 s, when it noticed at all.
+  - **Pauses:** a short answer is ended after 0.6 s of silence; a longer one gets
+    0.9–1.3 s, room for a thinking pause.
+  - **Interruptions:** while the assistant speaks, the candidate's speech is
+    passed on only once it has lasted 0.6 s and is clearly louder than the echo.
+    Then the held start goes with it and the assistant stops. Shorter bursts are
+    dropped as echo.
+- **Cues retired:** the opening cue after the greeting and the 3 s "not heard"
+  cue are no longer needed, since the end mark always gets a reply. The turn
+  manager's other cues stay.
+
+**It does the screening itself** (screening 1.9.3, the organisation's scope).
+
+- **No hand-off offers.** The call never offers a call from a person or the
+  written assessment, not at consent and not when it cannot be moved again. A
+  test call on 10 November ended at 33 s right after that offer.
+- **It still acts on a request.** If a candidate asks for one of them
+  themselves, the call notes it and ends as before.
+- **No hanging up in silence.** `end_call` is refused until the assistant has
+  said something since the candidate last spoke. The same test call hung up
+  without a goodbye.
+
+**No acknowledgement after each answer** (screening 1.9.4, the organisation's
+review). The assistant records each answer and goes straight to the next
+question, with no "thank you", "noted" or "understood". The candidate is thanked
+once, at the close. The Voice Guard (1.4.1) judges read-backs against the
+brief, so a per-answer "thank you" or "noted" on these calls is a low finding.
+
+**Pay in the role's own terms** (screening 1.10.0, docs/pay-terms-plan.md
+Phase 3). The four details follow the requisition's pay terms: "CTC per year"
+in rupees for Indian roles (unchanged), "gross yearly salary" in the zone's
+currency elsewhere, an hourly or day rate for those contracts. A contract asks
+"When could you start?" and "How long a contract are you looking for?" instead
+of the notice period. A figure said in another currency or per another period
+is recorded as said (`pay_currency`, `pay_basis`) and stored in `pay_figures`
+with what it comes to in the role's currency and the reporting currency.
+
+**Consent is the answer to the consent question; a pay range is a figure**
+(screening 1.9.5, test call of 11 November). `record_consent` counts only a
+reply to a question asked after the disclosure, and refuses while that question
+is still unanswered: the call had taken the "Yes" to "am I speaking with …?" as
+consent. When the candidate states a pay figure for a detail on record as
+declined, `record_details` refuses to leave the decline standing and asks for
+the figure; a range ("95 lakhs to 1 crore") is recorded as its lower end, with
+the range in the pay note.
+
+**"Call again" on the hiring desk** arranges another AI screening call
+(`callCandidateFromDesk`, `src/server/desk/desk.server.ts`).
+
+- **Who is called:** the candidate named or ranked; otherwise the one the
+  role's latest screening call was with.
+- **How:** it uses the same core and role check as "Call now" (TA, the HR head
+  or the CBO), audited `screening_call.requested`.
+- **After a completed screen:** a person's request may call again, recorded as
+  `again` in the audit entry. The Screening agent's own request never can, and
+  there is still never a second open call.
+- **Why:** before this, the desk had no such command, and a real thread on
+  10 November sent "call again" to a waiting job-feed listing as a change
+  request.
+- **Going back a step needs a reason** (the organisation's rule). Calling again
+  after a completed screen is going back a step, so the desk asks why and
+  judges the answer (`judgeGoingBack`, through the AI gateway, with the reason
+  passed as untrusted text and the verdict zod-checked).
+  - **Valid:** something went wrong with the call (dropped, misheard, a fault),
+    new information, or the candidate's own request with a reason.
+  - **Not valid:** no reason, the request repeated, or only wanting a different
+    result ("the score is low"). Repeating a step to change its outcome is
+    unfair to the other candidates.
+  - **Audited:** both verdicts, as `desk.go_back_allowed` or
+    `desk.go_back_refused`, with the reason. An allowed call's
+    `screening_call.requested` entry also carries the reason.
+- **Feedback names its request.** When more than one request is waiting, desk
+  feedback goes only to the one it names. Otherwise the desk asks which request
+  it is about and sends nothing.
+- **The other going-back steps on the desk** use the same reason check (a
+  shared `reasonGate`; `goBackFromDesk`):
+  - **Re-score the role's candidates** (`rescoreThread`). It replaces every
+    current score.
+  - **Move a candidate back a stage**, through `moveStageCore` with its
+    transition rules, role checks and stage events. Examples: back to
+    screening, back to Shortlisted, back to an earlier interview round, or out
+    of Rejected or Withdrawn ("undo a rejection").
+  - **Moves the flow only allows from On hold** go through On hold, and both
+    moves are recorded. Moves forward are refused here; they use the pipeline
+    as usual.
+  - **The reason is weighed against the system's own record of the step,**
+    not taken on trust:
+    - **Call again:** the last answered call's outcome, length, line audio,
+      turn-taking, required details and the Voice Guard's review
+      (`callEvidence`).
+    - **Move back:** the candidate's stage history (`stageEvidence`).
+    - **Re-score:** when the scores were made, and the job description versions
+      (`scoreEvidence`).
+
+    A stated fact the record contradicts or does not show is refused, with the
+    figures. On 10 November "the call is unclear" had been accepted for a call
+    with 0 audio gaps in about 12,000 frames. New information or the
+    candidate's own request is accepted only when the reason says what it is.
+
+  - **Not included:** an approved job description cannot be reopened. Approval
+    is final, and changes are asked for before approval.
+
+**An arranged call is managed from the desk too** (`manageCallFromDesk`).
+
+- **Ask about it:** "when is the call?" says when it rings, and the desk's facts
+  list the role's arranged calls.
+- **Move it:** "call now" or "move it to Friday 3 pm" moves it inside the
+  calling hours. "Now" outside them goes to the next opening, and the desk says
+  so. "Call again" on an arranged call moves it instead of being refused.
+- **Cancel it:** "cancel the call".
+- **Who and audit:** the same roles as "Call now". Changes are audited
+  `screening_call.moved` / `screening_call.cancelled`.
+- **A repeat is re-checked before it is moved.** If the call repeats a completed
+  screen, the reason it was arranged on is checked again against the last
+  call's record. When the record does not support it, the call is cancelled and
+  the desk says why; the hiring desk's judgement stands.
+- **Why:** on 10 November "call now" could only get "A screening call is
+  already arranged for this candidate."
+
+A completed call must leave with the earliest joining date, current pay and
+expected pay (Screening call agent 1.3.0): after consent, `end_call` with
+`completed` or `other` is refused until each is recorded or listed in
+`not_given` — "declined" with their words in `pay_note` / `candidate_note`, or
+"not_working" for current pay only. Ending for another reason (a later time, a
+person, not interested) is unaffected.
+
+Hard limits enforced by the worker, not the prompt: the planned length plus a
+minute (3 + 1 by default; the close is cued 30 s before the planned length), 20 s silence →
 close, voicemail / no speech in 10 s → one-line message and end, calling hours
 10:00–19:00 org time Mon–Sat, at most 3 attempts across 2 working days, PBX
 concurrency cap.

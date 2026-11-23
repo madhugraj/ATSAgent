@@ -28,6 +28,8 @@ import { Route as OffersRouteImport } from './routes/offers'
 import { Route as OrgProfileRouteImport } from './routes/org-profile'
 import { Route as OrganisationRouteImport } from './routes/organisation'
 import { Route as PlatformRouteImport } from './routes/platform'
+import { Route as PlatformAgentStudioRouteImport } from './routes/platform-agent-studio'
+import { Route as PlatformAgentWorkflowsRouteImport } from './routes/platform-agent-workflows'
 import { Route as PlatformAgentsRouteImport } from './routes/platform-agents'
 import { Route as PlatformAiUsageRouteImport } from './routes/platform-ai-usage'
 import { Route as PlatformHealthRouteImport } from './routes/platform-health'
@@ -35,10 +37,14 @@ import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as RoiRouteImport } from './routes/roi'
 import { Route as ScreeningRouteImport } from './routes/screening'
+import { Route as SkillOntologyRouteImport } from './routes/skill-ontology'
 import { Route as TeamRouteImport } from './routes/team'
 import { Route as TemplatesRouteImport } from './routes/templates'
 import { Route as TermsRouteImport } from './routes/terms'
 import { Route as AgentsIndexRouteImport } from './routes/agents.index'
+import { Route as AgentsCallReviewsRouteImport } from './routes/agents.call-reviews'
+import { Route as AgentsGovernanceRouteImport } from './routes/agents.governance'
+import { Route as AgentsIntelligenceRouteImport } from './routes/agents.intelligence'
 import { Route as AgentsObservabilityRouteImport } from './routes/agents.observability'
 import { Route as AgentsRegisterRouteImport } from './routes/agents.register'
 import { Route as AgentsSettingsRouteImport } from './routes/agents.settings'
@@ -57,6 +63,7 @@ import { Route as RequisitionsIndexRouteImport } from './routes/requisitions.ind
 import { Route as RequisitionsIdRouteImport } from './routes/requisitions.$id'
 import { Route as ScheduleTokenRouteImport } from './routes/schedule.$token'
 import { Route as ScorecardTokenRouteImport } from './routes/scorecard.$token'
+import { Route as WWorkflowIdRouteImport } from './routes/w.$workflowId'
 import { Route as ApiAuthChangePasswordRouteImport } from './routes/api/auth/change-password'
 import { Route as ApiAuthConfirmRouteImport } from './routes/api/auth/confirm'
 import { Route as ApiAuthLoginRouteImport } from './routes/api/auth/login'
@@ -177,6 +184,16 @@ const PlatformRoute = PlatformRouteImport.update({
   path: '/platform',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PlatformAgentStudioRoute = PlatformAgentStudioRouteImport.update({
+  id: '/platform-agent-studio',
+  path: '/platform-agent-studio',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PlatformAgentWorkflowsRoute = PlatformAgentWorkflowsRouteImport.update({
+  id: '/platform-agent-workflows',
+  path: '/platform-agent-workflows',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PlatformAgentsRoute = PlatformAgentsRouteImport.update({
   id: '/platform-agents',
   path: '/platform-agents',
@@ -212,6 +229,11 @@ const ScreeningRoute = ScreeningRouteImport.update({
   path: '/screening',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SkillOntologyRoute = SkillOntologyRouteImport.update({
+  id: '/skill-ontology',
+  path: '/skill-ontology',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TeamRoute = TeamRouteImport.update({
   id: '/team',
   path: '/team',
@@ -230,6 +252,21 @@ const TermsRoute = TermsRouteImport.update({
 const AgentsIndexRoute = AgentsIndexRouteImport.update({
   id: '/agents/',
   path: '/agents/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentsCallReviewsRoute = AgentsCallReviewsRouteImport.update({
+  id: '/agents/call-reviews',
+  path: '/agents/call-reviews',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentsGovernanceRoute = AgentsGovernanceRouteImport.update({
+  id: '/agents/governance',
+  path: '/agents/governance',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentsIntelligenceRoute = AgentsIntelligenceRouteImport.update({
+  id: '/agents/intelligence',
+  path: '/agents/intelligence',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgentsObservabilityRoute = AgentsObservabilityRouteImport.update({
@@ -320,6 +357,11 @@ const ScheduleTokenRoute = ScheduleTokenRouteImport.update({
 const ScorecardTokenRoute = ScorecardTokenRouteImport.update({
   id: '/scorecard/$token',
   path: '/scorecard/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WWorkflowIdRoute = WWorkflowIdRouteImport.update({
+  id: '/w/$workflowId',
+  path: '/w/$workflowId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiAuthChangePasswordRoute = ApiAuthChangePasswordRouteImport.update({
@@ -470,6 +512,8 @@ export interface FileRoutesByFullPath {
   '/org-profile': typeof OrgProfileRoute
   '/organisation': typeof OrganisationRoute
   '/platform': typeof PlatformRoute
+  '/platform-agent-studio': typeof PlatformAgentStudioRoute
+  '/platform-agent-workflows': typeof PlatformAgentWorkflowsRoute
   '/platform-agents': typeof PlatformAgentsRoute
   '/platform-ai-usage': typeof PlatformAiUsageRoute
   '/platform-health': typeof PlatformHealthRoute
@@ -477,9 +521,13 @@ export interface FileRoutesByFullPath {
   '/reports': typeof ReportsRoute
   '/roi': typeof RoiRoute
   '/screening': typeof ScreeningRoute
+  '/skill-ontology': typeof SkillOntologyRoute
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
   '/terms': typeof TermsRoute
+  '/agents/call-reviews': typeof AgentsCallReviewsRoute
+  '/agents/governance': typeof AgentsGovernanceRoute
+  '/agents/intelligence': typeof AgentsIntelligenceRoute
   '/agents/observability': typeof AgentsObservabilityRoute
   '/agents/register': typeof AgentsRegisterRoute
   '/agents/settings': typeof AgentsSettingsRoute
@@ -495,6 +543,7 @@ export interface FileRoutesByFullPath {
   '/requisitions/$id': typeof RequisitionsIdRoute
   '/schedule/$token': typeof ScheduleTokenRoute
   '/scorecard/$token': typeof ScorecardTokenRoute
+  '/w/$workflowId': typeof WWorkflowIdRoute
   '/agents/': typeof AgentsIndexRoute
   '/candidates/': typeof CandidatesIndexRoute
   '/interviews/': typeof InterviewsIndexRoute
@@ -544,6 +593,8 @@ export interface FileRoutesByTo {
   '/org-profile': typeof OrgProfileRoute
   '/organisation': typeof OrganisationRoute
   '/platform': typeof PlatformRoute
+  '/platform-agent-studio': typeof PlatformAgentStudioRoute
+  '/platform-agent-workflows': typeof PlatformAgentWorkflowsRoute
   '/platform-agents': typeof PlatformAgentsRoute
   '/platform-ai-usage': typeof PlatformAiUsageRoute
   '/platform-health': typeof PlatformHealthRoute
@@ -551,9 +602,13 @@ export interface FileRoutesByTo {
   '/reports': typeof ReportsRoute
   '/roi': typeof RoiRoute
   '/screening': typeof ScreeningRoute
+  '/skill-ontology': typeof SkillOntologyRoute
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
   '/terms': typeof TermsRoute
+  '/agents/call-reviews': typeof AgentsCallReviewsRoute
+  '/agents/governance': typeof AgentsGovernanceRoute
+  '/agents/intelligence': typeof AgentsIntelligenceRoute
   '/agents/observability': typeof AgentsObservabilityRoute
   '/agents/register': typeof AgentsRegisterRoute
   '/agents/settings': typeof AgentsSettingsRoute
@@ -569,6 +624,7 @@ export interface FileRoutesByTo {
   '/requisitions/$id': typeof RequisitionsIdRoute
   '/schedule/$token': typeof ScheduleTokenRoute
   '/scorecard/$token': typeof ScorecardTokenRoute
+  '/w/$workflowId': typeof WWorkflowIdRoute
   '/agents': typeof AgentsIndexRoute
   '/candidates': typeof CandidatesIndexRoute
   '/interviews': typeof InterviewsIndexRoute
@@ -619,6 +675,8 @@ export interface FileRoutesById {
   '/org-profile': typeof OrgProfileRoute
   '/organisation': typeof OrganisationRoute
   '/platform': typeof PlatformRoute
+  '/platform-agent-studio': typeof PlatformAgentStudioRoute
+  '/platform-agent-workflows': typeof PlatformAgentWorkflowsRoute
   '/platform-agents': typeof PlatformAgentsRoute
   '/platform-ai-usage': typeof PlatformAiUsageRoute
   '/platform-health': typeof PlatformHealthRoute
@@ -626,9 +684,13 @@ export interface FileRoutesById {
   '/reports': typeof ReportsRoute
   '/roi': typeof RoiRoute
   '/screening': typeof ScreeningRoute
+  '/skill-ontology': typeof SkillOntologyRoute
   '/team': typeof TeamRoute
   '/templates': typeof TemplatesRoute
   '/terms': typeof TermsRoute
+  '/agents/call-reviews': typeof AgentsCallReviewsRoute
+  '/agents/governance': typeof AgentsGovernanceRoute
+  '/agents/intelligence': typeof AgentsIntelligenceRoute
   '/agents/observability': typeof AgentsObservabilityRoute
   '/agents/register': typeof AgentsRegisterRoute
   '/agents/settings': typeof AgentsSettingsRoute
@@ -644,6 +706,7 @@ export interface FileRoutesById {
   '/requisitions/$id': typeof RequisitionsIdRoute
   '/schedule/$token': typeof ScheduleTokenRoute
   '/scorecard/$token': typeof ScorecardTokenRoute
+  '/w/$workflowId': typeof WWorkflowIdRoute
   '/agents/': typeof AgentsIndexRoute
   '/candidates/': typeof CandidatesIndexRoute
   '/interviews/': typeof InterviewsIndexRoute
@@ -695,6 +758,8 @@ export interface FileRouteTypes {
     | '/org-profile'
     | '/organisation'
     | '/platform'
+    | '/platform-agent-studio'
+    | '/platform-agent-workflows'
     | '/platform-agents'
     | '/platform-ai-usage'
     | '/platform-health'
@@ -702,9 +767,13 @@ export interface FileRouteTypes {
     | '/reports'
     | '/roi'
     | '/screening'
+    | '/skill-ontology'
     | '/team'
     | '/templates'
     | '/terms'
+    | '/agents/call-reviews'
+    | '/agents/governance'
+    | '/agents/intelligence'
     | '/agents/observability'
     | '/agents/register'
     | '/agents/settings'
@@ -720,6 +789,7 @@ export interface FileRouteTypes {
     | '/requisitions/$id'
     | '/schedule/$token'
     | '/scorecard/$token'
+    | '/w/$workflowId'
     | '/agents/'
     | '/candidates/'
     | '/interviews/'
@@ -769,6 +839,8 @@ export interface FileRouteTypes {
     | '/org-profile'
     | '/organisation'
     | '/platform'
+    | '/platform-agent-studio'
+    | '/platform-agent-workflows'
     | '/platform-agents'
     | '/platform-ai-usage'
     | '/platform-health'
@@ -776,9 +848,13 @@ export interface FileRouteTypes {
     | '/reports'
     | '/roi'
     | '/screening'
+    | '/skill-ontology'
     | '/team'
     | '/templates'
     | '/terms'
+    | '/agents/call-reviews'
+    | '/agents/governance'
+    | '/agents/intelligence'
     | '/agents/observability'
     | '/agents/register'
     | '/agents/settings'
@@ -794,6 +870,7 @@ export interface FileRouteTypes {
     | '/requisitions/$id'
     | '/schedule/$token'
     | '/scorecard/$token'
+    | '/w/$workflowId'
     | '/agents'
     | '/candidates'
     | '/interviews'
@@ -843,6 +920,8 @@ export interface FileRouteTypes {
     | '/org-profile'
     | '/organisation'
     | '/platform'
+    | '/platform-agent-studio'
+    | '/platform-agent-workflows'
     | '/platform-agents'
     | '/platform-ai-usage'
     | '/platform-health'
@@ -850,9 +929,13 @@ export interface FileRouteTypes {
     | '/reports'
     | '/roi'
     | '/screening'
+    | '/skill-ontology'
     | '/team'
     | '/templates'
     | '/terms'
+    | '/agents/call-reviews'
+    | '/agents/governance'
+    | '/agents/intelligence'
     | '/agents/observability'
     | '/agents/register'
     | '/agents/settings'
@@ -868,6 +951,7 @@ export interface FileRouteTypes {
     | '/requisitions/$id'
     | '/schedule/$token'
     | '/scorecard/$token'
+    | '/w/$workflowId'
     | '/agents/'
     | '/candidates/'
     | '/interviews/'
@@ -918,6 +1002,8 @@ export interface RootRouteChildren {
   OrgProfileRoute: typeof OrgProfileRoute
   OrganisationRoute: typeof OrganisationRoute
   PlatformRoute: typeof PlatformRoute
+  PlatformAgentStudioRoute: typeof PlatformAgentStudioRoute
+  PlatformAgentWorkflowsRoute: typeof PlatformAgentWorkflowsRoute
   PlatformAgentsRoute: typeof PlatformAgentsRoute
   PlatformAiUsageRoute: typeof PlatformAiUsageRoute
   PlatformHealthRoute: typeof PlatformHealthRoute
@@ -925,9 +1011,13 @@ export interface RootRouteChildren {
   ReportsRoute: typeof ReportsRoute
   RoiRoute: typeof RoiRoute
   ScreeningRoute: typeof ScreeningRoute
+  SkillOntologyRoute: typeof SkillOntologyRoute
   TeamRoute: typeof TeamRoute
   TemplatesRoute: typeof TemplatesRoute
   TermsRoute: typeof TermsRoute
+  AgentsCallReviewsRoute: typeof AgentsCallReviewsRoute
+  AgentsGovernanceRoute: typeof AgentsGovernanceRoute
+  AgentsIntelligenceRoute: typeof AgentsIntelligenceRoute
   AgentsObservabilityRoute: typeof AgentsObservabilityRoute
   AgentsRegisterRoute: typeof AgentsRegisterRoute
   AgentsSettingsRoute: typeof AgentsSettingsRoute
@@ -943,6 +1033,7 @@ export interface RootRouteChildren {
   RequisitionsIdRoute: typeof RequisitionsIdRoute
   ScheduleTokenRoute: typeof ScheduleTokenRoute
   ScorecardTokenRoute: typeof ScorecardTokenRoute
+  WWorkflowIdRoute: typeof WWorkflowIdRoute
   AgentsIndexRoute: typeof AgentsIndexRoute
   CandidatesIndexRoute: typeof CandidatesIndexRoute
   InterviewsIndexRoute: typeof InterviewsIndexRoute
@@ -1108,6 +1199,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PlatformRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/platform-agent-studio': {
+      id: '/platform-agent-studio'
+      path: '/platform-agent-studio'
+      fullPath: '/platform-agent-studio'
+      preLoaderRoute: typeof PlatformAgentStudioRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/platform-agent-workflows': {
+      id: '/platform-agent-workflows'
+      path: '/platform-agent-workflows'
+      fullPath: '/platform-agent-workflows'
+      preLoaderRoute: typeof PlatformAgentWorkflowsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/platform-agents': {
       id: '/platform-agents'
       path: '/platform-agents'
@@ -1157,6 +1262,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ScreeningRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/skill-ontology': {
+      id: '/skill-ontology'
+      path: '/skill-ontology'
+      fullPath: '/skill-ontology'
+      preLoaderRoute: typeof SkillOntologyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/team': {
       id: '/team'
       path: '/team'
@@ -1183,6 +1295,27 @@ declare module '@tanstack/react-router' {
       path: '/agents'
       fullPath: '/agents/'
       preLoaderRoute: typeof AgentsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agents/call-reviews': {
+      id: '/agents/call-reviews'
+      path: '/agents/call-reviews'
+      fullPath: '/agents/call-reviews'
+      preLoaderRoute: typeof AgentsCallReviewsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agents/governance': {
+      id: '/agents/governance'
+      path: '/agents/governance'
+      fullPath: '/agents/governance'
+      preLoaderRoute: typeof AgentsGovernanceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agents/intelligence': {
+      id: '/agents/intelligence'
+      path: '/agents/intelligence'
+      fullPath: '/agents/intelligence'
+      preLoaderRoute: typeof AgentsIntelligenceRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/agents/observability': {
@@ -1309,6 +1442,13 @@ declare module '@tanstack/react-router' {
       path: '/scorecard/$token'
       fullPath: '/scorecard/$token'
       preLoaderRoute: typeof ScorecardTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/w/$workflowId': {
+      id: '/w/$workflowId'
+      path: '/w/$workflowId'
+      fullPath: '/w/$workflowId'
+      preLoaderRoute: typeof WWorkflowIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/auth/change-password': {
@@ -1502,6 +1642,8 @@ const rootRouteChildren: RootRouteChildren = {
   OrgProfileRoute: OrgProfileRoute,
   OrganisationRoute: OrganisationRoute,
   PlatformRoute: PlatformRoute,
+  PlatformAgentStudioRoute: PlatformAgentStudioRoute,
+  PlatformAgentWorkflowsRoute: PlatformAgentWorkflowsRoute,
   PlatformAgentsRoute: PlatformAgentsRoute,
   PlatformAiUsageRoute: PlatformAiUsageRoute,
   PlatformHealthRoute: PlatformHealthRoute,
@@ -1509,9 +1651,13 @@ const rootRouteChildren: RootRouteChildren = {
   ReportsRoute: ReportsRoute,
   RoiRoute: RoiRoute,
   ScreeningRoute: ScreeningRoute,
+  SkillOntologyRoute: SkillOntologyRoute,
   TeamRoute: TeamRoute,
   TemplatesRoute: TemplatesRoute,
   TermsRoute: TermsRoute,
+  AgentsCallReviewsRoute: AgentsCallReviewsRoute,
+  AgentsGovernanceRoute: AgentsGovernanceRoute,
+  AgentsIntelligenceRoute: AgentsIntelligenceRoute,
   AgentsObservabilityRoute: AgentsObservabilityRoute,
   AgentsRegisterRoute: AgentsRegisterRoute,
   AgentsSettingsRoute: AgentsSettingsRoute,
@@ -1527,6 +1673,7 @@ const rootRouteChildren: RootRouteChildren = {
   RequisitionsIdRoute: RequisitionsIdRoute,
   ScheduleTokenRoute: ScheduleTokenRoute,
   ScorecardTokenRoute: ScorecardTokenRoute,
+  WWorkflowIdRoute: WWorkflowIdRoute,
   AgentsIndexRoute: AgentsIndexRoute,
   CandidatesIndexRoute: CandidatesIndexRoute,
   InterviewsIndexRoute: InterviewsIndexRoute,

@@ -21,13 +21,17 @@ import {
   Megaphone,
   MessagesSquare,
   PhoneCall,
+  Headphones,
+  Scale,
   Plug,
+  PackageOpen,
+  Workflow,
   ShieldCheck,
   Target,
   Settings,
   SlidersHorizontal,
   Users,
-  Workflow,
+  Waypoints,
 } from "lucide-react";
 
 import type { NavCtx } from "@/hooks/useNavCtx";
@@ -116,6 +120,28 @@ export const NAV_GROUPS: NavGroup[] = [
         to: "/agents/observability",
         label: "Agent observability",
         icon: Activity,
+        show: (c) => c.governance,
+        mode: "agent",
+      },
+      {
+        to: "/agents/call-reviews",
+        label: "Call reviews",
+        icon: Headphones,
+        // Reviews quote call transcripts (pay included): the people who may read them.
+        show: (c) => c.recruiterView,
+        mode: "agent",
+      },
+      {
+        to: "/agents/governance",
+        label: "Agent governance",
+        icon: Scale,
+        show: (c) => c.governance,
+        mode: "agent",
+      },
+      {
+        to: "/agents/intelligence",
+        label: "Agent intelligence",
+        icon: Waypoints,
         show: (c) => c.governance,
         mode: "agent",
       },
@@ -246,8 +272,8 @@ export const NAV_GROUPS: NavGroup[] = [
         to: "/brain",
         label: "Talent Brain",
         icon: Brain,
-        show: (c) => c.leadership,
-        mode: "manual",
+        // the organisation's skill and role ontology, in either way of working
+        show: (c) => c.leadership || c.governance,
       },
     ],
   },
@@ -257,12 +283,19 @@ export const NAV_GROUPS: NavGroup[] = [
     bottom: true,
     items: [
       { to: "/team", label: "Users & roles", icon: ShieldCheck, show: (c) => c.governance },
-      { to: "/organisation", label: "Organisation", icon: Building2, show: (c) => c.isOwner },
+      {
+        to: "/organisation",
+        label: "Organisation",
+        icon: Building2,
+        show: (c) => c.isOwner,
+      },
       {
         to: "/org-profile",
         label: "Organisation profile",
         icon: BookOpenText,
-        show: (c) => c.governance,
+        // Owners work on the profile as the Organisation page's Profile tab;
+        // the HR head and the CBO keep this page.
+        show: (c) => c.governance && !c.isOwner,
       },
       { to: "/integrations", label: "Integrations", icon: Plug, show: (c) => c.governance },
       { to: "/masters", label: "Master data", icon: Database, show: (c) => c.governance },
@@ -298,6 +331,18 @@ export const NAV_GROUPS: NavGroup[] = [
         show: (c) => c.isSuperUser,
       },
       {
+        to: "/platform-agent-studio",
+        label: "Agent studio",
+        icon: PackageOpen,
+        show: (c) => c.isSuperUser,
+      },
+      {
+        to: "/platform-agent-workflows",
+        label: "Agent workflows",
+        icon: Workflow,
+        show: (c) => c.isSuperUser,
+      },
+      {
         to: "/platform-health",
         label: "Service health",
         icon: Activity,
@@ -319,12 +364,18 @@ export const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-/** The way of working a page belongs to (null for shared pages), by longest matching path. */
+/**
+ * The way of working a page belongs to (null for shared pages). Only a menu
+ * page itself sets the mode; a record opened from either side (a requisition
+ * linked from the hiring desk, a candidate from an approval) keeps the mode you
+ * are in, so following a link never flips the menu.
+ */
 export function modeForPath(pathname: string): WorkMode | null {
   let best: { len: number; mode: WorkMode | null } = { len: -1, mode: null };
+  const path = pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
   for (const item of NAV_GROUPS.flatMap((g) => g.items)) {
     const to = item.to;
-    const hit = to === "/" ? pathname === "/" : pathname === to || pathname.startsWith(`${to}/`);
+    const hit = path === to;
     if (hit && to.length > best.len) best = { len: to.length, mode: item.mode ?? null };
   }
   return best.mode;

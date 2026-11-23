@@ -231,4 +231,60 @@ export function registerOrgTools(): void {
       };
     },
   });
+
+  /* Pay conventions (docs/pay-terms-plan.md, Phase 2). Conventions, never figures. */
+  registerTool({
+    name: "read_pay_conventions",
+    description:
+      "The organisation's pay conventions in force: reporting currency, how pay is usually quoted, kinds of work, the tolerance over a band, pooling regions and pay zones (per zone: countries and cities, currency, pay basis, payments a year, what a figure includes, hours, working days, kinds of work, contract types, employing entity, location pay factor, region) — and any proposal waiting for a decision.",
+    input: z.object({}),
+    risk: "read",
+    run: async (ctx) => {
+      const { currentConventions } = await import("@/lib/pay-settings.server");
+      const { db } = await import("../db");
+      const { payConventionDrafts } = await import("../../../drizzle/schema");
+      const { and, eq } = await import("drizzle-orm");
+      const [pending] = await db
+        .select({ id: payConventionDrafts.id, summary: payConventionDrafts.summary })
+        .from(payConventionDrafts)
+        .where(
+          and(eq(payConventionDrafts.orgId, ctx.orgId), eq(payConventionDrafts.status, "pending")),
+        )
+        .limit(1);
+      return { inForce: await currentConventions(ctx.orgId), pending: pending ?? null };
+    },
+  });
+
+  registerTool({
+    name: "propose_pay_conventions",
+    description:
+      "Propose the organisation's complete pay conventions (the whole set, not a change list): reporting currency, pay basis default, hours, kinds of work, the % over a band's ceiling that blocks, pooling regions (name, rule: same_zone | same_region | entity_countries | global_remote) and pay zones (name; ISO country codes; optional cities; ISO currency; basis annual | monthly | daily | hourly; payments a year 12–16; includes: base, variable, bonus, equity, employer_pf, gratuity, allowances, thirteenth_month, fourteenth_month, tfr; hours per week; working days a year; kinds; contract types; entity; geo factor; region name). Only what the admin or the organisation's sources state — never a pay figure or band. Nothing is applied: it returns the changes; then request_approval with subject { type: 'pay_conventions', draftId } and assignee_role 'hr_head'.",
+    input: z.object({ conventions: z.record(z.string(), z.unknown()) }),
+    // Inert until approved: the approval card is the human gate.
+    risk: "read",
+    describe: () => "Propose the organisation's pay conventions",
+    run: async (ctx, input) => {
+      const { PayConventions } = await import("@/lib/pay-settings");
+      const parsed = PayConventions.safeParse(input.conventions);
+      if (!parsed.success)
+        return {
+          ok: false,
+          error: parsed.error.issues
+            .slice(0, 6)
+            .map((i) => `${i.path.join(".") || "conventions"}: ${i.message}`)
+            .join("; "),
+        };
+      const { proposeConventionsCore } = await import("@/lib/pay-settings.server");
+      const out = await proposeConventionsCore(ctx.orgId, parsed.data, {
+        agentRunId: ctx.runId ?? null,
+        proposedBy: ctx.principalUserId,
+      });
+      return {
+        ok: true,
+        draftId: out.draftId,
+        changes: out.changes,
+        next: 'REQUIRED next call: request_approval with assignee_role "hr_head" and subject { type: "pay_conventions", draftId: "<the draftId above>" }.',
+      };
+    },
+  });
 }

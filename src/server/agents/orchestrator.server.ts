@@ -26,6 +26,7 @@ import {
   requisitions,
 } from "@db/schema";
 import { log } from "../log";
+import { agentRunScope } from "./context";
 import { loadPolicy } from "./policy";
 import { getAgent } from "./registry";
 import { startRun, syncGateTasks } from "./runtime.server";
@@ -104,6 +105,15 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
   let started = 0;
   if (!e.subjectId) return { started, synced };
 
+  // 0. Agent workflows granted to this organisation run alongside the built-in
+  // flow (docs/agent-workflows.md); a workflow failing never blocks it.
+  try {
+    const { onWorkflowEvent } = await import("./workflows.server");
+    started += await onWorkflowEvent(e);
+  } catch (err) {
+    log.error("workflow.start_failed", { org_id: e.orgId, type: e.type, error: err as Error });
+  }
+
   // 1. Keep inbox gates in step with decisions made on the regular pages.
   if (e.type === "requisition.status_changed") {
     const from = String((e.payload as { from?: string }).from ?? "");
@@ -165,6 +175,7 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
 
   const dispatch = async (
     agent:
+      | "requisition"
       | "jd"
       | "publishing"
       | "distribution"
@@ -241,6 +252,20 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
   ) {
     const { onRequisitionEnded } = await import("../desk/desk.server");
     await onRequisitionEnded(e.orgId, req.id, payload.to, e.actorUserId);
+  }
+
+  // An approver sent the requisition back with what should change: the
+  // Requisition agent applies it (pay terms, band, skills…) and resubmits, or
+  // asks a person when it cannot — nobody is left wondering why nothing moved.
+  if (
+    e.type === "requisition.status_changed" &&
+    payload.to === "draft" &&
+    (e.payload as { sentBack?: boolean }).sentBack
+  ) {
+    await dispatch(
+      "requisition",
+      `An approver sent requisition ${req.code} "${req.title}" back to draft with this change: "${String(payload.comment ?? "").slice(0, 500)}". Read get_requisition, make exactly that change (set_pay_terms then set_compensation for pay or currency; update_requisition_draft for other fields), say in one line what you changed, then submit_requisition_for_approval. Never assume what the change leaves open: if it gives pay without saying per month, per year or per hour, or a currency or basis different from the role's current one without saying which, or the new band is far from the current one, ask_human first with the exact choice (e.g. "Is 2,000–5,000 USD per month or per year?") and make the change only after the answer. If the change is unclear or you cannot make it, ask a person instead of resubmitting it unchanged.`,
+    );
   }
 
   if (e.type === "requisition.status_changed" && payload.to === "approved") {
@@ -401,7 +426,11 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
   }
 
   if (applicationId && e.type === "screening_call.ended") {
-    const p = e.payload as { status?: string; endReason?: string };
+    const p = e.payload as { status?: string; endReason?: string; missingDetails?: string[] };
+    // Required details the call did not get (checked on every ending, also a cut-off).
+    const missing = p.missingDetails?.length
+      ? ` The call did not get ${p.missingDetails.join(", ")}: include in your note that a person should ask for them (or send the pay & availability form).`
+      : "";
     const [app] = await db
       .select({ stage: applications.stage })
       .from(applications)
@@ -411,7 +440,7 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
       await dispatch(
         "screening",
         p.status === "completed" && p.endReason !== "not_interested"
-          ? `Candidate application ${applicationId} (${req.code} "${req.title}") took the AI screening call and the answers were graded. Read the result, add your proceed / hold recommendation as a candidate note, then ask a person to decide (request_approval, screening_decision). Never move them yourself — a person decides.`
+          ? `Candidate application ${applicationId} (${req.code} "${req.title}") took the AI screening call and the answers were graded.${missing} Read the result, add your proceed / hold recommendation as a candidate note, then ask a person to decide (request_approval, screening_decision). Never move them yourself — a person decides.`
           : `Candidate application ${applicationId} (${req.code} "${req.title}"): the AI screening call ended — ${p.endReason ?? p.status}. Act on how it ended as your instructions say (the written assessment, or a note for a person).`,
         { type: "application", id: applicationId },
       );
@@ -628,7 +657,9 @@ export function kickAgents(orgId: string): void {
   const lead = !kicking.has(orgId);
   if (lead) kicking.add(orgId);
   inFlight++;
-  void (async () => {
+  // Detach from the caller's run scope: the tick drives other runs (each sets
+  // its own scope) and must not credit their events to the run that kicked it.
+  void agentRunScope.exit(async () => {
     try {
       const { ensureAgentsRegistered } = await import("./index");
       ensureAgentsRegistered();
@@ -643,7 +674,7 @@ export function kickAgents(orgId: string): void {
       inFlight--;
       if (lead) kicking.delete(orgId);
     }
-  })();
+  });
 }
 
 /** Events still waiting, for diagnostics. */
@@ -722,6 +753,15 @@ async function recentRun(
  */
 export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<number> {
   let started = 0;
+  // Every answered AI phone call gets its Voice Guard review (mandatory).
+  if (getAgent("voice_guard")) {
+    try {
+      const { sweepCallReviews } = await import("../voice/guard/review.server");
+      started += (await sweepCallReviews(opts)).started;
+    } catch (err) {
+      log.warn("voice_guard.sweep_failed", { error: err as Error });
+    }
+  }
   // Applicants who just arrived (any channel) are scored within minutes, not
   // at the next 6-hourly pass; agent-added ones are scored by the run that added them.
   if (getAgent("intake")) {
@@ -864,6 +904,41 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
         .update(orgProfiles)
         .set({ nextRereadAt: new Date(Date.now() + 30 * 864e5), updatedAt: new Date() })
         .where(eq(orgProfiles.orgId, orgId));
+      started++;
+    }
+  }
+  // The Labour law & policy agent's weekly read of the organisation's approved
+  // official sources (docs/labour-policy-agent-plan.md): unchanged pages cost no AI call.
+  if (getAgent("labour_policy")) {
+    for (const orgId of await enabledOrgs("labour_policy", opts.orgId)) {
+      const { policySources } = await import("@db/schema");
+      const [src] = await db
+        .select({ id: policySources.id })
+        .from(policySources)
+        .where(and(eq(policySources.orgId, orgId), eq(policySources.active, true)))
+        .limit(1);
+      if (!src) continue;
+      const [recent] = await db
+        .select({ id: agentRuns.id })
+        .from(agentRuns)
+        .where(
+          and(
+            eq(agentRuns.orgId, orgId),
+            eq(agentRuns.agentType, "labour_policy"),
+            eq(agentRuns.mode, "live"),
+            sql`(${agentRuns.status} in ('queued','running','awaiting_human') or ${agentRuns.createdAt} >= now() - interval '7 days')`,
+          ),
+        )
+        .limit(1);
+      if (recent) continue;
+      const principal = await ownerOf(orgId);
+      if (!principal) continue;
+      await startRun({
+        orgId,
+        agentType: "labour_policy",
+        principalUserId: principal,
+        goal: "Weekly policy check: read each approved source, record every change that matters to hiring where the organisation hires with the source's exact words, and ask the HR head about each. If nothing changed, say so.",
+      });
       started++;
     }
   }

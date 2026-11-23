@@ -15,8 +15,21 @@
 import { CEILING_MESSAGE, LEG_LIMIT_MESSAGE } from "../agents/run-messages";
 import { localWhen } from "@/lib/local-time";
 import { placeLabel } from "@/lib/work-mode";
+import type { Stage } from "@/lib/lifecycle";
 import { sourceLabel as channelSourceLabel } from "@/lib/job-channels";
-import { and, asc, desc, eq, ilike, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm";
 import { z } from "zod";
 
 import { INJECTION_RULES, aiJson, untrusted } from "@/lib/ai-gateway.server";
@@ -329,6 +342,35 @@ const Command = z.discriminatedUnion("type", [
     top: z.number().int().min(1).max(20).optional(),
     ranks: z.array(z.number().int().min(1).max(50)).max(20).optional(),
   }),
+  z.object({
+    // "call again", "do the screening call again", "phone Meera": an AI phone screening call.
+    type: z.literal("call_candidate"),
+    name: z.string().trim().max(120).optional(),
+    ranks: z.array(z.number().int().min(1).max(50)).max(1).optional(),
+    /** Why, in their words — needed to repeat a completed call. */
+    reason: z.string().trim().max(500).optional(),
+  }),
+  z.object({
+    // An AI screening call already arranged: when it rings, move it, cancel it.
+    type: z.literal("manage_call"),
+    action: z.enum(["when", "move", "cancel"]),
+    name: z.string().trim().max(120).optional(),
+    ranks: z.array(z.number().int().min(1).max(50)).max(1).optional(),
+    /** "now", or the organisation's local time "YYYY-MM-DD HH:mm". */
+    when: z.string().trim().max(40).optional(),
+    reason: z.string().trim().max(500).optional(),
+  }),
+  z.object({
+    // Going back a step (the organisation's rule: only for a reason the desk judges).
+    type: z.literal("go_back"),
+    step: z.enum(["rescore", "move_candidate"]),
+    name: z.string().trim().max(120).optional(),
+    ranks: z.array(z.number().int().min(1).max(50)).max(1).optional(),
+    toStage: z
+      .enum(["sourced", "applied", "ai_screened", "shortlisted", "l1", "l2", "l3", "reserve"])
+      .optional(),
+    reason: z.string().trim().max(500).optional(),
+  }),
   z.object({ type: z.literal("new_role") }),
   z.object({ type: z.literal("use_existing"), code: z.string().max(40).optional() }),
   z.object({ type: z.literal("close_role") }),
@@ -350,6 +392,8 @@ const Command = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("feedback"),
     text: z.string().min(1).max(1000),
+    /** The OPEN REQUEST it is about, by its title — the desk never guesses which. */
+    request: z.string().min(1).max(300).optional(),
     /** A template the person asked for by name ("use the Yavar template"). */
     template: z.string().min(1).max(200).optional(),
   }),
@@ -391,11 +435,14 @@ const SYSTEM = [
   '- JD details (only when the person gives them): responsibilities (their key responsibilities, as text), reportingTo, successMeasures (what success looks like), education. If they ask you to fill these from the market / research / "you decide", set researchRole true.',
   '- "command": {"type":"none"} unless the person asks to act: "talk to / screen / call the first 5" → {"type":"screen","top":5}; "screen 1, 3 and 4" → {"type":"screen","ranks":[1,3,4]}; "create a new role" → {"type":"new_role"}; "use REQ-2026-014" → {"type":"use_existing","code":"REQ-2026-014"}.',
   '- "command" also: "close / cancel / delete / withdraw this role" → {"type":"close_role"}.',
+  '- Going back a step: "re-score the candidates" → {"type":"go_back","step":"rescore"}; "send Meera back to screening", "move candidate 2 back to shortlisted", "undo the rejection of Ravi", "bring her back to L1" → {"type":"go_back","step":"move_candidate"} with "name" or "ranks":[n] and "toStage" (one of sourced, applied, ai_screened, shortlisted, l1, l2, l3, reserve — "screening" is "applied", undoing a rejection is "shortlisted" unless they say otherwise). Add "reason":"<their words>" when they say why; when the desk has just asked why and they answer, it is the same go_back command with "reason" and the details from the conversation. Never feedback.',
+  '- An AI screening call that FACTS shows is already arranged: "when is the call?" → {"type":"manage_call","action":"when"}; "call now", "call her now", "move the call to Friday 3 pm", "she is unavailable tomorrow, call on Thursday" → {"type":"manage_call","action":"move","when":"now" or "YYYY-MM-DD HH:mm" in the organisation\'s time (NOW gives today)}; "cancel the call" → {"type":"manage_call","action":"cancel"}. Add "name" when they name the candidate and "reason" with their words. With no call arranged, calling is call_candidate.',
+  '- "call again", "do the screening call again", "redo the AI call", "phone Meera", "call candidate 2" → {"type":"call_candidate"} with "name" when they name the candidate (as they said it) or "ranks":[n] for a rank — never feedback, even when OPEN REQUESTS lists something: the system arranges an AI phone screening call. Add "reason":"<their words>" when they say why. When the desk has just asked why a call should be repeated and they answer, that is the same command with "reason" (and the name from the conversation).',
   '- When the person delegates a detail to you or to the market ("as per market needs", "you decide", "what does the market say?", "pick it up from research") → {"type":"research","fields":[...]} with the fields they delegated: "skills", "experience" and/or "budget". (JD details are not a research command — for those set researchRole true as above.) When OPEN PROPOSAL is yes and they agree ("ok", "yes", "use these", "go ahead") → {"type":"accept"}.',
   '- "show / see / open / read the JD (job description)" → {"type":"show_jd"}; the system posts the full text. Never summarise the JD instead or send the person elsewhere to read it.',
   '- "show / change the interview plan, the rounds, the panel size, what a round rates, or who the hiring manager is" → {"type":"show_interview_plan"}; the system posts the plan, which the person edits right in the card. Never describe or change the plan yourself.',
   '- Templates: whenever the person names or asks about a template ("use the Yavar template", "which template did you use?"), return {"type":"feedback","text":"<their words>","template":"<the name as they said it>"} — even when no request is open. The system checks the templates (by name and by content) and answers. Never state from memory or from earlier messages which templates exist; FACTS lists them.',
-  '- When OPEN REQUESTS lists a request and the person comments on it, objects to it or asks for a change ("give more weight to experience", "budget is too high", "use Pune instead") — or answers an agent\'s question — → {"type":"feedback","text":"<what they want, faithfully, in their words>"}. The system sends it to the agent, which revises and asks again. This includes a job description waiting for approval: "use the X template", "make it shorter", "add a section on Y" are feedback (changes to the JD), not an approval decision; when they name a template add "template":"<the name as they said it>".',
+  '- When OPEN REQUESTS lists a request and the person comments on it, objects to it or asks for a change ("give more weight to experience", "budget is too high", "use Pune instead") — or answers an agent\'s question — → {"type":"feedback","text":"<what they want, faithfully, in their words>","request":"<the title of the OPEN REQUEST it is about, copied exactly>"}. Only when the message is clearly about that request; otherwise use another command or none. The system sends it to the agent, which revises and asks again. This includes a job description waiting for approval: "use the X template", "make it shorter", "add a section on Y" are feedback (changes to the JD), not an approval decision; when they name a template add "template":"<the name as they said it>".',
   '- The reply must never promise an action ("I\'ll benchmark…", "I\'ll check…"): the desk acts only through commands, and the system reports what it did. With a research command the reply can be empty.',
   '- When the LATEST message names 2–3 distinct hiring needs, each with its own role ("I have 3 requirements: Head of AI, Intern, Data Scientist"), the desk runs them in PARALLEL: return needs: [{title, slots}] — one entry per need, its title and the details said for it in slots — and command {"type":"split_needs"}. Each need becomes its own thread with its own questions and its own approvals. Only for genuinely distinct needs in the LATEST message; one role with extra context is not a split. The first need\'s details also go in "slots" as usual.',
   '- "understood": one short line stating what the LATEST message adds or asks, in the person\'s terms ("Three roles named — Head of AI, Intern, Data Scientist; asking which to start with"). Fill it even when no slot could be set yet; leave it empty only when the message truly added nothing.',
@@ -430,6 +477,7 @@ export async function runTurn(
       (await hiringManagerOptions(orgId)).map((m) => m.name).join(", ") || "none registered yet"
     }`,
     `STAGE: ${conv.status}`,
+    `NOW (organisation's time): ${localWhen(new Date(), await orgTimeZone(orgId))}`,
     `OPEN PROPOSAL: ${open ? `yes — ${JSON.stringify({ ...open.proposal, sources: undefined, reasoning: undefined })} (if the person asks for changes to it, put the changed full lists in "slots")` : "no"}`,
     `OPEN REQUESTS (from agents in this thread): ${
       requests.length
@@ -1231,6 +1279,18 @@ async function handleUserMessageInner(
     await screenCandidates(conv, userId, ids);
     return;
   }
+  if (cmd.type === "manage_call") {
+    await manageCallFromDesk(conv, userId, cmd);
+    return;
+  }
+  if (cmd.type === "go_back") {
+    await goBackFromDesk(conv, userId, cmd);
+    return;
+  }
+  if (cmd.type === "call_candidate") {
+    await callCandidateFromDesk(conv, userId, cmd);
+    return;
+  }
   if (cmd.type === "show_jd") {
     await showJd(conv, understood);
     return;
@@ -1248,7 +1308,7 @@ async function handleUserMessageInner(
     return;
   }
   if (cmd.type === "feedback") {
-    await sendFeedback(conv, userId, cmd.text, understood, cmd.template);
+    await sendFeedback(conv, userId, cmd.text, understood, cmd.template, cmd.request);
     return;
   }
   if (cmd.type === "accept" && (await latestProposal(conv))) {
@@ -1735,7 +1795,7 @@ const AGENT_TITLE: Record<string, string> = {
   sourcing: "Sourcing agent",
   distribution: "Distribution agent",
   org_context: "Organisation context agent",
-  copilot: "Copilot",
+  copilot: "Aditi",
 };
 
 /** Agents that work alongside the journey rather than being a step of it. */
@@ -2849,6 +2909,7 @@ export async function deskFacts(conv: Conversation): Promise<string> {
     `Job description: ${jd ? jd.replace("_", " ") : "none yet"}.`,
     await jdTemplateFacts(conv.orgId, conv.requisitionId),
     `Candidates in its pipeline: ${c?.total ?? 0} (${c?.scored ?? 0} scored, ${c?.shortlisted ?? 0} shortlisted).`,
+    await arrangedCallsFact(conv),
     progress.next ? `Current journey step: ${progress.next.stage} — ${progress.next.text}` : "",
   ]
     .filter(Boolean)
@@ -3474,6 +3535,8 @@ export async function sendFeedback(
   text: string,
   understood: { label: string; value: string }[] = [],
   template?: string,
+  /** The open request it is about, by title (the desk's reading of the message). */
+  requestTitle?: string,
 ): Promise<void> {
   // "the Yavar template" → "Yavar", so replies don't read "Yavar template template".
   template =
@@ -3482,8 +3545,25 @@ export async function sendFeedback(
       .replace(/\s+/g, " ")
       .trim() || undefined;
   understood = [...understood, { label: "Your change", value: text }];
-  const requests = await openRequests(conv);
+  const allRequests = await openRequests(conv);
   const asksTemplate = Boolean(template?.trim());
+  // Which request it is about is never guessed: a real thread sent "call again" to a
+  // waiting job-feed listing because it was the first open request.
+  const named = requestTitle?.trim().toLowerCase();
+  const requests =
+    named && !asksTemplate
+      ? allRequests.filter((r) => r.title.trim().toLowerCase() === named)
+      : allRequests;
+  if (!asksTemplate && allRequests.length > 1 && requests.length !== 1) {
+    await postMessage(conv, {
+      role: "desk",
+      body: `Which request is that about — ${allRequests
+        .slice(0, 5)
+        .map((r) => `"${r.title}" (${AGENT_TITLE[r.agentType] ?? r.agentType})`)
+        .join(", ")} — or something else? Nothing was sent yet.`,
+    });
+    return;
+  }
   const target =
     requests.find((r) =>
       // A template request is about the job description: only the JD agent's
@@ -4373,6 +4453,701 @@ export async function announceNewApplicants(orgId?: string): Promise<number> {
     posted++;
   }
   return posted;
+}
+
+/** The candidate's AI screening call that has not happened yet, if any. */
+async function openCallFor(orgId: string, applicationId: string) {
+  const { screeningCalls } = await import("@db/schema");
+  const { OPEN_CALL } = await import("../voice/request.server");
+  const [c] = await db
+    .select({ id: screeningCalls.id, status: screeningCalls.status, dueAt: screeningCalls.dueAt })
+    .from(screeningCalls)
+    .where(
+      and(
+        eq(screeningCalls.orgId, orgId),
+        eq(screeningCalls.applicationId, applicationId),
+        eq(screeningCalls.purpose, "screening"),
+        inArray(screeningCalls.status, [...OPEN_CALL]),
+      ),
+    )
+    .orderBy(desc(screeningCalls.createdAt))
+    .limit(1);
+  return c ?? null;
+}
+
+/** FACTS: this role's arranged AI screening calls, and when they ring. */
+async function arrangedCallsFact(conv: Conversation): Promise<string> {
+  if (!conv.requisitionId) return "";
+  const { screeningCalls } = await import("@db/schema");
+  const { OPEN_CALL } = await import("../voice/request.server");
+  const rows = await db
+    .select({
+      name: candidates.fullName,
+      status: screeningCalls.status,
+      dueAt: screeningCalls.dueAt,
+    })
+    .from(screeningCalls)
+    .innerJoin(candidates, eq(candidates.id, screeningCalls.candidateId))
+    .where(
+      and(
+        eq(screeningCalls.orgId, conv.orgId),
+        eq(screeningCalls.requisitionId, conv.requisitionId),
+        eq(screeningCalls.purpose, "screening"),
+        inArray(screeningCalls.status, [...OPEN_CALL]),
+      ),
+    )
+    .limit(10);
+  if (!rows.length) return "Arranged AI screening calls: none.";
+  const tz = await orgTimeZone(conv.orgId);
+  return `Arranged AI screening calls: ${rows
+    .map(
+      (r) =>
+        `${r.name} — ${r.status.replace(/_/g, " ")}${r.dueAt ? `, rings ${localWhen(r.dueAt, tz)}` : ""}`,
+    )
+    .join("; ")}.`;
+}
+
+/**
+ * An arranged AI screening call, from the chat: when it rings, move it (inside
+ * the calling hours — "now" outside them is the next opening, said plainly), or
+ * cancel it. Same roles as "Call now"; every change audited. Moving a call that
+ * repeats a completed screen re-checks the reason it was arranged on against the
+ * last call's record first, and cancels it when the record does not support it —
+ * the hiring desk's judgement stands. (A real thread on 10 November could only
+ * answer "A screening call is already arranged" to "call now".)
+ */
+export async function manageCallFromDesk(
+  conv: Conversation,
+  userId: string,
+  cmd: {
+    action: "when" | "move" | "cancel";
+    name?: string | undefined;
+    ranks?: number[] | undefined;
+    when?: string | undefined;
+    reason?: string | undefined;
+  },
+): Promise<void> {
+  const say = (body: string) => postMessage(conv, { role: "desk", body });
+  if (!conv.requisitionId) {
+    await say("Choose or create the role first.");
+    return;
+  }
+  const { assertRole } = await import("@/lib/auth.middleware");
+  try {
+    await assertRole(userId, conv.orgId, ["recruiter", "hr_head", "president_cbo"]);
+  } catch {
+    await say("Only TA, the HR head or the CBO can change a screening call.");
+    return;
+  }
+  const app = await pickCandidate(conv, cmd, say, { lastCalled: true });
+  if (!app) return;
+  const call = await openCallFor(conv.orgId, app.id);
+  const tz = await orgTimeZone(conv.orgId);
+  if (!call) {
+    await say(
+      `No screening call is arranged for ${app.name}. Say "call ${app.name} again" to arrange one.`,
+    );
+    return;
+  }
+  const { screeningCalls } = await import("@db/schema");
+  const audit = (action: string, detail: Record<string, unknown>) =>
+    writeAudit({
+      actor: `user:${userId}`,
+      actorUserId: userId,
+      orgId: conv.orgId,
+      action,
+      entityType: "screening_call",
+      entityId: call.id,
+      detail: { via: "hiring_desk", conversation_id: conv.id, ...detail },
+    });
+  const cancel = async (why: string) => {
+    await db
+      .update(screeningCalls)
+      .set({ status: "cancelled", dueAt: null, updatedAt: new Date() })
+      .where(
+        and(
+          eq(screeningCalls.id, call.id),
+          eq(screeningCalls.orgId, conv.orgId),
+          inArray(screeningCalls.status, [
+            "requested",
+            "approved",
+            "callback",
+            "no_answer",
+            "failed",
+          ]),
+        ),
+      );
+    await audit("screening_call.cancelled", { reason: why.slice(0, 500) });
+  };
+  if (call.status === "dialling" || call.status === "in_progress") {
+    await say(`The call with ${app.name} is happening right now.`);
+    return;
+  }
+  if (cmd.action === "when") {
+    await say(
+      call.dueAt
+        ? `The screening call with ${app.name} rings ${localWhen(call.dueAt, tz)}.`
+        : `A screening call with ${app.name} is arranged (${call.status.replace(/_/g, " ")}).`,
+    );
+    return;
+  }
+  if (cmd.action === "cancel") {
+    await cancel(cmd.reason ?? "cancelled from the hiring desk");
+    await say(`Cancelled the screening call with ${app.name}.`);
+    return;
+  }
+  // Move. A repeat of a completed screen is re-checked on its record first.
+  const { auditLog } = await import("@db/schema");
+  const [asked] = await db
+    .select({ detail: auditLog.detail })
+    .from(auditLog)
+    .where(
+      and(
+        eq(auditLog.orgId, conv.orgId),
+        eq(auditLog.action, "screening_call.requested"),
+        eq(auditLog.entityId, call.id),
+      ),
+    )
+    .orderBy(desc(auditLog.createdAt))
+    .limit(1);
+  const d = (asked?.detail ?? {}) as { again?: boolean; reason?: string };
+  if (d.again) {
+    const verdict = await judgeGoingBack(conv.orgId, {
+      step: `repeat the AI phone screening call with ${app.name}, who has already completed one`,
+      reason: d.reason ?? "(no reason was recorded)",
+      evidence: await callEvidence(conv.orgId, app.id).catch(() => ""),
+    });
+    if (!verdict?.valid) {
+      const why = verdict?.why ?? "the reason could not be checked";
+      await cancel(`re-checked before moving: ${why}`);
+      await audit("desk.go_back_refused", {
+        step: "screening_call_again",
+        reason: (d.reason ?? "").slice(0, 500),
+        why,
+      });
+      await say(
+        `This call repeats ${app.name}'s completed screen, and it was arranged on "${d.reason ?? "no reason"}". The last call's record does not support that: ${why} So I have cancelled it. If there is a real problem with the last call or new information, tell me what it is and I'll arrange a call.`,
+      );
+      return;
+    }
+  }
+  const { phoneScreeningPolicyOf } = await import("../voice/settings.server");
+  const { callbackAt, inWindow, nextWindowStart } = await import("../voice/schedule");
+  const { callingHours } = await import("../voice/call-brief.server");
+  const policy = await phoneScreeningPolicyOf(conv.orgId);
+  const now = Date.now();
+  const asap = !cmd.when || /^now$/i.test(cmd.when);
+  const dueAt = asap ? nextWindowStart(now, policy, tz) : callbackAt(cmd.when, now, policy, tz);
+  await db
+    .update(screeningCalls)
+    .set({ dueAt, updatedAt: new Date() })
+    .where(and(eq(screeningCalls.id, call.id), eq(screeningCalls.orgId, conv.orgId)));
+  await audit("screening_call.moved", {
+    from: call.dueAt?.toISOString() ?? null,
+    to: dueAt.toISOString(),
+    asked: cmd.when ?? "now",
+    reason: (cmd.reason ?? "").slice(0, 500),
+  });
+  const soon = dueAt.getTime() - now < 2 * 60_000;
+  const outside = asap && !inWindow(now, policy, tz);
+  await say(
+    soon
+      ? `Moved the screening call with ${app.name} to now — it rings in a minute or two.`
+      : `${outside ? `It's outside your calling hours (${callingHours(policy)}), so the earliest is ` : `Moved the screening call with ${app.name} to `}${localWhen(dueAt, tz)}.${outside ? ` The call with ${app.name} now rings then.` : ""}`,
+  );
+}
+
+/**
+ * The candidate a desk command is about, in this role: named or ranked, else (when
+ * asked) the one the role's latest screening call was with. Says why when none or
+ * several match, and returns null.
+ */
+async function pickCandidate(
+  conv: Conversation,
+  cmd: { name?: string | undefined; ranks?: number[] | undefined },
+  say: (body: string) => Promise<unknown>,
+  opts: { lastCalled?: boolean } = {},
+): Promise<{ id: string; name: string } | null> {
+  if (!conv.requisitionId) return null;
+  const inRole = and(
+    eq(applications.orgId, conv.orgId),
+    eq(applications.requisitionId, conv.requisitionId),
+  );
+  let picked: { id: string; name: string }[] = [];
+  if (cmd.ranks?.length) {
+    const [id] = await resolveRanks(conv, { ranks: cmd.ranks });
+    if (id)
+      picked = await db
+        .select({ id: applications.id, name: candidates.fullName })
+        .from(applications)
+        .innerJoin(candidates, eq(candidates.id, applications.candidateId))
+        .where(and(inRole, eq(applications.id, id)))
+        .limit(1);
+  } else if (cmd.name?.trim()) {
+    const words = cmd.name
+      .trim()
+      .split(/\s+/)
+      .filter((w) => w.length > 1);
+    picked = await db
+      .select({ id: applications.id, name: candidates.fullName })
+      .from(applications)
+      .innerJoin(candidates, eq(candidates.id, applications.candidateId))
+      .where(and(inRole, ...words.map((w) => ilike(candidates.fullName, `%${w}%`))))
+      .limit(5);
+  } else if (opts.lastCalled) {
+    const { screeningCalls } = await import("@db/schema");
+    picked = await db
+      .select({ id: applications.id, name: candidates.fullName })
+      .from(screeningCalls)
+      .innerJoin(applications, eq(applications.id, screeningCalls.applicationId))
+      .innerJoin(candidates, eq(candidates.id, applications.candidateId))
+      .where(
+        and(inRole, eq(screeningCalls.orgId, conv.orgId), eq(screeningCalls.purpose, "screening")),
+      )
+      .orderBy(desc(screeningCalls.createdAt))
+      .limit(1);
+  }
+  if (!picked.length) {
+    await say(
+      cmd.name
+        ? `I couldn't find "${cmd.name}" in this role's pipeline. Which candidate do you mean?`
+        : opts.lastCalled
+          ? "Who should I call? Name the candidate, or say their rank."
+          : "Which candidate? Name them, or say their rank.",
+    );
+    return null;
+  }
+  if (picked.length > 1) {
+    await say(
+      `More than one candidate matches: ${picked.map((p) => p.name).join(", ")}. Which one?`,
+    );
+    return null;
+  }
+  return picked[0]!;
+}
+
+/**
+ * "Call again" in the chat: arrange an AI phone screening call — the same core
+ * and role check as the "Call now" button (requestScreeningCall, audited
+ * screening_call.requested). The candidate: the one they named or ranked, else
+ * the one this role's latest screening call was with. A real thread on
+ * 10 November sent "call again" to a waiting job-feed listing as a change.
+ */
+export async function callCandidateFromDesk(
+  conv: Conversation,
+  userId: string,
+  cmd: {
+    name?: string | undefined;
+    ranks?: number[] | undefined;
+    reason?: string | undefined;
+  },
+): Promise<void> {
+  const say = (body: string) => postMessage(conv, { role: "desk", body });
+  if (!conv.requisitionId) {
+    await say("Choose or create the role first, then I can arrange a screening call.");
+    return;
+  }
+  const { assertRole } = await import("@/lib/auth.middleware");
+  try {
+    await assertRole(userId, conv.orgId, ["recruiter", "hr_head", "president_cbo"]);
+  } catch {
+    await say("Only TA, the HR head or the CBO can arrange a screening call.");
+    return;
+  }
+  const app = await pickCandidate(conv, cmd, say, { lastCalled: true });
+  if (!app) return;
+  // Already arranged: "call now" moves that call — never a dead end.
+  if (await openCallFor(conv.orgId, app.id)) {
+    await manageCallFromDesk(conv, userId, {
+      action: "move",
+      name: app.name,
+      when: "now",
+      reason: cmd.reason,
+    });
+    return;
+  }
+  // Going back a step — a completed screen done again — needs a reason, judged here.
+  const { screeningCalls } = await import("@db/schema");
+  const [last] = await db
+    .select({ status: screeningCalls.status })
+    .from(screeningCalls)
+    .where(
+      and(
+        eq(screeningCalls.orgId, conv.orgId),
+        eq(screeningCalls.applicationId, app.id),
+        eq(screeningCalls.purpose, "screening"),
+      ),
+    )
+    .orderBy(desc(screeningCalls.createdAt))
+    .limit(1);
+  const goingBack = last?.status === "completed";
+  let accepted: { reason: string; why: string } | null = null;
+  if (goingBack) {
+    accepted = await reasonGate(conv, userId, {
+      stepKey: "screening_call_again",
+      step: `repeat the AI phone screening call with ${app.name}, who has already completed one`,
+      entity: { type: "application", id: app.id },
+      reason: cmd.reason,
+      ask: `${app.name} has already had a screening call. Repeating a completed step needs a reason — why should ${app.name} be called again? (For example: the call dropped, an answer was misheard, or there is new information.)`,
+      refuse: `I won't repeat ${app.name}'s screening call for that reason:`,
+      evidence: () => callEvidence(conv.orgId, app.id),
+    });
+    if (!accepted) return;
+  }
+  const { requestScreeningCall } = await import("../voice/request.server");
+  try {
+    const r = await requestScreeningCall({
+      orgId: conv.orgId,
+      applicationId: app.id,
+      requestedBy: userId,
+      requestedRunId: null,
+      actor: `user:${userId}`,
+      // A completed screen is done again only for a reason judged valid above.
+      again: goingBack,
+      ...(accepted ? { reason: accepted.reason } : {}),
+    });
+    const tz = await orgTimeZone(conv.orgId);
+    const soon = r.dueAt.getTime() - Date.now() < 2 * 60_000;
+    const because = accepted ? ` Reason accepted: ${accepted.why}` : "";
+    await postMessage(conv, {
+      role: "desk",
+      body: soon
+        ? `Arranged an AI screening call with ${app.name} — it rings in a minute or two.${because}`
+        : `Arranged an AI screening call with ${app.name} — it rings ${localWhen(r.dueAt, tz)}, the next time inside your calling hours.${because}`,
+      card: {
+        type: "reasoning",
+        understood: [{ label: "Call", value: app.name }],
+        missing: [],
+        next: "The call's result and its Voice Guard review come back here and under Agents → Call reviews.",
+      },
+    });
+  } catch (e) {
+    await say(
+      `I couldn't arrange the call: ${e instanceof Error ? e.message : "it could not be arranged."}`,
+    );
+  }
+}
+
+/**
+ * The organisation's rule for going back a step: a stated reason, judged by the
+ * desk (judgeGoingBack), before anything is redone. Asks when there is none;
+ * audits every verdict (desk.go_back_allowed / desk.go_back_refused) with the
+ * reason; says why when refused. Returns the accepted reason, or null (already said).
+ */
+async function reasonGate(
+  conv: Conversation,
+  userId: string,
+  g: {
+    stepKey: string;
+    /** What would be redone, for the judge ("re-score this role's candidates"). */
+    step: string;
+    entity: { type: string; id: string };
+    reason: string | undefined;
+    /** Said when no reason was given. */
+    ask: string;
+    /** Opens the refusal; the judge's why follows. */
+    refuse: string;
+    /** The system's record of the step, weighed against the reason. */
+    evidence: () => Promise<string>;
+  },
+): Promise<{ reason: string; why: string } | null> {
+  const say = (body: string) => postMessage(conv, { role: "desk", body });
+  const reason = g.reason?.trim();
+  if (!reason) {
+    await say(g.ask);
+    return null;
+  }
+  const evidence = await g.evidence().catch(() => "");
+  const verdict = await judgeGoingBack(conv.orgId, { step: g.step, reason, evidence });
+  await writeAudit({
+    actor: `user:${userId}`,
+    actorUserId: userId,
+    orgId: conv.orgId,
+    action: verdict?.valid ? "desk.go_back_allowed" : "desk.go_back_refused",
+    entityType: g.entity.type,
+    entityId: g.entity.id,
+    detail: {
+      conversation_id: conv.id,
+      step: g.stepKey,
+      reason: reason.slice(0, 500),
+      why: verdict?.why ?? "the reason could not be checked",
+    },
+  });
+  if (!verdict) {
+    await say("I couldn't check that reason just now, so nothing was changed. Please try again.");
+    return null;
+  }
+  if (!verdict.valid) {
+    await say(
+      `${g.refuse} ${verdict.why} If there is a concrete problem or new information, tell me what it is.`,
+    );
+    return null;
+  }
+  return { reason, why: verdict.why };
+}
+
+/**
+ * The record of a candidate's latest screening call, for judging "call again"
+ * (no words of theirs, no pay): outcome, length, line audio, the required details'
+ * status, answers kept and the Voice Guard's review.
+ */
+export async function callEvidence(orgId: string, applicationId: string): Promise<string> {
+  const { screeningCalls, callReviews } = await import("@db/schema");
+  const [c] = await db
+    .select()
+    .from(screeningCalls)
+    .where(
+      and(
+        eq(screeningCalls.orgId, orgId),
+        eq(screeningCalls.applicationId, applicationId),
+        eq(screeningCalls.purpose, "screening"),
+        // The last call that was answered — not one only arranged.
+        isNotNull(screeningCalls.startedAt),
+      ),
+    )
+    .orderBy(desc(screeningCalls.startedAt))
+    .limit(1);
+  if (!c) return "No answered screening call on record.";
+  const [r] = await db
+    .select()
+    .from(callReviews)
+    .where(and(eq(callReviews.orgId, orgId), eq(callReviews.callId, c.id)))
+    .limit(1);
+  const st = c.callStats;
+  return [
+    `Last screening call: ${c.status}, ended ${c.endReason ?? "unknown"}, ${c.durationS ?? 0} s, consent ${c.consentAt ? "given" : "not given"}.`,
+    st?.audio
+      ? `Line audio: ${st.audio.gaps} gaps in ${st.audio.frames} frames (speech running out mid-sentence), worst delay ${st.audio.maxLateMs} ms.`
+      : "Line audio: not measured.",
+    st
+      ? `Turn-taking: ${st.slowReplies} slow replies, ${st.talkOver} talk-over, ${st.bargeIns} interruptions.`
+      : "",
+    `Required details: ${
+      Object.entries(c.details?.required ?? {})
+        .map(([k, v]) => `${k.replace(/_/g, " ")} ${v}`)
+        .join(", ") || "none recorded"
+    }. Screening answers kept: ${c.answers.length}.`,
+    r
+      ? `Voice Guard review: ${r.verdict ?? r.status}, quality ${r.qualityScore ?? "-"} of 5; findings: ${
+          r.findings.map((f) => `[${f.severity}] ${f.summary}`).join(" ") || "none"
+        }`
+      : "Voice Guard review: none yet.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** A candidate's stage history, for judging a move back. */
+export async function stageEvidence(orgId: string, applicationId: string): Promise<string> {
+  const { stageEvents } = await import("@db/schema");
+  const ev = await db
+    .select({
+      from: stageEvents.fromStage,
+      to: stageEvents.toStage,
+      reason: stageEvents.reason,
+      at: stageEvents.createdAt,
+    })
+    .from(stageEvents)
+    .where(and(eq(stageEvents.orgId, orgId), eq(stageEvents.applicationId, applicationId)))
+    .orderBy(desc(stageEvents.createdAt))
+    .limit(6);
+  if (!ev.length) return "No stage changes on record.";
+  return `Stage history (newest first): ${ev
+    .map(
+      (e) =>
+        `${e.from ?? "new"} → ${e.to} on ${e.at.toISOString().slice(0, 10)}${e.reason ? ` (reason: ${e.reason.slice(0, 120)})` : ""}`,
+    )
+    .join("; ")}.`;
+}
+
+/** When the role's scores were made against which job description, for judging a re-score. */
+export async function scoreEvidence(orgId: string, requisitionId: string): Promise<string> {
+  const [sc] = (await db.execute(sql`
+    select count(*)::int n, max(m.computed_at) last
+    from match_scores m join applications a on a.id = m.application_id
+    where a.org_id = ${orgId} and a.requisition_id = ${requisitionId}`)) as unknown as {
+    n: number;
+    last: string | null;
+  }[];
+  const jds = await db
+    .select({
+      version: jobDescriptions.version,
+      status: jobDescriptions.status,
+      at: jobDescriptions.createdAt,
+    })
+    .from(jobDescriptions)
+    .where(and(eq(jobDescriptions.orgId, orgId), eq(jobDescriptions.requisitionId, requisitionId)))
+    .orderBy(desc(jobDescriptions.createdAt))
+    .limit(3);
+  return [
+    `Scores: ${sc?.n ?? 0} candidates scored, last at ${sc?.last ? new Date(sc.last).toISOString().slice(0, 16) : "never"}.`,
+    `Job descriptions (newest first): ${
+      jds
+        .map((j) => `v${j.version} ${j.status}, made ${j.at.toISOString().slice(0, 16)}`)
+        .join("; ") || "none"
+    }.`,
+  ].join("\n");
+}
+
+/** Stages a candidate may be sent back to from the desk (offer stages are HR's, not here). */
+const BACK_STAGES = [
+  "sourced",
+  "applied",
+  "ai_screened",
+  "shortlisted",
+  "l1",
+  "l2",
+  "l3",
+  "reserve",
+] as const;
+
+/**
+ * Going back a step on the desk (the organisation's rule: only for a reason the
+ * desk judges valid): re-score the role's candidates (rescoreThread), or move a
+ * candidate back a stage — including out of rejected or withdrawn — through
+ * moveStageCore (its transition rules, role checks and stage events; a move the
+ * flow allows only from on hold goes through on hold, both recorded).
+ */
+export async function goBackFromDesk(
+  conv: Conversation,
+  userId: string,
+  cmd: {
+    step: "rescore" | "move_candidate";
+    name?: string | undefined;
+    ranks?: number[] | undefined;
+    toStage?: (typeof BACK_STAGES)[number] | undefined;
+    reason?: string | undefined;
+  },
+): Promise<void> {
+  const say = (body: string) => postMessage(conv, { role: "desk", body });
+  if (!conv.requisitionId) {
+    await say("Choose or create the role first.");
+    return;
+  }
+  if (cmd.step === "rescore") {
+    const accepted = await reasonGate(conv, userId, {
+      stepKey: "rescore",
+      step: "re-score all of this role's active candidates against its job description, replacing their current scores",
+      entity: { type: "requisition", id: conv.requisitionId },
+      reason: cmd.reason,
+      ask: "Re-scoring replaces every candidate's current score, so it needs a reason — why should they be scored again? (For example: the job description changed, or the scores used the wrong requirements.)",
+      refuse: "I won't re-score the candidates for that reason:",
+      evidence: () => scoreEvidence(conv.orgId, conv.requisitionId!),
+    });
+    if (!accepted) return;
+    try {
+      const n = await rescoreThread(conv, userId);
+      await say(
+        `Re-scoring ${n} candidate${n === 1 ? "" : "s"} against the current job description. Reason accepted: ${accepted.why}`,
+      );
+    } catch (e) {
+      await say(`I couldn't re-score: ${e instanceof Error ? e.message : "it failed."}`);
+    }
+    return;
+  }
+  const app = await pickCandidate(conv, cmd, say);
+  if (!app) return;
+  const [row] = await db
+    .select({ stage: applications.stage })
+    .from(applications)
+    .where(and(eq(applications.id, app.id), eq(applications.orgId, conv.orgId)))
+    .limit(1);
+  const { FLOW, STAGE_LABEL, canMove, canonical } = await import("@/lib/lifecycle");
+  const from = canonical(row!.stage as Stage);
+  const to = cmd.toStage;
+  if (!to) {
+    await say(`Which stage should ${app.name} go back to? They are at ${STAGE_LABEL[from]} now.`);
+    return;
+  }
+  const closed = !FLOW.includes(from) && !["on_hold", "reserve"].includes(from);
+  const back = closed || (FLOW.includes(to) && FLOW.indexOf(to) < FLOW.indexOf(from));
+  if (!back) {
+    await say(
+      `${STAGE_LABEL[from]} → ${STAGE_LABEL[to]} is not going back a step. Move ${app.name} forward from the pipeline as usual.`,
+    );
+    return;
+  }
+  const accepted = await reasonGate(conv, userId, {
+    stepKey: "move_back",
+    step: `move ${app.name} back from ${STAGE_LABEL[from]} to ${STAGE_LABEL[to]}${closed ? " (undoing a closed outcome)" : ""}`,
+    entity: { type: "application", id: app.id },
+    reason: cmd.reason,
+    ask: `Moving ${app.name} back from ${STAGE_LABEL[from]} to ${STAGE_LABEL[to]} needs a reason — why? (For example: they were rejected by mistake, or new information about them.)`,
+    refuse: `I won't move ${app.name} back for that reason:`,
+    evidence: () => stageEvidence(conv.orgId, app.id),
+  });
+  if (!accepted) return;
+  const { activeOrgOf } = await import("@/lib/auth.middleware");
+  const org = await activeOrgOf(userId);
+  if (!org || org.orgId !== conv.orgId) {
+    await say("You are not a member of this organisation any more.");
+    return;
+  }
+  const actor = { orgId: conv.orgId, userId, memberEmail: org.memberEmail };
+  const { moveStageCore } = await import("@/lib/pipeline.server");
+  const why = `Back a step: ${accepted.reason}`.slice(0, 500);
+  try {
+    let via = "";
+    if (canMove(from, to)) {
+      await moveStageCore(actor, { applicationId: app.id, toStage: to, reason: why });
+    } else if (canMove(from, "on_hold") && canMove("on_hold", to)) {
+      await moveStageCore(actor, { applicationId: app.id, toStage: "on_hold", reason: why });
+      await moveStageCore(actor, { applicationId: app.id, toStage: to, reason: why });
+      via = " (through On hold, as the flow requires)";
+    } else {
+      await say(
+        `${STAGE_LABEL[from]} → ${STAGE_LABEL[to]} is not an allowed move. A closed candidate can go back to the reserve pool, Sourced or Shortlisted.`,
+      );
+      return;
+    }
+    await say(
+      `Moved ${app.name} back from ${STAGE_LABEL[from]} to ${STAGE_LABEL[to]}${via}. Reason accepted: ${accepted.why}`,
+    );
+  } catch (e) {
+    await say(`I couldn't move ${app.name}: ${e instanceof Error ? e.message : "it failed."}`);
+  }
+}
+
+/** The desk's judgement of a reason to go back a step (model JSON, zod-checked). */
+const GoingBackVerdict = z.object({
+  valid: z.boolean(),
+  /** One plain sentence, said to the person. */
+  why: z.string().trim().min(1).max(300),
+});
+
+/**
+ * Is there a real reason to go back a step in hiring? The organisation's rule
+ * (10 November): a completed step is repeated only for a strong reason, which
+ * the hiring desk asks for and judges. Valid: something went wrong with the
+ * step (a dropped or cut-off call, answers misheard or wrongly recorded, a
+ * technical fault), new information that changes it, or the candidate's own
+ * request with a reason. Not valid: no reason, the request said again, or only
+ * wanting a different result (a low score) — repeating a step to change its
+ * outcome is unfair to the other candidates. Null when it could not be checked.
+ */
+export async function judgeGoingBack(
+  orgId: string,
+  input: { step: string; reason: string; evidence?: string },
+): Promise<z.infer<typeof GoingBackVerdict> | null> {
+  const res = await aiJson({
+    system: [
+      'You check whether a recruiter\'s reason to go back a step in hiring is a real reason. Reply with JSON {"valid": boolean, "why": "one plain sentence to the recruiter"}.',
+      "Valid: something went wrong with the step (the call dropped or was cut off, answers were misheard or recorded wrongly, a technical fault, the candidate could not hear), new information that changes the step, or the candidate's own request with a reason.",
+      'Not valid: no reason; the request repeated ("call again", "just do it"); only wanting a different result ("the score is low", "I think they can do better") — repeating a step to change its outcome is unfair to the other candidates.',
+      "EVIDENCE is the system's own record of the step. A reason that states a fact about it (the call dropped or was cut off, the audio was unclear, answers were misheard or recorded wrongly, the scores used the wrong requirements, they were rejected by mistake) is valid only when EVIDENCE supports it; when EVIDENCE contradicts it or shows nothing of it, it is not valid — say which figures show otherwise. New information or the candidate's own request cannot be seen in the record: valid only when the reason says specifically what it is.",
+      "Judge only the reason and the evidence; never invent facts. Be brief and neutral; never mention the candidate's protected characteristics.",
+      INJECTION_RULES,
+    ].join("\n"),
+    prompt: [
+      `STEP TO REPEAT: ${input.step}`,
+      `REASON GIVEN: ${untrusted("recruiter_reason", input.reason)}`,
+      `EVIDENCE: ${untrusted("system_record", input.evidence?.trim() || "none on record")}`,
+    ].join("\n"),
+    orgId,
+    feature: "hiring_desk",
+    schema: GoingBackVerdict,
+  });
+  return res.ok ? res.data : null;
 }
 
 async function orgTimeZone(orgId: string): Promise<string> {

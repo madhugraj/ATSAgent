@@ -79,6 +79,17 @@ const open = () =>
 const evaluate = () => evaluateAgentHealth({ orgId });
 
 describe("rules", () => {
+  test("a studio agent failing in most of its runs here is flagged; studio tests are not", async () => {
+    for (const status of ["failed", "failed", "done", "failed"])
+      await run("studio:psychometric", { status });
+    for (const status of ["failed", "failed", "failed", "failed"])
+      await run("studio:test_abcd1234", { status });
+    await evaluate();
+    const flagged = (await open()).filter((i) => i.rule === "definition.studio_agent_failing");
+    expect(flagged.map((i) => i.agentType)).toEqual(["studio:psychometric"]);
+    expect(flagged[0]!.severity).toBe("warning");
+  });
+
   test("stuck run: critical while stuck, resolved (and audited) when it clears", async () => {
     const id = await run("intake", {
       status: "running",
@@ -362,6 +373,26 @@ describe("rules", () => {
     expect((await open()).map((i) => i.rule)).toContain("skills.ai_errors");
   });
 
+  test("HR copilot AI errors (chat and demand outlook, outside agent runs)", async () => {
+    await db.insert(aiUsageEvents).values(
+      Array.from({ length: 6 }, (_, i) => ({
+        orgId,
+        feature: i % 2 ? "copilot" : "demand_outlook",
+        provider: "x",
+        model: "x",
+        status: (i < 4 ? "error" : "ok") as never,
+      })),
+    );
+    try {
+      await evaluate();
+      const issue = (await open()).find((i) => i.rule === "skills.copilot_errors");
+      expect(issue).toMatchObject({ agentType: "copilot", severity: "serious" });
+      expect(issue!.detail).toMatchObject({ requests: 6, errors: 4 });
+    } finally {
+      await db.delete(aiUsageEvents).where(eq(aiUsageEvents.orgId, orgId));
+    }
+  });
+
   test("audit gap: a completed write tool call without its audit entry is critical", async () => {
     const [def] = await db
       .insert(agentDefinitions)
@@ -622,6 +653,47 @@ describe("an agent re-reading instead of working", () => {
       severity: "warning",
     });
   });
+
+  test("searching a document for different sections is not re-reading", async () => {
+    const id = await run("labour_policy");
+    await db.insert(agentSteps).values(
+      Array.from({ length: HEALTH.repeatedReadsPerRun + 3 }, (_, n) => ({
+        runId: id,
+        orgId,
+        seq: 500 + n,
+        kind: "tool",
+        toolName: "read_policy_document",
+        input: { documentUrl: "https://x.gov.in/a.pdf", search: [`section ${n}`] },
+        status: "ok",
+      })) as never,
+    );
+    await evaluate();
+    expect(
+      (await open()).find(
+        (i) => i.rule === "tools.repeated_reads" && i.agentType === "labour_policy",
+      ),
+    ).toBeUndefined();
+  });
+
+  test("a live phone call's length is not AI latency", async () => {
+    const { aiUsageEvents } = await import("../drizzle/schema");
+    const id = await run("screening_call");
+    await db.insert(aiUsageEvents).values(
+      Array.from({ length: HEALTH.minAiRequests + 1 }, () => ({
+        orgId,
+        agentRunId: id,
+        feature: "screening_call",
+        provider: "google",
+        model: "m",
+        status: "ok",
+        durationMs: 240_000,
+      })) as never,
+    );
+    await evaluate();
+    expect(
+      (await open()).find((i) => i.rule === "skills.latency" && i.agentType === "screening_call"),
+    ).toBeUndefined();
+  });
 });
 
 describe("a hiring manager who never answers the expert interview", () => {
@@ -867,6 +939,150 @@ describe("phone screening health", () => {
     await clear(many);
     await evaluate();
     expect(await ruleOf("screening_call.prompted")).toBeUndefined();
+  });
+});
+
+describe("Voice Guard health", () => {
+  const ruleOf = async (rule: string) => (await open()).find((i) => i.rule === rule);
+  async function endedCall(minutesAgo: number) {
+    const { candidates, screeningCalls } = await import("../drizzle/schema");
+    const [c] = await db
+      .insert(candidates)
+      .values({ orgId, fullName: "Guard Test", email: `vg-${Math.random()}@cand.local` } as never)
+      .returning({ id: candidates.id });
+    const [call] = await db
+      .insert(screeningCalls)
+      .values({
+        orgId,
+        candidateId: c!.id,
+        status: "completed",
+        startedAt: ago(minutesAgo + 5),
+        endedAt: ago(minutesAgo),
+      } as never)
+      .returning({ id: screeningCalls.id });
+    return { candidateId: c!.id, callId: call!.id };
+  }
+  const clear = async (candidateId: string) => {
+    const { candidates } = await import("../drizzle/schema");
+    await db.delete(candidates).where(eq(candidates.id, candidateId));
+  };
+
+  test("an answered call left without a review is flagged; resolved once reviewed", async () => {
+    const { agentPolicies, callReviews } = await import("../drizzle/schema");
+    await db
+      .insert(agentPolicies)
+      .values({ orgId, agentType: "screening_call", enabled: true })
+      .onConflictDoNothing();
+    const fresh = await endedCall(30);
+    await evaluate();
+    expect(await ruleOf("voice_guard.unreviewed")).toBeUndefined();
+    const late = await endedCall(HEALTH.callReviewOverdueHours * 60 + 10);
+    await evaluate();
+    expect(await ruleOf("voice_guard.unreviewed")).toMatchObject({
+      agentType: "voice_guard",
+      severity: "warning",
+      title: "1 answered AI phone call has no Voice Guard review yet",
+    });
+    await db.insert(callReviews).values({
+      orgId,
+      callId: late.callId,
+      purpose: "screening",
+      status: "done",
+      reviewedAt: new Date(),
+    });
+    await evaluate();
+    expect(await ruleOf("voice_guard.unreviewed")).toBeUndefined();
+    await clear(fresh.candidateId);
+    await clear(late.candidateId);
+    await db
+      .delete(agentPolicies)
+      .where(and(eq(agentPolicies.orgId, orgId), eq(agentPolicies.agentType, "screening_call")));
+  });
+
+  test("repeated breaches on one phone agent's calls are flagged on that agent", async () => {
+    const { callReviews } = await import("../drizzle/schema");
+    const breach = {
+      check: "read_back",
+      severity: "high",
+      summary: "Read the answer back.",
+      evidence: [{ turn: 3, quote: "You run three clusters" }],
+      source: "review",
+    } as const;
+    const made: string[] = [];
+    for (let i = 0; i < HEALTH.callBreaches7d; i++) {
+      const c = await endedCall(60);
+      made.push(c.candidateId);
+      await db.insert(callReviews).values({
+        orgId,
+        callId: c.callId,
+        purpose: "screening",
+        status: "done",
+        verdict: i === 0 ? "pass" : "breach",
+        findings: i === 0 ? [] : [breach],
+        breaches: i === 0 ? 0 : 1,
+        reviewedAt: new Date(),
+      });
+    }
+    await evaluate();
+    expect(await ruleOf("voice_guard.breaches")).toBeUndefined();
+    const c = await endedCall(60);
+    made.push(c.candidateId);
+    await db.insert(callReviews).values({
+      orgId,
+      callId: c.callId,
+      purpose: "screening",
+      status: "done",
+      verdict: "breach",
+      findings: [breach],
+      breaches: 1,
+      reviewedAt: new Date(),
+    });
+    await evaluate();
+    const issue = await ruleOf("voice_guard.breaches");
+    expect(issue).toMatchObject({
+      agentType: "screening_call",
+      severity: "warning",
+      title: `${HEALTH.callBreaches7d} of ${HEALTH.callBreaches7d + 1} reviewed screening calls in 7 days broke the call's rules`,
+    });
+    expect((issue!.detail as { top: string }).top).toBe("read_back (2)");
+    for (const id of made) await clear(id);
+    await evaluate();
+    expect(await ruleOf("voice_guard.breaches")).toBeUndefined();
+  });
+
+  test("reading out a tool call, code or its reasoning is serious from the first call", async () => {
+    const { WORKINGS_FINDING } = await import("../src/server/voice/guard/checks");
+    const { callReviews } = await import("../drizzle/schema");
+    await evaluate();
+    expect(await ruleOf("voice_guard.read_out_workings")).toBeUndefined();
+    const c = await endedCall(30);
+    await db.insert(callReviews).values({
+      orgId,
+      callId: c.callId,
+      purpose: "screening",
+      status: "done",
+      verdict: "breach",
+      findings: [
+        {
+          check: "charter",
+          severity: "critical",
+          summary: WORKINGS_FINDING,
+          evidence: [{ turn: 12, quote: "```json" }],
+          source: "code",
+        },
+      ],
+      breaches: 1,
+      reviewedAt: new Date(),
+    });
+    await evaluate();
+    expect(await ruleOf("voice_guard.read_out_workings")).toMatchObject({
+      agentType: "screening_call",
+      severity: "serious",
+      title: "1 screening call read out a tool call, code or its reasoning to the candidate",
+    });
+    await clear(c.candidateId);
+    await evaluate();
+    expect(await ruleOf("voice_guard.read_out_workings")).toBeUndefined();
   });
 });
 
@@ -1364,6 +1580,96 @@ describe("organisation context rules", () => {
     await evaluate();
     expect((await open()).find((i) => i.rule === "context.profile_stale")).toMatchObject({
       title: expect.stringContaining("document"),
+    });
+  });
+
+  test("pay conventions: a proposal left waiting, and a role paying in a currency its zone does not", async () => {
+    const { payConventionDrafts, payZones, requisitions } = await import("../drizzle/schema");
+    const old = new Date(Date.now() - (HEALTH.payConventionsWaitDays + 1) * 86_400_000);
+    await db.insert(payConventionDrafts).values({
+      orgId,
+      conventions: { reportingCurrency: "USD" } as never,
+      summary: "Reporting currency: INR → USD",
+      createdAt: old,
+    });
+    const [zone] = await db
+      .insert(payZones)
+      .values({ orgId, name: "Milan", countries: ["IT"], currency: "EUR" })
+      .returning({ id: payZones.id });
+    const code = `REQ-PAY-${Math.random().toString(36).slice(2, 7)}`;
+    await db.insert(requisitions).values({
+      orgId,
+      code,
+      title: "Engineer",
+      status: "pending_hr",
+      payCurrency: "INR",
+      payZoneId: zone!.id,
+    } as never);
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "context.pay_conventions_waiting")).toMatchObject({
+      agentType: "org_context",
+      severity: "warning",
+    });
+    expect((await open()).find((i) => i.rule === "context.pay_currency_mismatch")).toMatchObject({
+      agentType: "requisition",
+      severity: "serious",
+      title: expect.stringContaining(`${code} pays in INR`),
+    });
+    // Paying by the candidate's location is not a mismatch; a decided proposal is not waiting.
+    await db.update(requisitions).set({ paysByLocation: true }).where(eq(requisitions.code, code));
+    await db
+      .update(payConventionDrafts)
+      .set({ status: "approved" })
+      .where(eq(payConventionDrafts.orgId, orgId));
+    await evaluate();
+    const after = await open();
+    expect(after.find((i) => i.rule === "context.pay_currency_mismatch")).toBeUndefined();
+    expect(after.find((i) => i.rule === "context.pay_conventions_waiting")).toBeUndefined();
+  });
+
+  test("pay recorded in a currency with no current rate is flagged", async () => {
+    const { applications, candidates, payFigures, requisitions } =
+      await import("../drizzle/schema");
+    const [req] = await db
+      .insert(requisitions)
+      .values({
+        orgId,
+        code: `REQ-NR-${Math.random().toString(36).slice(2, 7)}`,
+        title: "Engineer",
+        status: "approved",
+        payCurrency: "EUR",
+      } as never)
+      .returning({ id: requisitions.id });
+    const [cand] = await db
+      .insert(candidates)
+      .values({ orgId, fullName: "Ana", email: `ana-${stamp}@cand.local` } as never)
+      .returning({ id: candidates.id });
+    const [app] = await db
+      .insert(applications)
+      .values({
+        orgId,
+        requisitionId: req!.id,
+        candidateId: cand!.id,
+        stage: "shortlisted",
+      } as never)
+      .returning({ id: applications.id });
+    await db.insert(payFigures).values({
+      orgId,
+      ownerType: "application",
+      ownerId: app!.id,
+      figure: "expected",
+      amount: "70000",
+      currency: "USD",
+      payBasis: "annual",
+      source: "screening_call",
+      refusal: "no_rate",
+      candidateId: cand!.id,
+    });
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "context.pay_not_comparable")).toMatchObject({
+      agentType: "org_context",
+      severity: "warning",
+      title: expect.stringContaining("USD → EUR"),
     });
   });
 

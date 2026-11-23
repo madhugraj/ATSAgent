@@ -30,6 +30,13 @@ We credit reporters in release notes on request.
   are the mandatory tenant boundary.
 - Roles are stored in a separate membership-role table. Platform administration is a separate,
   server-validated allowlist and is never inferred from browser storage.
+- HR copilot data is role-filtered on the server (`src/lib/copilot-scope.ts`,
+  `src/server/copilot/data.server.ts`): recruiters receive no pay or budget figures, hiring
+  managers and department heads only their own roles and approvals at their stage, governance
+  (audit log, agent issues, AI usage by feature) only leadership; tools outside a scope are not
+  offered to the model, so a prompt cannot widen access. Candidate names from pool lookups are
+  fenced as untrusted. A proposed agent hand-off is stored server-side and started only by the
+  person's click (claimed once); the client never supplies the goal.
 - Secrets: `SECRET_ENCRYPTION_KEY` encrypts stored credentials (AES-256-GCM); OAuth state
   is HMAC-signed with required secrets; no secret values are committed. Every organisation supplies
   its own AI provider key, and no deployment-level AI key is used as a fallback. That includes the
@@ -79,6 +86,17 @@ We credit reporters in release notes on request.
   and the only contact given is the organisation's mailbox. Each voice agent's dos and don'ts are
   one charter (`src/server/voice/charter.ts`, `docs/voice-agents-charter.md`), printed into every
   call and the source of its must-never list.
+- Voice Guard (docs/voice-guard.md): every answered AI phone call is reviewed after it ends,
+  observe-and-report only. The agent has two tools: read one call, and file its review. It has no
+  tool that touches a call, a candidate or a decision. Candidates are told the call "is checked
+  for quality", and their consent is refused in code until that was said. Without consent nothing
+  they said is kept, and only the call's line stats (no words) are reviewed, by the system. The
+  transcript reaches the Voice Guard as untrusted data. Its findings must quote the transcript; a
+  quote not in the named turn is dropped. Reviews quote transcripts that carry stated pay, so
+  Call reviews is for TA, the HR head, the CBO and owners only. Marking a review is audited
+  (`call_review.acknowledged`, `call_review.requeued`). Reviews and the call's stored brief and
+  line stats are erased with the call. The Voice Guard cannot be switched off while an AI phone
+  agent is on.
 - Rate limiting on all public HTTP routes and server-function RPCs (`src/server.ts`), a tighter
   budget on `/api/auth` mutations (sign-in, registration, password reset), shared across
   instances through Postgres when `RATE_LIMIT_STORE=postgres` (production).
@@ -89,7 +107,10 @@ We credit reporters in release notes on request.
 - SSRF connect pinning: after `safeFetch` vets a user-supplied host, the connection is pinned to
   the vetted address with an undici dispatcher, so a DNS rebinding between the check and the
   connect cannot retarget the socket (2026-11 audit N-2; Bun's fetch ignores dispatchers, where
-  the pre-connect vetting remains the guard).
+  the pre-connect vetting remains the guard). Every address the host resolves to is vetted (one
+  private address refuses the host); when one is unreachable, the next vetted address is dialled,
+  only after a connect-phase failure (nothing sent, so nothing is replayed), with a 4 s connect
+  timeout per address inside the request's overall timeout.
 - Step-up re-authentication: releasing an offer and rejecting candidates in bulk (directly, or by
   approving an agent's offer release or rejection batch) need the password re-entered in that
   session within 10 minutes; audited `auth.step_up` / `auth.step_up_failed`, locked after five
@@ -295,6 +316,25 @@ alert webhooks are signed with HMAC-SHA256 (`X-ATSAgent-Signature: sha256=<hex>`
 and alerts carry ids, rule names, statuses, timings and token counts only — no goals, prompts,
 candidate content or model names.
 
+## Labour law & policy sources
+
+The Labour law & policy agent (docs/labour-policy-agent-plan.md) fetches only the
+organisation's approved policy sources (`policy_sources`, https only): each read
+goes through `safeFetchText`, must stay on the source's own host (a redirect off
+it fails the read), and never follows links or searches. Adding, seeding or
+pausing a source is limited to the HR head, the CBO or an owner and is audited.
+Page text reaches the model only as the tool's untrusted output; a finding is
+refused unless its quote is on the page that was read, and nothing becomes an
+organisation rule until the HR head approves it (`policy_finding` gate, audited,
+captured for training behind consent). Reads are reused for 12 hours and
+unchanged pages cost no AI call.
+
+The offer check (L3) sends the offer letter to the model only as untrusted data,
+validates the result with zod, never marks a skipped rule as passed, and blocks
+approval on a "fix needed" unless the HR head overrides it with a reason
+(audited). The screening call accepts "not allowed" for current pay only when an
+approved rule where the job is forbids asking it.
+
 ## Organisation agreements
 
 An organisation cannot be created without its registering signatory accepting the current Terms of
@@ -306,6 +346,56 @@ audited as `org.agreement.accepted`. The request IP is kept only as an HMAC-SHA2
 (`requireOrgOwner`) and scoped to the owner's organisation; until it is done the workspace shows a
 blocking step (owner) or a waiting screen (members). The cross-tenant view is `requirePlatformAdmin`.
 Rows are deleted with the organisation; the audit entries remain.
+
+## Agent studio and hosted agent API
+
+Agent studio is a platform console page (`/platform-agent-studio`); every server function in
+`src/lib/platform-agent-studio.functions.ts` is `requirePlatformAdmin`, and no organisation route reaches
+it. Studio agents (`agent_blueprints`, migrations 0080 and 0082) are built only from the studio's tool
+catalogue (stock tools minus identity-bound ones). `blueprintProblem` (`src/server/agents/blueprints.server.ts`)
+refuses other tools, renamed tools that read as a human decision (`isGateToolName`, the registry's own ban),
+names that drop or add a propose_/request_/submit_ prefix or clash with the human tools, unknown roles or
+decision kinds, empty instructions or must-never lists, and raised step limits. The injection and operating
+rules are always prepended; tool inputs stay the stock contracts and renamed calls run the real tool, so every
+tool-level check (approvals, pre-approved templates, policy, org scoping) still applies.
+
+Lifecycle: a version must pass its sample-data tests (`studio-test.server.ts`: stand-in tools in a test
+organisation the super admin owns, on its own AI key — nothing real is read or changed) before it can be
+approved (`approveProblem`; self-approval is recorded), and only an approved version can be published
+(`publishProblem`) as an immutable manifest in `studio_agent_versions`. Runs of `studio:<slug>` resolve to the
+published version **only in organisations holding a live grant** (`studio_agent_grants`; checked on every
+start and step), pin the version they started on, and still need the organisation's own switch, autonomy and
+budget. Withdrawing a grant refuses new runs and cancels open ones. Every step is audited
+(`platform.studio_agent.*`).
+
+`/api/agents/*` and `/api/mcp` take platform-issued keys (`atsk_…`): only the SHA-256 hash and a short prefix
+are stored, the key is shown once, and revoked keys, unpublished or archived agents, a changed workspace, a
+workspace without a grant, or a principal who no longer owns it are refused. Requests are rate-limited per
+caller per path (60/min) and per key (30/min) in `src/server.ts`. Responses and packages carry no AI vendor or
+model fields.
+
+## Agent workflows
+
+Workflows (`src/lib/platform-agent-workflows.functions.ts`, all `requirePlatformAdmin`) only decide which
+agent runs next. The engine (`src/server/agents/workflows.server.ts`) starts agents through `startRun`, so the
+organisation's switch, autonomy, budget, studio grants, de-duplication and every human decision inside the
+agent still apply; it acts for the role's owner (else the person who caused the event). Conditions read only
+the event payload, the subject type and the last agent's status / result (`graphProblems` refuses other fields),
+goals are filled from the same fields, graphs cannot loop, and only published, tested, approved versions run,
+in organisations holding a grant (granting checks the studio agents it uses). Withdrawal cancels live runs;
+every step is audited (`platform.agent_workflow.*`) and each run keeps its history.
+The **Build with chat** assistant (`assistWorkflow`) only returns a draft to the canvas — it never saves,
+approves, publishes or grants; the super admin's messages enter the prompt through `untrusted(...)` with
+`INJECTION_RULES`, the model JSON is zod-validated, and the call uses the AI key of an organisation the
+caller owns (checked server-side), never a platform key.
+The organisation's view of granted workflows (`orgWorkflows`) is read-only, org-scoped (`requireOrg`, every query
+filtered by `orgId`) and limited to HR head / President-CBO / owner; switching an agent on from it uses the
+existing `saveAgentPolicy` path.
+The workflow API (`/api/workflows/…`, `src/server/agents/workflow-app.server.ts`) takes organisation-issued keys
+(`atsw_…`, one workflow each; only the SHA-256 hash is stored; issue/revoke by HR head, CBO or owner, audited),
+rate-limited per caller and per key in `src/server.ts`. A key acts as the person who issued it, is refused once
+revoked, once the workflow is withdrawn or archived, or once that person is no longer an active member, and every
+query is scoped to the key's organisation and workflow. Responses carry no request text and no vendor fields.
 
 ## Training data
 

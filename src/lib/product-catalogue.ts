@@ -108,13 +108,17 @@ export const CATALOGUE_MODULES: CatalogueModule[] = [
     id: "requisitions",
     name: "Requisitions & approvals",
     category: "Hiring workflow",
-    audience: "Hiring manager, HR head, CHRO",
+    audience: "Hiring manager, department head, HR head, CBO",
     summary:
       "Raise a role once, route it for approval and publish it internally and externally without retyping the job description.",
     overview:
       "A hiring manager or recruiter raises a requisition with the budget, openings, experience band, skills, responsibilities and qualifications, checks the live market range and sets the scoring weights for matching. The requisition and its job description then move through the department, HR and executive approval chain; transitions are decided on the server and every decision is kept in an immutable trail. Once approved, the role can be posted internally and published to the careers page, apply links and job boards from the same record.",
     outcome: "Approved roles reach the market faster with a clean audit trail.",
     capabilities: [
+      c(
+        "Content templates",
+        "Templates that steer every AI-drafted job description, LinkedIn post and branded job-card image.",
+      ),
       c(
         "Structured requisition intake",
         "Budget, openings, experience band, location, must-have and good-to-have skills, responsibilities and qualifications in one form.",
@@ -233,6 +237,14 @@ export const CATALOGUE_MODULES: CatalogueModule[] = [
       "When an organisation switches it on, AI voice agents call candidates through the organisation's own telephone line and its own AI voice key. Every call opens by saying it is an AI and asking for consent, keeps to calling hours, retries and honours callbacks, and falls back to a written route when the candidate prefers. Results come back to the hiring desk for a person to decide on — the call agents never make a hiring decision themselves.",
     outcome: "Candidates are reached quickly and consistently, while people keep every decision.",
     capabilities: [
+      c(
+        "Practical details on the screening call",
+        "The screening call takes the joining date and current and expected pay (recorded for HR only, or noted as declined) before the kit's questions.",
+      ),
+      c(
+        "Voice Guard",
+        "Every answered AI phone call is reviewed after it ends against the call's rules and facts; findings quote the transcript and are listed under Call reviews.",
+      ),
       c(
         "Screening calls",
         "The agent asks the screening kit's questions (never pay), grades only the questions actually answered and shows the result with a 'Why this score' explanation.",
@@ -618,7 +630,7 @@ export const CATALOGUE_MODULES: CatalogueModule[] = [
   },
   {
     id: "talent-brain",
-    name: "Talent Brain & skill ontology",
+    name: "Talent Brain & organisation ontology",
     category: "Leadership",
     audience: "CHRO, HR head, owner, product owner",
     summary:
@@ -628,6 +640,10 @@ export const CATALOGUE_MODULES: CatalogueModule[] = [
     outcome:
       "Leadership can see capability risk early and decide what talent to hire, build, borrow or redeploy.",
     capabilities: [
+      c(
+        "Organisation ontology and role emergence",
+        "Roles and skills of the organisation, with new roles detected as they grow out of existing ones, explored in a full-screen 3D view.",
+      ),
       c(
         "Graphical skill ontology",
         "Skills grouped into canonical capability families with aliases resolved.",
@@ -712,15 +728,27 @@ export const CATALOGUE_MODULES: CatalogueModule[] = [
   },
   {
     id: "copilot",
-    name: "Embedded HR copilot",
+    name: "Aditi — embedded HR copilot",
     category: "Intelligence",
     audience: "Whole HR team",
     summary:
-      "A chat assistant grounded in the organisation's own data and the product manual, so teams can self-serve.",
+      "Aditi, a chat assistant grounded in the organisation's own data and the product manual, answering within each person's role.",
     overview:
       "The copilot is available on every screen. It answers from the organisation's live requisitions, candidates and pipeline, and from the built-in user manual, and it walks new users through a guided first-login journey that mirrors the help page. Conversations are stored per organisation.",
     outcome: "New HR users configure and operate the product without training sessions.",
     capabilities: [
+      c(
+        "Answers by role",
+        "Requisition status and approval trails, approvals waiting on you, pipeline, budgets and governance, only where the person's role allows.",
+      ),
+      c(
+        "Pool coverage and demand outlook",
+        "Talent-pool coverage per open role and a demand outlook from the organisation's own requisition trend plus a market signal, with confidence.",
+      ),
+      c(
+        "Role ontology lookups",
+        "Looks a role up in the organisation's role map and names emerging roles.",
+      ),
       c(
         "Guided first-login journey",
         "A step-by-step setup walkthrough that matches the in-app manual exactly.",
@@ -846,7 +874,7 @@ export const CATALOGUE_SUMMARY = {
   name: "ATSIQ by Yavar AI",
   tagline: "Enterprise recruiting operating system",
   positioning:
-    "One multi-tenant platform covering requisition to joining: evidence-based JD↔CV matching, screening support, verified candidate signals, market-aligned budgets, recruiter governance and leadership analytics.",
+    "One multi-tenant platform covering requisition to joining: evidence-based JD↔CV matching, human-in-the-loop hiring agents and AI phone screening, verified candidate signals, market-aligned budgets, governance and leadership analytics.",
 };
 
 export function totalCapabilities() {

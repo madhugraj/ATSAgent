@@ -8,7 +8,7 @@
  * location break ties. The AI scoring that follows (score_new_applications)
  * judges real fit; this only decides who is worth scoring.
  */
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 
 import { aiJson } from "@/lib/ai-gateway.server";
@@ -41,13 +41,26 @@ const Expansion = z.object({
     .max(20),
 });
 
+/**
+ * The parts of a compound skill — "Python or TypeScript" → Python, TypeScript;
+ * "Cloud deployment (Docker, Kubernetes)" → Cloud deployment, Docker,
+ * Kubernetes — so a CV listing the parts still counts, with or without AI.
+ */
+export function skillParts(skill: string): string[] {
+  const parts = skill
+    .split(/\s*(?:[,/;()]|\bor\b|\band\b|&)\s*/i)
+    .map((p) => p.trim())
+    .filter((p) => p.length >= 2 && p.toLowerCase() !== skill.toLowerCase());
+  return parts.length > 1 || (parts.length === 1 && parts[0] !== skill) ? parts : [];
+}
+
 /** Each must-have with its equivalents; falls back to the skill itself if AI is unavailable. */
 export async function expandSkills(
   orgId: string,
   title: string,
   mustHave: string[],
 ): Promise<{ skill: string; terms: string[] }[]> {
-  const base = mustHave.map((s) => ({ skill: s, terms: [s] }));
+  const base = mustHave.map((s) => ({ skill: s, terms: [s, ...skillParts(s)] }));
   if (!mustHave.length) return base;
   const res = await aiJson({
     orgId,
@@ -63,7 +76,7 @@ export async function expandSkills(
   if (!res.ok) return base;
   return mustHave.map((skill) => {
     const g = res.data.groups.find((x) => x.skill.toLowerCase() === skill.toLowerCase());
-    const terms = [skill, ...(g?.equivalents ?? [])]
+    const terms = [skill, ...skillParts(skill), ...(g?.equivalents ?? [])]
       .map((t) => t.trim())
       .filter(
         (t, i, all) =>
@@ -166,16 +179,46 @@ export async function searchTalentPool(
     .where(and(eq(requisitions.id, requisitionId), eq(requisitions.orgId, orgId)))
     .limit(1);
   if (!req) throw new Error("Requisition not found.");
-  const groups = await expandSkills(orgId, req.title, req.mustHave ?? []);
+  const inPipeline = db
+    .select({ id: applications.candidateId })
+    .from(applications)
+    .where(and(eq(applications.requisitionId, requisitionId), eq(applications.orgId, orgId)));
+  return searchPoolBySkills(
+    orgId,
+    {
+      title: req.title,
+      mustHave: req.mustHave ?? [],
+      location: req.location,
+      experienceMin: req.experienceMin,
+      experienceMax: req.experienceMax,
+    },
+    limit,
+    sql`${candidates.id} not in (${inPipeline})`,
+  );
+}
+
+/**
+ * The same search for a skill bundle with no requisition yet ("do we already
+ * have people for this role?"). `exclude` narrows the pool further.
+ */
+export async function searchPoolBySkills(
+  orgId: string,
+  want: {
+    title: string;
+    mustHave: string[];
+    location: string | null;
+    experienceMin: number;
+    experienceMax: number;
+  },
+  limit = 10,
+  exclude?: SQL,
+): Promise<{ searchedFor: { skill: string; terms: string[] }[]; matches: PoolMatch[] }> {
+  const groups = await expandSkills(orgId, want.title, want.mustHave);
   const terms = [...new Set(groups.flatMap((g) => g.terms).map((t) => t.toLowerCase()))].slice(
     0,
     60,
   );
   if (!terms.length) return { searchedFor: groups, matches: [] };
-  const inPipeline = db
-    .select({ id: applications.candidateId })
-    .from(applications)
-    .where(and(eq(applications.requisitionId, requisitionId), eq(applications.orgId, orgId)));
   // Coarse database filter (any term in skills or CV text); exact ranking below.
   const pool = await db
     .select({
@@ -193,7 +236,7 @@ export async function searchTalentPool(
         eq(candidates.orgId, orgId),
         // CVs a portal limited to their own role are never reused (migration 0045).
         eq(candidates.poolUse, "pool"),
-        sql`${candidates.id} not in (${inPipeline})`,
+        ...(exclude ? [exclude] : []),
         sql`(${sql.join(
           terms.map(
             (t) =>
@@ -211,7 +254,11 @@ export async function searchTalentPool(
       skills: p.skills ?? [],
     })),
     groups,
-    { experienceMin: req.experienceMin, experienceMax: req.experienceMax, location: req.location },
+    {
+      experienceMin: want.experienceMin,
+      experienceMax: want.experienceMax,
+      location: want.location,
+    },
   ).slice(0, limit);
   return { searchedFor: groups, matches };
 }

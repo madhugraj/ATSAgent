@@ -1,5 +1,127 @@
 # Roadmap
 
+## Pay terms — Phase 1 foundation (2026-11-11)
+
+- Plan: `docs/pay-terms-plan.md` (currency, pay basis, kinds of work, pay zones,
+  regional pooling) and `docs/labour-policy-agent-plan.md` (labour law & policy
+  agent, offer check) — approved 11 November.
+- Shipped (P1): migration 0073 — `pay_zones`, `pooling_regions`,
+  `exchange_rates`, `pay_figures` (figures stored as said, with derived pay and
+  reporting values and the rate used); requisition pay terms (kind of work, pay
+  basis, pay currency, pay zone, hours, contract length, contract type, pays by
+  location, needed by); organisation pay defaults. Existing rows behave as
+  before (organisation currency, annual, permanent).
+- `src/lib/pay-terms.ts` (shapes, zone lookup) and `src/lib/pay-convert.ts` (the
+  only converter: payments a year, hours, dated rates with per-currency
+  validity, net never turned into gross, band check in pay currency, hike only
+  across one currency, money spoken per currency, amounts parsed as said).
+  `scripts/pay-terms.test.ts`: one test per scenario in the plan.
+- Shipped (P2, 11 November): migration 0074 (`pay_convention_drafts`, the
+  organisation's tolerance over a band). Organisation context agent 1.2.0 reads
+  and proposes the organisation's pay conventions (reporting currency, pay
+  zones, pooling regions, tolerance) — applied only when the HR head approves
+  the new `pay_conventions` gate, in one transaction, audited. Requisition
+  agent 1.10.0 sets a draft's pay terms (`set_pay_terms`: zone from where the
+  job is, kind of work, basis, currency, contract, needed-by) and researches pay
+  in the role's currency. Organisation page: "Pay, currency and pay zones"
+  (zones, rates, tolerance); requisition page: "Pay terms". Health rules:
+  a proposal waiting over 7 days; a role paying in a currency its zone does not.
+  Eval: org_context proposes conventions, applied only once approved.
+  Governance fix: screening-call versions 1.8.0–1.9.5 had been recorded on the
+  requisition agent's manifest; moved to the Screening call agent (now 1.9.5).
+- Shipped (P3, 11 November): matching compares expected pay in the role's
+  own currency and basis (`checkAgainstBand`, the organisation's tolerance),
+  reads the candidate's latest stated details for the application (the call
+  or TA, newer than the CV: joining date, notice, place, pay with its
+  currency), holds a candidate whose joining date is after the role's
+  needed-by date or who is outside the role's pool (same zone / same region,
+  unless relocating) for a person — never the score; a notice-based estimate
+  only flags. Screening call 1.10.0 asks pay in the role's terms (CTC per year
+  in India, gross yearly salary elsewhere, hourly or day rate for those
+  contracts), asks a contract's start date and length instead of the notice
+  period, and records figures said in another currency or period as said;
+  they are stored in `pay_figures` with the derived pay and reporting values.
+  Health rule: pay not compared for want of a current exchange rate.
+- Shipped (P4, 11 November): migration 0075 — an offer carries its currency,
+  pay basis, kind of work and a contract's end date (from its requisition), and
+  its exchange rate to the reporting currency is fixed when it is approved
+  (`lockOfferRate`; no rate → left out of reports, never guessed). Offer agent
+  1.7.0: bands, ceilings and approval briefs in the role's currency; the offer
+  letter states pay with its currency code and basis ("EUR 52,000 per annum"),
+  the kind of work and a contract's end date; the candidate's offer page and
+  the accept / counter notices show the offer's own currency. Negotiation call
+  0.9.0 speaks the offer's currency ("52 thousand euros … your gross annual
+  pay"; rupees unchanged) and its amount guard reads thousands, millions and
+  €/$/£. JD agent 1.5.0 states the kind of work and a contract's length (never
+  pay); job postings carry the schema.org employment type. Hiring reports sum
+  cost in the reporting currency only. Health rule: approved offers left out
+  of reports for want of a rate.
+- Pay terms plan complete (P1–P4).
+
+## Labour law & policy agent — L0–L2 (2026-11-11)
+
+- Migration 0076: `policy_sources` (the organisation's approved official pages,
+  seeded per pay zone: ILO NATLEX, EUR-Lex for EU countries, and each country's
+  labour ministry / gazette pages), `policy_reads` (hashed; unchanged pages
+  cost no AI call; a read under 12 hours old is reused), `policy_findings`.
+- Labour law & policy agent 1.0.0 (high risk, owner HR head): reads only the
+  approved sources, records each change that matters to hiring with the
+  source's exact quote (refused in code when it is not on the page) and asks
+  the HR head through the new `policy_finding` gate. Approved rules (one per
+  zone and area; a newer one supersedes) appear under "Rules" in the
+  organisation context every agent reads. Weekly run per organisation.
+- Organisation page: "Labour & hiring policy" (sources: seed, add, pause;
+  what it found). Health rules: a source failing 3 reads in a row; a zone with
+  an open role and no read for 14 days; a change in effect still waiting.
+  Eval: a quoted change approved, a planted instruction on the page ignored.
+- Shipped L3 (11 November): migration 0077. The offer check — the letter and
+  terms against the approved labour rules for the role's pay zone, each item
+  pass / fix needed (with suggested wording) / needs counsel, through the
+  gateway (feature `offer_policy_check`, the letter as untrusted data). It runs
+  when an offer is sent for approval (or from the letter dialog / the Offer
+  agent's `check_offer_against_policy`, offer agent 1.8.0); a fix needed
+  blocks approval unless the HR head overrides with a reason (audited,
+  captured for training); the result is on the approval card; any change to
+  the rules, letter or terms makes it stale. No rules for the place: needs
+  counsel, no AI call. Screening call 1.11.0 follows the approved rules where
+  the job is (questions, AI calls, data); under a salary-history ban it never
+  asks current pay (`not_allowed`, accepted only when such a rule is in
+  force). JDs and requisitions already read the approved rules through the
+  organisation context. Health rule: offer checks overridden in 30 days.
+- 11 November: labour.gov.in pages (built in the browser) are read through the
+  site's own public listing — the Labour Codes page gives 126 documents with
+  title, date and PDF. Agent 1.1.0 reads PDFs a source lists
+  (`read_policy_document`, same site only, through the document parser; quotes
+  checked against the document and cited), and on a source's first read sets
+  up the rules already in force from the core Codes and Rules. Empty pages and
+  scanned PDFs fail with the reason. Sources can be removed (audited). Seeds
+  replaced with pages verified readable. First real finding: minimum wages,
+  from the Code on Wages, 2019, section 5.
+
+- Labour law & policy agent 1.4.0 (2026-11-16): plain source pages (news, circulars) keep the
+  own-site PDFs they link to; a page never briefed shows those documents (title and address)
+  instead of nothing, and `search` works on any page — e.g. ESIC circulars can now be briefed on
+  the first read. Pages are never shown whole (the 1.3.2 budget lesson). `safeFetch` also falls
+  back to a host's next vetted address when one is dead (esic.gov.in publishes one).
+  Extracted document text drops NUL and control characters (a Hindi ESIC circular's PDF
+  text broke the read), and run transcripts are saved without NULs, so no tool output can
+  fail a run that way.
+
+## Agent intelligence (2026-11-06)
+
+- [x] `/agents/intelligence` (governance roles): the knowledge-graph view of the hiring fleet, computed live from this organisation's telemetry — three views, each with descriptive and prescriptive layers: agent behavior (agents × person gates × failure clusters, candidates folded into edge counts, per-agent action plan), governance (every person decision chained to the norm it acted under, overturn chains, autonomy check over `stage_events` actor attribution), and vocabulary (skills/role families seeded in-memory by the production `buildOntology()` + `deriveInsights()` — prescriptive sourcing/coverage insights, nothing persisted until Phase 1)
+- [x] System read: threshold-gated prescriptive chips per view (overturn clusters, open cards, definition churn vs eval coverage, alias-fold report card, idle/trace-gap coverage) with cause → effect → next best action; auto-refresh 60s; deterministic — no model calls, vendor- and model-neutral
+- [x] Governance tab rebuilt as agent governance (2026-11-09): five answers on whether the harness holds — limits (refused tool calls, injection flags), autonomy vs risk tier (changes with no approved card under "asks first", changes after an injection flag), definitions (runs on the approved, eval-covered manifest vs test or unrecorded versions; owner, eval count), hand-offs (event → agent routing and direct `start_agent` delegation as a hand-off map; stuck, failed and abandoned events; principal shifts; overlapping runs on the same work) and budget/run limits
+- [x] Vocabulary tab: skills asked for by requisitions vs held by the candidate pool, biggest gaps first; HR oversight (are people deciding, disagreements with reasons, cards waiting >48h, who moves candidates between stages) moved to the HR dashboard
+- [x] Event lineage (2026-11-09): `agent_events.source_run_id` records the agent run that published each event (from the run scope, never across organisations; migration 0069), so Governance follows run → event → run chains end to end, shows who published each event, and flags loops where an agent restarts itself on the same work
+- [x] Redesign (2026-11-09): Agent governance moves to its own page (`/agents/governance`) and Skill supply vs demand to Intelligence (`/skill-supply`); Agent intelligence keeps agent behaviour. All three share one layout (`src/components/ops-layout.tsx`): verdict with status pills, a fix list of only actionable rows with next-step links (passing checks collapse to one line), one main visual, and a per-item table
+- [x] Skill ontology and reports (2026-11-09): `/skill-ontology` replaces Skill supply with the ontology graph (capability families, co-occurrence, pressure) on the Talent Brain read model; Agent intelligence, Agent governance and Skill ontology take a period and agent filter that drives both the page and downloadable PDF + Excel reports (summary, fix list, every table, daily activity, run- and event-level detail). Fixed the ontology graph drawing every skill at one point (a CSS animation transform overrode the node position)
+- [x] Organisation ontology and role emergence (2026-11-09): domain seed packs (technology, healthcare, manufacturing, BFSI) chosen from the organisation's industry; established roles as skill bundles; emerging roles detected deterministically when requisitions keep asking for a bundle two roles explain together (`src/lib/org-ontology.ts`), named from real titles, signal → emerging → established over time; a 3D explorer (fixed layout, glowing new roles with particle streams from their parents, time-slider replay) on Skill ontology and the Talent Brain; "Suggest a name" through the gateway (`talent_brain`, untrusted titles, schema-validated) and "Confirm role" into master data role titles (audited, judgement captured as training feedback); emerging roles in the ontology report
+- [x] Conversational role lookup (2026-11-09): read-only `get_role_profile` (role from the organisation's ontology — must-haves, good-to-haves, parents, titles, demand, pool fit) and `check_talent_availability` (strong / partial / internal pool fit, best matches, without a requisition) for the copilot (1.3.0) and the requisition agent (1.6.0), with real-agent evals; a Client delivery family and Solutions / Forward deployed engineer starter roles in the technology pack; role emergence picks the best pair of parent roles; pool search also matches the parts of compound skills
+- [x] 3D ontology: full-screen popup and Record video (WebM, labels composited)
+- [x] Skill ontology merged into the Talent Brain (2026-11-09): one page and one nav entry (both ways of working) for the skill and role ontology — verdict, fix list, 3D role map, skill graph with search, period changes, reports, Relearn and the super admin's all-organisations view; `/skill-ontology` redirects to `/brain`
+- [ ] Cross-organisation role emergence on the platform view (anonymised)
+
 ## Navigation by area (2026-11-21)
 
 - [x] Sidebar regrouped from ~34 links into hubs (Home, Agents, Agent admin, Pipeline, Candidates, Sourcing, Insights; Settings, Platform, Help at the foot); each hub's pages show as a tab strip above the page. URLs, role predicates and Agent/Manual mode filtering unchanged
@@ -46,6 +168,14 @@
 - [x] Stage 1.2 S2 follow-ups (2026-10-25): the candidate speaks first; the reply nudge timed from the end of speech; only a clear no ends the call; the gateway records spoken lines before any tool runs (the disclosure check had made the assistant repeat itself); unsent offer e-mails withdrawn when the offer is replaced or booked; the local dev tick drains the outbox. A real call booked an interview (Mon 26 Oct 16:00)
 - [x] Voice-first interview scheduling (2026-11-17, migration 0069): offering times places the AI scheduling call at once and holds the e-mailed link (`link_emailed_at`) until the call ends without a booking — or no call is possible, the call stalls, or the link nears closing; the 24-hour e-mail wait is retired; Interview coordinator 2.2.0, Scheduling call agent 1.8.0; health rule `scheduling_call.not_dialled`
 - [x] Voice agents' charter (2026-10-26): one written charter per voice agent — purpose, must say, may talk about, must never, hands to a person, tone; each rule held by code or by instruction — printed into every call, the source of each manifest's must-never, with a generated doc and tests; staff confidential (no panel, hiring manager or contact names on calls); Screening call agent 1.1.8, Scheduling call agent 1.6.0
+- [x] Required details on every completed phone screen (2026-11-10): the earliest joining date, current pay and expected pay — `end_call` refuses "completed" until each is recorded or noted as not given (declined in their words, or not working for current pay); held in code and in the charter; new eval; Screening call agent 1.3.0
+- [x] Voice Guard (2026-11-10, docs/voice-guard.md, migration 0071): a silent, mandatory after-call review of every answered AI phone call. Candidates are told the call is checked for quality, and consent waits for it (screening 1.4.0, scheduling 1.8.0, negotiation 0.8.0). Line stats are stored on the call: spoke first, talk-over, reply times, audio gaps. The call stores the brief it ran with. Reviews come from system checks plus the Voice Guard agent (1.0.0); findings must quote the transcript. Line-only reviews cover calls without consent. Call reviews page with "findings hold / do not hold" (audited, training feedback) and Review again; a summary on agent health; health rules `voice_guard.unreviewed` and `voice_guard.breaches`. The screening call no longer reads answers back (new eval).
+- [x] Root causes of repeated call faults (2026-11-10, from a test call that went silent after an answer and a review that found 4 of 11 flaws): one turn manager for all three calls (`src/server/voice/turns.ts`: cues after a tool result, a statement or the candidate's answer; said-noted-but-not-recorded), replacing per-call cues; consent only from the answer to the latest question and never a concerned reply, in the words heard (screening 1.5.0); every ending reports missing required details; Voice Guard 1.1.0 — consent timing back in scope, a call-steps check, and system checks for stalls in the transcript, cues, and details asked but not recorded; `VOICE_DEBUG_FILE` traces tool calls and cues
+- [x] Screening call 1.5.1–1.6.0 and Voice Guard 1.2.0 (2026-11-10, two test calls and the organisation's review): one question per detail (stacked ones flagged in code); the source of the profile never mentioned; consent asked once more at most; no "great fit"; the four required details (notice, joining date, current and expected CTC) as their own step — told once that without clear answers the application cannot be considered, an unclear answer asked once more, never worked out for them; long answers cut short politely at 90 s and the opening reply 0.5 s after the hello (all three calls; scheduling 1.8.1, negotiation 0.8.1); Voice Guard checks for the source, a detail asked a third time and a question repeated after an answer, and no longer reports hidden pay as missing
+- [x] Screening call 1.6.1–1.7.0, Voice Guard redial fix (2026-11-10, two more test calls): repeat cues 6 s apart (a cue interrupts the reply being prepared; all three calls); a required detail is declined only after the candidate is told the application cannot be considered without it (code); a redialled call is reviewed again; the call's instructions trimmed by about 30% and answers kept to about a minute (cut in at 60 s), since the voice model re-reads the whole call on every turn
+- [x] Screening call 1.8.0 — the 3-minute call (2026-11-10, the organisation's rule; migration 0072): the length setting is the planned length (2–5 minutes, default 3); hello, consent, the role in one sentence, location, the four required details, one screening question (about 45 s) and a close that sends their questions to the hiring team by e-mail; the turn manager cues the close 30 s before and the call ends a minute after; Voice Guard 1.3.0 judges call steps against the brief's own plan
+- [x] The first words ready before pickup (2026-11-10; screening 1.8.1, scheduling 1.8.4, negotiation 0.8.4): asked for while the phone rings, held, and played the moment the candidate's hello ends — two test calls had first spoken 12–14 s after pickup; the hello is not passed to the model, the opening cue holds off meanwhile, and the debug trace records the greeting and each opening cue
+- [x] Our line decides the turns (2026-11-10; screening 1.9.2, scheduling 1.8.8, negotiation 0.8.8): the voice service's speech detection is off and each caller utterance is marked start/end by our line (turn-detector.ts) — replies ~0.9 s after they stop, short replies never missed, echo never cuts the assistant off; a line that reads out code or reasoning is cut (spoken-guard.ts; health rule voice_guard.read_out_workings)
 - [x] Interview panels P0: interviewer profiles on the Team page (areas, rounds, weekly cap; audited); a requisition's hiring manager is a registered member (`requisitions.hiring_manager_member_id`), asked for by the hiring desk and never guessed; invites audited
 - [x] Interview panels P1: the interview plan shown and edited in the desk thread (with the hiring manager); the hiring manager picked from members on the requisition page; a plan cannot drop a round in use
 - [x] Interview panels P2: the coordinator proposes each round's panel (`propose_panel`), the role's hiring manager approves or changes it in the desk, `role_panels` reused per role and round; times only with the approved panel; health rule `interview.no_eligible_panel`
@@ -137,7 +267,7 @@ Plan: `docs/org-context-agent-plan.md` (decided 2026-10-27; O0 built 2026-10-27,
 - [x] Offer answers and negotiation: the released-offer email carries a private link (/offer/<token>) to accept, decline (with a reason) or ask for changes (expected CTC, joining date, note); each is recorded once on the offer and the stage and told to the desk; a request for changes ("countered") reaches the Offer agent (1.1.0), which revises inside the band (`revise_offer`), regenerates the letter and takes the next revision through HR head → CBO approval again; health rule `offer.negotiation_loop`
 - [x] Observability people can read: tool errors split into refused (a rule said no) and failed (something broke), only failures count (migration 0043); cards state counts with their window; every agent rehearsal explained in plain words with its latest result (CI-enforced), two new Requisition rehearsals (full approval chain, send-back for changes; Requisition 1.3.1); "Try again" refuses while the agent is already working
 - [x] Run limits per stretch of work (migration 0042): each human decision gives a fresh allowance, a four-stretch ceiling guards against loops; Agent settings → Run limits (HR head / CBO, audited, applies to runs under way); older tool results shortened in what the model re-reads; health rule `harness.run_limits`
-- [x] Send a requisition in approval back for changes (approval card or chat; current approver, raiser, HR head / CBO; on the trail and audited; approvals start over; Requisition agent 1.3.0 applies the change and resubmits); scoring weights locked in approval, must total 100, audited; work mode (onsite / hybrid / remote) asked by the desk and shown with the location (migration 0041); button clicks shown in the chat
+- [x] Send a requisition in approval back for changes (approval card or chat; current approver, raiser, HR head / CBO; on the trail and audited; approvals start over; Requisition agent 1.3.0 applies the change and resubmits); scoring weights locked in approval, must total 100, audited; weight suggestion reads the role type, organisation profile, ontology demand and pool supply, and location / work mode, proposes up to two custom dimensions (location fit only for onsite / hybrid), shows its basis, and is evaluated live by `bun run eval:weights` (Requisition agent 1.7.0); work mode (onsite / hybrid / remote) asked by the desk and shown with the location (migration 0041); button clicks shown in the chat
 - [x] Delete a hiring-desk chat (migration 0040): dustbin while gathering details (starter or HR head / CBO / owner) or with an unused draft (HR head / CBO / owner, reason required); hidden at once, runs stopped, audited; owners restore for 30 days, then it is purged; anything in approval or later is rejected / closed instead
 - [x] "Send a test alert e-mail" in Agent settings → Trace export and alerts: the same alert e-mail, channel and recipients (owner, HR heads, CBOs) as a real serious / critical agent issue, marked as a test and audited (`agent.alert.test_email`)
 - [x] Fewer agent e-mails: one end-of-day summary per person — reminders from the Follow-up and Distribution agents ("waiting for you") and, for the owner / HR heads / CBOs, serious issues still open (after 18:00 org time, `agent_digest` template, audited `agent.issue.digest`); critical issues e-mail at once but at most once per rule per day; an issue resolves only after 60 minutes unseen, so a flapping rule no longer reopens and re-alerts every sweep
@@ -158,6 +288,8 @@ Plan: `docs/org-context-agent-plan.md` (decided 2026-10-27; O0 built 2026-10-27,
 - [x] Polish: ₹1.1 Cr no longer shows as ₹1 Cr; Indian digit grouping on agent cards; confirm before accepting an offer; budget / band position stated on offer approvals; ids kept out of agent text; duplicate document uploads skipped; requests waiting in a thread are pinned above the composer
 - [x] Full-journey E2E fixes: interview rounds are offered only after the candidate's earlier round ends (Interview coordinator 1.6.0); the released-offer email (letter PDF + answer link) now goes out under Node too (jsPDF named import; failures logged as `offer.release_email_failed`); the Pre-onboarding agent (1.1.0) never re-requests documents received or not yet due and gets the offer id it needs for release; tools can refuse pointless calls before a person is asked (`precheck`); single-candidate coordinator runs and document reads count in the candidate's hiring cost; events are never dropped by an empty agent registry
 - [x] Screening is not skipped silently: moving a candidate into an interview round with no screening on record needs a written reason (recorded as "Screening skipped"); the Interview coordinator (1.5.0) only plans rounds for screened candidates
+- [x] A move into an interview is refused while the screening call is still arranged (callback, retry, booked) and says when it is due; screening calls never ring once the candidate has moved on or been closed; a screening decision can be decided against the recommendation ("Move to L1 instead" / "Put on hold instead", with why on record)
+- [x] Screening decisions state the practical blockers from the call (not relocating to an onsite/hybrid role's city, notice, pay) and the agent cannot recommend proceeding past one; the CV match alone only flags relocation as unknown
 - [x] Interview plans, panels and decisions: per-role plan (1–3 rounds, rubric from the must-haves, panel size, verdict policy) shown and edited on the requisition page; panels of up to 3 with times that suit everyone and a brief for each; one scorecard per interviewer, the round completes when all have scored; interviewer holds / rejects are recommendations by default; the hiring decision (select → offer) only after the final round — enforced by the runtime (Evaluation agent 1.2.0); no-shows / cancellations recorded, the desk told, new times offered (Interview coordinator 1.4.0); scorecards chased per interviewer (Follow-up 1.3.0); health rule `interview.no_shows`; migration 0034
 - [x] Interviews: the interviewer gets their own invite and brief on every booking (calendar file, meeting link, candidate summary, match and screening highlights, earlier rounds' scorecards, how the time was set with a warning when the panelist's calendar was not checked, an accept-or-decline button, profile and scorecard links); the Interview coordinator (v1.3.0) finds real free times from the connected Google / Microsoft 365 calendar (free/busy only), offers three, and the candidate picks one at a private link — booked once with invites to both; "none of these work" and expiry reach the desk thread; health rule `interview.slots_unanswered`; migration 0033
 - [x] Interviews: the panel agrees a time before the candidate hears of it — each panelist ticks which offered times they can do and may suggest another; the candidate is contacted (AI call first, then the e-mailed link) with only the times the whole panel can do, and with none in common the coordinator re-offers from the suggestions; a panelist's suggested time moves a booked round whose candidate has not been told, and a booked round's invite is held until the panel accepts, then asks the candidate to confirm; per-round status and an audited "Send invite now" on Interviews; public `/confirm/<token>` page; a 2-hour panel answer window (reminder at 1 h; then a free calendar counts as yes, a silent panelist lapses on offered times, and a booked round gets a stand-in for the HR head); earliest-first interview times; same-day slot closing by the AI scheduling call (3 tries an hour apart, 24-hour link, the desk asked to phone an unreachable candidate); scorecards due 2 hours after a round with reminders, HR-head escalation and an overdue marker on Interviews (migration 0089; the Follow-up agent 1.6.0 no longer chases them); an end-to-end hiring SLA per organisation (default 5 days, application to offer) with stage shares, desk warnings and a Reports card (migration 0088); health rule `interview.panel_not_answering`; Interview coordinator v2.5.0; migrations 0085–0086, 0088
@@ -252,6 +384,42 @@ Plan: `docs/org-context-agent-plan.md` (decided 2026-10-27; O0 built 2026-10-27,
 - [x] Real-agent eval scenarios for all seven live agents (`scripts/evals/scenarios.ts`); governance suite `scripts/agent-governance.test.ts`
 - [x] Agent register (Governance → Agent register) and per-run trail export (JSON, vendor-neutral)
 
+## Agent workflows (2026-11-16)
+
+- [x] Migration `0083`: `agent_workflows`, `agent_workflow_versions` (immutable, trigger event + graph hash), `agent_workflow_grants`, `workflow_runs` (one per workflow and event, with history)
+- [x] Canvas builder (`@xyflow/react`): trigger, agent (stock or studio, goal with `{{fields}}`), condition (yes / no), end; drag, connect, edit, delete
+- [x] Graph rules (one trigger, connected, no loops, one way out except conditions, known agents and fields) and dry-run tests (sample event + each agent's outcome → path)
+- [x] Approve → publish → grant per organisation (studio agents must be granted there first); withdrawal cancels live runs
+- [x] Engine: orchestrator starts matching workflows for granted organisations; agents start through `startRun` with the org's switch, de-duplication and owner principal; finished runs move the flow on
+- [x] Tests: `scripts/agent-workflows.test.ts`
+- [x] Ready-made workflows (start from a template: shortlist → screening/follow-up, approved role → JD, JD → publish → advertise, final round → evaluation) and a real-agent test scenario in `docs/agent-workflows.md`
+- [x] Build with chat: describe the flow, the assistant drafts the graph and dry-run tests onto the canvas (checked with the Test rules, one repair turn; `workflow_assistant` feature, organisation's own key; drafts only) — `scripts/workflow-assistant.test.ts`
+- [x] Going live: go-live check per organisation (AI key, agents on, studio grants) on the Organisations tab, Agent settings → Workflows for the organisation (Switch on shortcut, recent runs) and a bell item until ready
+- [x] Workflow app and API: `/w/<id>` per granted workflow (start, follow, decide in place) and `/api/workflows/…` with organisation-issued, hashed, revocable keys (migration `0087`)
+- [ ] Webhooks when a run waits on a person or ends; MCP tools for workflows
+- [x] Hiring-need (manual) trigger — started by the super admin (Run now); wait-for steps on the flow's own role with "only when" and a timeout; report steps; PDF and Excel run reports (migration `0084`)
+- [ ] Approval steps on the canvas (people decide inside agents today); triggers from studio-built events
+
+## Agent studio 2 — studio agents in the app (2026-11-16)
+
+- [x] Migration `0082`: studio agent lifecycle (draft → tested → approved → published), `studio_agent_versions` (immutable manifests), `studio_agent_grants` (organisations the super admin picks)
+- [x] Build from the whole tool catalogue (adapted or new); risk tier, accountable role, human decisions, scope; identity-bound tools (panel, live calls, call review) excluded
+- [x] Test with sample data before approval: stand-in tools with the real contracts return the scenario's data in a test organisation on its own AI key; checks recorded per version (`studio-test.server.ts`)
+- [x] Approve (tested version only, self-approval recorded) → publish → grant / withdraw per organisation (withdrawal cancels open runs)
+- [x] Runtime: `studio:<slug>` types resolve to the published version only where granted; runs pin their version; `agent_studio` AI feature; hosted API and MCP run studio agents in a granted workspace
+- [x] Organisations see granted studio agents in Agent settings (switch, autonomy, budget, start a run); health rule `definition.studio_agent_failing`
+- [x] Agent workflow builder (see below)
+
+## Agent studio — platform blueprints (2026-11-16)
+
+- [x] Platform super admin only (`/platform-agent-studio`, `requirePlatformAdmin`); organisations never see it
+- [x] `agent_blueprints` / `agent_blueprint_keys` (migration `0080`); runs record `blueprint_id` / `blueprint_version`
+- [x] Adapt a stock agent to another domain: rewrite name, responsibility, instructions and must-never; drop, rename and re-describe its tools (inputs unchanged). Locked: injection and operating rules, human tools, gate-verb ban (renamed tools included), no foreign tools, steps ≤ stock
+- [x] Runtime aliasing: the model sees renamed tools, the real tool runs; only hosted runs in the blueprint's workspace organisation, never in-app runs
+- [x] Portable package `ats-agent-package/2` (vendor-neutral) and hosted API / MCP with hashed keys, per-key rate limit, workspace-owner principal, audit (`platform.agent_blueprint.*`)
+- [x] Tests: `scripts/agent-blueprints.test.ts`
+- [ ] Health rule for repeated invalid-key calls (needs a failure counter)
+
 ## Agentic platform — Phase 2: intake → match → screen (2026-10-06)
 
 - [x] Pipeline cores (`src/lib/pipeline.server.ts`) shared by the screens and agent tools — stage moves, adding talent-pool candidates (now verifies the candidates belong to the organisation, closing a gap in `addApplicationsToRequisition`), candidate notes; `createAssessmentCore`
@@ -333,6 +501,14 @@ Study in `docs/hrms-integrations-study.md`: vendor API landscape (Keka, greytHR,
 - [ ] P3: on-hire push to Keka (incl. preboarding) and greytHR, hooked at the stage-transition choke point
 - [ ] P4: Workday read via OAuth + RaaS/REST with a per-customer ISU setup guide; partnership track in parallel
 - [ ] P5: CSV import/export templates for partnership-gated HRMS (Darwinbox, ZingHR, Adrenalin); direct adapters as vendor specs arrive; evaluate a unified-API aggregator behind a DPIA
+
+## Copilot intelligence (2026-11-09)
+
+- [x] Role-aware HR copilot: tool-calling turns through the gateway (`copilot` feature) replace the fixed 60-row snapshot; every lookup is filtered server-side by the person's roles (leadership / recruiter / manager / member — `src/lib/copilot-scope.ts`), tools outside a scope are never offered, recruiters never receive pay figures
+- [x] Requisition status, approval trail and "waiting on whom, for how long", approvals waiting on the person (requisitions and offers), pipeline and stalled applications, department budgets (leadership), ontology overview and role profiles, governance summary (audit log, open agent issues, AI usage by feature — no vendor or model names)
+- [x] Pool coverage (`src/lib/pool-coverage.ts`): strong fits per opening for every open role and ontology role, internal share, profile freshness, scarce skills — deterministic; card on Talent pool
+- [x] Demand outlook (`src/lib/demand-outlook.ts`, migration 0070): eight quarters of requisitions per ontology role, a market signal (`demand_outlook` feature, zod-checked), emerging roles and coverage, ranked with evidence and confidence; thin history said plainly; cached weekly, refreshed by leadership; useful / not useful captured as training feedback
+- [x] Hand-off: work the copilot proposes is stored on its answer and starts the agent Copilot only on the person's click (claimed once); health rule `skills.copilot_errors`
 
 ## AI governance and spend visibility (2026-09-28)
 

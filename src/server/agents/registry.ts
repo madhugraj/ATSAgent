@@ -75,6 +75,9 @@ export type GateKind =
   | "panel_review"
   | "new_panelist"
   | "org_profile"
+  | "pay_conventions"
+  | "policy_finding"
+  | "policy_briefing"
   | "expert_brief"
   | "general";
 
@@ -111,6 +114,13 @@ export type AgentDefinition = {
   /** Tool names this agent may call (the HITL tools are always available). */
   tools: string[];
   maxSteps?: number;
+  /** Default token budget per leg when the organisation has not set one (document-heavy agents). */
+  maxTokens?: number;
+  /**
+   * Agent studio blueprints only (never stock agents): the name and description
+   * the model sees for a real tool. Calls are mapped back to the real tool.
+   */
+  toolAliases?: Record<string, { name: string; description: string }>;
 };
 
 const tools = new Map<string, AgentTool<never>>();
@@ -141,6 +151,12 @@ export const SUBMISSION_TOOLS: ReadonlySet<string> = new Set([
   "submit_offer_for_approval",
   "submit_profile_version",
   "propose_profile_items",
+  // Stores pay conventions as a pending proposal; applied only when the HR head
+  // approves the pay_conventions gate (src/lib/pay-settings.server.ts).
+  "propose_pay_conventions",
+  // Files a labour-law briefing (verified timeline and quoted provisions) for the
+  // HR head; nothing applies until the policy_briefing gate is approved.
+  "submit_policy_briefing",
   // In-call negotiation tool: passes the candidate's spoken yes to the hiring
   // team, who confirm it with them — it does not agree anything itself.
   "submit_agreed_terms",
@@ -152,6 +168,9 @@ export const SUBMISSION_TOOLS: ReadonlySet<string> = new Set([
   // Marks roles as "waiting to be posted" — the person posts on the portal
   // themselves (the extension only fills the form they are looking at).
   "request_hand_posting",
+  // The Voice Guard files its after-call review for a person (Call reviews);
+  // it changes nothing on the call, the candidate or any decision.
+  "submit_call_review",
 ]);
 
 export function isGateToolName(name: string): boolean {
@@ -194,6 +213,14 @@ export function getAgent(type: AgentType): AgentDefinition | undefined {
 }
 
 /** Test helper: forget everything registered. */
+/** Prefix of the stand-in tools a studio test registers (and only these can be removed). */
+export const STUDIO_TEST_TOOL_PREFIX = "stest_";
+
+/** Remove a studio test's stand-in tool once the test ends. */
+export function unregisterTestTool(name: string): void {
+  if (name.startsWith(STUDIO_TEST_TOOL_PREFIX)) tools.delete(name);
+}
+
 export function resetRegistry(): void {
   tools.clear();
   agents.clear();

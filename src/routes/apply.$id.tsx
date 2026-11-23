@@ -149,7 +149,7 @@ function ApplyPage() {
 
             {j.mustHave.length ? (
               <div className="mt-5 flex flex-wrap gap-2">
-                {j.mustHave.map((s) => (
+                {j.mustHave.map((s: string) => (
                   <span
                     key={s}
                     className="rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary"
@@ -157,7 +157,7 @@ function ApplyPage() {
                     {s}
                   </span>
                 ))}
-                {j.goodToHave.map((s) => (
+                {j.goodToHave.map((s: string) => (
                   <span
                     key={s}
                     className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground"

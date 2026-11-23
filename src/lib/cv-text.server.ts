@@ -20,9 +20,19 @@ export function looksLikeCv(filename: string): boolean {
 export async function attachmentText(filename: string, bytes: Uint8Array): Promise<string> {
   if (bytes.byteLength > 15_000_000) return "";
   const url = process.env["PARSER_URL"];
-  if (!url) return extractTextLocal(filename, bytes);
+  if (!url) return storableText(await extractTextLocal(filename, bytes));
   const { parseRemote } = await import("../server/parser/client");
-  return parseRemote(url, filename, bytes);
+  return storableText(await parseRemote(url, filename, bytes));
+}
+
+/**
+ * Text Postgres can store: PDFs (often non-Latin scripts with broken font maps)
+ * yield NUL and other control characters — a NUL makes any text or JSON column
+ * refuse the row. Tabs and line breaks are kept.
+ */
+export function storableText(text: string): string {
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, " ");
 }
 
 /**

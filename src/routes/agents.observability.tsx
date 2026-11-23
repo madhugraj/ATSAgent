@@ -52,6 +52,9 @@ import {
 import { AGENT_CATALOG, AGENT_LABEL, AUTONOMY_OPTIONS } from "@/lib/agents.catalog";
 import { AgentDetailDrawer, type DrawerTab } from "@/components/AgentDetailDrawer";
 import { AgentUtilisation } from "@/components/AgentUtilisation";
+import { CallReviewsSummary } from "@/components/CallReviewsSummary";
+import { ModalityToggle } from "@/components/report-bar";
+import { modalityLabel, type ModalityFilter } from "@/lib/agent-modality";
 
 const DRAWER_TABS = [
   "identity",
@@ -221,9 +224,11 @@ function ObservabilityPage() {
     }, 350);
     return () => window.clearTimeout(timer);
   }, [search.agent]);
+  const [modality, setModality] = useState<ModalityFilter>("all");
   const q = useQuery({
-    queryKey: ["agent_observability"],
-    queryFn: () => agentObservability(),
+    queryKey: ["agent_observability", modality],
+    queryFn: () => agentObservability({ data: { modality } }),
+    placeholderData: (prev) => prev,
     refetchInterval: 30_000,
     retry: false,
   });
@@ -236,7 +241,8 @@ function ObservabilityPage() {
         title="Agent observability"
         description="How every hiring agent is behaving and performing — 14-day trends, the issues the health engine has detected, and each agent's identity, tools, AI skills, evals, harness, human-in-the-loop, budget and audit."
         actions={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <ModalityToggle value={modality} onChange={setModality} />
             <Button asChild variant="outline" size="sm">
               <Link to="/agents/settings">Agent settings</Link>
             </Button>
@@ -256,9 +262,10 @@ function ObservabilityPage() {
       ) : (
         <div className="mt-4 space-y-6">
           <HealthSummary d={d} />
-          <KpiRow d={d} />
+          <KpiRow d={d} scope={modalityLabel(modality) ?? "All agents"} />
           <Trends d={d} />
           <AgentUtilisation />
+          <CallReviewsSummary />
           <IssuesPanel
             issues={[...d.orgIssues, ...d.agents.flatMap((a) => a.issues)]}
             rules={d.rules}
@@ -347,14 +354,41 @@ function Sparkline({ values, color = "var(--primary)" }: { values: number[]; col
   );
 }
 
-function KpiRow({ d }: { d: ObservabilityView }) {
+function Tile({
+  label,
+  value,
+  hint,
+  spark,
+  children,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  spark?: number[];
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="panel flex flex-col p-4">
+      <p className="text-xs font-medium text-muted-foreground">{label}</p>
+      <p className="num mt-1 text-2xl font-semibold tracking-tight">{value}</p>
+      {children}
+      {hint ? <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p> : null}
+      {spark ? (
+        <div className="mt-auto pt-2">
+          <Sparkline values={spark} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function KpiRow({ d, scope }: { d: ObservabilityView; scope: string }) {
   const t = d.totals;
   const tr = d.trends;
   return (
     <section>
       <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        All agents · last 7 days{" "}
-        <span className="font-normal normal-case">(sparklines: 14 days)</span>
+        {scope} · last 7 days <span className="font-normal normal-case">(sparklines: 14 days)</span>
       </p>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <StatCard

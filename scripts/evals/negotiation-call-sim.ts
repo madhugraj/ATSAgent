@@ -216,7 +216,7 @@ export function agentPolicy(f: AgentFacts, breaks: Breaks = {}): AgentPolicy {
     }
     // Greet and appreciate: the notes line, congratulations, what the team valued — then the go-ahead.
     io.say(
-      "Thank you. I make notes of this call for the hiring team, and they confirm anything we discuss. Congratulations — you cleared all the interview rounds, and the team has selected you.",
+      "Thank you. I make notes of this call for the hiring team, and it is checked for quality; the team confirms anything we discuss. Congratulations — you cleared all the interview rounds, and the team has selected you.",
       false,
     );
     const valued = await io.tool("explain_offer", { topic: "why_you" });
@@ -432,7 +432,10 @@ export function simulatedVoice(
         return out;
       },
     };
+    let started = false;
     const play = async () => {
+      if (started) return;
+      started = true;
       speak("caller", "Hello?");
       try {
         await agent(io);
@@ -445,6 +448,12 @@ export function simulatedVoice(
       session: {
         sendAudio() {},
         sendText(text: string) {
+          // The ready-made greeting is asked for while the phone rings (greeting.ts):
+          // the script plays from there, once the fake line has picked up.
+          if (text.includes("phone is ringing")) {
+            setTimeout(() => void play(), 20);
+            return;
+          }
           if (text.includes("picked up")) void play();
           else seen.cues?.push(text);
         },

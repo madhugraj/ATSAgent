@@ -207,7 +207,7 @@ describe("the in-call tools", () => {
         "record_permission",
         { granted: true, their_words: "yes" },
         options,
-        "This is Saranya, an AI recruiting assistant. I'll note the time you choose.",
+        "This is Saranya, an AI recruiting assistant. I'll note the time you choose, and the call is checked for quality.",
       ),
     ).toEqual({ ok: true });
     expect(
@@ -253,7 +253,8 @@ describe("the in-call tools", () => {
   });
 
   test("an unclear no is sent back once; a clear no is taken at once", () => {
-    const said = "This is Saranya, an AI recruiting assistant. I'll note the time you choose.";
+    const said =
+      "This is Saranya, an AI recruiting assistant. I'll note the time you choose, and the call is checked for quality.";
     const a = tools.freshSchedulingState();
     for (const words of [
       "I am not very clear with your ask.",
@@ -305,7 +306,7 @@ describe("the in-call tools", () => {
 
   test("on a live call the go-ahead comes only from an answer to the question, in the words heard", () => {
     const said =
-      "This is Saranya, an AI recruiting assistant. I'll note this short call. Do you have a minute now?";
+      "This is Saranya, an AI recruiting assistant. I'll note this short call, and it is checked for quality. Do you have a minute now?";
     const s = tools.freshSchedulingState();
     // Nothing said since the question (e.g. only "Yes, it's me" to "am I speaking with…?").
     expect(
@@ -832,7 +833,10 @@ function scriptedVoice(steps: Step[], seen: { opts?: VoiceOpts; results: unknown
       closedBy: "client",
       error: null,
     });
+    let started = false;
     const play = async () => {
+      if (started) return;
+      started = true;
       for (const st of steps) {
         if ("say" in st) {
           const turn = { who: st.say, text: st.text, at: new Date().toISOString() };
@@ -850,6 +854,12 @@ function scriptedVoice(steps: Step[], seen: { opts?: VoiceOpts; results: unknown
       session: {
         sendAudio() {},
         sendText(text: string) {
+          // The ready-made greeting is asked for while the phone rings (greeting.ts):
+          // the script plays from there, once the fake line has picked up.
+          if (text.includes("phone is ringing")) {
+            setTimeout(() => void play(), 20);
+            return;
+          }
           if (text.includes("picked up")) void play();
         },
         close: async () => {
@@ -864,7 +874,7 @@ function scriptedVoice(steps: Step[], seen: { opts?: VoiceOpts; results: unknown
 }
 
 const DISCLOSE =
-  "This is Saranya, an AI recruiting assistant from Sched Org, about your first-round interview. Do you have a minute to pick a time? I'll note the time you choose for the hiring team.";
+  "This is Saranya, an AI recruiting assistant from Sched Org, about your first-round interview. Do you have a minute to pick a time? I'll note the time you choose for the hiring team, and the call is checked for quality.";
 
 describe("a whole scheduling call (fake line)", () => {
   async function arranged(o: { attempt?: number } = {}) {
@@ -1043,7 +1053,7 @@ describe("a whole scheduling call (fake line)", () => {
           { tool: "record_permission", args: { granted: true, their_words: "Yeah, Meera here." } },
           {
             say: "ai",
-            text: "Thank you. I'll note this short call for the hiring team. Do you have a minute now?",
+            text: "Thank you. I'll note this short call for the hiring team, and it is checked for quality. Do you have a minute now?",
           },
           { say: "caller", text: "Yes, go ahead." },
           { tool: "record_permission", args: { granted: true, their_words: "yes" } },
@@ -1267,6 +1277,23 @@ describe("who speaks first", () => {
     w.stop();
     expect(w.sent).toEqual(["(The person has answered the phone. Reply to them now.)"]);
   }, 15_000);
+
+  test("still silent after the cue: it is repeated, at most twice more", async () => {
+    const heardAt = Date.now();
+    const w = watch(
+      () => heardAt,
+      () => false,
+      60_000,
+    );
+    // 6 s apart: a cue interrupts the reply the model is preparing (REPEAT_NUDGE_MS).
+    await wait(4_000 + 6_000 * 2 + 600);
+    w.stop();
+    expect(w.sent).toEqual([
+      "(The person has answered the phone. Reply to them now.)",
+      "(The person is on the line and waiting. Speak now.)",
+      "(The person is on the line and waiting. Speak now.)",
+    ]);
+  }, 25_000);
 });
 
 /** The panel agrees an offer's times (each panelist accepts), as the confirm links would. */

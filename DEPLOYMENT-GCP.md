@@ -1,5 +1,10 @@
 # ATSIQ — GCP deployment handoff (z-atsiq.yavar.ai)
 
+> **New production (www.scouts.yavar.ai): follow [docs/deployment-scouts-gcp.md](docs/deployment-scouts-gcp.md)** —
+> GKE Autopilot, private Cloud SQL, Cloud NAT for SIP, keyless CI/CD
+> (`.github/workflows/deploy-gke.yml`, manifests in `infra/gke/`). This document
+> describes the earlier z-atsiq setup and stays as reference.
+
 Instructions for DevOps to deploy the ATSIQ ATS to a GCP cluster under the domain **z-atsiq.yavar.ai** (DNS labels are case-insensitive; lowercase used throughout).
 
 ## 1. Source
@@ -119,6 +124,13 @@ RATE_LIMIT_STORE=postgres # one 60/min-per-caller limit across every instance
 The counters live in the UNLOGGED table `rate_limit_hits` (migration 0066). If
 the database cannot be reached the limiter falls back to the per-instance
 window rather than blocking traffic.
+
+### Hosted agent API (Agent studio)
+
+`/api/agents/*` and `/api/mcp` are served by the app itself and authenticated with keys
+issued by the platform super admin on Platform → Agent studio; hosted runs use the chosen workspace organisation's own AI key, so no deployment configuration or platform AI key is needed. They are
+rate-limited per caller (60/min, the shared limiter above) and per key (30/min). Apply migrations
+`0080_agent_blueprints.sql`, `0082_studio_agents.sql` and `0083_agent_workflows.sql` and `0084_workflow_waits.sql` before deploying.
 
 ### Sandboxed document parser (recommended)
 

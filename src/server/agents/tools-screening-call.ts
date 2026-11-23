@@ -20,6 +20,7 @@ import {
   CALL_TOOL_INPUTS,
   CALL_TOOL_NAMES,
   freshCallState,
+  type CallDetailsInput,
   type CallToolName,
 } from "../voice/call-tools";
 import { registerTool, type ToolContext } from "./registry";
@@ -53,6 +54,12 @@ async function callForRun(ctx: ToolContext) {
   return { ...free, agentRunId: ctx.runId };
 }
 
+/**
+ * Text mode only: the details recorded so far on each call, so end_call can check
+ * the required ones (the live call keeps them in its own state). Bounded.
+ */
+const textModeDetails = new Map<string, CallDetailsInput>();
+
 /** Apply one in-call tool to the call row (text mode); same rules as the live call. */
 async function applyToCall(ctx: ToolContext, name: CallToolName, input: unknown) {
   const call = await callForRun(ctx);
@@ -72,8 +79,14 @@ async function applyToCall(ctx: ToolContext, name: CallToolName, input: unknown)
     ...freshCallState(),
     consent: call.consentAt ? true : call.status === "consent_declined" ? false : null,
     answers: call.answers,
+    details: textModeDetails.get(call.id) ?? null,
   };
   const out = applyCallTool(state, name, input, questionIds, Date.now());
+  if (state.details) {
+    textModeDetails.delete(call.id);
+    textModeDetails.set(call.id, state.details);
+    if (textModeDetails.size > 500) textModeDetails.delete(textModeDetails.keys().next().value!);
+  }
   if (!out["ok"]) throw new Error(String(out["error"] ?? "Not recorded."));
   await db
     .update(screeningCalls)

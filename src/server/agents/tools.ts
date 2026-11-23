@@ -8,6 +8,7 @@
  * for them with request_approval (registry gate guard).
  */
 import { rupees } from "@/lib/money";
+import { isCurrencyCode } from "@/lib/iso";
 import { and, desc, eq, ilike, inArray, or } from "drizzle-orm";
 import { z } from "zod";
 
@@ -48,6 +49,20 @@ function requisitionView(r: typeof requisitions.$inferSelect) {
     budgetCtc: num(r.budgetCtc),
     ctcBandMin: num(r.ctcBandMin),
     ctcBandMax: num(r.ctcBandMax),
+    /** The budget and band are in this currency and basis (docs/pay-terms-plan.md). */
+    payTerms: {
+      kind: r.kindOfWork,
+      basis: r.payBasis,
+      currency: r.payCurrency,
+      payZoneId: r.payZoneId,
+      hoursPerWeek: num(r.hoursPerWeek),
+      daysPerWeek: num(r.daysPerWeek),
+      contractMonths: r.contractMonths,
+      extendable: r.extendable,
+      contractType: r.contractType,
+      paysByLocation: r.paysByLocation,
+      neededBy: r.neededBy,
+    },
     mustHaveSkills: r.mustHaveSkills,
     goodToHaveSkills: r.goodToHaveSkills,
     responsibilities: r.responsibilities,
@@ -174,7 +189,13 @@ export function registerPhase1Tools(): void {
     name: "research_compensation",
     description:
       "Live market pay research for the requisition's role, location and experience, with cited sources and a recommended budget and band. Slow; call once per requisition.",
-    input: RequisitionId.extend({ currency: z.string().length(3).default("INR") }),
+    input: RequisitionId.extend({
+      currency: z
+        .string()
+        .length(3)
+        .optional()
+        .describe("Defaults to the requisition's pay currency."),
+    }),
     risk: "read",
     skills: ["market_benchmark"],
     untrustedOutput: true,
@@ -185,7 +206,7 @@ export function registerPhase1Tools(): void {
         orgId: ctx.orgId,
         role: r.title,
         location: r.location || "India",
-        currency: i.currency,
+        currency: i.currency ?? r.payCurrency,
         experienceMin: r.experienceMin,
         experienceMax: r.experienceMax,
         skills: r.mustHaveSkills,
@@ -204,7 +225,7 @@ export function registerPhase1Tools(): void {
   registerTool({
     name: "suggest_weights",
     description:
-      "Suggest how the 100 candidate-scoring points should be split across skills, experience, career, impact, education and social for this requisition.",
+      "Suggest how the 100 candidate-scoring points should be split for this requisition — skills, experience, career, impact, education, social and up to two proposed organisation-specific dimensions (for example location fit or regulatory compliance) — from the role, the organisation profile, the role's demand and pool supply, and its location and work mode. Returns the knowledge it was based on.",
     input: RequisitionId,
     risk: "read",
     skills: ["weight_suggest"],
@@ -212,6 +233,9 @@ export function registerPhase1Tools(): void {
       const r = await loadRequisition(ctx.orgId, i.requisitionId);
       const { suggestWeightsCore } = await import("@/lib/matching.functions");
       return suggestWeightsCore(ctx.orgId, {
+        requisitionId: r.id,
+        location: r.location,
+        workMode: r.workMode,
         title: r.title,
         mustHave: r.mustHaveSkills,
         goodToHave: r.goodToHaveSkills,
@@ -326,7 +350,8 @@ export function registerPhase1Tools(): void {
 
   registerTool({
     name: "set_compensation",
-    description: "Set the requisition's budget CTC and pay band (annual, in the org currency).",
+    description:
+      "Set the requisition's budget and pay band, in the requisition's pay currency and pay basis (set_pay_terms first when they differ from the organisation's defaults — an hourly role's band is an hourly rate).",
     input: RequisitionId.extend({
       budgetCtc: z.number().positive(),
       bandMin: z.number().positive(),
@@ -334,7 +359,7 @@ export function registerPhase1Tools(): void {
     }),
     risk: "write",
     describe: (i) =>
-      `Set budget ${rupees(i.budgetCtc)} (band ${rupees(i.bandMin)}–${rupees(i.bandMax)})`,
+      `Set budget ${i.budgetCtc.toLocaleString("en")} (band ${i.bandMin.toLocaleString("en")}–${i.bandMax.toLocaleString("en")}) in the role's pay currency`,
     run: async (ctx, i) => {
       if (i.bandMin > i.bandMax) throw new Error("bandMin must not exceed bandMax.");
       const { updateRequisitionCompensationCore } = await import("@/lib/requisitions.server");
@@ -349,9 +374,57 @@ export function registerPhase1Tools(): void {
   });
 
   registerTool({
+    name: "set_pay_terms",
+    description:
+      "Set a draft requisition's pay terms: the pay zone (by name, from read_pay_conventions — the job's location decides it, not where the request came from), the kind of work (permanent, fixed_term, contract_hourly, part_time, intern), the pay basis (annual, monthly, daily, hourly), the pay currency (defaults to the zone's), hours and days per week, contract length in months and whether it can be extended (contracts), the contract type when the zone uses them (w2, 1099, ir35_outside…), whether a remote role pays by the candidate's location, and the date the role is needed by (YYYY-MM-DD). Only what the person said or the organisation's conventions state; ask about what is unclear.",
+    input: RequisitionId.extend({
+      zone: z.string().max(60).nullable().optional(),
+      kind: z
+        .enum(["permanent", "fixed_term", "contract_hourly", "part_time", "intern"])
+        .optional(),
+      basis: z.enum(["annual", "monthly", "daily", "hourly"]).optional(),
+      currency: z
+        .string()
+        .regex(/^[A-Za-z]{3}$/)
+        .refine(isCurrencyCode, "a real ISO currency code")
+        .optional(),
+      hoursPerWeek: z.number().min(1).max(80).nullable().optional(),
+      daysPerWeek: z.number().min(1).max(7).nullable().optional(),
+      contractMonths: z.number().int().min(1).max(120).nullable().optional(),
+      extendable: z.boolean().nullable().optional(),
+      contractType: z.string().max(30).nullable().optional(),
+      paysByLocation: z.boolean().optional(),
+      neededBy: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/)
+        .nullable()
+        .optional(),
+    }),
+    risk: "write",
+    describe: (i) =>
+      `Set pay terms${i.zone ? ` (${i.zone})` : ""}${i.kind ? `: ${i.kind.replace(/_/g, " ")}` : ""}${i.basis ? `, ${i.basis}` : ""}${i.currency ? `, ${i.currency.toUpperCase()}` : ""}${i.neededBy ? `, needed by ${i.neededBy}` : ""}`,
+    run: async (ctx, i) => {
+      const { updateRequisitionPayTermsCore } = await import("@/lib/pay-settings.server");
+      const { requisitionId, zone, currency, ...rest } = i;
+      const terms = Object.fromEntries(
+        Object.entries({
+          ...rest,
+          ...(currency ? { currency: currency.toUpperCase() } : {}),
+        }).filter(([, v]) => v !== undefined),
+      );
+      const out = await updateRequisitionPayTermsCore(await actor(ctx), {
+        id: requisitionId,
+        ...(zone !== undefined ? { zone } : {}),
+        terms,
+      });
+      return { ok: true, ...out };
+    },
+  });
+
+  registerTool({
     name: "save_weights",
     description:
-      "Save the six candidate-scoring weights (integers that sum to 100) on a draft requisition — one in approval must be sent back for changes first.",
+      "Save the candidate-scoring weights on a draft requisition: the six built-in weights plus any custom dimensions (key, label, hint, weight; at most 4), all integers that together sum to 100 — one in approval must be sent back for changes first.",
     input: RequisitionId.extend({
       skills: z.number().int().min(0).max(100),
       experience: z.number().int().min(0).max(100),
@@ -359,15 +432,25 @@ export function registerPhase1Tools(): void {
       impact: z.number().int().min(0).max(100),
       education: z.number().int().min(0).max(100),
       social: z.number().int().min(0).max(100),
+      custom: z
+        .array(
+          z.object({
+            key: z.string().max(40),
+            label: z.string().max(60),
+            hint: z.string().max(300),
+            weight: z.number().int().min(0).max(100),
+          }),
+        )
+        .max(4)
+        .optional(),
     }),
     risk: "write",
     describe: () => "Save candidate-scoring weights",
     run: async (ctx, i) => {
-      const { requisitionId, ...w } = i;
-      const total = Object.values(w).reduce((s, v) => s + v, 0);
-      if (total !== 100) throw new Error(`Weights must sum to 100 (got ${total}).`);
+      const { requisitionId, custom, ...w } = i;
       const { saveRequisitionWeightsCore } = await import("@/lib/requisitions.server");
-      await saveRequisitionWeightsCore(await actor(ctx), requisitionId, w);
+      // Totals and custom-dimension rules are checked by the core (weightsProblem).
+      await saveRequisitionWeightsCore(await actor(ctx), requisitionId, w, custom ?? []);
       return { ok: true };
     },
   });
@@ -443,6 +526,7 @@ export function registerPhase1Tools(): void {
           .join("\n\n"),
         education: r.educationRequirement,
         reportingTo: r.hiringManager,
+        employment: employmentWords(r.kindOfWork, r.contractMonths, r.extendable),
       });
       const { saveJobDescriptionCore } = await import("@/lib/requisitions.server");
       const saved = await saveJobDescriptionCore(await actor(ctx), {
@@ -565,4 +649,23 @@ export async function activeRunFor(
     )
     .limit(1);
   return Boolean(row);
+}
+
+/** The kind of work as a JD states it (pure): never pay, which stays inside the organisation. */
+export function employmentWords(
+  kind: string,
+  months: number | null,
+  extendable: boolean | null,
+): string {
+  const words: Record<string, string> = {
+    permanent: "Permanent, full-time",
+    fixed_term: "Fixed-term contract",
+    contract_hourly: "Contract",
+    part_time: "Part-time",
+    intern: "Internship",
+  };
+  const base = words[kind] ?? "Permanent, full-time";
+  if (!months || (kind !== "fixed_term" && kind !== "contract_hourly" && kind !== "intern"))
+    return base;
+  return `${base}, ${months} months${extendable ? ", can be extended" : ""}`;
 }

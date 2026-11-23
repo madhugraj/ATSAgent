@@ -249,7 +249,11 @@ describe("graders (pure)", () => {
       graders.gradeNegotiationCall({
         ...base,
         timeline: [
-          { kind: "turn", who: "ai", text: "I'm an AI assistant and I make notes." },
+          {
+            kind: "turn",
+            who: "ai",
+            text: "I'm an AI assistant and I make notes; the call is checked for quality.",
+          },
           { kind: "turn", who: "ai", text },
         ],
       });
@@ -500,7 +504,7 @@ describe("a quiet assistant after a tool result (the first real call)", () => {
         "Hello, this is Saranya, an AI recruiting assistant from Neg Org — am I speaking with Meera?",
       );
       io.say(
-        "Thank you. I make notes of this call for the hiring team, and they confirm anything we discuss. Do you have a few minutes now?",
+        "Thank you. I make notes of this call for the hiring team, and it is checked for quality; the team confirms anything we discuss. Do you have a few minutes now?",
       );
       await io.tool("record_permission", { granted: true, their_words: io.heard() });
       await new Promise((r) => setTimeout(r, negSession.NEGOTIATION_TOOL_SILENCE_CUE_MS + 800));

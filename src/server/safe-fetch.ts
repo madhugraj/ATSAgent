@@ -48,17 +48,45 @@ function isBlockedAddress(address: string): boolean {
   return true; // not an IP we understand — block
 }
 
-async function assertPublicHost(hostname: string): Promise<string> {
+/**
+ * Every address the host resolves to, all vetted (one private address refuses
+ * the host). Returned in resolver order so the caller can fall back to the
+ * next address when one is unreachable — hosts often publish a dead record.
+ */
+async function assertPublicHost(hostname: string): Promise<string[]> {
   if (net.isIP(hostname)) {
     if (isBlockedAddress(hostname)) throw new Error(`Blocked address: ${hostname}`);
-    return hostname;
+    return [hostname];
   }
   const looked = await dns.lookup(hostname, { all: true, verbatim: true });
   if (!looked.length) throw new Error(`Could not resolve ${hostname}`);
   for (const { address } of looked) {
     if (isBlockedAddress(address)) throw new Error(`Blocked address for ${hostname}`);
   }
-  return looked[0]!.address;
+  return [...new Set(looked.map((l) => l.address))].slice(0, MAX_ADDRESSES);
+}
+
+/** At most this many vetted addresses are tried per request. */
+const MAX_ADDRESSES = 4;
+/** Per-address connect timeout, so one dead address cannot eat the whole budget. */
+const CONNECT_TIMEOUT_MS = 4_000;
+
+/**
+ * Failures that happen before the request is sent (no byte reached the server),
+ * so trying the next vetted address can never replay a request.
+ */
+const CONNECT_FAILURES = new Set([
+  "UND_ERR_CONNECT_TIMEOUT",
+  "ECONNREFUSED",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "EADDRNOTAVAIL",
+  "ETIMEDOUT",
+]);
+
+export function isConnectFailure(e: unknown): boolean {
+  const cause = (e as { cause?: { code?: unknown } } | null)?.cause;
+  return typeof cause?.code === "string" && CONNECT_FAILURES.has(cause.code);
 }
 
 export type SafeFetchResponse = Response & { __resolvedIp?: string };
@@ -81,6 +109,7 @@ function pinnedAgentFor(ip: string): Agent {
   if (!agent) {
     agent = new Agent({
       connect: {
+        timeout: CONNECT_TIMEOUT_MS,
         lookup: (_hostname, _options, callback) => {
           callback(null, [{ address: ip, family: net.isIP(ip) as 4 | 6 }]);
         },
@@ -124,7 +153,7 @@ export async function safeFetch(
   const method = (opts?.method ?? "GET").toUpperCase();
   if (!ALLOWED_METHODS.has(method)) throw new Error(`Method not allowed: ${method}`);
 
-  const resolvedIp = await assertPublicHost(url.hostname);
+  const addresses = await assertPublicHost(url.hostname);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -136,16 +165,27 @@ export async function safeFetch(
     // The dispatcher is honoured on Node (the production runtime); Bun's fetch
     // ignores it, so under `bun test`/Bun dev the pre-connect vetting below is
     // the only guard — production dials the vetted address regardless of DNS.
-    const res = (await undiciFetch(url, {
-      method,
-      headers: opts?.headers ?? {},
-      ...(opts?.body !== undefined ? { body: opts.body } : {}),
-      redirect: "manual",
-      signal: controller.signal,
-      dispatcher: pinnedAgentFor(resolvedIp),
-    } as Parameters<typeof undiciFetch>[1])) as unknown as SafeFetchResponse;
-    res.__resolvedIp = resolvedIp;
-    return res;
+    // Each vetted address in turn: the next is tried only when the connection
+    // itself failed (nothing was sent), within the one overall timeout.
+    let lastError: unknown;
+    for (const resolvedIp of addresses) {
+      try {
+        const res = (await undiciFetch(url, {
+          method,
+          headers: opts?.headers ?? {},
+          ...(opts?.body !== undefined ? { body: opts.body } : {}),
+          redirect: "manual",
+          signal: controller.signal,
+          dispatcher: pinnedAgentFor(resolvedIp),
+        } as Parameters<typeof undiciFetch>[1])) as unknown as SafeFetchResponse;
+        res.__resolvedIp = resolvedIp;
+        return res;
+      } catch (e) {
+        lastError = e;
+        if (controller.signal.aborted || !isConnectFailure(e)) throw e;
+      }
+    }
+    throw lastError;
   } finally {
     clearTimeout(timer);
   }
