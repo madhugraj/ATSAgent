@@ -6,10 +6,9 @@ import { toast } from "sonner";
 
 import { CheckCircle2, ClipboardCheck, Loader2 } from "lucide-react";
 
-import { CompetencyRating, OverallReadout } from "@/components/CompetencyRating";
+import { EMPTY_SCORECARD, ScorecardFields, scorecardReady } from "@/components/CompetencyRating";
 import { PanelBriefView } from "@/components/PanelBriefView";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { getPanelistScorecard, submitPanelistScorecard } from "@/lib/panelist-links.functions";
 
 export const Route = createFileRoute("/scorecard/$token")({
@@ -40,10 +39,7 @@ function ScorecardPage() {
     queryFn: () => load({ data: { token } }),
     retry: false,
   });
-  const [verdict, setVerdict] = useState<"select" | "hold" | "reject" | null>(null);
-  const [comments, setComments] = useState("");
-  const [reason, setReason] = useState("");
-  const [scores, setScores] = useState<Record<string, number>>({});
+  const [card, setCard] = useState(EMPTY_SCORECARD);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
 
@@ -95,23 +91,19 @@ function ScorecardPage() {
       </Shell>
     );
 
-  const needsReason = verdict !== null && verdict !== "select";
-  const ready =
-    verdict !== null &&
-    c.competencies.every((x) => (scores[x] ?? 0) > 0) &&
-    (!needsReason || reason.trim().length > 0);
+  const ready = scorecardReady(card, c.competencies);
 
   const send = async () => {
-    if (!verdict) return;
+    if (!card.verdict) return;
     setBusy(true);
     try {
       await submit({
         data: {
           token,
-          verdict,
-          comments: comments.trim() || null,
-          reason: reason.trim() || null,
-          competencies: c.competencies.map((name) => ({ name, rating: scores[name]! })),
+          verdict: card.verdict,
+          comments: card.comments.trim() || null,
+          reason: card.reason.trim() || null,
+          competencies: c.competencies.map((name) => ({ name, rating: card.ratings[name]! })),
         },
       });
       setDone(true);
@@ -140,47 +132,9 @@ function ScorecardPage() {
         </div>
       ) : null}
 
-      <div className="mt-5 space-y-3">
-        {c.competencies.map((name) => (
-          <CompetencyRating
-            key={name}
-            name={name}
-            rubric={c}
-            value={scores[name] ?? 0}
-            onChange={(n) => setScores((s) => ({ ...s, [name]: n }))}
-          />
-        ))}
-        <OverallReadout ratings={scores} rubric={c} />
+      <div className="mt-5">
+        <ScorecardFields competencies={c.competencies} rubric={c} value={card} onChange={setCard} />
       </div>
-
-      <div className="mt-5 flex gap-2">
-        {(["select", "hold", "reject"] as const).map((v) => (
-          <Button
-            key={v}
-            size="sm"
-            variant={verdict === v ? "default" : "outline"}
-            onClick={() => setVerdict(v)}
-          >
-            {v === "select" ? "Select" : v === "hold" ? "Hold" : "Reject"}
-          </Button>
-        ))}
-      </div>
-      {needsReason ? (
-        <Textarea
-          className="mt-3"
-          placeholder="Why — the job-relevant reason (required)"
-          value={reason}
-          maxLength={2000}
-          onChange={(e) => setReason(e.target.value)}
-        />
-      ) : null}
-      <Textarea
-        className="mt-3"
-        placeholder="Evidence and comments (optional)"
-        value={comments}
-        maxLength={4000}
-        onChange={(e) => setComments(e.target.value)}
-      />
       <Button className="mt-4 w-full" disabled={!ready || busy} onClick={send}>
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit scorecard (final)"}
       </Button>

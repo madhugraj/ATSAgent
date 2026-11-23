@@ -17,6 +17,14 @@ import {
   requisitionsQuery,
 } from "@/lib/data";
 import { scheduleInterview, submitScorecard } from "@/lib/interviews.functions";
+import { getInterviewPlan } from "@/lib/interview-plan.functions";
+import { roundOf } from "@/lib/interview-plan";
+import {
+  EMPTY_SCORECARD,
+  ScorecardFields,
+  scorecardReady,
+  type ScorecardValue,
+} from "@/components/CompetencyRating";
 import { declineRoundTranscription, retryRoundTranscription } from "@/lib/panel-agent.functions";
 import { createMeetingLink, meetingProviders } from "@/lib/meetings.functions";
 import { buildIcs, downloadIcs } from "@/lib/ics";
@@ -169,11 +177,17 @@ function Interviews() {
     application_id: "",
     level: "1",
     focus_area: "",
-    rating: "3",
-    recommendation: "select" as "select" | "hold" | "reject",
-    comments: "",
-    reason: "",
   });
+  const [card, setCard] = useState<ScorecardValue>(EMPTY_SCORECARD);
+  const fetchPlan = useServerFn(getInterviewPlan);
+  const formReqId = (apps.data ?? []).find((a) => a.id === form.application_id)?.requisition_id;
+  const plan = useQuery({
+    queryKey: ["interview_plan", formReqId],
+    queryFn: () => fetchPlan({ data: { requisitionId: formReqId! } }),
+    enabled: !!formReqId,
+  });
+  const planRound = plan.data ? roundOf(plan.data.plan, Number(form.level)) : null;
+  const formCompetencies = planRound?.competencies ?? [];
 
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState("all");
@@ -198,6 +212,7 @@ function Interviews() {
   function pickApplication(applicationId: string) {
     const locked = scoredLevelsFor(applicationId);
     const firstOpen = LEVELS.find((l) => !locked.has(l.level));
+    setCard(EMPTY_SCORECARD);
     setForm({
       ...form,
       application_id: applicationId,
@@ -323,8 +338,8 @@ function Interviews() {
       toast.error("This interview round has already been scored — scorecards are final.");
       return;
     }
-    if (form.recommendation !== "select" && !form.reason.trim() && !form.comments.trim()) {
-      toast.error("A hold or reject needs a written reason");
+    if (!card.verdict || !scorecardReady(card, formCompetencies)) {
+      toast.error("Rate every competency, pick a verdict and give a reason for a hold or reject");
       return;
     }
     setBusy(true);
@@ -338,11 +353,10 @@ function Interviews() {
           applicationId: form.application_id,
           level: Number(form.level),
           focusArea: form.focus_area || null,
-          rating: Number(form.rating),
-          verdict: form.recommendation,
-          comments: form.comments || null,
-          reason: form.reason || null,
-          competencies: [],
+          verdict: card.verdict,
+          comments: card.comments || null,
+          reason: card.reason || null,
+          competencies: formCompetencies.map((name) => ({ name, rating: card.ratings[name]! })),
         },
       });
       toast.success(
@@ -352,7 +366,8 @@ function Interviews() {
       );
       if (res.blocked) toast.warning(res.blocked);
       if (res.nextInterviewCreated) toast.info("Next round queued for scheduling");
-      setForm({ ...form, comments: "", focus_area: "", reason: "" });
+      setForm({ ...form, focus_area: "" });
+      setCard(EMPTY_SCORECARD);
       qc.invalidateQueries({ queryKey: ["evaluations"] });
       qc.invalidateQueries({ queryKey: ["applications"] });
       qc.invalidateQueries({ queryKey: ["interviews"] });
@@ -786,7 +801,13 @@ function Interviews() {
             </div>
             <div>
               <Label className="mb-1.5 block text-xs text-muted-foreground">Level</Label>
-              <Select value={form.level} onValueChange={(v) => setForm({ ...form, level: v })}>
+              <Select
+                value={form.level}
+                onValueChange={(v) => {
+                  setForm({ ...form, level: v });
+                  setCard(EMPTY_SCORECARD);
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -816,56 +837,14 @@ function Interviews() {
                 placeholder="System design, ownership, communication…"
               />
             </div>
-            <div>
-              <Label className="mb-1.5 block text-xs text-muted-foreground">Rating (1–5)</Label>
-              <Input
-                type="number"
-                min={1}
-                max={5}
-                value={form.rating}
-                onChange={(e) => setForm({ ...form, rating: e.target.value })}
+            {form.application_id && formCompetencies.length ? (
+              <ScorecardFields
+                competencies={formCompetencies}
+                rubric={planRound ?? {}}
+                value={card}
+                onChange={setCard}
               />
-            </div>
-            <div>
-              <Label className="mb-1.5 block text-xs text-muted-foreground">Verdict</Label>
-              <Select
-                value={form.recommendation}
-                onValueChange={(v) =>
-                  setForm({ ...form, recommendation: v as typeof form.recommendation })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="select">
-                    Select —{" "}
-                    {form.level === "3" ? "raise offer" : `move to L${Number(form.level) + 1}`}
-                  </SelectItem>
-                  <SelectItem value="hold">Hold — park on hold</SelectItem>
-                  <SelectItem value="reject">Reject — close the candidate</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {form.recommendation !== "select" && (
-              <div>
-                <Label className="mb-1.5 block text-xs text-muted-foreground">
-                  Reason (required)
-                </Label>
-                <Input
-                  value={form.reason}
-                  onChange={(e) => setForm({ ...form, reason: e.target.value })}
-                />
-              </div>
-            )}
-            <div>
-              <Label className="mb-1.5 block text-xs text-muted-foreground">Comments</Label>
-              <Textarea
-                rows={4}
-                value={form.comments}
-                onChange={(e) => setForm({ ...form, comments: e.target.value })}
-              />
-            </div>
+            ) : null}
             <Button className="w-full" onClick={submitEvaluation} disabled={busy || levelLocked}>
               {busy ? <Loader2 className="size-4 animate-spin" /> : null} Submit evaluation
             </Button>
