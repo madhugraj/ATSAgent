@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 
-import { requireOrg, requireOrgOwner } from "@/lib/auth.middleware";
+import { requireOrgOwner, requirePanel } from "@/lib/auth.middleware";
 import { AgreementAcceptanceInput } from "@/lib/legal/acceptance";
 import type { AgreementKind } from "@/lib/legal/agreements";
 
@@ -16,8 +16,9 @@ export type MyOrgAgreements = {
  * organisation has still to accept. Any member may ask; only the owner can
  * accept (acceptOrgAgreements).
  */
+// Panel-only members pass through the same workspace gate, so they may read it.
 export const myOrgAgreements = createServerFn({ method: "GET" })
-  .middleware([requireOrg])
+  .middleware([requirePanel])
   .handler(async ({ context }): Promise<MyOrgAgreements> => {
     const { orgAgreementStatus } = await import("../server/org-agreements.server");
     const status = await orgAgreementStatus(context.orgId);

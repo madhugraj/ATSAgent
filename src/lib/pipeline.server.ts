@@ -90,6 +90,41 @@ export async function moveStageCore(
   return { from, to: input.toStage, unchanged: false };
 }
 
+/**
+ * A stage the offer workflow sets as a consequence of an offer action
+ * (raising, releasing, accepting). The offer action already checked the
+ * actor's role and the offer transition, so no funnel check runs here, but
+ * the move is recorded like any other: stage_events row, outcome capture and
+ * stale agent request cleanup.
+ */
+export async function recordOfferStageCore(
+  actor: LifecycleActor,
+  input: { applicationId: string; toStage: "offer_pending" | "offer_released" | "offer_accepted" },
+): Promise<{ from: Stage; to: Stage; unchanged: boolean } | null> {
+  const [app] = await db
+    .select({ id: applications.id, stage: applications.stage })
+    .from(applications)
+    .where(and(eq(applications.id, input.applicationId), eq(applications.orgId, actor.orgId)))
+    .limit(1);
+  if (!app) return null;
+  const from = app.stage as Stage;
+  if (from === input.toStage) return { from, to: input.toStage, unchanged: true };
+  await db
+    .update(applications)
+    .set({ stage: input.toStage, lastActivityAt: new Date() })
+    .where(and(eq(applications.id, app.id), eq(applications.orgId, actor.orgId)));
+  const { recordStageTransition } = await import("./stage-events.server");
+  await recordStageTransition({
+    orgId: actor.orgId,
+    applicationId: app.id,
+    fromStage: from,
+    toStage: input.toStage,
+    actor: actorLabel(actor),
+    cause: "offer",
+  });
+  return { from, to: input.toStage, unchanged: false };
+}
+
 /** Attach this organisation's candidates to one of its requisitions. */
 /**
  * A CV a portal limited to the role it was for (job-channels.ts, migration

@@ -1,0 +1,18 @@
+#!/bin/sh
+# Format and lint staged files before they leave this machine, so CI's Lint
+# step never fails on formatting. Enabled by `bun install` (the prepare script
+# sets core.hooksPath). Skip once with `git commit --no-verify`.
+files=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.(ts|tsx|js|jsx|mjs|json|css|md)$')
+[ -z "$files" ] && exit 0
+# shellcheck disable=SC2086
+bunx prettier --write --ignore-unknown $files >/dev/null || exit 1
+code=$(echo "$files" | grep -E '\.(ts|tsx|js|jsx|mjs)$')
+if [ -n "$code" ]; then
+  # shellcheck disable=SC2086
+  bunx eslint --fix --quiet $code || {
+    echo "pre-commit: fix the lint errors above (or commit with --no-verify)."
+    exit 1
+  }
+fi
+# shellcheck disable=SC2086
+git add $files

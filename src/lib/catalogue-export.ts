@@ -87,6 +87,7 @@ export function buildCataloguePdf(cat: CatalogueResult) {
     let y = 98;
     for (const para of [
       m.summary,
+      m.overview,
       `Outcome: ${m.outcome}`,
       m.commercials.notes ? `Commercial notes: ${m.commercials.notes}` : "",
     ]) {
@@ -98,8 +99,9 @@ export function buildCataloguePdf(cat: CatalogueResult) {
 
     autoTable(doc, {
       startY: y + 4,
-      head: [["Capabilities"]],
-      body: m.capabilities.map((c) => [pdfText(c)]),
+      head: [["Capability", "What it does"]],
+      body: m.capabilities.map((c) => [pdfText(c.name), pdfText(c.detail)]),
+      columnStyles: { 0: { cellWidth: 150, fontStyle: "bold" } },
       theme: "striped",
       styles: { font: "helvetica", fontSize: 9, cellPadding: 5, textColor: INK },
       headStyles: { fillColor: INK, textColor: [255, 255, 255], fontStyle: "bold" },
@@ -140,6 +142,7 @@ export function downloadCatalogueXlsx(cat: CatalogueResult) {
       Unit: m.commercials.unit,
       Capabilities: m.capabilities.length,
       Summary: m.summary,
+      Overview: m.overview,
       Outcome: m.outcome,
       "Commercial notes": m.commercials.notes,
     })),
@@ -154,6 +157,7 @@ export function downloadCatalogueXlsx(cat: CatalogueResult) {
     { wch: 20 },
     { wch: 12 },
     { wch: 60 },
+    { wch: 100 },
     { wch: 48 },
     { wch: 40 },
   ];
@@ -165,11 +169,12 @@ export function downloadCatalogueXlsx(cat: CatalogueResult) {
         Module: m.name,
         Category: m.category,
         Tier: m.commercials.tier,
-        Capability: c,
+        Capability: c.name,
+        "What it does": c.detail,
       })),
     ),
   );
-  caps["!cols"] = [{ wch: 38 }, { wch: 16 }, { wch: 12 }, { wch: 90 }];
+  caps["!cols"] = [{ wch: 38 }, { wch: 16 }, { wch: 12 }, { wch: 40 }, { wch: 100 }];
   XLSX.utils.book_append_sheet(wb, caps, "Capabilities");
 
   const about = XLSX.utils.aoa_to_sheet([

@@ -35,7 +35,7 @@ import { getResumeDownloadUrl } from "@/lib/resume.functions";
 import { downloadResume } from "@/lib/resume-download";
 import { createCandidate, deleteCandidates } from "@/lib/candidates.functions";
 import { sourceLabel as channelSourceLabel, UPLOAD_SOURCES } from "@/lib/job-channels";
-import { intakeCvs, type IntakeStatus } from "@/lib/cv-intake";
+import { CvUpload } from "@/components/CvUpload";
 import { normalizeExternalUrl } from "@/lib/external-links";
 import { canonical, nextAction, stalledDays, STAGE_LABEL, type Stage } from "@/lib/lifecycle";
 import { computeCareerMetrics, type EmploymentRow } from "@/lib/career";
@@ -318,8 +318,6 @@ function Candidates() {
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkReqId, setBulkReqId] = useState("");
   const [bulkSource, setBulkSource] = useState("direct");
-  const [bulkBusy, setBulkBusy] = useState(false);
-  const [bulkLog, setBulkLog] = useState<IntakeStatus[]>([]);
   const [form, setForm] = useState({
     full_name: "",
     email: "",
@@ -339,33 +337,6 @@ function Candidates() {
     source: "direct",
   });
   const [willingToRelocate, setWillingToRelocate] = useState<"yes" | "no" | "unknown">("unknown");
-
-  /** Bulk CV intake: read each file locally, AI-parse it, then upsert the candidate. */
-  async function bulkUpload(files: FileList | null) {
-    if (!files || files.length === 0) return;
-    const list = Array.from(files);
-    setBulkBusy(true);
-    setBulkLog(list.map((f) => ({ file: f.name, state: "pending" as const, message: "Queued" })));
-    try {
-      const summary = await intakeCvs({
-        files: list,
-        parse,
-        source: bulkSource,
-        requisitionId: bulkReqId || null,
-        onUpdate: (i, patch) =>
-          setBulkLog((l) => l.map((row, idx) => (idx === i ? { ...row, ...patch } : row))),
-      });
-      await qc.invalidateQueries({ queryKey: ["candidates"] });
-      await qc.invalidateQueries({ queryKey: ["applications"] });
-      if (summary.failed === 0)
-        toast.success(`${summary.ok} CV${summary.ok === 1 ? "" : "s"} added to the talent pool`);
-      else toast.warning(`${summary.ok} parsed · ${summary.failed} failed — see the list`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Bulk upload failed");
-    } finally {
-      setBulkBusy(false);
-    }
-  }
 
   // Pool hygiene is computed client-side and is fully explainable: which two rows
   // look like the same person, and why.
@@ -818,49 +789,12 @@ function Candidates() {
                   </div>
                 </div>
 
-                <div>
-                  <Label className="mb-1.5 block text-xs text-muted-foreground">Resume files</Label>
-                  <Input
-                    type="file"
-                    multiple
-                    disabled={bulkBusy}
-                    accept=".pdf,.docx,.txt,.md"
-                    onChange={(e) => {
-                      bulkUpload(e.target.files);
-                      e.target.value = "";
-                    }}
-                  />
-                  <p className="mt-1.5 text-xs text-muted-foreground">
-                    Text-based PDF, DOCX, TXT or MD. Scanned/image-only PDFs cannot be read — export
-                    a text PDF.
-                  </p>
-                </div>
-
-                {bulkLog.length > 0 && (
-                  <>
-                    <p className="num text-xs text-muted-foreground">
-                      {bulkLog.filter((l) => l.state === "ok").length} parsed ·{" "}
-                      {bulkLog.filter((l) => l.state === "error").length} failed · {bulkLog.length}{" "}
-                      total
-                    </p>
-                    <ul className="max-h-56 space-y-1 overflow-y-auto text-xs">
-                      {bulkLog.map((l, i) => (
-                        <li
-                          key={i}
-                          className={
-                            l.state === "error"
-                              ? "text-destructive"
-                              : l.state === "ok"
-                                ? "text-muted-foreground"
-                                : "text-foreground"
-                          }
-                        >
-                          <span className="font-medium">{l.file}</span> — {l.message}
-                        </li>
-                      ))}
-                    </ul>
-                  </>
-                )}
+                <CvUpload
+                  label="Resume files"
+                  source={bulkSource}
+                  requisitionId={bulkReqId || null}
+                  destination="the talent pool"
+                />
 
                 <DialogFooter>
                   <Button variant="outline" onClick={() => setBulkOpen(false)}>

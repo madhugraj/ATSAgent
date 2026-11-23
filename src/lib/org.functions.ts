@@ -2,15 +2,14 @@ import { and, eq, ilike, isNull, sql } from "drizzle-orm";
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-import { requireIdentity } from "@/lib/auth.middleware";
+import { assertNotPanelOnly, requireIdentity, type AppRole } from "@/lib/auth.middleware";
 import { db } from "../server/db";
 import { emailVerified } from "../server/claims";
 import { departments, masterItems, orgMembers, organizations, userRoles } from "@db/schema";
 import { registrableDomain, workEmailProblem } from "@/lib/work-email";
 import { AgreementAcceptanceInput } from "@/lib/legal/acceptance";
 
-export type AppRole =
-  "recruiter" | "hiring_manager" | "department_head" | "hr_head" | "president_cbo";
+export type { AppRole } from "@/lib/auth.middleware";
 
 const ROLES = [
   "recruiter",
@@ -18,6 +17,7 @@ const ROLES = [
   "department_head",
   "hr_head",
   "president_cbo",
+  "interviewer",
 ] as const;
 
 export type Organization = {
@@ -31,6 +31,8 @@ export type Organization = {
   employee_band: string | null;
   currency: string;
   fiscal_year_start_month: number;
+  /** End-to-end hiring SLA: days from application to offer. */
+  hiring_sla_days: number;
   careers_email: string | null;
   onboarding_step: string;
   onboarded_at: string | null;
@@ -58,6 +60,8 @@ export type MyOrg = {
   org: Organization | null;
   membership: { id: string; isOwner: boolean; status: string } | null;
   roles: AppRole[];
+  /** Holds only the interviewer role: the app shows the panel view and nothing else. */
+  panelOnly: boolean;
 };
 
 const ROLE_LABELS: Record<AppRole, string> = {
@@ -66,6 +70,7 @@ const ROLE_LABELS: Record<AppRole, string> = {
   department_head: "Department head",
   hr_head: "HR head",
   president_cbo: "President / CBO",
+  interviewer: "Interviewer",
 };
 
 /**
@@ -121,6 +126,7 @@ function orgRowToOrganization(o: typeof organizations.$inferSelect): Organizatio
     employee_band: o.employeeBand,
     currency: o.currency,
     fiscal_year_start_month: o.fiscalYearStartMonth,
+    hiring_sla_days: o.hiringSlaDays,
     careers_email: o.careersEmail,
     onboarding_step: o.onboardingStep,
     onboarded_at: o.onboardedAt ? o.onboardedAt.toISOString() : null,
@@ -151,7 +157,7 @@ export const myOrg = createServerFn({ method: "GET" })
       .orderBy(orgMembers.createdAt)
       .limit(1);
 
-    if (!member) return { org: null, membership: null, roles: [] };
+    if (!member) return { org: null, membership: null, roles: [], panelOnly: false };
 
     const [org, roles] = await Promise.all([
       db.select().from(organizations).where(eq(organizations.id, member.orgId)).limit(1),
@@ -165,6 +171,8 @@ export const myOrg = createServerFn({ method: "GET" })
       org: org[0] ? orgRowToOrganization(org[0]) : null,
       membership: { id: member.id, isOwner: member.isOwner, status: member.status },
       roles: roles.map((r) => r.role as AppRole),
+      panelOnly:
+        !member.isOwner && roles.length > 0 && roles.every((r) => r.role === "interviewer"),
     };
   });
 
@@ -446,6 +454,7 @@ const orgOf = createServerOnlyFn(async function orgOf(userId: string) {
     .where(and(eq(orgMembers.userId, userId), eq(orgMembers.status, "active")))
     .limit(1);
   if (!membership) throw new Error("You do not belong to an organisation yet.");
+  await assertNotPanelOnly(userId, membership.orgId);
   return membership.orgId;
 });
 
@@ -462,6 +471,7 @@ export const updateOrganization = createServerFn({ method: "POST" })
         employeeBand: z.string().max(40).optional(),
         currency: z.string().max(8).optional(),
         fiscalYearStartMonth: z.number().int().min(1).max(12).optional(),
+        hiringSlaDays: z.number().int().min(2).max(60).optional(),
         careersEmail: z.string().max(160).optional(),
       })
       .parse(data),
@@ -480,8 +490,21 @@ export const updateOrganization = createServerFn({ method: "POST" })
     if (data.fiscalYearStartMonth !== undefined)
       patch.fiscalYearStartMonth = data.fiscalYearStartMonth;
     if (data.careersEmail !== undefined) patch.careersEmail = data.careersEmail.trim() || null;
+    if (data.hiringSlaDays !== undefined) patch.hiringSlaDays = data.hiringSlaDays;
 
     await db.update(organizations).set(patch).where(eq(organizations.id, orgId));
+    if (data.hiringSlaDays !== undefined) {
+      const { writeAudit } = await import("../server/audit");
+      await writeAudit({
+        actor: context.claims.email,
+        actorUserId: context.userId,
+        orgId,
+        action: "org.hiring_sla_changed",
+        entityType: "organization",
+        entityId: orgId,
+        detail: { days: data.hiringSlaDays },
+      });
+    }
     return { ok: true };
   });
 

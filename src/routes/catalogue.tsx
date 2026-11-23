@@ -69,7 +69,8 @@ function Catalogue() {
         m.category.toLowerCase().includes(needle) ||
         m.audience.toLowerCase().includes(needle) ||
         m.summary.toLowerCase().includes(needle) ||
-        m.capabilities.some((c) => c.toLowerCase().includes(needle))
+        m.overview.toLowerCase().includes(needle) ||
+        m.capabilities.some((c) => `${c.name} ${c.detail}`.toLowerCase().includes(needle))
       );
     });
   }, [cat.data, q, tier]);
@@ -239,9 +240,12 @@ function ModuleCard({ m }: { m: CatalogueRow }) {
 
       <ul className="mt-4 grid gap-1.5 sm:grid-cols-2">
         {m.capabilities.map((c) => (
-          <li key={c} className="flex gap-2 text-sm">
+          <li key={c.name} className="flex gap-2 text-sm">
             <span aria-hidden className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary" />
-            <span>{c}</span>
+            <span>
+              <span className="font-medium">{c.name}</span>
+              <span className="text-muted-foreground"> — {c.detail}</span>
+            </span>
           </li>
         ))}
       </ul>

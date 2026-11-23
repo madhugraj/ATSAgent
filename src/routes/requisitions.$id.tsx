@@ -42,7 +42,7 @@ import { balanceWeights, extractResumeText } from "@/lib/cv-extract";
 import { InterviewPlanCard } from "@/components/InterviewPlanCard";
 import { HiringManagerPicker } from "@/components/HiringManagerPicker";
 import { RoleCostCard } from "@/components/HiringCost";
-import { intakeCvs, type IntakeStatus } from "@/lib/cv-intake";
+import { CvUpload } from "@/components/CvUpload";
 import { rankPool } from "@/lib/shortlist";
 import { publishToLinkedIn } from "@/lib/linkedin.functions";
 import { getTemplateBackground, getTemplateLogo, validateJobCard } from "@/lib/templates.functions";
@@ -139,8 +139,6 @@ function RequisitionDetail() {
 
   const [poolSearch, setPoolSearch] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
-  const [uploadBusy, setUploadBusy] = useState(false);
-  const [uploadLog, setUploadLog] = useState<IntakeStatus[]>([]);
 
   const [postTone, setPostTone] = useState<"professional" | "warm" | "bold">("professional");
   const [jdTemplateId, setJdTemplateId] = useState("");
@@ -700,30 +698,6 @@ function RequisitionDetail() {
     qc.invalidateQueries({ queryKey: ["applications"] });
   }
 
-  /** Upload brand-new CVs straight onto this requisition. */
-  async function uploadCvs(files: FileList | null) {
-    if (!files || files.length === 0) return;
-    const list = Array.from(files);
-    setUploadBusy(true);
-    setUploadLog(list.map((f) => ({ file: f.name, state: "pending" as const, message: "Queued" })));
-    try {
-      const summary = await intakeCvs({
-        files: list,
-        parse: runParseResume,
-        source: "direct",
-        requisitionId: r!.id,
-        onUpdate: (i, patch) =>
-          setUploadLog((l) => l.map((row, idx) => (idx === i ? { ...row, ...patch } : row))),
-      });
-      await qc.invalidateQueries({ queryKey: ["candidates"] });
-      await qc.invalidateQueries({ queryKey: ["applications"] });
-      if (summary.failed === 0) toast.success(`${summary.ok} CV(s) added to this requisition`);
-      else toast.warning(`${summary.ok} parsed · ${summary.failed} failed`);
-    } finally {
-      setUploadBusy(false);
-    }
-  }
-
   /* ----------------------------------------------------- LinkedIn job post */
 
   async function makePost() {
@@ -1068,44 +1042,11 @@ function RequisitionDetail() {
                 </p>
               </div>
 
-              <div>
-                <Label className="mb-1.5 block text-xs text-muted-foreground">
-                  Upload new CVs onto this requisition
-                </Label>
-                <Input
-                  type="file"
-                  multiple
-                  disabled={uploadBusy}
-                  accept=".pdf,.docx,.txt,.md"
-                  onChange={(e) => {
-                    uploadCvs(e.target.files);
-                    e.target.value = "";
-                  }}
-                />
-                <p className="mt-1.5 text-xs text-muted-foreground">
-                  Each CV is read in the browser, AI-parsed into structured fields, saved to the
-                  talent pool (existing emails are updated, not duplicated) and applied to this
-                  requisition.
-                </p>
-                {uploadLog.length > 0 && (
-                  <ul className="mt-3 max-h-72 space-y-1 overflow-y-auto text-xs">
-                    {uploadLog.map((l, i) => (
-                      <li
-                        key={i}
-                        className={
-                          l.state === "error"
-                            ? "text-destructive"
-                            : l.state === "ok"
-                              ? "text-muted-foreground"
-                              : "text-foreground"
-                        }
-                      >
-                        <span className="font-medium">{l.file}</span> — {l.message}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
+              <CvUpload
+                label="Upload new CVs onto this requisition"
+                requisitionId={r.id}
+                destination="this requisition"
+              />
             </div>
           </section>
 

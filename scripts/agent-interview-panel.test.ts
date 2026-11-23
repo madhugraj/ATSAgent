@@ -64,15 +64,21 @@ const ctx = (i: number) => ({
   email: people[i]!.email,
   actor: people[i]!.email,
 });
-const card = (level: number, verdict: "select" | "hold" | "reject", interviewId?: string) => ({
-  applicationId: app,
-  interviewId: interviewId ?? null,
-  level,
-  rating: verdict === "select" ? 4 : 2,
-  verdict,
-  comments: verdict === "select" ? "Strong" : "Weak on the must-haves",
-  competencies: [{ name: "Figma", rating: verdict === "select" ? 4 : 2 }],
-});
+/** A scorecard that rates every competency the role's current plan lists for the round. */
+const card = async (level: number, verdict: "select" | "hold" | "reject", interviewId?: string) => {
+  const rating = verdict === "select" ? 4 : 2;
+  const { plan } = await planServer.planFor(orgId, role);
+  const round = planLib.roundOf(plan, level);
+  return {
+    applicationId: app,
+    interviewId: interviewId ?? null,
+    level,
+    rating,
+    verdict,
+    comments: verdict === "select" ? "Strong" : "Weak on the must-haves",
+    competencies: (round?.competencies ?? ["Figma"]).map((name) => ({ name, rating })),
+  };
+};
 const stage = async () =>
   (await db.select().from(applications).where(eq(applications.id, app)))[0]!.stage;
 const future = (days: number) => new Date(Date.now() + days * 864e5).toISOString();
@@ -174,7 +180,6 @@ describe("the role's interview plan", () => {
       "Design systems",
       "React",
       "Accessibility",
-      "Problem solving",
     ]);
     expect(plan.rounds[1]!.competencies).toContain("Prototyping");
     expect(plan.verdictPolicy).toBe("recommend");
@@ -225,7 +230,7 @@ describe("panels", () => {
     )!;
     expect(brief.templateData).toMatchObject({
       panelText: "Priya, Ravi",
-      competencies: "Figma, Design systems, React, Accessibility, Problem solving",
+      competencies: "Figma, Design systems, React, Accessibility",
     });
     await expect(
       iv.scheduleInterviewCore(
@@ -245,14 +250,14 @@ describe("panels", () => {
 
   test("a scorecard opens only when the interview has started", async () => {
     const r = await book(1, [], false);
-    await expect(iv.submitScorecardCore(ctx(A), card(1, "select", r.id))).rejects.toThrow(
+    await expect(iv.submitScorecardCore(ctx(A), await card(1, "select", r.id))).rejects.toThrow(
       /scorecards open once it has started/,
     );
   });
 
   test("the round completes only when everyone has scored; one scorecard each; only the panel", async () => {
     const r = await book(1, [B]);
-    const first = await iv.submitScorecardCore(ctx(A), card(1, "select", r.id));
+    const first = await iv.submitScorecardCore(ctx(A), await card(1, "select", r.id));
     expect(first).toMatchObject({
       roundComplete: false,
       waitingFor: [people[B]!.email],
@@ -260,13 +265,13 @@ describe("panels", () => {
     });
     expect(await stage()).toBe("l1");
     expect(await events("scorecard.submitted")).toHaveLength(0);
-    await expect(iv.submitScorecardCore(ctx(A), card(1, "select", r.id))).rejects.toThrow(
+    await expect(iv.submitScorecardCore(ctx(A), await card(1, "select", r.id))).rejects.toThrow(
       /already scored this round/,
     );
-    await expect(iv.submitScorecardCore(ctx(C), card(1, "select", r.id))).rejects.toThrow(
+    await expect(iv.submitScorecardCore(ctx(C), await card(1, "select", r.id))).rejects.toThrow(
       /Only the interviewers on this round/,
     );
-    const second = await iv.submitScorecardCore(ctx(B), card(1, "select", r.id));
+    const second = await iv.submitScorecardCore(ctx(B), await card(1, "select", r.id));
     expect(second).toMatchObject({
       roundComplete: true,
       movedTo: "l2",
@@ -289,7 +294,7 @@ describe("panels", () => {
       .update(interviews)
       .set({ scheduledAt: new Date(Date.now() - 5 * 3600_000) })
       .where(eq(interviews.id, r.id));
-    await iv.submitScorecardCore(ctx(A), card(1, "select", r.id));
+    await iv.submitScorecardCore(ctx(A), await card(1, "select", r.id));
     const tool = getTool("list_pending_scorecards")!;
     const rows = (await tool.run(
       {
@@ -342,7 +347,7 @@ describe("panels", () => {
 describe("verdict policy", () => {
   test("recommend (default): a reject moves nobody; the hiring manager decides", async () => {
     const r = await book(1);
-    const res = await iv.submitScorecardCore(ctx(A), card(1, "reject", r.id));
+    const res = await iv.submitScorecardCore(ctx(A), await card(1, "reject", r.id));
     expect(res).toMatchObject({ roundComplete: true, movedTo: null });
     expect(res.decisionPending).toMatch(/hiring manager decides/);
     expect(await stage()).toBe("l1");
@@ -354,14 +359,14 @@ describe("verdict policy", () => {
     const { plan } = await planServer.planFor(orgId, role);
     await planServer.savePlan(orgId, role, { ...plan, verdictPolicy: "immediate" });
     const r = await book(1);
-    await iv.submitScorecardCore(ctx(A), { ...card(1, "reject", r.id) });
+    await iv.submitScorecardCore(ctx(A), { ...(await card(1, "reject", r.id)) });
     expect(await stage()).toBe("rejected");
   });
 
   test("a panel's verdict is the most cautious one", async () => {
     const r = await book(1, [B]);
-    await iv.submitScorecardCore(ctx(A), card(1, "select", r.id));
-    const res = await iv.submitScorecardCore(ctx(B), card(1, "hold", r.id));
+    await iv.submitScorecardCore(ctx(A), await card(1, "select", r.id));
+    const res = await iv.submitScorecardCore(ctx(B), await card(1, "hold", r.id));
     expect(res).toMatchObject({ roundComplete: true, movedTo: null });
     const [ev] = await events("scorecard.submitted");
     expect(ev!.payload).toMatchObject({ verdict: "hold" });
@@ -376,14 +381,14 @@ describe("the hiring decision comes after the final round", () => {
       /No interview round/,
     );
     const r1 = await book(1);
-    await iv.submitScorecardCore(ctx(A), card(1, "select", r1.id));
+    await iv.submitScorecardCore(ctx(A), await card(1, "select", r1.id));
     expect(await planServer.hiringDecisionBlocked(orgId, app, "select")).toMatch(
       /Too early for a select: .* final one \(L3\) is not complete \(complete: L1\)/,
     );
     expect(await planServer.hiringDecisionBlocked(orgId, app, "hold")).toBeNull();
     for (const level of [2, 3]) {
       const r = await book(level);
-      await iv.submitScorecardCore(ctx(A), card(level, "select", r.id));
+      await iv.submitScorecardCore(ctx(A), await card(level, "select", r.id));
     }
     expect(await planServer.hiringDecisionBlocked(orgId, app, "select")).toBeNull();
     // After the final select nothing moves on its own: the hiring manager decides.
@@ -407,7 +412,7 @@ describe("the hiring decision comes after the final round", () => {
       .onConflictDoNothing();
     const { processAgentEvents } = await import("../src/server/agents/orchestrator.server");
     const r1 = await book(1);
-    await iv.submitScorecardCore(ctx(A), card(1, "select", r1.id));
+    await iv.submitScorecardCore(ctx(A), await card(1, "select", r1.id));
     await processAgentEvents({ orgId });
     const [run1] = await db
       .select()
@@ -442,7 +447,7 @@ describe("no-shows and cancellations", () => {
       .from(hiringMessages)
       .where(eq(hiringMessages.conversationId, conv!.id));
     expect(msg!.body).toMatch(/did not happen: the candidate did not join \("Waited 15 minutes"\)/);
-    await expect(iv.submitScorecardCore(ctx(A), card(1, "select", r.id))).rejects.toThrow(
+    await expect(iv.submitScorecardCore(ctx(A), await card(1, "select", r.id))).rejects.toThrow(
       /did not take place/,
     );
     await expect(
