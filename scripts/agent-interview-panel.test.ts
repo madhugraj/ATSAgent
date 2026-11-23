@@ -9,7 +9,7 @@
  * Run: DATABASE_URL=postgres://…/atsagent_test SESSION_SECRET=… bun test scripts/agent-interview-panel.test.ts
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 
 const { db } = await import("../src/server/db");
 const {
@@ -150,10 +150,13 @@ async function book(level: number, panel: number[] = [], held = true) {
       panel: panel.map((i) => ({ email: people[i]!.email })),
     },
   );
+  // Newest row for (application, level): earlier tests may have booked the same
+  // level again, and Postgres gives no row order without ORDER BY (flake fix).
   const [r] = await db
     .select()
     .from(interviews)
-    .where(and(eq(interviews.applicationId, app), eq(interviews.level, level)));
+    .where(and(eq(interviews.applicationId, app), eq(interviews.level, level)))
+    .orderBy(desc(interviews.id));
   if (!held) return r!;
   const [past] = await db
     .update(interviews)

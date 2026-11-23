@@ -37,11 +37,20 @@ const call = (...calls: AgentToolCall[]): AgentStepResult => ({
   usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
 });
 
+let aiAgentStepCalls = 0;
 const realGateway = await import("../src/lib/ai-gateway.server");
 mock.module("../src/lib/ai-gateway.server", () => ({
   ...realGateway,
-  aiAgentStep: async () => script.shift() ?? say("(script exhausted)"),
+  aiAgentStep: async () => {
+    aiAgentStepCalls += 1;
+    return script.shift() ?? say("(script exhausted)");
+  },
 }));
+// Guard against a stale mock path: after files move, the mock would silently
+// stop applying and the suite would hit the real provider.
+afterAll(() => {
+  expect(aiAgentStepCalls).toBeGreaterThan(0);
+});
 
 const posted: { url: string; headers: Record<string, string>; body: string }[] = [];
 let httpStatus = 200;

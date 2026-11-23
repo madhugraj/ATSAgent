@@ -143,6 +143,35 @@ const lastDesk = async (id: string) =>
       .orderBy(hiringMessages.createdAt)
   ).at(-1);
 
+/**
+ * Simulate an offer's e-mail not having gone out yet. enqueueEmail drains the
+ * outbox with a fire-and-forget `void processEmailOutbox()`, which can claim
+ * the queued row and mark it sent — or fail the send and re-queue it with
+ * backoff — at any moment, racing the withdrawal below. Replace the row
+ * instead of re-queuing it: a fresh row an hour out is never due, so no drain
+ * claims it, and a drain already holding the old row finishes into an id that
+ * no longer exists.
+ */
+async function markUnsent(offerId: string): Promise<void> {
+  const key = `interview-slots:${offerId}`;
+  const [row] = await db.select().from(emailOutbox).where(eq(emailOutbox.idempotencyKey, key));
+  if (!row) throw new Error(`no outbox row ${key}`);
+  await db.delete(emailOutbox).where(eq(emailOutbox.id, row.id));
+  await db.insert(emailOutbox).values({
+    orgId: row.orgId,
+    applicationId: row.applicationId,
+    kind: row.kind,
+    templateName: row.templateName,
+    toEmail: row.toEmail,
+    replyTo: row.replyTo,
+    templateData: row.templateData,
+    attachments: row.attachments,
+    idempotencyKey: key,
+    status: "queued",
+    availableAt: new Date(Date.now() + 3_600_000),
+  });
+}
+
 describe("time zones and working hours", () => {
   test("a wall-clock time in a zone maps to the right instant", () => {
     // 10:00 in Kolkata (UTC+5:30) is 04:30 UTC.
@@ -321,7 +350,12 @@ describe("the candidate chooses the time", () => {
   test("an offer emails the candidate a private link; a clashing time is refused", async () => {
     const o = await offer();
     expect(o.slots).toHaveLength(3);
-    const [mail] = await db.select().from(emailOutbox).where(eq(emailOutbox.orgId, orgId));
+    // Target the offer's own row: the offer's panel agreement queues another
+    // e-mail too, and an unordered org-wide select may return that one first.
+    const [mail] = await db
+      .select()
+      .from(emailOutbox)
+      .where(eq(emailOutbox.idempotencyKey, `interview-slots:${o.offerId}`));
     expect(mail).toMatchObject({ kind: "interview_slots" });
     expect((mail!.templateData as Record<string, string>)["chooseUrl"]).toMatch(
       new RegExp(`/schedule/${o.token}$`),
@@ -353,20 +387,14 @@ describe("the candidate chooses the time", () => {
   test("a newer offer for the round withdraws the older one's unsent e-mail", async () => {
     const first = await offer();
     // Its e-mail has not gone out yet (e.g. the process that queued it exited first).
-    await db
-      .update(emailOutbox)
-      .set({ status: "queued" })
-      .where(eq(emailOutbox.idempotencyKey, `interview-slots:${first.offerId}`));
+    await markUnsent(first.offerId);
     const second = await offerSlotsAt([weekdayAt(6), weekdayAt(7, 14)]);
     const mails = await db.select().from(emailOutbox).where(eq(emailOutbox.orgId, orgId));
     const of = (id: string) => mails.find((m) => m.idempotencyKey === `interview-slots:${id}`)!;
     expect(of(first.offerId).status).toBe("suppressed");
     expect(of(second.offerId).status).not.toBe("suppressed");
     // Chosen before its e-mail went out: the e-mail is withdrawn too.
-    await db
-      .update(emailOutbox)
-      .set({ status: "queued" })
-      .where(eq(emailOutbox.idempotencyKey, `interview-slots:${second.offerId}`));
+    await markUnsent(second.offerId);
     const [row] = await db
       .select({ token: interviewSlotOffers.token })
       .from(interviewSlotOffers)
@@ -404,10 +432,7 @@ describe("the candidate chooses the time", () => {
 
   test("none of these work: the unsent e-mail is withdrawn with the offer", async () => {
     const o = await offer();
-    await db
-      .update(emailOutbox)
-      .set({ status: "queued" })
-      .where(eq(emailOutbox.idempotencyKey, `interview-slots:${o.offerId}`));
+    await markUnsent(o.offerId);
     expect(await offers.declineSlots(o.token, "not this week")).toBe(true);
     const [m] = await db
       .select()

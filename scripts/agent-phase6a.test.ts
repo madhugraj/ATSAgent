@@ -23,6 +23,7 @@ type Turn = { slots?: Record<string, unknown>; command?: Record<string, unknown>
 const deskScript: Turn[] = [];
 let lastDeskPrompt = "";
 const agentScript: AgentStepResult[] = [];
+let aiAgentStepCalls = 0;
 let researchCalls = 0;
 let researchResult: unknown = { ok: false, message: "no research scripted" };
 const say = (text: string): AgentStepResult => ({
@@ -42,7 +43,10 @@ mock.module("../src/lib/ai-gateway.server", () => ({
     const data = opts.schema ? opts.schema.parse(t) : t;
     return { ok: true, data, usage: null };
   },
-  aiAgentStep: async () => agentScript.shift() ?? say("(done)"),
+  aiAgentStep: async () => {
+    aiAgentStepCalls += 1;
+    return agentScript.shift() ?? say("(done)");
+  },
   aiResearchJson: async () => {
     researchCalls++;
     return researchResult;
@@ -205,6 +209,11 @@ beforeAll(async () => {
 afterAll(async () => {
   await db.delete(organizations).where(inArray(organizations.id, [orgId, otherOrgId]));
   await db.delete(users).where(eq(users.id, recruiter));
+});
+// Guard against a stale mock path: after files move, the mock would silently
+// stop applying and the suite would hit the real provider.
+afterAll(() => {
+  expect(aiAgentStepCalls).toBeGreaterThan(0);
 });
 
 const AGENTS = ["requisition", "jd", "intake", "screening"] as const;

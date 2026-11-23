@@ -16,7 +16,7 @@ import {
   statusClass,
 } from "./server/http-metrics";
 import { log } from "./server/log";
-import { allowRequest, AUTH_RATE_LIMIT } from "./server/rate-limit";
+import { allowRequest, AUTH_RATE_LIMIT, RATE_LIMIT } from "./server/rate-limit";
 import { env } from "./server/env";
 import {
   contextFromHeaders,
@@ -167,7 +167,9 @@ function isServerFnPath(path: string): boolean {
  * registration, password reset) get a tighter budget than the general 60/min:
  * online password guessing and reset spam must not get the full allowance.
  * Reads (`session`, `me`) stay on the normal budget — they run on every page
- * load and are authenticated or harmless.
+ * load and are authenticated or harmless. GETs are not mutations, but the
+ * `confirm` token redemption is credential-shaped on every method, so it is
+ * limited like a mutation via isAuthReadPath too.
  */
 function isAuthMutationPath(path: string): boolean {
   return (
@@ -175,6 +177,17 @@ function isAuthMutationPath(path: string): boolean {
     path !== "/api/auth/session" &&
     path !== "/api/auth/me"
   );
+}
+
+/**
+ * The GET-able auth endpoints that would otherwise fall through unlimited:
+ * `confirm` redeems an action token (a guessing target, so the tighter auth
+ * budget like the mutations), `session` and `me` are authenticated or
+ * harmless and get the normal per-caller-per-path budget — the same treatment
+ * /_serverFn gets, which is also called on every page load.
+ */
+function isAuthReadPath(path: string): boolean {
+  return path === "/api/auth/session" || path === "/api/auth/me" || path === "/api/auth/confirm";
 }
 
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -417,6 +430,14 @@ export default {
           `${clientIp(request)}:${url.pathname}`,
           Date.now(),
           AUTH_RATE_LIMIT,
+        ))
+          ? await handle(request, url, env, ctx)
+          : tooManyRequests();
+      } else if (request.method !== "OPTIONS" && isAuthReadPath(url.pathname)) {
+        response = (await allowRequest(
+          `${clientIp(request)}:${url.pathname}`,
+          Date.now(),
+          url.pathname === "/api/auth/confirm" ? AUTH_RATE_LIMIT : RATE_LIMIT,
         ))
           ? await handle(request, url, env, ctx)
           : tooManyRequests();

@@ -5,7 +5,7 @@
  * every live agent declares evals that exist, and the gate guard holds.
  * Needs the disposable local database.
  */
-import { beforeAll, describe, expect, mock, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
 import { z } from "zod";
 
 import type { ScriptStep } from "./evals/scenarios";
@@ -88,17 +88,28 @@ const AI_FIXTURES: Record<string, unknown> = {
     })),
   },
 };
+let aiAgentStepCalls = 0;
+let aiJsonCalls = 0;
 mock.module("../src/lib/ai-gateway.server", () => ({
   ...realGateway,
   aiAgentStep: async (opts: { messages: Msg[] }) => {
+    aiAgentStepCalls += 1;
     const next = script.shift() ?? { ok: false, status: 500, message: "script exhausted" };
     return typeof next === "function" ? next(opts.messages) : next;
   },
-  aiJson: async (opts: { feature: string }) =>
-    opts.feature in AI_FIXTURES
+  aiJson: async (opts: { feature: string }) => {
+    aiJsonCalls += 1;
+    return opts.feature in AI_FIXTURES
       ? { ok: true, data: AI_FIXTURES[opts.feature], model: "m", provider: "openai", usage: null }
-      : { ok: false, status: 500, message: `no fixture for ${opts.feature}` },
+      : { ok: false, status: 500, message: `no fixture for ${opts.feature}` };
+  },
 }));
+// Guard against a stale mock path: after files move, the mock would silently
+// stop applying and the suite would hit the real provider.
+afterAll(() => {
+  expect(aiAgentStepCalls).toBeGreaterThan(0);
+  expect(aiJsonCalls).toBeGreaterThan(0);
+});
 
 const {
   registerTool,
