@@ -17,8 +17,8 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { and, eq, inArray } from "drizzle-orm";
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { basename, join } from "node:path";
 import { FLOW, SIDE, canMove } from "../src/lib/lifecycle";
 import type { Stage } from "../src/lib/lifecycle";
 import type { LifecycleActor } from "../src/lib/requisitions.server";
@@ -539,16 +539,32 @@ describe("recordStageTransition", () => {
  *  - collaboration.functions.ts  referral INSERT with stage: "sourced"
  *  - candidates.functions.ts  create-candidate INSERT with stage: "sourced"
  */
+/**
+ * Directories the guard scans, relative to the repo root. The refactor moves
+ * writers into packages/* and apps/web (Phase 2+), so the scan follows them;
+ * roots that don't exist yet are skipped. MIN_STAGE_SCAN_FILES makes an
+ * empty/missing scan fail loudly instead of passing with nothing checked.
+ */
+const STAGE_SCAN_ROOTS = ["src", "apps", "packages"];
+const MIN_STAGE_SCAN_FILES = 300;
+
+/**
+ * Basenames, not paths: these files move during the refactor and the guard
+ * must keep matching them at their new location. Every basename must match
+ * exactly one scanned file — a rename, deletion or duplicate fails here.
+ * Phase 5 funnels all of these through the pipeline cores and shrinks the
+ * list to empty.
+ */
 const KNOWN_STAGE_WRITERS = [
-  "src/lib/pipeline.server.ts",
-  "src/lib/stage-events.server.ts",
-  "src/lib/autoscore.server.ts",
-  "src/lib/matching.functions.ts",
-  "src/lib/interviews.functions.ts",
-  "src/lib/offer-response.server.ts",
-  "src/lib/lifecycle.functions.ts",
-  "src/lib/collaboration.functions.ts",
-  "src/lib/candidates.functions.ts",
+  "pipeline.server.ts",
+  "stage-events.server.ts",
+  "autoscore.server.ts",
+  "matching.functions.ts",
+  "interviews.functions.ts",
+  "offer-response.server.ts",
+  "lifecycle.functions.ts",
+  "collaboration.functions.ts",
+  "candidates.functions.ts",
 ];
 
 /** `.set({ stage: ...` — with stage first or later inside the object. */
@@ -568,8 +584,18 @@ function sourceFiles(dir: string): string[] {
 describe("no rogue applications.stage writers", () => {
   test("only known files write the stage column", () => {
     const root = join(import.meta.dir, "..");
+    const files = STAGE_SCAN_ROOTS.map((dir) => join(root, dir))
+      .filter((dir) => existsSync(dir))
+      .flatMap((dir) => sourceFiles(dir));
+    // Coverage floor: if the scan comes up short (roots missing or emptied by
+    // a move), the offender check below would pass vacuously.
+    expect(files.length).toBeGreaterThanOrEqual(MIN_STAGE_SCAN_FILES);
+
     const offenders: { file: string; patterns: string[] }[] = [];
-    for (const path of sourceFiles(join(root, "src"))) {
+    const knownMatches = new Map<string, number>();
+    for (const path of files) {
+      const base = basename(path);
+      knownMatches.set(base, (knownMatches.get(base) ?? 0) + 1);
       const text = readFileSync(path, "utf8");
       const hits = [
         SET_STAGE.test(text) && "set({ stage",
@@ -577,9 +603,15 @@ describe("no rogue applications.stage writers", () => {
       ].filter(Boolean) as string[];
       if (!hits.length) continue;
       const rel = path.slice(root.length + 1);
-      if (KNOWN_STAGE_WRITERS.includes(rel)) continue;
+      if (KNOWN_STAGE_WRITERS.includes(base)) continue;
       offenders.push({ file: rel, patterns: hits });
     }
+    // Every listed writer must exist exactly once in the scanned tree — a
+    // move is fine (matched at the new path), a rename or loss is not.
+    const lost = KNOWN_STAGE_WRITERS.filter((base) => (knownMatches.get(base) ?? 0) !== 1);
+    expect(
+      lost.length ? `known stage writers not found exactly once: ${lost.join(", ")}` : "",
+    ).toBe("");
     expect(
       offenders.length
         ? `files writing applications.stage outside the known-writers list: ${offenders
