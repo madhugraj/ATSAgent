@@ -56,4 +56,9 @@ jobs:
       # combined `bun test scripts/` run would leak one file's mocks into
       # every later file (empty agent registry, fake db).
       - name: Tests (every scripts/*.test.ts, one bun process per file)
-        run: for f in scripts/*.test.ts; do bun test "$f" || exit 1; done
+        # Collect every failing file instead of stopping at the first, so one
+        # CI run shows the full failure set.
+        run: |
+          fails=""
+          for f in scripts/*.test.ts; do bun test "$f" || fails="$fails $f"; done
+          if [ -n "$fails" ]; then echo "failed test files:$fails"; exit 1; fi
