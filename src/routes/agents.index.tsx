@@ -2,31 +2,20 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
-import {
-  Bot,
-  Check,
-  FlaskConical,
-  Loader2,
-  MessageSquareText,
-  Send,
-  ShieldCheck,
-  Sparkles,
-  X,
-} from "lucide-react";
+import { Bot, FlaskConical, Loader2, Send, Sparkles } from "lucide-react";
 
 import { EmptyState, PageHeader } from "@/components/ats";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { AGENT_LABEL, ROLE_NAME } from "@/lib/agents.catalog";
+import { AGENT_LABEL } from "@/lib/agents.catalog";
 import {
   agentSettings,
   agentSummary,
   askAgents,
   cancelAgentRun,
   compareAgentRun,
-  decideAgentTask,
   exportAgentRun,
   getAgentRun,
   listAgentRuns,
@@ -35,11 +24,10 @@ import {
   myAgentActions,
   replayAgentRun,
   type AgentActionView,
-  type AgentDecisionInput,
   type AgentRunView,
   type AgentTaskView,
 } from "@/lib/agents.functions";
-import { withStepUp } from "@/lib/step-up-client";
+import { AgentTaskCard } from "@/components/agents/AgentTaskCard";
 
 const TABS = ["decisions", "acted", "activity"] as const;
 type AgentsTab = (typeof TABS)[number];
@@ -60,12 +48,6 @@ export const Route = createFileRoute("/agents/")({
   }),
   component: AgentsPage,
 });
-
-const KIND_META: Record<AgentTaskView["kind"], { label: string; icon: typeof Check }> = {
-  gate: { label: "Needs your decision", icon: ShieldCheck },
-  approval: { label: "Approve an action", icon: Bot },
-  clarification: { label: "Question", icon: MessageSquareText },
-};
 
 function AgentsPage() {
   const { tab = "decisions" } = Route.useSearch();
@@ -122,7 +104,7 @@ function AgentsPage() {
           {tasks.isLoading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : open.length ? (
-            open.map((t) => <TaskCard key={t.id} task={t} />)
+            open.map((t) => <AgentTaskCard key={t.id} task={t} />)
           ) : (
             <EmptyState
               title="Nothing is waiting for you"
@@ -214,166 +196,6 @@ function AskAgents() {
   );
 }
 
-function TaskCard({ task }: { task: AgentTaskView }) {
-  const qc = useQueryClient();
-  const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState("");
-  const [args, setArgs] = useState(task.action?.argsJson ?? "");
-  const meta = KIND_META[task.kind];
-  const Icon = meta.icon;
-
-  async function decide(decision: AgentDecisionInput) {
-    setBusy(true);
-    try {
-      const res = await withStepUp(() => decideAgentTask({ data: { taskId: task.id, decision } }));
-      if (res.noLongerRelevant) toast.info(res.noLongerRelevant);
-      else
-        toast.success(
-          decision.status === "rejected"
-            ? "Declined — the agent has been told"
-            : "Sent to the agent",
-        );
-      qc.invalidateQueries({ queryKey: ["agent_tasks"] });
-      qc.invalidateQueries({ queryKey: ["agent_runs"] });
-      qc.invalidateQueries({ queryKey: ["notifications"] });
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not record the decision");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function approve() {
-    if (task.action) {
-      const edited = args.trim() !== task.action.argsJson.trim();
-      let parsed: Record<string, unknown> | undefined;
-      if (edited) {
-        try {
-          parsed = JSON.parse(args) as Record<string, unknown>;
-        } catch {
-          toast.error("The edited details are not valid JSON");
-          return;
-        }
-      }
-      void decide({
-        status: "approved",
-        ...(parsed ? { args: parsed } : {}),
-        ...(note.trim() ? { comment: note.trim() } : {}),
-      });
-      return;
-    }
-    void decide({ status: "approved", ...(note.trim() ? { comment: note.trim() } : {}) });
-  }
-
-  return (
-    <article className="panel p-5">
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <Icon className="size-4 text-primary" />
-        <span className="font-medium text-foreground">{meta.label}</span>
-        <span>·</span>
-        <span>{AGENT_LABEL[task.agentType] ?? "Agent"}</span>
-        {task.assigneeRole ? (
-          <Badge variant="outline">For {ROLE_NAME[task.assigneeRole] ?? task.assigneeRole}</Badge>
-        ) : null}
-        <span className="ml-auto">{new Date(task.createdAt).toLocaleString()}</span>
-      </div>
-      <h3 className="mt-2 font-semibold">{task.title}</h3>
-      {task.body ? (
-        <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{task.body}</p>
-      ) : null}
-      <p className="mt-2 text-xs text-muted-foreground">Goal: {task.goal}</p>
-
-      {task.action ? (
-        // The title says what the agent will do in plain words; the exact
-        // details stay one click away for anyone who wants to check or edit them.
-        <details className="mt-3">
-          <summary className="cursor-pointer text-xs font-medium">
-            Review or edit the details before approving
-          </summary>
-          <Textarea
-            className="mt-1 font-mono text-xs"
-            rows={Math.min(12, Math.max(3, args.split("\n").length))}
-            value={args}
-            onChange={(e) => setArgs(e.target.value)}
-          />
-        </details>
-      ) : null}
-
-      <Textarea
-        className="mt-3"
-        rows={2}
-        placeholder={
-          task.kind === "clarification" ? "Your answer" : "Optional note or reason for the agent"
-        }
-        value={note}
-        onChange={(e) => setNote(e.target.value)}
-      />
-
-      <div className="mt-3 flex flex-wrap gap-2">
-        {task.kind === "clarification" ? (
-          <Button
-            size="sm"
-            disabled={busy || !note.trim()}
-            onClick={() => decide({ status: "answered", answer: note.trim() })}
-          >
-            {busy ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} Send
-            answer
-          </Button>
-        ) : (
-          <>
-            <Button size="sm" disabled={busy} onClick={approve}>
-              {busy ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}{" "}
-              {task.subjectType === "panel_review" ? "Approve — go with the panel" : "Approve"}
-            </Button>
-            {task.subjectType === "org_profile" ? (
-              // A profile version is usually sent back with what to change.
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={busy || note.trim().length < 3}
-                title="Write what should change in the note first"
-                onClick={() => decide({ status: "rejected", reason: note.trim(), changes: true })}
-              >
-                Send back for changes
-              </Button>
-            ) : null}
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={busy || (task.subjectType === "panel_review" && note.trim().length < 3)}
-              title={
-                task.subjectType === "panel_review"
-                  ? "Puts the candidate on hold — write why in the note first"
-                  : undefined
-              }
-              onClick={() =>
-                decide({ status: "rejected", ...(note.trim() ? { reason: note.trim() } : {}) })
-              }
-            >
-              <X className="size-4" />{" "}
-              {task.subjectType === "panel_review" ? "Decline — put on hold" : "Decline"}
-            </Button>
-            {task.subjectType === "panel_review" ? (
-              // A panel review may end with rejecting the candidate: the HR head's decision, with a reason.
-              <Button
-                size="sm"
-                variant="destructive"
-                disabled={busy || note.trim().length < 3}
-                title="Rejects the candidate for this role — write why in the note first"
-                onClick={() =>
-                  decide({ status: "rejected", reason: note.trim(), rejectCandidate: true })
-                }
-              >
-                Reject candidate
-              </Button>
-            ) : null}
-          </>
-        )}
-      </div>
-    </article>
-  );
-}
-
 const RUN_STATUS: Record<
   string,
   { label: string; tone: "default" | "outline" | "destructive" | "secondary" }
@@ -456,7 +278,7 @@ function RunSteps({ runId }: { runId: string }) {
   return (
     <div className="mt-3 rounded-md border border-border bg-muted/30 p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <p className="num text-[11px] text-muted-foreground">
+        <p className="num text-[0.6875rem] text-muted-foreground">
           Trace {q.data.traceId.replace(/-/g, "")}
         </p>
         <Button size="sm" variant="outline" onClick={() => downloadTrail(runId)}>
@@ -486,7 +308,7 @@ function RunSteps({ runId }: { runId: string }) {
               {s.durationMs ? ` · ${s.durationMs} ms` : ""}
             </span>
             {s.detail ? (
-              <pre className="mt-0.5 whitespace-pre-wrap break-all font-mono text-[11px] text-muted-foreground">
+              <pre className="mt-0.5 whitespace-pre-wrap break-all font-mono text-[0.6875rem] text-muted-foreground">
                 {s.detail}
               </pre>
             ) : null}

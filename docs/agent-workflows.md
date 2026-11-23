@@ -22,6 +22,92 @@ press Delete to remove it. Rules: exactly one trigger with a real event; every s
 trigger; one way out of each step except conditions (one yes, one no); no loops; agents must exist;
 goals not empty; at most 40 steps.
 
+## Build with chat
+
+**Build with chat** in the editor opens a chat panel: describe the flow ("when candidates are shortlisted,
+screen them; if screening fails, have the follow-up agent remind the team") and the assistant draws the graph
+and writes its dry-run tests onto the canvas. Ask for changes in the same chat ("add a wait for JD approval") —
+it edits the current canvas. Server: `assistWorkflow` (`requirePlatformAdmin`); engine:
+`src/server/agents/workflow-assistant.server.ts`.
+
+- **Drafts only.** Nothing is saved; **Save draft** (marked • while unsaved) then Test → Approve → Publish →
+  Grant as usual. It cannot approve, publish or grant.
+- **Checked like Test.** The draft is checked with the same graph rules and dry run; when it fails, the
+  assistant gets one repair turn with the problems. The reply says whether its tests pass.
+- **AI key.** Keys are per organisation, so the chat uses the key of an organisation the super admin owns
+  (picked in the panel when they own several). The call goes through `aiJson` with feature
+  `workflow_assistant`; messages enter the prompt as untrusted data and the model's JSON is zod-validated.
+- Each turn is audited as `platform.agent_workflow.assisted`.
+
+## Going live in an organisation
+
+A workflow runs in an organisation only when it is **published**, **granted** there, and the organisation
+can run it. The go-live check (`workflowReadiness` in `workflows.server.ts`) says what is missing:
+
+- **AI key** — the organisation's own key (Integrations → AI model).
+- **Every agent the flow starts switched on** there (Agent settings); shows its autonomy when on.
+- **Studio agents granted** to the organisation.
+
+Where it shows:
+
+- **Platform → Agent workflows → Organisations** — each organisation with _Ready_ / _Not ready_ and the items.
+  Granting a not-ready organisation is allowed, with a warning.
+- **The organisation's Agent settings → Workflows** (HR head, President / CBO, owner;
+  `src/lib/org-workflows.functions.ts`, read-only) — every granted workflow, what starts it, _Live_ / _Not
+  ready_, a **Switch on** shortcut for each missing agent (normal `saveAgentPolicy`, autonomy Suggest) and its
+  latest runs.
+- **The bell** — owners and HR heads see "Workflow … is not running yet" until it is ready (derived live, so
+  it disappears by itself).
+
+## What a run is waiting for — and deciding it in place
+
+A waiting run says why, in plain words (`waitingOnFor` in `workflows.server.ts`): **"<agent> is waiting for
+you — 1 question"**, **"<agent> is working"**, or **"Waiting for <event>"** ("An earlier <agent> run" when it
+waits behind one). Each run on the Runs tab is drawn as its flow: steps done, the step it is on, and what comes
+next up to the next condition.
+
+A run's open requests (questions, approvals, gates) are answered **inside the workflow window** — under the run
+on the Runs tab (for organisations the super admin belongs to) and in the organisation's Agent settings →
+Workflows — with the same card and decision path as Waiting for you (`listWorkflowRunTasks` returns only that
+run's agents' requests, org-scoped, same visibility; `decideAgentTask` records the decision, step-up included).
+
+## Workflow app and API
+
+**Sharing with HR and TA.** Once a workflow is published and granted, the platform admin presses **Copy link**
+next to the organisation (Builder → Organisations) and sends it to that organisation's HR or TA. The link opens
+**`/desk?workflow=<workflowId>`**: the hiring desk lists every shared workflow under **Workflows** in its
+sidebar (with a count of live runs, amber when one needs a person), and the workflow opens inline there.
+HR head, CBO, owner and recruiters (TA) start runs and retry or skip a stopped step; API keys stay with the
+HR head, CBO and owner. A finished run shows the end it reached ("Workflow completed", "Stopped early").
+When a run waits on a requisition approval, the approver at that step answers it in the run's thread: the card
+shows the requisition summary and offers **Approve**, **Edit** (the approver corrects role, openings, location,
+experience, CTC band, skills or responsibilities; it stays at its step and the change goes on the approval trail
+and audit log) and **Ask for changes** (sent back to draft with the reason). A send-back goes to the Requisition agent, which
+makes the change and resubmits or asks in the thread. A declined requisition can be **reopened with changes** (the
+person who raised it, the HR head or the CBO): back to draft with the change, handed to the same agent.
+
+Each granted workflow has its own app page in the organisation: **`/w/<workflowId>`** (Agent settings →
+Workflows → **Open**). It shows only that workflow: what starts it, whether it is Live, a **Start** box for a
+hiring need (HR head / CBO / owner), and every run as its flow with its questions and approvals answered in
+place. Visible to the HR head, CBO, owner, department heads, hiring managers and recruiters; each request
+still shows only to the people it is for. Server: `src/lib/org-workflows.functions.ts`
+(`orgWorkflowApp`, `startOrgWorkflowRun`).
+
+**API** — the HR head / CBO / owner issues a key for one workflow on the app page (shown once; only its
+SHA-256 hash is stored, `workflow_api_keys`, migration `0087`; issue and revoke are audited as
+`workflow.api_key.issued|revoked`). Runs started with a key act as the person who issued it; the key stops
+working when revoked, when the workflow is withdrawn or archived, or when that person leaves.
+
+| Call                                                      | Does                                                               |
+| --------------------------------------------------------- | ------------------------------------------------------------------ |
+| `POST /api/workflows/<workflowId>/runs` `{ "need": "…" }` | Start a hiring-need workflow → the run (201)                       |
+| `GET /api/workflows/<workflowId>/runs`                    | Latest 20 runs                                                     |
+| `GET /api/workflows/runs/<runId>`                         | One run: status, current step, what it waits for, steps, `appPath` |
+
+`Authorization: Bearer atsw_…`. Responses are vendor-neutral and carry no request text — people answer
+questions and approvals in the app (`appPath`). Rate-limited per caller and per key in `src/server.ts`
+(`src/server/agents/workflow-app.server.ts`). Started runs are audited as `workflow.run.started_by_api`.
+
 ## More steps: hiring need, wait for, report
 
 - **Hiring need (manual) trigger** — the flow starts by hand with the need's text (`{{payload.need}}`): super
@@ -56,10 +142,18 @@ When an organisation holding a grant has an event matching the trigger, the orch
 **workflow run** (`workflow_runs`, one per workflow and event) and walks the graph:
 
 - **Agent** — started through `startRun` like the orchestrator's own dispatch: the organisation's switch
-  must be on (otherwise the flow stops with the reason), a run already working on the same subject is
-  joined rather than duplicated, it acts for the role's owner (else the person who caused the event), and
+  must be on (otherwise the flow stops with the reason), a run the same event already started on the
+  subject (e.g. the built-in hand-off) is joined rather than duplicated; an older run of that agent still open
+  on the role (only one may be open per agent and role) is waited for, then the step starts its own run with
+  its own goal; it acts for the role's owner (else the person who caused the event), and
   autonomy, budget and every human decision inside the agent are unchanged. The flow waits until the run
   finishes, then records `last.status` / `last.result`.
+- **Hand-offs and the role** — an agent that hands the work back ("Handed off: …") ends with `last.status = handed_off`, not `done`, so a check on `done` takes the _no_ way out. The flow learns its role from its agents' runs and the events they caused (e.g. the Requisition agent drafting one), checked again before every agent step, and passes it to later agents.
+- **What each step knows** — every agent step starts with its own goal plus the hiring need and the previous
+  step's result (`stepGoal`), so it never starts blind. **Aditi (the copilot) cannot be a step**: it hands work
+  to other agents on its own, which would happen outside the flow — start a hiring need with the Requisition
+  agent. A step whose run ended without the flow hearing about it (e.g. a restart) moves on at the next
+  scheduler tick (`resumeFinishedRunWaits`). A step whose agent **stopped at its run limit** (turns or tokens) does not fail the flow: it pauses with "<agent> stopped at its run limit — Retry or Skip". **Retry** (HR head / CBO / owner, in the workflow app or the Runs tab) starts the step's agent again with the same goal, told to pick up what the stopped run already did; **Skip** treats the step as failed and follows the flow (`resolveStoppedStep`, audited as `workflow.step.retried|skipped`). A **wait** first looks back over the run's lifetime: if its event already happened on the role (e.g. people approved the requisition while the agent was still working), it moves straight on; the tick repeats that look-back for waits whose event was missed.
 - **Condition** — evaluated on the event and the last agent's outcome.
 - **End** (or no next step) — the run is done.
 
@@ -68,7 +162,7 @@ themselves.
 
 ## Audit
 
-`platform.agent_workflow.created|saved|tested|approved|published|granted|revoked|archived`.
+`platform.agent_workflow.created|saved|assisted|tested|approved|published|granted|revoked|archived`.
 
 ## Ready-made workflows
 

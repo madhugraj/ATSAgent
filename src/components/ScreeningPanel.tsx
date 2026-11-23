@@ -290,15 +290,15 @@ export function ScreeningPanel(props: {
                     <span className="mt-0.5 text-xs text-muted-foreground">{i + 1}</span>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground">
+                        <span className="rounded-full border px-2 py-0.5 text-[0.6875rem] text-muted-foreground">
                           {FOCUS_LABEL[q.focus] ?? "General"}
                         </span>
-                        <span className="text-[11px] text-muted-foreground">
+                        <span className="text-[0.6875rem] text-muted-foreground">
                           weight {q.weight}/5
                         </span>
                         {verdict ? (
                           <span
-                            className={`text-[11px] font-medium ${VERDICT_TONE[verdict.verdict]}`}
+                            className={`text-[0.6875rem] font-medium ${VERDICT_TONE[verdict.verdict]}`}
                           >
                             {VERDICT_LABEL[verdict.verdict]} · {verdict.score}/100
                           </span>

@@ -1,6 +1,6 @@
 /**
  * The facts for one scheduling call (docs/voice-scheduling-call-plan.md): the
- * e-mailed offer it follows up, the times it may book — the offer's times still
+ * interview offer it is about, the times it may book — the offer's times still
  * far enough ahead, then the call's pre-checked alternates — and how to say
  * them in the organisation's time zone.
  */
@@ -209,6 +209,7 @@ export async function loadSchedulingBrief(
       progress,
       options: options.map((o) => ({ spoken: spokenWhen(o.at, tz), alternate: o.alternate })),
       maxMinutes: 4,
+      emailed: Boolean(row.offer.linkEmailedAt),
       isCallback: row.call.bookedByCandidate,
       callbackAllowed: row.call.reschedules < 1,
     },

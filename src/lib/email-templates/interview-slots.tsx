@@ -1,7 +1,7 @@
 import * as React from "react";
 
 import type { TemplateEntry } from "./registry";
-import { EmailLayout, layoutStyles } from "./email-layout";
+import { EmailAction, EmailLayout, layoutStyles } from "./email-layout";
 
 interface Props {
   candidateName?: string;
@@ -63,14 +63,7 @@ const Email = ({
         ))}
       </ul>
     ) : null}
-    {chooseUrl ? (
-      <p style={text}>
-        Choose your time here:{" "}
-        <a href={chooseUrl} style={link}>
-          {chooseUrl}
-        </a>
-      </p>
-    ) : null}
+    {chooseUrl ? <EmailAction href={chooseUrl} label="Choose a time" /> : null}
     <p style={text}>
       If none of these work, the same link lets you tell us, and we will offer other times.
       {expiresText ? ` The link works until ${expiresText}.` : ""} It is personal to you — please do

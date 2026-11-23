@@ -65,6 +65,15 @@ export const HEALTH = {
   slotOffersUnanswered7d: 3,
   /** …and as a share of all offers that closed. */
   slotOffersUnansweredShare: 0.5,
+  /**
+   * Hours a candidate may wait on the panel before this is flagged — the answer
+   * window (4 h) has closed and nobody acted on the stand-in or "Send invite now".
+   */
+  panelAnswerHours: 8,
+  /** A panelist's scorecard proposal left undecided this long. */
+  planProposalHours: 8,
+  /** Panelists who moved or stepped down from this many rounds in 14 days. */
+  panelChangesPerPerson: 3,
   /** Rounds the candidate did not join, in 7 days, before it is flagged. */
   interviewNoShows7d: 3,
   /** An open offer on its this-many-th revision is going back and forth. */
@@ -79,6 +88,8 @@ export const HEALTH = {
   minSchedulingCalls7d: 5,
   /** …fewer than this share ending in a booking is flagged. */
   schedulingBookedShare: 0.3,
+  /** A scheduling call placed when times were offered, still not dialled this many minutes after it was due. */
+  schedulingCallStuckMins: 30,
   /** Pay calls: a yes heard on a call and not confirmed by a person for this many hours. */
   verbalConfirmHours: 24,
   /** …with at least this many connected pay calls in 14 days… */
@@ -122,6 +133,8 @@ export const HEALTH = {
   shortCalls7d: 3,
   /** Re-evaluate at most this often (minutes). */
   evaluateEveryMinutes: 5,
+  /** An issue resolves only after it has not been seen for this long (stops flapping). */
+  resolveAfterMinutes: 60,
   /** An approved organisation profile older than this is stale (days). */
   profileStaleDays: 180,
   /** A pay conventions proposal waiting this long for the HR head (docs/pay-terms-plan.md). */
@@ -131,6 +144,8 @@ export const HEALTH = {
   policyStaleDays: 14,
   /** A submitted profile version waiting longer than this for a decision (days). */
   reviewWaitingDays: 7,
+  /** A request for a new panellist left this long holds the round up. */
+  newPanelistWaitingHours: 24,
   /** Website re-read failures before the warning becomes serious. */
   rereadSeriousFailures: 2,
   /** Profile items refused from sources in 7 days before it is flagged. */
@@ -626,11 +641,78 @@ export const RULES: Rule[] = [
     },
   },
   {
+    id: "interview.panel_not_answering",
+    element: "hitl",
+    severity: "warning",
+    description: `Offered interview times, or a booked round's invite, have waited more than ${HEALTH.panelAnswerHours} hours for the panel to accept the time — the candidate has not been contacted. Chase the panel, or send the invite from the Interviews page.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ held: number }>(sql`
+        select (
+          (select count(*) from email_outbox
+            where org_id = ${orgId} and status = 'held' and kind = 'interview_invite'
+              and created_at <= now() - make_interval(hours => ${HEALTH.panelAnswerHours}))
+          + (select count(distinct k.offer_id) from interview_confirmations k
+              join interview_slot_offers o on o.id = k.offer_id and o.status = 'offered'
+              where k.org_id = ${orgId} and k.state = 'pending'
+                and k.created_at <= now() - make_interval(hours => ${HEALTH.panelAnswerHours}))
+        )::int held`);
+      const held = r[0]?.held ?? 0;
+      if (!held) return [];
+      return [
+        {
+          agentType: "interview",
+          title: `${held} candidate interview e-mail${held === 1 ? " is" : "s are"} waiting on the panel`,
+          detail: { held },
+        },
+      ];
+    },
+  },
+  {
+    id: "interview.plan_proposal_waiting",
+    element: "hitl",
+    severity: "warning",
+    description: `A panelist's proposed scorecard change has waited more than ${HEALTH.planProposalHours} hours for the hiring manager — the round keeps the current scorecard until someone decides. Approve or reject it on the role's Interview plan; the HR head can decide too.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number }>(sql`
+        select count(*)::int n from plan_change_proposals
+        where org_id = ${orgId} and status = 'awaiting_approval'
+          and created_at <= now() - make_interval(hours => ${HEALTH.planProposalHours})`);
+      const n = r[0]?.n ?? 0;
+      if (!n) return [];
+      return [
+        {
+          agentType: "interview",
+          title: `${n} scorecard proposal${n === 1 ? " is" : "s are"} waiting for the hiring manager`,
+          detail: { waiting: n },
+        },
+      ];
+    },
+  },
+  {
+    id: "interview.panel_changes_often",
+    element: "hitl",
+    severity: "warning",
+    description: `A panelist moved or stepped down from ${HEALTH.panelChangesPerPerson} or more booked rounds in the last 14 days. Each change costs the candidate time against the hiring SLA; talk to them or rely on others for the panel.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ email: string; n: number }>(sql`
+        select c->>'email' email, count(*)::int n
+        from interviews i, jsonb_array_elements(i.panel_changes) c
+        where i.org_id = ${orgId}
+          and (c->>'at')::timestamptz > now() - interval '14 days'
+        group by 1 having count(*) >= ${HEALTH.panelChangesPerPerson}`);
+      return r.map((x) => ({
+        agentType: "interview",
+        title: `${x.email} changed ${x.n} booked rounds in 14 days`,
+        detail: { email: x.email, changes: x.n },
+      }));
+    },
+  },
+  {
     id: "interview.no_eligible_panel",
     element: "skills",
     severity: "warning",
     description:
-      "Candidates are waiting for an interview round that has no approved panel and nobody eligible to propose: no registered interviewer takes the round, or all are at their weekly limit. The owner, CBO or HR head can register interviewers on the Team page.",
+      "Candidates are waiting for an interview round that has no approved panel and nobody eligible to propose: nobody in the panel directory takes the round, or all are at their weekly limit. The Interview coordinator asks the HR head in the hiring desk to add someone; people can also be added under Team → Panel directory.",
     evaluate: async (orgId) => {
       const waiting = await rows<{
         requisition_id: string;
@@ -1070,6 +1152,28 @@ export const RULES: Rule[] = [
           agentType: "scheduling_call",
           title: `${x.booked} of ${x.connected} scheduling calls booked a time`,
           detail: { connected: x.connected, booked: x.booked },
+        },
+      ];
+    },
+  },
+  {
+    id: "scheduling_call.not_dialled",
+    element: "harness",
+    severity: "serious",
+    description: `A scheduling call placed when interview times were offered has not been dialled ${HEALTH.schedulingCallStuckMins} minutes after it was due — the voice worker or its phone line may be down. Voice goes first, so the candidate has not heard about these times yet; the e-mail goes out within hours as a fallback.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number; oldest: string }>(sql`
+        select count(*)::int n, min(due_at)::text oldest from screening_calls
+        where org_id = ${orgId} and purpose = 'scheduling'
+          and status in ('approved', 'callback')
+          and due_at < now() - make_interval(mins => ${HEALTH.schedulingCallStuckMins})`);
+      const x = r[0];
+      if (!x || x.n === 0) return [];
+      return [
+        {
+          agentType: "scheduling_call",
+          title: `${x.n} scheduling call${x.n === 1 ? " has" : "s have"} not been dialled`,
+          detail: { calls: x.n, oldestDueAt: x.oldest },
         },
       ];
     },
@@ -1638,6 +1742,29 @@ export const RULES: Rule[] = [
     },
   },
   {
+    id: "interview.new_panelist_waiting",
+    element: "hitl",
+    severity: "warning",
+    description: `The Interview coordinator asked the HR head to add someone to the panel directory more than ${HEALTH.newPanelistWaitingHours} hours ago and nobody has answered — that interview round cannot get a panel or times until someone is typed in (or the request is declined) in the hiring desk.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ code: string; level: number; hours: number }>(sql`
+        select r.code, (t.proposed_action -> 'args' -> 'subject' ->> 'level')::int as level,
+          extract(epoch from now() - t.created_at)::int / 3600 as hours
+        from agent_tasks t
+        join requisitions r on r.org_id = t.org_id
+          and r.id::text = t.proposed_action -> 'args' -> 'subject' ->> 'requisitionId'
+        where t.org_id = ${orgId} and t.status = 'open' and t.kind = 'gate'
+          and t.proposed_action -> 'args' -> 'subject' ->> 'type' = 'new_panelist'
+          and t.created_at < now() - make_interval(hours => ${HEALTH.newPanelistWaitingHours})
+        limit 20`);
+      return r.map((x) => ({
+        agentType: "interview",
+        title: `${x.code} L${x.level} has waited ${x.hours} hours for a new panellist`,
+        detail: { requisition: x.code, level: x.level, hours: x.hours },
+      }));
+    },
+  },
+  {
     id: "context.review_waiting",
     element: "context",
     severity: "warning",
@@ -1781,7 +1908,16 @@ async function orgsToCheck(orgId?: string): Promise<string[]> {
 
 export type HealthCounts = { orgs: number; opened: number; resolved: number; seen: number };
 
-export async function evaluateAgentHealth(opts: { orgId?: string } = {}): Promise<HealthCounts> {
+/**
+ * `resolveAfterMinutes`: how long an issue must go unseen before it resolves.
+ * The scheduled sweep waits HEALTH.resolveAfterMinutes so a flapping rule does
+ * not reopen (and re-alert) every few minutes; an explicit single-org check
+ * (tests, "check now") resolves at once unless told otherwise.
+ */
+export async function evaluateAgentHealth(
+  opts: { orgId?: string; resolveAfterMinutes?: number } = {},
+): Promise<HealthCounts> {
+  const resolveAfter = opts.resolveAfterMinutes ?? (opts.orgId ? 0 : HEALTH.resolveAfterMinutes);
   const counts: HealthCounts = { orgs: 0, opened: 0, resolved: 0, seen: 0 };
   for (const orgId of await orgsToCheck(opts.orgId)) {
     counts.orgs++;
@@ -1850,7 +1986,8 @@ export async function evaluateAgentHealth(opts: { orgId?: string } = {}): Promis
         });
       }
     }
-    const cleared = active.filter((a) => !firing.has(a.id));
+    const quietSince = Date.now() - resolveAfter * 60_000;
+    const cleared = active.filter((a) => !firing.has(a.id) && a.lastSeenAt.getTime() < quietSince);
     if (cleared.length) {
       await db
         .update(agentIssues)
@@ -1908,6 +2045,9 @@ export async function heartbeatAndMaybeEvaluate(
   const { dispatchAgentAlerts } = await import("./alerts.server");
   const a = await dispatchAgentAlerts();
   if (a.alerted) log.info("agent.alerts", a);
+  const { dispatchAgentDigests } = await import("./alerts.server");
+  const d = await dispatchAgentDigests();
+  if (d.digests) log.info("agent.digests", d);
   // Platform SLO burn-rate alerts ride the same cadence (src/server/slo.server.ts).
   try {
     const { evaluateSloBurn } = await import("../slo.server");

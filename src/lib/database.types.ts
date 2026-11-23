@@ -3038,7 +3038,13 @@ export type Database = {
       shares_pool_with_me: { Args: { _owner_org: string }; Returns: boolean };
     };
     Enums: {
-      app_role: "recruiter" | "hiring_manager" | "department_head" | "hr_head" | "president_cbo";
+      app_role:
+        | "recruiter"
+        | "hiring_manager"
+        | "department_head"
+        | "hr_head"
+        | "president_cbo"
+        | "interviewer";
       app_stage:
         | "sourced"
         | "applied"
@@ -3202,7 +3208,14 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["recruiter", "hiring_manager", "department_head", "hr_head", "president_cbo"],
+      app_role: [
+        "recruiter",
+        "hiring_manager",
+        "department_head",
+        "hr_head",
+        "president_cbo",
+        "interviewer",
+      ],
       app_stage: [
         "sourced",
         "applied",

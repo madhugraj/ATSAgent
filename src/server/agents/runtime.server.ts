@@ -188,10 +188,14 @@ type PendingCall = { taskId: string; call: AgentToolCall };
 import { HITL_TOOLS, isHitl, type HitlName } from "./hitl";
 import {
   approvedPanelWords,
+  newPanelistGateFor,
+  newPanelistWords,
   panelGateFor,
+  performNewPanelistGate,
   performPanelGate,
   performSubstituteGate,
   substituteGateFor,
+  type NewPanelistSubject,
   type PanelApprovalSubject,
   type PanelSubstituteSubject,
 } from "./panel-gate.server";
@@ -244,6 +248,7 @@ type GateSubject =
   | PolicyBriefingSubject
   | PanelApprovalSubject
   | PanelSubstituteSubject
+  | NewPanelistSubject
   | RecordSubject
   | RejectionSubject
   | HiringDecisionSubject
@@ -453,6 +458,7 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
   if (subject.type === "panel_approval") return panelGateFor(orgId, subject);
   if (subject.type === "expert_brief") return expertBriefGateFor(orgId, subject);
   if (subject.type === "panel_substitute") return substituteGateFor(orgId, subject);
+  if (subject.type === "new_panelist") return newPanelistGateFor(orgId, subject);
   if (subject.type === "panel_review") {
     const { reviewGateFor } = await import("../panel/review.server");
     return reviewGateFor(orgId, subject);
@@ -852,6 +858,8 @@ async function performGate(
   }
   if (subject.type === "panel_substitute")
     return performSubstituteGate(orgId, userId, org.memberEmail, subject, decision);
+  if (subject.type === "new_panelist")
+    return performNewPanelistGate(orgId, userId, subject, decision);
   if (subject.type === "offer" || subject.type === "offer_release") {
     const offerId = "offerId" in subject ? subject.offerId : subject.id;
     if (decision.status !== "approved") {
@@ -1668,8 +1676,9 @@ export async function runAgentTick(
       const { scheduleSweeps } = await import("./orchestrator.server");
       await scheduleSweeps(opts.orgId ? { orgId: opts.orgId } : {});
       // Agent workflows waiting past their time move on (wait.status = timed_out).
-      const { expireWorkflowWaits } = await import("./workflows.server");
+      const { expireWorkflowWaits, resumeFinishedRunWaits } = await import("./workflows.server");
       await expireWorkflowWaits();
+      await resumeFinishedRunWaits();
     } catch (e) {
       log.error("agent.orchestrator.failed", { error: e instanceof Error ? e : String(e) });
     }
@@ -2559,6 +2568,8 @@ async function applyDecision(
       ?.subject;
     if (subject?.type === "panel_approval")
       return told(`${await approvedPanelWords(task.orgId, subject)}${comment}`);
+    if (subject?.type === "new_panelist")
+      return told(`${await newPanelistWords(task.orgId, task.id)}${comment}`);
     return told(`Approved.${comment}`);
   }
   // An approved tool call runs with the (possibly edited) arguments, re-validated.

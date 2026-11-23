@@ -1,7 +1,7 @@
 import { and, asc, eq, ilike, inArray, isNotNull, lte, or, sql } from "drizzle-orm";
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 
-import { requireIdentity, type AppRole } from "./auth.middleware";
+import { isPanelOnly, requireIdentity, type AppRole } from "./auth.middleware";
 import { db } from "../server/db";
 import { taskIsRemindable } from "../server/agents/task-liveness";
 import {
@@ -119,7 +119,8 @@ export const myNotifications = createServerFn({ method: "GET" })
       .where(and(eq(orgMembers.userId, context.userId), eq(orgMembers.status, "active")))
       .limit(1);
 
-    if (member) {
+    // A panel-only member's inbox is their interviews page, not the org's queues.
+    if (member && !(await isPanelOnly(context.userId, member.orgId, member.isOwner))) {
       const orgId = member.orgId;
       const now = Date.now();
       const in7 = new Date(now + 7 * 864e5);
@@ -335,6 +336,23 @@ export const myNotifications = createServerFn({ method: "GET" })
             at: i.firstSeenAt.toISOString(),
             severity: i.severity === "critical" ? "urgent" : "warn",
           });
+        // Workflows the platform granted that cannot run here yet (until fixed).
+        const { grantedWorkflows, workflowReadiness } =
+          await import("../server/agents/workflows.server");
+        for (const w of await grantedWorkflows(orgId)) {
+          const r = await workflowReadiness(orgId, w.graph);
+          if (r.ready) continue;
+          const missing = r.items.filter((i) => !i.ok).map((i) => i.label);
+          out.push({
+            id: `workflow-ready:${w.id}:${w.version}`,
+            kind: "agent",
+            title: `Workflow "${w.name}" is not running yet`,
+            body: `It needs: ${missing.join(", ")}. Switch these on in Agent settings → Workflows.`,
+            to: "/agents/settings#workflows",
+            at: w.grantedAt.toISOString(),
+            severity: "warn",
+          });
+        }
         const [anyOn] = await db
           .select({ id: agentPolicies.id })
           .from(agentPolicies)

@@ -25,7 +25,7 @@ import { requirePlatformAdmin } from "./auth.middleware";
 async function audit(
   userId: string,
   action: string,
-  entityId: string,
+  entityId: string | null,
   detail: unknown,
   orgId: string | null = null,
 ) {
@@ -61,7 +61,7 @@ async function agentPalette(): Promise<{ type: string; name: string; studio: boo
   ).filter((r) => r.type && r.publishedVersion != null && r.status !== "archived");
   return [
     ...listAgents()
-      .filter((d) => !d.type.startsWith("studio:"))
+      .filter((d) => !d.type.startsWith("studio:") && d.type !== "copilot")
       .map((d) => ({ type: d.type as string, name: d.name, studio: false })),
     ...published.map((r) => ({ type: r.type!, name: r.name, studio: true })),
   ];
@@ -90,6 +90,7 @@ export type WorkflowRow = {
 export type WorkflowRunRow = {
   id: string;
   workflowId: string;
+  orgId: string;
   orgName: string;
   version: number;
   status: string;
@@ -97,6 +98,10 @@ export type WorkflowRunRow = {
   history: { node: string; at: string; note: string }[];
   error: string | null;
   createdAt: string;
+  /** The graph of the version this run ran (steps are drawn from it, not the current draft). */
+  graph: WorkflowGraph | null;
+  /** What a waiting run waits for (no request text — that stays in the organisation). */
+  waitingOn: { kind: "person" | "agent" | "event" | "stopped"; text: string } | null;
 };
 
 export type WorkflowBuilderView = {
@@ -149,6 +154,24 @@ export const workflowBuilder = createServerFn({ method: "GET" })
     ]);
     const { WORKFLOW_TEMPLATES } = await import("./workflow-templates");
     const { orgMembers } = await import("@db/schema");
+    const waits = await (await wf()).waitingOnFor(runs.map(({ r }) => r));
+    const versionKeys = [...new Set(runs.map(({ r }) => `${r.workflowId}:${r.version}`))];
+    const versionGraphs = new Map<string, WorkflowGraph>();
+    if (versionKeys.length) {
+      const rowsV = await db
+        .select({
+          workflowId: agentWorkflowVersions.workflowId,
+          version: agentWorkflowVersions.version,
+          graph: agentWorkflowVersions.graph,
+        })
+        .from(agentWorkflowVersions)
+        .where(
+          inArray(agentWorkflowVersions.workflowId, [
+            ...new Set(runs.map(({ r }) => r.workflowId)),
+          ]),
+        );
+      for (const v of rowsV) versionGraphs.set(`${v.workflowId}:${v.version}`, v.graph);
+    }
     const owned = await db
       .select({ id: organizations.id, name: organizations.name })
       .from(orgMembers)
@@ -194,6 +217,7 @@ export const workflowBuilder = createServerFn({ method: "GET" })
       runs: runs.map(({ r, orgName }) => ({
         id: r.id,
         workflowId: r.workflowId,
+        orgId: r.orgId,
         orgName,
         version: r.version,
         status: r.status,
@@ -201,6 +225,11 @@ export const workflowBuilder = createServerFn({ method: "GET" })
         history: r.history,
         error: r.error,
         createdAt: r.createdAt.toISOString(),
+        graph: versionGraphs.get(`${r.workflowId}:${r.version}`) ?? null,
+        waitingOn: (() => {
+          const w = waits.get(r.id);
+          return w ? { kind: w.kind, text: w.text } : null;
+        })(),
       })),
     };
   });
@@ -548,4 +577,86 @@ export const platformWorkflowReport = createServerFn({ method: "GET" })
     const r = await (await wf()).workflowRunReport(data.runId);
     if (!r) throw new Error("Run not found.");
     return r;
+  });
+
+const AssistInput = z.object({
+  /** The workflow being edited, when it is saved already (for the audit trail). */
+  workflowId: z.string().uuid().optional(),
+  /** An organisation the super admin owns: its own AI key pays for the turn. */
+  orgId: z.string().uuid(),
+  messages: z
+    .array(z.object({ role: z.enum(["user", "assistant"]), text: z.string().max(4000) }))
+    .min(1)
+    .max(30),
+  current: z.object({ nodes: z.array(Node).max(40), edges: z.array(Edge).max(80) }).nullable(),
+});
+
+export type WorkflowAssistInput = z.infer<typeof AssistInput>;
+export type WorkflowAssistResult =
+  import("../server/agents/workflow-assistant.server").AssistantDraft;
+
+/**
+ * Build with chat: describe the flow, get a draft graph and its dry-run tests.
+ * Drafts only — nothing is saved; the builder loads it onto the canvas.
+ */
+export const assistWorkflow = createServerFn({ method: "POST" })
+  .middleware([requirePlatformAdmin])
+  .validator((d: unknown) => AssistInput.parse(d))
+  .handler(async ({ data, context }): Promise<WorkflowAssistResult> => {
+    const { isWorkspaceOwner } = await import("../server/agents/blueprints.server");
+    if (!(await isWorkspaceOwner(context.userId, data.orgId)))
+      throw new Error("Pick an organisation you own; its AI key is used.");
+    if (data.messages.at(-1)?.role !== "user")
+      throw new Error("Write what the workflow should do.");
+    const { ensureAgentsRegistered } = await import("../server/agents");
+    ensureAgentsRegistered();
+    const { listAgents } = await import("../server/agents/registry");
+    const responsibility = new Map(listAgents().map((d) => [d.type as string, d.responsibility]));
+    const agents = (await agentPalette()).map((a) => ({
+      type: a.type,
+      name: a.name,
+      responsibility: responsibility.get(a.type) ?? "",
+    }));
+    const { draftWorkflow } = await import("../server/agents/workflow-assistant.server");
+    const draft = await draftWorkflow({
+      orgId: data.orgId,
+      messages: data.messages,
+      current: data.current?.nodes.length ? (data.current as WorkflowGraph) : null,
+      agents,
+    });
+    await audit(
+      context.userId,
+      "assisted",
+      data.workflowId ?? null,
+      { steps: draft.graph.nodes.length, testsPassed: draft.testsPassed },
+      data.orgId,
+    );
+    return draft;
+  });
+
+export type OrgReadinessRow = {
+  orgId: string;
+  ready: boolean;
+  items: { key: string; label: string; ok: boolean; detail: string }[];
+};
+
+/**
+ * Go-live check: for each organisation, whether it can run this workflow (AI
+ * key, every agent switched on, studio agents granted). Uses the published
+ * version when there is one, else the current draft. Read-only.
+ */
+export const workflowOrgReadiness = createServerFn({ method: "GET" })
+  .middleware([requirePlatformAdmin])
+  .validator((d: unknown) => IdInput.parse(d))
+  .handler(async ({ data }): Promise<OrgReadinessRow[]> => {
+    const w = await load(data.id);
+    const { publishedGraph, workflowReadiness } = await wf();
+    const graph = (await publishedGraph(w.id)) ?? w.graph;
+    const orgs = await db
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(eq(organizations.status, "active"));
+    return Promise.all(
+      orgs.map(async (o) => ({ orgId: o.id, ...(await workflowReadiness(o.id, graph)) })),
+    );
   });

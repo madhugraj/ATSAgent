@@ -535,7 +535,7 @@ export function ZoneOverlay({
           style={{ left: `${z.x}%`, top: `${z.y}%`, width: `${z.w}%`, height: `${z.h}%` }}
           title={`${z.slot} — drag to position`}
         >
-          <span className="absolute -top-0.5 left-0 rounded-br bg-primary px-1 text-[9px] font-medium text-primary-foreground">
+          <span className="absolute -top-0.5 left-0 rounded-br bg-primary px-1 text-[0.5625rem] font-medium text-primary-foreground">
             {z.slot}
           </span>
         </div>

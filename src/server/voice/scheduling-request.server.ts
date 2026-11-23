@@ -1,17 +1,16 @@
 /**
- * When a scheduling call may be asked for, and arranging it
- * (docs/voice-scheduling-call-plan.md). Every rule is checked here, by the
- * system — never left to the agent:
+ * When a scheduling call may be placed, and arranging it
+ * (docs/voice-scheduling-call-plan.md). Voice goes first: offering times
+ * arranges the call at once (`offerSlotsCore`, callFirst) and the e-mailed link
+ * is held until the call ends without a booking. Every rule is checked here, by
+ * the system — never left to the agent:
  *  - scheduling calls switched on, and calls can be placed (line + voice key);
- *  - an open e-mailed offer for the candidate with at least one time still
- *    four hours or more away;
- *  - the offer has had its chance by e-mail: the organisation's hours have
- *    passed unanswered, or its link closes within six hours (offers expire two
- *    hours before their first time, often within a day) — never sooner than two
- *    hours after it was sent; a repeat offer (an earlier one for this round was
- *    declined or expired) is called about straight away;
+ *  - an open offer for the candidate with at least one time still four hours
+ *    or more away;
  *  - an Indian mobile on file, and the candidate has not opted out of AI calls;
- *  - one scheduling call per offer.
+ *  - one scheduling call per offer, and one conversation per round (after the
+ *    assistant has spoken with them about a round, later times go by e-mail).
+ * There is no e-mail wait: a call is placed as soon as it is allowed.
  */
 import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 
@@ -27,19 +26,6 @@ type InterviewSlotOffer = typeof interviewSlotOffers.$inferSelect;
 const HOUR = 3_600_000;
 /** A call is worth placing only while a time at least this far ahead is left to book. */
 export const CALL_MIN_LEAD_MS = 4 * HOUR;
-/** …and is due once the e-mailed link closes within this, whatever the organisation's wait. */
-export const CALL_BEFORE_EXPIRY_MS = 6 * HOUR;
-/** …but never sooner than this after the e-mail went out. */
-export const CALL_MIN_AFTER_EMAIL_MS = 2 * HOUR;
-
-/** When an e-mailed offer may be followed by a call (pure; unit-tested). */
-export function callableAt(o: { createdAt: Date; expiresAt: Date }, waitHours: number): number {
-  const created = o.createdAt.getTime();
-  return Math.max(
-    created + CALL_MIN_AFTER_EMAIL_MS,
-    Math.min(created + waitHours * HOUR, o.expiresAt.getTime() - CALL_BEFORE_EXPIRY_MS),
-  );
-}
 const TERMINAL = ["rejected", "hired", "joined", "withdrawn", "no_show"];
 
 export type SchedulingCheck =
@@ -48,7 +34,7 @@ export type SchedulingCheck =
       offer: InterviewSlotOffer;
       candidateId: string;
       requisitionId: string;
-      /** A repeat offer: called about without waiting. */
+      /** A repeat offer (an earlier one for this round was declined or expired). */
       repeat: boolean;
     }
   | { ok: false; reason: string };
@@ -57,7 +43,7 @@ export async function checkSchedulingCall(
   orgId: string,
   applicationId: string,
   now = Date.now(),
-  /** A person arranging the call may call before the wait (agents never may). */
+  /** A person on the team may call again about a round already spoken about (agents never may). */
   opts: { byPerson?: boolean } = {},
 ): Promise<SchedulingCheck> {
   const policy = await phoneScreeningPolicyOf(orgId);
@@ -112,6 +98,25 @@ export async function checkSchedulingCall(
       ok: false,
       reason: "No interview times are waiting for this candidate — offer times first.",
     };
+  {
+    const { interviewConfirmations } = await import("@db/schema");
+    const [waiting] = await db
+      .select({ id: interviewConfirmations.id })
+      .from(interviewConfirmations)
+      .where(
+        and(
+          eq(interviewConfirmations.orgId, orgId),
+          eq(interviewConfirmations.offerId, offer.id),
+          sql`${interviewConfirmations.state} in ('pending','declined')`,
+        ),
+      )
+      .limit(1);
+    if (waiting)
+      return {
+        ok: false,
+        reason: "The panel has not agreed these times yet, so the candidate is not contacted.",
+      };
+  }
   // Only for the round they are in (an older offer for a later round is never called about).
   const { roundNotYet } = await import("@/lib/slot-offers.server");
   const notYet = roundNotYet(app.stage, offer.level);
@@ -174,14 +179,6 @@ export async function checkSchedulingCall(
     )
     .limit(1);
   const repeat = Boolean(earlier);
-  const dueAt = callableAt(offer, policy.schedulingWaitHours);
-  if (!repeat && !opts.byPerson && dueAt > now) {
-    const hours = Math.ceil((dueAt - now) / HOUR);
-    return {
-      ok: false,
-      reason: `The e-mail has not had its chance yet; a call can be asked for in about ${hours} hour${hours === 1 ? "" : "s"}.`,
-    };
-  }
   return {
     ok: true,
     offer,
@@ -230,12 +227,14 @@ export async function findAlternates(
 export async function requestSchedulingCall(input: {
   orgId: string;
   applicationId: string;
-  requestedBy: string;
+  requestedBy: string | null;
   requestedRunId: string | null;
   actor: string;
   now?: number;
-  /** A person on the team arranged it (may call before the organisation's wait). */
+  /** A person on the team arranged it (may call again about a round already spoken about). */
   byPerson?: boolean;
+  /** Arranged by offering the times: the call goes first, the link is held. */
+  callFirst?: boolean;
 }): Promise<{ callId: string; dueAt: Date; options: number }> {
   const now = input.now ?? Date.now();
   const check = await checkSchedulingCall(input.orgId, input.applicationId, now, {
@@ -276,6 +275,7 @@ export async function requestSchedulingCall(input: {
       alternates: alternates.length,
       repeat: check.repeat,
       byPerson: Boolean(input.byPerson),
+      callFirst: Boolean(input.callFirst),
       dueAt: dueAt.toISOString(),
     },
   });
@@ -283,9 +283,11 @@ export async function requestSchedulingCall(input: {
 }
 
 /**
- * Trigger: e-mailed times left unanswered for the organisation's wait (and
- * still callable). Raises `interview.slots_no_reply` once per offer so the
- * Interview coordinator can ask for a scheduling call. Run by the agent tick.
+ * Recovery trigger: an open offer whose link was e-mailed because no call could
+ * be placed when the times were offered (the phone line was down, calls were
+ * off…) and that has had no call since — once a call is possible, raise
+ * `interview.slots_no_reply` (once per offer) so the Interview coordinator asks
+ * for it. Run by the agent tick.
  */
 export async function raiseUnansweredOffers(now = Date.now(), orgId?: string): Promise<number> {
   const rows = (await db.execute(sql`
@@ -293,15 +295,15 @@ export async function raiseUnansweredOffers(now = Date.now(), orgId?: string): P
     from interview_slot_offers o
     join phone_screening_settings s on s.org_id = o.org_id
     where o.status = 'offered'
+      and o.link_emailed_at is not null
       and s.enabled and s.scheduling_enabled
       ${orgId ? sql`and o.org_id = ${orgId}` : sql``}
       and o.expires_at > ${new Date(now).toISOString()}::timestamptz
-      -- Its chance by e-mail: the organisation's wait, or its link closing within 6 h
-      -- (never sooner than 2 h after it was sent); checkSchedulingCall has the same rule.
-      and o.created_at <= ${new Date(now).toISOString()}::timestamptz - interval '2 hours'
-      and (o.created_at <= ${new Date(now).toISOString()}::timestamptz - make_interval(hours => s.scheduling_wait_hours)
-        or o.expires_at <= ${new Date(now).toISOString()}::timestamptz + interval '6 hours')
       and not exists (select 1 from screening_calls c where c.slot_offer_id = o.id and c.status <> 'cancelled')
+      -- Not while the panel has yet to agree the times.
+      and not exists (
+        select 1 from interview_confirmations k
+        where k.offer_id = o.id and k.state in ('pending','declined'))
       and not exists (
         select 1 from agent_events e
         where e.org_id = o.org_id and e.type = 'interview.slots_no_reply'
@@ -315,7 +317,7 @@ export async function raiseUnansweredOffers(now = Date.now(), orgId?: string): P
   const { emitAgentEvent } = await import("../agents/events");
   let raised = 0;
   for (const r of rows) {
-    // Only offers a call could still help (a day ahead, a dialable candidate…).
+    // Only offers a call could now help (a dialable candidate, calls possible…).
     const c = await checkSchedulingCall(r.org_id, r.application_id, now);
     if (!c.ok) continue;
     await emitAgentEvent({

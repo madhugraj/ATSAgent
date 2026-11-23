@@ -69,7 +69,7 @@ export function Verdict({
             key={p.key}
             type="button"
             onClick={() => onPick?.(active === p.key ? null : p.key)}
-            className={`inline-flex items-center gap-2 whitespace-nowrap rounded-full border px-3 py-1 text-[13px] transition-colors hover:border-foreground/30 ${STATUS[p.status].pill} ${
+            className={`inline-flex items-center gap-2 whitespace-nowrap rounded-full border px-3 py-1 text-[0.8125rem] transition-colors hover:border-foreground/30 ${STATUS[p.status].pill} ${
               active === p.key ? "ring-2 ring-primary/40" : ""
             }`}
           >
@@ -140,7 +140,7 @@ export function FixList({
       {rows.length === 0 ? (
         <p className="px-4 py-4 text-sm text-muted-foreground">Nothing needs action.</p>
       ) : (
-        <table className="mt-2 w-full text-[13px]">
+        <table className="mt-2 w-full text-[0.8125rem]">
           <thead>
             <tr className="border-b border-border text-left text-xs text-muted-foreground">
               <th className="w-20 px-4 py-2 font-medium">Severity</th>
@@ -213,7 +213,7 @@ export function FixList({
         </button>
       )}
       {passing.count > 0 && (
-        <p className="flex items-center gap-2 border-t border-border px-4 py-2.5 text-[13px] text-muted-foreground">
+        <p className="flex items-center gap-2 border-t border-border px-4 py-2.5 text-[0.8125rem] text-muted-foreground">
           <Dot status="good" />
           <b className="font-semibold text-foreground">{passing.count} checks passing</b>
           {passing.summary.length > 0 && <span>· {passing.summary.join(" · ")}</span>}

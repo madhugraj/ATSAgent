@@ -48,12 +48,12 @@ import { Route as AgentsIntelligenceRouteImport } from './routes/agents.intellig
 import { Route as AgentsObservabilityRouteImport } from './routes/agents.observability'
 import { Route as AgentsRegisterRouteImport } from './routes/agents.register'
 import { Route as AgentsSettingsRouteImport } from './routes/agents.settings'
-import { Route as AgentsWorkflowsRouteImport } from './routes/agents.workflows'
 import { Route as ApplyIdRouteImport } from './routes/apply.$id'
 import { Route as AssessTokenRouteImport } from './routes/assess.$token'
 import { Route as AuthResetRouteImport } from './routes/auth.reset'
 import { Route as CandidatesIndexRouteImport } from './routes/candidates.index'
 import { Route as CandidatesIdRouteImport } from './routes/candidates.$id'
+import { Route as ConfirmTokenRouteImport } from './routes/confirm.$token'
 import { Route as InterviewsIndexRouteImport } from './routes/interviews.index'
 import { Route as InterviewsMineRouteImport } from './routes/interviews.mine'
 import { Route as NegotiateTokenRouteImport } from './routes/negotiate.$token'
@@ -62,6 +62,8 @@ import { Route as PayTokenRouteImport } from './routes/pay.$token'
 import { Route as RequisitionsIndexRouteImport } from './routes/requisitions.index'
 import { Route as RequisitionsIdRouteImport } from './routes/requisitions.$id'
 import { Route as ScheduleTokenRouteImport } from './routes/schedule.$token'
+import { Route as ScorecardTokenRouteImport } from './routes/scorecard.$token'
+import { Route as WWorkflowIdRouteImport } from './routes/w.$workflowId'
 import { Route as ApiAuthChangePasswordRouteImport } from './routes/api/auth/change-password'
 import { Route as ApiAuthConfirmRouteImport } from './routes/api/auth/confirm'
 import { Route as ApiAuthLoginRouteImport } from './routes/api/auth/login'
@@ -282,11 +284,6 @@ const AgentsSettingsRoute = AgentsSettingsRouteImport.update({
   path: '/agents/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AgentsWorkflowsRoute = AgentsWorkflowsRouteImport.update({
-  id: '/agents/workflows',
-  path: '/agents/workflows',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ApplyIdRoute = ApplyIdRouteImport.update({
   id: '/apply/$id',
   path: '/apply/$id',
@@ -310,6 +307,11 @@ const CandidatesIndexRoute = CandidatesIndexRouteImport.update({
 const CandidatesIdRoute = CandidatesIdRouteImport.update({
   id: '/candidates/$id',
   path: '/candidates/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConfirmTokenRoute = ConfirmTokenRouteImport.update({
+  id: '/confirm/$token',
+  path: '/confirm/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InterviewsIndexRoute = InterviewsIndexRouteImport.update({
@@ -350,6 +352,16 @@ const RequisitionsIdRoute = RequisitionsIdRouteImport.update({
 const ScheduleTokenRoute = ScheduleTokenRouteImport.update({
   id: '/schedule/$token',
   path: '/schedule/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ScorecardTokenRoute = ScorecardTokenRouteImport.update({
+  id: '/scorecard/$token',
+  path: '/scorecard/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WWorkflowIdRoute = WWorkflowIdRouteImport.update({
+  id: '/w/$workflowId',
+  path: '/w/$workflowId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiAuthChangePasswordRoute = ApiAuthChangePasswordRouteImport.update({
@@ -519,17 +531,19 @@ export interface FileRoutesByFullPath {
   '/agents/observability': typeof AgentsObservabilityRoute
   '/agents/register': typeof AgentsRegisterRoute
   '/agents/settings': typeof AgentsSettingsRoute
-  '/agents/workflows': typeof AgentsWorkflowsRoute
   '/apply/$id': typeof ApplyIdRoute
   '/assess/$token': typeof AssessTokenRoute
   '/auth/reset': typeof AuthResetRoute
   '/candidates/$id': typeof CandidatesIdRoute
+  '/confirm/$token': typeof ConfirmTokenRoute
   '/interviews/mine': typeof InterviewsMineRoute
   '/negotiate/$token': typeof NegotiateTokenRoute
   '/offer/$token': typeof OfferTokenRoute
   '/pay/$token': typeof PayTokenRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
   '/schedule/$token': typeof ScheduleTokenRoute
+  '/scorecard/$token': typeof ScorecardTokenRoute
+  '/w/$workflowId': typeof WWorkflowIdRoute
   '/agents/': typeof AgentsIndexRoute
   '/candidates/': typeof CandidatesIndexRoute
   '/interviews/': typeof InterviewsIndexRoute
@@ -598,17 +612,19 @@ export interface FileRoutesByTo {
   '/agents/observability': typeof AgentsObservabilityRoute
   '/agents/register': typeof AgentsRegisterRoute
   '/agents/settings': typeof AgentsSettingsRoute
-  '/agents/workflows': typeof AgentsWorkflowsRoute
   '/apply/$id': typeof ApplyIdRoute
   '/assess/$token': typeof AssessTokenRoute
   '/auth/reset': typeof AuthResetRoute
   '/candidates/$id': typeof CandidatesIdRoute
+  '/confirm/$token': typeof ConfirmTokenRoute
   '/interviews/mine': typeof InterviewsMineRoute
   '/negotiate/$token': typeof NegotiateTokenRoute
   '/offer/$token': typeof OfferTokenRoute
   '/pay/$token': typeof PayTokenRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
   '/schedule/$token': typeof ScheduleTokenRoute
+  '/scorecard/$token': typeof ScorecardTokenRoute
+  '/w/$workflowId': typeof WWorkflowIdRoute
   '/agents': typeof AgentsIndexRoute
   '/candidates': typeof CandidatesIndexRoute
   '/interviews': typeof InterviewsIndexRoute
@@ -678,17 +694,19 @@ export interface FileRoutesById {
   '/agents/observability': typeof AgentsObservabilityRoute
   '/agents/register': typeof AgentsRegisterRoute
   '/agents/settings': typeof AgentsSettingsRoute
-  '/agents/workflows': typeof AgentsWorkflowsRoute
   '/apply/$id': typeof ApplyIdRoute
   '/assess/$token': typeof AssessTokenRoute
   '/auth/reset': typeof AuthResetRoute
   '/candidates/$id': typeof CandidatesIdRoute
+  '/confirm/$token': typeof ConfirmTokenRoute
   '/interviews/mine': typeof InterviewsMineRoute
   '/negotiate/$token': typeof NegotiateTokenRoute
   '/offer/$token': typeof OfferTokenRoute
   '/pay/$token': typeof PayTokenRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
   '/schedule/$token': typeof ScheduleTokenRoute
+  '/scorecard/$token': typeof ScorecardTokenRoute
+  '/w/$workflowId': typeof WWorkflowIdRoute
   '/agents/': typeof AgentsIndexRoute
   '/candidates/': typeof CandidatesIndexRoute
   '/interviews/': typeof InterviewsIndexRoute
@@ -759,17 +777,19 @@ export interface FileRouteTypes {
     | '/agents/observability'
     | '/agents/register'
     | '/agents/settings'
-    | '/agents/workflows'
     | '/apply/$id'
     | '/assess/$token'
     | '/auth/reset'
     | '/candidates/$id'
+    | '/confirm/$token'
     | '/interviews/mine'
     | '/negotiate/$token'
     | '/offer/$token'
     | '/pay/$token'
     | '/requisitions/$id'
     | '/schedule/$token'
+    | '/scorecard/$token'
+    | '/w/$workflowId'
     | '/agents/'
     | '/candidates/'
     | '/interviews/'
@@ -838,17 +858,19 @@ export interface FileRouteTypes {
     | '/agents/observability'
     | '/agents/register'
     | '/agents/settings'
-    | '/agents/workflows'
     | '/apply/$id'
     | '/assess/$token'
     | '/auth/reset'
     | '/candidates/$id'
+    | '/confirm/$token'
     | '/interviews/mine'
     | '/negotiate/$token'
     | '/offer/$token'
     | '/pay/$token'
     | '/requisitions/$id'
     | '/schedule/$token'
+    | '/scorecard/$token'
+    | '/w/$workflowId'
     | '/agents'
     | '/candidates'
     | '/interviews'
@@ -917,17 +939,19 @@ export interface FileRouteTypes {
     | '/agents/observability'
     | '/agents/register'
     | '/agents/settings'
-    | '/agents/workflows'
     | '/apply/$id'
     | '/assess/$token'
     | '/auth/reset'
     | '/candidates/$id'
+    | '/confirm/$token'
     | '/interviews/mine'
     | '/negotiate/$token'
     | '/offer/$token'
     | '/pay/$token'
     | '/requisitions/$id'
     | '/schedule/$token'
+    | '/scorecard/$token'
+    | '/w/$workflowId'
     | '/agents/'
     | '/candidates/'
     | '/interviews/'
@@ -997,17 +1021,19 @@ export interface RootRouteChildren {
   AgentsObservabilityRoute: typeof AgentsObservabilityRoute
   AgentsRegisterRoute: typeof AgentsRegisterRoute
   AgentsSettingsRoute: typeof AgentsSettingsRoute
-  AgentsWorkflowsRoute: typeof AgentsWorkflowsRoute
   ApplyIdRoute: typeof ApplyIdRoute
   AssessTokenRoute: typeof AssessTokenRoute
   AuthResetRoute: typeof AuthResetRoute
   CandidatesIdRoute: typeof CandidatesIdRoute
+  ConfirmTokenRoute: typeof ConfirmTokenRoute
   InterviewsMineRoute: typeof InterviewsMineRoute
   NegotiateTokenRoute: typeof NegotiateTokenRoute
   OfferTokenRoute: typeof OfferTokenRoute
   PayTokenRoute: typeof PayTokenRoute
   RequisitionsIdRoute: typeof RequisitionsIdRoute
   ScheduleTokenRoute: typeof ScheduleTokenRoute
+  ScorecardTokenRoute: typeof ScorecardTokenRoute
+  WWorkflowIdRoute: typeof WWorkflowIdRoute
   AgentsIndexRoute: typeof AgentsIndexRoute
   CandidatesIndexRoute: typeof CandidatesIndexRoute
   InterviewsIndexRoute: typeof InterviewsIndexRoute
@@ -1313,13 +1339,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsSettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/agents/workflows': {
-      id: '/agents/workflows'
-      path: '/agents/workflows'
-      fullPath: '/agents/workflows'
-      preLoaderRoute: typeof AgentsWorkflowsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/apply/$id': {
       id: '/apply/$id'
       path: '/apply/$id'
@@ -1353,6 +1372,13 @@ declare module '@tanstack/react-router' {
       path: '/candidates/$id'
       fullPath: '/candidates/$id'
       preLoaderRoute: typeof CandidatesIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/confirm/$token': {
+      id: '/confirm/$token'
+      path: '/confirm/$token'
+      fullPath: '/confirm/$token'
+      preLoaderRoute: typeof ConfirmTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/interviews/': {
@@ -1409,6 +1435,20 @@ declare module '@tanstack/react-router' {
       path: '/schedule/$token'
       fullPath: '/schedule/$token'
       preLoaderRoute: typeof ScheduleTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/scorecard/$token': {
+      id: '/scorecard/$token'
+      path: '/scorecard/$token'
+      fullPath: '/scorecard/$token'
+      preLoaderRoute: typeof ScorecardTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/w/$workflowId': {
+      id: '/w/$workflowId'
+      path: '/w/$workflowId'
+      fullPath: '/w/$workflowId'
+      preLoaderRoute: typeof WWorkflowIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/auth/change-password': {
@@ -1621,17 +1661,19 @@ const rootRouteChildren: RootRouteChildren = {
   AgentsObservabilityRoute: AgentsObservabilityRoute,
   AgentsRegisterRoute: AgentsRegisterRoute,
   AgentsSettingsRoute: AgentsSettingsRoute,
-  AgentsWorkflowsRoute: AgentsWorkflowsRoute,
   ApplyIdRoute: ApplyIdRoute,
   AssessTokenRoute: AssessTokenRoute,
   AuthResetRoute: AuthResetRoute,
   CandidatesIdRoute: CandidatesIdRoute,
+  ConfirmTokenRoute: ConfirmTokenRoute,
   InterviewsMineRoute: InterviewsMineRoute,
   NegotiateTokenRoute: NegotiateTokenRoute,
   OfferTokenRoute: OfferTokenRoute,
   PayTokenRoute: PayTokenRoute,
   RequisitionsIdRoute: RequisitionsIdRoute,
   ScheduleTokenRoute: ScheduleTokenRoute,
+  ScorecardTokenRoute: ScorecardTokenRoute,
+  WWorkflowIdRoute: WWorkflowIdRoute,
   AgentsIndexRoute: AgentsIndexRoute,
   CandidatesIndexRoute: CandidatesIndexRoute,
   InterviewsIndexRoute: InterviewsIndexRoute,

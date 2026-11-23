@@ -166,7 +166,7 @@ export function CommandPalette({
               </p>
             ) : null}
           </CommandList>
-          <div className="border-t border-border px-3 py-1.5 text-[11px] text-muted-foreground">
+          <div className="border-t border-border px-3 py-1.5 text-[0.6875rem] text-muted-foreground">
             ↑↓ navigate · ↵ open · esc close
           </div>
         </Command>

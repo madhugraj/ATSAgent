@@ -6,3 +6,6 @@ pnpm-lock.yaml
 package-lock.json
 bun.lock
 routeTree.gen.ts
+
+# Generated docs checked by tests (bun scripts/voice-charter-doc.ts)
+docs/voice-agents-charter.md

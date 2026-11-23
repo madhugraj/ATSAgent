@@ -43,7 +43,7 @@ import { readsOutWorkings, WORKINGS_CORRECTION } from "./spoken-guard";
 import { GREETING_WAIT_MS, greetingCue, ReadyGreeting } from "./greeting";
 import { TURN_TIMING, TurnKeeper } from "./turns";
 import { rms, Vad } from "./vad";
-import { localNow, retryAt } from "./schedule";
+import { localNow, nextWindowStart } from "./schedule";
 import {
   applySchedulingTool,
   freshSchedulingState,
@@ -60,6 +60,7 @@ import {
   noteAvailability,
   saveCallback,
   SCHEDULING_MAX_ATTEMPTS,
+  SCHEDULING_RETRY_MS,
 } from "./scheduling-outcome.server";
 import { schedulingSystemPrompt, schedulingFirstWords } from "./scheduling-prompt";
 import { phoneScreeningPolicyOf } from "./settings.server";
@@ -82,12 +83,14 @@ const WORDS: Record<string, string> = {
   booked: "The candidate picked an interview time on the call; it is booked.",
   callback: "The candidate asked to be called back shortly to pick a time.",
   availability_noted: "None of the times worked; the candidate's availability went to the team.",
-  not_now: "Not a good time for the candidate; the e-mailed link stands.",
-  declined: "The candidate did not want to pick a time on the call; the e-mailed link stands.",
-  opt_out: "The candidate asked not to be called by the AI assistant; the e-mailed link stands.",
-  wrong_person: "The number reached someone else; the e-mailed link stands.",
-  no_answer: "Nobody answered; the call will be tried again.",
-  gave_up: "The candidate could not be reached; the e-mailed link stands.",
+  not_now: "Not a good time for the candidate; the times go to them by e-mail with a link.",
+  declined:
+    "The candidate did not want to pick a time on the call; the times go to them by e-mail with a link.",
+  opt_out:
+    "The candidate asked not to be called by the AI assistant; the times go to them by e-mail with a link.",
+  wrong_person: "The number reached someone else; the times go to them by e-mail with a link.",
+  no_answer: "Nobody answered; the times went by e-mail and the call will be tried once more.",
+  gave_up: "The candidate could not be reached; the times go to them by e-mail with a link.",
 };
 
 /** Place a claimed scheduling call. Never throws for an ordinary failure. */
@@ -445,7 +448,8 @@ async function place(
  * Record how the call ended, close its run and tell the role's thread. A
  * booking or "none of these work" already told the thread (the link's core
  * does that); everything else is said here. Unanswered calls are tried once
- * more inside the calling window, then the e-mailed link stands.
+ * more inside the calling window; the held link is e-mailed after any call
+ * that did not book.
  */
 async function settle(
   orgId: string,
@@ -466,7 +470,12 @@ async function settle(
     if (call.attempt < SCHEDULING_MAX_ATTEMPTS) {
       const policy = await phoneScreeningPolicyOf(orgId);
       const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
-      dueAt = retryAt(at, call.attempt, policy, (await getOrgEmailSettings(orgId)).timezone);
+      // Hourly the same day (hiring SLA), not the screening call's 2 h then next day.
+      dueAt = nextWindowStart(
+        at + SCHEDULING_RETRY_MS,
+        policy,
+        (await getOrgEmailSettings(orgId)).timezone,
+      );
       status = "no_answer";
     } else {
       status = "fell_back";
@@ -498,6 +507,14 @@ async function settle(
       actor: "agent:scheduling_call",
       callId: call.id,
     }).catch((e) => log.warn("scheduling_call.opt_out_failed", { call_id: call.id, error: e }));
+  }
+  // Voice went first and did not book: e-mail the held link now (also after a
+  // missed first attempt — the retry still comes, and they have the link meanwhile).
+  try {
+    const { releaseOfferLinkAfterCall } = await import("@/lib/slot-offers.server");
+    await releaseOfferLinkAfterCall(orgId, call.slotOfferId, status);
+  } catch (e) {
+    log.warn("scheduling_call.link_release_failed", { call_id: call.id, error: e as Error });
   }
   if (call.agentRunId)
     await closeCallRun(call.agentRunId, !o.lastError, words).catch((e) =>
@@ -532,11 +549,11 @@ async function postToThread(orgId: string, call: Call, how: string, dueAt: Date 
     : null;
   const round = row?.level ? `L${row.level} interview` : "interview";
   const said: Record<string, string> = {
-    not_now: `${name} could not talk when the assistant called about their ${round} time; the e-mailed link still stands.`,
-    declined: `${name} preferred not to pick their ${round} time on the call; the e-mailed link still stands.`,
-    opt_out: `${name} asked not to be called by the AI assistant. No AI call will dial them again; the e-mailed link for their ${round} still stands.`,
-    wrong_person: `The scheduling call for ${name}'s ${round} reached someone else; the e-mailed link still stands.`,
-    already_chosen: `${name} picked their ${round} time from the e-mail before the call, so no call was needed.`,
+    not_now: `${name} could not talk when the assistant called about their ${round} time; the times are e-mailed to them with a link.`,
+    declined: `${name} preferred not to pick their ${round} time on the call; the times are e-mailed to them with a link.`,
+    opt_out: `${name} asked not to be called by the AI assistant. No AI call will dial them again; the times for their ${round} are e-mailed to them with a link.`,
+    wrong_person: `The scheduling call for ${name}'s ${round} reached someone else; the times are e-mailed to them with a link.`,
+    already_chosen: `${name} picked their ${round} time from the link before the call, so no call was needed.`,
     callback: `${name} asked the assistant to call back${at ? ` at ${at}` : " shortly"} to pick their ${round} time.`,
   };
   await desk.postMessage(
@@ -546,7 +563,7 @@ async function postToThread(orgId: string, call: Call, how: string, dueAt: Date 
       agentType: "scheduling_call",
       body:
         said[how] ??
-        `The assistant could not reach ${name} to pick their ${round} time; the e-mailed link still stands.`,
+        `The assistant could not reach ${name} about their ${round} time after ${SCHEDULING_MAX_ATTEMPTS} calls; the times are e-mailed to them with a link. Please phone them today — the hiring SLA leaves no room for a missed day.`,
     },
   );
 }

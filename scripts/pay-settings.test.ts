@@ -394,7 +394,12 @@ describe("offers in the role's terms (Phase 4)", () => {
       .returning({ id: candidates.id });
     const [app] = await db
       .insert(applications)
-      .values({ orgId, requisitionId: req!.id, candidateId: cand!.id, stage: "shortlisted" } as never)
+      .values({
+        orgId,
+        requisitionId: req!.id,
+        candidateId: cand!.id,
+        stage: "shortlisted",
+      } as never)
       .returning({ id: applications.id });
     return app!.id;
   }

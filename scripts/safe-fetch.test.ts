@@ -14,7 +14,12 @@ describe("safeFetch", () => {
       expect(isConnectFailure(failure(code))).toBe(true);
   });
   test("failures after sending never retry (no replayed requests)", () => {
-    for (const code of ["ECONNRESET", "UND_ERR_SOCKET", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_ABORTED"])
+    for (const code of [
+      "ECONNRESET",
+      "UND_ERR_SOCKET",
+      "UND_ERR_HEADERS_TIMEOUT",
+      "UND_ERR_ABORTED",
+    ])
       expect(isConnectFailure(failure(code))).toBe(false);
     expect(isConnectFailure(new Error("Blocked address"))).toBe(false);
     expect(isConnectFailure(null)).toBe(false);

@@ -149,7 +149,7 @@ export function Copilot() {
           </span>
           <span className="leading-tight">
             <span className="block text-sm font-semibold tracking-tight">Aditi</span>
-            <span className="block text-[11px] text-muted-foreground">
+            <span className="block text-[0.6875rem] text-muted-foreground">
               AI copilot ·{" "}
               <Link to="/desk" className="text-primary underline" onClick={() => setOpen(false)}>
                 hire with agents
@@ -262,7 +262,7 @@ export function Copilot() {
         ) : null}
         {messages.length === 0 ? (
           <div className="space-y-4">
-            <p className="text-[13px] leading-relaxed text-muted-foreground">
+            <p className="text-[0.8125rem] leading-relaxed text-muted-foreground">
               Ask about requisitions and approvals, your pipeline, the role ontology, pool coverage
               or future demand — answers use your organisation's live data, limited to what your
               role can see.
@@ -299,7 +299,7 @@ export function Copilot() {
               {m.handoff ? (
                 <div className="rounded-xl border border-primary/30 bg-primary/5 p-2.5">
                   <p className="text-xs font-medium text-foreground">{m.handoff.summary}</p>
-                  <p className="mt-1 line-clamp-4 text-[11px] leading-snug text-muted-foreground">
+                  <p className="mt-1 line-clamp-4 text-[0.6875rem] leading-snug text-muted-foreground">
                     {m.handoff.goal}
                   </p>
                   <Button

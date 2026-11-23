@@ -15,7 +15,7 @@
  */
 import { createHash } from "node:crypto";
 
-import { and, eq, inArray, isNull, lt } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, isNull, lt, ne } from "drizzle-orm";
 
 import {
   agentRuns,
@@ -37,12 +37,15 @@ import {
 import { db } from "../db";
 import { log } from "../log";
 import { AGENT_EVENT_TYPES } from "./events";
+import { CEILING_MESSAGE, LEG_LIMIT_MESSAGE } from "./run-messages";
 
 export const MAX_NODES = 40;
 const MAX_HOPS = 60;
 /** The trigger of a workflow someone starts by hand with a hiring need. */
 export const MANUAL_TRIGGER = "manual";
 export const DEFAULT_WAIT_HOURS = 72;
+/** A run started this long before the workflow run still counts as the same event's. */
+export const JOIN_WINDOW_MS = 60_000;
 export const MAX_WAIT_HOURS = 24 * 30;
 const FIELD = /^(payload(\.[A-Za-z0-9_]+)+|subject_type|last\.(status|result)|wait\.status)$/;
 const OPS = ["eq", "neq", "contains", "gt", "gte", "lt", "lte", "exists"] as const;
@@ -61,6 +64,16 @@ export type WorkflowContext = {
   /** Every agent run the flow started or joined. */
   runs?: string[];
   principal?: string | null;
+  /**
+   * An older run of the step's agent was still open on the role (one open run
+   * per agent and role): the flow waits for it, then starts its own run.
+   */
+  queuedBehind?: string | null;
+  /**
+   * The step's agent run stopped at its turn or token limit (a resumable stop):
+   * the flow pauses on that step until a person presses Retry or Skip.
+   */
+  stoppedRun?: string | null;
 };
 
 /* -------------------------------------------------------------- the graph */
@@ -109,7 +122,11 @@ export function graphProblems(g: WorkflowGraph, knownAgent: (type: string) => bo
       if (incoming.length) out.push("Nothing may lead into the trigger.");
     }
     if (n.kind === "agent") {
-      if (!n.data.agentType || !knownAgent(n.data.agentType))
+      if (n.data.agentType && NOT_A_STEP.has(n.data.agentType))
+        out.push(
+          `"${label(n)}": Aditi hands work to other agents on its own, so it cannot be a workflow step — use the agent that does the work (e.g. the Requisition agent).`,
+        );
+      else if (!n.data.agentType || !knownAgent(n.data.agentType))
         out.push(`"${label(n)}": pick an agent that exists.`);
       if (!n.data.goal?.trim()) out.push(`"${label(n)}": write the agent's goal.`);
       if ((n.data.goal ?? "").length > 2000) out.push(`"${label(n)}": the goal is too long.`);
@@ -218,6 +235,28 @@ export function conditionHolds(n: WorkflowNode, ctx: WorkflowContext): boolean {
 }
 
 /** A goal with {{field}} placeholders filled from the context (missing → empty). */
+/**
+ * Agents that cannot be workflow steps: the copilot (Aditi) is the front door —
+ * it starts other agents itself, so their work would happen outside the flow.
+ */
+export const NOT_A_STEP = new Set(["copilot"]);
+
+/**
+ * The goal an agent step starts with: its own goal, then what the flow already
+ * knows — the hiring need and what the previous step produced — so a step never
+ * starts blind, whatever its goal mentions.
+ */
+export function stepGoal(goal: string, ctx: WorkflowContext): string {
+  const own = renderGoal(goal, ctx).trim();
+  const need = typeof ctx.payload?.["need"] === "string" ? String(ctx.payload["need"]).trim() : "";
+  const prev = ctx.last?.result?.trim() ?? "";
+  const parts = [own];
+  if (need && !own.includes(need)) parts.push(`Hiring need: ${need.slice(0, 2000)}`);
+  if (prev && !own.includes(prev.slice(0, 200)))
+    parts.push(`What the previous step produced:\n${prev.slice(0, 3000)}`);
+  return parts.join("\n\n");
+}
+
 export function renderGoal(goal: string, ctx: WorkflowContext): string {
   return goal.replace(/\{\{\s*([A-Za-z0-9_.]+)\s*\}\}/g, (_m, f: string) => {
     const v = FIELD.test(f) ? fieldValue(f, ctx) : undefined;
@@ -401,6 +440,33 @@ export async function onWorkflowEvent(e: EventRow): Promise<number> {
   return startWorkflowsFor(e);
 }
 
+/**
+ * The role a flow's own agents worked on: a run's subject, else the first
+ * requisition one of those runs created or changed (its events). Null if none.
+ */
+async function subjectFromRuns(runIds: string[]): Promise<{ type: string; id: string } | null> {
+  const ids = [...new Set(runIds)].filter(Boolean);
+  if (!ids.length) return null;
+  const withSubject = await db
+    .select({ type: agentRuns.subjectType, id: agentRuns.subjectId })
+    .from(agentRuns)
+    .where(and(inArray(agentRuns.id, ids), eq(agentRuns.subjectType, "requisition")))
+    .limit(1);
+  if (withSubject[0]?.id) return { type: "requisition", id: withSubject[0].id };
+  const { agentEvents } = await import("@db/schema");
+  const events = await db
+    .select()
+    .from(agentEvents)
+    .where(inArray(agentEvents.sourceRunId, ids))
+    .orderBy(agentEvents.createdAt)
+    .limit(20);
+  for (const e of events) {
+    const id = await eventRequisition(e as EventRow);
+    if (id) return { type: "requisition", id };
+  }
+  return null;
+}
+
 /** A flow learns its role from the first event one of its own agents caused. */
 async function linkSubject(e: EventRow): Promise<void> {
   if (!e.sourceRunId) return;
@@ -428,6 +494,25 @@ async function linkSubject(e: EventRow): Promise<void> {
       })
       .where(eq(workflowRuns.id, wr.id));
   }
+}
+
+/** Events of `type` since `since`, replayed to waiting flows (they check role and "only when"). */
+async function lookBackForWait(orgId: string, type: string, since: Date): Promise<void> {
+  if (!type) return;
+  const { agentEvents } = await import("@db/schema");
+  const past = await db
+    .select()
+    .from(agentEvents)
+    .where(
+      and(
+        eq(agentEvents.orgId, orgId),
+        eq(agentEvents.type, type),
+        gte(agentEvents.createdAt, since),
+      ),
+    )
+    .orderBy(agentEvents.createdAt)
+    .limit(50);
+  for (const e of past) await resumeWaiting(e as EventRow);
 }
 
 /** Flows waiting for this event on their own role move on. */
@@ -480,6 +565,55 @@ export async function expireWorkflowWaits(now = new Date()): Promise<number> {
     await moveOn(wr, ctx, `Stopped waiting for ${wr.waitingEvent} (timed out).`);
   }
   return due.length;
+}
+
+/**
+ * Safety net (each scheduler tick): a workflow still waiting on an agent run
+ * that has already ended — its finish signal was missed (e.g. a restart) —
+ * moves on as if the signal had arrived. Idempotent.
+ */
+export async function resumeFinishedRunWaits(): Promise<number> {
+  const stuck = await db
+    .select({
+      id: agentRuns.id,
+      orgId: agentRuns.orgId,
+      status: agentRuns.status,
+      result: agentRuns.result,
+    })
+    .from(workflowRuns)
+    .innerJoin(agentRuns, eq(agentRuns.id, workflowRuns.waitingRunId))
+    .where(
+      and(
+        eq(workflowRuns.status, "waiting"),
+        inArray(agentRuns.status, ["done", "failed", "cancelled"]),
+      ),
+    )
+    .limit(50);
+  for (const r of stuck) {
+    try {
+      await onAgentRunFinished(r);
+    } catch (err) {
+      log.error("workflow.resume_failed", { run_id: r.id, error: err as Error });
+    }
+  }
+  // Waits whose event already happened (before the wait began, or missed in a restart).
+  const waits = await db
+    .select({
+      orgId: workflowRuns.orgId,
+      event: workflowRuns.waitingEvent,
+      since: workflowRuns.createdAt,
+    })
+    .from(workflowRuns)
+    .where(and(eq(workflowRuns.status, "waiting"), isNotNull(workflowRuns.waitingEvent)))
+    .limit(50);
+  for (const w of waits) {
+    try {
+      await lookBackForWait(w.orgId, w.event ?? "", w.since);
+    } catch (err) {
+      log.error("workflow.lookback_failed", { org_id: w.orgId, error: err as Error });
+    }
+  }
+  return stuck.length;
 }
 
 /** Leave the current step (an agent or a wait) for the next one, then advance. */
@@ -582,6 +716,10 @@ export async function startWorkflowManually(input: {
   return { runId: wr!.id };
 }
 
+/** The graph of a published version (what a run of that version follows). */
+export const runVersionGraph = (workflowId: string, version: number) =>
+  versionGraph(workflowId, version);
+
 async function versionGraph(workflowId: string, version: number): Promise<WorkflowGraph | null> {
   const [v] = await db
     .select({ graph: agentWorkflowVersions.graph })
@@ -658,10 +796,18 @@ export async function advanceWorkflowRun(id: string): Promise<void> {
         waitingEvent: node.data.event ?? null,
         waitingUntil: new Date(Date.now() + hours * 3_600_000),
       });
+      // It may already have happened while an earlier step was still working
+      // (e.g. people approved the requisition before the agent finished): look
+      // back over this run's lifetime, and move on if it did.
+      await lookBackForWait(wr.orgId, node.data.event ?? "", wr.createdAt);
       return;
     }
     // Agent: start it the way the orchestrator does, then wait for it.
     const agentType = node.data.agentType as AgentType;
+    if (!ctx.subject && ctx.runs.length) {
+      ctx.subject = await subjectFromRuns(ctx.runs);
+      if (ctx.subject) note(node.id, "Linked to its role.");
+    }
     try {
       const { loadPolicy } = await import("./policy");
       const policy = await loadPolicy(wr.orgId, agentType);
@@ -676,7 +822,7 @@ export async function advanceWorkflowRun(id: string): Promise<void> {
       const subject = ctx.subject ?? null;
       const [existing] = subject
         ? await db
-            .select({ id: agentRuns.id })
+            .select({ id: agentRuns.id, createdAt: agentRuns.createdAt })
             .from(agentRuns)
             .where(
               and(
@@ -688,11 +834,23 @@ export async function advanceWorkflowRun(id: string): Promise<void> {
             )
             .limit(1)
         : [];
+      // Same event (e.g. the built-in hand-off started it): join it. An older
+      // run doing other work: wait for it, then start this step's own run.
+      if (existing && existing.createdAt.getTime() < wr.createdAt.getTime() - JOIN_WINDOW_MS) {
+        ctx.queuedBehind = existing.id;
+        note(
+          node.id,
+          `Waiting for an earlier ${agentType} run on this role (started ${existing.createdAt.toISOString().slice(0, 10)}) to finish — it may be waiting on a person in Waiting for you. Then this step starts its own run.`,
+        );
+        await save({ status: "waiting", currentNode: node.id, waitingRunId: existing.id });
+        return;
+      }
+      ctx.queuedBehind = null;
       let runId = existing?.id;
-      if (runId) note(node.id, "Joined the run already working on this.");
+      if (runId) note(node.id, "Joined the run this event already started.");
       else {
         const { startRun } = await import("./runtime.server");
-        const goal = renderGoal(node.data.goal ?? "", ctx);
+        const goal = stepGoal(node.data.goal ?? "", ctx);
         ({ runId } = await startRun({
           orgId: wr.orgId,
           agentType,
@@ -719,6 +877,85 @@ export async function advanceWorkflowRun(id: string): Promise<void> {
   await end("failed", "The flow took too many steps.");
 }
 
+const LIMIT_STOPS = new Set([LEG_LIMIT_MESSAGE, CEILING_MESSAGE]);
+
+/**
+ * A person's choice on a step paused at its run limit: Retry starts the step's
+ * agent again (same goal, told to pick up what the stopped run already did,
+ * acting for that person); Skip treats the step as failed and follows the flow.
+ */
+export async function resolveStoppedStep(input: {
+  workflowRunId: string;
+  orgId: string;
+  userId: string;
+  action: "retry" | "skip";
+}): Promise<void> {
+  const [wr] = await db
+    .select()
+    .from(workflowRuns)
+    .where(
+      and(
+        eq(workflowRuns.id, input.workflowRunId),
+        eq(workflowRuns.orgId, input.orgId),
+        eq(workflowRuns.status, "waiting"),
+      ),
+    )
+    .limit(1);
+  const ctx = wr?.context as WorkflowContext | undefined;
+  if (!wr || !ctx?.stoppedRun) throw new Error("This run is not paused on a stopped step.");
+  const [stopped] = await db
+    .select()
+    .from(agentRuns)
+    .where(eq(agentRuns.id, ctx.stoppedRun))
+    .limit(1);
+  if (!stopped) throw new Error("The stopped run was not found.");
+  const note = (text: string) => ({
+    node: wr.currentNode ?? "",
+    at: new Date().toISOString(),
+    note: text,
+  });
+  if (input.action === "skip") {
+    ctx.stoppedRun = null;
+    ctx.last = { status: "failed", result: "" };
+    await moveOn(
+      { ...wr, history: [...wr.history] },
+      ctx,
+      "Skipped after it stopped at its run limit.",
+    );
+    return;
+  }
+  const { loadPolicy } = await import("./policy");
+  if (!(await loadPolicy(wr.orgId, stopped.agentType as AgentType)).enabled)
+    throw new Error("That agent is switched off — switch it on in Agent settings first.");
+  const { startRun } = await import("./runtime.server");
+  const subject =
+    ctx.subject ??
+    (stopped.subjectType && stopped.subjectId
+      ? { type: stopped.subjectType, id: stopped.subjectId }
+      : null);
+  const { runId } = await startRun({
+    orgId: wr.orgId,
+    agentType: stopped.agentType as AgentType,
+    principalUserId: input.userId,
+    goal: `${stopped.goal}\n\nAn earlier attempt at this step stopped at its turn limit before finishing. Pick up from what it already did (for example a draft it created) instead of starting over, and keep lookups short.`,
+    ...(subject ? { subjectType: subject.type, subjectId: subject.id } : {}),
+    triggerEventId: wr.triggerEventId,
+  });
+  ctx.stoppedRun = null;
+  ctx.runs = [...(ctx.runs ?? []), runId];
+  await db
+    .update(workflowRuns)
+    .set({
+      context: ctx,
+      waitingRunId: runId,
+      history: [...wr.history, note("Retried.")],
+      updatedAt: new Date(),
+    })
+    .where(eq(workflowRuns.id, wr.id));
+  const { kickAgents } = await import("./orchestrator.server");
+  kickAgents(wr.orgId);
+}
+
 /** When an agent run a workflow waits on ends, the flow moves to its next step. */
 export async function onAgentRunFinished(run: {
   id: string;
@@ -739,16 +976,65 @@ export async function onAgentRunFinished(run: {
   for (const wr of waiting) {
     try {
       const ctx = wr.context as WorkflowContext;
-      ctx.last = { status: run.status, result: (run.result ?? "").slice(0, 2000) };
-      if (!ctx.subject) {
-        // The agent may have worked on a role (e.g. the Requisition agent drafted one).
-        const [r] = await db
-          .select({ type: agentRuns.subjectType, id: agentRuns.subjectId })
+      if (ctx.queuedBehind === run.id) {
+        // It was not this flow's run: now the role is free, start the step's own.
+        ctx.queuedBehind = null;
+        const resumed = await db
+          .update(workflowRuns)
+          .set({
+            status: "running",
+            context: ctx,
+            waitingRunId: null,
+            history: [
+              ...wr.history,
+              {
+                node: wr.currentNode ?? "",
+                at: new Date().toISOString(),
+                note: `The earlier run ${run.status}; starting this step's own run.`,
+              },
+            ],
+            updatedAt: new Date(),
+          })
+          .where(and(eq(workflowRuns.id, wr.id), eq(workflowRuns.status, "waiting")))
+          .returning({ id: workflowRuns.id });
+        if (resumed.length) await advanceWorkflowRun(wr.id);
+        continue;
+      }
+      // Stopped at its run limit: not a real failure — pause for Retry or Skip.
+      if (run.status === "failed") {
+        const [ended] = await db
+          .select({ lastError: agentRuns.lastError })
           .from(agentRuns)
           .where(eq(agentRuns.id, run.id))
           .limit(1);
-        if (r?.type && r.id) ctx.subject = { type: r.type, id: r.id };
+        if (ended?.lastError && LIMIT_STOPS.has(ended.lastError)) {
+          ctx.stoppedRun = run.id;
+          await db
+            .update(workflowRuns)
+            .set({
+              context: ctx,
+              waitingRunId: null,
+              history: [
+                ...wr.history,
+                {
+                  node: wr.currentNode ?? "",
+                  at: new Date().toISOString(),
+                  note: "Stopped at its run limit — Retry the step (raise the limit in Agent settings if it keeps stopping) or Skip it.",
+                },
+              ],
+              updatedAt: new Date(),
+            })
+            .where(and(eq(workflowRuns.id, wr.id), eq(workflowRuns.status, "waiting")));
+          continue;
+        }
       }
+      // A hand-off ("I can't do this, someone else must") is not the step done.
+      const handedOff = run.status === "done" && (run.result ?? "").startsWith("Handed off:");
+      ctx.last = {
+        status: handedOff ? "handed_off" : run.status,
+        result: (run.result ?? "").slice(0, 2000),
+      };
+      if (!ctx.subject) ctx.subject = await subjectFromRuns([run.id, ...(ctx.runs ?? [])]);
       await moveOn(wr, ctx, `Agent ${run.status}.`);
     } catch (err) {
       log.error("workflow.advance_failed", { workflow_run_id: wr.id, error: err as Error });
@@ -916,4 +1202,229 @@ export async function workflowRunReport(
         : null,
     },
   };
+}
+
+/* --------------------------------------------------------------- readiness */
+
+export type ReadinessItem = {
+  /** "ai_key", "agent:<type>" or "studio:<type>". */
+  key: string;
+  label: string;
+  ok: boolean;
+  /** What is wrong, or the current setting when ok (e.g. autonomy). */
+  detail: string;
+};
+
+export type WorkflowReadiness = { ready: boolean; items: ReadinessItem[] };
+
+/** The agent types a graph starts, in order, without repeats. */
+export function agentsOf(g: WorkflowGraph): string[] {
+  return [
+    ...new Set(
+      g.nodes.filter((n) => n.kind === "agent" && n.data.agentType).map((n) => n.data.agentType!),
+    ),
+  ];
+}
+
+/**
+ * Can this organisation run the workflow? Its own AI key, every agent the flow
+ * starts switched on there, and every studio agent granted to it. Read-only.
+ */
+export async function workflowReadiness(
+  orgId: string,
+  graph: WorkflowGraph,
+): Promise<WorkflowReadiness> {
+  const { resolveAiConfig } = await import("../../lib/ai-gateway.server");
+  const { loadPolicy } = await import("./policy");
+  const { AGENT_LABEL, AUTONOMY_OPTIONS } = await import("../../lib/agents.catalog");
+  const level = (a: string) => AUTONOMY_OPTIONS.find((o) => o.value === a)?.label ?? a;
+  const items: ReadinessItem[] = [];
+  const cfg = await resolveAiConfig(orgId);
+  items.push({
+    key: "ai_key",
+    label: "AI key",
+    ok: Boolean(cfg.apiKey),
+    detail: cfg.apiKey ? "Saved" : "Add one in Integrations → AI model",
+  });
+  for (const type of agentsOf(graph)) {
+    const name = graph.nodes.find((n) => n.data.agentType === type)?.data.label;
+    const label = AGENT_LABEL[type] ?? name ?? type;
+    if (type.startsWith("studio:")) {
+      const { publishedStudioAgent, hasGrant } = await import("./blueprints.server");
+      const p = await publishedStudioAgent(type);
+      const granted = Boolean(p && (await hasGrant(p.blueprintId, orgId)));
+      items.push({
+        key: `studio:${type}`,
+        label,
+        ok: granted,
+        detail: granted ? "Granted" : "Grant this studio agent to the organisation",
+      });
+      if (!granted) continue;
+    }
+    const policy = await loadPolicy(orgId, type as AgentType);
+    items.push({
+      key: `agent:${type}`,
+      label,
+      ok: policy.enabled,
+      detail: policy.enabled ? `On · ${level(policy.autonomy)}` : "Switched off in Agent settings",
+    });
+  }
+  return { ready: items.every((i) => i.ok), items };
+}
+
+/** The published graph of a workflow, or null when it has none. */
+export async function publishedGraph(workflowId: string): Promise<WorkflowGraph | null> {
+  const [w] = await db
+    .select({ v: agentWorkflows.publishedVersion })
+    .from(agentWorkflows)
+    .where(eq(agentWorkflows.id, workflowId))
+    .limit(1);
+  if (w?.v == null) return null;
+  const [row] = await db
+    .select({ graph: agentWorkflowVersions.graph })
+    .from(agentWorkflowVersions)
+    .where(
+      and(eq(agentWorkflowVersions.workflowId, workflowId), eq(agentWorkflowVersions.version, w.v)),
+    )
+    .limit(1);
+  return row?.graph ?? null;
+}
+
+/** Live workflows granted to an organisation, with their published graph. */
+export async function grantedWorkflows(orgId: string) {
+  return db
+    .select({
+      id: agentWorkflows.id,
+      name: agentWorkflows.name,
+      description: agentWorkflows.description,
+      version: agentWorkflowVersions.version,
+      trigger: agentWorkflowVersions.triggerEvent,
+      graph: agentWorkflowVersions.graph,
+      grantedAt: agentWorkflowGrants.grantedAt,
+    })
+    .from(agentWorkflowGrants)
+    .innerJoin(agentWorkflows, eq(agentWorkflows.id, agentWorkflowGrants.workflowId))
+    .innerJoin(
+      agentWorkflowVersions,
+      and(
+        eq(agentWorkflowVersions.workflowId, agentWorkflows.id),
+        eq(agentWorkflowVersions.version, agentWorkflows.publishedVersion),
+      ),
+    )
+    .where(
+      and(
+        eq(agentWorkflowGrants.orgId, orgId),
+        isNull(agentWorkflowGrants.revokedAt),
+        ne(agentWorkflows.status, "archived"),
+      ),
+    );
+}
+
+/* ------------------------------------------------------- what a run awaits */
+
+export type WaitingOn = {
+  /** person: an agent asked people something; agent: an agent is working; event: a wait step. */
+  kind: "person" | "agent" | "event" | "stopped";
+  /** One plain line, e.g. "Aditi is waiting for you — 1 question". */
+  text: string;
+  /** Open requests the agent run is waiting on (count only; detail stays in the org). */
+  requests: number;
+  /** The first request's title and text — only filled for the organisation's own view. */
+  first?: { kind: string; title: string; body: string } | null;
+};
+
+/**
+ * What each waiting workflow run is waiting for, in plain words: a person to
+ * answer an agent (with a link to Waiting for you), an agent still working, or
+ * an event. `withDetail` adds the first request's text (organisation view only).
+ */
+export async function waitingOnFor(
+  rows: {
+    id: string;
+    status: string;
+    waitingRunId: string | null;
+    waitingEvent: string | null;
+    waitingUntil: Date | null;
+    context: unknown;
+  }[],
+  withDetail = false,
+): Promise<Map<string, WaitingOn>> {
+  const out = new Map<string, WaitingOn>();
+  const waiting = rows.filter((r) => r.status === "waiting");
+  const runIds = [...new Set(waiting.map((r) => r.waitingRunId).filter(Boolean) as string[])];
+  const { AGENT_LABEL } = await import("../../lib/agents.catalog");
+  const runs = runIds.length
+    ? await db
+        .select({ id: agentRuns.id, agentType: agentRuns.agentType, status: agentRuns.status })
+        .from(agentRuns)
+        .where(inArray(agentRuns.id, runIds))
+    : [];
+  const tasks = runIds.length
+    ? await db
+        .select({
+          runId: agentTasks.runId,
+          kind: agentTasks.kind,
+          title: agentTasks.title,
+          body: agentTasks.body,
+          createdAt: agentTasks.createdAt,
+        })
+        .from(agentTasks)
+        .where(and(inArray(agentTasks.runId, runIds), eq(agentTasks.status, "open")))
+        .orderBy(agentTasks.createdAt)
+    : [];
+  for (const r of waiting) {
+    const stoppedId = (r.context as WorkflowContext | null)?.stoppedRun;
+    if (stoppedId) {
+      const [st] = await db
+        .select({ agentType: agentRuns.agentType })
+        .from(agentRuns)
+        .where(eq(agentRuns.id, stoppedId))
+        .limit(1);
+      const nm = st ? (AGENT_LABEL[st.agentType] ?? st.agentType) : "The agent";
+      out.set(r.id, {
+        kind: "stopped",
+        text: `${nm} stopped at its run limit — Retry or Skip`,
+        requests: 0,
+      });
+      continue;
+    }
+    if (r.waitingEvent) {
+      const until = r.waitingUntil
+        ? ` (until ${r.waitingUntil.toISOString().slice(0, 16).replace("T", " ")})`
+        : "";
+      out.set(r.id, {
+        kind: "event",
+        text: `Waiting for ${r.waitingEvent.replace(/[._]/g, " ")}${until}`,
+        requests: 0,
+      });
+      continue;
+    }
+    const run = runs.find((x) => x.id === r.waitingRunId);
+    if (!run) continue;
+    const name = AGENT_LABEL[run.agentType] ?? run.agentType;
+    const earlier = (r.context as WorkflowContext | null)?.queuedBehind === run.id;
+    const open = tasks.filter((t) => t.runId === run.id);
+    if (open.length) {
+      const questions = open.filter((t) => t.kind === "clarification").length;
+      const what =
+        questions === open.length
+          ? `${open.length} question${open.length === 1 ? "" : "s"}`
+          : `${open.length} request${open.length === 1 ? "" : "s"}`;
+      out.set(r.id, {
+        kind: "person",
+        text: `${earlier ? `An earlier ${name} run` : name} is waiting for you — ${what}`,
+        requests: open.length,
+        first: withDetail
+          ? { kind: open[0]!.kind, title: open[0]!.title, body: open[0]!.body.slice(0, 600) }
+          : null,
+      });
+    } else {
+      out.set(r.id, {
+        kind: "agent",
+        text: `${earlier ? `An earlier ${name} run` : name} is working`,
+        requests: 0,
+      });
+    }
+  }
+  return out;
 }

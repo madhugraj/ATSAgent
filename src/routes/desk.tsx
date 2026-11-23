@@ -20,10 +20,28 @@ import {
   Sparkles,
   Trash2,
   UserRound,
+  Workflow,
   X,
 } from "lucide-react";
 
 import { EmptyState, PageHeader } from "@/components/ats";
+import { WorkflowJourney, type JourneySubstep } from "@/components/agents/WorkflowApp";
+import { WorkflowRunRequests } from "@/components/agents/AgentTaskCard";
+import { StoppedStepActions } from "@/components/agents/StoppedStepActions";
+import { useRoles } from "@/hooks/useRoles";
+import {
+  advanceRequisition,
+  editRequisitionInApproval,
+  sendBackRequisition,
+} from "@/lib/requisitions.functions";
+import { getRequisition } from "@/lib/queries.functions";
+import {
+  deskWorkflows,
+  orgWorkflowApp,
+  startOrgWorkflowRun,
+  type AppRun,
+} from "@/lib/org-workflows.functions";
+import type { WorkflowGraph as WfGraph } from "@db/schema";
 import { OrgProfileNotice } from "@/components/OrgProfileNotice";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -41,7 +59,11 @@ import { HiringManagerPicker } from "@/components/HiringManagerPicker";
 import { InterviewPlanCard } from "@/components/InterviewPlanCard";
 import { getPanelChoices } from "@/lib/panels.functions";
 import { AGENT_LABEL } from "@/lib/agents.catalog";
-import { decideAgentTask, type AgentDecisionInput } from "@/lib/agents.functions";
+import {
+  decideAgentTask,
+  listWorkflowRunTasks,
+  type AgentDecisionInput,
+} from "@/lib/agents.functions";
 import { withStepUp } from "@/lib/step-up-client";
 import {
   acceptDeskProposal,
@@ -75,7 +97,12 @@ import {
 } from "@/lib/hiring-desk.functions";
 
 export const Route = createFileRoute("/desk")({
-  validateSearch: z.object({ c: z.string().optional(), split: z.string().optional() }),
+  validateSearch: z.object({
+    c: z.string().optional(),
+    split: z.string().optional(),
+    workflow: z.string().uuid().optional(),
+    run: z.string().uuid().optional(),
+  }),
   head: () => ({
     meta: [
       { title: "Hiring desk — ATSIQ" },
@@ -96,11 +123,11 @@ const EXAMPLES = [
 ];
 
 function DeskPage() {
-  const { c, split } = Route.useSearch();
+  const { c, split, workflow, run } = Route.useSearch();
   const navigate = useNavigate({ from: "/desk" });
   const splitIds = (split ?? "")
     .split(",")
-    .filter((s) => /^[-0-9a-f]{36}$/.test(s))
+    .filter((s: string) => /^[-0-9a-f]{36}$/.test(s))
     .slice(0, 3);
   const list = useQuery({
     queryKey: ["desk_list"],
@@ -129,6 +156,13 @@ function DeskPage() {
       ) : (
         <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
           <aside className="panel h-fit max-h-[70vh] overflow-y-auto p-2">
+            <DeskWorkflowList
+              current={workflow}
+              currentRun={run}
+              onSelect={(id, r) =>
+                void navigate({ search: r ? { workflow: id, run: r } : { workflow: id } })
+              }
+            />
             {list.isLoading ? (
               <p className="p-3 text-sm text-muted-foreground">Loading…</p>
             ) : !list.data?.length ? (
@@ -143,7 +177,16 @@ function DeskPage() {
             )}
             <RecentlyDeleted onRestored={(id) => select(id)} />
           </aside>
-          {c ? (
+          {workflow ? (
+            run ? (
+              <DeskWorkflowRun workflowId={workflow} runId={run} />
+            ) : (
+              <DeskWorkflowStart
+                workflowId={workflow}
+                onStarted={(id) => void navigate({ search: { workflow, run: id } })}
+              />
+            )
+          ) : c ? (
             <Thread id={c} onDeleted={() => select(undefined)} />
           ) : (
             <NewThread onStarted={(id) => select(id)} />
@@ -151,6 +194,761 @@ function DeskPage() {
         </div>
       )}
     </>
+  );
+}
+
+/** Workflows the platform shared with this organisation; the open one lists its runs like conversations. */
+function DeskWorkflowList({
+  current,
+  currentRun,
+  onSelect,
+}: {
+  current: string | undefined;
+  currentRun: string | undefined;
+  onSelect: (id: string, run?: string) => void;
+}) {
+  const q = useQuery({
+    queryKey: ["desk_workflows"],
+    queryFn: () => deskWorkflows(),
+    refetchInterval: 30_000,
+  });
+  const app = useWorkflowApp(current);
+  if (!q.data?.length) return null;
+  return (
+    <div className="mb-2 border-b pb-2">
+      <div className="px-2 py-1 text-xs font-medium text-muted-foreground">Workflows</div>
+      {q.data.map((w) => (
+        <div key={w.id}>
+          <button
+            type="button"
+            onClick={() => onSelect(w.id)}
+            className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted ${current === w.id && !currentRun ? "bg-muted font-medium" : ""}`}
+          >
+            <Workflow className="size-4 shrink-0 text-muted-foreground" />
+            <span className="flex-1 truncate">{w.name}</span>
+            {w.needsYou ? (
+              <span className="inline-block size-2 rounded-full bg-amber-500" />
+            ) : !w.ready ? (
+              <Badge variant="outline">Not ready</Badge>
+            ) : null}
+          </button>
+          {current === w.id && app.data?.runs.length ? (
+            <ul className="ml-4 border-l pl-1">
+              {app.data.runs.map((r) => (
+                <li key={r.id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelect(w.id, r.id)}
+                    className={`w-full rounded-md px-2 py-1.5 text-left hover:bg-muted ${currentRun === r.id ? "bg-muted" : ""}`}
+                  >
+                    <span className="flex items-center gap-2 text-sm">
+                      <span className="flex-1 truncate">{r.need ?? "Run"}</span>
+                      {r.waitingOn?.kind === "person" || r.waitingOn?.kind === "stopped" ? (
+                        <span className="inline-block size-2 shrink-0 rounded-full bg-amber-500" />
+                      ) : null}
+                    </span>
+                    <span className="block text-xs text-muted-foreground">
+                      {runOutcome(r)} · {new Date(r.createdAt).toLocaleDateString()}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function useWorkflowApp(workflowId: string | undefined) {
+  return useQuery({
+    queryKey: ["workflow_app", workflowId],
+    queryFn: () => orgWorkflowApp({ data: { workflowId: workflowId! } }),
+    enabled: Boolean(workflowId),
+    retry: false,
+    refetchInterval: (query) =>
+      query.state.data?.runs.some((r) => r.status === "waiting" || r.status === "running")
+        ? 10_000
+        : false,
+  });
+}
+
+const stepName = (graph: WfGraph | null, id: string) => {
+  const n = graph?.nodes.find((x) => x.id === id);
+  return n ? n.data.label || n.data.agentType || n.kind : id;
+};
+
+function runOutcome(r: AppRun): string {
+  if (r.status === "running" || r.status === "waiting") return "In progress";
+  if (r.status === "failed") return "Failed";
+  const last = r.history.at(-1);
+  return last?.note === "Ended." ? stepName(r.graph, last.node) : "Done";
+}
+
+/** A new workflow run, started like a new desk conversation. */
+function DeskWorkflowStart({
+  workflowId,
+  onStarted,
+}: {
+  workflowId: string;
+  onStarted: (runId: string) => void;
+}) {
+  const qc = useQueryClient();
+  const app = useWorkflowApp(workflowId);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const v = app.data;
+  async function start() {
+    if (text.trim().length < 5) return;
+    setBusy(true);
+    try {
+      const { runId } = await startOrgWorkflowRun({ data: { workflowId, need: text.trim() } });
+      await qc.invalidateQueries({ queryKey: ["workflow_app", workflowId] });
+      onStarted(runId);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not start");
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (app.error)
+    return (
+      <section className="panel p-6 text-sm text-muted-foreground">
+        {app.error instanceof Error ? app.error.message : "This workflow is not available."}
+      </section>
+    );
+  if (!v) return <section className="panel p-6 text-sm text-muted-foreground">Loading…</section>;
+  const canStart = v.canStart && v.ready && v.workflow.trigger === "manual";
+  return (
+    <section className="panel flex flex-col items-center justify-center gap-4 p-8 text-center">
+      <Workflow className="size-8 text-primary" aria-hidden />
+      <div>
+        <h2 className="text-lg font-semibold">{v.workflow.name}</h2>
+        <p className="mt-1 max-w-xl text-sm text-muted-foreground">{v.workflow.description}</p>
+      </div>
+      {!v.ready ? (
+        <p className="text-sm text-destructive">
+          {v.items
+            .filter((i) => !i.ok)
+            .map((i) => i.label)
+            .join(" · ")}
+        </p>
+      ) : null}
+      {canStart ? (
+        <Composer
+          value={text}
+          onChange={setText}
+          busy={busy}
+          onSend={start}
+          placeholder="Who do you need? e.g. Two AI engineers in Chennai, hybrid, by March"
+        />
+      ) : null}
+    </section>
+  );
+}
+
+/** One workflow run, shown like a desk conversation with its journey alongside. */
+function DeskWorkflowRun({ workflowId, runId }: { workflowId: string; runId: string }) {
+  const qc = useQueryClient();
+  const { canApprove, roles, isAdmin } = useRoles();
+  const app = useWorkflowApp(workflowId);
+  const v = app.data;
+  const r = v?.runs.find((x) => x.id === runId);
+  const reqId = r?.requisition?.id;
+  const reqFull = useQuery({
+    queryKey: ["requisition", reqId],
+    queryFn: () => getRequisition({ data: { id: reqId! } }),
+    enabled: !!reqId,
+    refetchInterval: 15_000,
+  });
+  // Same query the request cards use: open questions and approvals from agents.
+  const openTasks = useQuery({
+    queryKey: ["workflow_run_tasks", runId],
+    queryFn: () => listWorkflowRunTasks({ data: { workflowRunId: runId } }),
+    refetchInterval: 15_000,
+  });
+  const agentAsking = (openTasks.data?.length ?? 0) > 0;
+  if (!v) return <section className="panel p-6 text-sm text-muted-foreground">Loading…</section>;
+  if (!r)
+    return <section className="panel p-6 text-sm text-muted-foreground">Run not found.</section>;
+  const graph = r.graph ?? v.workflow.graph;
+  const kind = (id: string) => graph.nodes.find((n) => n.id === id)?.kind;
+  // One update per step, in plain words; checks and the start are left out.
+  const updates: { node: string; at: string; text: string }[] = [];
+  for (const h of r.history) {
+    const k = kind(h.node);
+    if (k !== "agent" && k !== "wait" && k !== "report" && k !== "end") continue;
+    const text =
+      h.note === "Agent started." ||
+      h.note === "Linked to its role." ||
+      h.note.startsWith("Joined the run")
+        ? "Working on it."
+        : h.note === "Agent done."
+          ? "Done."
+          : h.note === "Ended."
+            ? "This workflow has ended."
+            : h.note.startsWith("Waiting for")
+              ? "Waiting for the approvals."
+              : h.note.endsWith(" happened.")
+                ? "Approved — moving on."
+                : h.note;
+    const prev = updates.at(-1);
+    if (prev && prev.node === h.node) prev.text = text;
+    else updates.push({ node: h.node, at: h.at, text });
+  }
+  // What people did on the requisition since the run began, as thread messages.
+  const trail = (
+    Array.isArray((reqFull.data as Record<string, unknown> | null)?.["approval_trail"])
+      ? ((reqFull.data as Record<string, unknown>)["approval_trail"] as {
+          at?: string;
+          to?: string;
+          from?: string;
+          actor?: string;
+          decision?: string;
+          comment?: string | null;
+        }[])
+      : []
+  ).filter((t) => t.at && t.at >= r.createdAt);
+  const WHO: Record<string, string> = {
+    pending_dh: "Department head",
+    pending_hr: "HR head",
+    pending_cbo: "CBO",
+  };
+  const trailText = (t: (typeof trail)[number]) => {
+    const by = t.actor ? ` (${t.actor})` : "";
+    const note = t.comment ? ` — “${t.comment}”` : "";
+    if (t.decision === "edited")
+      return `Corrected by ${WHO[t.from ?? ""] ?? "a person"}${by}${note}`;
+    if (t.decision === "reopened") return `Reopened with changes${by}${note}`;
+    if (t.to === "rejected")
+      return `Declined by the ${WHO[t.from ?? ""] ?? "approver"}${by}${note}`;
+    if (t.to === "draft") return `Sent back by the ${WHO[t.from ?? ""] ?? "approver"}${by}${note}`;
+    if (t.to === "approved") return `Approved by the CBO${by}${note}`;
+    if (t.from === "draft") return `Submitted for approval${by}${note}`;
+    if (t.from === "rejected" || t.from === "on_hold")
+      return `Corrected and resubmitted${by}${note}`;
+    return `Approved by the ${WHO[t.from ?? ""] ?? "approver"}${by}${note}`;
+  };
+  const reqStatus = r.requisition?.status;
+  const returned =
+    r.status === "waiting" &&
+    !!r.requisition &&
+    (reqStatus === "rejected" || reqStatus === "draft" || reqStatus === "on_hold");
+  // Just sent back or reopened: the agent is being handed it — no resubmit race.
+  const last = trail.at(-1);
+  const handingOff =
+    !!last &&
+    (last.decision === "sent_back" || last.decision === "reopened") &&
+    Date.now() - new Date(last.at ?? 0).getTime() < 2 * 60_000;
+  const agentFixing = returned && (!!r.requisition?.agentBusy || handingOff);
+  const canFix =
+    returned &&
+    !agentFixing &&
+    !agentAsking &&
+    (isAdmin || roles.includes("hr_head") || roles.includes("president_cbo") || !!v.canStart);
+  // A requisition waiting for an approval this person can give is answered
+  // here, in the thread, like every other desk decision.
+  const reqPending =
+    r.status === "waiting" && r.requisition && REQ_NEXT[r.requisition.status]
+      ? r.requisition
+      : null;
+  const reqApprovable =
+    !!reqPending && canApprove(reqPending.status) && !agentAsking && !r.requisition?.agentBusy;
+  const needsYou =
+    agentAsking ||
+    r.waitingOn?.kind === "person" ||
+    r.waitingOn?.kind === "stopped" ||
+    reqApprovable ||
+    canFix;
+  const waitWords = agentAsking
+    ? "An agent needs your decision below before this can move on."
+    : agentFixing
+      ? `The requisition agent is applying the change to ${r.requisition!.code} and will resubmit it.`
+      : returned
+        ? `${r.requisition!.code} was sent back — waiting for it to be corrected and resubmitted.`
+        : reqPending
+          ? `Waiting for the ${REQ_NEXT[reqPending.status]!.who} to approve ${reqPending.code}.`
+          : r.waitingOn?.text.replace(/^Waiting for (.+?) (\(until .*\))?$/, "Waiting — $1.");
+  // Inside the requisition step: the approval chain this round, send-backs and
+  // the agent's open question — the journey mirrors the thread.
+  const substeps: JourneySubstep[] = [];
+  if (r.requisition && r.status === "waiting" && kind(r.currentNode ?? "") === "wait") {
+    const st = r.requisition.status;
+    const backs = trail.filter(
+      (t) => t.decision === "sent_back" || t.decision === "reopened" || t.to === "rejected",
+    );
+    const lastBack = backs.at(-1);
+    const fixing = st === "draft" || st === "rejected" || st === "on_hold";
+    if (backs.length)
+      substeps.push({
+        label: `Returned for changes ${backs.length === 1 ? "once" : `${backs.length} times`}`,
+        state: fixing ? "back" : "done",
+        ...(lastBack?.comment ? { note: `Last: “${lastBack.comment}”` } : {}),
+      });
+    if (fixing)
+      substeps.push({
+        label: agentAsking
+          ? "Requisition agent is asking you a question"
+          : agentFixing
+            ? "Requisition agent is making the change"
+            : st === "rejected"
+              ? "Declined — reopen with changes"
+              : "Waiting to be corrected and resubmitted",
+        state: "now",
+      });
+    const order = ["pending_dh", "pending_hr", "pending_cbo"] as const;
+    const at = order.indexOf(st as (typeof order)[number]);
+    for (const [i, s2] of order.entries())
+      substeps.push({
+        label: `${WHO[s2]} approval`,
+        state: st === "approved" || (at >= 0 && i < at) ? "done" : i === at ? "now" : "todo",
+      });
+  }
+  const showAction = () => {
+    const el = document.getElementById(`wf-action-${r.id}`);
+    el?.scrollIntoView({ behavior: "smooth", block: "start" });
+    el?.classList.add("ring-2", "ring-primary");
+    window.setTimeout(() => el?.classList.remove("ring-2", "ring-primary"), 1600);
+  };
+  return (
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
+      <div className="xl:order-2">
+        <WorkflowJourney
+          substeps={substeps}
+          needsYou={needsYou}
+          run={
+            r.waitingOn && waitWords ? { ...r, waitingOn: { ...r.waitingOn, text: waitWords } } : r
+          }
+          graph={graph}
+          onReview={showAction}
+        />
+      </div>
+      <section className="panel flex h-[calc(100vh-9.5rem)] min-h-[460px] flex-col xl:order-1">
+        <header className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
+          <h2 className="font-semibold">{v.workflow.name}</h2>
+          <Badge variant="outline">{runOutcome(r)}</Badge>
+          {needsYou ? <span className="inline-block size-2 rounded-full bg-amber-500" /> : null}
+          {r.requisition ? (
+            <Link
+              to="/requisitions/$id"
+              params={{ id: r.requisition.id }}
+              className="ml-auto text-xs text-primary underline"
+            >
+              {r.requisition.code} · {r.requisition.status.replace(/_/g, " ")}
+            </Link>
+          ) : null}
+        </header>
+        <div className="flex-1 space-y-3 overflow-y-auto p-4">
+          {r.need ? <Bubble role="user" body={r.need} /> : null}
+          {updates.map((u, i) => (
+            <Bubble
+              key={i}
+              role="agent"
+              {...(kind(u.node) === "end" ? {} : { who: stepName(graph, u.node) })}
+              body={u.text}
+            />
+          ))}
+          {trail.map((t, i) => (
+            <Bubble key={`t${i}`} role="agent" who={r.requisition!.code} body={trailText(t)} />
+          ))}
+          {r.error ? <p className="text-xs text-destructive">{r.error}</p> : null}
+          {needsYou && !agentAsking ? (
+            <div id={`wf-action-${r.id}`} className="rounded-lg transition-shadow">
+              {canFix ? (
+                <RequisitionApprovalCard
+                  requisition={r.requisition!}
+                  returned
+                  onDone={() =>
+                    void qc.invalidateQueries({ queryKey: ["workflow_app", workflowId] })
+                  }
+                />
+              ) : null}
+              {reqApprovable && reqPending ? (
+                <RequisitionApprovalCard
+                  key={reqPending.status}
+                  requisition={reqPending}
+                  onDone={() =>
+                    void qc.invalidateQueries({ queryKey: ["workflow_app", workflowId] })
+                  }
+                />
+              ) : null}
+              {r.waitingOn?.kind === "stopped" ? (
+                <div className="space-y-2 rounded-lg border border-amber-500/50 bg-amber-500/10 p-3 text-sm">
+                  <p>{r.waitingOn.text}</p>
+                  {v.canStart ? (
+                    <StoppedStepActions
+                      workflowRunId={r.id}
+                      invalidate={["workflow_app", workflowId]}
+                    />
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          {/* Questions from agents on this run or its requisition, whatever the run waits on. */}
+          {r.status === "waiting" && agentAsking ? (
+            <div id={`wf-action-${r.id}`}>
+              <WorkflowRunRequests
+                workflowRunId={r.id}
+                onDecided={() =>
+                  void qc.invalidateQueries({ queryKey: ["workflow_app", workflowId] })
+                }
+              />
+            </div>
+          ) : null}
+        </div>
+        <footer className="space-y-2 border-t border-border p-3">
+          {needsYou ? (
+            <button
+              type="button"
+              onClick={showAction}
+              className="w-full rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-left text-sm text-primary"
+            >
+              {agentAsking
+                ? `${openTasks.data!.length === 1 ? "1 request" : `${openTasks.data!.length} requests`} from an agent waiting for you — show`
+                : r.waitingOn?.kind === "stopped"
+                  ? "A step stopped in this run — show"
+                  : canFix && r.waitingOn?.kind !== "person"
+                    ? "A requisition to correct and resubmit — show"
+                    : reqApprovable && r.waitingOn?.kind !== "person"
+                      ? "1 approval waiting for you in this run — show"
+                      : `${r.waitingOn?.text.replace(/^.* — /, "") ?? "Requests"} waiting for you in this run — show`}
+            </button>
+          ) : waitWords ? (
+            <p className="px-1 text-sm text-muted-foreground">{waitWords}</p>
+          ) : null}
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+const REQ_NEXT: Record<string, { next: "pending_hr" | "pending_cbo" | "approved"; who: string }> = {
+  pending_dh: { next: "pending_hr", who: "Department head" },
+  pending_hr: { next: "pending_cbo", who: "HR head" },
+  pending_cbo: { next: "approved", who: "CBO" },
+};
+
+/** A requisition approval answered in the thread; the server checks the role and writes the trail. */
+function RequisitionApprovalCard({
+  requisition,
+  onDone,
+  returned = false,
+}: {
+  requisition: { id: string; code: string; status: string };
+  onDone: () => void;
+  returned?: boolean;
+}) {
+  const qc = useQueryClient();
+  const step = REQ_NEXT[requisition.status] ?? { next: "approved" as const, who: "" };
+  const full = useQuery({
+    queryKey: ["requisition", requisition.id],
+    queryFn: () => getRequisition({ data: { id: requisition.id } }),
+  });
+  const q = (full.data ?? {}) as Record<string, unknown>;
+  const str = (v: unknown) => (v == null ? "" : String(v));
+  const arr = (v: unknown) => (Array.isArray(v) ? v.map(String).filter(Boolean) : []);
+  const money = (v: unknown) =>
+    v == null || v === "" ? "" : Number(v).toLocaleString("en-IN", { maximumFractionDigits: 0 });
+  const facts: [string, string][] = (
+    [
+      ["Role", str(q["title"])],
+      ["Type", str(q["req_type"]).replace(/_/g, " ")],
+      ["Openings", str(q["openings"])],
+      ["Location", [str(q["location"]), str(q["work_mode"])].filter(Boolean).join(" · ")],
+      ["Experience", `${str(q["experience_min"])}–${str(q["experience_max"])} yrs`],
+      [
+        "CTC band",
+        q["ctc_band_min"] || q["ctc_band_max"]
+          ? `${money(q["ctc_band_min"])} – ${money(q["ctc_band_max"])} ${str(q["pay_currency"]) || "INR"}${q["pay_basis"] ? ` · ${str(q["pay_basis"])}` : ""}`
+          : "",
+      ],
+      ["Hiring manager", str(q["hiring_manager"])],
+      ["Needed by", q["needed_by"] ? new Date(String(q["needed_by"])).toLocaleDateString() : ""],
+      ["Must-have skills", arr(q["must_have_skills"]).join(", ")],
+      ["Good to have", arr(q["good_to_have_skills"]).join(", ")],
+      ["Responsibilities", str(q["responsibilities"])],
+    ] as [string, string][]
+  ).filter(([, v]) => v && v !== "–  yrs");
+  const trail = (Array.isArray(q["approval_trail"]) ? q["approval_trail"] : []) as {
+    actor?: string;
+    comment?: string | null;
+  }[];
+  const notes = trail.filter((t) => t.comment);
+  const [mode, setMode] = useState<"view" | "edit" | "changes" | "reopen">("view");
+  const [comment, setComment] = useState("");
+  const [f, setF] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  function startEdit() {
+    setF({
+      title: str(q["title"]),
+      openings: str(q["openings"]),
+      location: str(q["location"]),
+      workMode: str(q["work_mode"]),
+      experienceMin: str(q["experience_min"]),
+      experienceMax: str(q["experience_max"]),
+      ctcBandMin: q["ctc_band_min"] == null ? "" : String(Number(q["ctc_band_min"])),
+      ctcBandMax: q["ctc_band_max"] == null ? "" : String(Number(q["ctc_band_max"])),
+      mustHaveSkills: arr(q["must_have_skills"]).join(", "),
+      goodToHaveSkills: arr(q["good_to_have_skills"]).join(", "),
+      responsibilities: str(q["responsibilities"]),
+    });
+    setMode("edit");
+  }
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ["requisition", requisition.id] });
+    onDone();
+  };
+  async function run(fn: () => Promise<unknown>, ok: string) {
+    setBusy(true);
+    try {
+      await withStepUp(fn);
+      toast.success(ok);
+      setComment("");
+      setMode("view");
+      refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not save");
+    } finally {
+      setBusy(false);
+    }
+  }
+  const list = (v: string | undefined) =>
+    (v ?? "")
+      .split(",")
+      .map((x) => x.trim())
+      .filter(Boolean);
+  const num = (v: string | undefined) => (v && v.trim() ? Number(v) : null);
+  const saveEdit = () =>
+    run(
+      () =>
+        editRequisitionInApproval({
+          data: {
+            id: requisition.id,
+            title: f["title"]!,
+            openings: Number(f["openings"]) || 1,
+            location: f["location"] ?? "",
+            ...(f["workMode"] === "onsite" ||
+            f["workMode"] === "hybrid" ||
+            f["workMode"] === "remote"
+              ? { workMode: f["workMode"] }
+              : {}),
+            experienceMin: Number(f["experienceMin"]) || 0,
+            experienceMax: Number(f["experienceMax"]) || 0,
+            ctcBandMin: num(f["ctcBandMin"]),
+            ctcBandMax: num(f["ctcBandMax"]),
+            mustHaveSkills: list(f["mustHaveSkills"]),
+            goodToHaveSkills: list(f["goodToHaveSkills"]),
+            responsibilities: f["responsibilities"] ?? "",
+          },
+        }),
+      "Requisition corrected",
+    );
+  const field = (k: string, label: string, opts?: { type?: string; long?: boolean }) => (
+    <label className="grid gap-1 text-xs">
+      <span className="text-muted-foreground">{label}</span>
+      {opts?.long ? (
+        <Textarea
+          rows={3}
+          value={f[k] ?? ""}
+          onChange={(e) => setF({ ...f, [k]: e.target.value })}
+        />
+      ) : (
+        <input
+          type={opts?.type ?? "text"}
+          className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+          value={f[k] ?? ""}
+          onChange={(e) => setF({ ...f, [k]: e.target.value })}
+        />
+      )}
+    </label>
+  );
+  return (
+    <div className="rounded-lg border border-primary/40 p-3 text-sm">
+      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-primary">
+        {returned ? "Sent back" : `${step.who} approval`}
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="font-medium">
+          {returned
+            ? `Correct and resubmit ${requisition.code}`
+            : `Approve requisition ${requisition.code}`}
+        </p>
+        <Badge className="ml-auto">Waiting for you</Badge>
+      </div>
+      {full.isLoading ? (
+        <p className="mt-2 text-xs text-muted-foreground">Loading…</p>
+      ) : mode === "edit" ? (
+        <div className="mt-2 grid gap-2 rounded-md bg-muted/40 p-2 sm:grid-cols-2">
+          {field("title", "Role")}
+          {field("openings", "Openings", { type: "number" })}
+          {field("location", "Location")}
+          <label className="grid gap-1 text-xs">
+            <span className="text-muted-foreground">Work mode</span>
+            <select
+              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+              value={f["workMode"] ?? ""}
+              onChange={(e) => setF({ ...f, workMode: e.target.value })}
+            >
+              <option value="onsite">Onsite</option>
+              <option value="hybrid">Hybrid</option>
+              <option value="remote">Remote</option>
+            </select>
+          </label>
+          {field("experienceMin", "Experience from (yrs)", { type: "number" })}
+          {field("experienceMax", "Experience to (yrs)", { type: "number" })}
+          {field("ctcBandMin", `CTC band from (${str(q["pay_currency"]) || "INR"})`, {
+            type: "number",
+          })}
+          {field("ctcBandMax", `CTC band to (${str(q["pay_currency"]) || "INR"})`, {
+            type: "number",
+          })}
+          <div className="sm:col-span-2">{field("mustHaveSkills", "Must-have skills")}</div>
+          <div className="sm:col-span-2">{field("goodToHaveSkills", "Good to have")}</div>
+          <div className="sm:col-span-2">
+            {field("responsibilities", "Responsibilities", { long: true })}
+          </div>
+        </div>
+      ) : (
+        <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-md bg-muted/40 p-2 text-xs">
+          {facts.map(([k, v]) => (
+            <Fragment key={k}>
+              <dt className="text-muted-foreground">{k}</dt>
+              <dd className="whitespace-pre-wrap">{v}</dd>
+            </Fragment>
+          ))}
+        </dl>
+      )}
+      {notes.length && mode !== "edit" ? (
+        <ul className="mt-2 space-y-1 text-xs">
+          {notes.map((t, i) => (
+            <li key={i}>
+              <span className="text-muted-foreground">{t.actor ?? "Approver"}:</span> {t.comment}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {mode !== "edit" && (!returned || mode === "reopen") ? (
+        <Textarea
+          className="mt-2"
+          rows={2}
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          placeholder={
+            mode === "changes" || mode === "reopen"
+              ? "What should change? The requisition agent makes it and resubmits."
+              : "Comment (optional)"
+          }
+        />
+      ) : null}
+      <div className="mt-2 flex flex-wrap gap-2">
+        {mode === "edit" ? (
+          <>
+            <Button size="sm" disabled={busy} onClick={() => void saveEdit()}>
+              Save changes
+            </Button>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => setMode("view")}>
+              Cancel
+            </Button>
+          </>
+        ) : mode === "changes" ? (
+          <>
+            <Button
+              size="sm"
+              disabled={busy || comment.trim().length < 3}
+              onClick={() =>
+                void run(
+                  () =>
+                    sendBackRequisition({ data: { id: requisition.id, reason: comment.trim() } }),
+                  "Sent back for changes",
+                )
+              }
+            >
+              Send back
+            </Button>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => setMode("view")}>
+              Cancel
+            </Button>
+          </>
+        ) : returned && mode === "reopen" ? (
+          <>
+            <Button
+              size="sm"
+              disabled={busy || comment.trim().length < 3}
+              onClick={() =>
+                void run(
+                  () =>
+                    sendBackRequisition({
+                      data: { id: requisition.id, reason: comment.trim(), reopen: true },
+                    }),
+                  "Reopened — the requisition agent is making the change",
+                )
+              }
+            >
+              Reopen
+            </Button>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => setMode("view")}>
+              Cancel
+            </Button>
+          </>
+        ) : returned ? (
+          <>
+            {requisition.status !== "draft" ? (
+              <Button size="sm" disabled={busy} onClick={() => setMode("reopen")}>
+                Reopen with changes
+              </Button>
+            ) : null}
+            <Button size="sm" variant="outline" disabled={busy} onClick={startEdit}>
+              Edit
+            </Button>
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() =>
+                void run(
+                  () =>
+                    advanceRequisition({
+                      data: { id: requisition.id, status: "pending_dh", comment: null },
+                    }),
+                  "Resubmitted for approval",
+                )
+              }
+            >
+              Resubmit for approval
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() =>
+                void run(
+                  () =>
+                    advanceRequisition({
+                      data: {
+                        id: requisition.id,
+                        status: step.next,
+                        comment: comment.trim() || null,
+                      },
+                    }),
+                  `Approved as ${step.who} — next: ${step.next === "approved" ? "done" : (REQ_NEXT[step.next]?.who ?? "")}`,
+                )
+              }
+            >
+              Approve as {step.who}
+            </Button>
+            <Button size="sm" variant="outline" disabled={busy} onClick={startEdit}>
+              Edit
+            </Button>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => setMode("changes")}>
+              Ask for changes
+            </Button>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -210,12 +1008,12 @@ function ThreadList({
         b.group && b.items.length >= 2 ? (
           <li key={b.group} className="rounded-md border border-border/70 py-1">
             <div className="flex items-center gap-1 px-3 py-1">
-              <span className="flex-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              <span className="flex-1 text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">
                 {b.items.length} needs in parallel
               </span>
               <button
                 type="button"
-                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-primary hover:bg-primary/10"
+                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[0.6875rem] text-primary hover:bg-primary/10"
                 onClick={() => onSideBySide(b.items.slice(0, 3).map((i) => i.id))}
               >
                 <Columns2 className="size-3" /> Side by side
@@ -1042,7 +1840,7 @@ function Bubble({
       <div
         className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${mine ? "bg-primary text-primary-foreground" : "bg-muted"}`}
       >
-        {who ? <p className="mb-0.5 text-[11px] font-medium opacity-70">{who}</p> : null}
+        {who ? <p className="mb-0.5 text-[0.6875rem] font-medium opacity-70">{who}</p> : null}
         <AgentMarkdown text={folded && !expanded ? head : body} />
         {folded ? (
           <button
@@ -1455,8 +2253,33 @@ function TaskCard({
   const proceed = card["recommendation"] === "proceed";
   // A panel proposal: approve it, or change the people (the decider's choice).
   const panel = kind === "gate" && card["subjectType"] === "panel_approval";
+  // Someone new for the panel directory: HR types them in and approves in one step.
+  const newPanelist = kind === "gate" && card["subjectType"] === "new_panelist";
   const [changing, setChanging] = useState(false);
   const status = conv.tasks[taskId] ?? "open";
+  // One decision at a time: a role-level request waits while a newer open
+  // request (a follow-up question, a fresh approval) sits below it — answering
+  // both at once raced. Per-candidate decisions stay independent.
+  // Role-level decisions (requisition, JD, profile, brief) wait while a newer
+  // question or a newer request on the same thing sits below; per-candidate
+  // requests (calls, screening, panels) stay independent.
+  const ROLE_LEVEL = new Set(["requisition", "jd", "org_profile", "expert_brief"]);
+  const subjectOf = (c: DeskCardView) =>
+    String(c["subjectType"] ?? conv.taskSubjects[String(c["taskId"])] ?? "");
+  const locked = (() => {
+    if (status !== "open" || kind !== "gate" || !ROLE_LEVEL.has(subjectOf(card))) return false;
+    const cards = conv.messages
+      .map((m) => m.card)
+      .filter((c): c is DeskCardView => !!c && c.type === "task");
+    const at = cards.findIndex((c) => String(c["taskId"]) === taskId);
+    return cards
+      .slice(at + 1)
+      .some(
+        (c) =>
+          (conv.tasks[String(c["taskId"])] ?? "open") === "open" &&
+          (String(c["kind"]) === "clarification" || subjectOf(c) === subjectOf(card)),
+      );
+  })();
   const details =
     conv.taskDetails[taskId] ??
     (Array.isArray(card["details"]) ? (card["details"] as { label: string; value: string }[]) : []);
@@ -1494,6 +2317,11 @@ function TaskCard({
           {TASK_STATUS[status] ?? status}
         </Badge>
       </div>
+      {locked ? (
+        <p className="mt-2 rounded-md bg-amber-500/10 px-2 py-1 text-xs text-amber-800">
+          A newer request below needs you first — this one waits until it is answered.
+        </p>
+      ) : null}
       {card["revision"] ? <RevisionNote revision={card["revision"] as Revision} /> : null}
       {screening && card["applicationId"] ? (
         <div className="mt-2">
@@ -1543,7 +2371,7 @@ function TaskCard({
             />
             <Button
               size="sm"
-              disabled={busy || !answer.trim()}
+              disabled={busy || locked || !answer.trim()}
               onClick={() => decide({ status: "answered", answer: answer.trim() })}
             >
               Answer
@@ -1574,7 +2402,7 @@ function TaskCard({
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={busy || why.trim().length < 3}
+                  disabled={busy || locked || why.trim().length < 3}
                   title={
                     review
                       ? "The candidate goes on hold; later rounds not yet held are cancelled"
@@ -1587,7 +2415,7 @@ function TaskCard({
                 <Button
                   size="sm"
                   variant="destructive"
-                  disabled={busy || why.trim().length < 3}
+                  disabled={busy || locked || why.trim().length < 3}
                   title="Rejects the candidate for this role, with your reason on record"
                   onClick={() =>
                     decide({ status: "rejected", reason: why.trim(), rejectCandidate: true })
@@ -1598,7 +2426,7 @@ function TaskCard({
                 <Button
                   size="sm"
                   variant="ghost"
-                  disabled={busy}
+                  disabled={busy || locked}
                   onClick={() => setDeclining(false)}
                 >
                   Back
@@ -1609,7 +2437,7 @@ function TaskCard({
                 {sendable ? (
                   <Button
                     size="sm"
-                    disabled={busy || why.trim().length < 3}
+                    disabled={busy || locked || why.trim().length < 3}
                     title="Back to draft with your change; the agent applies it and the approvals start over"
                     onClick={() =>
                       decide({ status: "rejected", reason: why.trim(), changes: true })
@@ -1621,7 +2449,7 @@ function TaskCard({
                 <Button
                   size="sm"
                   variant="destructive"
-                  disabled={busy || (kind === "gate" && why.trim().length < 3)}
+                  disabled={busy || locked || (kind === "gate" && why.trim().length < 3)}
                   onClick={() =>
                     decide({
                       status: "rejected",
@@ -1634,7 +2462,7 @@ function TaskCard({
                 <Button
                   size="sm"
                   variant="ghost"
-                  disabled={busy}
+                  disabled={busy || locked}
                   onClick={() => setDeclining(false)}
                 >
                   Back
@@ -1654,7 +2482,7 @@ function TaskCard({
             <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
-                disabled={busy || why.trim().length < 3}
+                disabled={busy || locked || why.trim().length < 3}
                 onClick={() =>
                   decide({
                     status: "approved",
@@ -1668,13 +2496,21 @@ function TaskCard({
               <Button
                 size="sm"
                 variant="ghost"
-                disabled={busy}
+                disabled={busy || locked}
                 onClick={() => setOverruling(false)}
               >
                 Back
               </Button>
             </div>
           </div>
+        ) : newPanelist ? (
+          <NewPanelistForm
+            level={Number(card["level"])}
+            needed={String(card["needed"] ?? "")}
+            busy={busy}
+            onSave={(panelist) => decide({ status: "approved", args: { panelist } })}
+            onDecline={() => setDeclining(true)}
+          />
         ) : changing ? (
           <PanelChange
             requisitionId={String(card["requisitionId"])}
@@ -1686,7 +2522,11 @@ function TaskCard({
           />
         ) : (
           <div className="mt-2 flex flex-wrap gap-2">
-            <Button size="sm" disabled={busy} onClick={() => decide({ status: "approved" })}>
+            <Button
+              size="sm"
+              disabled={busy || locked}
+              onClick={() => decide({ status: "approved" })}
+            >
               {panel
                 ? "Approve this panel"
                 : review
@@ -1698,7 +2538,12 @@ function TaskCard({
                     : "Approve"}
             </Button>
             {panel ? (
-              <Button size="sm" variant="outline" disabled={busy} onClick={() => setChanging(true)}>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy || locked}
+                onClick={() => setChanging(true)}
+              >
                 Change the people
               </Button>
             ) : null}
@@ -1706,7 +2551,7 @@ function TaskCard({
               <Button
                 size="sm"
                 variant="outline"
-                disabled={busy}
+                disabled={busy || locked}
                 onClick={() => setOverruling(true)}
               >
                 {proceed ? "Put on hold instead" : "Move to L1 instead"}
@@ -1718,13 +2563,18 @@ function TaskCard({
               <Button
                 size="sm"
                 variant="outline"
-                disabled={busy}
+                disabled={busy || locked}
                 onClick={() => setDeclining(true)}
               >
                 Send back for changes
               </Button>
             ) : null}
-            <Button size="sm" variant="outline" disabled={busy} onClick={() => setDeclining(true)}>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy || locked}
+              onClick={() => setDeclining(true)}
+            >
               {screening ? "Decline" : sendable ? "Decline (final)" : "Decline"}
             </Button>
             <Link to="/agents" className="self-center text-xs text-primary underline">
@@ -1733,6 +2583,139 @@ function TaskCard({
           </div>
         )
       ) : null}
+    </div>
+  );
+}
+
+/** Type the person who should sit on the panel — saved to the panel directory on approval. */
+function NewPanelistForm(props: {
+  level: number;
+  needed: string;
+  busy: boolean;
+  onSave: (p: {
+    fullName: string;
+    email: string;
+    kind: "internal" | "external";
+    title: string | null;
+    company: string | null;
+    areas: string[];
+    rounds: number[];
+  }) => void;
+  onDecline: () => void;
+}) {
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [kind, setKind] = useState<"internal" | "external">("internal");
+  const [title, setTitle] = useState("");
+  const [company, setCompany] = useState("");
+  const [areas, setAreas] = useState("");
+  const [rounds, setRounds] = useState<number[]>([props.level]);
+  const ok =
+    fullName.trim().length >= 2 &&
+    /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim()) &&
+    rounds.length > 0 &&
+    (kind === "internal" || company.trim().length > 0);
+  const input = "w-full rounded-md border border-border bg-background px-2 py-1 text-xs";
+  return (
+    <div className="mt-2 space-y-2 rounded-md border border-border p-2">
+      {props.needed ? (
+        <p className="text-xs text-muted-foreground">
+          Needed for L{props.level}: {props.needed}
+        </p>
+      ) : null}
+      <div className="flex gap-3 text-xs">
+        {(["internal", "external"] as const).map((k) => (
+          <label key={k} className="flex items-center gap-1">
+            <input type="radio" checked={kind === k} onChange={() => setKind(k)} />
+            {k === "internal" ? "In our organisation" : "External (e.g. a client)"}
+          </label>
+        ))}
+      </div>
+      <input
+        className={input}
+        placeholder="Full name"
+        value={fullName}
+        maxLength={120}
+        onChange={(e) => setFullName(e.target.value)}
+      />
+      <input
+        className={input}
+        placeholder="E-mail"
+        type="email"
+        value={email}
+        maxLength={200}
+        onChange={(e) => setEmail(e.target.value)}
+      />
+      <input
+        className={input}
+        placeholder="Job title (optional)"
+        value={title}
+        maxLength={120}
+        onChange={(e) => setTitle(e.target.value)}
+      />
+      {kind === "external" ? (
+        <input
+          className={input}
+          placeholder="Their organisation"
+          value={company}
+          maxLength={120}
+          onChange={(e) => setCompany(e.target.value)}
+        />
+      ) : null}
+      <input
+        className={input}
+        placeholder="What they assess, comma-separated (e.g. Spark, Data governance)"
+        value={areas}
+        onChange={(e) => setAreas(e.target.value)}
+      />
+      <div className="flex items-center gap-3 text-xs">
+        <span>Rounds:</span>
+        {[1, 2, 3].map((r) => (
+          <label key={r} className="flex items-center gap-1">
+            <input
+              type="checkbox"
+              checked={rounds.includes(r)}
+              onChange={() =>
+                setRounds((x) => (x.includes(r) ? x.filter((y) => y !== r) : [...x, r].sort()))
+              }
+            />
+            L{r}
+          </label>
+        ))}
+      </div>
+      <p className="text-[0.6875rem] text-muted-foreground">
+        You add and approve them in one step (recorded as self-approved). They stay in the panel
+        directory for future roles.
+        {kind === "external"
+          ? " External panellists score through a private link sent with their brief."
+          : ""}
+      </p>
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          disabled={props.busy || !ok}
+          onClick={() =>
+            props.onSave({
+              fullName: fullName.trim(),
+              email: email.trim().toLowerCase(),
+              kind,
+              title: title.trim() || null,
+              company: kind === "external" ? company.trim() : null,
+              areas: areas
+                .split(",")
+                .map((a) => a.trim())
+                .filter((a) => a.length >= 2)
+                .slice(0, 20),
+              rounds,
+            })
+          }
+        >
+          Add to the panel and approve
+        </Button>
+        <Button size="sm" variant="outline" disabled={props.busy} onClick={props.onDecline}>
+          Decline
+        </Button>
+      </div>
     </div>
   );
 }
@@ -1780,7 +2763,7 @@ function PanelChange(props: {
       {q.data.others.length ? (
         <details className="text-xs">
           <summary className="cursor-pointer text-muted-foreground">
-            Other members (not registered for this round)
+            Others in the panel directory (not registered for this round)
           </summary>
           <div className="mt-1 space-y-1">{q.data.others.map(row)}</div>
         </details>
@@ -2881,7 +3864,7 @@ function JdCard({ card }: { card: DeskCardView }) {
           Open the requisition
         </Link>
       </div>
-      <div className="max-h-96 overflow-y-auto whitespace-pre-wrap px-3 py-2 text-[13px] leading-relaxed">
+      <div className="max-h-96 overflow-y-auto whitespace-pre-wrap px-3 py-2 text-[0.8125rem] leading-relaxed">
         <AgentMarkdown text={String(card["text"] ?? "")} />
       </div>
     </div>

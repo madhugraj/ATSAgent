@@ -63,7 +63,7 @@ export type ReportWindowState = ReturnType<typeof useReportWindow>;
 
 const nice = (s: string) => s.replace(/_/g, " ");
 const selectCls =
-  "h-8 rounded-md border border-border bg-card px-2 text-[13px] text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30";
+  "h-8 rounded-md border border-border bg-card px-2 text-[0.8125rem] text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30";
 
 export function ReportBar({
   rw,
@@ -180,7 +180,7 @@ export function ModalityToggle({
     <div
       role="radiogroup"
       aria-label="Agent type"
-      className="inline-flex h-8 items-center rounded-md border border-border bg-card p-0.5 text-[13px]"
+      className="inline-flex h-8 items-center rounded-md border border-border bg-card p-0.5 text-[0.8125rem]"
     >
       {MODALITY_OPTIONS.map((o) => (
         <button

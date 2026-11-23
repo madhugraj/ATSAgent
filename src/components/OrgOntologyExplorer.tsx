@@ -223,7 +223,7 @@ export function OrgOntologyExplorer({
       </div>
 
       <aside
-        className="overflow-y-auto rounded-xl border border-border bg-card p-4 text-[13px]"
+        className="overflow-y-auto rounded-xl border border-border bg-card p-4 text-[0.8125rem]"
         style={{ maxHeight: full ? "calc(100vh - 90px)" : 680 }}
       >
         {focus?.kind === "emerging" ? (
@@ -336,7 +336,7 @@ export function OrgOntologyExplorer({
                         </span>
                       </span>
                       <span
-                        className={`shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-semibold ${BADGE[st]}`}
+                        className={`shrink-0 rounded-full px-2 py-0.5 text-[0.65625rem] font-semibold ${BADGE[st]}`}
                       >
                         {e.confirmed && st === "established" ? "confirmed" : st}
                       </span>
@@ -379,14 +379,14 @@ function Stat({ n, label }: { n: number | string; label: string }) {
   return (
     <div className="rounded-lg bg-muted/50 px-2.5 py-1.5">
       <p className="text-base font-semibold tabular-nums">{n}</p>
-      <p className="text-[11px] text-muted-foreground">{label}</p>
+      <p className="text-[0.6875rem] text-muted-foreground">{label}</p>
     </div>
   );
 }
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+      <p className="mb-1 text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">
         {title}
       </p>
       {children}
@@ -454,7 +454,7 @@ function EmergingDetail({
       <div className="flex items-start justify-between gap-2">
         <p className="text-sm font-semibold">{e.name}</p>
         <span
-          className={`shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-semibold ${BADGE[st ?? "signal"]}`}
+          className={`shrink-0 rounded-full px-2 py-0.5 text-[0.65625rem] font-semibold ${BADGE[st ?? "signal"]}`}
         >
           {e.confirmed ? "confirmed" : (st ?? "not yet")}
         </span>
@@ -494,7 +494,7 @@ function EmergingDetail({
           <input
             value={name}
             onChange={(ev) => setName(ev.target.value)}
-            className="h-8 w-full rounded-md border border-border bg-background px-2 text-[13px]"
+            className="h-8 w-full rounded-md border border-border bg-background px-2 text-[0.8125rem]"
             aria-label="Role name"
           />
           {suggested && (

@@ -392,7 +392,11 @@ export async function lockOfferRate(orgId: string, offerId: string, now = new Da
     .set({
       reportingCurrency: reporting,
       reportingAmount: out.ok ? String(out.money.amount) : null,
-      rate: out.ok ? (out.rate ? { rate: out.rate.rate, source: out.rate.source, at: out.rate.at } : null) : null,
+      rate: out.ok
+        ? out.rate
+          ? { rate: out.rate.rate, source: out.rate.source, at: out.rate.at }
+          : null
+        : null,
       rateLockedAt: now,
     })
     .where(and(eq(offers.id, offerId), eq(offers.orgId, orgId)));

@@ -57,6 +57,8 @@ export const AI_FEATURES = [
   "agent_labour_policy",
   // Agent studio agents (platform-built, granted per organisation; migration 0082).
   "agent_studio",
+  // Workflow builder chat: drafts a workflow graph and its dry-run tests.
+  "workflow_assistant",
   "agent_expert_interview",
   "agent_panel_l1",
   "agent_panel_l2",
@@ -90,6 +92,12 @@ export const AI_FEATURES = [
   "panel_summary",
   // Model safety check: red-team probes before Autonomous (docs/red-team.md).
   "redteam_probe",
+  // A panelist's proposed scorecard change, reviewed against the job before the
+  // hiring manager decides (src/lib/panel-changes.server.ts).
+  "plan_change_review",
+  // Whether a panelist's reason for moving a round is a genuine one
+  // (src/lib/panel-changes.server.ts).
+  "panel_change_reason",
 ] as const;
 
 export type AiFeature = (typeof AI_FEATURES)[number];

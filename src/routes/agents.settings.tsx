@@ -7,6 +7,8 @@ import {
   ArrowRight,
   ArrowUpRight,
   ChevronRight,
+  CircleCheck,
+  CircleX,
   Loader2,
   Pause,
   Search,
@@ -15,6 +17,8 @@ import {
 } from "lucide-react";
 
 import { PageHeader } from "@/components/ats";
+import { orgWorkflows, type OrgWorkflowRow } from "@/lib/org-workflows.functions";
+import { WorkflowRunRequests } from "@/components/agents/AgentTaskCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -113,6 +117,11 @@ function AgentSettingsPage() {
           ) : null}
 
           <SafetyCheckSection check={data.safetyCheck} canEdit={data.canEdit} />
+
+          <WorkflowsSection
+            canEdit={data.canEdit}
+            onSwitchOn={(agentType) => save({ agentType, enabled: true })}
+          />
 
           <AgentList
             agents={data.agents}
@@ -366,7 +375,7 @@ function AgentCard({
         selected ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : ""
       }`}
     >
-      <div className="flex items-center gap-2 text-[11px]">
+      <div className="flex items-center gap-2 text-[0.6875rem]">
         <span className="num font-medium text-muted-foreground">
           {row.studio ? `Studio · v${row.studio.version}` : `Phase ${info.phase}`}
         </span>
@@ -408,7 +417,7 @@ function AgentCard({
       <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{info.description}</p>
 
       <div className="mt-auto pt-3">
-        <div className="flex items-center justify-between text-[11px]">
+        <div className="flex items-center justify-between text-[0.6875rem]">
           <span className="text-muted-foreground">Autonomy</span>
           <span className={active ? "font-medium" : "text-muted-foreground"}>
             {LEVEL_LABEL[row.autonomy] ?? row.autonomy}
@@ -1130,6 +1139,135 @@ function StudioRun({ row, canEdit }: { row: Row; canEdit: boolean }) {
       >
         {busy ? "Starting…" : "Start"}
       </Button>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------- workflows */
+
+const triggerLabel = (t: string) =>
+  t === "manual"
+    ? "Started by the platform team (hiring need)"
+    : `Starts on ${t.replace(/[._]/g, " ")}`;
+
+/**
+ * Workflows the platform granted this organisation: what each needs before it
+ * can run here, with a switch-on shortcut, and its latest runs.
+ */
+function WorkflowsSection({
+  canEdit,
+  onSwitchOn,
+}: {
+  canEdit: boolean;
+  onSwitchOn: (agentType: string) => Promise<void>;
+}) {
+  const qc = useQueryClient();
+  const q = useQuery({
+    queryKey: ["org_workflows"],
+    queryFn: () => orgWorkflows(),
+    retry: false,
+    enabled: canEdit,
+  });
+  if (!canEdit || !q.data?.length) return null;
+  const switchOn = async (type: string) => {
+    await onSwitchOn(type);
+    await qc.invalidateQueries({ queryKey: ["org_workflows"] });
+  };
+  return (
+    <section id="workflows" className="mt-6 space-y-3">
+      <h2 className="text-sm font-semibold">Workflows</h2>
+      {q.data.map((w) => (
+        <WorkflowCard key={w.id} w={w} onSwitchOn={switchOn} />
+      ))}
+    </section>
+  );
+}
+
+function WorkflowCard({
+  w,
+  onSwitchOn,
+}: {
+  w: OrgWorkflowRow;
+  onSwitchOn: (agentType: string) => Promise<void>;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const qc = useQueryClient();
+  return (
+    <div className="panel p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium">{w.name}</span>
+        <Badge variant="secondary">v{w.version}</Badge>
+        <Badge variant={w.ready ? "default" : "outline"}>{w.ready ? "Live" : "Not ready"}</Badge>
+        <span className="ml-auto text-xs text-muted-foreground">{triggerLabel(w.trigger)}</span>
+        <Button asChild size="sm" className="h-7">
+          <Link to="/w/$workflowId" params={{ workflowId: w.id }}>
+            Open
+          </Link>
+        </Button>
+      </div>
+      {w.description ? <p className="mt-1 text-sm text-muted-foreground">{w.description}</p> : null}
+      <ul className="mt-3 divide-y rounded-md border text-sm">
+        {w.items.map((i) => {
+          const type = i.key.startsWith("agent:") ? i.key.slice(6) : null;
+          return (
+            <li key={i.key} className="flex items-center gap-2 px-3 py-1.5">
+              {i.ok ? (
+                <CircleCheck className="size-4 text-emerald-600" />
+              ) : (
+                <CircleX className="size-4 text-destructive" />
+              )}
+              <span className="flex-1">{i.label}</span>
+              <span className="text-xs text-muted-foreground">{i.detail}</span>
+              {!i.ok && type ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7"
+                  disabled={busy === type}
+                  onClick={async () => {
+                    setBusy(type);
+                    try {
+                      await onSwitchOn(type);
+                    } finally {
+                      setBusy(null);
+                    }
+                  }}
+                >
+                  Switch on
+                </Button>
+              ) : null}
+              {!i.ok && i.key === "ai_key" ? (
+                <Button asChild size="sm" variant="outline" className="h-7">
+                  <Link to="/integrations">Add key</Link>
+                </Button>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+      {w.runs.length ? (
+        <ul className="mt-3 space-y-1 text-xs">
+          {w.runs.map((r) => (
+            <li key={r.id} className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="h-5">
+                  {r.status}
+                </Badge>
+                <span className="text-muted-foreground">
+                  {new Date(r.createdAt).toLocaleString()}
+                </span>
+                <span className="truncate">{r.error ?? r.waitingOn?.text ?? r.lastNote ?? ""}</span>
+              </div>
+              {r.waitingOn?.kind === "person" ? (
+                <WorkflowRunRequests
+                  workflowRunId={r.id}
+                  onDecided={() => void qc.invalidateQueries({ queryKey: ["org_workflows"] })}
+                />
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
 }

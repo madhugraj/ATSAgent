@@ -171,7 +171,7 @@ function AgentStudioPage() {
                 >
                   <td className="px-4 py-2.5">
                     <div className="font-medium">{b.name}</div>
-                    <div className="font-mono text-[11px] text-muted-foreground">{b.type}</div>
+                    <div className="font-mono text-[0.6875rem] text-muted-foreground">{b.type}</div>
                   </td>
                   <td className="px-4 py-2.5">
                     {b.baseType ? agentName(b.baseType) : "New"}
@@ -908,12 +908,12 @@ function ToolPicker({
                     }
                   />
                   {row.name !== real ? (
-                    <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+                    <span className="shrink-0 font-mono text-[0.6875rem] text-muted-foreground">
                       ← {real}
                     </span>
                   ) : null}
                   {t?.needsPersonApproval ? (
-                    <Badge variant="outline" className="shrink-0 text-[10px]">
+                    <Badge variant="outline" className="shrink-0 text-[0.625rem]">
                       person approves
                     </Badge>
                   ) : null}
@@ -930,7 +930,7 @@ function ToolPicker({
                 {t?.fields.length ? (
                   <div className="mt-2 flex flex-wrap gap-1">
                     {t.fields.map((f) => (
-                      <Badge key={f.name} variant="outline" className="font-mono text-[10px]">
+                      <Badge key={f.name} variant="outline" className="font-mono text-[0.625rem]">
                         {f.name}
                         {f.required ? "*" : ""}: {f.type}
                       </Badge>
@@ -961,7 +961,7 @@ function ToolPicker({
             if (!shown.length) return null;
             return (
               <div key={g.agent}>
-                <div className="text-[11px] font-medium text-muted-foreground">
+                <div className="text-[0.6875rem] font-medium text-muted-foreground">
                   {agentName(g.agent)}
                 </div>
                 <div className="mt-1 space-y-1">
@@ -1029,7 +1029,7 @@ function TestReport({
                 {r.steps} steps · {r.tokens.toLocaleString()} tokens
               </span>
             </div>
-            <div className="font-mono text-[11px] text-muted-foreground">
+            <div className="font-mono text-[0.6875rem] text-muted-foreground">
               {r.calls.join(" → ") || "no tools called"}
             </div>
             {r.failures.map((f) => (

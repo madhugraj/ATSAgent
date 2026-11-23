@@ -674,12 +674,14 @@ function CandidateDetail() {
   );
 }
 
-
 /* ------------------------------------------------------- agent activity */
 
 const RUN_STATUS: Record<string, { cls: string; label: string }> = {
   done: { cls: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400", label: "done" },
-  awaiting_human: { cls: "bg-amber-500/10 text-amber-600 dark:text-amber-400", label: "awaiting a person" },
+  awaiting_human: {
+    cls: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+    label: "awaiting a person",
+  },
   queued: { cls: "bg-muted text-muted-foreground", label: "queued" },
   cancelled: { cls: "bg-muted text-muted-foreground", label: "cancelled" },
   failed: { cls: "bg-red-500/10 text-red-600 dark:text-red-400", label: "failed" },
@@ -695,11 +697,13 @@ function AgentActivitySection({ candidateId }: { candidateId: string }) {
     <section className="panel p-5">
       <h2 className="font-semibold">Agent activity</h2>
       <p className="text-xs text-muted-foreground">
-        Every agent run about this candidate — goal, steps, gate decisions and the AI it spent — newest first.
-        Deterministic metadata from the runs ledger; transcripts and CV text stay out.
+        Every agent run about this candidate — goal, steps, gate decisions and the AI it spent —
+        newest first. Deterministic metadata from the runs ledger; transcripts and CV text stay out.
       </p>
       {activity.isError ? (
-        <p className="mt-3 text-sm text-destructive">Agent activity could not be loaded. The error has been logged.</p>
+        <p className="mt-3 text-sm text-destructive">
+          Agent activity could not be loaded. The error has been logged.
+        </p>
       ) : activity.isLoading ? (
         <p className="mt-3 text-sm text-muted-foreground">Loading agent activity…</p>
       ) : runs.length === 0 ? (
@@ -710,29 +714,38 @@ function AgentActivitySection({ candidateId }: { candidateId: string }) {
         <>
           <ol className="mt-4 space-y-4 border-l border-border pl-4 text-sm">
             {runs.map((r) => {
-              const st = RUN_STATUS[r.status] ?? { cls: "bg-muted text-muted-foreground", label: r.status };
+              const st = RUN_STATUS[r.status] ?? {
+                cls: "bg-muted text-muted-foreground",
+                label: r.status,
+              };
               return (
                 <li key={r.id} className="relative">
                   <span className="absolute -left-[21px] top-1.5 size-2 rounded-full bg-primary" />
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium capitalize">{r.agentType.replaceAll("_", " ")}</span>
+                    <span className="font-medium capitalize">
+                      {r.agentType.replaceAll("_", " ")}
+                    </span>
                     {r.definitionVersion ? (
                       <span className="text-xs text-muted-foreground">v{r.definitionVersion}</span>
                     ) : null}
-                    <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${st.cls}`}>
+                    <span
+                      className={`inline-flex rounded px-1.5 py-0.5 text-[0.625rem] font-semibold uppercase ${st.cls}`}
+                    >
                       {st.label}
                     </span>
                   </div>
                   {r.goal ? <p className="mt-0.5 text-xs text-muted-foreground">{r.goal}</p> : null}
                   <div className="num mt-0.5 text-xs text-muted-foreground">
-                    {new Date(r.createdAt).toLocaleString()} · {r.stepCount} steps · {r.aiCalls} AI calls ·{" "}
-                    {fmt(r.tokens)} tokens{r.aiErrors ? ` · ${r.aiErrors} failed` : ""}
+                    {new Date(r.createdAt).toLocaleString()} · {r.stepCount} steps · {r.aiCalls} AI
+                    calls · {fmt(r.tokens)} tokens{r.aiErrors ? ` · ${r.aiErrors} failed` : ""}
                   </div>
                   {r.tasks.length > 0 && (
                     <ul className="mt-1.5 space-y-1 text-xs">
                       {r.tasks.map((t) => (
                         <li key={t.id} className="flex flex-wrap items-center gap-1.5">
-                          <span className="rounded bg-muted px-1.5 py-0.5 font-medium capitalize">{t.kind}</span>
+                          <span className="rounded bg-muted px-1.5 py-0.5 font-medium capitalize">
+                            {t.kind}
+                          </span>
                           <span
                             className={
                               t.status === "approved"
@@ -758,7 +771,7 @@ function AgentActivitySection({ candidateId }: { candidateId: string }) {
               <div className="text-xs font-semibold text-muted-foreground">AI calls by feature</div>
               <table className="mt-2 w-full text-xs tabular-nums">
                 <thead>
-                  <tr className="border-b border-border text-left text-[11px] text-muted-foreground">
+                  <tr className="border-b border-border text-left text-[0.6875rem] text-muted-foreground">
                     <th className="py-1 pr-3 font-medium">Feature</th>
                     <th className="py-1 pr-3 font-medium">Requests</th>
                     <th className="py-1 pr-3 font-medium">Failed</th>

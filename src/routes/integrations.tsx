@@ -63,7 +63,7 @@ import { orgInbox } from "@/lib/local-inbox.functions";
 
 import { collectApplicants, type CollectSummary } from "@/lib/collect.functions";
 import { captureSetup, rotateCaptureToken } from "@/lib/capture.functions";
-import { PageHeader } from "@/components/ats";
+import { PageHeader, StatusPill as SharedStatusPill, type PillTone } from "@/components/ats";
 import { BoardConnectPanel } from "@/components/board-connect-panel";
 import { BoardEnterprisePanel } from "@/components/board-enterprise-panel";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -298,19 +298,15 @@ export const Route = createFileRoute("/integrations")({
   component: Integrations,
 });
 
+const CONNECTION: Record<string, { icon: typeof CheckCircle2; tone: PillTone; label: string }> = {
+  ok: { icon: CheckCircle2, tone: "good", label: "Connected" },
+  pending: { icon: CircleDashed, tone: "warn", label: "Needs setup" },
+  failed: { icon: CircleAlert, tone: "bad", label: "Failed" },
+  untested: { icon: CircleDashed, tone: "neutral", label: "Not configured" },
+};
+
 function StatusPill({ status }: { status: string }) {
-  const map: Record<string, { icon: typeof CheckCircle2; cls: string; label: string }> = {
-    ok: { icon: CheckCircle2, cls: "text-emerald-600", label: "Connected" },
-    pending: { icon: CircleDashed, cls: "text-amber-600", label: "Needs setup" },
-    failed: { icon: CircleAlert, cls: "text-destructive", label: "Failed" },
-    untested: { icon: CircleDashed, cls: "text-muted-foreground", label: "Not configured" },
-  };
-  const { icon: Icon, cls, label } = map[status] ?? map["untested"]!;
-  return (
-    <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${cls}`}>
-      <Icon className="size-3.5" /> {label}
-    </span>
-  );
+  return <SharedStatusPill {...(CONNECTION[status] ?? CONNECTION["untested"]!)} />;
 }
 
 /**
@@ -689,7 +685,7 @@ function LinkedinOneClick() {
         <summary className="cursor-pointer text-xs font-medium">
           Ask LinkedIn to switch on data access for ATSIQ — ready-to-send request
         </summary>
-        <pre className="mt-3 whitespace-pre-wrap rounded-md bg-surface-2 p-3 text-[11px] leading-relaxed text-muted-foreground">
+        <pre className="mt-3 whitespace-pre-wrap rounded-md bg-surface-2 p-3 text-[0.6875rem] leading-relaxed text-muted-foreground">
           {LINKEDIN_ACCESS_REQUEST}
         </pre>
         <Button

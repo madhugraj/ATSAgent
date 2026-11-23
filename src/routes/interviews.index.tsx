@@ -1,5 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ConfirmLine } from "@/components/interviews/ConfirmLine";
+import { overdueScorecards, roundConfirmations } from "@/lib/interview-confirmations.functions";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -15,6 +17,14 @@ import {
   requisitionsQuery,
 } from "@/lib/data";
 import { scheduleInterview, submitScorecard } from "@/lib/interviews.functions";
+import { getInterviewPlan } from "@/lib/interview-plan.functions";
+import { roundOf } from "@/lib/interview-plan";
+import {
+  EMPTY_SCORECARD,
+  ScorecardFields,
+  scorecardReady,
+  type ScorecardValue,
+} from "@/components/CompetencyRating";
 import { declineRoundTranscription, retryRoundTranscription } from "@/lib/panel-agent.functions";
 import { createMeetingLink, meetingProviders } from "@/lib/meetings.functions";
 import { buildIcs, downloadIcs } from "@/lib/ics";
@@ -80,6 +90,31 @@ function Interviews() {
   const reqs = useQuery(requisitionsQuery);
   const scores = useQuery(matchScoresQuery);
   const ivs = useQuery(interviewsQuery);
+  const confirmFn = useServerFn(roundConfirmations);
+  const roundIds = (ivs.data ?? [])
+    .filter((i) => ["scheduled", "rescheduled"].includes(i.status))
+    .map((i) => i.id)
+    .slice(0, 500);
+  const overdueFn = useServerFn(overdueScorecards);
+  const pastIds = (ivs.data ?? [])
+    .filter(
+      (i) =>
+        ["scheduled", "rescheduled", "completed"].includes(i.status) &&
+        i.scheduled_at &&
+        new Date(i.scheduled_at).getTime() < Date.now(),
+    )
+    .map((i) => i.id)
+    .slice(0, 500);
+  const overdue = useQuery({
+    queryKey: ["overdue_scorecards", pastIds],
+    queryFn: () => overdueFn({ data: { interviewIds: pastIds } }),
+    enabled: pastIds.length > 0,
+  });
+  const confirms = useQuery({
+    queryKey: ["round_confirmations", roundIds],
+    queryFn: () => confirmFn({ data: { interviewIds: roundIds } }),
+    enabled: roundIds.length > 0,
+  });
   const evals = useQuery(evaluationsQuery);
 
   const doSchedule = useServerFn(scheduleInterview);
@@ -142,11 +177,17 @@ function Interviews() {
     application_id: "",
     level: "1",
     focus_area: "",
-    rating: "3",
-    recommendation: "select" as "select" | "hold" | "reject",
-    comments: "",
-    reason: "",
   });
+  const [card, setCard] = useState<ScorecardValue>(EMPTY_SCORECARD);
+  const fetchPlan = useServerFn(getInterviewPlan);
+  const formReqId = (apps.data ?? []).find((a) => a.id === form.application_id)?.requisition_id;
+  const plan = useQuery({
+    queryKey: ["interview_plan", formReqId],
+    queryFn: () => fetchPlan({ data: { requisitionId: formReqId! } }),
+    enabled: !!formReqId,
+  });
+  const planRound = plan.data ? roundOf(plan.data.plan, Number(form.level)) : null;
+  const formCompetencies = planRound?.competencies ?? [];
 
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState("all");
@@ -171,6 +212,7 @@ function Interviews() {
   function pickApplication(applicationId: string) {
     const locked = scoredLevelsFor(applicationId);
     const firstOpen = LEVELS.find((l) => !locked.has(l.level));
+    setCard(EMPTY_SCORECARD);
     setForm({
       ...form,
       application_id: applicationId,
@@ -296,8 +338,8 @@ function Interviews() {
       toast.error("This interview round has already been scored — scorecards are final.");
       return;
     }
-    if (form.recommendation !== "select" && !form.reason.trim() && !form.comments.trim()) {
-      toast.error("A hold or reject needs a written reason");
+    if (!card.verdict || !scorecardReady(card, formCompetencies)) {
+      toast.error("Rate every competency, pick a verdict and give a reason for a hold or reject");
       return;
     }
     setBusy(true);
@@ -311,11 +353,10 @@ function Interviews() {
           applicationId: form.application_id,
           level: Number(form.level),
           focusArea: form.focus_area || null,
-          rating: Number(form.rating),
-          verdict: form.recommendation,
-          comments: form.comments || null,
-          reason: form.reason || null,
-          competencies: [],
+          verdict: card.verdict,
+          comments: card.comments || null,
+          reason: card.reason || null,
+          competencies: formCompetencies.map((name) => ({ name, rating: card.ratings[name]! })),
         },
       });
       toast.success(
@@ -325,7 +366,8 @@ function Interviews() {
       );
       if (res.blocked) toast.warning(res.blocked);
       if (res.nextInterviewCreated) toast.info("Next round queued for scheduling");
-      setForm({ ...form, comments: "", focus_area: "", reason: "" });
+      setForm({ ...form, focus_area: "" });
+      setCard(EMPTY_SCORECARD);
       qc.invalidateQueries({ queryKey: ["evaluations"] });
       qc.invalidateQueries({ queryKey: ["applications"] });
       qc.invalidateQueries({ queryKey: ["interviews"] });
@@ -538,7 +580,7 @@ function Interviews() {
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[860px] text-left text-xs">
-                <thead className="border-b border-border bg-surface-2 text-[11px] uppercase tracking-wider text-muted-foreground">
+                <thead className="border-b border-border bg-surface-2 text-[0.6875rem] uppercase tracking-wider text-muted-foreground">
                   <tr>
                     <th className="px-3 py-2 font-medium">Candidate</th>
                     <th className="px-3 py-2 font-medium">Requisition</th>
@@ -570,13 +612,13 @@ function Interviews() {
                           >
                             {c?.full_name ?? "—"}
                           </Link>
-                          <div className="num truncate text-[11px] text-muted-foreground">
+                          <div className="num truncate text-[0.6875rem] text-muted-foreground">
                             {c?.experience_years ?? "—"} yrs{c?.location ? ` · ${c.location}` : ""}
                           </div>
                         </td>
                         <td className="max-w-[170px] px-3 py-2">
                           <div className="truncate">{r?.title ?? "—"}</div>
-                          <div className="num truncate text-[11px] text-muted-foreground">
+                          <div className="num truncate text-[0.6875rem] text-muted-foreground">
                             {r?.code}
                           </div>
                         </td>
@@ -593,13 +635,13 @@ function Interviews() {
                           return (
                             <td key={level} className="px-2 py-2">
                               {evaluation ? (
-                                <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-border bg-surface-2 px-1.5 py-0.5 text-[11px] font-medium">
+                                <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-border bg-surface-2 px-1.5 py-0.5 text-[0.6875rem] font-medium">
                                   <Lock className="size-3" /> {evaluation.recommendation}
                                   {evaluation.rating ? ` ${evaluation.rating}/5` : ""}
                                 </span>
                               ) : (
                                 <div className="flex flex-col items-start gap-1">
-                                  <span className="num whitespace-nowrap text-[11px] text-muted-foreground">
+                                  <span className="num whitespace-nowrap text-[0.6875rem] text-muted-foreground">
                                     {when
                                       ? when.toLocaleString(undefined, {
                                           day: "2-digit",
@@ -615,7 +657,7 @@ function Interviews() {
                                     <Button
                                       size="sm"
                                       variant={round ? "secondary" : "outline"}
-                                      className="h-6 px-2 text-[11px]"
+                                      className="h-6 px-2 text-[0.6875rem]"
                                       onClick={() => openSlot(a.id, level, round?.id ?? null)}
                                     >
                                       {round ? "Re-sched" : "Schedule"}
@@ -663,9 +705,21 @@ function Interviews() {
                                       </Button>
                                     ) : null}
                                   </div>
+                                  {round && overdue.data?.[round.id]?.length ? (
+                                    <span className="text-[0.6875rem] text-destructive">
+                                      Scorecard overdue: {overdue.data[round.id]!.join(", ")}
+                                    </span>
+                                  ) : null}
+                                  {round ? (
+                                    <ConfirmLine
+                                      interviewId={round.id}
+                                      c={confirms.data?.[round.id]}
+                                      onChange={() => void confirms.refetch()}
+                                    />
+                                  ) : null}
                                   {round && round.transcription !== "off" ? (
                                     <span
-                                      className="flex items-center gap-1 text-[11px] text-muted-foreground"
+                                      className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground"
                                       title={round.transcription_detail ?? undefined}
                                     >
                                       {TRANSCRIPTION_LABEL[round.transcription] ??
@@ -701,7 +755,7 @@ function Interviews() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="h-6 px-2 text-[11px]"
+                            className="h-6 px-2 text-[0.6875rem]"
                             onClick={() => pickApplication(a.id)}
                           >
                             Record
@@ -747,7 +801,13 @@ function Interviews() {
             </div>
             <div>
               <Label className="mb-1.5 block text-xs text-muted-foreground">Level</Label>
-              <Select value={form.level} onValueChange={(v) => setForm({ ...form, level: v })}>
+              <Select
+                value={form.level}
+                onValueChange={(v) => {
+                  setForm({ ...form, level: v });
+                  setCard(EMPTY_SCORECARD);
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -777,56 +837,14 @@ function Interviews() {
                 placeholder="System design, ownership, communication…"
               />
             </div>
-            <div>
-              <Label className="mb-1.5 block text-xs text-muted-foreground">Rating (1–5)</Label>
-              <Input
-                type="number"
-                min={1}
-                max={5}
-                value={form.rating}
-                onChange={(e) => setForm({ ...form, rating: e.target.value })}
+            {form.application_id && formCompetencies.length ? (
+              <ScorecardFields
+                competencies={formCompetencies}
+                rubric={planRound ?? {}}
+                value={card}
+                onChange={setCard}
               />
-            </div>
-            <div>
-              <Label className="mb-1.5 block text-xs text-muted-foreground">Verdict</Label>
-              <Select
-                value={form.recommendation}
-                onValueChange={(v) =>
-                  setForm({ ...form, recommendation: v as typeof form.recommendation })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="select">
-                    Select —{" "}
-                    {form.level === "3" ? "raise offer" : `move to L${Number(form.level) + 1}`}
-                  </SelectItem>
-                  <SelectItem value="hold">Hold — park on hold</SelectItem>
-                  <SelectItem value="reject">Reject — close the candidate</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {form.recommendation !== "select" && (
-              <div>
-                <Label className="mb-1.5 block text-xs text-muted-foreground">
-                  Reason (required)
-                </Label>
-                <Input
-                  value={form.reason}
-                  onChange={(e) => setForm({ ...form, reason: e.target.value })}
-                />
-              </div>
-            )}
-            <div>
-              <Label className="mb-1.5 block text-xs text-muted-foreground">Comments</Label>
-              <Textarea
-                rows={4}
-                value={form.comments}
-                onChange={(e) => setForm({ ...form, comments: e.target.value })}
-              />
-            </div>
+            ) : null}
             <Button className="w-full" onClick={submitEvaluation} disabled={busy || levelLocked}>
               {busy ? <Loader2 className="size-4 animate-spin" /> : null} Submit evaluation
             </Button>

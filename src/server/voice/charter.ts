@@ -120,7 +120,7 @@ export const SCREENING_CALL_CHARTER: VoiceCharter = {
 export const SCHEDULING_CALL_CHARTER: VoiceCharter = {
   agent: "scheduling_call",
   purpose:
-    "Help the candidate and the interview panel agree a time for the candidate's current round, from times already e-mailed — nothing else.",
+    "Help the candidate and the interview panel agree a time for the candidate's current round, from the times offered for it — nothing else. The call goes first; the times are e-mailed with a link if it does not book.",
   mustSay: [
     c(
       "That it is an AI recruiting assistant, in its first line, before anything about the interview.",
@@ -136,7 +136,7 @@ export const SCHEDULING_CALL_CHARTER: VoiceCharter = {
     c(
       "The interview's round, length and format, and that it is with a person or a panel from the hiring team.",
     ),
-    c("The times in its list — the e-mailed times and up to three more free for the whole panel."),
+    c("The times in its list — the offered times and up to three more free for the whole panel."),
   ],
   mustNot: [
     ...COMMON_MUST_NOT,
@@ -150,7 +150,7 @@ export const SCHEDULING_CALL_CHARTER: VoiceCharter = {
     c(
       "None of the times work, or they set a condition: their words go to the team, who offer other times.",
     ),
-    c("Not a good time: one short call-back, or the e-mailed link."),
+    c("Not a good time: one short call-back, or the times by e-mail with a link."),
   ],
   tone: COMMON_TONE,
 };

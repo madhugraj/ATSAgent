@@ -49,7 +49,7 @@ function OversightPanel({ o }: { o: Oversight }) {
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
         {o.headline.map((h, i) => (
           <div key={i} className={`rounded-lg border bg-card p-4 ${TONE[h.tone].ring}`}>
-            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            <p className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">
               {QUESTIONS[i]}
             </p>
             <p className="mt-2 flex items-center gap-2 text-base font-semibold">
@@ -78,7 +78,7 @@ function OversightPanel({ o }: { o: Oversight }) {
                 className="flex flex-1 flex-col items-center gap-1"
                 title={`Week of ${w.week}: ${w.approved} approved, ${w.declined} declined`}
               >
-                <span className="text-[10px] tabular-nums text-muted-foreground">
+                <span className="text-[0.625rem] tabular-nums text-muted-foreground">
                   {w.approved + w.declined || ""}
                 </span>
                 <div
@@ -98,13 +98,13 @@ function OversightPanel({ o }: { o: Oversight }) {
                     }}
                   />
                 </div>
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-[0.625rem] text-muted-foreground">
                   {new Date(w.week).toLocaleDateString([], { day: "numeric", month: "short" })}
                 </span>
               </div>
             ))}
           </div>
-          <div className="mt-2 flex gap-4 text-[11px] text-muted-foreground">
+          <div className="mt-2 flex gap-4 text-[0.6875rem] text-muted-foreground">
             <span className="inline-flex items-center gap-1.5">
               <span className="size-2.5 rounded-sm bg-emerald-500/80" />
               approved
@@ -150,7 +150,7 @@ function OversightPanel({ o }: { o: Oversight }) {
               ))}
             </ul>
           )}
-          <div className="mt-3 flex gap-4 text-[11px] text-muted-foreground">
+          <div className="mt-3 flex gap-4 text-[0.6875rem] text-muted-foreground">
             <span className="inline-flex items-center gap-1.5">
               <span className="size-2.5 rounded-sm bg-blue-500/80" />
               by an agent
@@ -175,7 +175,7 @@ function OversightPanel({ o }: { o: Oversight }) {
         ) : (
           <table className="w-full text-xs">
             <thead>
-              <tr className="border-b border-border text-left text-[11px] text-muted-foreground">
+              <tr className="border-b border-border text-left text-[0.6875rem] text-muted-foreground">
                 <th className="px-4 py-2 font-medium">Agent</th>
                 <th className="px-4 py-2 font-medium">Proposal</th>
                 <th className="px-4 py-2 font-medium">Declined</th>
