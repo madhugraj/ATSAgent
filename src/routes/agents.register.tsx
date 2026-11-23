@@ -158,11 +158,11 @@ function RegisterBody({ agents }: { agents: AgentRegisterEntry[] }) {
                 </a>
                 <Badge
                   variant={RISK_TONE[a.manifest.riskTier] ?? "secondary"}
-                  className="shrink-0 px-1.5 py-0 text-[10px]"
+                  className="shrink-0 px-1.5 py-0 text-[0.625rem]"
                 >
                   {a.manifest.riskTier}
                 </Badge>
-                <span className="shrink-0 text-[11px] text-muted-foreground">
+                <span className="shrink-0 text-[0.6875rem] text-muted-foreground">
                   {a.policy.enabled ? "on" : "off"}
                 </span>
               </li>
@@ -233,12 +233,12 @@ function AgentCard({
         <Badge variant={a.policy.enabled ? "default" : "outline"}>
           {a.policy.enabled ? `On · ${a.policy.autonomy.replace(/_/g, " ")}` : "Off"}
         </Badge>
-        <span className="num ml-auto text-[11px] text-muted-foreground">
+        <span className="num ml-auto text-[0.6875rem] text-muted-foreground">
           id {a.type} · hash {a.hash.slice(0, 12)}
         </span>
         <a
           href="#agent-index"
-          className="inline-flex items-center gap-0.5 text-[11px] text-primary underline-offset-2 hover:underline"
+          className="inline-flex items-center gap-0.5 text-[0.6875rem] text-primary underline-offset-2 hover:underline"
         >
           <ArrowUp className="size-3" /> Index
         </a>
@@ -353,7 +353,7 @@ function AgentCard({
             </pre>
           ) : null}
           {showManifest ? (
-            <pre className="mt-2 max-h-96 overflow-auto rounded-md border border-border bg-muted/30 p-3 font-mono text-[11px]">
+            <pre className="mt-2 max-h-96 overflow-auto rounded-md border border-border bg-muted/30 p-3 font-mono text-[0.6875rem]">
               {a.manifestJson}
             </pre>
           ) : null}

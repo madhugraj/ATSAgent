@@ -127,6 +127,21 @@
   --sidebar-ring: oklch(0.55 0.252 277);
 }
 
+/* Soft — the light theme with less glare: dimmer canvas and surfaces. */
+.soft {
+  --background: oklch(0.93 0.006 261);
+  --surface-2: oklch(0.9 0.008 261);
+  --card: oklch(0.965 0.004 261);
+  --popover: oklch(0.965 0.004 261);
+  --secondary: oklch(0.9 0.008 261);
+  --muted: oklch(0.9 0.008 261);
+  --muted-foreground: oklch(0.45 0.008 261);
+  --accent: oklch(0.9 0.03 277);
+  --border: oklch(0.86 0.006 261);
+  --input: oklch(0.84 0.006 261);
+  --ontology-zone: oklch(0.92 0.007 261);
+}
+
 .dark {
   --background: oklch(0.15 0.008 285);
   --foreground: oklch(0.97 0.002 285);

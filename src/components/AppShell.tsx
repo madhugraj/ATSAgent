@@ -204,7 +204,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               className="mb-3 space-y-0.5 border-b border-sidebar-border pb-3"
             >
               {collapsed ? null : (
-                <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/40">
+                <div className="px-3 pb-1 text-[0.625rem] font-semibold uppercase tracking-widest text-sidebar-foreground/40">
                   Pinned
                 </div>
               )}
@@ -271,7 +271,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             >
               <Search className="size-4" />
               Search
-              <kbd className="rounded border border-border bg-muted px-1 font-mono text-[10px]">
+              <kbd className="rounded border border-border bg-muted px-1 font-mono text-[0.625rem]">
                 ⌘K
               </kbd>
             </Button>

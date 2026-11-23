@@ -63,7 +63,7 @@ export function PanelBriefView({ brief }: { brief: PanelBrief }) {
             CV
           </button>
           {cvOpen ? (
-            <pre className="mt-2 max-h-[480px] overflow-auto whitespace-pre-wrap rounded-md border border-border bg-card p-3 font-sans text-[13px] leading-relaxed">
+            <pre className="mt-2 max-h-[480px] overflow-auto whitespace-pre-wrap rounded-md border border-border bg-card p-3 font-sans text-[0.8125rem] leading-relaxed">
               {brief.cv}
             </pre>
           ) : null}

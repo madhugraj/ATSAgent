@@ -2360,7 +2360,7 @@ export type Database = {
           audio_path: string | null;
           candidate_id: string;
           combined_score: number | null;
-          coverage: Json | null
+          coverage: Json | null;
           created_at: string;
           created_by: string | null;
           engine: Json;
@@ -2385,7 +2385,7 @@ export type Database = {
           audio_path?: string | null;
           candidate_id: string;
           combined_score?: number | null;
-          coverage?: Json | null
+          coverage?: Json | null;
           created_at?: string;
           created_by?: string | null;
           engine?: Json;
@@ -2410,7 +2410,7 @@ export type Database = {
           audio_path?: string | null;
           candidate_id?: string;
           combined_score?: number | null;
-          coverage?: Json | null
+          coverage?: Json | null;
           created_at?: string;
           created_by?: string | null;
           engine?: Json;
@@ -3038,7 +3038,12 @@ export type Database = {
       shares_pool_with_me: { Args: { _owner_org: string }; Returns: boolean };
     };
     Enums: {
-      app_role: "recruiter" | "hiring_manager" | "department_head" | "hr_head" | "president_cbo"
+      app_role:
+        | "recruiter"
+        | "hiring_manager"
+        | "department_head"
+        | "hr_head"
+        | "president_cbo"
         | "interviewer";
       app_stage:
         | "sourced"

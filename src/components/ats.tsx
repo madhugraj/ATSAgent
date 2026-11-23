@@ -58,7 +58,7 @@ export function StatCard({
   }[tone];
   return (
     <div className="panel flex flex-col p-3.5">
-      <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+      <div className="text-[0.6875rem] font-medium uppercase tracking-wider text-muted-foreground">
         {label}
       </div>
       <div className={cn("num mt-1 text-2xl font-semibold", toneClass)}>{value}</div>
@@ -141,7 +141,7 @@ export function ScoreBar({
         <span className="num shrink-0 text-sm font-semibold">{score}</span>
       </div>
       {weight !== undefined || weighted !== undefined ? (
-        <div className="num truncate text-[11px] text-muted-foreground">
+        <div className="num truncate text-[0.6875rem] text-muted-foreground">
           {weight !== undefined ? `weight ${weight}%` : null}
           {weighted !== undefined ? `${weight !== undefined ? " · " : ""}+${weighted} pts` : null}
         </div>

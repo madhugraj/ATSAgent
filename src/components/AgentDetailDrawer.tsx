@@ -318,7 +318,7 @@ function ToolsTab({ d }: { d: AgentDetail }) {
               <p className="text-xs text-muted-foreground">
                 Input contract (validated before it runs)
               </p>
-              <pre className="mt-1 max-h-56 overflow-auto rounded border border-border bg-muted/30 p-2 font-mono text-[11px]">
+              <pre className="mt-1 max-h-56 overflow-auto rounded border border-border bg-muted/30 p-2 font-mono text-[0.6875rem]">
                 {t.inputSchemaJson}
               </pre>
             </div>

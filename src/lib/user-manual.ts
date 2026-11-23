@@ -426,6 +426,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
     steps: [
       "Sign in with the confirmed work email and password used during registration or invitation. A successful session remains active in the browser and is renewed while it is used.",
       "Passwords follow one policy everywhere (registration, reset and change): 8–128 characters with at least one uppercase letter, one lowercase letter and one digit, and a new password must differ from the current one. Use the eye toggle on any password field to check what you typed.",
+      "Open your account menu at the top right to change Appearance: Light, Soft (less glare), Dark or System theme, and Default, Large or Larger text. The choice is saved in this browser.",
       "Choose Forgot password on the sign-in form, submit the work email and use the time-limited link delivered to that inbox.",
       "If the link is invalid or expired, request a new one. For privacy, the request screen does not reveal whether an address exists.",
       "If sign-in fails during a temporary database interruption, wait briefly and retry; do not create a duplicate account.",

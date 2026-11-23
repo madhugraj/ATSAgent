@@ -17,7 +17,7 @@ export function BrandLogo({
     <img
       src={logoUrl}
       alt="Yavar"
-      className={`${className} w-auto ${tone === "onDark" ? "brightness-0 invert" : ""}`}
+      className={`${className} w-auto ${tone === "onDark" ? "brightness-0 invert" : "dark:brightness-0 dark:invert"}`}
     />
   );
 }

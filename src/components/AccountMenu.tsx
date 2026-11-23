@@ -18,6 +18,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  TEXT_SIZE_OPTIONS,
+  THEME_OPTIONS,
+  applyAppearance,
+  readAppearance,
+  saveAppearance,
+  type TextSize,
+  type Theme,
+} from "@/lib/appearance";
+import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 const ROLE_LABEL: Record<string, string> = {
@@ -42,6 +52,24 @@ export function AccountMenu() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [changing, setChanging] = useState(false);
+
+  const [appearance, setAppearance] = useState<{ theme: Theme; textSize: TextSize }>({
+    theme: "light",
+    textSize: "default",
+  });
+  useEffect(() => setAppearance(readAppearance()), []);
+  useEffect(() => {
+    if (appearance.theme !== "system") return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => applyAppearance(appearance);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, [appearance]);
+  function updateAppearance(patch: Partial<typeof appearance>) {
+    const next = { ...appearance, ...patch };
+    setAppearance(next);
+    saveAppearance(next);
+  }
 
   // One shared identity query — a second queryFn on this key used to win the
   // cache race with useMe() and strip userId for every consumer.
@@ -113,12 +141,12 @@ export function AccountMenu() {
           className="h-9 gap-2 px-2"
           aria-label="Account, privileges and sign out"
         >
-          <span className="flex size-6 items-center justify-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary">
+          <span className="flex size-6 items-center justify-center rounded-full bg-primary/10 text-[0.6875rem] font-semibold text-primary">
             {initials || <UserRound className="size-3.5" />}
           </span>
           <span className="hidden text-left leading-tight sm:block">
             <span className="block max-w-[140px] truncate text-xs font-semibold">{name}</span>
-            <span className="block max-w-[140px] truncate text-[10px] text-muted-foreground">
+            <span className="block max-w-[140px] truncate text-[0.625rem] text-muted-foreground">
               {headline}
             </span>
           </span>
@@ -135,7 +163,7 @@ export function AccountMenu() {
           )}
         </div>
         <div className="border-b border-border p-3">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <p className="text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground">
             Access level
           </p>
           <div className="mt-2 flex flex-wrap gap-1.5">
@@ -152,14 +180,31 @@ export function AccountMenu() {
             )}
           </div>
           {isSuperUser ? (
-            <p className="mt-2 text-[11px] text-muted-foreground">
+            <p className="mt-2 text-[0.6875rem] text-muted-foreground">
               You can see every organisation on the platform console.
             </p>
           ) : (
-            <p className="mt-2 text-[11px] text-muted-foreground">
+            <p className="mt-2 text-[0.6875rem] text-muted-foreground">
               You only see data for this organisation.
             </p>
           )}
+        </div>
+        <div className="space-y-2 border-b border-border p-3">
+          <p className="text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground">
+            Appearance
+          </p>
+          <Segmented
+            label="Theme"
+            options={THEME_OPTIONS}
+            value={appearance.theme}
+            onChange={(theme) => updateAppearance({ theme })}
+          />
+          <Segmented
+            label="Text size"
+            options={TEXT_SIZE_OPTIONS}
+            value={appearance.textSize}
+            onChange={(textSize) => updateAppearance({ textSize })}
+          />
         </div>
         <div className="p-2">
           <Button
@@ -235,5 +280,37 @@ export function AccountMenu() {
         </DialogContent>
       </Dialog>
     </Popover>
+  );
+}
+
+function Segmented<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} className="flex rounded-md bg-muted p-0.5">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          role="radio"
+          aria-checked={value === o.value}
+          onClick={() => onChange(o.value)}
+          className={cn(
+            "flex-1 rounded px-2 py-1 text-xs font-medium text-muted-foreground transition-colors",
+            value === o.value && "bg-card text-foreground shadow-sm",
+          )}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
   );
 }

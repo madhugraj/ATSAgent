@@ -580,7 +580,7 @@ function Interviews() {
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[860px] text-left text-xs">
-                <thead className="border-b border-border bg-surface-2 text-[11px] uppercase tracking-wider text-muted-foreground">
+                <thead className="border-b border-border bg-surface-2 text-[0.6875rem] uppercase tracking-wider text-muted-foreground">
                   <tr>
                     <th className="px-3 py-2 font-medium">Candidate</th>
                     <th className="px-3 py-2 font-medium">Requisition</th>
@@ -612,13 +612,13 @@ function Interviews() {
                           >
                             {c?.full_name ?? "—"}
                           </Link>
-                          <div className="num truncate text-[11px] text-muted-foreground">
+                          <div className="num truncate text-[0.6875rem] text-muted-foreground">
                             {c?.experience_years ?? "—"} yrs{c?.location ? ` · ${c.location}` : ""}
                           </div>
                         </td>
                         <td className="max-w-[170px] px-3 py-2">
                           <div className="truncate">{r?.title ?? "—"}</div>
-                          <div className="num truncate text-[11px] text-muted-foreground">
+                          <div className="num truncate text-[0.6875rem] text-muted-foreground">
                             {r?.code}
                           </div>
                         </td>
@@ -635,13 +635,13 @@ function Interviews() {
                           return (
                             <td key={level} className="px-2 py-2">
                               {evaluation ? (
-                                <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-border bg-surface-2 px-1.5 py-0.5 text-[11px] font-medium">
+                                <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-border bg-surface-2 px-1.5 py-0.5 text-[0.6875rem] font-medium">
                                   <Lock className="size-3" /> {evaluation.recommendation}
                                   {evaluation.rating ? ` ${evaluation.rating}/5` : ""}
                                 </span>
                               ) : (
                                 <div className="flex flex-col items-start gap-1">
-                                  <span className="num whitespace-nowrap text-[11px] text-muted-foreground">
+                                  <span className="num whitespace-nowrap text-[0.6875rem] text-muted-foreground">
                                     {when
                                       ? when.toLocaleString(undefined, {
                                           day: "2-digit",
@@ -657,7 +657,7 @@ function Interviews() {
                                     <Button
                                       size="sm"
                                       variant={round ? "secondary" : "outline"}
-                                      className="h-6 px-2 text-[11px]"
+                                      className="h-6 px-2 text-[0.6875rem]"
                                       onClick={() => openSlot(a.id, level, round?.id ?? null)}
                                     >
                                       {round ? "Re-sched" : "Schedule"}
@@ -706,7 +706,7 @@ function Interviews() {
                                     ) : null}
                                   </div>
                                   {round && overdue.data?.[round.id]?.length ? (
-                                    <span className="text-[11px] text-destructive">
+                                    <span className="text-[0.6875rem] text-destructive">
                                       Scorecard overdue: {overdue.data[round.id]!.join(", ")}
                                     </span>
                                   ) : null}
@@ -719,7 +719,7 @@ function Interviews() {
                                   ) : null}
                                   {round && round.transcription !== "off" ? (
                                     <span
-                                      className="flex items-center gap-1 text-[11px] text-muted-foreground"
+                                      className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground"
                                       title={round.transcription_detail ?? undefined}
                                     >
                                       {TRANSCRIPTION_LABEL[round.transcription] ??
@@ -755,7 +755,7 @@ function Interviews() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="h-6 px-2 text-[11px]"
+                            className="h-6 px-2 text-[0.6875rem]"
                             onClick={() => pickApplication(a.id)}
                           >
                             Record

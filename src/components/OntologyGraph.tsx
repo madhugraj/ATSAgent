@@ -304,7 +304,7 @@ export function OntologyGraph({
           </g>
         </svg>
       </div>
-      <div className="grid gap-3 border-t bg-surface-2/60 px-5 py-3 text-[11px] text-muted-foreground sm:grid-cols-[auto_1fr] sm:items-center">
+      <div className="grid gap-3 border-t bg-surface-2/60 px-5 py-3 text-[0.6875rem] text-muted-foreground sm:grid-cols-[auto_1fr] sm:items-center">
         <div className="flex flex-wrap items-center gap-3">
           <Legend colour="var(--ontology-healthy)" label="Healthy" />
           <Legend colour="var(--ontology-tightening)" label="Tightening" />
