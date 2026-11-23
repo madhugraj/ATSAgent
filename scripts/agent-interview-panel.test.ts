@@ -9,7 +9,7 @@
  * Run: DATABASE_URL=postgres://…/atsagent_test SESSION_SECRET=… bun test scripts/agent-interview-panel.test.ts
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { and, desc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 const { db } = await import("../src/server/db");
 const {
@@ -137,7 +137,7 @@ beforeEach(async () => {
 
 /** Book a round; by default it has already been held (scorecards open at the start). */
 async function book(level: number, panel: number[] = [], held = true) {
-  await iv.scheduleInterviewCore(
+  const created = await iv.scheduleInterviewCore(
     { orgId, actor: "test" },
     {
       applicationId: app,
@@ -150,13 +150,11 @@ async function book(level: number, panel: number[] = [], held = true) {
       panel: panel.map((i) => ({ email: people[i]!.email })),
     },
   );
-  // Newest row for (application, level): earlier tests may have booked the same
-  // level again, and Postgres gives no row order without ORDER BY (flake fix).
-  const [r] = await db
-    .select()
-    .from(interviews)
-    .where(and(eq(interviews.applicationId, app), eq(interviews.level, level)))
-    .orderBy(desc(interviews.id));
+  // Target exactly the row the core created or rescheduled. Selecting by
+  // (application, level) races with placeholder rounds the inline agents
+  // insert after a scorecard (pending_scheduling, no interviewer), and
+  // interview ids are UUIDs, so no id ordering picks the booked row either.
+  const [r] = await db.select().from(interviews).where(eq(interviews.id, created.interviewId!));
   if (!held) return r!;
   const [past] = await db
     .update(interviews)
