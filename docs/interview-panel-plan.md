@@ -1,8 +1,8 @@
 # Interview panels — plan
 
-Status: **P0 and P1 built** (2026-10-26). P0 — interviewer profiles, hiring manager as a member, the desk asks for it, invites audited. P1 — the plan in the desk thread (posted when the role is raised, and on "show the interview plan"), editable in place with the hiring manager; the hiring manager picked from members on the requisition page (audited, `requisition.hiring_manager_set`); a plan cannot drop a round a candidate is in or an interview is booked for. P2 — the Interview coordinator (2.0.0) proposes each round's panel with `propose_panel` (a proposal tool: it never runs by itself, whatever the autonomy); the role's hiring manager — else the HR head — approves it or changes the people on the desk card; the approved panel is stored in `role_panels` (audited `role_panel.approved`) and reused for every candidate of the role and round; agents offer or book times only with it; eligibility = registered interviewer, takes the round, under the weekly limit, ranked by competencies covered, past rounds for the role, load (every active member when nobody is registered yet); health rule `interview.no_eligible_panel`. P3 — scorecards only from the interview's start time; an interviewer on a booked round can say "Can't make it" on *My interviews* before it starts (recorded on the round, audited, the thread told; the booking stands for now); the coordinator (2.1.0) proposes a stand-in for that candidate only (`list_substitutes`, `propose_substitute`; also when a panellist is away for a candidate's window), decided by the hiring manager (gate `panel_substitute`); approved, it is stored in `round_substitutes` (audited `round_substitute.approved`) — the booking keeps its time when the stand-in is free then (they get the invite and brief; the candidate sees no change), else it is cancelled and new times offered, the e-mail saying the earlier time no longer stands; health rule `interview.unavailable_unresolved`. P4 — set up in the Yavar organisation (2026-10-27): Saranya and two test interviewers (plus-addresses) invited, interviewer profiles for all four; the test steps are in `docs/runbooks/interview-panels-p4-test.md`.
+Status: **built through P4** — P0 and P1 (2026-10-26), P2 and P3 (shipped, see roadmap.md), the P4 pilot in the Yavar organisation (2026-10-27, `docs/runbooks/interview-panels-p4-test.md`), then extended by the panel directory (`docs/panel-directory.md`) and the scorecard rubric (weights ×1–×5, a 1/3/5 rating guide, the weighted-average overall). P0 — interviewer profiles, hiring manager as a member, the desk asks for it, invites audited. P1 — the plan in the desk thread (posted when the role is raised, and on "show the interview plan"), editable in place with the hiring manager; the hiring manager picked from members on the requisition page (audited, `requisition.hiring_manager_set`); a plan cannot drop a round a candidate is in or an interview is booked for. P2 — the Interview coordinator (2.0.0) proposes each round's panel with `propose_panel` (a proposal tool: it never runs by itself, whatever the autonomy); the role's hiring manager — else the HR head — approves it or changes the people on the desk card; the approved panel is stored in `role_panels` (audited `role_panel.approved`) and reused for every candidate of the role and round; agents offer or book times only with it; eligibility = registered interviewer, takes the round, under the weekly limit, ranked by competencies covered, past rounds for the role, load (every active member when nobody is registered yet); health rule `interview.no_eligible_panel`. P3 — scorecards only from the interview's start time; an interviewer on a booked round can say "Can't make it" on _My interviews_ before it starts (recorded on the round, audited, the thread told; the booking stands for now); the coordinator (2.1.0) proposes a stand-in for that candidate only (`list_substitutes`, `propose_substitute`; also when a panellist is away for a candidate's window), decided by the hiring manager (gate `panel_substitute`); approved, it is stored in `round_substitutes` (audited `round_substitute.approved`) — the booking keeps its time when the stand-in is free then (they get the invite and brief; the candidate sees no change), else it is cancelled and new times offered, the e-mail saying the earlier time no longer stands; health rule `interview.unavailable_unresolved`. P4 — set up in the Yavar organisation (2026-10-27): Saranya and two test interviewers (plus-addresses) invited, interviewer profiles for all four; the test steps are in `docs/runbooks/interview-panels-p4-test.md`.
 
-Decisions (2026-10-26): test in the Yavar organisation; the role's hiring manager approves panels; one panel per role and round; weekly cap 4; members only.
+Decisions (2026-10-26): test in the Yavar organisation; the role's hiring manager approves panels; one panel per role and round; weekly cap 4; members only. (Update: panels are now proposed from the panel directory — org members and external people — `docs/panel-directory.md`; the weekly cap keeps applying to members.)
 
 ## The problem
 
@@ -32,7 +32,7 @@ area. The organisation's people, though, are registered once.
   `panelSize` people itself. No person approves the panel. Times are then
   checked free for everyone on it (`findFreeSlots`, `chooseSlot`).
 - **The interviewer.** Gets an invite and a brief by e-mail
-  (`src/lib/interviewer-brief.server.ts`) and sees the round on *My interviews*
+  (`src/lib/interviewer-brief.server.ts`) and sees the round on _My interviews_
   (matched on their e-mail). A scorecard can be submitted while the round is
   scheduled — even before it has happened.
 - **The candidate** never learns who interviews them ("the hiring team" / "a
@@ -99,7 +99,7 @@ On the Team page, in the first-login journey (`src/lib/user-manual.ts`):
   them (as today). If a panellist is away for a candidate's window, the
   coordinator proposes a substitute for that interview only, approved the same
   way.
-- **Interviewer declines** ("I can't make it" on *My interviews* or by e-mail
+- **Interviewer declines** ("I can't make it" on _My interviews_ or by e-mail
   reply): the round is re-proposed with a substitute; the candidate is re-offered
   times only if the change moves the interview.
 - `list_panel_options` becomes the ranked eligible list; the coordinator's
@@ -107,7 +107,7 @@ On the Team page, in the first-login journey (`src/lib/user-manual.ts`):
 
 ## 4. The interviewer's side
 
-- Invite and brief by e-mail, *My interviews* — as today.
+- Invite and brief by e-mail, _My interviews_ — as today.
 - **Scorecards only from the interview's start time** (today they can be
   submitted before it happens).
 - A "Can't make it" button that tells the coordinator.
@@ -118,27 +118,27 @@ On the Team page, in the first-login journey (`src/lib/user-manual.ts`):
   such as `madhu.r+ml@yavar.ai` reach your inbox as separate accounts), with
   areas that differ.
 - Raise a role with two rounds of different focus; approve the proposed panel
-  for L1, change it for L2; book both; sign in as an interviewer to see *My
-  interviews* and submit a scorecard after the start time.
+  for L1, change it for L2; book both; sign in as an interviewer to see _My
+  interviews_ and submit a scorecard after the start time.
 
 ## Milestones
 
-| Step | What |
-|---|---|
-| P0 | Interviewer profiles on the Team page (migration, audit); hiring manager as a member on the requisition; the desk asks for it |
-| P1 | Interview plan editor on the requisition page and in the desk |
-| P2 | `propose_panel`, the panel approval card, `role_panels`; the coordinator proposes → waits → offers times; eligibility ranking; health rule |
-| P3 | Substitutes and interviewer declines; scorecards only from the start time |
-| P4 | Real test with Saranya and registered interviewers |
+| Step | What                                                                                                                                       |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| P0   | Interviewer profiles on the Team page (migration, audit); hiring manager as a member on the requisition; the desk asks for it              |
+| P1   | Interview plan editor on the requisition page and in the desk                                                                              |
+| P2   | `propose_panel`, the panel approval card, `role_panels`; the coordinator proposes → waits → offers times; eligibility ranking; health rule |
+| P3   | Substitutes and interviewer declines; scorecards only from the start time                                                                  |
+| P4   | Real test with Saranya and registered interviewers                                                                                         |
 
-## Open decisions
+## Decisions (closed 2026-10-26/27)
 
-1. **Where to test:** the real *Yavar* organisation (where you and Saranya
-   belong) or keep the demo organisation?
-2. **Who approves a panel:** the role's hiring manager (recommended), the HR
-   head, or either?
-3. **Panel reuse:** one approved panel per role and round for all its candidates
-   (recommended), or approved per candidate?
-4. **Weekly cap default:** 4 interviews per interviewer per week?
-5. **Interviewers who are not members** (e.g. an external expert): out of scope
-   (recommended) — they must be registered first.
+1. **Where to test:** the real _Yavar_ organisation — done 2026-10-27 (P4,
+   `docs/runbooks/interview-panels-p4-test.md`).
+2. **Who approves a panel:** the role's hiring manager; the HR head when the role has none.
+3. **Panel reuse:** one approved panel per role and round, reused for every candidate;
+   changeable on the desk card.
+4. **Weekly cap default:** 4 interviews per interviewer per week.
+5. **Interviewers who are not members:** in scope since the panel directory
+   (`docs/panel-directory.md`) — HR adds them as external entries; they score through a
+   private, expiring link.

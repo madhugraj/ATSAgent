@@ -16,7 +16,12 @@ import {
 import { buildIcs, downloadIcs } from "@/lib/ics";
 import { STAGE_LABEL } from "@/lib/lifecycle";
 import { EmptyState, PageHeader, StageBadge } from "@/components/ats";
-import { CompetencyRating, OverallReadout } from "@/components/CompetencyRating";
+import {
+  EMPTY_SCORECARD,
+  ScorecardFields,
+  scorecardReady,
+  type ScorecardValue,
+} from "@/components/CompetencyRating";
 import { PanelBriefView } from "@/components/PanelBriefView";
 import { ChangeTime, ScorecardChange } from "@/components/interviews/PanelChanges";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -73,17 +78,14 @@ function MyInterviewsPage() {
 
   const [openId, setOpenId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [form, setForm] = useState({
-    ratings: {} as Record<string, number>,
-    verdict: "select" as "select" | "hold" | "reject",
+  const [form, setForm] = useState<ScorecardValue & { focus: string }>({
+    ...EMPTY_SCORECARD,
     focus: "",
-    comments: "",
-    reason: "",
   });
 
   function openScorecard(round: MyInterview) {
     setOpenId(round.id);
-    setForm({ ratings: {}, verdict: "select", focus: "", comments: "", reason: "" });
+    setForm({ ...EMPTY_SCORECARD, focus: "" });
   }
 
   const [changing, setChanging] = useState<MyInterview | null>(null);
@@ -124,12 +126,8 @@ function MyInterviewsPage() {
     const competencies = names
       .filter((n) => form.ratings[n])
       .map((n) => ({ name: n, rating: form.ratings[n]! }));
-    if (competencies.length < names.length) {
-      toast.error("Rate every competency");
-      return;
-    }
-    if (form.verdict !== "select" && !form.reason.trim() && !form.comments.trim()) {
-      toast.error("A hold or reject needs a written reason");
+    if (!form.verdict || !scorecardReady(form, names)) {
+      toast.error("Rate every competency, pick a verdict and give a reason for a hold or reject");
       return;
     }
     setBusy(true);
@@ -365,19 +363,13 @@ function MyInterviewsPage() {
 
                 {isOpen && !round.submitted && (
                   <div className="grid gap-4 border-t border-border bg-surface-2 p-5 md:grid-cols-2">
+                    <ScorecardFields
+                      competencies={names}
+                      rubric={round}
+                      value={form}
+                      onChange={(v) => setForm((f) => ({ ...f, ...v }))}
+                    />
                     <div className="space-y-3">
-                      {names.map((name) => (
-                        <CompetencyRating
-                          key={name}
-                          name={name}
-                          rubric={round}
-                          value={form.ratings[name] ?? 0}
-                          onChange={(n) =>
-                            setForm((f) => ({ ...f, ratings: { ...f.ratings, [name]: n } }))
-                          }
-                        />
-                      ))}
-                      <OverallReadout ratings={form.ratings} rubric={round} />
                       <div>
                         <Label className="mb-1.5 block text-xs text-muted-foreground">
                           Focus area covered
@@ -386,54 +378,6 @@ function MyInterviewsPage() {
                           value={form.focus}
                           onChange={(e) => setForm((f) => ({ ...f, focus: e.target.value }))}
                           placeholder="System design, ownership, communication…"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-3">
-                      <div>
-                        <Label className="mb-1.5 block text-xs text-muted-foreground">
-                          Verdict
-                        </Label>
-                        <Select
-                          value={form.verdict}
-                          onValueChange={(v) =>
-                            setForm((f) => ({ ...f, verdict: v as typeof f.verdict }))
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="select">Select — recommend going ahead</SelectItem>
-                            <SelectItem value="hold">Hold — not sure yet</SelectItem>
-                            <SelectItem value="reject">
-                              Reject — recommend not going ahead
-                            </SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      {form.verdict !== "select" && (
-                        <div>
-                          <Label className="mb-1.5 block text-xs text-muted-foreground">
-                            Reason (required)
-                          </Label>
-                          <Input
-                            value={form.reason}
-                            onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))}
-                            placeholder="Why hold / reject?"
-                          />
-                        </div>
-                      )}
-                      <div>
-                        <Label className="mb-1.5 block text-xs text-muted-foreground">
-                          Evidence & comments
-                        </Label>
-                        <Textarea
-                          rows={5}
-                          value={form.comments}
-                          onChange={(e) => setForm((f) => ({ ...f, comments: e.target.value }))}
-                          placeholder="What did the candidate actually demonstrate?"
                         />
                       </div>
                       <Button className="w-full" onClick={() => send(round)} disabled={busy}>
