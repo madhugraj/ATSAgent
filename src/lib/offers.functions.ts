@@ -84,12 +84,14 @@ export const createOfferCore = createServerOnlyFn(async function createOfferCore
 
   // Raising the offer is what puts the candidate in "offer pending approval".
   try {
-    await db
-      .update(applications)
-      .set({ stage: "offer_pending" })
-      .where(and(eq(applications.id, data.applicationId), eq(applications.orgId, actor.orgId)));
-  } catch {
+    const { recordOfferStageCore } = await import("./pipeline.server");
+    await recordOfferStageCore(actor, {
+      applicationId: data.applicationId,
+      toStage: "offer_pending",
+    });
+  } catch (e) {
     /* stage bump is best-effort, exactly as before */
+    console.error("[offers] stage update failed (offer unaffected):", e);
   }
   return { ok: true as const, id: created!.id };
 });
@@ -295,22 +297,15 @@ export const advanceOfferCore = createServerOnlyFn(async function advanceOfferCo
     .where(and(eq(offers.id, data.id), eq(offers.orgId, actor.orgId)));
 
   if (data.applicationStage) {
-    const [offer] = await db
-      .select({ applicationId: offers.applicationId })
-      .from(offers)
-      .where(and(eq(offers.id, data.id), eq(offers.orgId, actor.orgId)))
-      .limit(1);
-    if (offer) {
-      try {
-        await db
-          .update(applications)
-          .set({ stage: data.applicationStage })
-          .where(
-            and(eq(applications.id, offer.applicationId), eq(applications.orgId, actor.orgId)),
-          );
-      } catch {
-        /* stage bump is best-effort, exactly as before */
-      }
+    try {
+      const { recordOfferStageCore } = await import("./pipeline.server");
+      await recordOfferStageCore(actor, {
+        applicationId: current.applicationId,
+        toStage: data.applicationStage,
+      });
+    } catch (e) {
+      /* stage bump is best-effort, exactly as before */
+      console.error("[offers] stage update failed (offer change unaffected):", e);
     }
   }
 
