@@ -1574,7 +1574,9 @@ export type EmailOutboxKind =
   | "screening_call_booked"
   | "panel_summary"
   | "panel_time_check"
-  | "panel_reminder";
+  | "panel_reminder"
+  | "interview_reminder"
+  | "interviewer_reminder";
 /** `held`: waiting on interview confirmations (migration 0085) — released to `queued`. */
 export type EmailOutboxStatus = "queued" | "held" | "sent" | "failed" | "suppressed";
 export type EmailOutboxAttachment = {
