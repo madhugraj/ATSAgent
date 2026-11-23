@@ -27,7 +27,22 @@ interface Props {
   previousText?: string;
 }
 
-const { text, detail, link } = layoutStyles;
+const { text, link } = layoutStyles;
+const box = {
+  margin: "4px 0 18px",
+  border: "1px solid #e5e7eb",
+  borderRadius: "10px",
+  padding: "6px 14px",
+  backgroundColor: "#fafafb",
+};
+const boxKey = {
+  width: "70px",
+  padding: "7px 0",
+  fontSize: "13px",
+  color: "#6b7280",
+  verticalAlign: "top",
+};
+const boxVal = { padding: "7px 0", fontSize: "14px", color: "#111827", fontWeight: 600 };
 const button = {
   ...primaryButton,
   backgroundColor: BRAND,
@@ -78,22 +93,38 @@ const Email = ({
         <strong>{jobTitle}</strong>.
       </p>
     )}
-    {scheduledAtText ? <p style={detail}>When: {scheduledAtText}</p> : null}
-    {durationMins ? <p style={detail}>Duration: {durationMins} minutes</p> : null}
-    {modeLabel ? <p style={detail}>Mode: {modeLabel}</p> : null}
-    {whereText ? (
-      <p style={detail}>
-        Where:{" "}
-        {whereText.startsWith("http") ? (
-          <a href={whereText} style={link}>
-            {whereText}
-          </a>
-        ) : (
-          whereText
-        )}
-      </p>
-    ) : null}
-    {withText ? <p style={detail}>With: {withText}</p> : null}
+    <table width="100%" cellPadding={0} cellSpacing={0} style={box}>
+      <tbody>
+        {(
+          [
+            ["When", scheduledAtText],
+            [
+              "Length",
+              durationMins
+                ? `${durationMins} minutes${modeLabel ? `, ${modeLabel.toLowerCase()}` : ""}`
+                : modeLabel,
+            ],
+            ["Where", whereText],
+            ["With", withText],
+          ] as const
+        )
+          .filter(([, v]) => v)
+          .map(([k, v]) => (
+            <tr key={k}>
+              <td style={boxKey}>{k}</td>
+              <td style={boxVal}>
+                {k === "Where" && v!.startsWith("http") ? (
+                  <a href={v} style={link}>
+                    Join the meeting
+                  </a>
+                ) : (
+                  v
+                )}
+              </td>
+            </tr>
+          ))}
+      </tbody>
+    </table>
     {agenda ? <p style={text}>{agenda}</p> : null}
     {transcribed === "yes" ? (
       <p style={text}>

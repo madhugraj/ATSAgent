@@ -1,5 +1,11 @@
 # Roadmap
 
+## Navigation by area (2026-11-21)
+
+- [x] Sidebar regrouped from ~34 links into hubs (Home, Agents, Agent admin, Pipeline, Candidates, Sourcing, Insights; Settings, Platform, Help at the foot); each hub's pages show as a tab strip above the page. URLs, role predicates and Agent/Manual mode filtering unchanged
+- [x] Pinned pages: pin button on the tab strip, up to six per browser, shown above the hubs
+- [ ] Next: counts on tabs (screening calls today, waiting for you); pins kept per user on the server
+
 ## Prompt-injection guardrails — P0 (2026-11-01)
 
 - [x] `docs/guardrails.md`: every security control by layer, the v2.0 threat landscape mapped attack by attack, open items, how it is verified
@@ -134,6 +140,8 @@ Plan: `docs/org-context-agent-plan.md` (decided 2026-10-27; O0 built 2026-10-27,
 - [x] Send a requisition in approval back for changes (approval card or chat; current approver, raiser, HR head / CBO; on the trail and audited; approvals start over; Requisition agent 1.3.0 applies the change and resubmits); scoring weights locked in approval, must total 100, audited; work mode (onsite / hybrid / remote) asked by the desk and shown with the location (migration 0041); button clicks shown in the chat
 - [x] Delete a hiring-desk chat (migration 0040): dustbin while gathering details (starter or HR head / CBO / owner) or with an unused draft (HR head / CBO / owner, reason required); hidden at once, runs stopped, audited; owners restore for 30 days, then it is purged; anything in approval or later is rejected / closed instead
 - [x] "Send a test alert e-mail" in Agent settings → Trace export and alerts: the same alert e-mail, channel and recipients (owner, HR heads, CBOs) as a real serious / critical agent issue, marked as a test and audited (`agent.alert.test_email`)
+- [x] Fewer agent e-mails: one end-of-day summary per person — reminders from the Follow-up and Distribution agents ("waiting for you") and, for the owner / HR heads / CBOs, serious issues still open (after 18:00 org time, `agent_digest` template, audited `agent.issue.digest`); critical issues e-mail at once but at most once per rule per day; an issue resolves only after 60 minutes unseen, so a flapping rule no longer reopens and re-alerts every sweep
+- [x] E-mail branding per organisation (Organisation → E-mail branding): logo (inline `cid:` attachment, no public URL) and brand colour (darkened to WCAG AA behind white text) theme every e-mail the organisation sends; redesigned shared layout and end-of-day summary (count tiles, reminder cards, severity labels); changes audited (`org.email_brand.*`); migration 0091
 - [x] Pay discussion before the letter (migration 0039): when the expectation is above the HR head's ceiling (CBO above the band), the Offer agent (1.5.0) prepares a call brief and a warm message with levers (joining bonus, early review, split / ESOPs); a person always approves the message; the candidate accepts, suggests a figure or asks for a call on a private link, or TA records a call; agreement restarts the Offer agent at that figure; pop-ups and health rule `offer.negotiation_stalled`
 - [x] AI pay call (Negotiation call agent 0.1.0, migration 0058, docs/negotiator-voice-agent.md): the Offer agent (1.6.0) asks for a call when the candidate counters, asks for a call or lets the link close — the HR head approves — or TA arranges it ("Call to negotiate"); the assistant reads out the approved figure in the system's words, may move once to a pre-approved improved figure, and passes a yes on; TA / the HR head confirm in one click; CI harness with graders and broken-agent controls
 - [x] AI pay call health rules (N4): `negotiation_call.leak_suspected` (the CI graders on kept transcripts; critical for the ceiling), `.unconfirmed_yes`, `.few_agreements`

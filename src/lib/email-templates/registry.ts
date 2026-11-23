@@ -12,6 +12,7 @@ import { template as interviewInviteTemplate } from "./interview-invite";
 import { template as offerReleasedTemplate } from "./offer-released";
 import { template as assessmentInviteTemplate } from "./assessment-invite";
 import { template as memberReminderTemplate } from "./member-reminder";
+import { template as agentDigestTemplate } from "./agent-digest";
 import { template as documentRequestTemplate } from "./document-request";
 import { template as roleInviteTemplate } from "./role-invite";
 import { template as interviewerBriefTemplate } from "./interviewer-brief";
@@ -71,6 +72,7 @@ export const TEMPLATES: Record<string, TemplateEntry> = {
   offer_released: offerReleasedTemplate,
   assessment_invite: assessmentInviteTemplate,
   member_reminder: memberReminderTemplate,
+  agent_digest: agentDigestTemplate,
   document_request: documentRequestTemplate,
   role_invite: roleInviteTemplate,
   interviewer_brief: interviewerBriefTemplate,

@@ -105,6 +105,9 @@ erDiagram
     text capture_token UK "nullable"
     text capture_token_hash UK "nullable"
     text distribution_token_hash UK "nullable"
+    text brand_logo_path "nullable"
+    text brand_logo_content_type "nullable"
+    text brand_color "nullable"
   }
   org_members {
     uuid id PK
@@ -1463,7 +1466,7 @@ erDiagram
 | `org_pool_shares`               | Organisations & masters      | 10      | (ownerOrg+partnerOrg)                                                    |
 | `org_profile_versions`          | Organisations & masters      | 16      | (orgId+version)                                                          |
 | `org_profiles`                  | Organisations & masters      | 12      | —                                                                        |
-| `organizations`                 | Organisations & masters      | 28      | (slug), (capture_token), (capture_token_hash), (distribution_token_hash) |
+| `organizations`                 | Organisations & masters      | 31      | (slug), (capture_token), (capture_token_hash), (distribution_token_hash) |
 | `panel_agent_settings`          | —                            | 5       | —                                                                        |
 | `panel_assessments`             | —                            | 23      | (interview_id)                                                           |
 | `panelist_scorecard_links`      | —                            | 8       | (interviewId+panelistId), (token_hash)                                   |
