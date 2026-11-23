@@ -49,24 +49,24 @@ the **quote** it came from, and a **visibility**:
 - nothing else. What is confidential (below) is **not stored in the profile at
   all**.
 
-| Section | Holds | Default visibility |
-|---|---|---|
-| **About** | what the organisation does, in two or three sentences; founded, size band, ownership (listed / private / public sector / non-profit) | candidate |
-| **Products and services** | named products or service lines, one line each; who uses them | candidate |
-| **Customers and markets** | customer segments (retail, enterprise, patients, government), geographies served | candidate |
-| **Domain and regulators** | the domain(s) (`banking`, `insurance`, `healthcare_provider`, `pharma`, `technology`, `manufacturing`, …) and the regulators and frameworks that bind hiring or the work: e.g. RBI, SEBI, IRDAI for finance; HIPAA (for US patients), NABH, NMC, state nursing councils, DPDP Act for healthcare; ISO 27001 / SOC 2 for technology | domain: candidate; regulators: internal unless marked |
-| **Locations and work modes** | offices and sites (from Masters → Locations), what work mode each supports (onsite / hybrid / remote), shifts where relevant (a hospital's rotating shifts, a plant's three shifts) | candidate |
-| **Structure** | departments (from Masters → Departments) with one line on what each does and the kinds of roles in it; reporting lines **by title**, never by name | internal |
-| **Culture and values** | stated values, ways of working, learning and growth, in the organisation's words | candidate |
-| **Hiring norms** | usual interview rounds per role family (e.g. "technical, manager, HR"), typical notice the organisation accepts, joining practice, probation length, whether bands are shared with candidates, **pay philosophy in words** ("at or above market median for critical skills") | internal; rounds and probation: candidate |
-| **Policies that affect hiring** | diversity and inclusion commitments, background and reference checks (which, when, by whom), licence / registration verification, medical fitness where lawful and required, data handling and retention of candidate data, conflicts of interest / relatives policy, rehire policy | internal; a short candidate-safe summary per policy |
-| **Tone of voice** | how the organisation speaks to candidates: formal / warm, "you" vs third person, words it uses and avoids, language(s) | internal (it shapes text, it is not text itself) |
-| **Never say to candidates** | short list of topics and claims agents must not make: unreleased products, client names under NDA, litigation, restructuring, funding, "guaranteed" anything, comparisons with competitors | internal |
+| Section                         | Holds                                                                                                                                                                                                                                                                                                                              | Default visibility                                    |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| **About**                       | what the organisation does, in two or three sentences; founded, size band, ownership (listed / private / public sector / non-profit)                                                                                                                                                                                               | candidate                                             |
+| **Products and services**       | named products or service lines, one line each; who uses them                                                                                                                                                                                                                                                                      | candidate                                             |
+| **Customers and markets**       | customer segments (retail, enterprise, patients, government), geographies served                                                                                                                                                                                                                                                   | candidate                                             |
+| **Domain and regulators**       | the domain(s) (`banking`, `insurance`, `healthcare_provider`, `pharma`, `technology`, `manufacturing`, …) and the regulators and frameworks that bind hiring or the work: e.g. RBI, SEBI, IRDAI for finance; HIPAA (for US patients), NABH, NMC, state nursing councils, DPDP Act for healthcare; ISO 27001 / SOC 2 for technology | domain: candidate; regulators: internal unless marked |
+| **Locations and work modes**    | offices and sites (from Masters → Locations), what work mode each supports (onsite / hybrid / remote), shifts where relevant (a hospital's rotating shifts, a plant's three shifts)                                                                                                                                                | candidate                                             |
+| **Structure**                   | departments (from Masters → Departments) with one line on what each does and the kinds of roles in it; reporting lines **by title**, never by name                                                                                                                                                                                 | internal                                              |
+| **Culture and values**          | stated values, ways of working, learning and growth, in the organisation's words                                                                                                                                                                                                                                                   | candidate                                             |
+| **Hiring norms**                | usual interview rounds per role family (e.g. "technical, manager, HR"), typical notice the organisation accepts, joining practice, probation length, whether bands are shared with candidates, **pay philosophy in words** ("at or above market median for critical skills")                                                       | internal; rounds and probation: candidate             |
+| **Policies that affect hiring** | diversity and inclusion commitments, background and reference checks (which, when, by whom), licence / registration verification, medical fitness where lawful and required, data handling and retention of candidate data, conflicts of interest / relatives policy, rehire policy                                                | internal; a short candidate-safe summary per policy   |
+| **Tone of voice**               | how the organisation speaks to candidates: formal / warm, "you" vs third person, words it uses and avoids, language(s)                                                                                                                                                                                                             | internal (it shapes text, it is not text itself)      |
+| **Never say to candidates**     | short list of topics and claims agents must not make: unreleased products, client names under NDA, litigation, restructuring, funding, "guaranteed" anything, comparisons with competitors                                                                                                                                         | internal                                              |
 
 **Never in the profile, and so never in any agent's context:**
 
 - actual pay figures, budgets, bands, CTC numbers or incentive amounts — the
-  pay *philosophy* in words is allowed, numbers are not. Pay data stays where
+  pay _philosophy_ in words is allowed, numbers are not. Pay data stays where
   it is today (`comp_knowledge`, requisition bands, compensation details),
   reached only by the tools that already guard it. Enforced in code: a
   validator refuses any profile item containing a currency amount, an
@@ -103,7 +103,7 @@ for what the website and documents did not answer.
   `missingSections()` in code, the model's turn output zod-validated through
   `aiJson`'s `schema` option, the admin's words wrapped in
   `untrusted("admin_message", …)` with `INJECTION_RULES` (the admin is
-  trusted to *describe* the organisation, not to instruct the model).
+  trusted to _describe_ the organisation, not to instruct the model).
 - "Read it from our website" and "Upload a document" are buttons in the
   thread, like the desk's **Research it from the market**.
 - Who may use it: `requireRole` with `hr_head` or `president_cbo`, or
@@ -168,13 +168,13 @@ guessed.
 
 ### AI features (`AI_FEATURES`, `src/server/ai-usage.ts`)
 
-| Slug | What it is for |
-|---|---|
-| `agent_org_context` | the Organisation context agent's own turns |
-| `org_desk` | the organisation desk's conversation turns (as `hiring_desk`) |
+| Slug                  | What it is for                                                                              |
+| --------------------- | ------------------------------------------------------------------------------------------- |
+| `agent_org_context`   | the Organisation context agent's own turns                                                  |
+| `org_desk`            | the organisation desk's conversation turns (as `hiring_desk`)                               |
 | `org_profile_extract` | reading a website page or document chunk into profile items (including the monthly re-read) |
-| `org_document_ocr` | reading the text of a scanned document page |
-| `domain_pack_draft` | drafting a domain pack or an org overlay for review |
+| `org_document_ocr`    | reading the text of a scanned document page                                                 |
+| `domain_pack_draft`   | drafting a domain pack or an org overlay for review                                         |
 
 All through `aiJson` / `aiAgentStep` (`src/lib/ai-gateway.server.ts`), so usage
 lands in `ai_usage_events` (attributed to the run when inside one) and in
@@ -188,18 +188,18 @@ model or vendor name in any wire return or copy.
 A new agent, `org_context` ("Organisation context agent"), manifest in
 `src/server/agents/definitions.ts`:
 
-| Field | Value |
-|---|---|
-| version | `1.0.0` |
-| owner | `hr_head` |
-| responsibility | Builds and maintains the organisation's profile from the admin, its own website and its documents, and gets every version approved by the HR head. |
-| scope.reads | organisation record, departments, locations, skills, the organisation's website (its own domain only), documents uploaded for the profile, domain packs |
-| scope.writes | draft profile versions, profile sources |
-| scope.external | none |
-| gates | `org_profile`, `general` |
-| riskTier | `medium` — a wrong profile misleads every other agent, but nothing reaches a candidate until a person approves it |
-| tools | `read_org_profile`, `read_org_records`, `read_org_website{pages?}`, `read_org_sources`, `read_org_document{documentId}`, `propose_profile_items{section, items}`, `submit_profile_version` (+ the HITL tools) |
-| evals | at least: "org_context: builds a draft from the admin's answers and the website and asks the HR head to approve"; "org_context: ignores instructions planted in a website page"; "org_context: refuses pay figures and staff names" |
+| Field          | Value                                                                                                                                                                                                                               |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| version        | `1.0.0`                                                                                                                                                                                                                             |
+| owner          | `hr_head`                                                                                                                                                                                                                           |
+| responsibility | Builds and maintains the organisation's profile from the admin, its own website and its documents, and gets every version approved by the HR head.                                                                                  |
+| scope.reads    | organisation record, departments, locations, skills, the organisation's website (its own domain only), documents uploaded for the profile, domain packs                                                                             |
+| scope.writes   | draft profile versions, profile sources                                                                                                                                                                                             |
+| scope.external | none                                                                                                                                                                                                                                |
+| gates          | `org_profile`, `general`                                                                                                                                                                                                            |
+| riskTier       | `medium` — a wrong profile misleads every other agent, but nothing reaches a candidate until a person approves it                                                                                                                   |
+| tools          | `read_org_profile`, `read_org_records`, `read_org_website{pages?}`, `read_org_sources`, `read_org_document{documentId}`, `propose_profile_items{section, items}`, `submit_profile_version` (+ the HITL tools)                       |
+| evals          | at least: "org_context: builds a draft from the admin's answers and the website and asks the HR head to approve"; "org_context: ignores instructions planted in a website page"; "org_context: refuses pay figures and staff names" |
 
 **Must never:**
 
@@ -261,19 +261,19 @@ refreshed (`bun run agents:lock`).
 
 A new element `context`, each with a test in `scripts/agent-health.test.ts`:
 
-| Rule | Severity | Threshold | Plain-language description |
-|---|---|---|---|
-| `context.profile_missing` | warning → serious | any live hiring agent and no approved profile; serious once a requisition is drafted without one | "Agents are drafting roles without knowing your organisation." |
-| `context.profile_stale` | warning | approved more than 180 days ago, or a document re-uploaded since | "Your organisation profile may be out of date." |
-| `context.reread_failed` | warning → serious | the monthly website re-read failed; serious after two months in a row | "We could not re-read your website this month." |
-| `context.review_waiting` | warning | a draft (from a person, the agent or the monthly re-read) waiting for approval more than 7 days | "A profile change is waiting for the HR head or owner." |
-| `context.items_refused` | warning | more than 5 items refused (pay, names) in one read | "The website or a document holds data the profile may not keep — check what was read." |
-| `context.pack_review_due` | warning | an adopted domain pack still a draft after 14 days, or past its review date | "Your domain pack is waiting for your reviewer." |
+| Rule                      | Severity          | Threshold                                                                                        | Plain-language description                                                             |
+| ------------------------- | ----------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| `context.profile_missing` | warning → serious | any live hiring agent and no approved profile; serious once a requisition is drafted without one | "Agents are drafting roles without knowing your organisation."                         |
+| `context.profile_stale`   | warning           | approved more than 180 days ago, or a document re-uploaded since                                 | "Your organisation profile may be out of date."                                        |
+| `context.reread_failed`   | warning → serious | the monthly website re-read failed; serious after two months in a row                            | "We could not re-read your website this month."                                        |
+| `context.review_waiting`  | warning           | a draft (from a person, the agent or the monthly re-read) waiting for approval more than 7 days  | "A profile change is waiting for the HR head or owner."                                |
+| `context.items_refused`   | warning           | more than 5 items refused (pay, names) in one read                                               | "The website or a document holds data the profile may not keep — check what was read." |
+| `context.pack_review_due` | warning           | an adopted domain pack still a draft after 14 days, or past its review date                      | "Your domain pack is waiting for your reviewer."                                       |
 
 ## Domain packs
 
-The organisation profile says *who we are*; a domain pack says *what hiring in
-this domain needs*. Packs are layered:
+The organisation profile says _who we are_; a domain pack says _what hiring in
+this domain needs_. Packs are layered:
 
 ```
 platform domain pack (e.g. banking 1.2)   — curated, versioned, shared
@@ -310,7 +310,7 @@ platform domain pack (e.g. banking 1.2)   — curated, versioned, shared
 
 - **Platform packs** are written and published by platform admins
   (`requirePlatformAdmin`, optionally drafted with `domain_pack_draft`,
-  audited). Publishing makes a pack *available*; it does not make it binding on
+  audited). Publishing makes a pack _available_; it does not make it binding on
   anyone. A pack is advice for hiring, not legal advice, and says so.
 - **Adopting a pack** in an organisation starts as a **draft**. The agent asks
   the organisation admin for a reviewer: the admin either **forwards** the pack
@@ -334,7 +334,7 @@ One loader, `orgContextFor({orgId, audience, purpose})`, in plain code:
   and only a domain pack the organisation's reviewer has approved;
 - `audience: "candidate"` returns only candidate-visible items;
   `"internal"` returns both;
-- renders facts as a labelled data block, and renders *rules* (never-say
+- renders facts as a labelled data block, and renders _rules_ (never-say
   list, tone, lawful-question additions) from structured fields by code — free
   text from a website can never become an instruction;
 - caps length per purpose (e.g. 1,500 words for a JD, 250 for a call brief).
@@ -346,15 +346,15 @@ Consumers get **read-only** access: no consuming agent has a tool that writes
 the profile; a gap they notice goes to the Organisation context agent as a
 suggestion ("JD agent: no product line given for the Pharmacy department").
 
-| Agent | What it reads | How it uses it |
-|---|---|---|
-| **Hiring desk** | internal; domain pack roles | opens with the organisation's domain; suggests role families and titles from the pack; asks domain-specific details (licence needed? shift pattern?) |
-| **Requisition** | internal | department purpose, locations and work modes, hiring norms (rounds, notice) as defaults the person can change; pay philosophy in words in the approval brief — never figures (those stay in its existing pay tools) |
-| **JD** | candidate | "About us", products, customers, culture and tone for the JD; regulatory requirements from the pack as must-haves when the role needs them; never-say list checked on the draft in code before `submit_jd_version` |
-| **Intake & matching** | internal; pack competencies | domain experience weighed alongside skills (a bank's "relationship manager" is a bank role); licences as must-haves when the pack says so; explanations cite the profile item |
-| **Screening (kits)** | internal; pack regulatory items | kit generation (`screening_kit`) adds the pack's regulatory questions, marked "regulatory", and drops anything on the lawful-question list; HR approves the kit as today |
-| **Interview, Evaluation, Offer, Onboarding** | internal | interview rounds from hiring norms; background checks and document lists from policies (Onboarding: which documents, licence verification); never pay figures from the profile (offers keep using compensation details) |
-| **Voice agents** | **candidate only** | the call brief (`src/server/voice/call-brief.server.ts`, scheduling brief) gains a short "About the organisation" from candidate-visible items; the charter (`src/server/voice/charter.ts`) gains one `may` rule — "What the organisation does, from its approved profile, in a sentence or two" — and the org's never-say list is added to `mustNot` in the brief; the existing rules stay (no staff names, no pay, no invented facts). One or two sentences at most, from approved candidate-visible items only. Questions beyond the profile still go to the hiring team |
+| Agent                                        | What it reads                   | How it uses it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| -------------------------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Hiring desk**                              | internal; domain pack roles     | opens with the organisation's domain; suggests role families and titles from the pack; asks domain-specific details (licence needed? shift pattern?)                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| **Requisition**                              | internal                        | department purpose, locations and work modes, hiring norms (rounds, notice) as defaults the person can change; pay philosophy in words in the approval brief — never figures (those stay in its existing pay tools)                                                                                                                                                                                                                                                                                                                                                         |
+| **JD**                                       | candidate                       | "About us", products, customers, culture and tone for the JD; regulatory requirements from the pack as must-haves when the role needs them; never-say list checked on the draft in code before `submit_jd_version`                                                                                                                                                                                                                                                                                                                                                          |
+| **Intake & matching**                        | internal; pack competencies     | domain experience weighed alongside skills (a bank's "relationship manager" is a bank role); licences as must-haves when the pack says so; explanations cite the profile item                                                                                                                                                                                                                                                                                                                                                                                               |
+| **Screening (kits)**                         | internal; pack regulatory items | kit generation (`screening_kit`) adds the pack's regulatory questions, marked "regulatory", and drops anything on the lawful-question list; HR approves the kit as today                                                                                                                                                                                                                                                                                                                                                                                                    |
+| **Interview, Evaluation, Offer, Onboarding** | internal                        | interview rounds from hiring norms; background checks and document lists from policies (Onboarding: which documents, licence verification); never pay figures from the profile (offers keep using compensation details)                                                                                                                                                                                                                                                                                                                                                     |
+| **Voice agents**                             | **candidate only**              | the call brief (`src/server/voice/call-brief.server.ts`, scheduling brief) gains a short "About the organisation" from candidate-visible items; the charter (`src/server/voice/charter.ts`) gains one `may` rule — "What the organisation does, from its approved profile, in a sentence or two" — and the org's never-say list is added to `mustNot` in the brief; the existing rules stay (no staff names, no pay, no invented facts). One or two sentences at most, from approved candidate-visible items only. Questions beyond the profile still go to the hiring team |
 
 Every consuming agent whose instructions or tools change bumps its `version`
 and the lock is refreshed; the voice charter change is a charter version
@@ -449,14 +449,14 @@ shows a one-line notice with a link while no profile is approved.
 
 ## Milestones
 
-| Step | What | Done when |
-|---|---|---|
-| O0 | Migration; Organisation → Profile page (view, edit by hand, versions, diff); `org_profile` gate and approval card; pay / name validators; audit | an HR head approves a hand-written profile; tests pass for the validators and the gate |
-| O1 | Organisation context agent: manifest, tools, website read (`safeFetchText`), document read with OCR for scanned pages, extraction with quote check; organisation desk thread; AI features; evals | real-agent evals pass, including the planted-instruction page, a scanned policy, and pay / name refusals |
-| O2 | `orgContextFor`; Hiring desk, Requisition and JD agents consume it; soft gate and the hard-gate setting; monthly website re-read raising drafts; run records the version; health rules; manual and journey step | a JD for a non-tech role reads like the organisation's own; health shows a missing profile; a changed site raises a draft |
-| O3 | Domain packs (banking, healthcare provider, technology, generic) and overlays, with the reviewer flow; Intake and Screening kit consume them. Packs ship as **drafts** in each organisation until its named reviewer approves | a nursing role's kit carries the registration question; a bank role's scoring weighs domain experience; an unapproved pack is not read |
-| O4 | Voice briefs and charter change; Interview / Offer / Onboarding norms and policies | evals: the call says what the organisation does and keeps internal items out |
-| O5 | Pilot with one finance and one healthcare organisation, HR reviewing the first versions | — |
+| Step | What                                                                                                                                                                                                                          | Done when                                                                                                                              |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| O0   | Migration; Organisation → Profile page (view, edit by hand, versions, diff); `org_profile` gate and approval card; pay / name validators; audit                                                                               | an HR head approves a hand-written profile; tests pass for the validators and the gate                                                 |
+| O1   | Organisation context agent: manifest, tools, website read (`safeFetchText`), document read with OCR for scanned pages, extraction with quote check; organisation desk thread; AI features; evals                              | real-agent evals pass, including the planted-instruction page, a scanned policy, and pay / name refusals                               |
+| O2   | `orgContextFor`; Hiring desk, Requisition and JD agents consume it; soft gate and the hard-gate setting; monthly website re-read raising drafts; run records the version; health rules; manual and journey step               | a JD for a non-tech role reads like the organisation's own; health shows a missing profile; a changed site raises a draft              |
+| O3   | Domain packs (banking, healthcare provider, technology, generic) and overlays, with the reviewer flow; Intake and Screening kit consume them. Packs ship as **drafts** in each organisation until its named reviewer approves | a nursing role's kit carries the registration question; a bank role's scoring weighs domain experience; an unapproved pack is not read |
+| O4   | Voice briefs and charter change; Interview / Offer / Onboarding norms and policies                                                                                                                                            | evals: the call says what the organisation does and keeps internal items out                                                           |
+| O5   | Pilot with one finance and one healthcare organisation, HR reviewing the first versions                                                                                                                                       | —                                                                                                                                      |
 
 ## O0 — built (2026-10-27)
 
@@ -478,7 +478,7 @@ shows a one-line notice with a link while no profile is approved.
 - **The gate**: `GateKind` `org_profile`; the runtime's gate lookup states the
   changes and every candidate-visible line on the card, and the decision runs
   `decideVersionCore` as the person (desk card and Waiting for you both offer
-  *Send back for changes*). A decision on the Profile page closes a waiting agent
+  _Send back for changes_). A decision on the Profile page closes a waiting agent
   request. **Deferred to O1:** adding `org_profile` to the `request_approval`
   input schema (`src/server/agents/hitl.ts`) — that schema is part of every
   agent's manifest hash, so it would bump all 13 agents now for a subject no
