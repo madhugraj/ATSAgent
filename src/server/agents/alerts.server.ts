@@ -308,12 +308,41 @@ export async function dispatchAgentDigests(
         (a.severity === "critical" ? 0 : 1) - (b.severity === "critical" ? 0 : 1) ||
         a.firstSeenAt.getTime() - b.firstSeenAt.getTime(),
     );
+    const { AGENT_LABEL } = await import("@/lib/agents.catalog");
+    const short = (d: Date) => {
+      try {
+        return new Intl.DateTimeFormat("en-GB", {
+          timeZone: tz,
+          day: "numeric",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+          hourCycle: "h23",
+        }).format(d);
+      } catch {
+        return formatInOrgTZ(d, tz);
+      }
+    };
     const issueRows = issues.slice(0, 40).map((i) => ({
       severity: i.severity,
-      agent: i.agentType === "*" ? "Orchestrator" : i.agentType,
+      agent:
+        i.agentType === "*"
+          ? "Orchestrator"
+          : (AGENT_LABEL[i.agentType] ?? i.agentType.replace(/_/g, " ")),
       title: i.title.slice(0, 200),
-      since: formatInOrgTZ(i.firstSeenAt, tz),
+      since: short(i.firstSeenAt),
     }));
+    let dayLabel = day;
+    try {
+      dayLabel = new Intl.DateTimeFormat("en-GB", {
+        timeZone: tz,
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+      }).format(now);
+    } catch {
+      /* keep ISO day */
+    }
     const held = await db
       .select()
       .from(emailOutbox)
@@ -353,7 +382,7 @@ export async function dispatchAgentDigests(
       const parts = [
         mine.length ? `${mine.length} waiting for you` : "",
         rowsForMe.length
-          ? `${rowsForMe.length} agent issue${rowsForMe.length === 1 ? "" : "s"} open`
+          ? `${rowsForMe.length} agent issue${rowsForMe.length === 1 ? "" : "s"}`
           : "",
       ].filter(Boolean);
       await enqueueEmail({
@@ -365,10 +394,11 @@ export async function dispatchAgentDigests(
         templateData: {
           memberName: p.name ?? undefined,
           orgName: org?.name ?? undefined,
-          heading: `Today: ${parts.join(", ")}`,
+          heading: `Today at ${org?.name ?? "your organisation"}: ${parts.join(", ")}`,
+          dayLabel,
           issuesJson: JSON.stringify(rowsForMe),
           remindersJson: JSON.stringify(mine),
-          actionUrl: rowsForMe.length ? `${base}/agents/observability` : undefined,
+          actionUrl: rowsForMe.length ? `${base}/agents/observability` : `${base}/`,
         },
       });
     }

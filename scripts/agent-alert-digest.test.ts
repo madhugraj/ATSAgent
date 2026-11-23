@@ -118,7 +118,7 @@ describe("end-of-day digest", () => {
       "REQ-2 waits for approval",
     ]);
     expect(JSON.parse(sent!.templateData!["issuesJson"]!)).toEqual([]);
-    expect(sent!.templateData!["heading"]).toBe("Today: 2 waiting for you");
+    expect(sent!.templateData!["heading"]).toBe("Today at Digest Org: 2 waiting for you");
     expect((await mail("reminder:")).map((m) => m.status)).toEqual(["suppressed", "suppressed"]);
   });
 

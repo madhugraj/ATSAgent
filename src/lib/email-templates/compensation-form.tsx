@@ -1,7 +1,7 @@
 import * as React from "react";
 
 import type { TemplateEntry } from "./registry";
-import { EmailLayout, layoutStyles } from "./email-layout";
+import { EmailAction, EmailLayout, layoutStyles } from "./email-layout";
 
 interface Props {
   candidateName?: string;
@@ -33,11 +33,7 @@ const Email = ({
       you, please share your current and expected pay, your notice period and when you could join.
       It takes about two minutes.
     </p>
-    {formUrl ? (
-      <p style={text}>
-        Open the form here: <a href={formUrl}>{formUrl}</a>
-      </p>
-    ) : null}
+    {formUrl ? <EmailAction href={formUrl} label="Share pay and availability" /> : null}
     {dueDate ? <p style={text}>Please send it by {dueDate}.</p> : null}
     <p style={text}>
       Only the HR team sees your answers. The link is personal to you — please do not share it.

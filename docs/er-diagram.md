@@ -105,6 +105,9 @@ erDiagram
     text capture_token UK "nullable"
     text capture_token_hash UK "nullable"
     text distribution_token_hash UK "nullable"
+    text brand_logo_path "nullable"
+    text brand_logo_content_type "nullable"
+    text brand_color "nullable"
   }
   org_members {
     uuid id PK
@@ -1148,356 +1151,356 @@ erDiagram
 
 ## All foreign-key relationships
 
-| From (child) | Column | To (parent) | ON DELETE |
-|---|---|---|---|
-| `agent_cost_rates` | `org_id` | `organizations` | cascade |
-| `agent_cost_rates` | `updated_by` | `users` | no action |
-| `agent_events` | `actor_user_id` | `users` | no action |
-| `agent_events` | `org_id` | `organizations` | cascade |
-| `agent_issues` | `acknowledged_by` | `users` | no action |
-| `agent_issues` | `org_id` | `organizations` | cascade |
-| `agent_metrics_daily` | `org_id` | `organizations` | cascade |
-| `agent_policies` | `org_id` | `organizations` | cascade |
-| `agent_policies` | `updated_by` | `users` | no action |
-| `agent_runs` | `definition_id` | `agent_definitions` | no action |
-| `agent_runs` | `org_id` | `organizations` | cascade |
-| `agent_runs` | `principal_user_id` | `users` | cascade |
-| `agent_runs` | `trigger_event_id` | `agent_events` | no action |
-| `agent_steps` | `org_id` | `organizations` | cascade |
-| `agent_steps` | `run_id` | `agent_runs` | cascade |
-| `agent_tasks` | `assignee_user_id` | `users` | no action |
-| `agent_tasks` | `decided_by` | `users` | no action |
-| `agent_tasks` | `org_id` | `organizations` | cascade |
-| `agent_tasks` | `run_id` | `agent_runs` | cascade |
-| `agent_telemetry_settings` | `org_id` | `organizations` | cascade |
-| `agent_telemetry_settings` | `updated_by` | `users` | no action |
-| `ai_interviews` | `application_id` | `applications` | cascade |
-| `ai_interviews` | `org_id` | `organizations` | cascade |
-| `ai_provider_credentials` | `org_id` | `organizations` | cascade |
-| `ai_redteam_checks` | `org_id` | `organizations` | cascade |
-| `ai_redteam_checks` | `run_by` | `users` | no action |
-| `ai_settings` | `org_id` | `organizations` | cascade |
-| `ai_usage_events` | `org_id` | `organizations` | cascade |
-| `ai_usage_events` | `user_id` | `users` | no action |
-| `applications` | `candidate_id` | `candidates` | cascade |
-| `applications` | `org_id` | `organizations` | cascade |
-| `applications` | `requisition_id` | `requisitions` | cascade |
-| `assessment_settings` | `org_id` | `organizations` | cascade |
-| `assessment_settings` | `updated_by` | `users` | no action |
-| `board_sync_state` | `integration_id` | `source_integrations` | cascade |
-| `board_sync_state` | `org_id` | `organizations` | cascade |
-| `board_webhook_events` | `org_id` | `organizations` | no action |
-| `candidate_assessments` | `application_id` | `applications` | no action |
-| `candidate_assessments` | `candidate_id` | `candidates` | cascade |
-| `candidate_assessments` | `org_id` | `organizations` | cascade |
-| `candidate_assessments` | `requisition_id` | `requisitions` | no action |
-| `candidate_notes` | `candidate_id` | `candidates` | cascade |
-| `candidate_notes` | `org_id` | `organizations` | cascade |
-| `candidate_ownership_events` | `candidate_id` | `candidates` | cascade |
-| `candidate_ownership_events` | `org_id` | `organizations` | no action |
-| `candidate_referrals` | `candidate_id` | `candidates` | cascade |
-| `candidate_referrals` | `org_id` | `organizations` | no action |
-| `candidate_referrals` | `requisition_id` | `requisitions` | no action |
-| `candidate_verifications` | `candidate_id` | `candidates` | cascade |
-| `candidate_verifications` | `org_id` | `organizations` | cascade |
-| `candidates` | `org_id` | `organizations` | cascade |
-| `capture_events` | `candidate_id` | `candidates` | no action |
-| `capture_events` | `org_id` | `organizations` | cascade |
-| `capture_events` | `requisition_id` | `requisitions` | no action |
-| `comp_knowledge` | `org_id` | `organizations` | cascade |
-| `comp_knowledge` | `requisition_id` | `requisitions` | no action |
-| `compensation_details` | `application_id` | `applications` | cascade |
-| `compensation_details` | `candidate_id` | `candidates` | cascade |
-| `compensation_details` | `entered_by` | `users` | no action |
-| `compensation_details` | `org_id` | `organizations` | cascade |
-| `compensation_details` | `request_id` | `compensation_requests` | no action |
-| `compensation_requests` | `application_id` | `applications` | cascade |
-| `compensation_requests` | `candidate_id` | `candidates` | cascade |
-| `compensation_requests` | `org_id` | `organizations` | cascade |
-| `content_templates` | `org_id` | `organizations` | cascade |
-| `copilot_messages` | `org_id` | `organizations` | cascade |
-| `departments` | `org_id` | `organizations` | cascade |
-| `email_outbox` | `application_id` | `applications` | cascade |
-| `email_outbox` | `org_id` | `organizations` | cascade |
-| `email_settings` | `org_id` | `organizations` | cascade |
-| `evaluations` | `application_id` | `applications` | cascade |
-| `evaluations` | `interview_id` | `interviews` | no action |
-| `evaluations` | `org_id` | `organizations` | cascade |
-| `hiring_conversations` | `created_by` | `users` | cascade |
-| `hiring_conversations` | `deleted_by` | `users` | no action |
-| `hiring_conversations` | `org_id` | `organizations` | cascade |
-| `hiring_conversations` | `requisition_id` | `requisitions` | no action |
-| `hiring_conversations` | `reuse_jd_from` | `requisitions` | no action |
-| `hiring_messages` | `conversation_id` | `hiring_conversations` | cascade |
-| `hiring_messages` | `org_id` | `organizations` | cascade |
-| `hr_incentive_schemes` | `org_id` | `organizations` | cascade |
-| `hrms_employees` | `integration_id` | `source_integrations` | cascade |
-| `hrms_employees` | `org_id` | `organizations` | cascade |
-| `hrms_field_mappings` | `integration_id` | `source_integrations` | cascade |
-| `hrms_field_mappings` | `org_id` | `organizations` | cascade |
-| `hrms_sync_state` | `integration_id` | `source_integrations` | cascade |
-| `hrms_sync_state` | `org_id` | `organizations` | cascade |
-| `inbox_messages` | `org_id` | `organizations` | cascade |
-| `integration_credentials` | `integration_id` | `source_integrations` | cascade |
-| `integration_credentials` | `org_id` | `organizations` | cascade |
-| `interview_confirmations` | `interview_id` | `interviews` | cascade |
-| `interview_confirmations` | `offer_id` | `interview_slot_offers` | cascade |
-| `interview_confirmations` | `org_id` | `organizations` | cascade |
-| `interview_slot_offers` | `application_id` | `applications` | cascade |
-| `interview_slot_offers` | `interview_id` | `interviews` | no action |
-| `interview_slot_offers` | `org_id` | `organizations` | cascade |
-| `interview_transcripts` | `application_id` | `applications` | cascade |
-| `interview_transcripts` | `interview_id` | `interviews` | cascade |
-| `interview_transcripts` | `org_id` | `organizations` | cascade |
-| `interviews` | `application_id` | `applications` | cascade |
-| `interviews` | `org_id` | `organizations` | cascade |
-| `job_descriptions` | `org_id` | `organizations` | cascade |
-| `job_descriptions` | `requisition_id` | `requisitions` | cascade |
-| `job_index_notifications` | `org_id` | `organizations` | cascade |
-| `job_index_notifications` | `requisition_id` | `requisitions` | no action |
-| `master_items` | `org_id` | `organizations` | cascade |
-| `match_scores` | `application_id` | `applications` | cascade |
-| `match_scores` | `org_id` | `organizations` | cascade |
-| `member_interviewer_profiles` | `member_id` | `org_members` | cascade |
-| `member_interviewer_profiles` | `org_id` | `organizations` | cascade |
-| `member_interviewer_profiles` | `updated_by` | `users` | no action |
-| `notification_states` | `org_id` | `organizations` | cascade |
-| `notification_states` | `user_id` | `users` | cascade |
-| `offer_negotiations` | `application_id` | `applications` | cascade |
-| `offer_negotiations` | `candidate_id` | `candidates` | cascade |
-| `offer_negotiations` | `org_id` | `organizations` | cascade |
-| `offer_negotiations` | `run_id` | `agent_runs` | no action |
-| `offers` | `application_id` | `applications` | cascade |
-| `offers` | `org_id` | `organizations` | cascade |
-| `onboarding_documents` | `application_id` | `applications` | cascade |
-| `onboarding_documents` | `candidate_id` | `candidates` | cascade |
-| `onboarding_documents` | `offer_id` | `offers` | no action |
-| `onboarding_documents` | `org_id` | `organizations` | cascade |
-| `ontology_snapshots` | `org_id` | `organizations` | cascade |
-| `org_agreements` | `accepted_by` | `users` | no action |
-| `org_agreements` | `org_id` | `organizations` | cascade |
-| `org_context_sources` | `created_by` | `users` | no action |
-| `org_context_sources` | `deleted_by` | `users` | no action |
-| `org_context_sources` | `org_id` | `organizations` | cascade |
-| `org_job_distribution` | `org_id` | `organizations` | cascade |
-| `org_linkedin_connections` | `org_id` | `organizations` | cascade |
-| `org_members` | `org_id` | `organizations` | cascade |
-| `org_members` | `user_id` | `users` | cascade |
-| `org_pool_shares` | `owner_org` | `organizations` | cascade |
-| `org_pool_shares` | `partner_org` | `organizations` | cascade |
-| `org_profile_versions` | `agent_run_id` | `agent_runs` | no action |
-| `org_profile_versions` | `created_by` | `users` | no action |
-| `org_profile_versions` | `decided_by` | `users` | no action |
-| `org_profile_versions` | `org_id` | `organizations` | cascade |
-| `org_profile_versions` | `submitted_by` | `users` | no action |
-| `org_profile_versions` | `updated_by` | `users` | no action |
-| `org_profiles` | `current_version_id` | `org_profile_versions` | no action |
-| `org_profiles` | `org_id` | `organizations` | cascade |
-| `org_profiles` | `updated_by` | `users` | no action |
-| `org_profiles` | `website_confirmed_by` | `users` | no action |
-| `panel_agent_settings` | `org_id` | `organizations` | cascade |
-| `panel_agent_settings` | `updated_by` | `users` | no action |
-| `panel_assessments` | `agent_run_id` | `agent_runs` | no action |
-| `panel_assessments` | `application_id` | `applications` | cascade |
-| `panel_assessments` | `interview_id` | `interviews` | cascade |
-| `panel_assessments` | `org_id` | `organizations` | cascade |
-| `panel_assessments` | `reviewed_by` | `users` | no action |
-| `panelist_scorecard_links` | `interview_id` | `interviews` | cascade |
-| `panelist_scorecard_links` | `org_id` | `organizations` | cascade |
-| `panelist_scorecard_links` | `panelist_id` | `panelists` | cascade |
-| `panelists` | `added_by` | `users` | no action |
-| `panelists` | `approved_by` | `users` | no action |
-| `panelists` | `member_id` | `org_members` | cascade |
-| `panelists` | `org_id` | `organizations` | cascade |
-| `phone_screening_settings` | `org_id` | `organizations` | cascade |
-| `phone_screening_settings` | `updated_by` | `users` | no action |
-| `plan_change_proposals` | `interview_id` | `interviews` | no action |
-| `plan_change_proposals` | `org_id` | `organizations` | cascade |
-| `plan_change_proposals` | `requisition_id` | `requisitions` | cascade |
-| `requisition_board_postings` | `org_id` | `organizations` | cascade |
-| `requisition_board_postings` | `requisition_id` | `requisitions` | cascade |
-| `requisitions` | `created_by` | `users` | no action |
-| `requisitions` | `department_id` | `departments` | no action |
-| `requisitions` | `hiring_manager_member_id` | `org_members` | no action |
-| `requisitions` | `org_id` | `organizations` | cascade |
-| `role_panels` | `approved_by` | `users` | no action |
-| `role_panels` | `org_id` | `organizations` | cascade |
-| `role_panels` | `requisition_id` | `requisitions` | cascade |
-| `round_substitutes` | `application_id` | `applications` | cascade |
-| `round_substitutes` | `approved_by` | `users` | no action |
-| `round_substitutes` | `org_id` | `organizations` | cascade |
-| `round_substitutes` | `replace_member_id` | `org_members` | cascade |
-| `round_substitutes` | `replace_panelist_id` | `panelists` | cascade |
-| `round_substitutes` | `with_member_id` | `org_members` | cascade |
-| `round_substitutes` | `with_panelist_id` | `panelists` | cascade |
-| `salary_benchmarks` | `org_id` | `organizations` | cascade |
-| `salary_benchmarks` | `requisition_id` | `requisitions` | no action |
-| `scorecard_chases` | `interview_id` | `interviews` | cascade |
-| `scorecard_chases` | `org_id` | `organizations` | cascade |
-| `screening_calls` | `agent_run_id` | `agent_runs` | no action |
-| `screening_calls` | `application_id` | `applications` | no action |
-| `screening_calls` | `candidate_id` | `candidates` | cascade |
-| `screening_calls` | `kit_id` | `screening_kits` | no action |
-| `screening_calls` | `negotiation_id` | `offer_negotiations` | no action |
-| `screening_calls` | `org_id` | `organizations` | cascade |
-| `screening_calls` | `requested_by` | `users` | no action |
-| `screening_calls` | `requested_run_id` | `agent_runs` | no action |
-| `screening_calls` | `requisition_id` | `requisitions` | no action |
-| `screening_calls` | `screening_run_id` | `screening_runs` | no action |
-| `screening_calls` | `slot_offer_id` | `interview_slot_offers` | no action |
-| `screening_kits` | `application_id` | `applications` | no action |
-| `screening_kits` | `candidate_id` | `candidates` | cascade |
-| `screening_kits` | `org_id` | `organizations` | cascade |
-| `screening_kits` | `requisition_id` | `requisitions` | no action |
-| `screening_prep_jobs` | `application_id` | `applications` | cascade |
-| `screening_prep_jobs` | `candidate_id` | `candidates` | cascade |
-| `screening_prep_jobs` | `org_id` | `organizations` | cascade |
-| `screening_prep_jobs` | `requisition_id` | `requisitions` | cascade |
-| `screening_runs` | `application_id` | `applications` | no action |
-| `screening_runs` | `candidate_id` | `candidates` | cascade |
-| `screening_runs` | `kit_id` | `screening_kits` | cascade |
-| `screening_runs` | `org_id` | `organizations` | cascade |
-| `screening_runs` | `requisition_id` | `requisitions` | no action |
-| `sessions` | `user_id` | `users` | cascade |
-| `skill_edges` | `org_id` | `organizations` | cascade |
-| `skill_evidence` | `candidate_id` | `candidates` | cascade |
-| `skill_evidence` | `org_id` | `organizations` | cascade |
-| `skill_evidence` | `requisition_id` | `requisitions` | cascade |
-| `skill_nodes` | `org_id` | `organizations` | cascade |
-| `social_profiles` | `candidate_id` | `candidates` | cascade |
-| `social_profiles` | `org_id` | `organizations` | cascade |
-| `source_integrations` | `org_id` | `organizations` | cascade |
-| `stage_events` | `application_id` | `applications` | cascade |
-| `stage_events` | `org_id` | `organizations` | cascade |
-| `talent_request_suggestions` | `candidate_id` | `candidates` | cascade |
-| `talent_request_suggestions` | `org_id` | `organizations` | no action |
-| `talent_request_suggestions` | `request_id` | `talent_requests` | cascade |
-| `talent_requests` | `org_id` | `organizations` | no action |
-| `talent_requests` | `requisition_id` | `requisitions` | no action |
-| `training_feedback` | `actor_user_id` | `users` | no action |
-| `training_feedback` | `agent_run_id` | `agent_runs` | no action |
-| `training_feedback` | `agent_task_id` | `agent_tasks` | no action |
-| `training_feedback` | `application_id` | `applications` | no action |
-| `training_feedback` | `candidate_id` | `candidates` | cascade |
-| `training_feedback` | `inference_id` | `training_inferences` | cascade |
-| `training_feedback` | `org_id` | `organizations` | cascade |
-| `training_feedback` | `requisition_id` | `requisitions` | no action |
-| `training_inferences` | `agent_run_id` | `agent_runs` | no action |
-| `training_inferences` | `application_id` | `applications` | no action |
-| `training_inferences` | `candidate_id` | `candidates` | cascade |
-| `training_inferences` | `org_id` | `organizations` | cascade |
-| `training_inferences` | `requisition_id` | `requisitions` | no action |
-| `training_settings` | `consented_by` | `users` | no action |
-| `training_settings` | `org_id` | `organizations` | cascade |
-| `user_roles` | `org_id` | `organizations` | cascade |
-| `user_roles` | `user_id` | `users` | cascade |
+| From (child)                  | Column                     | To (parent)             | ON DELETE |
+| ----------------------------- | -------------------------- | ----------------------- | --------- |
+| `agent_cost_rates`            | `org_id`                   | `organizations`         | cascade   |
+| `agent_cost_rates`            | `updated_by`               | `users`                 | no action |
+| `agent_events`                | `actor_user_id`            | `users`                 | no action |
+| `agent_events`                | `org_id`                   | `organizations`         | cascade   |
+| `agent_issues`                | `acknowledged_by`          | `users`                 | no action |
+| `agent_issues`                | `org_id`                   | `organizations`         | cascade   |
+| `agent_metrics_daily`         | `org_id`                   | `organizations`         | cascade   |
+| `agent_policies`              | `org_id`                   | `organizations`         | cascade   |
+| `agent_policies`              | `updated_by`               | `users`                 | no action |
+| `agent_runs`                  | `definition_id`            | `agent_definitions`     | no action |
+| `agent_runs`                  | `org_id`                   | `organizations`         | cascade   |
+| `agent_runs`                  | `principal_user_id`        | `users`                 | cascade   |
+| `agent_runs`                  | `trigger_event_id`         | `agent_events`          | no action |
+| `agent_steps`                 | `org_id`                   | `organizations`         | cascade   |
+| `agent_steps`                 | `run_id`                   | `agent_runs`            | cascade   |
+| `agent_tasks`                 | `assignee_user_id`         | `users`                 | no action |
+| `agent_tasks`                 | `decided_by`               | `users`                 | no action |
+| `agent_tasks`                 | `org_id`                   | `organizations`         | cascade   |
+| `agent_tasks`                 | `run_id`                   | `agent_runs`            | cascade   |
+| `agent_telemetry_settings`    | `org_id`                   | `organizations`         | cascade   |
+| `agent_telemetry_settings`    | `updated_by`               | `users`                 | no action |
+| `ai_interviews`               | `application_id`           | `applications`          | cascade   |
+| `ai_interviews`               | `org_id`                   | `organizations`         | cascade   |
+| `ai_provider_credentials`     | `org_id`                   | `organizations`         | cascade   |
+| `ai_redteam_checks`           | `org_id`                   | `organizations`         | cascade   |
+| `ai_redteam_checks`           | `run_by`                   | `users`                 | no action |
+| `ai_settings`                 | `org_id`                   | `organizations`         | cascade   |
+| `ai_usage_events`             | `org_id`                   | `organizations`         | cascade   |
+| `ai_usage_events`             | `user_id`                  | `users`                 | no action |
+| `applications`                | `candidate_id`             | `candidates`            | cascade   |
+| `applications`                | `org_id`                   | `organizations`         | cascade   |
+| `applications`                | `requisition_id`           | `requisitions`          | cascade   |
+| `assessment_settings`         | `org_id`                   | `organizations`         | cascade   |
+| `assessment_settings`         | `updated_by`               | `users`                 | no action |
+| `board_sync_state`            | `integration_id`           | `source_integrations`   | cascade   |
+| `board_sync_state`            | `org_id`                   | `organizations`         | cascade   |
+| `board_webhook_events`        | `org_id`                   | `organizations`         | no action |
+| `candidate_assessments`       | `application_id`           | `applications`          | no action |
+| `candidate_assessments`       | `candidate_id`             | `candidates`            | cascade   |
+| `candidate_assessments`       | `org_id`                   | `organizations`         | cascade   |
+| `candidate_assessments`       | `requisition_id`           | `requisitions`          | no action |
+| `candidate_notes`             | `candidate_id`             | `candidates`            | cascade   |
+| `candidate_notes`             | `org_id`                   | `organizations`         | cascade   |
+| `candidate_ownership_events`  | `candidate_id`             | `candidates`            | cascade   |
+| `candidate_ownership_events`  | `org_id`                   | `organizations`         | no action |
+| `candidate_referrals`         | `candidate_id`             | `candidates`            | cascade   |
+| `candidate_referrals`         | `org_id`                   | `organizations`         | no action |
+| `candidate_referrals`         | `requisition_id`           | `requisitions`          | no action |
+| `candidate_verifications`     | `candidate_id`             | `candidates`            | cascade   |
+| `candidate_verifications`     | `org_id`                   | `organizations`         | cascade   |
+| `candidates`                  | `org_id`                   | `organizations`         | cascade   |
+| `capture_events`              | `candidate_id`             | `candidates`            | no action |
+| `capture_events`              | `org_id`                   | `organizations`         | cascade   |
+| `capture_events`              | `requisition_id`           | `requisitions`          | no action |
+| `comp_knowledge`              | `org_id`                   | `organizations`         | cascade   |
+| `comp_knowledge`              | `requisition_id`           | `requisitions`          | no action |
+| `compensation_details`        | `application_id`           | `applications`          | cascade   |
+| `compensation_details`        | `candidate_id`             | `candidates`            | cascade   |
+| `compensation_details`        | `entered_by`               | `users`                 | no action |
+| `compensation_details`        | `org_id`                   | `organizations`         | cascade   |
+| `compensation_details`        | `request_id`               | `compensation_requests` | no action |
+| `compensation_requests`       | `application_id`           | `applications`          | cascade   |
+| `compensation_requests`       | `candidate_id`             | `candidates`            | cascade   |
+| `compensation_requests`       | `org_id`                   | `organizations`         | cascade   |
+| `content_templates`           | `org_id`                   | `organizations`         | cascade   |
+| `copilot_messages`            | `org_id`                   | `organizations`         | cascade   |
+| `departments`                 | `org_id`                   | `organizations`         | cascade   |
+| `email_outbox`                | `application_id`           | `applications`          | cascade   |
+| `email_outbox`                | `org_id`                   | `organizations`         | cascade   |
+| `email_settings`              | `org_id`                   | `organizations`         | cascade   |
+| `evaluations`                 | `application_id`           | `applications`          | cascade   |
+| `evaluations`                 | `interview_id`             | `interviews`            | no action |
+| `evaluations`                 | `org_id`                   | `organizations`         | cascade   |
+| `hiring_conversations`        | `created_by`               | `users`                 | cascade   |
+| `hiring_conversations`        | `deleted_by`               | `users`                 | no action |
+| `hiring_conversations`        | `org_id`                   | `organizations`         | cascade   |
+| `hiring_conversations`        | `requisition_id`           | `requisitions`          | no action |
+| `hiring_conversations`        | `reuse_jd_from`            | `requisitions`          | no action |
+| `hiring_messages`             | `conversation_id`          | `hiring_conversations`  | cascade   |
+| `hiring_messages`             | `org_id`                   | `organizations`         | cascade   |
+| `hr_incentive_schemes`        | `org_id`                   | `organizations`         | cascade   |
+| `hrms_employees`              | `integration_id`           | `source_integrations`   | cascade   |
+| `hrms_employees`              | `org_id`                   | `organizations`         | cascade   |
+| `hrms_field_mappings`         | `integration_id`           | `source_integrations`   | cascade   |
+| `hrms_field_mappings`         | `org_id`                   | `organizations`         | cascade   |
+| `hrms_sync_state`             | `integration_id`           | `source_integrations`   | cascade   |
+| `hrms_sync_state`             | `org_id`                   | `organizations`         | cascade   |
+| `inbox_messages`              | `org_id`                   | `organizations`         | cascade   |
+| `integration_credentials`     | `integration_id`           | `source_integrations`   | cascade   |
+| `integration_credentials`     | `org_id`                   | `organizations`         | cascade   |
+| `interview_confirmations`     | `interview_id`             | `interviews`            | cascade   |
+| `interview_confirmations`     | `offer_id`                 | `interview_slot_offers` | cascade   |
+| `interview_confirmations`     | `org_id`                   | `organizations`         | cascade   |
+| `interview_slot_offers`       | `application_id`           | `applications`          | cascade   |
+| `interview_slot_offers`       | `interview_id`             | `interviews`            | no action |
+| `interview_slot_offers`       | `org_id`                   | `organizations`         | cascade   |
+| `interview_transcripts`       | `application_id`           | `applications`          | cascade   |
+| `interview_transcripts`       | `interview_id`             | `interviews`            | cascade   |
+| `interview_transcripts`       | `org_id`                   | `organizations`         | cascade   |
+| `interviews`                  | `application_id`           | `applications`          | cascade   |
+| `interviews`                  | `org_id`                   | `organizations`         | cascade   |
+| `job_descriptions`            | `org_id`                   | `organizations`         | cascade   |
+| `job_descriptions`            | `requisition_id`           | `requisitions`          | cascade   |
+| `job_index_notifications`     | `org_id`                   | `organizations`         | cascade   |
+| `job_index_notifications`     | `requisition_id`           | `requisitions`          | no action |
+| `master_items`                | `org_id`                   | `organizations`         | cascade   |
+| `match_scores`                | `application_id`           | `applications`          | cascade   |
+| `match_scores`                | `org_id`                   | `organizations`         | cascade   |
+| `member_interviewer_profiles` | `member_id`                | `org_members`           | cascade   |
+| `member_interviewer_profiles` | `org_id`                   | `organizations`         | cascade   |
+| `member_interviewer_profiles` | `updated_by`               | `users`                 | no action |
+| `notification_states`         | `org_id`                   | `organizations`         | cascade   |
+| `notification_states`         | `user_id`                  | `users`                 | cascade   |
+| `offer_negotiations`          | `application_id`           | `applications`          | cascade   |
+| `offer_negotiations`          | `candidate_id`             | `candidates`            | cascade   |
+| `offer_negotiations`          | `org_id`                   | `organizations`         | cascade   |
+| `offer_negotiations`          | `run_id`                   | `agent_runs`            | no action |
+| `offers`                      | `application_id`           | `applications`          | cascade   |
+| `offers`                      | `org_id`                   | `organizations`         | cascade   |
+| `onboarding_documents`        | `application_id`           | `applications`          | cascade   |
+| `onboarding_documents`        | `candidate_id`             | `candidates`            | cascade   |
+| `onboarding_documents`        | `offer_id`                 | `offers`                | no action |
+| `onboarding_documents`        | `org_id`                   | `organizations`         | cascade   |
+| `ontology_snapshots`          | `org_id`                   | `organizations`         | cascade   |
+| `org_agreements`              | `accepted_by`              | `users`                 | no action |
+| `org_agreements`              | `org_id`                   | `organizations`         | cascade   |
+| `org_context_sources`         | `created_by`               | `users`                 | no action |
+| `org_context_sources`         | `deleted_by`               | `users`                 | no action |
+| `org_context_sources`         | `org_id`                   | `organizations`         | cascade   |
+| `org_job_distribution`        | `org_id`                   | `organizations`         | cascade   |
+| `org_linkedin_connections`    | `org_id`                   | `organizations`         | cascade   |
+| `org_members`                 | `org_id`                   | `organizations`         | cascade   |
+| `org_members`                 | `user_id`                  | `users`                 | cascade   |
+| `org_pool_shares`             | `owner_org`                | `organizations`         | cascade   |
+| `org_pool_shares`             | `partner_org`              | `organizations`         | cascade   |
+| `org_profile_versions`        | `agent_run_id`             | `agent_runs`            | no action |
+| `org_profile_versions`        | `created_by`               | `users`                 | no action |
+| `org_profile_versions`        | `decided_by`               | `users`                 | no action |
+| `org_profile_versions`        | `org_id`                   | `organizations`         | cascade   |
+| `org_profile_versions`        | `submitted_by`             | `users`                 | no action |
+| `org_profile_versions`        | `updated_by`               | `users`                 | no action |
+| `org_profiles`                | `current_version_id`       | `org_profile_versions`  | no action |
+| `org_profiles`                | `org_id`                   | `organizations`         | cascade   |
+| `org_profiles`                | `updated_by`               | `users`                 | no action |
+| `org_profiles`                | `website_confirmed_by`     | `users`                 | no action |
+| `panel_agent_settings`        | `org_id`                   | `organizations`         | cascade   |
+| `panel_agent_settings`        | `updated_by`               | `users`                 | no action |
+| `panel_assessments`           | `agent_run_id`             | `agent_runs`            | no action |
+| `panel_assessments`           | `application_id`           | `applications`          | cascade   |
+| `panel_assessments`           | `interview_id`             | `interviews`            | cascade   |
+| `panel_assessments`           | `org_id`                   | `organizations`         | cascade   |
+| `panel_assessments`           | `reviewed_by`              | `users`                 | no action |
+| `panelist_scorecard_links`    | `interview_id`             | `interviews`            | cascade   |
+| `panelist_scorecard_links`    | `org_id`                   | `organizations`         | cascade   |
+| `panelist_scorecard_links`    | `panelist_id`              | `panelists`             | cascade   |
+| `panelists`                   | `added_by`                 | `users`                 | no action |
+| `panelists`                   | `approved_by`              | `users`                 | no action |
+| `panelists`                   | `member_id`                | `org_members`           | cascade   |
+| `panelists`                   | `org_id`                   | `organizations`         | cascade   |
+| `phone_screening_settings`    | `org_id`                   | `organizations`         | cascade   |
+| `phone_screening_settings`    | `updated_by`               | `users`                 | no action |
+| `plan_change_proposals`       | `interview_id`             | `interviews`            | no action |
+| `plan_change_proposals`       | `org_id`                   | `organizations`         | cascade   |
+| `plan_change_proposals`       | `requisition_id`           | `requisitions`          | cascade   |
+| `requisition_board_postings`  | `org_id`                   | `organizations`         | cascade   |
+| `requisition_board_postings`  | `requisition_id`           | `requisitions`          | cascade   |
+| `requisitions`                | `created_by`               | `users`                 | no action |
+| `requisitions`                | `department_id`            | `departments`           | no action |
+| `requisitions`                | `hiring_manager_member_id` | `org_members`           | no action |
+| `requisitions`                | `org_id`                   | `organizations`         | cascade   |
+| `role_panels`                 | `approved_by`              | `users`                 | no action |
+| `role_panels`                 | `org_id`                   | `organizations`         | cascade   |
+| `role_panels`                 | `requisition_id`           | `requisitions`          | cascade   |
+| `round_substitutes`           | `application_id`           | `applications`          | cascade   |
+| `round_substitutes`           | `approved_by`              | `users`                 | no action |
+| `round_substitutes`           | `org_id`                   | `organizations`         | cascade   |
+| `round_substitutes`           | `replace_member_id`        | `org_members`           | cascade   |
+| `round_substitutes`           | `replace_panelist_id`      | `panelists`             | cascade   |
+| `round_substitutes`           | `with_member_id`           | `org_members`           | cascade   |
+| `round_substitutes`           | `with_panelist_id`         | `panelists`             | cascade   |
+| `salary_benchmarks`           | `org_id`                   | `organizations`         | cascade   |
+| `salary_benchmarks`           | `requisition_id`           | `requisitions`          | no action |
+| `scorecard_chases`            | `interview_id`             | `interviews`            | cascade   |
+| `scorecard_chases`            | `org_id`                   | `organizations`         | cascade   |
+| `screening_calls`             | `agent_run_id`             | `agent_runs`            | no action |
+| `screening_calls`             | `application_id`           | `applications`          | no action |
+| `screening_calls`             | `candidate_id`             | `candidates`            | cascade   |
+| `screening_calls`             | `kit_id`                   | `screening_kits`        | no action |
+| `screening_calls`             | `negotiation_id`           | `offer_negotiations`    | no action |
+| `screening_calls`             | `org_id`                   | `organizations`         | cascade   |
+| `screening_calls`             | `requested_by`             | `users`                 | no action |
+| `screening_calls`             | `requested_run_id`         | `agent_runs`            | no action |
+| `screening_calls`             | `requisition_id`           | `requisitions`          | no action |
+| `screening_calls`             | `screening_run_id`         | `screening_runs`        | no action |
+| `screening_calls`             | `slot_offer_id`            | `interview_slot_offers` | no action |
+| `screening_kits`              | `application_id`           | `applications`          | no action |
+| `screening_kits`              | `candidate_id`             | `candidates`            | cascade   |
+| `screening_kits`              | `org_id`                   | `organizations`         | cascade   |
+| `screening_kits`              | `requisition_id`           | `requisitions`          | no action |
+| `screening_prep_jobs`         | `application_id`           | `applications`          | cascade   |
+| `screening_prep_jobs`         | `candidate_id`             | `candidates`            | cascade   |
+| `screening_prep_jobs`         | `org_id`                   | `organizations`         | cascade   |
+| `screening_prep_jobs`         | `requisition_id`           | `requisitions`          | cascade   |
+| `screening_runs`              | `application_id`           | `applications`          | no action |
+| `screening_runs`              | `candidate_id`             | `candidates`            | cascade   |
+| `screening_runs`              | `kit_id`                   | `screening_kits`        | cascade   |
+| `screening_runs`              | `org_id`                   | `organizations`         | cascade   |
+| `screening_runs`              | `requisition_id`           | `requisitions`          | no action |
+| `sessions`                    | `user_id`                  | `users`                 | cascade   |
+| `skill_edges`                 | `org_id`                   | `organizations`         | cascade   |
+| `skill_evidence`              | `candidate_id`             | `candidates`            | cascade   |
+| `skill_evidence`              | `org_id`                   | `organizations`         | cascade   |
+| `skill_evidence`              | `requisition_id`           | `requisitions`          | cascade   |
+| `skill_nodes`                 | `org_id`                   | `organizations`         | cascade   |
+| `social_profiles`             | `candidate_id`             | `candidates`            | cascade   |
+| `social_profiles`             | `org_id`                   | `organizations`         | cascade   |
+| `source_integrations`         | `org_id`                   | `organizations`         | cascade   |
+| `stage_events`                | `application_id`           | `applications`          | cascade   |
+| `stage_events`                | `org_id`                   | `organizations`         | cascade   |
+| `talent_request_suggestions`  | `candidate_id`             | `candidates`            | cascade   |
+| `talent_request_suggestions`  | `org_id`                   | `organizations`         | no action |
+| `talent_request_suggestions`  | `request_id`               | `talent_requests`       | cascade   |
+| `talent_requests`             | `org_id`                   | `organizations`         | no action |
+| `talent_requests`             | `requisition_id`           | `requisitions`          | no action |
+| `training_feedback`           | `actor_user_id`            | `users`                 | no action |
+| `training_feedback`           | `agent_run_id`             | `agent_runs`            | no action |
+| `training_feedback`           | `agent_task_id`            | `agent_tasks`           | no action |
+| `training_feedback`           | `application_id`           | `applications`          | no action |
+| `training_feedback`           | `candidate_id`             | `candidates`            | cascade   |
+| `training_feedback`           | `inference_id`             | `training_inferences`   | cascade   |
+| `training_feedback`           | `org_id`                   | `organizations`         | cascade   |
+| `training_feedback`           | `requisition_id`           | `requisitions`          | no action |
+| `training_inferences`         | `agent_run_id`             | `agent_runs`            | no action |
+| `training_inferences`         | `application_id`           | `applications`          | no action |
+| `training_inferences`         | `candidate_id`             | `candidates`            | cascade   |
+| `training_inferences`         | `org_id`                   | `organizations`         | cascade   |
+| `training_inferences`         | `requisition_id`           | `requisitions`          | no action |
+| `training_settings`           | `consented_by`             | `users`                 | no action |
+| `training_settings`           | `org_id`                   | `organizations`         | cascade   |
+| `user_roles`                  | `org_id`                   | `organizations`         | cascade   |
+| `user_roles`                  | `user_id`                  | `users`                 | cascade   |
 
 ## Table inventory
 
-| Table | Domain | Columns | Unique constraints |
-|---|---|---|---|
-| `agent_cost_rates` | — | 6 | — |
-| `agent_definitions` | — | 6 | (agentType+hash) |
-| `agent_events` | — | 12 | — |
-| `agent_issues` | — | 16 | — |
-| `agent_metrics_daily` | — | 17 | — |
-| `agent_policies` | — | 12 | (orgId+agentType) |
-| `agent_runs` | — | 34 | — |
-| `agent_runtime_heartbeat` | — | 4 | — |
-| `agent_steps` | — | 17 | (runId+seq) |
-| `agent_tasks` | — | 16 | — |
-| `agent_telemetry_settings` | — | 12 | — |
-| `ai_interviews` | Screening & interviews | 8 | — |
-| `ai_provider_credentials` | Communications & AI settings | 4 | (orgId+provider) |
-| `ai_redteam_checks` | — | 8 | — |
-| `ai_settings` | Communications & AI settings | 11 | (org_id) |
-| `ai_usage_events` | Communications & AI settings | 19 | — |
-| `applications` | Candidates & pipeline | 11 | (requisitionId+candidateId) |
-| `assessment_settings` | — | 8 | — |
-| `audit_log` | Identity & access | 10 | — |
-| `board_sync_state` | — | 11 | (integration_id) |
-| `board_webhook_events` | — | 15 | (dedupe_key) |
-| `candidate_assessments` | Candidates & pipeline | 23 | (token) |
-| `candidate_notes` | Candidates & pipeline | 8 | — |
-| `candidate_ownership_events` | Candidates & pipeline | 8 | — |
-| `candidate_referrals` | Candidates & pipeline | 11 | — |
-| `candidate_verifications` | Candidates & pipeline | 11 | — |
-| `candidates` | Candidates & pipeline | 43 | — |
-| `capture_events` | Sourcing & integrations | 10 | — |
-| `comp_knowledge` | Intelligence | 17 | — |
-| `compensation_details` | — | 19 | — |
-| `compensation_requests` | — | 12 | (token) |
-| `content_templates` | Requisitions & job content | 16 | — |
-| `copilot_messages` | Intelligence | 6 | — |
-| `departments` | Organisations & masters | 8 | (orgId+name) |
-| `email_outbox` | Communications & AI settings | 16 | (idempotency_key) |
-| `email_settings` | Communications & AI settings | 11 | (org_id) |
-| `evaluations` | Candidates & pipeline | 15 | — |
-| `hiring_conversations` | — | 15 | — |
-| `hiring_messages` | — | 8 | — |
-| `hr_incentive_schemes` | Offers & onboarding | 9 | — |
-| `hrms_employees` | — | 15 | (integrationId+externalId) |
-| `hrms_field_mappings` | — | 6 | (integration_id) |
-| `hrms_sync_state` | — | 12 | (integrationId+entity) |
-| `inbox_messages` | Sourcing & integrations | 16 | — |
-| `integration_credentials` | Sourcing & integrations | 4 | — |
-| `interview_confirmations` | — | 17 | (token) |
-| `interview_slot_offers` | — | 23 | (token) |
-| `interview_transcripts` | — | 8 | (interview_id) |
-| `interviews` | Screening & interviews | 25 | — |
-| `job_descriptions` | Requisitions & job content | 17 | — |
-| `job_index_notifications` | — | 10 | — |
-| `master_items` | Organisations & masters | 8 | — |
-| `match_scores` | Candidates & pipeline | 27 | — |
-| `member_interviewer_profiles` | — | 9 | (member_id) |
-| `notification_states` | — | 7 | — |
-| `offer_negotiations` | — | 24 | — |
-| `offers` | Offers & onboarding | 14 | — |
-| `onboarding_documents` | Offers & onboarding | 23 | — |
-| `ontology_snapshots` | Intelligence | 11 | — |
-| `org_agreements` | Organisations & masters | 10 | — |
-| `org_context_sources` | Organisations & masters | 17 | — |
-| `org_job_distribution` | — | 7 | — |
-| `org_linkedin_connections` | Organisations & masters | 11 | — |
-| `org_members` | Organisations & masters | 12 | (orgId+email) |
-| `org_pool_shares` | Organisations & masters | 10 | (ownerOrg+partnerOrg) |
-| `org_profile_versions` | Organisations & masters | 16 | (orgId+version) |
-| `org_profiles` | Organisations & masters | 12 | — |
-| `organizations` | Organisations & masters | 28 | (slug), (capture_token), (capture_token_hash), (distribution_token_hash) |
-| `panel_agent_settings` | — | 5 | — |
-| `panel_assessments` | — | 23 | (interview_id) |
-| `panelist_scorecard_links` | — | 8 | (interviewId+panelistId), (token_hash) |
-| `panelists` | — | 18 | — |
-| `phone_screening_settings` | Screening & interviews | 16 | — |
-| `plan_change_proposals` | — | 16 | — |
-| `platform_admins` | Identity & access | 6 | (email) |
-| `product_catalogue_commercials` | Organisations & masters | 8 | — |
-| `rate_limit_hits` | — | 3 | — |
-| `requisition_board_postings` | — | 16 | (requisitionId+provider) |
-| `requisitions` | Requisitions & job content | 44 | (orgId+code) |
-| `role_panels` | — | 9 | (requisitionId+level) |
-| `round_substitutes` | — | 11 | — |
-| `salary_benchmarks` | Intelligence | 15 | — |
-| `scorecard_chases` | — | 7 | (interviewId+email) |
-| `screening_calls` | Screening & interviews | 34 | — |
-| `screening_kits` | Screening & interviews | 11 | — |
-| `screening_prep_jobs` | Screening & interviews | 10 | (application_id) |
-| `screening_runs` | Screening & interviews | 23 | — |
-| `service_request_minutes` | — | 7 | — |
-| `sessions` | Identity & access | 9 | (token_hash) |
-| `skill_edges` | Intelligence | 8 | — |
-| `skill_evidence` | Intelligence | 9 | — |
-| `skill_nodes` | Intelligence | 15 | (orgId+slug) |
-| `slo_alerts` | — | 10 | — |
-| `social_profiles` | Candidates & pipeline | 13 | (candidateId+provider) |
-| `source_integrations` | Sourcing & integrations | 17 | (orgId+provider) |
-| `stage_events` | Candidates & pipeline | 9 | — |
-| `talent_request_suggestions` | Candidates & pipeline | 8 | (requestId+candidateId) |
-| `talent_requests` | Candidates & pipeline | 10 | — |
-| `training_eval_results` | — | 13 | — |
-| `training_feedback` | — | 17 | — |
-| `training_inferences` | — | 22 | — |
-| `training_settings` | — | 6 | — |
-| `user_roles` | Identity & access | 4 | — |
-| `users` | Identity & access | 8 | (email) |
-| `voice_worker_heartbeat` | — | 4 | — |
+| Table                           | Domain                       | Columns | Unique constraints                                                       |
+| ------------------------------- | ---------------------------- | ------- | ------------------------------------------------------------------------ |
+| `agent_cost_rates`              | —                            | 6       | —                                                                        |
+| `agent_definitions`             | —                            | 6       | (agentType+hash)                                                         |
+| `agent_events`                  | —                            | 12      | —                                                                        |
+| `agent_issues`                  | —                            | 16      | —                                                                        |
+| `agent_metrics_daily`           | —                            | 17      | —                                                                        |
+| `agent_policies`                | —                            | 12      | (orgId+agentType)                                                        |
+| `agent_runs`                    | —                            | 34      | —                                                                        |
+| `agent_runtime_heartbeat`       | —                            | 4       | —                                                                        |
+| `agent_steps`                   | —                            | 17      | (runId+seq)                                                              |
+| `agent_tasks`                   | —                            | 16      | —                                                                        |
+| `agent_telemetry_settings`      | —                            | 12      | —                                                                        |
+| `ai_interviews`                 | Screening & interviews       | 8       | —                                                                        |
+| `ai_provider_credentials`       | Communications & AI settings | 4       | (orgId+provider)                                                         |
+| `ai_redteam_checks`             | —                            | 8       | —                                                                        |
+| `ai_settings`                   | Communications & AI settings | 11      | (org_id)                                                                 |
+| `ai_usage_events`               | Communications & AI settings | 19      | —                                                                        |
+| `applications`                  | Candidates & pipeline        | 11      | (requisitionId+candidateId)                                              |
+| `assessment_settings`           | —                            | 8       | —                                                                        |
+| `audit_log`                     | Identity & access            | 10      | —                                                                        |
+| `board_sync_state`              | —                            | 11      | (integration_id)                                                         |
+| `board_webhook_events`          | —                            | 15      | (dedupe_key)                                                             |
+| `candidate_assessments`         | Candidates & pipeline        | 23      | (token)                                                                  |
+| `candidate_notes`               | Candidates & pipeline        | 8       | —                                                                        |
+| `candidate_ownership_events`    | Candidates & pipeline        | 8       | —                                                                        |
+| `candidate_referrals`           | Candidates & pipeline        | 11      | —                                                                        |
+| `candidate_verifications`       | Candidates & pipeline        | 11      | —                                                                        |
+| `candidates`                    | Candidates & pipeline        | 43      | —                                                                        |
+| `capture_events`                | Sourcing & integrations      | 10      | —                                                                        |
+| `comp_knowledge`                | Intelligence                 | 17      | —                                                                        |
+| `compensation_details`          | —                            | 19      | —                                                                        |
+| `compensation_requests`         | —                            | 12      | (token)                                                                  |
+| `content_templates`             | Requisitions & job content   | 16      | —                                                                        |
+| `copilot_messages`              | Intelligence                 | 6       | —                                                                        |
+| `departments`                   | Organisations & masters      | 8       | (orgId+name)                                                             |
+| `email_outbox`                  | Communications & AI settings | 16      | (idempotency_key)                                                        |
+| `email_settings`                | Communications & AI settings | 11      | (org_id)                                                                 |
+| `evaluations`                   | Candidates & pipeline        | 15      | —                                                                        |
+| `hiring_conversations`          | —                            | 15      | —                                                                        |
+| `hiring_messages`               | —                            | 8       | —                                                                        |
+| `hr_incentive_schemes`          | Offers & onboarding          | 9       | —                                                                        |
+| `hrms_employees`                | —                            | 15      | (integrationId+externalId)                                               |
+| `hrms_field_mappings`           | —                            | 6       | (integration_id)                                                         |
+| `hrms_sync_state`               | —                            | 12      | (integrationId+entity)                                                   |
+| `inbox_messages`                | Sourcing & integrations      | 16      | —                                                                        |
+| `integration_credentials`       | Sourcing & integrations      | 4       | —                                                                        |
+| `interview_confirmations`       | —                            | 17      | (token)                                                                  |
+| `interview_slot_offers`         | —                            | 23      | (token)                                                                  |
+| `interview_transcripts`         | —                            | 8       | (interview_id)                                                           |
+| `interviews`                    | Screening & interviews       | 25      | —                                                                        |
+| `job_descriptions`              | Requisitions & job content   | 17      | —                                                                        |
+| `job_index_notifications`       | —                            | 10      | —                                                                        |
+| `master_items`                  | Organisations & masters      | 8       | —                                                                        |
+| `match_scores`                  | Candidates & pipeline        | 27      | —                                                                        |
+| `member_interviewer_profiles`   | —                            | 9       | (member_id)                                                              |
+| `notification_states`           | —                            | 7       | —                                                                        |
+| `offer_negotiations`            | —                            | 24      | —                                                                        |
+| `offers`                        | Offers & onboarding          | 14      | —                                                                        |
+| `onboarding_documents`          | Offers & onboarding          | 23      | —                                                                        |
+| `ontology_snapshots`            | Intelligence                 | 11      | —                                                                        |
+| `org_agreements`                | Organisations & masters      | 10      | —                                                                        |
+| `org_context_sources`           | Organisations & masters      | 17      | —                                                                        |
+| `org_job_distribution`          | —                            | 7       | —                                                                        |
+| `org_linkedin_connections`      | Organisations & masters      | 11      | —                                                                        |
+| `org_members`                   | Organisations & masters      | 12      | (orgId+email)                                                            |
+| `org_pool_shares`               | Organisations & masters      | 10      | (ownerOrg+partnerOrg)                                                    |
+| `org_profile_versions`          | Organisations & masters      | 16      | (orgId+version)                                                          |
+| `org_profiles`                  | Organisations & masters      | 12      | —                                                                        |
+| `organizations`                 | Organisations & masters      | 31      | (slug), (capture_token), (capture_token_hash), (distribution_token_hash) |
+| `panel_agent_settings`          | —                            | 5       | —                                                                        |
+| `panel_assessments`             | —                            | 23      | (interview_id)                                                           |
+| `panelist_scorecard_links`      | —                            | 8       | (interviewId+panelistId), (token_hash)                                   |
+| `panelists`                     | —                            | 18      | —                                                                        |
+| `phone_screening_settings`      | Screening & interviews       | 16      | —                                                                        |
+| `plan_change_proposals`         | —                            | 16      | —                                                                        |
+| `platform_admins`               | Identity & access            | 6       | (email)                                                                  |
+| `product_catalogue_commercials` | Organisations & masters      | 8       | —                                                                        |
+| `rate_limit_hits`               | —                            | 3       | —                                                                        |
+| `requisition_board_postings`    | —                            | 16      | (requisitionId+provider)                                                 |
+| `requisitions`                  | Requisitions & job content   | 44      | (orgId+code)                                                             |
+| `role_panels`                   | —                            | 9       | (requisitionId+level)                                                    |
+| `round_substitutes`             | —                            | 11      | —                                                                        |
+| `salary_benchmarks`             | Intelligence                 | 15      | —                                                                        |
+| `scorecard_chases`              | —                            | 7       | (interviewId+email)                                                      |
+| `screening_calls`               | Screening & interviews       | 34      | —                                                                        |
+| `screening_kits`                | Screening & interviews       | 11      | —                                                                        |
+| `screening_prep_jobs`           | Screening & interviews       | 10      | (application_id)                                                         |
+| `screening_runs`                | Screening & interviews       | 23      | —                                                                        |
+| `service_request_minutes`       | —                            | 7       | —                                                                        |
+| `sessions`                      | Identity & access            | 9       | (token_hash)                                                             |
+| `skill_edges`                   | Intelligence                 | 8       | —                                                                        |
+| `skill_evidence`                | Intelligence                 | 9       | —                                                                        |
+| `skill_nodes`                   | Intelligence                 | 15      | (orgId+slug)                                                             |
+| `slo_alerts`                    | —                            | 10      | —                                                                        |
+| `social_profiles`               | Candidates & pipeline        | 13      | (candidateId+provider)                                                   |
+| `source_integrations`           | Sourcing & integrations      | 17      | (orgId+provider)                                                         |
+| `stage_events`                  | Candidates & pipeline        | 9       | —                                                                        |
+| `talent_request_suggestions`    | Candidates & pipeline        | 8       | (requestId+candidateId)                                                  |
+| `talent_requests`               | Candidates & pipeline        | 10      | —                                                                        |
+| `training_eval_results`         | —                            | 13      | —                                                                        |
+| `training_feedback`             | —                            | 17      | —                                                                        |
+| `training_inferences`           | —                            | 22      | —                                                                        |
+| `training_settings`             | —                            | 6       | —                                                                        |
+| `user_roles`                    | Identity & access            | 4       | —                                                                        |
+| `users`                         | Identity & access            | 8       | (email)                                                                  |
+| `voice_worker_heartbeat`        | —                            | 4       | —                                                                        |
