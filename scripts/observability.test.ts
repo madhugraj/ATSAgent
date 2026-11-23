@@ -28,9 +28,11 @@ function nodeAbortError(): Error {
   e.stack = "Error: aborted\n    at abortIncoming (node:_http_server:912:17)";
   return e;
 }
+let serverEntryCalls = 0;
 mock.module("@tanstack/react-start/server-entry", () => ({
   default: {
     fetch: async (request: Request) => {
+      serverEntryCalls += 1;
       const path = new URL(request.url).pathname;
       if (path === "/_serverFn/gone") {
         console.error("Server Fn Error!", nodeAbortError());
@@ -48,6 +50,12 @@ mock.module("@tanstack/react-start/server-entry", () => ({
     },
   },
 }));
+
+// Guard against a stale mock path: after files move, the mock would silently
+// stop applying and the suite would exercise the real server entry.
+afterAll(() => {
+  expect(serverEntryCalls).toBeGreaterThan(0);
+});
 
 /** Capture stdout/stderr JSON lines written while `fn` runs. */
 async function captureLogs(

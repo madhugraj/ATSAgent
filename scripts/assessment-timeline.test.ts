@@ -15,19 +15,28 @@ import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from "b
 import { and, eq } from "drizzle-orm";
 
 // The AI question writer is the only stub: everything else runs for real.
+let generateQuestionsCalls = 0;
 mock.module("../src/lib/assessment.server.ts", () => ({
-  generateQuestions: async () => [
-    {
-      id: "q1",
-      dimension: "ownership",
-      prompt: "Tell us about a product you owned.",
-      looks_like: "x",
-    },
-  ],
+  generateQuestions: async () => {
+    generateQuestionsCalls += 1;
+    return [
+      {
+        id: "q1",
+        dimension: "ownership",
+        prompt: "Tell us about a product you owned.",
+        looks_like: "x",
+      },
+    ];
+  },
   scoreAnswers: async () => {
     throw new Error("not used");
   },
 }));
+// Guard against a stale mock path: after files move, the mock would silently
+// stop applying and the suite would hit the real provider.
+afterAll(() => {
+  expect(generateQuestionsCalls).toBeGreaterThan(0);
+});
 
 const { db } = await import("../src/server/db");
 const {

@@ -10,7 +10,7 @@ import { z } from "zod";
 import type { AgentMessage, AgentToolSpec, AiConfig } from "../src/lib/ai-gateway.server";
 
 const ledger: { feature: string; status: string; totalTokens?: number | null }[] = [];
-mock.module("../src/server/db", () => ({ db: {} }));
+mock.module("../src/server/db", () => ({ db: { __dbMockMarker: true } }));
 mock.module("../src/server/ai-usage", () => ({
   recordAiUsage: async (row: { feature: string; status: string; totalTokens?: number | null }) => {
     ledger.push(row);
@@ -97,6 +97,21 @@ describe("toolParameters", () => {
     expect(p["$schema"]).toBeUndefined();
     expect(p["type"]).toBe("object");
     expect(p["required"]).toEqual(["id"]);
+  });
+});
+
+describe("mocks are live", () => {
+  // A stale mock path would silently leave the real (db-backed) modules in
+  // place, so assert the gateway still sees the mocked ones.
+  test("the db mock is what ai-gateway resolves", async () => {
+    const { db } = await import("../src/server/db");
+    expect(db).toHaveProperty("__dbMockMarker", true);
+  });
+
+  test("the ai-usage mock records every ledger row the gateway writes", async () => {
+    expect(ledger.length).toBe(0);
+    await run("openai");
+    expect(ledger.length).toBeGreaterThan(0);
   });
 });
 

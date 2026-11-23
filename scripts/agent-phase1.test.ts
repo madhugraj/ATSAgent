@@ -46,18 +46,27 @@ const JD = {
   full_text: "# Platform SRE\nRun the platform.",
 };
 
+let gatewayCalls = 0;
 const realGateway = await import("../src/lib/ai-gateway.server");
 mock.module("../src/lib/ai-gateway.server", () => ({
   ...realGateway,
   aiAgentStep: async (opts: { messages: { role: string; content?: string }[] }) => {
+    gatewayCalls += 1;
     const next = script.shift() ?? say("(script exhausted)");
     return typeof next === "function" ? next(opts.messages) : next;
   },
-  aiJson: async (opts: { feature: string }) =>
-    opts.feature === "jd_generate"
+  aiJson: async (opts: { feature: string }) => {
+    gatewayCalls += 1;
+    return opts.feature === "jd_generate"
       ? { ok: true, data: JD, model: "m", provider: "openai", usage: null }
-      : { ok: false, status: 500, message: `unexpected aiJson ${opts.feature}` },
+      : { ok: false, status: 500, message: `unexpected aiJson ${opts.feature}` };
+  },
 }));
+// Guard against a stale mock path: after files move, the mock would silently
+// stop applying and the suite would hit the real provider.
+afterAll(() => {
+  expect(gatewayCalls).toBeGreaterThan(0);
+});
 
 const { db } = await import("../src/server/db");
 const {

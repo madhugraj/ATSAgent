@@ -70,11 +70,16 @@ function panelAgentModel(messages: Msg[]): AgentStepResult {
 /** The agent's own view of each candidate (the case's certain input). */
 const VIEW: Record<string, { rating: number; verdict: "select" | "hold" | "reject" }> = {};
 
+let gatewayCalls = 0;
 const realGateway = await import("../src/lib/ai-gateway.server");
 mock.module("../src/lib/ai-gateway.server", () => ({
   ...realGateway,
-  aiAgentStep: async (opts: { messages: Msg[] }) => panelAgentModel(opts.messages),
+  aiAgentStep: async (opts: { messages: Msg[] }) => {
+    gatewayCalls += 1;
+    return panelAgentModel(opts.messages);
+  },
   aiJson: async (opts: { feature: string; prompt: string }) => {
+    gatewayCalls += 1;
     if (opts.feature === "panel_assess") {
       const name = /Candidate: (.+)/.exec(opts.prompt)?.[1]?.trim() ?? "";
       const v = VIEW[name] ?? { rating: 3, verdict: "hold" };
@@ -124,6 +129,12 @@ mock.module("../src/lib/ai-gateway.server", () => ({
     return { ok: false, status: 500, message: `no fixture for ${opts.feature}` };
   },
 }));
+
+// Guard against a stale mock path: after files move, the mock would silently
+// stop applying and the suite would hit the real provider.
+afterAll(() => {
+  expect(gatewayCalls).toBeGreaterThan(0);
+});
 
 const { db } = await import("../src/server/db");
 const s = await import("../drizzle/schema");
