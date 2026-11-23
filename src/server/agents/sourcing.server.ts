@@ -374,6 +374,28 @@ export async function starvingRoles(
             and r.subject_id = ${requisitions.id} and r.mode = 'live'
             and (r.status in ('queued','running','awaiting_human') or r.created_at >= now() - make_interval(hours => ${SOURCING.cooldownHours}))
         )`,
+        // Nothing to search again: after the last sourcing run, no one joined the
+        // pool, no one moved in another role's pipeline (past candidates) and the
+        // JD was not revised — the same people would be ranked the same way.
+        sql`not exists (
+          select 1 from agent_runs last where last.id = (
+            select r.id from agent_runs r where r.org_id = ${orgId} and r.agent_type = 'sourcing'
+              and r.subject_id = ${requisitions.id} and r.mode = 'live' and r.status = 'done'
+            order by r.created_at desc limit 1
+          )
+          and not exists (
+            select 1 from candidates c where c.org_id = ${orgId} and c.pool_use = 'pool'
+              and c.created_at > last.created_at
+          )
+          and not exists (
+            select 1 from applications a where a.org_id = ${orgId}
+              and a.requisition_id <> ${requisitions.id} and a.last_activity_at > last.created_at
+          )
+          and not exists (
+            select 1 from job_descriptions j where j.requisition_id = ${requisitions.id}
+              and j.created_at > last.created_at
+          )
+        )`,
       ),
     )
     .limit(10);
