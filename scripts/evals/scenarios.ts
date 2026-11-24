@@ -635,6 +635,63 @@ export function scenarios(): ScriptedScenario[] {
         say("JD v1 approved."),
       ],
     },
+    (() => {
+      const OWN_JD = [
+        "# Platform SRE",
+        "",
+        "We run the payments platform that settles every merchant transaction overnight.",
+        "",
+        "## What you will do",
+        "- Keep our Kubernetes clusters healthy and our on-call humane.",
+        "- Own the Terraform for three AWS regions.",
+        "",
+        "## What you will bring",
+        "- 5+ years running production Kubernetes; Terraform; Go or Python.",
+        "- Nice to have: PCI-DSS experience.",
+      ].join("\n");
+      return {
+        name: "jd: files the person's own JD word for word and routes it to the department head",
+        agentType: "jd",
+        autonomy: "act_and_notify",
+        setup: async ({ orgId, userId }) => ({
+          requisitionId: await seedRequisition(orgId, userId, "approved"),
+        }),
+        goal: (d) =>
+          `Use my own JD for the approved requisition — don't rewrite it.\n\nRequisition id: ${d["requisitionId"]}`,
+        decide: () => ({ status: "approved" }),
+        expect: {
+          status: "done",
+          calls: ["get_requisition", "import_jd_version", "request_approval"],
+          neverCalls: ["submit_jd_version"],
+          gateRole: "department_head",
+          verify: async ({ seeded }) => {
+            const { db } = await import("../../src/server/db");
+            const { jobDescriptions } = await import("../../drizzle/schema");
+            const { eq } = await import("drizzle-orm");
+            const [jd] = await db
+              .select({ fullText: jobDescriptions.fullText })
+              .from(jobDescriptions)
+              .where(eq(jobDescriptions.requisitionId, seeded["requisitionId"]!))
+              .limit(1);
+            if (!jd) return "no JD version was filed";
+            return jd.fullText === OWN_JD ? null : "the filed JD is not the person's text verbatim";
+          },
+        },
+        script: [
+          (m: Msg[]) => call("r", "get_requisition", { requisitionId: idFromGoal(m) }),
+          (m: Msg[]) =>
+            call("j", "import_jd_version", { requisitionId: idFromGoal(m), jdText: OWN_JD }),
+          (m: Msg[]) =>
+            call("g", "request_approval", {
+              title: "Approve the JD",
+              summary: "Your own JD, filed as v1.",
+              assignee_role: "department_head",
+              subject: { type: "jd", id: lastTool(m)["jdId"] },
+            }),
+          say("Filed your JD as v1; the department head approved."),
+        ],
+      } satisfies Scenario;
+    })(),
     {
       name: "publishing: posts internally and puts the external post up for review",
       agentType: "publishing",
