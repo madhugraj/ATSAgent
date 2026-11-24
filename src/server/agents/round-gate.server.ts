@@ -70,6 +70,8 @@ async function factsOf(orgId: string, applicationId: string): Promise<Facts | nu
 export async function extraRoundBlocked(
   orgId: string,
   applicationId: string,
+  /** Deciding the card itself: it is the open request, so it does not block. */
+  opts: { deciding?: boolean } = {},
 ): Promise<string | null> {
   const f = await factsOf(orgId, applicationId);
   if (!f) return "Application not found.";
@@ -81,6 +83,7 @@ export async function extraRoundBlocked(
     return `The role's final round (L${p.finalLevel}) is not complete yet — another round is added only after it.`;
   if (f.stage !== `l${p.finalLevel}`)
     return `The candidate is no longer at L${p.finalLevel} (now ${f.stage}); another round does not apply.`;
+  if (opts.deciding) return null;
   const [waiting] = await db
     .select({ id: agentTasks.id })
     .from(agentTasks)
@@ -151,7 +154,7 @@ export async function performRoundGate(
   decision: { status: string; args?: unknown; comment?: string | undefined },
 ): Promise<void> {
   if (decision.status !== "approved") return;
-  const blocked = await extraRoundBlocked(orgId, subject.applicationId);
+  const blocked = await extraRoundBlocked(orgId, subject.applicationId, { deciding: true });
   if (blocked) throw new Error(blocked);
   const f = (await factsOf(orgId, subject.applicationId))!;
   const { planFor, savePlan } = await import("@/lib/interview-plan.server");
