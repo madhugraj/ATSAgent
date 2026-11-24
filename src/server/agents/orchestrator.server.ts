@@ -31,8 +31,14 @@ import { loadPolicy } from "./policy";
 import { getAgent } from "./registry";
 import { startRun, syncGateTasks } from "./runtime.server";
 import { activeRunFor } from "./tools";
+import { DEFERRED_DISPATCH } from "./events";
 
 const MAX_ATTEMPTS = 3;
+/** Work held for a busy agent is dropped (logged) after this long. */
+const DEFERRED_MAX_DAYS = 7;
+
+/** The agent is still busy on this candidate: try the deferred work next tick. */
+class StillBusy extends Error {}
 
 export type OrchestratorCounts = {
   processed: number;
@@ -76,6 +82,14 @@ export async function processAgentEvents(
         .where(eq(agentEvents.id, e.id));
       counts.processed++;
     } catch (err) {
+      if (err instanceof StillBusy) {
+        // Not a failure: the work waits for the agent's current run.
+        await db
+          .update(agentEvents)
+          .set({ status: "pending", updatedAt: new Date() })
+          .where(eq(agentEvents.id, e.id));
+        continue;
+      }
       counts.failed++;
       const attempts = e.attempts + 1;
       log.error("agent.orchestrator.event_failed", {
@@ -222,7 +236,29 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
       await notifyAgentOff(e.orgId, req.id, agent);
       return;
     }
-    if (await activeRunFor(e.orgId, agent, subject.id)) return;
+    if (await activeRunFor(e.orgId, agent, subject.id)) {
+      // Per-candidate work for an agent already busy on that candidate (often
+      // waiting on a person for something else) is held, not dropped, and
+      // starts once that run is done. Role-level work is covered by the run.
+      if (subject.type === "application" && e.type !== DEFERRED_DISPATCH) {
+        const { emitAgentEvent } = await import("./events");
+        await emitAgentEvent({
+          orgId: e.orgId,
+          type: DEFERRED_DISPATCH,
+          subjectType: "application",
+          subjectId: subject.id,
+          actorUserId: e.actorUserId,
+          payload: { agent, goal, requisitionId: req.id, after: e.type },
+        });
+        log.info("agent.orchestrator.dispatch_deferred", {
+          org_id: e.orgId,
+          agent,
+          type: e.type,
+        });
+      }
+      if (e.type === DEFERRED_DISPATCH) throw new StillBusy();
+      return;
+    }
     await startRun({
       orgId: e.orgId,
       agentType: agent,
@@ -234,6 +270,20 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
     });
     started++;
   };
+
+  if (e.type === DEFERRED_DISPATCH) {
+    const p = e.payload as { agent?: string; goal?: string };
+    if (Date.now() - e.createdAt.getTime() > DEFERRED_MAX_DAYS * 864e5) {
+      log.warn("agent.orchestrator.deferred_expired", { org_id: e.orgId, agent: p.agent ?? "" });
+      return { started, synced };
+    }
+    if (p.agent && p.goal)
+      await dispatch(p.agent as Parameters<typeof dispatch>[0], p.goal, {
+        type: "application",
+        id: e.subjectId,
+      });
+    return { started, synced };
+  }
 
   const latestJd = async () =>
     (
