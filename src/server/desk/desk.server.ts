@@ -1708,7 +1708,10 @@ export async function onTaskOpened(
                       : (task.proposedAction as { args?: { subject?: { type?: string } } } | null)
                             ?.args?.subject?.type === "panel_review"
                         ? "The panel and the round's panel agent see this candidate differently — both views are below; the decision is yours."
-                        : "This needs a decision."
+                        : (task.proposedAction as { args?: { subject?: { type?: string } } } | null)
+                              ?.args?.subject?.type === "round_addition"
+                          ? "Another interview round, drafted from the earlier rounds' feedback — edit it and approve, or decline."
+                          : "This needs a decision."
           : revision
             ? `Revised as you asked ("${revision.reason}")${
                 revision.changes.length
@@ -1736,6 +1739,7 @@ export async function onTaskOpened(
                 level?: number;
                 memberIds?: string[];
                 needed?: string;
+                round?: { name: string; focus: string; competencies: string[] };
               };
             };
           } | null
@@ -1749,6 +1753,7 @@ export async function onTaskOpened(
             level: subj.level,
             memberIds: subj.memberIds,
           };
+        if (subj.type === "round_addition") return { subjectType: subj.type, round: subj.round };
         if (subj.type === "new_panelist")
           return { subjectType: subj.type, level: subj.level, needed: subj.needed };
         return subj.type === "screening_decision"

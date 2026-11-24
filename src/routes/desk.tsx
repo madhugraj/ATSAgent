@@ -58,6 +58,7 @@ import { OrgProfileNotice } from "@/components/OrgProfileNotice";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
@@ -2431,6 +2432,8 @@ function TaskCard({
   const panel = kind === "gate" && card["subjectType"] === "panel_approval";
   // Someone new for the panel directory: HR types them in and approves in one step.
   const newPanelist = kind === "gate" && card["subjectType"] === "new_panelist";
+  // Another interview round the agent drafted: the hiring manager edits it, then approves.
+  const extraRound = kind === "gate" && card["subjectType"] === "round_addition";
   const [changing, setChanging] = useState(false);
   const status = conv.tasks[taskId] ?? "open";
   // One decision at a time: a role-level request waits while a newer open
@@ -2692,6 +2695,13 @@ function TaskCard({
               </Button>
             </div>
           </div>
+        ) : changing && extraRound ? (
+          <ExtraRoundEdit
+            proposed={card["round"] as ExtraRoundDraft}
+            busy={busy}
+            onSave={(round) => decide({ status: "approved", args: { round } })}
+            onBack={() => setChanging(false)}
+          />
         ) : changing ? (
           <PanelChange
             requisitionId={String(card["requisitionId"])}
@@ -2710,22 +2720,24 @@ function TaskCard({
             >
               {panel
                 ? "Approve this panel"
-                : review
-                  ? "Approve — go with the panel"
-                  : screening
-                    ? proceed
-                      ? "Approve — move to interview (L1)"
-                      : "Approve — put on hold"
-                    : "Approve"}
+                : extraRound
+                  ? "Approve — add this round"
+                  : review
+                    ? "Approve — go with the panel"
+                    : screening
+                      ? proceed
+                        ? "Approve — move to interview (L1)"
+                        : "Approve — put on hold"
+                      : "Approve"}
             </Button>
-            {panel ? (
+            {panel || extraRound ? (
               <Button
                 size="sm"
                 variant="outline"
                 disabled={busy || locked}
                 onClick={() => setChanging(true)}
               >
-                Change the people
+                {extraRound ? "Edit the round" : "Change the people"}
               </Button>
             ) : null}
             {screening ? (
@@ -4309,6 +4321,63 @@ function RescoreCard({
         {busy ? <Loader2 className="size-4 animate-spin" /> : null}
         Re-score {String(card["count"])} against version {String(card["version"])}
       </Button>
+    </div>
+  );
+}
+
+type ExtraRoundDraft = { name: string; focus: string; competencies: string[] };
+
+/** The drafted round, edited in place before the hiring manager approves it. */
+function ExtraRoundEdit({
+  proposed,
+  busy,
+  onSave,
+  onBack,
+}: {
+  proposed: ExtraRoundDraft;
+  busy: boolean;
+  onSave: (round: ExtraRoundDraft) => void;
+  onBack: () => void;
+}) {
+  const [name, setName] = useState(proposed.name);
+  const [focus, setFocus] = useState(proposed.focus);
+  const [rates, setRates] = useState(proposed.competencies.join("\n"));
+  const competencies = rates
+    .split(/\n|,/)
+    .map((c) => c.trim())
+    .filter((c) => c.length >= 2);
+  const ok = name.trim().length >= 2 && competencies.length >= 1 && competencies.length <= 8;
+  return (
+    <div className="mt-2 grid gap-2 text-xs">
+      <label className="grid gap-1">
+        <span className="text-muted-foreground">Round name</span>
+        <Input value={name} maxLength={60} onChange={(e) => setName(e.target.value)} />
+      </label>
+      <label className="grid gap-1">
+        <span className="text-muted-foreground">Focus</span>
+        <Textarea
+          value={focus}
+          maxLength={300}
+          rows={2}
+          onChange={(e) => setFocus(e.target.value)}
+        />
+      </label>
+      <label className="grid gap-1">
+        <span className="text-muted-foreground">Rated on</span>
+        <Textarea value={rates} rows={4} onChange={(e) => setRates(e.target.value)} />
+      </label>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          disabled={busy || !ok}
+          onClick={() => onSave({ name: name.trim(), focus: focus.trim(), competencies })}
+        >
+          Approve — add this round
+        </Button>
+        <Button size="sm" variant="ghost" disabled={busy} onClick={onBack}>
+          Back
+        </Button>
+      </div>
     </div>
   );
 }
