@@ -38,6 +38,20 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { eq, inArray } from "drizzle-orm";
 
+// CI runs the suites with only DATABASE_URL and SESSION_SECRET. These secrets
+// only need to EXIST for the OAuth-state and credential tests: throwaway
+// 32-byte values, real environment values always win. Fail-closed on a
+// MISSING state secret is tested explicitly below. SECRET_ENCRYPTION_KEY must
+// be set before any encryptSecret/decryptSecret call (crypto.ts caches it).
+process.env.OAUTH_STATE_SECRET ??= `test-oauth-${"x".repeat(40)}`;
+process.env.LINKEDIN_STATE_SECRET ??= `test-linkedin-${"x".repeat(40)}`;
+process.env.SECRET_ENCRYPTION_KEY ??= Buffer.from("x".repeat(32)).toString("base64");
+// The meetings OAuth provider map is built from the env snapshot at module
+// load; the finishProviderConnect tests exercise the google pair with the
+// token exchange stubbed via globalThis.fetch, so placeholder values suffice.
+process.env.GOOGLE_OAUTH_CLIENT_ID ??= `test-google-client-${"x".repeat(20)}`;
+process.env.GOOGLE_OAUTH_CLIENT_SECRET ??= `test-google-secret-${"x".repeat(20)}`;
+
 const { db } = await import("../src/server/db");
 const {
   applications,
@@ -256,6 +270,25 @@ describe("oauth-state (moves to @ats/auth with zero tests today)", () => {
     }
   });
 
+  test("a MISSING secret fails closed on sign and verify (CI runs without these set)", () => {
+    const savedId = env.OAUTH_STATE_SECRET;
+    const savedLinkedin = env.LINKEDIN_STATE_SECRET;
+    env.OAUTH_STATE_SECRET = undefined as unknown as string;
+    env.LINKEDIN_STATE_SECRET = undefined as unknown as string;
+    try {
+      expect(() => oauthState.signOAuthState(payload())).toThrow(/not configured/);
+      expect(oauthState.verifyOAuthState("any.body")).toBeNull();
+      // The LinkedIn clone shares the same fail-closed shape.
+      expect(() => linkedin.signState({ orgId: orgA, userId: "u", ts: Date.now() })).toThrow(
+        /not configured/,
+      );
+      expect(linkedin.verifyState("any.body")).toBeNull();
+    } finally {
+      env.OAUTH_STATE_SECRET = savedId;
+      env.LINKEDIN_STATE_SECRET = savedLinkedin;
+    }
+  });
+
   test("assertAllowedOrigin accepts the public site and the two localhost ports, strips a trailing slash, refuses anything else", () => {
     const site = env.PUBLIC_SITE_URL.replace(/\/$/, "");
     expect(oauthState.assertAllowedOrigin(`${site}/`)).toBe(site);
@@ -296,6 +329,7 @@ describe("linkedin.server signState/verifyState (the LinkedIn clone)", () => {
     const savedId = env.OAUTH_STATE_SECRET;
     const savedLinkedin = env.LINKEDIN_STATE_SECRET;
     env.OAUTH_STATE_SECRET = "too-short";
+    env.LINKEDIN_STATE_SECRET = "too-short";
     try {
       expect(() => linkedin.signState(payload())).toThrow(/not configured/);
       expect(linkedin.verifyState("a.0".repeat(16))).toBeNull();
