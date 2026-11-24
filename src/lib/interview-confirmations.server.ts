@@ -335,7 +335,7 @@ export async function rowByToken(token: string) {
   return r ?? null;
 }
 
-async function contextOf(r: typeof interviewConfirmations.$inferSelect) {
+export async function contextOf(r: typeof interviewConfirmations.$inferSelect) {
   if (r.interviewId) {
     const [i] = await db
       .select({

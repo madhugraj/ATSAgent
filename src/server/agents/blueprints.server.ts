@@ -108,6 +108,8 @@ const IDENTITY_BOUND_AGENTS = new Set<string>([
   "screening_call",
   "scheduling_call",
   "negotiation_call",
+  "confirmation_call",
+  "panel_check_call",
 ]);
 
 /**
