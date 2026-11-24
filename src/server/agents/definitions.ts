@@ -1145,12 +1145,16 @@ export function registerPhase3Agents(): void {
     // 1.2.3: merged with zod 4 (tool contracts) and the shared harness changes; no behaviour change.
     // 1.2.4: the request_approval subject gained the organisation profile; no behaviour change for this agent.
     // 1.3.0: a hiring decision waits while a round's panel agent disagrees with the panel and the HR head has not reviewed it; it is asked for once the HR head goes with the panel, naming the dissent.
-    version: "1.3.0",
+    // 1.4.0: when the hiring manager declines a decision because they want another round,
+    // drafts it from the earlier rounds' feedback (propose_extra_round) for them to edit
+    // and approve; approving adds it to the role's plan and moves the candidate into it.
+    version: "1.4.0",
     owner: "hiring_manager",
     responsibility:
-      "After interview rounds, writes the debrief across all evidence, surfaces disagreements and fairness signals, and asks the hiring manager for the hiring decision.",
+      "After interview rounds, writes the debrief across all evidence, surfaces disagreements and fairness signals, asks the hiring manager for the hiring decision, and drafts another round when they want one.",
     mustNever: [
       "Make the hiring decision — it recommends, the hiring manager decides",
+      "Add an interview round itself — it drafts one, the hiring manager approves it",
       "Base a recommendation on anything but job-relevant evidence in the scorecards, screening and assessment",
     ],
     scope: {
@@ -1161,12 +1165,18 @@ export function registerPhase3Agents(): void {
       writes: ["candidate notes (debrief)"],
       external: [],
     },
-    gates: ["hiring_decision", "general"],
+    gates: ["hiring_decision", "round_addition", "general"],
     riskTier: "high",
     evals: ["evaluation: debriefs and asks the hiring manager to decide"],
     feature: "agent_evaluation",
     maxSteps: 14,
-    tools: ["get_candidate_dossier", "selection_parity", "add_candidate_note", "list_applications"],
+    tools: [
+      "get_candidate_dossier",
+      "selection_parity",
+      "add_candidate_note",
+      "list_applications",
+      "propose_extra_round",
+    ],
     system: [
       "You are the evaluation agent. You turn interview evidence into a clear debrief and a recommendation; the hiring manager decides.",
       "1. get_candidate_dossier for the candidate named in the goal.",
@@ -1174,6 +1184,7 @@ export function registerPhase3Agents(): void {
       "3. selection_parity; if any source breaches four-fifths, say so in the debrief as a pipeline-level signal (never as a reason about this candidate).",
       "4. Ask for the hiring decision only when it is due: when finalComplete is true (recommendation select, hold or reject), or when the round just completed has the verdict hold or reject (recommendation hold or reject). Then request_approval with subject {type: 'hiring_decision', applicationId, recommendation, rationale} addressed to hiring_manager; the rationale must rest on job-relevant evidence only, rated against the role's rubric.",
       "5. Otherwise (an earlier round completed with select), do NOT request a decision: the next round is being arranged. Finish with the debrief.",
+      "6. If the hiring decision is declined because the hiring manager wants another interview round, propose_extra_round for that candidate: a short name, a one-line focus and the competencies to rate, drawn from the gaps, low ratings and open questions in the earlier rounds' scorecards and the manager's reason — never a requirement the role does not have. Once it is approved, finish with the debrief; the next round is being arranged.",
       "Finish with the recommendation (or 'debrief only — next round L<n>') and the person who decides.",
     ].join("\n"),
   });
