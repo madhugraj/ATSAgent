@@ -494,6 +494,12 @@ describe("uniqueInboxSlug (org-setup.server)", () => {
     // Real callers pass the (already lowercased) owner email domain.
     expect(await setup.uniqueInboxSlug(`acme${stamp}.co.in`, "Acme Systems")).toBe(`acme${stamp}`);
     expect(await setup.uniqueInboxSlug(`acme-team${stamp}.test`, "X")).toBe(`acme-team${stamp}`);
+    // Issue #92: an upper-case first label must lowercase, not turn into a
+    // leading dash via the [^a-z0-9-] replace.
+    expect(await setup.uniqueInboxSlug(`Acme${stamp}.co.in`, "Acme Systems")).toBe(`acme${stamp}`);
+    expect(await setup.uniqueInboxSlug(`MixedCase-Team${stamp}.test`, "X")).toBe(
+      `mixedcase-team${stamp}`,
+    );
   });
 
   test("falls back to the org name when the domain gives nothing", async () => {
