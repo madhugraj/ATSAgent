@@ -45,7 +45,12 @@ const scenarios: Scenario[] = [
     industry: "Healthcare diagnostics",
     input: {
       title: "Medical Lab Technician",
-      mustHave: ["sample collection", "haematology analysers", "biochemistry", "NABL documentation"],
+      mustHave: [
+        "sample collection",
+        "haematology analysers",
+        "biochemistry",
+        "NABL documentation",
+      ],
       goodToHave: ["LIMS", "phlebotomy"],
       education: "DMLT or B.Sc MLT, state paramedical registration",
       experienceMin: 2,
@@ -139,7 +144,12 @@ for (const s of run) {
   try {
     const a = await suggestWeightsCore(org!.id, s.input, { config: { provider, model, apiKey } });
     const total =
-      a.skills + a.experience + a.career + a.impact + a.education + a.social +
+      a.skills +
+      a.experience +
+      a.career +
+      a.impact +
+      a.education +
+      a.social +
       a.customDimensions.reduce((t, d) => t + d.weight, 0);
     const failures = [...(total === 100 ? [] : [`total ${total} ≠ 100`]), ...s.expect(a)];
     if (failures.length) failed++;

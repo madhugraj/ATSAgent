@@ -24,7 +24,13 @@ import {
   YAxis,
 } from "recharts";
 
-import { PageHeader } from "@/components/ats";
+import {
+  PageHeader,
+  StatCard,
+  StatusPill as SharedStatusPill,
+  PILL_TONE_CLASS,
+  type PillTone,
+} from "@/components/ats";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -88,27 +94,21 @@ export const Route = createFileRoute("/agents/observability")({
 type Status = "good" | "warning" | "serious" | "critical" | "idle";
 
 /** Reserved status colours, always paired with an icon and a label. */
-const STATUS: Record<Status, { color: string; label: string; Icon: typeof CheckCircle2 }> = {
-  good: { color: "#0ca30c", label: "Healthy", Icon: CheckCircle2 },
-  warning: { color: "#fab219", label: "Warning", Icon: AlertTriangle },
-  serious: { color: "#ec835a", label: "Serious", Icon: AlertOctagon },
-  critical: { color: "#d03b3b", label: "Critical", Icon: OctagonX },
-  idle: { color: "currentColor", label: "No activity", Icon: CircleDashed },
+const STATUS: Record<
+  Status,
+  { color: string; tone: PillTone; label: string; Icon: typeof CheckCircle2 }
+> = {
+  good: { color: "#0ca30c", tone: "good", label: "Healthy", Icon: CheckCircle2 },
+  warning: { color: "#fab219", tone: "warn", label: "Warning", Icon: AlertTriangle },
+  serious: { color: "#ec835a", tone: "serious", label: "Serious", Icon: AlertOctagon },
+  critical: { color: "#d03b3b", tone: "bad", label: "Critical", Icon: OctagonX },
+  idle: { color: "currentColor", tone: "neutral", label: "No activity", Icon: CircleDashed },
 };
 const RANK: Record<Status, number> = { idle: 0, good: 1, warning: 2, serious: 3, critical: 4 };
 
 function StatusPill({ status, label }: { status: Status; label?: string | undefined }) {
   const s = STATUS[status];
-  return (
-    <span className="inline-flex items-center gap-1 text-xs font-medium text-foreground">
-      <s.Icon
-        className={`size-3.5 ${status === "idle" ? "text-muted-foreground" : ""}`}
-        style={status === "idle" ? undefined : { color: s.color }}
-        aria-hidden
-      />
-      {label ?? s.label}
-    </span>
-  );
+  return <SharedStatusPill icon={s.Icon} tone={s.tone} label={label ?? s.label} />;
 }
 
 function worst(issues: IssueView[], element: string, fallback: Status): Status {
@@ -393,37 +393,47 @@ function KpiRow({ d, scope }: { d: ObservabilityView; scope: string }) {
         {scope} · last 7 days <span className="font-normal normal-case">(sparklines: 14 days)</span>
       </p>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        <Tile
+        <StatCard
           label="Runs"
           value={t.runs7d.toLocaleString()}
-          spark={tr.map((x) => x.completed + x.failed + x.inProgress + x.stopped)}
+          footer={
+            <Sparkline values={tr.map((x) => x.completed + x.failed + x.inProgress + x.stopped)} />
+          }
         />
-        <Tile
+        <StatCard
           label="Success rate"
           value={t.successRate == null ? "—" : `${Math.round(t.successRate * 100)}%`}
           hint="Finished runs that completed"
-          spark={tr
-            .filter((x) => x.completed + x.failed)
-            .map((x) => (x.completed / (x.completed + x.failed)) * 100)}
+          footer={
+            <Sparkline
+              values={tr
+                .filter((x) => x.completed + x.failed)
+                .map((x) => (x.completed / (x.completed + x.failed)) * 100)}
+            />
+          }
         />
-        <Tile
+        <StatCard
           label="Tokens"
           value={compact(t.tokens7d)}
           hint="Incl. AI inside tools"
-          spark={tr.map((x) => x.tokens)}
+          footer={<Sparkline values={tr.map((x) => x.tokens)} />}
         />
-        <Tile
+        <StatCard
           label="Waiting on people"
           value={String(t.openRequests)}
           hint={`${t.overdueRequests} past the ${d.slaHours} h SLA`}
-          spark={tr.map((x) => x.hitlOpened)}
+          footer={<Sparkline values={tr.map((x) => x.hitlOpened)} />}
         />
-        <Tile
+        <StatCard
           label="Median wait for a person"
           value={mins(t.medianWaitMinutes)}
-          spark={tr.flatMap((x) => (x.medianWaitHours == null ? [] : [x.medianWaitHours]))}
+          footer={
+            <Sparkline
+              values={tr.flatMap((x) => (x.medianWaitHours == null ? [] : [x.medianWaitHours]))}
+            />
+          }
         />
-        <Tile
+        <StatCard
           label="Open issues"
           value={String(t.issues.critical + t.issues.serious + t.issues.warning)}
         >
@@ -432,7 +442,7 @@ function KpiRow({ d, scope }: { d: ObservabilityView; scope: string }) {
             <StatusPill status="serious" label={`${t.issues.serious} serious`} />
             <StatusPill status="warning" label={`${t.issues.warning} warning`} />
           </div>
-        </Tile>
+        </StatCard>
       </div>
     </section>
   );
@@ -1038,13 +1048,7 @@ function AgentCard({
 
 function ElementDot({ status }: { status: Status }) {
   const s = STATUS[status];
-  return (
-    <s.Icon
-      className={`size-3.5 shrink-0 ${status === "idle" ? "text-muted-foreground" : ""}`}
-      style={status === "idle" ? undefined : { color: s.color }}
-      aria-label={s.label}
-    />
-  );
+  return <s.Icon className={`size-3.5 shrink-0 ${PILL_TONE_CLASS[s.tone]}`} aria-label={s.label} />;
 }
 
 /* ------------------------------------------------------------- issues */

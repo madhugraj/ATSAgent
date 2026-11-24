@@ -576,7 +576,10 @@ export function applyNegotiationTool(
           error: "Not recorded: ask whether the figure works for them and wait for their answer.",
         };
       const ctc = which === "improved" ? figures.stepCtc! : figures.proposalCtc;
-      if (!clearYes(heard ?? their_words) || namesOtherFigure(heard ?? their_words, ctc, figures.currency))
+      if (
+        !clearYes(heard ?? their_words) ||
+        namesOtherFigure(heard ?? their_words, ctc, figures.currency)
+      )
         return {
           ok: false,
           error:

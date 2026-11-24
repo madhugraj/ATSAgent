@@ -44,7 +44,7 @@ export function ConfirmLine({
       : null;
   return (
     <span
-      className={`flex flex-wrap items-center gap-1 text-[11px] ${declined.length || c.candidate === "declined" ? "text-destructive" : "text-muted-foreground"}`}
+      className={`flex flex-wrap items-center gap-1 text-[0.6875rem] ${declined.length || c.candidate === "declined" ? "text-destructive" : "text-muted-foreground"}`}
       title={c.panel.map((p) => `${p.name ?? p.email}: ${WORD[p.state]}`).join("\n")}
     >
       {panelText}

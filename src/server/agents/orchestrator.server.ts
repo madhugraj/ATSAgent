@@ -1083,6 +1083,13 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
   } catch (err) {
     log.warn("interview.answer_call_request_failed", { error: err as Error });
   }
+  // Booked rounds coming up: the candidate and the panel are reminded ~24 h and ~1 h before.
+  try {
+    const { sweepInterviewReminders } = await import("@/lib/interview-reminders.server");
+    await sweepInterviewReminders(opts.orgId);
+  } catch (err) {
+    log.warn("interview.reminder_sweep_failed", { error: err as Error });
+  }
   // The panel's answer window: a reminder, then a default so a silent panelist
   // never holds the candidate up past the hiring SLA.
   try {

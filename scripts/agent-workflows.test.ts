@@ -16,12 +16,20 @@ import type { WorkflowGraph, WorkflowNode } from "../drizzle/schema";
 
 const script: AgentStepResult[] = [];
 const usage = { promptTokens: 10, completionTokens: 5, totalTokens: 15 };
+let aiAgentStepCalls = 0;
 const realGateway = await import("../src/lib/ai-gateway.server");
 mock.module("../src/lib/ai-gateway.server", () => ({
   ...realGateway,
-  aiAgentStep: async () =>
-    script.shift() ?? { ok: true, text: "Done.", toolCalls: [], stopReason: "end", usage },
+  aiAgentStep: async () => {
+    aiAgentStepCalls += 1;
+    return script.shift() ?? { ok: true, text: "Done.", toolCalls: [], stopReason: "end", usage };
+  },
 }));
+// Guard against a stale mock path: after files move, the mock would silently
+// stop applying and the suite would hit the real provider.
+afterAll(() => {
+  expect(aiAgentStepCalls).toBeGreaterThan(0);
+});
 
 const w = await import("../src/server/agents/workflows.server");
 

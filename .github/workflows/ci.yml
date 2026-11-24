@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:14  # same major as production (Cloud SQL POSTGRES_14)
+        image: postgres:14 # same major as production (Cloud SQL POSTGRES_14)
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -40,6 +40,8 @@ jobs:
         run: bun run typecheck
       - name: Lint
         run: bun run lint
+      - name: Format check
+        run: bunx prettier --check .
       - name: Dependency audit (high+ blocks)
         run: bun audit --audit-level=high
         continue-on-error: false
@@ -50,137 +52,22 @@ jobs:
       - name: Apply database schema
         run: bun scripts/migrate-pg.mjs
 
-      - name: Unit tests (agent gateway)
-        run: bun test scripts/agent-gateway.test.ts
+      # One bun process per file: bun's mock.module is process-global, so a
+      # combined `bun test scripts/` run would leak one file's mocks into
+      # every later file (empty agent registry, fake db).
+      - name: Tests (every scripts/*.test.ts, one bun process per file)
+        # Collect every failing file instead of stopping at the first, so one
+        # CI run shows the full failure set.
+        run: |
+          fails=""
+          for f in scripts/*.test.ts; do bun test "$f" || fails="$fails $f"; done
+          if [ -n "$fails" ]; then echo "failed test files:$fails"; exit 1; fi
 
-      - name: Prompt-injection guardrails (fence, tripwire, taint, scorer schema, echo, probes)
-        run: bun test scripts/guardrails.test.ts
+      - name: Build (web, voice worker, parser worker)
+        run: bun run build
 
-      - name: Hidden text in CVs (PDF and Word)
-        run: bun test scripts/hidden-text.test.ts
-
-      - name: Spend caps and public-apply flagging
-        run: bun test scripts/guardrails-p1.test.ts
-
-      - name: Model safety check (red-team probes)
-        run: bun test scripts/redteam-check.test.ts
-
-      - name: Shared rate limit, step-up re-auth, parser sandbox
-        run: bun test scripts/rate-limit.test.ts scripts/step-up.test.ts scripts/parser-sandbox.test.ts
-
-      - name: Integration tests
-        run: bun test scripts/integration.verify.test.ts
-
-      - name: Agent runtime tests
-        run: bun test scripts/agent-runtime.test.ts
-
-      - name: Agent eval scenarios (scripted model) and gate guard
-        run: bun test scripts/agent-eval.test.ts
-
-      - name: Phase 1 agents (requisition, JD, publishing, orchestrator)
-        run: bun test scripts/agent-phase1.test.ts
-
-      - name: Phase 2 agents (intake, screening, follow-up)
-        run: bun test scripts/agent-phase2.test.ts
-
-      - name: Phase 3 agents (interview coordinator, evaluation, hiring decision)
-        run: bun test scripts/agent-phase3.test.ts
-
-      - name: Phase 4 agents (offer, pre-onboarding, release)
-        run: bun test scripts/agent-phase4.test.ts
-
-      - name: Agent-to-agent handoffs (every edge, each agent switched off, manual completion)
-        run: bun test scripts/agent-handoff.test.ts
-
-      - name: Agent governance (change control, traceability, budget, audit)
-        run: bun test scripts/agent-governance.test.ts
-
-      - name: Agent health engine (rules, issues, heartbeat)
-        run: bun test scripts/agent-health.test.ts
-
-      - name: Agents Phase 5 (replay, autonomy recommendations, alerts, trace export)
-        run: bun test scripts/agent-phase5.test.ts
-
-      - name: Observability (request correlation, metrics, SLOs, burn alerts)
-        run: bun test scripts/observability.test.ts
-
-      - name: Agents Phase 6a (hiring desk)
-        run: bun test scripts/agent-phase6a.test.ts
-
-      - name: Agent utilisation & efficiency
-        run: bun test scripts/agent-utilisation.test.ts
-
-      - name: Publishing channels, supply and the Sourcing agent
-        run: bun test scripts/agent-sourcing.test.ts
-
-      - name: Interview scheduling (free slots, candidate choice, interviewer brief)
-        run: bun test scripts/agent-interview-slots.test.ts
-
-      - name: Interview plans, panels and the hiring decision
-        run: bun test scripts/agent-interview-panel.test.ts
-
-      - name: Role expert interview (the hiring manager's brief)
-        run: bun test scripts/expert-brief.test.ts
-
-      - name: Cost per candidate, offer answers and negotiation
-        run: bun test scripts/agent-hiring-cost-offer.test.ts
-      - name: Agent unhappy paths (declines, rejections, closed roles, pricing)
-        run: bun test scripts/agent-unhappy-paths.test.ts
-      - name: Duplicates, races and exceptions
-        run: bun test scripts/agent-edge-cases.test.ts
-      - name: Training-data capture (consent, linking, erasure, export)
-        run: bun test scripts/training-data.test.ts
-      - name: Assessment timeline and agent pop-ups
-        run: bun test scripts/assessment-timeline.test.ts
-      - name: Pay & availability before an offer (form, entry, offer readiness)
-        run: bun test scripts/compensation.test.ts
-      - name: Pay discussion before the offer (negotiation)
-        run: bun test scripts/negotiation.test.ts
-      - name: Hiring desk clarity (agent text, overtaken cards, thread order)
-        run: bun test scripts/desk-clarity.test.ts
-      - name: Deleting a hiring-desk chat (30-day restore)
-        run: bun test scripts/desk-delete.test.ts
-      - name: Requisition changes in approval, weights and work mode
-        run: bun test scripts/requisition-changes.test.ts
-      - name: Run limits per stretch of work
-        run: bun test scripts/run-limits.test.ts
-      - name: Observability clarity (refused vs failed, retry guard)
-        run: bun test scripts/observability-clarity.test.ts
-      - name: Agent markdown rendering (structure and escaping)
-        run: bun test scripts/agent-markdown.test.ts
-      - name: Career metrics (employers, promotions, dates)
-        run: bun test scripts/career-metrics.test.ts
-      - name: Job distribution (Google for Jobs, feeds, tracked links, report)
-        run: bun test scripts/job-distribution.test.ts
-      - name: Distribution agent (portal credit, role-limited CVs, daily check)
-        run: bun test scripts/distribution-agent.test.ts
-      - name: Voice foundation (G.711, resampler, RTP, SIP, live-session framing)
-        run: bun test scripts/voice.test.ts
-      - name: Phone screening settings (numbers, policy, voice credential, readiness)
-        run: bun test scripts/phone-screening.test.ts
-      - name: Phone screening call (brief, in-call tools, outcomes, window, dispatcher)
-        run: bun test scripts/screening-call.test.ts
-      - name: Voice agents' charter (dos and don'ts, generated doc in sync)
-        run: bun test scripts/voice-charter.test.ts
-      - name: Voice turn manager (who owes the next words, cues, said-but-not-recorded)
-        run: bun test scripts/voice-turns.test.ts
-      - name: Voice Guard (line stats, checks, quoted evidence, mandatory review sweep)
-        run: bun test scripts/voice-guard.test.ts
-      - name: Scheduling call (tools, brief, timing, booking, call-back, opt-out)
-        run: bun test scripts/scheduling-call.test.ts
-      - name: "Negotiation call (no amounts in tools, one move, a yes is passed on)"
-        run: bun test scripts/negotiation-call.test.ts
-      - name: "Negotiation call harness (whole calls vs personas, graders, negative control)"
-        run: bun test scripts/negotiation-call-session.test.ts
-      - name: Interview with (confidential panel wording)
-        run: bun test scripts/interview-with.test.ts
-      - name: Interview panels (profiles, hiring manager, plan, panels, stand-ins)
-        run: bun test scripts/interview-panels.test.ts
-      - name: Organisation agreements (Terms, Privacy, DPA acceptance)
-        run: bun test scripts/org-agreements.test.ts
-      - name: Companion portal form filler (field matching)
-        run: bun test scripts/portal-fill.test.ts
-      - name: Organisation profile (versions, approval gate, pay and name refusals)
-        run: bun test scripts/org-profile.test.ts
-      - name: "Organisation context agent (O1+O2 — sources, consumers, sweep)"
-        run: bun test scripts/org-context.test.ts
+      # The image ships only .output, no node_modules: both workers must boot
+      # from a bare directory (a static "#tanstack-*" import once crashed the
+      # voice worker at start while CI stayed green).
+      - name: Worker boot smoke (no node_modules)
+        run: bash scripts/worker-boot-smoke.sh

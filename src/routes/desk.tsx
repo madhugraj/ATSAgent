@@ -2918,7 +2918,7 @@ function NewPanelistForm(props: {
           </label>
         ))}
       </div>
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-[0.6875rem] text-muted-foreground">
         You add and approve them in one step (recorded as self-approved). They stay in the panel
         directory for future roles.
         {kind === "external"

@@ -230,7 +230,12 @@ beforeAll(async () => {
     .returning({ id: requisitions.id });
   const [cand] = await db
     .insert(candidates)
-    .values({ orgId, fullName: "Test Person", email: `copilot-cand-${stamp}@test.local`, skills: ["Python", "LLM"] } as never)
+    .values({
+      orgId,
+      fullName: "Test Person",
+      email: `copilot-cand-${stamp}@test.local`,
+      skills: ["Python", "LLM"],
+    } as never)
     .returning({ id: candidates.id });
   const [app] = await db
     .insert(applications)

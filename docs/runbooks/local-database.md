@@ -5,14 +5,14 @@ version (Cloud SQL `POSTGRES_14`), password authentication, and backups that
 are verified and can be restored. One script manages it:
 `scripts/local-db.sh` (`bun run db:local <command>`).
 
-| Command | What it does |
-| --- | --- |
-| `init` | Creates the cluster in a durable per-user folder, a random superuser password (scram-sha-256, kept in `~/.pgpass` and the gitignored `.env.local`), the `atsagent` and `atsagent_test` databases, and runs every migration on both. |
-| `start` / `stop` / `status` | Runs the server on `127.0.0.1:54377` only. `status` shows the data folder and the latest backups. |
-| `migrate` | Applies pending migrations to both databases. |
-| `backup` | Compressed `pg_dump` of `atsagent`, read back with `pg_restore --list` before it counts; keeps the newest 14. |
-| `restore FILE` | Needs `ATSAGENT_RESTORE_CONFIRM=atsagent`; backs up the current database first, restores into a scratch database, then swaps it in. |
-| `schedule-backups` / `unschedule-backups` | A daily backup (13:00) through launchd on macOS (cron line printed elsewhere). |
+| Command                                   | What it does                                                                                                                                                                                                                        |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `init`                                    | Creates the cluster in a durable per-user folder, a random superuser password (scram-sha-256, kept in `~/.pgpass` and the gitignored `.env.local`), the `atsagent` and `atsagent_test` databases, and runs every migration on both. |
+| `start` / `stop` / `status`               | Runs the server on `127.0.0.1:54377` only. `status` shows the data folder and the latest backups.                                                                                                                                   |
+| `migrate`                                 | Applies pending migrations to both databases.                                                                                                                                                                                       |
+| `backup`                                  | Compressed `pg_dump` of `atsagent`, read back with `pg_restore --list` before it counts; keeps the newest 14.                                                                                                                       |
+| `restore FILE`                            | Needs `ATSAGENT_RESTORE_CONFIRM=atsagent`; backs up the current database first, restores into a scratch database, then swaps it in.                                                                                                 |
+| `schedule-backups` / `unschedule-backups` | A daily backup (13:00) through launchd on macOS (cron line printed elsewhere).                                                                                                                                                      |
 
 Where things live (macOS; Linux uses `$XDG_DATA_HOME/atsagent`):
 

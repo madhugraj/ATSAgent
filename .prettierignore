@@ -6,3 +6,19 @@ pnpm-lock.yaml
 package-lock.json
 bun.lock
 routeTree.gen.ts
+
+# Generated docs checked by tests (bun scripts/voice-charter-doc.ts)
+docs/voice-agents-charter.md
+
+# Generated doc (node scripts/gen-er-diagram.mjs)
+docs/er-diagram.md
+
+# Agent manifest and prompt files — a reformat would change agents.lock.json
+# hashes and voice behaviour (refactor rule 4). Never format these.
+src/server/agents/definitions.ts
+src/server/agents/tools*.ts
+src/server/voice/call-prompt.ts
+src/server/voice/negotiation-prompt.ts
+src/server/voice/scheduling-prompt.ts
+src/server/voice/greeting.ts
+src/server/voice/spoken-guard.ts

@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { StatCard } from "@/components/ats";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -150,12 +151,12 @@ function UtilisationBody({ u, unit }: { u: UtilisationView; unit: "tokens" | "co
   return (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <Tile
+        <StatCard
           label="Tokens"
           value={compact(u.totals.tokens)}
           hint="Agent model turns + AI in tools"
         />
-        <Tile
+        <StatCard
           label="Estimated cost"
           value={rate ? money(u.totals.cost, rate.currency) : "Set your rate"}
           hint={
@@ -164,17 +165,17 @@ function UtilisationBody({ u, unit }: { u: UtilisationView; unit: "tokens" | "co
               : "Enter your AI token prices below"
           }
         />
-        <Tile
+        <StatCard
           label="Agents working"
           value={`${u.totals.agentHours} h`}
           hint="Model turns and tools"
         />
-        <Tile
+        <StatCard
           label="Waiting for people"
           value={`${u.totals.waitHours} h`}
           hint="Request to decision, summed"
         />
-        <Tile
+        <StatCard
           label="Tokens on failed runs"
           value={compact(u.totals.wastedTokens)}
           hint={
@@ -312,16 +313,6 @@ export function AgentOptimisationTips() {
   const u = q.data;
   if (!u) return null;
   return <Recommendations u={u} />;
-}
-
-function Tile({ label, value, hint }: { label: string; value: string; hint?: string | undefined }) {
-  return (
-    <div className="panel p-4">
-      <p className="text-xs font-medium text-muted-foreground">{label}</p>
-      <p className="num mt-1 text-xl font-semibold tracking-tight">{value}</p>
-      {hint ? <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p> : null}
-    </div>
-  );
 }
 
 function Recommendations({ u }: { u: UtilisationView }) {

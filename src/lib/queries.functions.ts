@@ -648,9 +648,15 @@ export const listCandidateAgentActivity = createServerFn({ method: "POST" })
     if (!candidate) throw new Error("Candidate not found.");
 
     const apps = await db
-      .select({ id: applications.id, requisitionId: applications.requisitionId, stage: applications.stage })
+      .select({
+        id: applications.id,
+        requisitionId: applications.requisitionId,
+        stage: applications.stage,
+      })
       .from(applications)
-      .where(and(eq(applications.candidateId, data.candidateId), eq(applications.orgId, context.orgId)));
+      .where(
+        and(eq(applications.candidateId, data.candidateId), eq(applications.orgId, context.orgId)),
+      );
     const appIds = apps.map((a) => a.id);
 
     // Runs reach a candidate through two doors: application subjects, and the
@@ -731,10 +737,18 @@ export const listCandidateAgentActivity = createServerFn({ method: "POST" })
           .orderBy(desc(agentTasks.createdAt))
       : [];
 
-    const usageByFeatureMap = new Map<string, { feature: string; requests: number; errors: number; tokens: number }>();
+    const usageByFeatureMap = new Map<
+      string,
+      { feature: string; requests: number; errors: number; tokens: number }
+    >();
     const tokensByRun = new Map<string, { tokens: number; calls: number; errors: number }>();
     for (const u of usageRows) {
-      const f = usageByFeatureMap.get(u.feature) ?? { feature: u.feature, requests: 0, errors: 0, tokens: 0 };
+      const f = usageByFeatureMap.get(u.feature) ?? {
+        feature: u.feature,
+        requests: 0,
+        errors: 0,
+        tokens: 0,
+      };
       f.requests += 1;
       f.tokens += u.totalTokens ?? 0;
       if (u.status === "error") f.errors += 1;
@@ -748,7 +762,11 @@ export const listCandidateAgentActivity = createServerFn({ method: "POST" })
     }
 
     const activity: CandidateAgentActivity = {
-      applications: apps.map((a) => ({ id: a.id, requisitionId: a.requisitionId, stage: a.stage ?? null })),
+      applications: apps.map((a) => ({
+        id: a.id,
+        requisitionId: a.requisitionId,
+        stage: a.stage ?? null,
+      })),
       runs: runs.map((r) => ({
         id: r.id,
         agentType: r.agentType,
@@ -763,7 +781,13 @@ export const listCandidateAgentActivity = createServerFn({ method: "POST" })
         aiErrors: tokensByRun.get(r.id)?.errors ?? 0,
         tasks: tasks
           .filter((t) => t.runId === r.id)
-          .map((t) => ({ id: t.id, kind: t.kind, status: t.status, title: t.title, createdAt: t.createdAt.toISOString() })),
+          .map((t) => ({
+            id: t.id,
+            kind: t.kind,
+            status: t.status,
+            title: t.title,
+            createdAt: t.createdAt.toISOString(),
+          })),
       })),
       usageByFeature: [...usageByFeatureMap.values()].sort((x, y) => y.tokens - x.tokens),
     };

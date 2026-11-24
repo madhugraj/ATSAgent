@@ -49,12 +49,12 @@ a rollback never needs a reverse migration.)
 
 ## When it breaks
 
-| Symptom | Fix |
-|---|---|
-| `FAIL: gcloud account is not madhu.r@yavar.ai` | `gcloud auth list` — set the active account. |
-| kaniko build killed (exit 137) | Build context too heavy — the script already avoids this by building the app in the bun pod and letting kaniko see only `.output`. If you edited the script, keep that split. |
-| `kubectl cp` truncates a file | The script verifies byte sizes and retries — if it still fails, just re-run. |
-| Docker/`gcloud builds` issues | Irrelevant by design — this path uses neither. |
+| Symptom                                        | Fix                                                                                                                                                                           |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FAIL: gcloud account is not madhu.r@yavar.ai` | `gcloud auth list` — set the active account.                                                                                                                                  |
+| kaniko build killed (exit 137)                 | Build context too heavy — the script already avoids this by building the app in the bun pod and letting kaniko see only `.output`. If you edited the script, keep that split. |
+| `kubectl cp` truncates a file                  | The script verifies byte sizes and retries — if it still fails, just re-run.                                                                                                  |
+| Docker/`gcloud builds` issues                  | Irrelevant by design — this path uses neither.                                                                                                                                |
 
 Full infrastructure reference (provisioning, DNS/TLS, secrets, scheduler): `DEPLOYMENT-GCP.md` and
 `infra/DEPLOYMENT-HANDOFF.md`. Deploy history: image tags are commit shas —

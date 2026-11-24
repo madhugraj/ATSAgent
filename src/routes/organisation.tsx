@@ -13,6 +13,7 @@ import {
   CircleDashed,
   Coins,
   ListChecks,
+  Mail,
   Phone,
   Scale,
   ScrollText,

@@ -204,7 +204,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               className="mb-3 space-y-0.5 border-b border-sidebar-border pb-3"
             >
               {collapsed ? null : (
-                <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/40">
+                <div className="px-3 pb-1 text-[0.625rem] font-semibold uppercase tracking-widest text-sidebar-foreground/40">
                   Pinned
                 </div>
               )}

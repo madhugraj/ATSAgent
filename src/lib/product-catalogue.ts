@@ -116,6 +116,10 @@ export const CATALOGUE_MODULES: CatalogueModule[] = [
     outcome: "Approved roles reach the market faster with a clean audit trail.",
     capabilities: [
       c(
+        "Content templates",
+        "Templates that steer every AI-drafted job description, LinkedIn post and branded job-card image.",
+      ),
+      c(
         "Structured requisition intake",
         "Budget, openings, experience band, location, must-have and good-to-have skills, responsibilities and qualifications in one form.",
       ),
@@ -237,6 +241,14 @@ export const CATALOGUE_MODULES: CatalogueModule[] = [
       "When an organisation switches it on, AI voice agents call candidates through the organisation's own telephone line and its own AI voice key. Every call opens by saying it is an AI and asking for consent, keeps to calling hours, retries and honours callbacks, and falls back to a written route when the candidate prefers. Every call is then reviewed by the Voice Guard against the call's rules and facts, and results come back to the hiring desk for a person to decide on — the call agents never make a hiring decision themselves.",
     outcome: "Candidates are reached quickly and consistently, while people keep every decision.",
     capabilities: [
+      c(
+        "Practical details on the screening call",
+        "The screening call takes the joining date and current and expected pay (recorded for HR only, or noted as declined) before the kit's questions.",
+      ),
+      c(
+        "Voice Guard",
+        "Every answered AI phone call is reviewed after it ends against the call's rules and facts; findings quote the transcript and are listed under Call reviews.",
+      ),
       c(
         "Screening calls",
         "The agent takes the joining date and pay expectation (HR-only), asks the screening kit's questions, grades only the questions actually answered and shows the result with a 'Why this score' explanation.",
@@ -885,6 +897,18 @@ export const CATALOGUE_MODULES: CatalogueModule[] = [
       "The copilot is available on every screen. It answers from the organisation's live requisitions, candidates and pipeline, and from the built-in user manual, and it walks new users through a guided first-login journey that mirrors the help page. Conversations are stored per organisation.",
     outcome: "New HR users configure and operate the product without training sessions.",
     capabilities: [
+      c(
+        "Answers by role",
+        "Requisition status and approval trails, approvals waiting on you, pipeline, budgets and governance, only where the person's role allows.",
+      ),
+      c(
+        "Pool coverage and demand outlook",
+        "Talent-pool coverage per open role and a demand outlook from the organisation's own requisition trend plus a market signal, with confidence.",
+      ),
+      c(
+        "Role ontology lookups",
+        "Looks a role up in the organisation's role map and names emerging roles.",
+      ),
       c(
         "Guided first-login journey",
         "A step-by-step setup walkthrough that matches the in-app manual exactly.",

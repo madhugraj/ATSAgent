@@ -76,7 +76,9 @@ export function CodeSelect({
                     setOpen(false);
                   }}
                 >
-                  <Check className={cn("mr-2 size-4", o.code === value ? "opacity-100" : "opacity-0")} />
+                  <Check
+                    className={cn("mr-2 size-4", o.code === value ? "opacity-100" : "opacity-0")}
+                  />
                   {o.label}
                 </CommandItem>
               ))}
@@ -135,7 +137,11 @@ export function CountryMultiSelect({
               <CommandEmpty>Nothing matches.</CommandEmpty>
               <CommandGroup>
                 {options.map((o) => (
-                  <CommandItem key={o.code} value={`${o.label} ${o.code}`} onSelect={() => pick(o.code)}>
+                  <CommandItem
+                    key={o.code}
+                    value={`${o.label} ${o.code}`}
+                    onSelect={() => pick(o.code)}
+                  >
                     <Check
                       className={cn(
                         "mr-2 size-4",

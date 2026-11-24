@@ -16,6 +16,7 @@ if (!url) {
 const sql = postgres(url, { max: 2 });
 const out = process.argv[2] ?? "docs/design/agent-behavior-real.html";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- raw SQL report rows of any shape
 type Row = Record<string, any>;
 
 const runsByAgent: Row[] = await sql`
@@ -92,7 +93,10 @@ const taskStat = (a: string, kind: string, st: string) => byAgentTask[a]?.[kind]
 const sumKind = (kind: string, st?: string) =>
   Object.entries(byAgentTask).reduce(
     (s, [, kinds]) =>
-      s + (st ? (kinds[kind]?.[st] ?? 0) : Object.values(kinds[kind] ?? {}).reduce((x: number, n) => x + (n as number), 0)),
+      s +
+      (st
+        ? (kinds[kind]?.[st] ?? 0)
+        : Object.values(kinds[kind] ?? {}).reduce((x: number, n) => x + (n as number), 0)),
     0,
   );
 
@@ -112,15 +116,30 @@ const norm = {
   clarify: { stops: clarifications, rejected: 0 },
 };
 const errByAgent = new Map<string, number>();
-for (const e of errorClusters) errByAgent.set(e.agent_type, (errByAgent.get(e.agent_type) ?? 0) + e.count);
+for (const e of errorClusters)
+  errByAgent.set(e.agent_type, (errByAgent.get(e.agent_type) ?? 0) + e.count);
 
 // ================= VIEW 1 — AGENT BEHAVIOR =================
 type Node = {
-  id: string; type: string;
-  name: string; runs?: number; steps?: number; avg?: number;
-  ver?: string; stops?: number; rejected?: number; tool?: string;
-  awaiting?: number; cause?: string; effect?: string; action?: string;
-  idle?: boolean; members?: string[]; agent?: string; kind?: string; count?: number;
+  id: string;
+  type: string;
+  name: string;
+  runs?: number;
+  steps?: number;
+  avg?: number;
+  ver?: string;
+  stops?: number;
+  rejected?: number;
+  tool?: string;
+  awaiting?: number;
+  cause?: string;
+  effect?: string;
+  action?: string;
+  idle?: boolean;
+  members?: string[];
+  agent?: string;
+  kind?: string;
+  count?: number;
 };
 type Edge = { s: string; t: string; k: string; label?: string };
 const nodes: Node[] = [];
@@ -134,8 +153,15 @@ for (const d of definitions) {
   if (!r) {
     idleAgents.push(d.agent_type);
     nodes.push({
-      id: `ag-${d.agent_type}`, type: "agent", name: d.agent_type, ver: d.version,
-      runs: 0, steps: 0, avg: 0, awaiting: 0, idle: true,
+      id: `ag-${d.agent_type}`,
+      type: "agent",
+      name: d.agent_type,
+      ver: d.version,
+      runs: 0,
+      steps: 0,
+      avg: 0,
+      awaiting: 0,
+      idle: true,
       cause: `Registered in the manifest (v${d.version}) with zero runs this period.`,
       effect: `The capability exists but nobody invokes it — dead weight in governance, evals and cost accounting, or an unadopted feature.`,
       action: `Decide: enable it (a tick, a copilot route, a client feature flag) or park it. An agent that never runs should not silently keep its manifest.`,
@@ -151,8 +177,14 @@ for (const d of definitions) {
   const cla = taskTotal(a, "clarification");
   const err = errByAgent.get(a) ?? 0;
   const n: Node = {
-    id: `ag-${a}`, type: "agent", name: a, ver: d.version,
-    runs: r.runs, steps: r.steps, avg: r.avg, awaiting: awaitingByAgent.find((x) => x.agent_type === a)?.count ?? 0,
+    id: `ag-${a}`,
+    type: "agent",
+    name: a,
+    ver: d.version,
+    runs: r.runs,
+    steps: r.steps,
+    avg: r.avg,
+    awaiting: awaitingByAgent.find((x) => x.agent_type === a)?.count ?? 0,
   };
   if (appR >= 2 && appT > 0 && appR / Math.max(appT, 1) >= 0.1) {
     const top = rejectDetails.filter((x) => x.agent_type === a);
@@ -165,7 +197,8 @@ for (const d of definitions) {
     n.action = `None — keep the 10% health threshold so drift surfaces on its own.`;
   } else if (r.steps > 0) {
     n.cause = `${r.runs} runs · ${r.steps} steps, all autonomous (no person touchpoints).`;
-    n.effect = err > 0 ? `${err} tool errors — the failure cluster.` : `Clean: no errors, no interventions.`;
+    n.effect =
+      err > 0 ? `${err} tool errors — the failure cluster.` : `Clean: no errors, no interventions.`;
     n.action = err > 5 ? `Investigate the failing tool before trusting the output.` : `None.`;
   } else {
     gapAgents.push(a);
@@ -176,21 +209,45 @@ for (const d of definitions) {
   }
   if (err >= 5 && n.action && !n.action.includes("Top failure")) {
     const top = errorClusters.filter((e) => e.agent_type === a)[0];
-    n.action = n.action.startsWith("None") ? `Investigate top failure ${top.tool} ×${top.count}.` : `${n.action} Top failure: ${top.tool} ×${top.count}.`;
+    n.action = n.action.startsWith("None")
+      ? `Investigate top failure ${top.tool} ×${top.count}.`
+      : `${n.action} Top failure: ${top.tool} ×${top.count}.`;
   }
   nodes.push(n);
-  if (appT > 0) edges.push({ s: `ag-${a}`, t: "n-hitl", k: "gated", label: appR ? `×${appT}, ${appR} rejected` : undefined });
-  if (gateT > 0) edges.push({ s: `ag-${a}`, t: "n-gates", k: "gated", label: gateR ? `×${gateT}, ${gateR} rejected` : undefined });
+  if (appT > 0)
+    edges.push({
+      s: `ag-${a}`,
+      t: "n-hitl",
+      k: "gated",
+      label: appR ? `×${appT}, ${appR} rejected` : undefined,
+    });
+  if (gateT > 0)
+    edges.push({
+      s: `ag-${a}`,
+      t: "n-gates",
+      k: "gated",
+      label: gateR ? `×${gateT}, ${gateR} rejected` : undefined,
+    });
   if (cla > 0) edges.push({ s: `ag-${a}`, t: "n-clarify", k: "gated", label: `×${cla}` });
   for (const e of errorClusters) {
-    if (e.agent_type === a && e.count >= 3) edges.push({ s: `ag-${a}`, t: `fail-${e.tool}`, k: "errored", label: `×${e.count}` });
+    if (e.agent_type === a && e.count >= 3)
+      edges.push({ s: `ag-${a}`, t: `fail-${e.tool}`, k: "errored", label: `×${e.count}` });
   }
-  if (a === "intake") edges.push({ s: "ag-intake", t: "vocab-seed", k: "awaits", label: `×${counts.match_scores} scores` });
+  if (a === "intake")
+    edges.push({
+      s: "ag-intake",
+      t: "vocab-seed",
+      k: "awaits",
+      label: `×${counts.match_scores} scores`,
+    });
 }
 
 if (idleAgents.length) {
   nodes.push({
-    id: "hub-idle", type: "hub", name: `no traffic (${idleAgents.length})`, members: idleAgents,
+    id: "hub-idle",
+    type: "hub",
+    name: `no traffic (${idleAgents.length})`,
+    members: idleAgents,
     cause: `${idleAgents.length} of ${definitions.length} registered agents ran zero times: ${idleAgents.join(", ")}.`,
     effect: `Copilot — the routing front door — is among them: requests reach specialists directly, so routing and its guardrails are untested.`,
     action: `Per agent: enable (tick, copilot route, feature flag) or park. An idle manifest should be a decision, not an accident.`,
@@ -198,7 +255,10 @@ if (idleAgents.length) {
 }
 if (gapAgents.length) {
   nodes.push({
-    id: "hub-gap", type: "hub", name: `step-trace gap (${gapAgents.length})`, members: gapAgents,
+    id: "hub-gap",
+    type: "hub",
+    name: `step-trace gap (${gapAgents.length})`,
+    members: gapAgents,
     cause: `${gapAgents.join(", ")} ran with zero rows in agent_steps — voice/panel sessions are captured out-of-band.`,
     effect: `These agents bypass every step-based rule: error clusters, run limits on tools, and this graph.`,
     action: `Emit session turns as steps (consent, tool calls, outcomes) — until then, treat their transcripts as unaudited.`,
@@ -206,44 +266,78 @@ if (gapAgents.length) {
 }
 
 const normSpecs = [
-  { id: "n-hitl", name: "hitl_cards", what: "proposed actions wait for a person (shortlist, feed listing…)", stops: norm.hitl.stops, rejected: norm.hitl.rejected },
-  { id: "n-gates", name: "approval_gates", what: "requisition/org-profile/jd approvals before any publish", stops: norm.gates.stops, rejected: norm.gates.rejected },
-  { id: "n-clarify", name: "clarification", what: "agent asks, a person answers (ask_human)", stops: norm.clarify.stops, rejected: 0 },
+  {
+    id: "n-hitl",
+    name: "hitl_cards",
+    what: "proposed actions wait for a person (shortlist, feed listing…)",
+    stops: norm.hitl.stops,
+    rejected: norm.hitl.rejected,
+  },
+  {
+    id: "n-gates",
+    name: "approval_gates",
+    what: "requisition/org-profile/jd approvals before any publish",
+    stops: norm.gates.stops,
+    rejected: norm.gates.rejected,
+  },
+  {
+    id: "n-clarify",
+    name: "clarification",
+    what: "agent asks, a person answers (ask_human)",
+    stops: norm.clarify.stops,
+    rejected: 0,
+  },
 ];
 for (const s of normSpecs) {
   nodes.push({
-    ...s, type: "norm",
+    ...s,
+    type: "norm",
     cause: `${s.what}. ${s.stops} stops folded from ${totalRuns} runs.`,
-    effect: s.rejected > 0
-      ? `${s.rejected} overturned by a person (${Math.round((s.rejected / Math.max(s.stops, 1)) * 100)}%) — the miscalibration signal.`
-      : `Zero overturns — calibrated.`,
-    action: s.rejected >= 3 ? `This norm (or the proposals under it) needs review — see the agent cards.` : `None.`,
+    effect:
+      s.rejected > 0
+        ? `${s.rejected} overturned by a person (${Math.round((s.rejected / Math.max(s.stops, 1)) * 100)}%) — the miscalibration signal.`
+        : `Zero overturns — calibrated.`,
+    action:
+      s.rejected >= 3
+        ? `This norm (or the proposals under it) needs review — see the agent cards.`
+        : `None.`,
   });
 }
 
 const errByTool = new Map<string, number>();
-for (const e of errorClusters) if (e.count >= 3) errByTool.set(e.tool, (errByTool.get(e.tool) ?? 0) + e.count);
+for (const e of errorClusters)
+  if (e.count >= 3) errByTool.set(e.tool, (errByTool.get(e.tool) ?? 0) + e.count);
 const agentsForTool = (tool: string) =>
-  errorClusters.filter((e) => e.tool === tool && e.count >= 3).map((e) => `${e.agent_type} ${e.count}`).join(" + ");
+  errorClusters
+    .filter((e) => e.tool === tool && e.count >= 3)
+    .map((e) => `${e.agent_type} ${e.count}`)
+    .join(" + ");
 for (const [tool, count] of errByTool) {
   nodes.push({
-    id: `fail-${tool}`, type: "failure", name: tool, tool,
+    id: `fail-${tool}`,
+    type: "failure",
+    name: tool,
+    tool,
     cause: `${count} errors inside agent runs — ${agentsForTool(tool)}.`,
-    effect: tool === "add_to_pipeline"
-      ? "Duplicate-pipeline skips — the recent fix (agents skipping candidates already in the pipeline) should retire most of these; verify on the next run."
-      : tool === "read_org_website"
-        ? "Failure rate this high on the tool the org profile is built from — network egress or parser sandbox, not the model."
-        : "Repeated tool failure — flaky dependency or bad input shape.",
-    action: tool === "add_to_pipeline"
-      ? "Re-run an intake stretch and confirm the error count drops."
-      : tool === "read_org_website"
-        ? "Check egress rules / parser sandbox health; this is infrastructure, not intelligence."
-        : "Inspect last_error on the steps.",
+    effect:
+      tool === "add_to_pipeline"
+        ? "Duplicate-pipeline skips — the recent fix (agents skipping candidates already in the pipeline) should retire most of these; verify on the next run."
+        : tool === "read_org_website"
+          ? "Failure rate this high on the tool the org profile is built from — network egress or parser sandbox, not the model."
+          : "Repeated tool failure — flaky dependency or bad input shape.",
+    action:
+      tool === "add_to_pipeline"
+        ? "Re-run an intake stretch and confirm the error count drops."
+        : tool === "read_org_website"
+          ? "Check egress rules / parser sandbox health; this is infrastructure, not intelligence."
+          : "Inspect last_error on the steps.",
   });
 }
 
 nodes.push({
-  id: "vocab-seed", type: "vocab", name: "skill graph",
+  id: "vocab-seed",
+  type: "vocab",
+  name: "skill graph",
   cause: `skill_nodes is empty — the ontology hasn't been built, yet ${counts.match_scores} match scores and ${counts.candidates} candidates already carry raw text[] skills.`,
   effect: `Every matching verdict normalizes with a hardcoded alias list; cross-run vocabulary learning is impossible until nodes exist.`,
   action: `Build Phase 1 (definitions + normalization) — the seed evidence is already in the tables.`,
@@ -256,7 +350,13 @@ for (const n of nodes) {
 }
 
 // agent-behavior system read
-const systemRead: { title: string; short: string; cause: string; effect: string; action: string }[] = [];
+const systemRead: {
+  title: string;
+  short: string;
+  cause: string;
+  effect: string;
+  action: string;
+}[] = [];
 const webErr = errorClusters.find((e) => e.tool === "read_org_website");
 if (webErr && webErr.count >= 10) {
   systemRead.push({
@@ -282,9 +382,10 @@ if (approvalsRejected >= 2) {
   systemRead.push({
     title: `⚠ Persons are rejecting agent proposals (${approvalsRejected} overturns)`,
     short: `${approvalsRejected} proposal overturns (${Math.round((approvalsRejected / Math.max(approvals, 1)) * 100)}% rate)`,
-    cause: intakeR >= 2
-      ? `Intake's "Shortlist the top-scored applicants" was declined ${intakeR}× — the same proposal, repeatedly.`
-      : `Rejections spread across ${new Set(rejectDetails.map((d) => d.agent_type)).size} agents.`,
+    cause:
+      intakeR >= 2
+        ? `Intake's "Shortlist the top-scored applicants" was declined ${intakeR}× — the same proposal, repeatedly.`
+        : `Rejections spread across ${new Set(rejectDetails.map((d) => d.agent_type)).size} agents.`,
     effect: `Overturn rate on HITL cards: ${Math.round((approvalsRejected / Math.max(approvals, 1)) * 100)}%. This is the graph telling you the agent's judgment and the reviewer's disagree.`,
     action: `Read the rejection reasons. If the wording is the problem, change the proposal copy; if the candidates are, change the scorer threshold. Don't touch the reviewer.`,
   });
@@ -335,8 +436,16 @@ const sysreadSummary = `${sysread.filter((s) => s.pri === "high").length} need a
 
 // per-agent action plan
 type Plan = {
-  name: string; ver: string; state: string; pri: "high" | "medium" | "ok";
-  runs: number; stops: number; overturned: number; errors: number; awaiting: number; action: string;
+  name: string;
+  ver: string;
+  state: string;
+  pri: "high" | "medium" | "ok";
+  runs: number;
+  stops: number;
+  overturned: number;
+  errors: number;
+  awaiting: number;
+  action: string;
 };
 const plan: Plan[] = [];
 for (const d of definitions) {
@@ -344,13 +453,23 @@ for (const d of definitions) {
   const a = d.agent_type;
   if (!r) {
     plan.push({
-      name: a, ver: d.version, state: "idle", pri: "ok", runs: 0, stops: 0, overturned: 0, errors: 0, awaiting: 0,
+      name: a,
+      ver: d.version,
+      state: "idle",
+      pri: "ok",
+      runs: 0,
+      stops: 0,
+      overturned: 0,
+      errors: 0,
+      awaiting: 0,
       action: `Enable (tick / copilot route / feature flag) or park — an idle manifest should be a decision.`,
     });
     continue;
   }
-  const appT = taskTotal(a, "approval"), appR = taskStat(a, "approval", "rejected");
-  const gateT = taskTotal(a, "gate"), gateR = taskStat(a, "gate", "rejected");
+  const appT = taskTotal(a, "approval"),
+    appR = taskStat(a, "approval", "rejected");
+  const gateT = taskTotal(a, "gate"),
+    gateR = taskStat(a, "gate", "rejected");
   const cla = taskTotal(a, "clarification");
   const errors = errByAgent.get(a) ?? 0;
   const awaitingN = awaitingByAgent.find((x) => x.agent_type === a)?.count ?? 0;
@@ -358,39 +477,70 @@ for (const d of definitions) {
   const overturned = appR + gateR;
   let state: string, pri: Plan["pri"], action: string;
   if (r.steps === 0) {
-    state = "no trace"; pri = "medium";
+    state = "no trace";
+    pri = "medium";
     action = `Add session-shaped telemetry so voice/panel behavior joins governance and this graph.`;
   } else if (overturned >= 2 && stops > 0) {
-    state = "out of sync"; pri = "high";
+    state = "out of sync";
+    pri = "high";
     action = `Persons declined ${overturned} of ${stops} proposals — read the rejection reasons; fix proposal copy or scorer threshold, not the reviewer.`;
   } else if (errors >= 10) {
-    state = "infra"; pri = "high";
+    state = "infra";
+    pri = "high";
     action = `Top failure is infrastructure-shaped — fix egress/parser first, then re-run a stretch.`;
   } else if (errors >= 3) {
-    state = "flaky"; pri = "medium";
+    state = "flaky";
+    pri = "medium";
     action = `${errors} tool errors — re-run a stretch after the relevant fix and verify the count drops.`;
   } else if (awaitingN > 0) {
-    state = "waiting"; pri = "medium";
+    state = "waiting";
+    pri = "medium";
     action = `${awaitingN} run(s) parked awaiting a person — clear the decisions inbox.`;
   } else if (stops > 0) {
-    state = "healthy"; pri = "ok";
+    state = "healthy";
+    pri = "ok";
     action = `None — ${stops} touchpoints, overturn rate inside band. Keep the 10% threshold watching.`;
   } else {
-    state = "clean"; pri = "ok";
+    state = "clean";
+    pri = "ok";
     action = `None — autonomous, no errors, no interventions.`;
   }
-  plan.push({ name: a, ver: d.version, state, pri, runs: r.runs, stops, overturned, errors, awaiting: awaitingN, action });
+  plan.push({
+    name: a,
+    ver: d.version,
+    state,
+    pri,
+    runs: r.runs,
+    stops,
+    overturned,
+    errors,
+    awaiting: awaitingN,
+    action,
+  });
 }
 const priOrder = { high: 0, medium: 1, ok: 2 } as const;
-plan.sort((x, y) => priOrder[x.pri] - priOrder[y.pri] || y.errors - x.errors || x.name.localeCompare(y.name));
+plan.sort(
+  (x, y) =>
+    priOrder[x.pri] - priOrder[y.pri] || y.errors - x.errors || x.name.localeCompare(y.name),
+);
 
 // ================= VIEW 2 — GOVERNANCE (real decision chains) =================
 const govNodes: Node[] = [];
 const govEdges: Edge[] = [];
-const kindNorm: Record<string, string> = { approval: "n-hitl", gate: "n-gates", clarification: "n-clarify" };
-const kindWord: Record<string, string> = { approval: "cards", gate: "gates", clarification: "asks" };
+const kindNorm: Record<string, string> = {
+  approval: "n-hitl",
+  gate: "n-gates",
+  clarification: "n-clarify",
+};
+const kindWord: Record<string, string> = {
+  approval: "cards",
+  gate: "gates",
+  clarification: "asks",
+};
 const govSeen = new Set<string>();
-let govOk = 0, govRej = 0, govAnswered = 0;
+let govOk = 0,
+  govRej = 0,
+  govAnswered = 0;
 
 for (const [agent, kinds] of Object.entries(byAgentTask)) {
   for (const kind of Object.keys(kinds)) {
@@ -406,7 +556,12 @@ for (const [agent, kinds] of Object.entries(byAgentTask)) {
     if (ok > 0) {
       const id = `gv-ok-${agent}-${kind}`;
       govNodes.push({
-        id, type: "dOk", name: `✓ ${kindWord[kind]} · ${agent}`, agent, kind, count: ok,
+        id,
+        type: "dOk",
+        name: `✓ ${kindWord[kind]} · ${agent}`,
+        agent,
+        kind,
+        count: ok,
         cause: `${ok} proposals approved by a person (${kindWord[kind]} on ${agent} runs).`,
         effect: `Human-in-the-loop working as designed on this proposal type.`,
         action: `None — approved decisions are the calibration baseline.`,
@@ -415,31 +570,51 @@ for (const [agent, kinds] of Object.entries(byAgentTask)) {
     }
     if (rej > 0) {
       const id = `gv-rej-${agent}-${kind}`;
-      const titles = rejectDetails.filter((d) => d.agent_type === agent && d.kind === kind).map((d) => `${d.title} (${d.tool ?? "?"})`);
+      const titles = rejectDetails
+        .filter((d) => d.agent_type === agent && d.kind === kind)
+        .map((d) => `${d.title} (${d.tool ?? "?"})`);
       govNodes.push({
-        id, type: "dBad", name: `✗ ${kindWord[kind]} · ${agent}`, agent, kind, count: rej, members: titles,
+        id,
+        type: "dBad",
+        name: `✗ ${kindWord[kind]} · ${agent}`,
+        agent,
+        kind,
+        count: rej,
+        members: titles,
         cause: `${rej} proposal(s) declined by a person: ${titles.join("; ")}.`,
-        effect: rej >= 2
-          ? `The same proposal type keeps getting declined — the agent's judgment or its wording is out of sync with reviewers.`
-          : `A single rejection is normal human disagreement — it becomes a pattern at 2.`,
-        action: rej >= 2 ? `Read the rejection reasons; fix proposal copy or scorer threshold, not the reviewer.` : `No action yet.`,
+        effect:
+          rej >= 2
+            ? `The same proposal type keeps getting declined — the agent's judgment or its wording is out of sync with reviewers.`
+            : `A single rejection is normal human disagreement — it becomes a pattern at 2.`,
+        action:
+          rej >= 2
+            ? `Read the rejection reasons; fix proposal copy or scorer threshold, not the reviewer.`
+            : `No action yet.`,
       });
       govEdges.push({ s: id, t: nk, k: "decided" });
     }
   }
 }
 for (const s of normSpecs) {
-  if (!govSeen.has(s.id === "n-hitl" ? "approval" : s.id === "n-gates" ? "gate" : "clarification")) continue;
+  if (!govSeen.has(s.id === "n-hitl" ? "approval" : s.id === "n-gates" ? "gate" : "clarification"))
+    continue;
   govNodes.push({
-    ...s, type: "norm",
+    ...s,
+    type: "norm",
     cause: `${s.what}.`,
-    effect: s.rejected > 0 ? `${s.rejected} overturns against ${s.stops} stops.` : `${s.stops} stops, zero overturns — calibrated.`,
-    action: s.rejected >= 3 ? `Review the proposals under this norm — see the rejected chains.` : `None.`,
+    effect:
+      s.rejected > 0
+        ? `${s.rejected} overturns against ${s.stops} stops.`
+        : `${s.stops} stops, zero overturns — calibrated.`,
+    action:
+      s.rejected >= 3 ? `Review the proposals under this norm — see the rejected chains.` : `None.`,
   });
 }
 if (taskStatusTotals.open > 0) {
   govNodes.push({
-    id: "gv-open", type: "dOpen", name: `open cards ×${taskStatusTotals.open}`,
+    id: "gv-open",
+    type: "dOpen",
+    name: `open cards ×${taskStatusTotals.open}`,
     members: openByAgent.map((r) => r.agent_type),
     cause: `${taskStatusTotals.open} cards still awaiting a person: ${openByAgent.map((r) => `${r.agent_type} ×${r.count}`).join(", ")}.`,
     effect: `Proposals (and the runs behind them) are parked mid-flight; ${awaiting} runs sit in awaiting_human.`,
@@ -448,15 +623,25 @@ if (taskStatusTotals.open > 0) {
 }
 if (taskStatusTotals.cancelled > 0) {
   govNodes.push({
-    id: "gv-cancel", type: "dMut", name: `cancelled ×${taskStatusTotals.cancelled}`,
+    id: "gv-cancel",
+    type: "dMut",
+    name: `cancelled ×${taskStatusTotals.cancelled}`,
     cause: `${taskStatusTotals.cancelled} cards were cancelled — mostly stale ticks reaped when their run ended.`,
     effect: `Harmless, but they bury the live signals in the decisions inbox.`,
     action: `A liveness rule should cancel stale cards sooner and mark them, so open ≠ stale.`,
   });
 }
 
-const govSystemRead: { title: string; short: string; cause: string; effect: string; action: string }[] = [];
-const repeatRej = govNodes.filter((n) => n.type === "dBad" && (n.count ?? 0) >= 2).sort((a, b) => (b.count ?? 0) - (a.count ?? 0))[0];
+const govSystemRead: {
+  title: string;
+  short: string;
+  cause: string;
+  effect: string;
+  action: string;
+}[] = [];
+const repeatRej = govNodes
+  .filter((n) => n.type === "dBad" && (n.count ?? 0) >= 2)
+  .sort((a, b) => (b.count ?? 0) - (a.count ?? 0))[0];
 if (repeatRej) {
   govSystemRead.push({
     title: `⚠ Repeated overturns: ${repeatRej.agent} ${kindWord[repeatRej.kind!]} declined ×${repeatRej.count}`,
@@ -496,7 +681,10 @@ if (taskStatusTotals.cancelled > 0) {
 }
 {
   const totalVersions = defChurn.reduce((s, r) => s + r.versions, 0);
-  const top = defChurn.slice(0, 3).map((r) => `${r.agent_type} ×${r.versions}`).join(", ");
+  const top = defChurn
+    .slice(0, 3)
+    .map((r) => `${r.agent_type} ×${r.versions}`)
+    .join(", ");
   govSystemRead.push({
     title: `◈ Definition churn: ${totalVersions} manifest versions shipped — top ${top}`,
     short: `${totalVersions} definition versions — eval coverage per bump?`,
@@ -518,27 +706,50 @@ const govSummary = `${govSysread.filter((s) => s.pri === "high").length} need ac
 // ================= VIEW 3 — VOCABULARY (seeded via the production normalizer) =================
 const ont = buildOntology({
   candidates: candRows.map((c) => ({
-    candidateId: c.id, skills: c.skills, observedAt: c.created_at.toISOString(), hired: !!c.hired, resumeText: null,
+    candidateId: c.id,
+    skills: c.skills,
+    observedAt: c.created_at.toISOString(),
+    hired: !!c.hired,
+    resumeText: null,
   })),
   demand: demandRows.map((r) => ({
-    requisitionId: r.id, title: r.title ?? "requisition", openings: r.openings ?? 1,
-    mustHave: r.must_have_skills ?? [], goodToHave: r.good_to_have_skills ?? [], open: !!r.open,
+    requisitionId: r.id,
+    title: r.title ?? "requisition",
+    openings: r.openings ?? 1,
+    mustHave: r.must_have_skills ?? [],
+    goodToHave: r.good_to_have_skills ?? [],
+    open: !!r.open,
   })),
   previous: [],
 });
 const rawForms = new Set<string>();
 for (const c of candRows) for (const s of c.skills) rawForms.add(s.toLowerCase().trim());
-for (const r of demandRows) for (const s of (r.must_have_skills ?? []).concat(r.good_to_have_skills ?? [])) rawForms.add(s.toLowerCase().trim());
+for (const r of demandRows)
+  for (const s of (r.must_have_skills ?? []).concat(r.good_to_have_skills ?? []))
+    rawForms.add(s.toLowerCase().trim());
 
 const vocabNodes: Node[] = ont.nodes.map((n) => ({
-  id: "sk-" + n.slug, type: "skill", name: n.name,
-  slug: n.slug, cat: n.category, aliases: n.aliases.join(", "),
-  supply: n.supply, demand: n.demand, ev: n.evidence, dormant: n.status === "dormant",
+  id: "sk-" + n.slug,
+  type: "skill",
+  name: n.name,
+  slug: n.slug,
+  cat: n.category,
+  aliases: n.aliases.join(", "),
+  supply: n.supply,
+  demand: n.demand,
+  ev: n.evidence,
+  dormant: n.status === "dormant",
   cause: `${n.evidence} evidence links · supply ${n.supply} / demand ${n.demand} · ${n.category}${n.aliases.length ? " · aliases folded: " + n.aliases.join(", ") : ""}.`,
-  effect: n.demand > 0 && n.supply === 0
-    ? `Demanded with zero pool supply — every open req on this skill depends on sourcing.`
-    : n.status === "dormant" ? `No recent evidence — flagged dormant by the build.` : `Active node, normal flow.`,
-  action: n.demand > 0 && n.supply === 0 ? `Open a sourcing campaign or demote it to good-to-have.` : `None.`,
+  effect:
+    n.demand > 0 && n.supply === 0
+      ? `Demanded with zero pool supply — every open req on this skill depends on sourcing.`
+      : n.status === "dormant"
+        ? `No recent evidence — flagged dormant by the build.`
+        : `Active node, normal flow.`,
+  action:
+    n.demand > 0 && n.supply === 0
+      ? `Open a sourcing campaign or demote it to good-to-have.`
+      : `None.`,
 }));
 // significance threshold: demand-bearing or evidence-backed skills only — the tail folds into a count
 const significant = vocabNodes
@@ -549,9 +760,17 @@ const shownSkills = significant.slice(0, 60);
 const shownIds = new Set(shownSkills.map((n) => n.id));
 const vocabGraphNodes = significant.filter((n) => n.type === "family" || shownIds.has(n.id));
 const vocabEdges: Edge[] = [];
-for (const e of ont.edges.filter((e) => e.count >= 2).sort((a, b) => b.count - a.count).slice(0, 22)) {
+for (const e of ont.edges
+  .filter((e) => e.count >= 2)
+  .sort((a, b) => b.count - a.count)
+  .slice(0, 22)) {
   if (shownIds.has("sk-" + e.from) && shownIds.has("sk-" + e.to)) {
-    vocabEdges.push({ s: "sk-" + e.from, t: "sk-" + e.to, k: "cooccurs", label: e.count >= 3 ? `×${e.count}` : undefined });
+    vocabEdges.push({
+      s: "sk-" + e.from,
+      t: "sk-" + e.to,
+      k: "cooccurs",
+      label: e.count >= 3 ? `×${e.count}` : undefined,
+    });
   }
 }
 const deptAsks = new Map<string, Map<string, number>>();
@@ -565,13 +784,21 @@ const familyNodes: Node[] = [];
 for (const [dept, m] of deptAsks) {
   const fid = "fam-" + slugify(dept);
   familyNodes.push({
-    id: fid, type: "family", name: dept,
+    id: fid,
+    type: "family",
+    name: dept,
     cause: `Department standing in as a role family — ${[...m.values()].reduce((s, n) => s + n, 0)} must-have asks.`,
     effect: `${m.size} distinct skills demanded by this family.`,
     action: `Real role-family nodes (with builds_on) arrive with Phase 1; today departments are the proxy.`,
   });
   for (const [slug, n] of [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)) {
-    if (shownIds.has("sk-" + slug)) vocabEdges.push({ s: fid, t: "sk-" + slug, k: "asks_for", label: n > 1 ? `×${n}` : undefined });
+    if (shownIds.has("sk-" + slug))
+      vocabEdges.push({
+        s: fid,
+        t: "sk-" + slug,
+        k: "asks_for",
+        label: n > 1 ? `×${n}` : undefined,
+      });
   }
 }
 const vocabGraph = [...familyNodes, ...vocabGraphNodes];
@@ -608,7 +835,7 @@ vocabSystemRead.push({
   pri: "medium",
 });
 const vocabPriOrder = { high: 0, medium: 1, ok: 2 } as const;
-vocabSystemRead.sort((a, b) => vocabPriOrder[(a.pri as "high")] - vocabPriOrder[(b.pri as "high")]);
+vocabSystemRead.sort((a, b) => vocabPriOrder[a.pri as "high"] - vocabPriOrder[b.pri as "high"]);
 const vocabSummary = `${vocabSystemRead.filter((s) => s.pri === "high").length} need action · ${vocabSystemRead.filter((s) => s.pri === "medium").length} to plan · ${vocabSystemRead.filter((s) => s.pri === "ok").length} healthy`;
 
 // ================= assemble =================
@@ -617,24 +844,51 @@ const DATA = {
   orgs: orgCount,
   views: {
     agentb: {
-      key: "agentb", label: "Agent behavior",
+      key: "agentb",
+      label: "Agent behavior",
       title: "agent_runs · agent_steps · agent_tasks — the fleet and its governance from live data",
       snapshot: "every count is a live SQL aggregate — candidates folded into edge weights",
       tiles: [
         ["Runs", String(totalRuns), `${orgCount} orgs · ${failed} failed · ${cancelled} cancelled`],
-        ["Agent steps", String(totalSteps), `${definitions.length - idleAgents.length}/${definitions.length} registered agents active`],
-        ["Person touchpoints", String(norm.hitl.stops + norm.gates.stops + norm.clarify.stops), `${approvalsRejected + gatesRejected} declined by a person`],
-        ["Skill graph", `${counts.skill_nodes} nodes`, `${counts.match_scores} match scores await normalization`],
+        [
+          "Agent steps",
+          String(totalSteps),
+          `${definitions.length - idleAgents.length}/${definitions.length} registered agents active`,
+        ],
+        [
+          "Person touchpoints",
+          String(norm.hitl.stops + norm.gates.stops + norm.clarify.stops),
+          `${approvalsRejected + gatesRejected} declined by a person`,
+        ],
+        [
+          "Skill graph",
+          `${counts.skill_nodes} nodes`,
+          `${counts.match_scores} match scores await normalization`,
+        ],
       ],
-      nodes, edges, systemRead: sysread, sysreadSummary,
-      rejects: rejectDetails, plan,
+      nodes,
+      edges,
+      systemRead: sysread,
+      sysreadSummary,
+      rejects: rejectDetails,
+      plan,
       fleet: { registered: definitions.length, idle: idleAgents.length, gap: gapAgents.length },
       typeStyles: {
         agent: { color: "var(--series-role)", r: 15, label: "Agent", plural: "Agents" },
         norm: { color: "var(--series-cand)", r: 14, label: "Person gate", plural: "Person gates" },
-        failure: { color: "var(--text-muted)", r: 9, label: "Failure cluster", plural: "Failure clusters" },
+        failure: {
+          color: "var(--text-muted)",
+          r: 9,
+          label: "Failure cluster",
+          plural: "Failure clusters",
+        },
         vocab: { color: "var(--series-skill)", r: 11, label: "Vocabulary", plural: "Vocabulary" },
-        hub: { color: "var(--text-muted)", r: 13, label: "Diagnosis hub", plural: "Diagnosis hubs" },
+        hub: {
+          color: "var(--text-muted)",
+          r: 13,
+          label: "Diagnosis hub",
+          plural: "Diagnosis hubs",
+        },
       },
       edgeStyles: {
         gated: { stroke: "var(--baseline)", width: 1.8, dash: "" },
@@ -643,24 +897,64 @@ const DATA = {
         idle: { stroke: "var(--baseline)", width: 1.2, dash: "2 3", opacity: 0.7 },
         gap: { stroke: "var(--status-warning)", width: 1.6, dash: "3 3" },
       },
-      elabels: { gated: "gated by", errored: "errors in", awaits: "awaits", idle: "idle —", gap: "trace gap:" },
+      elabels: {
+        gated: "gated by",
+        errored: "errors in",
+        awaits: "awaits",
+        idle: "idle —",
+        gap: "trace gap:",
+      },
       spring: { gated: 185, errored: 150, awaits: 190, idle: 140, gap: 170 },
     },
     gov: {
-      key: "gov", label: "Governance",
-      title: "agent_tasks decisions — every person verdict, the norm it acted under, and what it means",
+      key: "gov",
+      label: "Governance",
+      title:
+        "agent_tasks decisions — every person verdict, the norm it acted under, and what it means",
       snapshot: `stage_events: ai moves ${aiMoves}/${stageTotal} pipeline transitions · ${defChurn.reduce((s, r) => s + r.versions, 0)} definition versions shipped`,
       tiles: [
-        ["Person decisions", String(govOk + govAnswered + govRej), `${govOk} approved · ${govRej} declined · ${govAnswered} answered`],
-        ["Open cards", String(taskStatusTotals.open), openByAgent.map((r) => `${r.agent_type} ×${r.count}`).slice(0, 3).join(", ") || "none"],
-        ["Cancelled cards", String(taskStatusTotals.cancelled), "stale — reap with a liveness rule"],
-        ["Stage moves", String(stageTotal), `${Math.round((aiMoves / Math.max(stageTotal, 1)) * 100)}% ai · ${stageTotal - aiMoves} person (via agent)`],
+        [
+          "Person decisions",
+          String(govOk + govAnswered + govRej),
+          `${govOk} approved · ${govRej} declined · ${govAnswered} answered`,
+        ],
+        [
+          "Open cards",
+          String(taskStatusTotals.open),
+          openByAgent
+            .map((r) => `${r.agent_type} ×${r.count}`)
+            .slice(0, 3)
+            .join(", ") || "none",
+        ],
+        [
+          "Cancelled cards",
+          String(taskStatusTotals.cancelled),
+          "stale — reap with a liveness rule",
+        ],
+        [
+          "Stage moves",
+          String(stageTotal),
+          `${Math.round((aiMoves / Math.max(stageTotal, 1)) * 100)}% ai · ${stageTotal - aiMoves} person (via agent)`,
+        ],
       ],
-      nodes: govNodes, edges: govEdges, systemRead: govSysread, sysreadSummary: govSummary,
+      nodes: govNodes,
+      edges: govEdges,
+      systemRead: govSysread,
+      sysreadSummary: govSummary,
       typeStyles: {
         norm: { color: "var(--series-cand)", r: 14, label: "Person gate", plural: "Person gates" },
-        dOk: { color: "var(--status-good)", r: 11, label: "Approved", plural: "Approved decisions" },
-        dBad: { color: "var(--status-critical)", r: 12, label: "Overturned", plural: "Overturned decisions" },
+        dOk: {
+          color: "var(--status-good)",
+          r: 11,
+          label: "Approved",
+          plural: "Approved decisions",
+        },
+        dBad: {
+          color: "var(--status-critical)",
+          r: 12,
+          label: "Overturned",
+          plural: "Overturned decisions",
+        },
         dOpen: { color: "var(--status-warning)", r: 10, label: "Open card", plural: "Open cards" },
         dMut: { color: "var(--text-muted)", r: 9, label: "Cancelled", plural: "Cancelled cards" },
       },
@@ -671,19 +965,46 @@ const DATA = {
       spring: { decided: 175 },
     },
     vocab: {
-      key: "vocab", label: "Vocabulary",
-      title: "skills · role-family proxies · co-occurrence — built by the production buildOntology() from raw skills",
+      key: "vocab",
+      label: "Vocabulary",
+      title:
+        "skills · role-family proxies · co-occurrence — built by the production buildOntology() from raw skills",
       snapshot: `seed view — in-memory only · ${ont.stats.nodeCount} nodes · ${ont.stats.edgeCount} edges · ${ont.stats.scarce} scarce · ${ont.stats.dormant} dormant · ${ont.stats.coverage}% coverage`,
       tiles: [
-        ["Skill nodes", String(ont.stats.nodeCount), `${vocabGraph.filter((n) => n.type === "skill").length} shown · ${minorCount} low-evidence folded`],
-        ["Co-occurrence edges", String(ont.stats.edgeCount), `${vocabEdges.filter((e) => e.k === "cooccurs").length} shown (top by count)`],
-        ["Insights", String(ont.insights.length), `${ont.insights.filter((i) => i.severity === "high").length} high severity — prescriptive, from deriveInsights`],
+        [
+          "Skill nodes",
+          String(ont.stats.nodeCount),
+          `${vocabGraph.filter((n) => n.type === "skill").length} shown · ${minorCount} low-evidence folded`,
+        ],
+        [
+          "Co-occurrence edges",
+          String(ont.stats.edgeCount),
+          `${vocabEdges.filter((e) => e.k === "cooccurs").length} shown (top by count)`,
+        ],
+        [
+          "Insights",
+          String(ont.insights.length),
+          `${ont.insights.filter((i) => i.severity === "high").length} high severity — prescriptive, from deriveInsights`,
+        ],
         ["Persisted", "0 rows", "skill_nodes empty — Phase 1 persists these"],
       ],
-      nodes: vocabGraph, edges: vocabEdges, systemRead: vocabSystemRead, sysreadSummary: vocabSummary,
+      nodes: vocabGraph,
+      edges: vocabEdges,
+      systemRead: vocabSystemRead,
+      sysreadSummary: vocabSummary,
       typeStyles: {
-        family: { color: "var(--series-role)", r: 14, label: "Role family (dept proxy)", plural: "Role families" },
-        skill: { color: "var(--series-skill)", r: 9, label: "Skill (size = evidence)", plural: "Skills" },
+        family: {
+          color: "var(--series-role)",
+          r: 14,
+          label: "Role family (dept proxy)",
+          plural: "Role families",
+        },
+        skill: {
+          color: "var(--series-skill)",
+          r: 9,
+          label: "Skill (size = evidence)",
+          plural: "Skills",
+        },
       },
       edgeStyles: {
         asks_for: { stroke: "var(--baseline)", width: 1.8, dash: "" },
@@ -1192,6 +1513,31 @@ loop();
 
 await Bun.write(out, html);
 console.log("wrote " + out);
-console.log("agentb: runs=" + DATA.views.agentb.tiles[0][1] + " nodes=" + DATA.views.agentb.nodes.length + " edges=" + DATA.views.agentb.edges.length + " chips=" + DATA.views.agentb.systemRead.length + " plan=" + DATA.views.agentb.plan.length);
-console.log("gov: nodes=" + DATA.views.gov.nodes.length + " edges=" + DATA.views.gov.edges.length + " chips=" + DATA.views.gov.systemRead.length);
-console.log("vocab: nodes=" + DATA.views.vocab.nodes.length + " edges=" + DATA.views.vocab.edges.length + " chips=" + DATA.views.vocab.systemRead.length);
+console.log(
+  "agentb: runs=" +
+    DATA.views.agentb.tiles[0][1] +
+    " nodes=" +
+    DATA.views.agentb.nodes.length +
+    " edges=" +
+    DATA.views.agentb.edges.length +
+    " chips=" +
+    DATA.views.agentb.systemRead.length +
+    " plan=" +
+    DATA.views.agentb.plan.length,
+);
+console.log(
+  "gov: nodes=" +
+    DATA.views.gov.nodes.length +
+    " edges=" +
+    DATA.views.gov.edges.length +
+    " chips=" +
+    DATA.views.gov.systemRead.length,
+);
+console.log(
+  "vocab: nodes=" +
+    DATA.views.vocab.nodes.length +
+    " edges=" +
+    DATA.views.vocab.edges.length +
+    " chips=" +
+    DATA.views.vocab.systemRead.length,
+);

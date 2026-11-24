@@ -902,9 +902,11 @@ export function registerPhase3Agents(): void {
     // end — the model replies ~0.9 s after the end (it waited 1.6 s and missed short
     // replies); a short answer ends after 0.6 s of silence, a long one gets room for a
     // pause; while it speaks, only sustained louder speech cuts in (echo no longer does).
-    // 1.9.0 (voice-first scheduling): the call usually comes before any e-mail — it
+    // (main) 1.8.0 (voice-first scheduling): the call usually comes before any e-mail — it
     // no longer says the times were e-mailed unless they were, and points to the
     // e-mail that follows when the candidate does not pick on the call.
+    // 1.9.0: merge of the Voice Guard / turn-manager line (1.8.0–1.8.8 above) with
+    // voice-first scheduling (main 1.8.0); both sets of instructions kept.
     version: "1.9.0",
     owner: "hr_head",
     responsibility:
@@ -980,7 +982,12 @@ export function registerPhase3Agents(): void {
     ],
     feature: "agent_confirmation_call",
     maxSteps: 8,
-    tools: ["record_attendance_go_ahead", "will_attend", "cannot_attend", "end_confirmation_call"],
+    tools: [
+      "record_attendance_go_ahead",
+      "will_attend",
+      "cannot_attend",
+      "end_confirmation_call",
+    ],
     // The live call renders the same prompt with the real facts (confirm-calls.server.ts).
     system: CONFIRMATION_PROMPT_TEMPLATE,
   });
