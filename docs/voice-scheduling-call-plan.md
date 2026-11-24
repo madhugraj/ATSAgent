@@ -49,6 +49,27 @@ for old rows but is no longer read or shown. Approving the offer (or its
 pre-approval) covers the call. Health rule `scheduling_call.not_dialled`
 (serious) flags a call still undialled 30 minutes after it was due.
 
+## Confirmation and reminder calls (2026-11-24, migration 0092)
+
+Booking is not the only place days are lost. Three more short calls, all on
+the same line, worker, dispatcher and shared live plumbing
+(`src/server/voice/short-call.server.ts`), all arranged by the system in the
+agent tick, all answered through the same core as the e-mailed links:
+
+| Call                                     | Agent                       | When                                                                                                                                     | What it records                                                                                   |
+| ---------------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Reminder scheduling call                 | Scheduling call agent       | the e-mailed times unanswered for 3 h (`REMINDER_CALL_AFTER_HOURS`) — once per offer, even after an earlier conversation about the round | a booked time, exactly as the first call                                                          |
+| Attendance confirmation (`confirmation`) | Confirmation call agent     | a booked round 4–30 h away whose candidate's confirmation is pending                                                                     | yes / no through `answerConfirmation` on the invite's token; a no reaches the desk to re-schedule |
+| Panel time check (`panel_check`)         | Panel time-check call agent | a panelist's answer pending past the 1-hour reminder, mobile in the panel directory                                                      | which times they can do (`okSlots`) through their confirm token                                   |
+
+Rules (checked by the system): scheduling calls and phone calls switched on,
+the agent switched on (both new agents are opt-in), a dialable Indian mobile,
+no opt-out (the panelist's own for a panel call — `panelists.ai_call_opt_out_at`),
+one call per answer row (`screening_calls.confirmation_id`), two attempts. No
+tool moves, cancels or books a round: "I can't make it" goes to the hiring
+desk. A candidate not reached after two tries for a round still ahead raises
+`confirmation_call.not_reached` and a desk message asking a person to phone.
+
 ## When it calls (original e-mail-first design, superseded above)
 
 The call was a follow-up to an open e-mail offer, never the first contact about

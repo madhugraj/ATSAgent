@@ -1179,6 +1179,52 @@ export const RULES: Rule[] = [
     },
   },
   {
+    id: "confirmation_call.not_reached",
+    element: "skills",
+    severity: "serious",
+    description:
+      "The attendance confirmation call could not reach a candidate whose interview is still ahead and still unconfirmed — after two tries. The hiring desk was asked to phone them; a no-show costs the round and a day of the hiring SLA.",
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number }>(sql`
+        select count(*)::int n from screening_calls c
+        join interview_confirmations k on k.id = c.confirmation_id
+        join interviews i on i.id = k.interview_id
+        where c.org_id = ${orgId} and c.purpose = 'confirmation'
+          and c.status = 'fell_back' and k.state = 'pending'
+          and i.status in ('scheduled', 'rescheduled') and i.scheduled_at > now()`);
+      const n = r[0]?.n ?? 0;
+      if (!n) return [];
+      return [
+        {
+          agentType: "confirmation_call",
+          title: `${n} candidate${n === 1 ? "" : "s"} with an interview ahead could not be reached to confirm`,
+          detail: { candidates: n },
+        },
+      ];
+    },
+  },
+  {
+    id: "answer_call.not_dialled",
+    element: "harness",
+    severity: "serious",
+    description: `An attendance confirmation or panel time-check call has not been dialled ${HEALTH.schedulingCallStuckMins} minutes after it was due — the voice worker or its phone line may be down. The e-mail reminders still go; nobody has been phoned.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ purpose: string; n: number }>(sql`
+        select purpose, count(*)::int n from screening_calls
+        where org_id = ${orgId} and purpose in ('confirmation', 'panel_check')
+          and status in ('approved', 'callback')
+          and due_at < now() - make_interval(mins => ${HEALTH.schedulingCallStuckMins})
+        group by purpose`);
+      return r
+        .filter((x) => x.n > 0)
+        .map((x) => ({
+          agentType: x.purpose === "confirmation" ? "confirmation_call" : "panel_check_call",
+          title: `${x.n} ${x.purpose === "confirmation" ? "attendance confirmation" : "panel time-check"} call${x.n === 1 ? " has" : "s have"} not been dialled`,
+          detail: { calls: x.n },
+        }));
+    },
+  },
+  {
     id: "negotiation_call.leak_suspected",
     element: "skills",
     severity: "serious",

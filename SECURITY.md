@@ -44,6 +44,10 @@ We credit reporters in release notes on request.
   it uploads (validated, stored encrypted, reported to the browser only as "stored"; saving and
   removing it are audited `ai.voice_credential.save` / `.remove`). The PBX extension the voice
   worker dials from (`SIP_*`) is deployment configuration; phone numbers are never logged.
+  Panel members may be phoned too (the panel time check, migration 0092): only the HR head can
+  set a panellist's mobile, the browser sees its last four digits only, each change is audited
+  `panelist.phone_set` (last four digits), the number is never given to the model, and a
+  panellist's "don't call me" is recorded (`panelist.ai_call_opt_out`) and honoured by the dispatcher.
   On a call the assistant says it is an AI; nothing is recorded before the candidate consents, the
   transcript is kept only after consent (no audio is stored), answers are accepted only for the kit's
   questions, and what it may write about the candidate is notice period and availability — the

@@ -27,6 +27,7 @@ import { registerTool, type ToolContext } from "./registry";
 import { registerScreeningCallTools } from "./tools-screening-call";
 import { registerNegotiationCallTools } from "./tools-negotiation-call";
 import { registerSchedulingCallTools } from "./tools-scheduling-call";
+import { registerConfirmCallTools } from "./tools-confirm-calls";
 import { taskIsRemindable } from "./task-liveness";
 
 const actor = async (ctx: ToolContext) => {
@@ -703,5 +704,6 @@ export function registerPhase2Tools(): void {
 
   registerScreeningCallTools();
   registerSchedulingCallTools();
+  registerConfirmCallTools();
   registerNegotiationCallTools();
 }

@@ -575,6 +575,60 @@ describe("scheduling call health", () => {
       severity: "serious",
     });
     await db.delete(screeningCalls).where(eq(screeningCalls.applicationId, app!.id));
+
+    // Answer calls (0092): a confirmation call that gave up on a round still ahead,
+    // and one never dialled.
+    const { interviews, interviewConfirmations } = await import("../drizzle/schema");
+    const [iv] = await db
+      .insert(interviews)
+      .values({
+        orgId,
+        applicationId: app!.id,
+        level: 1,
+        scheduledAt: new Date(Date.now() + 20 * 3600_000),
+        status: "scheduled",
+      })
+      .returning({ id: interviews.id });
+    const [k] = await db
+      .insert(interviewConfirmations)
+      .values({
+        orgId,
+        interviewId: iv!.id,
+        party: "candidate",
+        email: "c@t.test",
+        token: "a".repeat(64),
+        state: "pending",
+      })
+      .returning({ id: interviewConfirmations.id });
+    expect(await ruleOf("confirmation_call.not_reached")).toBeUndefined();
+    await db.insert(screeningCalls).values({
+      orgId,
+      candidateId: cand!.id,
+      applicationId: app!.id,
+      purpose: "confirmation",
+      confirmationId: k!.id,
+      status: "fell_back",
+    });
+    await db.insert(screeningCalls).values({
+      orgId,
+      candidateId: cand!.id,
+      applicationId: app!.id,
+      purpose: "confirmation",
+      confirmationId: k!.id,
+      status: "approved",
+      dueAt: new Date(Date.now() - (HEALTH.schedulingCallStuckMins + 5) * 60_000),
+    });
+    await evaluate();
+    expect(await ruleOf("confirmation_call.not_reached")).toMatchObject({
+      agentType: "confirmation_call",
+      severity: "serious",
+    });
+    expect(await ruleOf("answer_call.not_dialled")).toMatchObject({
+      agentType: "confirmation_call",
+      severity: "serious",
+    });
+    await db.delete(screeningCalls).where(eq(screeningCalls.applicationId, app!.id));
+    await db.delete(interviews).where(eq(interviews.id, iv!.id));
     await db.delete(applications).where(eq(applications.id, app!.id));
     await db.delete(candidates).where(eq(candidates.id, cand!.id));
     await db.delete(requisitions).where(eq(requisitions.id, req!.id));

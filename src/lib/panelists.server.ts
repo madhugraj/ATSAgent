@@ -36,6 +36,10 @@ export type PanelistRow = {
   member: boolean;
   selfApproved: boolean;
   approvedAt: string | null;
+  /** Last four digits of the mobile for AI time-check calls (0092), or null. */
+  phoneLast4: string | null;
+  /** They asked not to be phoned by the AI assistant. */
+  aiCallOptedOut: boolean;
 };
 
 /**
@@ -194,6 +198,8 @@ export async function listPanelists(orgId: string): Promise<PanelistRow[]> {
     member: Boolean(r.memberId),
     selfApproved: r.selfApproved,
     approvedAt: r.approvedAt?.toISOString() ?? null,
+    phoneLast4: r.phone ? r.phone.replace(/\D/g, "").slice(-4) || null : null,
+    aiCallOptedOut: Boolean(r.aiCallOptOutAt),
   }));
 }
 
@@ -226,4 +232,38 @@ export async function setPanelistActive(
     entityId: id,
     detail: { email: p.email },
   });
+}
+
+/**
+ * The mobile the AI assistant phones when this panellist has not answered an
+ * interview time (0092): an Indian mobile, or null to remove it. Audited with
+ * the last four digits only.
+ */
+export async function setPanelistPhone(
+  orgId: string,
+  userId: string,
+  id: string,
+  phone: string | null,
+): Promise<{ phoneLast4: string | null }> {
+  const { dialNumber } = await import("../server/voice/phone");
+  const clean = phone?.trim() || null;
+  const n = clean ? dialNumber(clean) : null;
+  if (clean && !n) throw new Error("Enter an Indian mobile number (10 digits, optionally +91).");
+  const [row] = await db
+    .update(panelists)
+    .set({ phone: clean, updatedAt: new Date() })
+    .where(and(eq(panelists.id, id), eq(panelists.orgId, orgId)))
+    .returning({ id: panelists.id });
+  if (!row) throw new Error("That panellist is not in your directory.");
+  const { writeAudit } = await import("../server/audit");
+  await writeAudit({
+    actor: `user:${userId}`,
+    actorUserId: userId,
+    orgId,
+    action: "panelist.phone_set",
+    entityType: "panelist",
+    entityId: id,
+    detail: { last4: n?.last4 ?? null, removed: !n },
+  });
+  return { phoneLast4: n?.last4 ?? null };
 }

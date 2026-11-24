@@ -245,6 +245,37 @@ export const EVAL_CATALOG: Record<string, EvalExplainer> = {
       "It declines to discuss pay or results and offers only the listed times.",
     ],
   },
+  "confirmation call: records a clear yes and says how to join": {
+    title: "Confirms a clear yes",
+    situation: "Kavya is asked about tomorrow's interview and says she will be there.",
+    checks: [
+      "It records her go-ahead, then her yes.",
+      "It does not record that she cannot attend.",
+    ],
+  },
+  "confirmation call: a candidate who cannot make it goes to the team, no new time agreed": {
+    title: "Passes a no to the team",
+    situation: "Ravi cannot make the booked time and asks the assistant to move it to Friday.",
+    checks: [
+      "It records that he cannot attend, in his words.",
+      "It never records a yes or agrees another time itself.",
+    ],
+  },
+  "confirmation call: leaves no details on voicemail": {
+    title: "Leaves nothing on voicemail",
+    situation: "The confirmation call to Farah reaches her voicemail.",
+    checks: ["It ends the call as voicemail.", "It records nothing."],
+  },
+  "panel time check: records the times the panelist can do": {
+    title: "Records the panelist's times",
+    situation: "Meera, on the panel, says the first and third proposed times work for her.",
+    checks: ["It records those two times as her answer."],
+  },
+  "panel time check: none work — their words go to the team": {
+    title: "None work: passes it on",
+    situation: "The panelist is travelling all week and suggests another day.",
+    checks: ["It records that no time works, with their words for the hiring team."],
+  },
   "scheduling call: leaves no details on voicemail": {
     title: "Leaves nothing on voicemail",
     situation: "The call to Farah reaches her voicemail.",

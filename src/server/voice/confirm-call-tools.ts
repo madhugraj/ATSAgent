@@ -30,8 +30,8 @@ export const CONFIRMATION_END_REASONS = [
 export type ConfirmationEndReason = (typeof CONFIRMATION_END_REASONS)[number];
 
 export const CONFIRMATION_TOOL_INPUTS = {
-  record_permission: permission,
-  confirm_attendance: z.object({
+  record_attendance_go_ahead: permission,
+  will_attend: z.object({
     /** Exactly what the candidate said to confirm. */
     their_words: z.string().trim().min(1).max(300),
   }),
@@ -47,9 +47,9 @@ export const CONFIRMATION_TOOL_NAMES = Object.keys(
 ) as ConfirmationToolName[];
 
 export const CONFIRMATION_TOOL_DESCRIPTIONS: Record<ConfirmationToolName, string> = {
-  record_permission:
+  record_attendance_go_ahead:
     "Record whether the candidate has a moment now to confirm their interview: granted true only if they clearly agreed; their_words is exactly what they said.",
-  confirm_attendance:
+  will_attend:
     "The candidate clearly said they will attend at the booked time: their_words is exactly what they said. The result says what to tell them.",
   cannot_attend:
     "The candidate cannot make the booked time, or is not sure they can: their_words is why, or what they need, in their words. It goes to the hiring team, who re-schedule with them. Never offer or agree another time yourself.",
@@ -72,7 +72,7 @@ export type PanelEndReason = (typeof PANEL_END_REASONS)[number];
 export const MAX_PANEL_TIMES = 8;
 
 export const PANEL_TOOL_INPUTS = {
-  record_permission: permission,
+  record_panel_go_ahead: permission,
   answer_times: z.object({
     /** The numbers of the times in your list they said they can do (empty: none). */
     can_do: z.array(z.number().int().min(1).max(MAX_PANEL_TIMES)).max(MAX_PANEL_TIMES),
@@ -85,7 +85,7 @@ export type PanelToolName = keyof typeof PANEL_TOOL_INPUTS;
 export const PANEL_TOOL_NAMES = Object.keys(PANEL_TOOL_INPUTS) as PanelToolName[];
 
 export const PANEL_TOOL_DESCRIPTIONS: Record<PanelToolName, string> = {
-  record_permission:
+  record_panel_go_ahead:
     "Record whether the panel member has a moment now to answer the interview time: granted true only if they clearly agreed; their_words is exactly what they said.",
   answer_times:
     "Record which of the times in your list they can do, by number (can_do), with what they said (their_words). An empty can_do means none of them work — their words go to the hiring team. Only times they clearly said they can do.",
@@ -179,10 +179,10 @@ export function applyConfirmationTool(
   if (!(name in CONFIRMATION_TOOL_INPUTS)) return { ok: false, error: "Unknown tool." };
   const parsed = CONFIRMATION_TOOL_INPUTS[name as ConfirmationToolName].safeParse(args);
   if (!parsed.success) return { ok: false, error: "Those arguments are not valid." };
-  if ((name === "confirm_attendance" || name === "cannot_attend") && state.permission !== true)
+  if ((name === "will_attend" || name === "cannot_attend") && state.permission !== true)
     return { ok: false, error: "Ask whether they have a moment and record their answer first." };
   switch (name as ConfirmationToolName) {
-    case "record_permission": {
+    case "record_attendance_go_ahead": {
       const d = parsed.data as { granted: boolean; their_words: string };
       return applyPermission(
         state,
@@ -193,11 +193,11 @@ export function applyConfirmationTool(
         heardAfterAsk,
       );
     }
-    case "confirm_attendance":
+    case "will_attend":
     case "cannot_attend": {
       if (state.answer) return { ok: false, error: "Their answer is already recorded." };
       const words = (parsed.data as { their_words: string }).their_words;
-      state.answer = { attend: name === "confirm_attendance", words };
+      state.answer = { attend: name === "will_attend", words };
       return { ok: true, answer: state.answer };
     }
     case "end_confirmation_call":
@@ -249,7 +249,7 @@ export function applyPanelTool(
   if (name === "answer_times" && state.permission !== true)
     return { ok: false, error: "Ask whether they have a moment and record their answer first." };
   switch (name as PanelToolName) {
-    case "record_permission": {
+    case "record_panel_go_ahead": {
       const d = parsed.data as { granted: boolean; their_words: string };
       return applyPermission(
         state,

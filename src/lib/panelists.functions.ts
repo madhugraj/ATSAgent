@@ -53,3 +53,19 @@ export const setPanelDirectoryActive = createServerFn({ method: "POST" })
     await setPanelistActive(context.orgId, context.userId, data.id, data.active);
     return { ok: true as const };
   });
+
+export const setPanelDirectoryPhone = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) =>
+    z.object({ id: z.string().uuid(), phone: z.string().trim().max(30).nullable() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertRole(
+      context.userId,
+      context.orgId,
+      ["hr_head"],
+      "Only the HR head can change the panel directory.",
+    );
+    const { setPanelistPhone } = await import("./panelists.server");
+    return setPanelistPhone(context.orgId, context.userId, data.id, data.phone);
+  });

@@ -8,10 +8,13 @@ import { callSystemPrompt } from "../voice/call-prompt";
 import { NEGOTIATION_TOOL_NAMES } from "../voice/negotiation-call-tools";
 import { NEGOTIATION_PROMPT_TEMPLATE } from "../voice/negotiation-prompt";
 import { SCHEDULING_PROMPT_TEMPLATE } from "../voice/scheduling-prompt";
+import { CONFIRMATION_PROMPT_TEMPLATE, PANEL_PROMPT_TEMPLATE } from "../voice/confirm-call-prompts";
 import {
   mustNeverOf,
   NEGOTIATION_CALL_CHARTER,
   SCHEDULING_CALL_CHARTER,
+  CONFIRMATION_CALL_CHARTER,
+  PANEL_CHECK_CALL_CHARTER,
   SCREENING_CALL_CHARTER,
 } from "../voice/charter";
 import { registerAgent } from "./registry";
@@ -923,6 +926,83 @@ export function registerPhase3Agents(): void {
     // The rules every call follows: the live call renders the same prompt with the
     // real facts (src/server/voice/scheduling-brief.server.ts), so this hash covers them.
     system: SCHEDULING_PROMPT_TEMPLATE,
+  });
+
+  registerAgent({
+    type: "confirmation_call",
+    name: "Confirmation call agent",
+    // 0.1.0 (migration 0092): the day before a booked round the candidate has not
+    // confirmed, one short call — says it is an AI and notes the call, reads out the
+    // booked time and asks whether they will attend. A yes or a no goes through the
+    // invite's own confirm link (a no reaches the hiring desk to re-schedule); it never
+    // moves, cancels or re-books the interview. Arranged by the system; two attempts,
+    // then the desk is asked to phone them.
+    version: "0.1.0",
+    owner: "hr_head",
+    responsibility:
+      "Holds one short AI phone call the day before a booked interview the candidate has not confirmed: says it is an AI, reads out the booked time and records whether they will attend — a no, in their words, goes to the hiring team to re-schedule. Nothing else.",
+    mustNever: mustNeverOf(CONFIRMATION_CALL_CHARTER),
+    scope: {
+      reads: ["the booked interview and the candidate's pending confirmation — for one call"],
+      writes: [
+        "on the call: the candidate's go-ahead (with their words), their yes or no to the booked time through the invite's confirm answer, an opt-out from AI calls",
+      ],
+      external: [
+        "one short phone call to one candidate, within the organisation's calling window",
+        "a message on the role's hiring desk when they cannot make it or could not be reached",
+      ],
+    },
+    gates: ["general"],
+    riskTier: "medium",
+    evals: [
+      "confirmation call: records a clear yes and says how to join",
+      "confirmation call: a candidate who cannot make it goes to the team, no new time agreed",
+      "confirmation call: leaves no details on voicemail",
+    ],
+    feature: "agent_confirmation_call",
+    maxSteps: 8,
+    tools: [
+      "record_attendance_go_ahead",
+      "will_attend",
+      "cannot_attend",
+      "end_confirmation_call",
+    ],
+    // The live call renders the same prompt with the real facts (confirm-calls.server.ts).
+    system: CONFIRMATION_PROMPT_TEMPLATE,
+  });
+
+  registerAgent({
+    type: "panel_check_call",
+    name: "Panel time-check call agent",
+    // 0.1.0 (migration 0092): a panel member who has not answered an interview time
+    // within the reminder window, with a mobile in the panel directory, is phoned once
+    // alongside the reminder e-mail — says it is an AI and notes the call, reads the
+    // times and records which they can do through their confirm link's own answer.
+    // Never agrees a new time; "don't call me" is honoured for the panelist.
+    version: "0.1.0",
+    owner: "hr_head",
+    responsibility:
+      "Holds one short AI phone call to a panel member who has not answered a proposed interview time: says it is an AI, reads the times and records which they can do — the same answer as their confirm link. Nothing else.",
+    mustNever: mustNeverOf(PANEL_CHECK_CALL_CHARTER),
+    scope: {
+      reads: ["the panelist's pending time answer and the times — for one call"],
+      writes: [
+        "on the call: the panelist's go-ahead (with their words), which times they can do through their confirm answer, an opt-out from AI calls",
+      ],
+      external: [
+        "one short phone call to one panel member, within the organisation's calling window",
+      ],
+    },
+    gates: ["general"],
+    riskTier: "low",
+    evals: [
+      "panel time check: records the times the panelist can do",
+      "panel time check: none work — their words go to the team",
+    ],
+    feature: "agent_panel_check_call",
+    maxSteps: 8,
+    tools: ["record_panel_go_ahead", "answer_times", "end_panel_call"],
+    system: PANEL_PROMPT_TEMPLATE,
   });
 
   registerAgent({

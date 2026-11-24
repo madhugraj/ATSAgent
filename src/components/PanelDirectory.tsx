@@ -7,7 +7,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { toast } from "sonner";
-import { UserPlus, Users } from "lucide-react";
+import { Phone, UserPlus, Users } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import {
   addToPanelDirectory,
   listPanelDirectory,
   setPanelDirectoryActive,
+  setPanelDirectoryPhone,
 } from "@/lib/panelists.functions";
 
 export function PanelDirectory({ canEdit }: { canEdit: boolean }) {
@@ -23,6 +24,9 @@ export function PanelDirectory({ canEdit }: { canEdit: boolean }) {
   const list = useServerFn(listPanelDirectory);
   const add = useServerFn(addToPanelDirectory);
   const setActive = useServerFn(setPanelDirectoryActive);
+  const setPhone = useServerFn(setPanelDirectoryPhone);
+  const [phoneFor, setPhoneFor] = useState<string | null>(null);
+  const [phoneDraft, setPhoneDraft] = useState("");
   const q = useQuery({ queryKey: ["panel_directory"], queryFn: () => list({}) });
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -72,6 +76,17 @@ export function PanelDirectory({ canEdit }: { canEdit: boolean }) {
       await refresh();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not change it.");
+    }
+  };
+
+  const savePhone = async (id: string, phone: string | null) => {
+    try {
+      await setPhone({ data: { id, phone } });
+      setPhoneFor(null);
+      setPhoneDraft("");
+      await refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not save the mobile.");
     }
   };
 
@@ -195,6 +210,40 @@ export function PanelDirectory({ canEdit }: { canEdit: boolean }) {
                 {p.rounds.map((r) => `L${r}`).join(" ")}
                 {p.areas.length ? ` · ${p.areas.join(", ")}` : ""}
               </span>
+              {phoneFor === p.id ? (
+                <span className="flex items-center gap-1">
+                  <Input
+                    className="h-7 w-40"
+                    placeholder="Mobile"
+                    inputMode="tel"
+                    value={phoneDraft}
+                    maxLength={30}
+                    onChange={(e) => setPhoneDraft(e.target.value)}
+                  />
+                  <Button size="sm" onClick={() => savePhone(p.id, phoneDraft)}>
+                    Save
+                  </Button>
+                  {p.phoneLast4 ? (
+                    <Button size="sm" variant="ghost" onClick={() => savePhone(p.id, null)}>
+                      Remove
+                    </Button>
+                  ) : null}
+                </span>
+              ) : p.phoneLast4 || canEdit ? (
+                <button
+                  type="button"
+                  disabled={!canEdit}
+                  className="flex items-center gap-1 text-xs text-muted-foreground disabled:cursor-default"
+                  onClick={() => {
+                    setPhoneFor(p.id);
+                    setPhoneDraft("");
+                  }}
+                >
+                  <Phone className="size-3" />
+                  {p.phoneLast4 ? `••${p.phoneLast4}` : "Add mobile"}
+                  {p.aiCallOptedOut ? " · no AI calls" : ""}
+                </button>
+              ) : null}
               {canEdit && !p.member ? (
                 <Button
                   size="sm"
