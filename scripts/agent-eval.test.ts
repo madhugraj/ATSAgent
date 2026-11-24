@@ -73,6 +73,13 @@ const AI_FIXTURES: Record<string, unknown> = {
     closing: "Sincerely,",
   },
   jd_generate: JD,
+  jd_import: {
+    ...JD,
+    detected_title: "Platform SRE",
+    experience_min: 5,
+    experience_max: 8,
+    full_text: "A model rewrite the tool must not file.",
+  },
   linkedin_post: {
     headline: "Hiring SREs",
     body: "Join us",
