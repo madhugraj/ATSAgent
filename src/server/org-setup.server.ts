@@ -11,7 +11,10 @@ import { organizations } from "@db/schema";
 /** The tenant's own careers address slug: yavar.ai -> yavar@careers.atsiq.yavar.ai, unique. */
 export async function uniqueInboxSlug(companyDomain: string, name: string): Promise<string> {
   let inboxSlug =
-    companyDomain.split(".")[0]?.replace(/[^a-z0-9-]+/g, "-") ||
+    companyDomain
+      .split(".")[0]
+      ?.toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-") ||
     name
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
