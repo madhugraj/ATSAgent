@@ -14,6 +14,8 @@ export const VOICE_AGENT_TYPES: readonly string[] = [
   "screening_call",
   "scheduling_call",
   "negotiation_call",
+  "confirmation_call",
+  "panel_check_call",
 ];
 
 export const modalityFilterSchema = z.enum(["all", "voice", "text"]);

@@ -121,6 +121,8 @@ function CallReviewsPage() {
             <SelectItem value="all">All calls</SelectItem>
             <SelectItem value="screening">Screening</SelectItem>
             <SelectItem value="scheduling">Scheduling</SelectItem>
+            <SelectItem value="confirmation">Attendance check</SelectItem>
+            <SelectItem value="panel_check">Panel time check</SelectItem>
             <SelectItem value="negotiation">Pay discussion</SelectItem>
           </SelectContent>
         </Select>

@@ -9,7 +9,9 @@
 import { writeFileSync } from "node:fs";
 
 import {
+  CONFIRMATION_CALL_CHARTER,
   NEGOTIATION_CALL_CHARTER,
+  PANEL_CHECK_CALL_CHARTER,
   SCHEDULING_CALL_CHARTER,
   SCREENING_CALL_CHARTER,
   type Rule,
@@ -18,6 +20,8 @@ import {
 
 const NAME: Record<VoiceCharter["agent"], string> = {
   screening_call: "Screening call agent",
+  confirmation_call: "Confirmation call agent",
+  panel_check_call: "Panel time-check call agent",
   scheduling_call: "Scheduling call agent",
   negotiation_call: "Negotiation call agent",
 };
@@ -56,7 +60,13 @@ export function charterDoc(): string {
     "contact given is the organisation's mailbox.",
     "",
   ];
-  for (const ch of [SCREENING_CALL_CHARTER, SCHEDULING_CALL_CHARTER, NEGOTIATION_CALL_CHARTER]) {
+  for (const ch of [
+    SCREENING_CALL_CHARTER,
+    SCHEDULING_CALL_CHARTER,
+    CONFIRMATION_CALL_CHARTER,
+    PANEL_CHECK_CALL_CHARTER,
+    NEGOTIATION_CALL_CHARTER,
+  ]) {
     out.push(`## ${NAME[ch.agent]} (\`${ch.agent}\`)`, "", `**Purpose:** ${ch.purpose}`, "");
     out.push(...rows("Must say", ch.mustSay));
     out.push(...rows("May talk about only", ch.may));

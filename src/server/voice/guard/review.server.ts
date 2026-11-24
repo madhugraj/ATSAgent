@@ -27,7 +27,9 @@ import {
 import { db } from "../../db";
 import { log } from "../../log";
 import {
+  CONFIRMATION_CALL_CHARTER,
   NEGOTIATION_CALL_CHARTER,
+  PANEL_CHECK_CALL_CHARTER,
   SCHEDULING_CALL_CHARTER,
   SCREENING_CALL_CHARTER,
   charterBlock,
@@ -44,6 +46,8 @@ const CHARTER = {
   screening: SCREENING_CALL_CHARTER,
   scheduling: SCHEDULING_CALL_CHARTER,
   negotiation: NEGOTIATION_CALL_CHARTER,
+  confirmation: CONFIRMATION_CALL_CHARTER,
+  panel_check: PANEL_CHECK_CALL_CHARTER,
 } as const;
 
 type CallRow = typeof screeningCalls.$inferSelect;

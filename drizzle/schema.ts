@@ -366,6 +366,10 @@ export const panelists = pgTable(
       .notNull()
       .default(sql`'{1,2,3}'::integer[]`),
     weeklyCap: integer("weekly_cap").notNull().default(4),
+    /** Mobile for the AI time-check call (0092); never sent to the model, only dialled. */
+    phone: text("phone"),
+    /** They asked not to be phoned by the AI assistant (0092). */
+    aiCallOptOutAt: timestamp("ai_call_opt_out_at", { withTimezone: true }),
     active: boolean("active").notNull().default(true),
     addedBy: uuid("added_by").references(() => users.id, { onDelete: "set null" }),
     approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
@@ -2518,6 +2522,8 @@ export type StockAgentType =
   | "distribution"
   | "screening_call"
   | "scheduling_call"
+  | "confirmation_call"
+  | "panel_check_call"
   | "negotiation_call"
   | "org_context"
   | "expert_interview"
@@ -4035,7 +4041,8 @@ export type ScreeningCallDetails = {
 };
 
 /** What the candidate said for one kit question, as the call agent recorded it. */
-export type VoiceCallPurpose = "screening" | "scheduling" | "negotiation";
+export type VoiceCallPurpose =
+  "screening" | "scheduling" | "negotiation" | "confirmation" | "panel_check";
 
 export type ScreeningCallAnswer = {
   question_id: string;
@@ -4134,6 +4141,14 @@ export const screeningCalls = pgTable(
     negotiationId: uuid("negotiation_id").references(() => offerNegotiations.id, {
       onDelete: "set null",
     }),
+    /** Confirmation / panel_check: the time answer this call collects (0092). */
+    confirmationId: uuid("confirmation_id").references(() => interviewConfirmations.id, {
+      onDelete: "cascade",
+    }),
+    /** panel_check: the panelist phoned (candidateId stays the candidate it is about) (0092). */
+    panelistId: uuid("panelist_id").references(() => panelists.id, { onDelete: "cascade" }),
+    /** Scheduling: one more call because the e-mailed times stayed unanswered (0092). */
+    reminder: boolean("reminder").notNull().default(false),
     /** Turn-taking and audio stats of the answered call (0071) — reviewed by the Voice Guard. */
     callStats: jsonb("call_stats").$type<CallStats>(),
     /** The instructions and facts the answered call ran with (0071) — the Voice Guard's reference. */
@@ -4153,7 +4168,7 @@ export const screeningCalls = pgTable(
     index("screening_calls_slot_offer_idx").on(t.slotOfferId),
     check(
       "screening_calls_purpose_check",
-      sql`${t.purpose} in ('screening', 'scheduling', 'negotiation')`,
+      sql`${t.purpose} in ('screening', 'scheduling', 'negotiation', 'confirmation', 'panel_check')`,
     ),
     check(
       "screening_calls_alternates_check",
@@ -4164,6 +4179,15 @@ export const screeningCalls = pgTable(
       sql`${t.purpose} <> 'scheduling' or ${t.slotOfferId} is not null`,
     ),
     index("screening_calls_negotiation_idx").on(t.negotiationId),
+    index("screening_calls_confirmation_idx").on(t.confirmationId),
+    check(
+      "screening_calls_callee_check",
+      sql`(${t.purpose} = 'panel_check') = (${t.panelistId} is not null)`,
+    ),
+    check(
+      "screening_calls_confirmation_check",
+      sql`${t.purpose} not in ('confirmation', 'panel_check') or ${t.confirmationId} is not null`,
+    ),
     check(
       "screening_calls_negotiation_check",
       sql`${t.purpose} <> 'negotiation' or ${t.negotiationId} is not null`,

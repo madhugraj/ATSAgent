@@ -26,11 +26,15 @@ export async function dueCalls(now: Date, limit = 50) {
     join candidates cand on cand.id = c.candidate_id
     where c.status in ('approved', 'callback', 'no_answer', 'failed')
       -- Scheduling calls only while the organisation keeps them switched on.
-      and (c.purpose <> 'scheduling' or coalesce(s.scheduling_enabled, false))
+      and (c.purpose not in ('scheduling', 'confirmation', 'panel_check')
+        or coalesce(s.scheduling_enabled, false))
       -- Pay negotiation calls only while the organisation keeps them switched on.
       and (c.purpose <> 'negotiation' or coalesce(s.negotiation_enabled, false))
-      -- Never a candidate who asked not to be called by the AI assistant.
-      and cand.ai_call_opt_out_at is null
+      -- Never a candidate who asked not to be called by the AI assistant; a panel
+      -- time check phones the panelist, so theirs is the opt-out that counts.
+      and (c.purpose = 'panel_check' or cand.ai_call_opt_out_at is null)
+      and (c.purpose <> 'panel_check' or not exists (
+        select 1 from panelists p where p.id = c.panelist_id and p.ai_call_opt_out_at is not null))
       -- A screening call only while the candidate is still before the interviews:
       -- never one who has since moved into a round, or was closed.
       and (c.purpose <> 'screening' or c.application_id is null or exists (
@@ -43,7 +47,7 @@ export async function dueCalls(now: Date, limit = 50) {
           and n.status in ('open', 'message_sent', 'countered', 'call_requested', 'expired')))
       -- Scheduling and pay calls are tried at most twice (…_MAX_ATTEMPTS).
       and (c.status = 'callback'
-        or c.attempt < case when c.purpose in ('scheduling', 'negotiation') then 2
+        or c.attempt < case when c.purpose in ('scheduling', 'negotiation', 'confirmation', 'panel_check') then 2
           else coalesce(s.max_attempts, 3) end)
     order by c.due_at
     limit ${limit}`);
@@ -64,7 +68,8 @@ export async function claimCall(orgId: string, id: string): Promise<boolean> {
         eq(screeningCalls.id, id),
         eq(screeningCalls.orgId, orgId),
         inArray(screeningCalls.status, [...WAITING]),
-        sql`not exists (select 1 from candidates c where c.id = ${screeningCalls.candidateId} and c.ai_call_opt_out_at is not null)`,
+        sql`(${screeningCalls.purpose} = 'panel_check' or not exists (select 1 from candidates c where c.id = ${screeningCalls.candidateId} and c.ai_call_opt_out_at is not null))`,
+        sql`(${screeningCalls.purpose} <> 'panel_check' or not exists (select 1 from panelists p where p.id = ${screeningCalls.panelistId} and p.ai_call_opt_out_at is not null))`,
       ),
     )
     .returning({ id: screeningCalls.id });

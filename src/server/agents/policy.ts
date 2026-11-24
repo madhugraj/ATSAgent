@@ -72,7 +72,13 @@ export function decideToolCall(
 }
 
 /** The AI phone agents whose calls the Voice Guard reviews. */
-export const VOICE_CALL_AGENTS = ["screening_call", "scheduling_call", "negotiation_call"] as const;
+export const VOICE_CALL_AGENTS = [
+  "screening_call",
+  "scheduling_call",
+  "negotiation_call",
+  "confirmation_call",
+  "panel_check_call",
+] as const;
 
 /**
  * The Voice Guard is mandatory, not opt-in: it is on whenever any AI phone

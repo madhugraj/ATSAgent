@@ -5,7 +5,7 @@
  * already waiting are cancelled. Only a person on the team can clear it, when
  * the candidate asks to be called again. Both are audited.
  */
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 
 import { candidates, screeningCalls } from "@db/schema";
 import { writeAudit } from "../audit";
@@ -61,6 +61,8 @@ export async function recordAiCallOptOut(input: {
         eq(screeningCalls.orgId, input.orgId),
         eq(screeningCalls.candidateId, input.candidateId),
         inArray(screeningCalls.status, [...NOT_PLACED]),
+        // A panelist's time check is about the candidate, not to them.
+        ne(screeningCalls.purpose, "panel_check"),
       ),
     )
     .returning({ id: screeningCalls.id });

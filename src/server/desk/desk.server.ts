@@ -1865,6 +1865,8 @@ const AGENT_TITLE: Record<string, string> = {
   screening: "Screening agent",
   screening_call: "Screening call agent",
   scheduling_call: "Scheduling call agent",
+  confirmation_call: "Confirmation call agent",
+  panel_check_call: "Panel time-check call agent",
   interview: "Interview coordinator",
   evaluation: "Evaluation agent",
   offer: "Offer agent",
