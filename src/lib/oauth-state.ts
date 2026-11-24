@@ -85,6 +85,8 @@ export function assertAllowedOrigin(origin: string): string {
     "http://localhost:8081",
   ]);
   const cleaned = origin.replace(/\/$/, "");
+  // Local dev servers run on arbitrary ports; Vite compiles this out of builds.
+  if (import.meta.env?.DEV && /^http:\/\/localhost:\d+$/.test(cleaned)) return cleaned;
   if (!allowed.has(cleaned)) throw new Error("Unrecognised application origin.");
   return cleaned;
 }
