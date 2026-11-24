@@ -419,18 +419,21 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST https://www.scouts.yavar.ai/api
 ## 7. First organisation and platform admin
 
 Run the bootstrap once, from a pod that can reach the database (the migrate
-image has Bun, the scripts and node_modules):
+image has Bun, the scripts and node_modules). The script refuses a non-local
+database unless `BOOTSTRAP_ALLOW_REMOTE=yes` is set, so the command sets it:
 
 ```bash
 kubectl -n scouts run bootstrap --rm -it --restart=Never \
   --image $IMG-migrate:$TAG \
-  --env ORG_NAME="Yavar" --env OWNER_EMAIL="owner@yavar.ai" \
-  --overrides '{"spec":{"containers":[{"name":"bootstrap","image":"'$IMG-migrate:$TAG'","command":["bun","scripts/bootstrap-org.ts"],"envFrom":[{"secretRef":{"name":"scouts-env"}}],"env":[{"name":"ORG_NAME","value":"Yavar"},{"name":"OWNER_EMAIL","value":"owner@yavar.ai"}]}]}}'
+  --overrides '{"spec":{"containers":[{"name":"bootstrap","image":"'$IMG-migrate:$TAG'","command":["bun","scripts/bootstrap-org.ts"],"envFrom":[{"secretRef":{"name":"scouts-env"}}],"env":[{"name":"ORG_NAME","value":"Yavar"},{"name":"OWNER_EMAIL","value":"owner@yavar.ai"},{"name":"BOOTSTRAP_ALLOW_REMOTE","value":"yes"}]}]}}'
 ```
 
 It creates the organisation, makes the owner the platform super admin, and
 e-mails a one-time link (60 minutes) to set the password — `SMTP_URL` must work.
-No password is ever set or seen by the operator. Idempotent.
+No password is ever set or seen by the operator. Idempotent. Check the output:
+it ends with `Sent the set-password link to …`; anything else (an error, or
+`Email is not configured`) means no email was sent. If the owner already has a
+password, use "Forgot password" on the sign-in page.
 
 **Moving existing data** (from the current `atsiq` database): run the migrations
 first (§6), then `pg_restore --data-only --no-owner -d "$DATABASE_URL" atsiq.dump`

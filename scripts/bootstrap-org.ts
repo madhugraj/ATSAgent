@@ -1,5 +1,5 @@
 /**
- * Local only: create an organisation with its owner, who is also the platform
+ * Create an organisation with its owner, who is also the platform
  * super admin, and email them the link to set their password.
  *
  *   ORG_NAME="Yavar" OWNER_EMAIL=you@example.com bun scripts/bootstrap-org.ts
@@ -10,13 +10,22 @@
  * without them everything else is created and the owner can use
  * "Forgot password" on the sign-in page once email is configured.
  * Idempotent: re-running updates nothing that already exists.
+ *
+ * Runs against a local database only, unless the operator opts in for a
+ * deployed one (e.g. from a pod in the cluster):
+ *
+ *   BOOTSTRAP_ALLOW_REMOTE=yes ORG_NAME=… OWNER_EMAIL=… bun scripts/bootstrap-org.ts
  */
 import { and, eq, ilike } from "drizzle-orm";
 
 const url = process.env.DATABASE_URL ?? "";
-if (!["127.0.0.1", "localhost", "::1"].includes(new URL(url).hostname)) {
-  throw new Error("Refusing to bootstrap an organisation on a non-local database");
+const isLocal = ["127.0.0.1", "localhost", "::1"].includes(new URL(url).hostname);
+if (!isLocal && process.env.BOOTSTRAP_ALLOW_REMOTE !== "yes") {
+  throw new Error(
+    "Refusing to bootstrap an organisation on a non-local database. Set BOOTSTRAP_ALLOW_REMOTE=yes to run it against a deployed database on purpose.",
+  );
 }
+if (!isLocal) console.log("BOOTSTRAP_ALLOW_REMOTE=yes: bootstrapping a non-local database.");
 const orgName = (process.env.ORG_NAME ?? "").trim();
 const email = (process.env.OWNER_EMAIL ?? "").trim().toLowerCase();
 if (!orgName) throw new Error("Set ORG_NAME");
