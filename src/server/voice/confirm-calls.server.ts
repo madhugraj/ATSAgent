@@ -620,7 +620,7 @@ async function placeConfirmation(
       voice: policy.voice,
       maxMinutes: brief.facts.maxMinutes,
       dial: number,
-      recordTools: ["record_permission", "confirm_attendance", "cannot_attend"],
+      recordTools: ["record_attendance_go_ahead", "will_attend", "cannot_attend"],
       endTools: ["end_confirmation_call"],
       keepTranscript: () => state.permission === true,
       onTool: async (c, live) => {
@@ -633,7 +633,7 @@ async function placeConfirmation(
         );
         live.noteTool(c.name, out.ok);
         if (!out.ok) return out;
-        if (c.name === "record_permission") {
+        if (c.name === "record_attendance_go_ahead") {
           await setCall(call.id, orgId, {
             consentAt: state.permission ? new Date(now()) : null,
             consentWords: state.permissionWords ?? null,
@@ -736,7 +736,7 @@ async function placePanelCheck(
       voice: policy.voice,
       maxMinutes: brief.facts.maxMinutes,
       dial: number,
-      recordTools: ["record_permission", "answer_times"],
+      recordTools: ["record_panel_go_ahead", "answer_times"],
       endTools: ["end_panel_call"],
       keepTranscript: () => state.permission === true,
       onTool: async (c, live) => {
@@ -750,7 +750,7 @@ async function placePanelCheck(
         );
         live.noteTool(c.name, out.ok);
         if (!out.ok) return out;
-        if (c.name === "record_permission") {
+        if (c.name === "record_panel_go_ahead") {
           await setCall(call.id, orgId, {
             consentAt: state.permission ? new Date(now()) : null,
             consentWords: state.permissionWords ?? null,
