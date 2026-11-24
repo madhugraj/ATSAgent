@@ -78,11 +78,12 @@ export async function parseCv(
       phone: v.phone ?? null,
       location: v.location ?? null,
       experience_years: v.experience_years ?? null,
-      education: typeof v.education === "string"
-        ? v.education
-        : Array.isArray(v.education)
-          ? v.education.filter((s) => s.trim()).join("; ")
-          : null,
+      education:
+        typeof v.education === "string"
+          ? v.education
+          : Array.isArray(v.education)
+            ? v.education.filter((s) => s.trim()).join("; ")
+            : null,
       skills: v.skills ?? null,
       linkedin_url: v.linkedin_url ?? null,
       github_url: v.github_url ?? null,
