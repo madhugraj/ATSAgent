@@ -196,6 +196,18 @@ export async function performRoundGate(
     reason: `Another round before the hiring decision: L${level} ${round.name}`,
     note: decision.comment?.trim() || null,
   });
+  // The card keeps the agent's draft; the thread says what was actually added.
+  try {
+    const desk = await import("../desk/desk.server");
+    const conv = await desk.conversationForRequisition(orgId, f.requisitionId);
+    if (conv)
+      await desk.postMessage(conv, {
+        role: "desk",
+        body: `Added L${level} · ${round.name} to the interview plan${round.focus ? ` — ${round.focus}` : ""}. Rated on: ${round.competencies.join(", ")}. ${f.candidate} is now in L${level}.`,
+      });
+  } catch {
+    /* the thread is a courtesy; the plan and the audit trail have the record */
+  }
   const { writeAudit } = await import("../audit");
   await writeAudit({
     actor: actor.memberEmail,
