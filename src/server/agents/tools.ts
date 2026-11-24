@@ -538,6 +538,8 @@ export function registerPhase1Tools(): void {
       // Tell the hiring-desk thread (if any) which template shaped this draft.
       const { noteJdTemplate } = await import("../desk/desk.server");
       await noteJdTemplate(ctx.orgId, ctx.runId, saved.version, template);
+      const { postFiledJd } = await import("../desk/desk.server");
+      await postFiledJd(ctx.orgId, ctx.runId, saved.id, false);
       return {
         jdId: saved.id,
         version: saved.version,
@@ -607,6 +609,9 @@ export function registerPhase1Tools(): void {
         // The person's own text is the JD; the model only structures the fields around it.
         jd: { ...parsed, full_text: jdText },
       });
+
+      const { postFiledJd } = await import("../desk/desk.server");
+      await postFiledJd(ctx.orgId, ctx.runId, saved.id, true);
 
       // Same blanks-only fill as the requisition page's import.
       const patch: Partial<typeof requisitions.$inferInsert> = {};
