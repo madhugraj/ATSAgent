@@ -62,3 +62,12 @@ jobs:
           fails=""
           for f in scripts/*.test.ts; do bun test "$f" || fails="$fails $f"; done
           if [ -n "$fails" ]; then echo "failed test files:$fails"; exit 1; fi
+
+      - name: Build (web, voice worker, parser worker)
+        run: bun run build
+
+      # The image ships only .output, no node_modules: both workers must boot
+      # from a bare directory (a static "#tanstack-*" import once crashed the
+      # voice worker at start while CI stayed green).
+      - name: Worker boot smoke (no node_modules)
+        run: bash scripts/worker-boot-smoke.sh
