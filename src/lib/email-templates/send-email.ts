@@ -156,6 +156,11 @@ export async function sendTemplateEmail(
   );
   const from = process.env["EMAIL_FROM"] || `${SITE_NAME} <noreply@${FROM_DOMAIN}>`;
 
+  // A missing relay fails loudly first, in tests as everywhere else.
+  const smtpUrl = process.env["SMTP_URL"];
+  if (!smtpUrl) {
+    throw new Error("Email is not configured: set SMTP_URL");
+  }
   if (process.env["NODE_ENV"] === "test") {
     testOutbox.push({ template: templateName, to: recipient, subject });
     return { sent: true };
@@ -163,11 +168,6 @@ export async function sendTemplateEmail(
   if (undeliverableAddress(recipient)) {
     console.warn(`[email] not sent: ${templateName} to a reserved test address`);
     return { sent: true };
-  }
-
-  const smtpUrl = process.env["SMTP_URL"];
-  if (!smtpUrl) {
-    throw new Error("Email is not configured: set SMTP_URL");
   }
 
   // Test runs share .env.local, whose SMTP relay reaches real inboxes: render
