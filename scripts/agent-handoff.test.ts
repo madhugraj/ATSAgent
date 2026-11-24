@@ -1275,6 +1275,29 @@ describe("work for an agent that is busy on the same candidate", () => {
       .where(and(eq(agentEvents.orgId, orgId), eq(agentEvents.type, "agent.dispatch_deferred")));
     expect(held).toHaveLength(1);
     expect(held[0]).toMatchObject({ status: "pending", subjectId: appId, attempts: 0 });
+    // More work for the same agent and candidate joins the held item instead of piling up.
+    await emitAgentEvent({
+      orgId,
+      type: "application.advanced",
+      subjectType: "requisition",
+      subjectId: reqId,
+      actorUserId: hrId,
+      payload: { applicationIds: [appId] },
+    });
+    await emitAgentEvent({
+      orgId,
+      type: "interview.missed",
+      subjectType: "application",
+      subjectId: appId,
+      actorUserId: hrId,
+      payload: { applicationId: appId, level: 2 },
+    });
+    await processAgentEvents({ orgId });
+    const stillOne = await db
+      .select()
+      .from(agentEvents)
+      .where(and(eq(agentEvents.orgId, orgId), eq(agentEvents.type, "agent.dispatch_deferred")));
+    expect(stillOne).toHaveLength(1);
     // Still busy on the next tick: it keeps waiting, without counting as a failure.
     await processAgentEvents({ orgId });
     const [again] = await db.select().from(agentEvents).where(eq(agentEvents.id, held[0]!.id));
@@ -1295,8 +1318,19 @@ describe("work for an agent that is busy on the same candidate", () => {
       .set({ status: "done" } as never)
       .where(eq(agentRuns.id, busy));
     await processAgentEvents({ orgId });
-    const [done] = await db.select().from(agentEvents).where(eq(agentEvents.id, held[0]!.id));
-    expect(done!.status).toBe("done");
-    expect((await interviewRuns()).length).toBeGreaterThan(0);
+    // Exactly one new coordinator run starts with everything held; later work waits behind it
+    // as a single held item, never one run per event.
+    expect(await interviewRuns()).toHaveLength(1);
+    const pendingHeld = await db
+      .select()
+      .from(agentEvents)
+      .where(
+        and(
+          eq(agentEvents.orgId, orgId),
+          eq(agentEvents.type, "agent.dispatch_deferred"),
+          eq(agentEvents.status, "pending"),
+        ),
+      );
+    expect(pendingHeld.length).toBeLessThanOrEqual(1);
   });
 });

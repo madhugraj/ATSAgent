@@ -241,15 +241,46 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
       // waiting on a person for something else) is held, not dropped, and
       // starts once that run is done. Role-level work is covered by the run.
       if (subject.type === "application" && e.type !== DEFERRED_DISPATCH) {
-        const { emitAgentEvent } = await import("./events");
-        await emitAgentEvent({
-          orgId: e.orgId,
-          type: DEFERRED_DISPATCH,
-          subjectType: "application",
-          subjectId: subject.id,
-          actorUserId: e.actorUserId,
-          payload: { agent, goal, requisitionId: req.id, after: e.type },
-        });
+        // One held item per agent and candidate: later work joins it, so the
+        // agent starts once with everything, not once per event.
+        const [held] = await db
+          .select({ id: agentEvents.id, payload: agentEvents.payload })
+          .from(agentEvents)
+          .where(
+            and(
+              eq(agentEvents.orgId, e.orgId),
+              eq(agentEvents.type, DEFERRED_DISPATCH),
+              eq(agentEvents.subjectId, subject.id),
+              inArray(agentEvents.status, ["pending", "processing"]),
+              sql`${agentEvents.payload} ->> 'agent' = ${agent}`,
+            ),
+          )
+          .limit(1);
+        if (held) {
+          const p = held.payload as { goal?: string; after?: string };
+          if (!(p.goal ?? "").includes(goal))
+            await db
+              .update(agentEvents)
+              .set({
+                payload: {
+                  ...p,
+                  goal: `${p.goal ?? ""}\n\nThen (latest first if they conflict): ${goal}`,
+                  after: `${p.after ?? ""},${e.type}`,
+                },
+                updatedAt: new Date(),
+              })
+              .where(eq(agentEvents.id, held.id));
+        } else {
+          const { emitAgentEvent } = await import("./events");
+          await emitAgentEvent({
+            orgId: e.orgId,
+            type: DEFERRED_DISPATCH,
+            subjectType: "application",
+            subjectId: subject.id,
+            actorUserId: e.actorUserId,
+            payload: { agent, goal, requisitionId: req.id, after: e.type },
+          });
+        }
         log.info("agent.orchestrator.dispatch_deferred", {
           org_id: e.orgId,
           agent,
