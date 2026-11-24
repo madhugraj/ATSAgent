@@ -51,6 +51,9 @@ const KIND_TOGGLE: Record<
   panel_reminder: null,
   // Asking a panel member for their mobile (AI time-check calls): internal mail.
   panel_mobile_ask: null,
+  // Pre-interview reminders: the candidate (interview toggle) and the panel (internal).
+  interview_reminder: "interviewEnabled",
+  interviewer_reminder: null,
 };
 
 export async function getOrgEmailSettings(orgId: string): Promise<EmailSettingsEffective> {
