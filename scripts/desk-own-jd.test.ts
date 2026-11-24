@@ -3,8 +3,8 @@
  *  - it is kept in the thread word for word, marked as their JD;
  *  - before the role exists, the desk reads it like any message (details are taken);
  *  - when the role is approved, the JD agent is told to file it, not draft one;
- *  - a role that already has an approved JD keeps it — nothing is replaced and
- *    no JD agent starts.
+ *  - on a role that already has a JD, it is filed as the next version (for
+ *    approval again) instead of being refused;
  * Run: DATABASE_URL=postgres://…/atsagent_test SESSION_SECRET=… bun test scripts/desk-own-jd.test.ts
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -132,7 +132,7 @@ describe("own JD attached in the hiring desk", () => {
     expect(m[1]?.body).toContain("as soon as the requisition is approved");
   });
 
-  test("an approved JD is never replaced and no JD agent starts", async () => {
+  test("on an approved role it is filed as the next version, never refused", async () => {
     const reqId = await requisition("approved");
     await db
       .insert(jobDescriptions)
@@ -140,12 +140,14 @@ describe("own JD attached in the hiring desk", () => {
     const conv = await thread(reqId);
     await desk.attachOwnJd(conv, userId, OWN_JD, null);
     const m = await messages(conv.id);
-    expect(m[1]?.body).toContain("already has an approved job description");
+    expect(m[1]?.body).not.toContain("already has an approved job description");
+    // The JD agent is asked to file it (or, switched off here, the desk says so).
     const runs = await db
-      .select({ id: agentRuns.id })
+      .select({ goal: agentRuns.goal })
       .from(agentRuns)
       .where(eq(agentRuns.conversationId, conv.id));
-    expect(runs).toHaveLength(0);
+    if (runs.length) expect(runs[0]!.goal).toContain("import_jd_version");
+    else expect(m[1]?.body).toContain("switched off");
   });
 
   test("“stop” cancels the role's running agents and keeps the role open", async () => {
