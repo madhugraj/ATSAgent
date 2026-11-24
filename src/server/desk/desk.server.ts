@@ -654,6 +654,94 @@ async function startForThread(
   return runId;
 }
 
+/** Card on the person's own job description, attached in the thread (file or long paste). */
+export const OWN_JD_CARD = "own_jd";
+
+/** Longest own JD the thread keeps word for word (a message is clipped beyond this). */
+export const OWN_JD_MAX = MESSAGE_MAX;
+
+async function threadHasOwnJd(conv: { id: string; orgId: string }): Promise<boolean> {
+  const [m] = await db
+    .select({ id: hiringMessages.id })
+    .from(hiringMessages)
+    .where(
+      and(
+        eq(hiringMessages.conversationId, conv.id),
+        eq(hiringMessages.orgId, conv.orgId),
+        sql`${hiringMessages.card}->>'type' = ${OWN_JD_CARD}`,
+      ),
+    )
+    .limit(1);
+  return Boolean(m);
+}
+
+/** The JD agent's goal: file the person's own JD when they shared one, else draft. */
+async function jdAgentBrief(
+  conv: { id: string; orgId: string },
+  req: { code: string; title: string },
+): Promise<{ goal: string; announce: string }> {
+  if (await threadHasOwnJd(conv))
+    return {
+      goal: `Requisition ${req.code} "${req.title}": the person shared their own job description in this thread. File it word for word with import_jd_version (leave jdText out) — do not draft a new one — and get it approved by the department head.`,
+      announce:
+        "I've asked the JD agent to file your job description as written; it will come back here for approval.",
+    };
+  return {
+    goal: `Requisition ${req.code} "${req.title}" is approved. Draft its job description and get it approved by the department head.`,
+    announce:
+      "I've asked the JD agent to draft the job description; it will come back here for approval.",
+  };
+}
+
+/**
+ * The person attached their own JD (a file's text or a long paste): keep it
+ * verbatim in the thread and, when the role is ready for a JD, hand it to the
+ * JD agent to file as written. Otherwise it is used once the role is approved.
+ */
+export async function attachOwnJd(
+  conv: Conversation,
+  userId: string,
+  text: string,
+  fileName: string | null,
+): Promise<void> {
+  await postMessage(conv, {
+    role: "user",
+    body: text,
+    card: { type: OWN_JD_CARD, fileName },
+  });
+  if (!conv.requisitionId) {
+    await postMessage(conv, {
+      role: "desk",
+      body: "Got your job description. Once the role is raised and approved, the JD agent will file it exactly as written for the department head's approval.",
+    });
+    return;
+  }
+  const [req] = await db
+    .select({ status: requisitions.status })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, conv.orgId)))
+    .limit(1);
+  const jd = await latestJdStatus(conv.orgId, conv.requisitionId);
+  if (jd === "approved" || jd === "pending_dh") {
+    await postMessage(conv, {
+      role: "desk",
+      body:
+        jd === "approved"
+          ? "This role already has an approved job description, so I've kept yours in the thread without replacing it. To use yours instead, upload it with “I already have a JD” on the requisition page."
+          : "A job description is already waiting for the department head. Ask for changes on it and I'll have the JD agent file yours instead.",
+    });
+    return;
+  }
+  if (req?.status !== "approved") {
+    await postMessage(conv, {
+      role: "desk",
+      body: "Got your job description. The JD agent will file it exactly as written as soon as the requisition is approved.",
+    });
+    return;
+  }
+  await startStage(conv, userId);
+}
+
 async function latestJdStatus(orgId: string, requisitionId: string) {
   const [jd] = await db
     .select({ status: jobDescriptions.status })
@@ -714,14 +802,8 @@ export async function continueWithRole(
       body: "Its job description is waiting for the department head's approval. I'll search the talent pool as soon as it is approved.",
     });
   } else {
-    await startForThread(
-      conv,
-      "jd",
-      userId,
-      `Requisition ${req.code} "${req.title}" is approved. Draft its job description and get it approved by the department head.`,
-      req.id,
-      "I've asked the JD agent to draft the job description; it will come back here for approval.",
-    );
+    const brief = await jdAgentBrief(conv, req);
+    await startForThread(conv, "jd", userId, brief.goal, req.id, brief.announce);
   }
 }
 
@@ -2734,14 +2816,8 @@ export async function startStage(
     if (jd === "pending_dh") return null; // waiting for the department head
     if (opts.dryRun) return "jd";
     if (await reuseJdIfChosen(conv.orgId, conv.requisitionId)) return null;
-    return startForThread(
-      conv,
-      "jd",
-      userId,
-      `Requisition ${req.code} "${req.title}" is approved. Draft its job description and get it approved by the department head.`,
-      conv.requisitionId,
-      "I've asked the JD agent to draft the job description; it will come back here for approval.",
-    );
+    const brief = await jdAgentBrief(conv, req);
+    return startForThread(conv, "jd", userId, brief.goal, conv.requisitionId, brief.announce);
   }
   if (opts.dryRun) return "intake";
   return startForThread(

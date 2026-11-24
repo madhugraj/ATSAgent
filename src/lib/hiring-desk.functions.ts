@@ -383,6 +383,27 @@ export const sendDeskMessage = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
+/** The person's own JD (a file's extracted text or a long paste), kept word for word. */
+export const attachDeskJd = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        text: z.string().trim().min(200).max(12_000),
+        fileName: z.string().trim().min(1).max(200).nullable().optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    await needsAiKey(context.orgId);
+    await registered();
+    const { attachOwnJd } = await import("../server/desk/desk.server");
+    await attachOwnJd(conv, context.userId, data.text, data.fileName ?? null);
+    return { ok: true as const };
+  });
+
 const Choice = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("existing"), requisitionId: z.string().uuid() }),
   z.object({ kind: z.literal("new"), reuseJdFrom: z.string().uuid().nullable().optional() }),
