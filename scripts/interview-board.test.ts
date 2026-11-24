@@ -198,8 +198,7 @@ describe("a candidate's interview row", () => {
     expect(picked.now.text).toBe("Time agreed — the interview is being booked");
     const panelPending = arranging({ panel: [{ name: "Saranya", state: "pending", okSlots: [] }] });
     expect(panelPending.now.text).toBe("Waiting for the panel to accept a time");
-    expect(panelPending.steps.at(-1)!.sub).toBe(
-      "Saranya has not answered yet\nVishal: not contacted yet".split("\n")[0],
-    );
+    // Until the panel has accepted, the candidate is not contacted.
+    expect(panelPending.steps.at(-1)!.sub).toBe("Saranya has not answered yet");
   });
 });
