@@ -414,7 +414,8 @@ function RequisitionDetail() {
     setBusy(true);
     try {
       const jd = await runImportJd({ data: { jdText: text, title: r!.title } });
-      await saveJobDescription({ data: { requisitionId: r!.id, jd } });
+      // The recruiter's text is the JD, word for word; the AI only reads skills and experience from it.
+      await saveJobDescription({ data: { requisitionId: r!.id, jd: { ...jd, full_text: text } } });
 
       // Keep the requisition's scoring baseline in sync with the uploaded JD.
       if (jd.must_have?.length && !r!.must_have_skills.length) {

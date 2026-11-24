@@ -159,7 +159,7 @@ export const importJdCore = createServerOnlyFn(async function importJdCore(
       "Return ONLY JSON with keys: detected_title, purpose, responsibilities (markdown bullets), " +
       "must_have (string array of concrete skills), good_to_have (string array), qualifications, " +
       "success_factors, reporting_to, experience_min (number, 0 if absent), experience_max (number, 0 if absent), " +
-      "full_text (the JD cleaned up as markdown).",
+      "full_text (the JD text as given).",
     prompt: JSON.stringify({
       title: data.title ?? null,
       job_description: untrusted("existing_job_description", data.jdText),
