@@ -38,9 +38,15 @@ export const AGENT_EVENT_TYPES = [
 
 export type AgentEventType = (typeof AGENT_EVENT_TYPES)[number];
 
+/**
+ * Internal: an agent was busy on a candidate when work for it arrived; the
+ * work waits as this event until that run is done (not offered to workflows).
+ */
+export const DEFERRED_DISPATCH = "agent.dispatch_deferred";
+
 export async function emitAgentEvent(e: {
   orgId: string;
-  type: AgentEventType;
+  type: AgentEventType | typeof DEFERRED_DISPATCH;
   subjectType: "requisition" | "jd" | "application" | "offer";
   subjectId: string;
   actorUserId: string | null;

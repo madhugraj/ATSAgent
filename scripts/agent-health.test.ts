@@ -486,6 +486,27 @@ describe("rules", () => {
     await db.delete(agentDefinitions).where(eq(agentDefinitions.id, def!.id));
   });
 
+  test("orchestrator: work held for a busy agent is its own warning, not a stale event", async () => {
+    await db.insert(agentEvents).values({
+      orgId,
+      type: "agent.dispatch_deferred",
+      status: "pending",
+      payload: { agent: "interview", goal: "Book the next round." },
+      createdAt: ago((HEALTH.deferredWaitHours + 1) * 60),
+    });
+    await evaluate();
+    const issues = await open();
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({
+      agentType: "interview",
+      rule: "orchestrator.work_held",
+      severity: "warning",
+      detail: { held: 1 },
+    });
+    await db.delete(agentEvents).where(eq(agentEvents.type, "agent.dispatch_deferred"));
+    await evaluate();
+  });
+
   test("orchestrator: failed or stale lifecycle events are an organisation-wide issue", async () => {
     await db.insert(agentEvents).values([
       { orgId, type: "jd.approved", status: "failed", attempts: 3 },
