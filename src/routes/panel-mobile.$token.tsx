@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { CheckCircle2, Loader2, Phone } from "lucide-react";
 
@@ -37,6 +37,13 @@ function PanelMobilePage() {
   const [noCalls, setNoCalls] = useState(false);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string | null>(null);
+  // Try to close the tab once saved. Browsers allow it only for tabs a script
+  // opened, so the page also says it is done.
+  useEffect(() => {
+    if (!done) return;
+    const t = setTimeout(() => window.close(), 1500);
+    return () => clearTimeout(t);
+  }, [done]);
 
   if (q.isLoading)
     return (
@@ -54,9 +61,10 @@ function PanelMobilePage() {
   if (done)
     return (
       <Shell>
-        <p className="flex items-center gap-2 text-sm">
+        <p className="flex items-center gap-2 text-sm font-medium">
           <CheckCircle2 className="h-5 w-5 text-emerald-600" /> {done}
         </p>
+        <p className="text-sm text-muted-foreground">You can close this tab.</p>
       </Shell>
     );
   const submit = async () => {
@@ -80,9 +88,8 @@ function PanelMobilePage() {
       <p className="text-sm text-muted-foreground">
         {c.orgName}&apos;s AI assistant calls you when an interview time is waiting on your answer.
       </p>
-      {c.phoneLast4 ? <p className="text-sm">On file: ••{c.phoneLast4}</p> : null}
       <Input
-        placeholder="Mobile number"
+        placeholder={c.phoneLast4 ? `New mobile (on file ••${c.phoneLast4})` : "Mobile number"}
         inputMode="tel"
         maxLength={30}
         value={phone}
