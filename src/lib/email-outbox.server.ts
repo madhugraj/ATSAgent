@@ -49,6 +49,8 @@ const KIND_TOGGLE: Record<
   panel_time_check: null,
   // Reminding a panelist to answer an interview time: internal mail.
   panel_reminder: null,
+  // Asking a panel member for their mobile (AI time-check calls): internal mail.
+  panel_mobile_ask: null,
 };
 
 export async function getOrgEmailSettings(orgId: string): Promise<EmailSettingsEffective> {

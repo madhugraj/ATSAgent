@@ -58,6 +58,7 @@ import { Route as InterviewsIndexRouteImport } from './routes/interviews.index'
 import { Route as InterviewsMineRouteImport } from './routes/interviews.mine'
 import { Route as NegotiateTokenRouteImport } from './routes/negotiate.$token'
 import { Route as OfferTokenRouteImport } from './routes/offer.$token'
+import { Route as PanelMobileTokenRouteImport } from './routes/panel-mobile.$token'
 import { Route as PayTokenRouteImport } from './routes/pay.$token'
 import { Route as RequisitionsIndexRouteImport } from './routes/requisitions.index'
 import { Route as RequisitionsIdRouteImport } from './routes/requisitions.$id'
@@ -334,6 +335,11 @@ const OfferTokenRoute = OfferTokenRouteImport.update({
   path: '/offer/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PanelMobileTokenRoute = PanelMobileTokenRouteImport.update({
+  id: '/panel-mobile/$token',
+  path: '/panel-mobile/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PayTokenRoute = PayTokenRouteImport.update({
   id: '/pay/$token',
   path: '/pay/$token',
@@ -539,6 +545,7 @@ export interface FileRoutesByFullPath {
   '/interviews/mine': typeof InterviewsMineRoute
   '/negotiate/$token': typeof NegotiateTokenRoute
   '/offer/$token': typeof OfferTokenRoute
+  '/panel-mobile/$token': typeof PanelMobileTokenRoute
   '/pay/$token': typeof PayTokenRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
   '/schedule/$token': typeof ScheduleTokenRoute
@@ -620,6 +627,7 @@ export interface FileRoutesByTo {
   '/interviews/mine': typeof InterviewsMineRoute
   '/negotiate/$token': typeof NegotiateTokenRoute
   '/offer/$token': typeof OfferTokenRoute
+  '/panel-mobile/$token': typeof PanelMobileTokenRoute
   '/pay/$token': typeof PayTokenRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
   '/schedule/$token': typeof ScheduleTokenRoute
@@ -702,6 +710,7 @@ export interface FileRoutesById {
   '/interviews/mine': typeof InterviewsMineRoute
   '/negotiate/$token': typeof NegotiateTokenRoute
   '/offer/$token': typeof OfferTokenRoute
+  '/panel-mobile/$token': typeof PanelMobileTokenRoute
   '/pay/$token': typeof PayTokenRoute
   '/requisitions/$id': typeof RequisitionsIdRoute
   '/schedule/$token': typeof ScheduleTokenRoute
@@ -785,6 +794,7 @@ export interface FileRouteTypes {
     | '/interviews/mine'
     | '/negotiate/$token'
     | '/offer/$token'
+    | '/panel-mobile/$token'
     | '/pay/$token'
     | '/requisitions/$id'
     | '/schedule/$token'
@@ -866,6 +876,7 @@ export interface FileRouteTypes {
     | '/interviews/mine'
     | '/negotiate/$token'
     | '/offer/$token'
+    | '/panel-mobile/$token'
     | '/pay/$token'
     | '/requisitions/$id'
     | '/schedule/$token'
@@ -947,6 +958,7 @@ export interface FileRouteTypes {
     | '/interviews/mine'
     | '/negotiate/$token'
     | '/offer/$token'
+    | '/panel-mobile/$token'
     | '/pay/$token'
     | '/requisitions/$id'
     | '/schedule/$token'
@@ -1029,6 +1041,7 @@ export interface RootRouteChildren {
   InterviewsMineRoute: typeof InterviewsMineRoute
   NegotiateTokenRoute: typeof NegotiateTokenRoute
   OfferTokenRoute: typeof OfferTokenRoute
+  PanelMobileTokenRoute: typeof PanelMobileTokenRoute
   PayTokenRoute: typeof PayTokenRoute
   RequisitionsIdRoute: typeof RequisitionsIdRoute
   ScheduleTokenRoute: typeof ScheduleTokenRoute
@@ -1409,6 +1422,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OfferTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/panel-mobile/$token': {
+      id: '/panel-mobile/$token'
+      path: '/panel-mobile/$token'
+      fullPath: '/panel-mobile/$token'
+      preLoaderRoute: typeof PanelMobileTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/pay/$token': {
       id: '/pay/$token'
       path: '/pay/$token'
@@ -1669,6 +1689,7 @@ const rootRouteChildren: RootRouteChildren = {
   InterviewsMineRoute: InterviewsMineRoute,
   NegotiateTokenRoute: NegotiateTokenRoute,
   OfferTokenRoute: OfferTokenRoute,
+  PanelMobileTokenRoute: PanelMobileTokenRoute,
   PayTokenRoute: PayTokenRoute,
   RequisitionsIdRoute: RequisitionsIdRoute,
   ScheduleTokenRoute: ScheduleTokenRoute,

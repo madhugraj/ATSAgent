@@ -1573,7 +1573,7 @@ erDiagram
 | `panel_agent_settings` | — | 5 | — |
 | `panel_assessments` | — | 23 | (interview_id) |
 | `panelist_scorecard_links` | — | 8 | (interviewId+panelistId), (token_hash) |
-| `panelists` | — | 20 | — |
+| `panelists` | — | 23 | — |
 | `pay_convention_drafts` | — | 11 | — |
 | `pay_figures` | — | 22 | — |
 | `pay_zones` | — | 19 | (orgId+name) |

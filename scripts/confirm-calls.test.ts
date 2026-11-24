@@ -689,3 +689,78 @@ describe("whole calls (fake line)", () => {
     expect(k).toMatchObject({ state: "accepted", okSlots: [w.slots[1]] });
   });
 });
+
+/* ------------------------------------------------------------ panel mobiles (0093) */
+
+describe("panel members add their own mobile", () => {
+  const mobile = () => import("../src/lib/panelist-mobile.server");
+
+  test("asked at most twice, 14 days apart; never once they have a number or said no calls", async () => {
+    const { askDue } = await mobile();
+    const now = Date.now();
+    const base = { phone: null, aiCallOptOutAt: null, phoneAskCount: 0, phoneAskedAt: null };
+    expect(askDue(base, now)).toBe(true);
+    expect(
+      askDue({ ...base, phoneAskCount: 1, phoneAskedAt: new Date(now - 3 * 864e5) }, now),
+    ).toBe(false);
+    expect(
+      askDue({ ...base, phoneAskCount: 1, phoneAskedAt: new Date(now - 15 * 864e5) }, now),
+    ).toBe(true);
+    expect(
+      askDue({ ...base, phoneAskCount: 2, phoneAskedAt: new Date(now - 30 * 864e5) }, now),
+    ).toBe(false);
+    expect(askDue({ ...base, phone: "+91 98400 11122" }, now)).toBe(false);
+    expect(askDue({ ...base, aiCallOptOutAt: new Date() }, now)).toBe(false);
+  });
+
+  test("the private link saves their number (audited as them); a bad number or token is refused", async () => {
+    const m = await mobile();
+    const [p] = await db
+      .insert(panelists)
+      .values({
+        orgId,
+        kind: "internal",
+        fullName: "Shalini Mohan",
+        email: `sh-${stamp}@test.local`,
+      })
+      .returning();
+    const token = await m.mobileToken(orgId, p!.id);
+    expect(await m.mobileToken(orgId, p!.id)).toBe(token);
+    expect(await m.publicMobileAsk(token)).toMatchObject({
+      firstName: "Shalini",
+      phoneLast4: null,
+    });
+    expect(await m.publicMobileAsk("0".repeat(64))).toBeNull();
+    expect(await m.saveMobileByLink(token, { phone: "12345", aiCalls: true })).toMatchObject({
+      ok: false,
+    });
+    expect(await m.saveMobileByLink(token, { phone: "98400 11122", aiCalls: true })).toEqual({
+      ok: true,
+      phoneLast4: "1122",
+    });
+    const [after] = await db.select().from(panelists).where(eq(panelists.id, p!.id));
+    expect(after!.phone).toBe("98400 11122");
+    expect(await m.askForMobile(orgId, p!.id)).toBe(false);
+    // "Don't call me" from the same page.
+    await m.saveMobileByLink(token, { phone: null, aiCalls: false });
+    const [out] = await db.select().from(panelists).where(eq(panelists.id, p!.id));
+    expect(out!.aiCallOptOutAt).not.toBeNull();
+  });
+
+  test("an ask is counted once and e-mailed with the link", async () => {
+    const m = await mobile();
+    const [p] = await db
+      .insert(panelists)
+      .values({
+        orgId,
+        kind: "internal",
+        fullName: "Madhanagopal P",
+        email: `mg-${stamp}@test.local`,
+      })
+      .returning();
+    expect(await m.askForMobile(orgId, p!.id)).toBe(true);
+    expect(await m.askForMobile(orgId, p!.id)).toBe(false);
+    const [after] = await db.select().from(panelists).where(eq(panelists.id, p!.id));
+    expect(after).toMatchObject({ phoneAskCount: 1 });
+  });
+});

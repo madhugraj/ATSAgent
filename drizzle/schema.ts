@@ -370,6 +370,11 @@ export const panelists = pgTable(
     phone: text("phone"),
     /** They asked not to be phoned by the AI assistant (0092). */
     aiCallOptOutAt: timestamp("ai_call_opt_out_at", { withTimezone: true }),
+    /** SHA-256 of their private add-your-mobile link (0093). */
+    mobileTokenHash: text("mobile_token_hash"),
+    /** When they were last asked for their mobile, and how many times (0093). */
+    phoneAskedAt: timestamp("phone_asked_at", { withTimezone: true }),
+    phoneAskCount: integer("phone_ask_count").notNull().default(0),
     active: boolean("active").notNull().default(true),
     addedBy: uuid("added_by").references(() => users.id, { onDelete: "set null" }),
     approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
@@ -1578,7 +1583,8 @@ export type EmailOutboxKind =
   | "screening_call_booked"
   | "panel_summary"
   | "panel_time_check"
-  | "panel_reminder";
+  | "panel_reminder"
+  | "panel_mobile_ask";
 /** `held`: waiting on interview confirmations (migration 0085) — released to `queued`. */
 export type EmailOutboxStatus = "queued" | "held" | "sent" | "failed" | "suppressed";
 export type EmailOutboxAttachment = {
