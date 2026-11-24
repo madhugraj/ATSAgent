@@ -192,7 +192,9 @@ export async function toPanelistIds(orgId: string, ids: string[]): Promise<strin
 
 /**
  * Directory entries for these ids that may sit on a panel now: active, and —
- * for org members — still active members. In the order asked; others drop out.
+ * for org members — active or invited (as eligibleInterviewers lists them; an
+ * invited member without a login scores through their private link). Removed
+ * or suspended members drop out. In the order asked.
  */
 export async function panelPeople(orgId: string, given: string[]): Promise<PanelPerson[]> {
   if (!given.length) return [];
@@ -212,7 +214,9 @@ export async function panelPeople(orgId: string, given: string[]): Promise<Panel
       and(eq(orgMembers.id, panelists.memberId), eq(orgMembers.orgId, panelists.orgId)),
     )
     .where(and(eq(panelists.orgId, orgId), eq(panelists.active, true), inArray(panelists.id, ids)));
-  const ok = rows.filter((r) => !r.linked || r.memberStatus === "active");
+  const ok = rows.filter(
+    (r) => !r.linked || r.memberStatus === "active" || r.memberStatus === "invited",
+  );
   return ids
     .map((id) => ok.find((r) => r.memberId === id))
     .filter((r): r is NonNullable<typeof r> => Boolean(r))
