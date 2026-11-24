@@ -5,6 +5,7 @@ import { ArrowLeft, ArrowRight, BookOpen, Download, List, Search } from "lucide-
 import { MANUAL_SECTIONS, type ManualSection } from "@/lib/user-manual";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { ManualFlowDiagram } from "@/components/ManualFlowDiagram";
 
 export const Route = createFileRoute("/help")({
   head: () => ({
@@ -139,6 +140,14 @@ function Help() {
               {openSection.summary}
             </p>
           </header>
+
+          {openSection.flows?.length ? (
+            <div className="space-y-3">
+              {openSection.flows.map((f) => (
+                <ManualFlowDiagram key={f.title} flow={f} />
+              ))}
+            </div>
+          ) : null}
 
           <ol className="space-y-5">
             {openSection.steps.map((t, i) => (

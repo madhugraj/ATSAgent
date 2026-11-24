@@ -6,11 +6,20 @@
  * Edit here only — both surfaces stay in sync automatically.
  */
 
+/** Who acts at a step of a flow diagram. */
+export type FlowActor = "person" | "agent" | "system" | "candidate";
+
+export type FlowStep = { label: string; by: FlowActor };
+
+/** A left-to-right flow diagram; `outcomes` are the ways out of the last step. */
+export type ManualFlow = { title: string; steps: FlowStep[]; outcomes?: string[] };
+
 export type ManualSection = {
   id: string;
   title: string;
   summary: string;
   steps: string[];
+  flows?: ManualFlow[];
 };
 
 /** Shared first-run journey for the help page and the HR copilot. */
@@ -80,7 +89,7 @@ export const FIRST_RUN_JOURNEY = [
   },
 ] as const;
 
-export const MANUAL_SECTIONS: ManualSection[] = [
+const SECTIONS: ManualSection[] = [
   {
     id: "first-run-journey",
     title: "Start here: from integration to offer release",
@@ -247,6 +256,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
       "Panelists can also suggest changes to their round's scorecard from that link — what the round covers, competencies to add or drop, and weights. The role's must-haves stay and nothing may weigh more than them; among the competencies already on the round, no share can move by more than 10 points, so adding new ones or balancing the split evenly is fine. The AI reviews the change against the job (does it still cover what the role needs, is it relevant, could it invite unfair questions, is it clear) and the role's hiring manager approves or rejects it under **Panel proposals** on the interview plan; the HR head can decide after 4 hours. Nothing changes until someone approves, and an approved change applies to every later round of that role.",
       "With the Interview coordinator on, the candidate chooses the time: it reads the interviewer's free/busy from your connected Google or Microsoft 365 calendar (never event details), offers three free times — first to the panel: each panelist ticks the times they can do and may suggest another. The candidate is offered only the times the whole panel can do; when none are in common, nothing reaches the candidate and the coordinator offers new times starting from the panel's suggestions. Only then is the candidate contacted (the AI scheduling call first, where it is on; otherwise the private link by e-mail) and picks one — then the round is booked and both invites go out. If a panelist cannot do the times, the offer is cancelled before the candidate hears of it and the hiring desk thread tells you. If none of the times work, or the link expires, the hiring desk thread tells you.",
       "Reschedule from the same row; a reason is mandatory and the change is audited.",
+      "Confirmation and time-check calls (switch each agent on in Agent settings): the day before a booked round a candidate has not confirmed (4 to 30 hours ahead), the Confirmation call agent phones them and records their yes or no on the invite — a no reaches the hiring desk to re-schedule; after two unanswered tries the desk is asked to phone them. The Panel time-check call agent phones a panelist still silent after the 1-hour reminder and records which times they can do; it uses the mobile number the HR head sets in the panel directory, and a panelist who opts out is never called.",
       "Silent panel agent (optional, being built in steps): the HR head switches it on under Organisation → Silent panel agent and chooses the rounds (L1–L3). Online rounds on those levels are then transcribed by your own meeting tool — Teams, Zoom or Google Meet — and the transcript is kept with the candidate. Connect the meeting provider again after switching it on so it asks for permission to read transcripts (for Teams your Microsoft admin approves it; transcription must be allowed on the meeting account's plan). The candidate's invite says the call is transcribed; if they reply that they would rather it were not, press **Candidate declined** under the round on Interviews — transcription is switched off and any transcript deleted (audited). Each round shows Transcribed, Transcript in or No transcript (hover for why). The transcript is fetched from 10 minutes after the call starts and for up to 6 hours after its booked end; if the meeting account was missing a permission, fix it and press **Try again** under the round. Switch on the L1, L2 and L3 panel agents in Agent settings: once a round's transcript is in, that level's agent records its own view of the candidate and of how the round was run — kept hidden until the panel has scored — and e-mails everyone on the panel the same factual summary of what was asked and answered, with no score. Under Suggest a person approves each step; Act and notify lets it assess without asking. When every panellist has scored, the agent's view is compared with theirs: if they agree, the panel's verdict stands as always; if they partly agree, the candidate moves on and the HR head gets a review card to confirm or stop them before the next round; if they disagree, the move is held and the HR head sees both views side by side — go with the panel, put the candidate on hold, or reject them with a reason. Stopping a candidate cancels later rounds not yet held; tell the candidate yourself.",
       "Each role has an interview plan on its requisition page: up to three rounds, what each one rates (built from the role's own must-haves — generic ones such as Problem solving or Communication are added only when a round has fewer than three; edit freely), how many interviewers sit on it, and whether interviewers' holds and rejects are recommendations (the default) or move the candidate at once.",
       "Weights and rating guide: in Edit plan, open **Weights and rating guide** under a round. Each competency weighs ×1 to ×5 — leave ×1 for equal weight and give a competency ×2 to ×5 when it matters more for this role — and write what a 1, a 3 and a 5 look like for it here — for example, for LLMs, 1: only buzzwords; 3: has shipped one model to production; 5: has run LLM systems at scale and can explain their failures. Interviewers see the guide next to each rating, so they read the scale the same way. Weights show as ×2, ×3… on the scorecard and in the plan.",
@@ -421,6 +431,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
       "Read-only pages for HR leadership on how the hiring agents behave, what they are allowed to do and what needs a person now.",
     steps: [
       "Agent administration → Agent observability: how every agent is behaving — 14-day trends, the issues the health engine has opened (each with severity and a plain-language description; resolved automatically when the cause clears), and each agent's tools, AI skills, evals, human checkpoints, budget and audit. Issues are also e-mailed, and sent to a webhook if you set one.",
+      "Fewer e-mails: everyone gets one end-of-day summary (after 18:00 in your organisation's time) of agent reminders waiting for them and, for the owner, HR heads and CBOs, serious issues still open. Critical issues are e-mailed at once, at most once a day per issue.",
       "Agent administration → Call reviews: the Voice Guard reviews every answered AI phone call (screening, scheduling and pay) after it ends — what was said against the call's rules and facts, what was recorded against what the candidate said, and how the call went on the line — quoting the transcript. It changes nothing; you decide what to do.",
       "Agent administration → Agent register: what each agent is, who owns it, its version, what it may read, change and send outside the organisation, what it must never do, its risk tier and how it is tested. Every run records the version it ran under; export a run's trail from Agent activity.",
       "Agent observability, Agent governance and Agent intelligence each have an All / Voice / Text switch: Voice is the live phone-call agents, Text everything else.",
@@ -462,8 +473,43 @@ export const MANUAL_SECTIONS: ManualSection[] = [
     ],
   },
   {
+    id: "agent-studio",
+    title: "22. Agent studio (platform super admin)",
+    summary:
+      "Build an agent inside the product — adapted from a stock hiring agent or new — test it with sample data, approve and publish it, then grant it to the organisations that should have it.",
+    steps: [
+      "Open Platform → Agent studio (/platform-agent-studio). Only the platform super admin sees it; organisations never build or edit studio agents.",
+      "Start from a stock agent (its instructions are filled in for you) or from blank. Set the name, description, responsibility, instructions, must-never list, risk tier and the role accountable for it.",
+      "Pick its tools from the catalogue — any stock agent's tools — and rename or re-describe them for the job. Choose which human decisions it may ask for, and how many steps it may take between two decisions by a person.",
+      "Some things are always added and cannot be edited: the rules against instructions hidden in CVs and messages, the operating rules, the ability to ask a person and request approval, each tool's own checks, and the organisation's switch, autonomy, budget and audit. No tool may approve, reject, release, hire or decline, whatever it is renamed to.",
+      "Test tab: up to five tests, each with a goal, sample data for each tool, the tools expected in order and whether it must ask a person. Tools are stand-ins that return the sample data — nothing real is read, sent or changed. All tests passing marks the version Tested.",
+      "Approve a tested version (your approval is recorded; approving your own work is allowed after passing tests and is flagged in the audit), then Publish. Saving again makes a new draft; the published version keeps running until another is published, and every run keeps the version it started on.",
+      "Organisations tab: grant the agent to an organisation. It appears in that organisation's Agent settings with a Studio chip, switched off until they switch it on; withdrawing a grant refuses new runs and cancels open ones.",
+      "Delivery: download the published version as a package (instructions, locked rules, tools and their inputs) for another application, or create an API key against a workspace organisation you own so other systems can start runs and read their result. Keys are shown once and can be revoked.",
+      "Every step — created, saved, tested, approved, published, granted, withdrawn, downloaded, key issued or revoked — is written to the audit log. Agent observability flags a studio agent that fails in most of its runs.",
+    ],
+  },
+  {
+    id: "workflow-builder",
+    title: "23. Workflow builder (platform super admin)",
+    summary:
+      "Draw which agents run, in what order and under what conditions; test it, publish it and grant it to organisations, who run it from the hiring desk, its own app page or their own systems.",
+    steps: [
+      "Open Platform → Agent workflows (/platform-agent-workflows). Start from a template (shortlisted → screening with a follow-up if it stalls; role approved → draft the JD; JD approved → publish → advertise; final-round scorecard → evaluation; hiring need → requisition → JD → screening → report) or from a blank canvas.",
+      "Steps on the canvas: one Trigger (the event that starts it, or a Hiring need typed by a person), Agent (a stock or published studio agent with its goal), Condition (yes and no ways out), Wait for (pause until something happens on the flow's role, with a timeout), Report (the run report is ready) and End. Drag steps from the palette, connect them, select one to edit it, press Delete to remove it.",
+      "The builder checks the drawing: exactly one trigger, every step connected to it, one way out of each step (a condition has a yes and a no), no loops, real agents, goals filled in, at most 40 steps. Aditi cannot be a step.",
+      'Build with chat: describe the flow in plain words ("when candidates are shortlisted, screen them; if screening fails, have the follow-up agent remind the team") and the assistant draws it and writes its tests on the canvas. Ask for changes in the same chat. It only drafts — press Save draft (marked • while unsaved) and take it through the usual steps; it cannot approve, publish or grant.',
+      "Tests are dry runs: a sample event and how each agent step ends. The path taken is shown and a test may require the flow to end at a chosen step. No AI is called and nothing real happens. All tests passing marks the version Tested; then Approve and Publish, as for studio agents.",
+      "Organisations tab: grant the published workflow. Each organisation shows Ready or Not ready with what is missing — its own AI key, every agent the flow uses switched on, and any studio agents granted. Until it is ready, the organisation's owner and HR head see it in the bell. Copy link sends HR or TA straight to it on the hiring desk.",
+      "In the organisation, the workflow is listed on the hiring desk under Workflows and in Agent settings → Workflows; Open gives its own page (/w/…) with a Start box for a hiring need and every run drawn as its flow. A run says plainly what it is waiting for, and its questions and approvals are answered right there — the same decision as in Waiting for you.",
+      "An agent step that stops at its run limit pauses the run: the HR head, CBO or owner presses Retry (the agent picks up where it stopped) or Skip (the step counts as failed and the flow follows that way out).",
+      "Every run downloads as PDF or Excel: the hiring need, every step, each agent's result and tokens, and every decision people made. On the workflow's page the HR head, CBO or owner can issue an API key so the HRMS or careers portal can start runs and read their progress; it works for that one workflow, is shown once and can be revoked.",
+      "Workflows never approve, reject or decide anything themselves — every decision stays with the person it belongs to.",
+    ],
+  },
+  {
     id: "account-recovery",
-    title: "22. Sign-in and account recovery",
+    title: "24. Sign-in and account recovery",
     summary: "ATSIQ uses first-party database-backed sessions and secure browser cookies.",
     steps: [
       "Sign in with the confirmed work email and password used during registration or invitation. A successful session remains active in the browser and is renewed while it is used.",
@@ -477,7 +523,182 @@ export const MANUAL_SECTIONS: ManualSection[] = [
   },
 ];
 
+const FLOWS: Record<string, ManualFlow[]> = {
+  "first-run-journey": [
+    {
+      title: "From registration to the first hire",
+      steps: [
+        { label: "Register the organisation", by: "person" },
+        { label: "Platform approves it", by: "system" },
+        { label: "Connect AI key, mail, calendar", by: "person" },
+        { label: "Raise and approve a role", by: "person" },
+        { label: "Bring in and score candidates", by: "agent" },
+        { label: "Screen and interview", by: "person" },
+        { label: "Approve and release the offer", by: "person" },
+      ],
+    },
+  ],
+  requisitions: [
+    {
+      title: "Requisition and JD approval",
+      steps: [
+        { label: "Draft the requisition", by: "person" },
+        { label: "Department head approves", by: "person" },
+        { label: "HR head approves", by: "person" },
+        { label: "CBO approves (where required)", by: "person" },
+        { label: "JD drafted and approved", by: "person" },
+        { label: "Role open: IJP, job boards, feeds", by: "system" },
+      ],
+      outcomes: ["Send back for changes → back to draft", "Decline → closed for good"],
+    },
+  ],
+  matching: [
+    {
+      title: "From CV to shortlist",
+      steps: [
+        { label: "CV arrives (upload, inbox, board, capture)", by: "candidate" },
+        { label: "Parsed, deduplicated, verified", by: "system" },
+        { label: "Scored out of 100 against the JD", by: "agent" },
+        { label: "Held checks go to a person", by: "person" },
+        { label: "Shortlist", by: "person" },
+      ],
+    },
+  ],
+  screening: [
+    {
+      title: "Screening",
+      steps: [
+        { label: "Candidate shortlisted", by: "person" },
+        { label: "Question kit prepared", by: "agent" },
+        { label: "Screening call (recruiter or AI phone call)", by: "candidate" },
+        { label: "Answers graded, Voice Guard review", by: "agent" },
+        { label: "You decide who moves on", by: "person" },
+      ],
+      outcomes: ["Approve → first interview round", "Hold or reject with a reason"],
+    },
+  ],
+  interviews: [
+    {
+      title: "Booking an interview round",
+      steps: [
+        { label: "Coordinator offers three free times", by: "agent" },
+        { label: "Panel ticks the times it can do (2 hours)", by: "person" },
+        { label: "Candidate picks one (AI call, then e-mail)", by: "candidate" },
+        { label: "Invites and briefs sent", by: "system" },
+        { label: "Reminders 24 h and 1 h before; confirmation call", by: "agent" },
+        { label: "Each panelist submits a scorecard", by: "person" },
+      ],
+      outcomes: [
+        "Select → next round, or offer after the final round",
+        "Hold",
+        "Reject with a reason",
+      ],
+    },
+  ],
+  offers: [
+    {
+      title: "Offer to joining",
+      steps: [
+        { label: "Raise offer and letter", by: "person" },
+        { label: "Policy check of the letter", by: "agent" },
+        { label: "HR head and CBO approve", by: "person" },
+        { label: "Four mandatory documents validated", by: "person" },
+        { label: "Release (password confirmed)", by: "person" },
+        { label: "Candidate accepts, declines or counters", by: "candidate" },
+      ],
+      outcomes: [
+        "Accepted → joined, no-show or deferred",
+        "Counter → Offer agent revises inside the band → approval again",
+      ],
+    },
+  ],
+  "hiring-desk": [
+    {
+      title: "A hiring need on the desk",
+      steps: [
+        { label: "Describe the need in plain words", by: "person" },
+        { label: "Desk asks what is missing", by: "agent" },
+        { label: "Requisition drafted and sent for approval", by: "agent" },
+        { label: "Approvers decide on the card", by: "person" },
+        { label: "JD, scoring, publishing, sourcing", by: "agent" },
+        { label: "Ranked list; you pick who to screen", by: "person" },
+      ],
+    },
+  ],
+  "agent-intelligence": [
+    {
+      title: "When an agent misbehaves",
+      steps: [
+        { label: "Health rule trips", by: "system" },
+        { label: "Issue opened with severity", by: "system" },
+        { label: "Critical: e-mail now; serious: end-of-day summary", by: "system" },
+        { label: "HR leadership acts from the fix list", by: "person" },
+        { label: "Resolved when the cause clears", by: "system" },
+      ],
+    },
+  ],
+  "agent-studio": [
+    {
+      title: "Studio agent lifecycle",
+      steps: [
+        { label: "Build: adapt a stock agent or start new", by: "person" },
+        { label: "Test with sample data", by: "system" },
+        { label: "Approve", by: "person" },
+        { label: "Publish an immutable version", by: "person" },
+        { label: "Grant to organisations", by: "person" },
+        { label: "Organisation switches it on", by: "person" },
+      ],
+      outcomes: [
+        "Runs in the app under the organisation's autonomy and budget",
+        "Delivered as a package or through an API key",
+      ],
+    },
+  ],
+  "workflow-builder": [
+    {
+      title: "Building a workflow",
+      steps: [
+        { label: "Template, canvas or Build with chat", by: "person" },
+        { label: "Rules checked, dry-run tests", by: "system" },
+        { label: "Approve and publish", by: "person" },
+        { label: "Grant; go-live check per organisation", by: "person" },
+        { label: "Organisation fixes what is missing", by: "person" },
+      ],
+      outcomes: ["Live → runs on its trigger, from the desk, its page or the API"],
+    },
+    {
+      title: "A workflow run",
+      steps: [
+        { label: "Trigger event or hiring need", by: "system" },
+        { label: "Agent step runs with its goal", by: "agent" },
+        { label: "People answer its questions and approvals", by: "person" },
+        { label: "Condition or wait for an event", by: "system" },
+        { label: "Report: PDF or Excel", by: "system" },
+      ],
+      outcomes: [
+        "Stopped at its run limit → Retry or Skip",
+        "Wait timed out → follows the timed-out path",
+      ],
+    },
+  ],
+};
+
+/** The manual's chapters, each with its flow diagrams. */
+export const MANUAL_SECTIONS: ManualSection[] = SECTIONS.map((s) => {
+  const flows = FLOWS[s.id];
+  return flows ? { ...s, flows } : s;
+});
+
+/** Plain-text rendering of a flow: "A → B → C (then: x; y)". */
+export function flowText(f: ManualFlow): string {
+  const path = f.steps.map((st) => st.label).join(" → ");
+  return `${f.title}: ${path}${f.outcomes?.length ? ` (then: ${f.outcomes.join("; ")})` : ""}`;
+}
+
 /** Markdown rendering of the manual, used for the copilot knowledge base. */
 export const MANUAL_TEXT = MANUAL_SECTIONS.map(
-  (s) => `${s.title}\n${s.summary}\n${s.steps.map((t) => `- ${t}`).join("\n")}`,
+  (s) =>
+    `${s.title}\n${s.summary}\n${s.steps.map((t) => `- ${t}`).join("\n")}${
+      s.flows?.length ? `\n${s.flows.map((f) => `Flow — ${flowText(f)}`).join("\n")}` : ""
+    }`,
 ).join("\n\n");

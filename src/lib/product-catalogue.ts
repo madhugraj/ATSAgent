@@ -250,6 +250,10 @@ export const CATALOGUE_MODULES: CatalogueModule[] = [
         "The agent phones the candidate with the approved figure — and at most one pre-approved improved figure, never the ceiling; a yes comes back for HR to confirm in one click.",
       ),
       c(
+        "Confirmation and panel time-check calls",
+        "The day before a round a candidate has not confirmed, the agent phones them and records their yes or no; a panelist still silent after the reminder is phoned for the times they can do.",
+      ),
+      c(
         "Consent and calling rules",
         "AI disclosure and consent at the start of every call, calling hours and days, retries and callbacks, a written fallback, and candidates can opt out of AI calls.",
       ),
@@ -621,6 +625,114 @@ export const CATALOGUE_MODULES: CatalogueModule[] = [
       c(
         "Trace export and platform consoles",
         "Optional OpenTelemetry trace export, plus cross-tenant agent and AI usage consoles for the product owner.",
+      ),
+    ],
+    defaultTier: "Enterprise",
+  },
+  {
+    id: "agent-workflows",
+    name: "Agent workflows & workflow apps",
+    category: "Automation",
+    audience: "Product owner, HR head, recruiter, IT",
+    summary:
+      "Flows of hiring agents — which run, in what order and under what conditions — drawn on a canvas or described in chat, tested, published and granted to each organisation, then run from the hiring desk, their own app page or the client's systems.",
+    overview:
+      "The product owner builds a workflow on a canvas from a trigger (a hiring event or a typed hiring need), agent steps with goals, conditions, waits for events, a report step and ends — or describes it in plain words and lets the builder draw it and write its tests. The drawing is checked against the graph rules and dry-run tested with sample events before it can be approved and published as an immutable version. Granting it to an organisation shows whether that organisation is ready (its own AI key, every agent switched on, any custom agents granted). The organisation runs it from the hiring desk, from the workflow's own app page, or from its HRMS or careers portal with a per-workflow API key; each run is drawn as its flow, its questions and approvals are answered in place, and the run report downloads as PDF or Excel. Workflows never decide anything themselves.",
+    outcome:
+      "Each client's hiring process runs as a repeatable, governed flow instead of one-off agent runs.",
+    capabilities: [
+      c(
+        "Visual workflow builder",
+        "Trigger, agent, condition, wait-for, report and end steps on a canvas, checked for one trigger, no loops, connected steps and real agents.",
+      ),
+      c(
+        "Build with chat",
+        "Describe the flow in plain words; the builder draws it and writes its tests as a draft — it never approves, publishes or grants.",
+      ),
+      c(
+        "Ready-made templates",
+        "Shortlist to screening with follow-up, role approved to JD, JD approved to publish and advertise, final scorecard to evaluation, and a full hiring need to report.",
+      ),
+      c(
+        "Test, approve, publish, grant",
+        "Dry-run tests with no AI and nothing real, recorded approval, immutable published versions and per-organisation grants with a go-live check.",
+      ),
+      c(
+        "Workflow app page and desk",
+        "Each granted workflow has its own page and appears on the hiring desk: start it with a hiring need, follow every run step by step and answer its approvals in place.",
+      ),
+      c(
+        "Workflow API",
+        "Per-workflow keys let the client's HRMS or portal start runs and read their progress; keys are shown once, hashed at rest, rate-limited and revocable.",
+      ),
+      c(
+        "Run reports",
+        "Every run downloads as PDF or Excel with the hiring need, each step, each agent's result and tokens, and every decision people made.",
+      ),
+    ],
+    defaultTier: "Enterprise",
+  },
+  {
+    id: "agent-studio",
+    name: "Agent studio — custom agents",
+    category: "Automation",
+    audience: "Product owner",
+    summary:
+      "The product owner builds custom agents for a client — adapted from a stock hiring agent or new — tests them on sample data and grants them to that client's workspace, or delivers them to the client's own applications.",
+    overview:
+      "In the Agent studio the product owner sets an agent's identity, responsibility, instructions, must-never list, risk tier and accountable role, and picks its tools from the catalogue of stock-agent tools, renamed for the job. The safety rules, the ability to ask a person, each tool's own checks and the ban on any tool that approves, rejects, releases or hires are always added and cannot be edited. Each version is tested with stand-in tools that return sample data, approved, published and granted; the client switches it on in Agent settings under its own autonomy and budget. Published agents can also be downloaded as a package or run through a hosted API.",
+    outcome: "Client-specific agents ship quickly under the same governance as the built-in ones.",
+    capabilities: [
+      c(
+        "Adapt or build",
+        "Start from any stock agent's instructions and tools, or from blank; rename and re-describe tools for the client's process.",
+      ),
+      c(
+        "Locked safety rules",
+        "Injection and operating rules, human checkpoints and each tool's checks are always added; no tool may decide on a person's behalf.",
+      ),
+      c(
+        "Sample-data tests",
+        "Up to five tests per version with stand-in tools — nothing real is read, sent or changed — before a version can be approved.",
+      ),
+      c(
+        "Versioned publishing and grants",
+        "Immutable published versions, runs pinned to the version they started on, per-organisation grants and a health rule for failing agents.",
+      ),
+      c(
+        "Delivery outside the app",
+        "A vendor-neutral package of the published version, or hosted runs through an API key; every studio action is audited.",
+      ),
+    ],
+    defaultTier: "Enterprise",
+  },
+  {
+    id: "agent-oversight",
+    name: "Agent oversight & governance",
+    category: "Governance",
+    audience: "HR head, CBO, organisation owner",
+    summary:
+      "Read-only pages that show how the hiring agents behave, whether the controls around them are holding and what needs a person now.",
+    overview:
+      "Agent observability shows each agent's trends, open health issues and configuration; Agent intelligence shows where people declined agent proposals and which tools fail; Agent governance checks limits, autonomy against risk tier, approved definitions, hand-offs and budget; Call reviews lists the Voice Guard's review of every answered AI phone call; the Agent register lists what each agent is, owns and may never do. Every page opens with a verdict and a fix list, can be filtered to voice or text agents and a period, and downloads as PDF or Excel. Critical issues are e-mailed at once and everything else arrives in one end-of-day summary per person.",
+    outcome:
+      "Leadership can show an auditor that agents act within limits and that people make the decisions.",
+    capabilities: [
+      c(
+        "Health engine and alerts",
+        "Plain-language issues with severity and thresholds; critical ones e-mailed at once, the rest in one end-of-day summary, plus an optional webhook.",
+      ),
+      c(
+        "Intelligence and governance views",
+        "Declines, failing tools, autonomy against risk tier, changes made without approval, hand-off chains and lost events, deterministic and refreshed every minute.",
+      ),
+      c(
+        "Agent register",
+        "Owner, version, permissions, must-never list, risk tier and tests for every agent; every run records the version it ran under.",
+      ),
+      c(
+        "Reports",
+        "PDF and Excel for any period: summary, fix list, day-by-day activity and every run with its tokens, failed calls and approvals.",
       ),
     ],
     defaultTier: "Enterprise",
