@@ -1988,6 +1988,34 @@ function Thread({
   );
 }
 
+/** The person's own JD in the thread: a compact file chip; its text opens in place. */
+function AttachedJd({ body, fileName }: { body: string; fileName: string | null }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="flex justify-end">
+      <div className="w-full max-w-[80%] rounded-lg border border-border bg-background text-sm">
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          className="flex w-full items-center gap-2 px-3 py-2 text-left"
+          aria-expanded={open}
+        >
+          <Paperclip className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+          <span className="min-w-0 flex-1 truncate font-medium">
+            {fileName ?? "Job description"}
+          </span>
+          <span className="shrink-0 text-xs text-primary">{open ? "Hide" : "View"}</span>
+        </button>
+        {open ? (
+          <div className="max-h-80 overflow-y-auto border-t border-border px-3 py-2 text-[0.8125rem] leading-relaxed whitespace-pre-wrap">
+            {body}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function Bubble({
   role,
   body,
@@ -2071,7 +2099,9 @@ function Message({
   const isTask = m.card?.type === "task";
   return (
     <div className="space-y-2">
-      {m.body && !isTask ? (
+      {m.card?.type === "own_jd" ? (
+        <AttachedJd body={m.body} fileName={(m.card["fileName"] as string | null) ?? null} />
+      ) : m.body && !isTask ? (
         <Bubble
           role={m.role}
           body={m.body}
@@ -2138,13 +2168,7 @@ function Card({
   if (card.type === "next_steps")
     return <NextStepsCard card={card} conv={conv} onChanged={onChanged} />;
   if (card.type === "rescore") return <RescoreCard card={card} conv={conv} onChanged={onChanged} />;
-  if (card.type === "own_jd")
-    return (
-      <p className="flex items-center justify-end gap-1 text-xs text-muted-foreground">
-        <Paperclip className="size-3" aria-hidden />
-        {card["fileName"] ? String(card["fileName"]) : "Pasted job description"}
-      </p>
-    );
+  if (card.type === "own_jd") return null; // shown as the attachment itself (AttachedJd)
   if (card.type === "proposal")
     return <ProposalCard card={card} conv={conv} onChanged={onChanged} />;
   if (card.type === "close_role")

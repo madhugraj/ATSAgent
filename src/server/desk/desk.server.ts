@@ -733,17 +733,6 @@ export async function attachOwnJd(
     .from(requisitions)
     .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, conv.orgId)))
     .limit(1);
-  const jd = await latestJdStatus(conv.orgId, conv.requisitionId);
-  if (jd === "approved" || jd === "pending_dh") {
-    await postMessage(conv, {
-      role: "desk",
-      body:
-        jd === "approved"
-          ? "This role already has an approved job description, so I've kept yours in the thread without replacing it. To use yours instead, upload it with “I already have a JD” on the requisition page."
-          : "A job description is already waiting for the department head. Ask for changes on it and I'll have the JD agent file yours instead.",
-    });
-    return;
-  }
   if (req?.status !== "approved") {
     await postMessage(conv, {
       role: "desk",
@@ -751,7 +740,24 @@ export async function attachOwnJd(
     });
     return;
   }
-  await startStage(conv, userId);
+  // Approved role: file this JD now — as the next version when one exists, which
+  // goes to the department head again (the person chose to replace it).
+  const [r] = await db
+    .select({ code: requisitions.code, title: requisitions.title })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, conv.orgId)))
+    .limit(1);
+  const brief = await jdAgentBrief(conv, r!);
+  await startForThread(
+    conv,
+    "jd",
+    userId,
+    brief.goal,
+    conv.requisitionId,
+    (await latestJdStatus(conv.orgId, conv.requisitionId))
+      ? "I've asked the JD agent to file your job description as written as the next version; it replaces the current one once the department head approves it."
+      : brief.announce,
+  );
 }
 
 async function latestJdStatus(orgId: string, requisitionId: string) {
