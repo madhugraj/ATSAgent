@@ -1119,48 +1119,66 @@ function Composer({
   placeholder?: string | undefined;
 }) {
   const fileInput = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const off = busy || disabled;
   return (
     <div className="flex w-full items-end gap-2">
-      {onAttach ? (
-        <>
-          <input
-            ref={fileInput}
-            type="file"
-            accept=".pdf,.doc,.docx,.txt,.md"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              e.target.value = "";
-              if (f) onAttach(f);
-            }}
-          />
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            aria-label="Attach your job description"
-            title="Attach your job description"
-            disabled={busy || disabled}
-            onClick={() => fileInput.current?.click()}
-          >
-            <Paperclip className="size-4" />
-          </Button>
-        </>
-      ) : null}
-      <Textarea
-        value={value}
-        disabled={busy || disabled}
-        placeholder={placeholder ?? "Type a message…"}
-        className="min-h-12 flex-1 resize-none"
-        rows={2}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            onSend();
-          }
+      <div
+        className={`relative flex-1 rounded-md ${dragging ? "ring-2 ring-primary/40" : ""}`}
+        onDragOver={(e) => {
+          if (!onAttach || off) return;
+          e.preventDefault();
+          setDragging(true);
         }}
-      />
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          setDragging(false);
+          const f = e.dataTransfer.files?.[0];
+          if (!onAttach || off || !f) return;
+          e.preventDefault();
+          onAttach(f);
+        }}
+      >
+        <Textarea
+          value={value}
+          disabled={off}
+          placeholder={placeholder ?? "Type a message…"}
+          className={`min-h-12 w-full resize-none ${onAttach ? "pr-10" : ""}`}
+          rows={2}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              onSend();
+            }
+          }}
+        />
+        {onAttach ? (
+          <>
+            <input
+              ref={fileInput}
+              type="file"
+              accept=".pdf,.doc,.docx,.txt,.md"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (f) onAttach(f);
+              }}
+            />
+            <button
+              type="button"
+              aria-label="Attach your job description"
+              title="Attach your job description"
+              disabled={off}
+              onClick={() => fileInput.current?.click()}
+              className="absolute right-2 bottom-2 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+            >
+              <Paperclip className="size-4" />
+            </button>
+          </>
+        ) : null}
+      </div>
       <Button onClick={onSend} disabled={busy || disabled || !value.trim()}>
         {busy ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
         Send
