@@ -673,6 +673,36 @@ async function threadHasOwnJd(conv: { id: string; orgId: string }): Promise<bool
   return Boolean(m);
 }
 
+/** True when the role's latest JD is, word for word, a JD the person attached in this thread. */
+async function latestJdIsOwn(conv: Conversation): Promise<boolean> {
+  if (!conv.requisitionId) return false;
+  const [jd] = await db
+    .select({ fullText: jobDescriptions.fullText })
+    .from(jobDescriptions)
+    .where(
+      and(
+        eq(jobDescriptions.requisitionId, conv.requisitionId),
+        eq(jobDescriptions.orgId, conv.orgId),
+      ),
+    )
+    .orderBy(desc(jobDescriptions.version))
+    .limit(1);
+  if (!jd?.fullText) return false;
+  const words = (t: string) => t.replace(/\s+/g, " ").trim();
+  const own = await db
+    .select({ body: hiringMessages.body })
+    .from(hiringMessages)
+    .where(
+      and(
+        eq(hiringMessages.conversationId, conv.id),
+        eq(hiringMessages.orgId, conv.orgId),
+        sql`${hiringMessages.card}->>'type' = ${OWN_JD_CARD}`,
+      ),
+    );
+  const filed = words(jd.fullText);
+  return own.some((m) => words(m.body) === filed);
+}
+
 /** The JD agent's goal for an approved requisition, from its hiring thread (if any). */
 export async function jdGoalForRequisition(
   orgId: string,
@@ -728,6 +758,13 @@ export async function attachOwnJd(
     await postMessage(conv, {
       role: "desk",
       body: "Got your job description. The JD agent will file it exactly as written as soon as the requisition is approved.",
+    });
+    return;
+  }
+  if (await latestJdIsOwn(conv)) {
+    await postMessage(conv, {
+      role: "desk",
+      body: 'This is already the role\'s job description — your text, word for word — so nothing needs to change. Type "show the JD" to see it.',
     });
     return;
   }
@@ -3068,7 +3105,7 @@ export async function deskFacts(conv: Conversation): Promise<string> {
     last?.to && ["closed", "rejected", "on_hold"].includes(last.to)
       ? `It became ${last.to.replace("_", " ")}${last.at ? ` on ${last.at.slice(0, 10)}` : ""}${last.comment ? ` — reason: "${last.comment}"` : ""}.`
       : "",
-    `Job description: ${jd ? jd.replace("_", " ") : "none yet"}.`,
+    `Job description: ${jd ? jd.replace("_", " ") : "none yet"}${jd && (await latestJdIsOwn(conv)) ? " — it IS the recruiter's own job description (the one they attached), filed word for word; nothing of theirs is waiting to be used" : ""}.`,
     await jdTemplateFacts(conv.orgId, conv.requisitionId),
     `Candidates in its pipeline: ${c?.total ?? 0} (${c?.scored ?? 0} scored, ${c?.shortlisted ?? 0} shortlisted).`,
     await arrangedCallsFact(conv),
