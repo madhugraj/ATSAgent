@@ -2858,7 +2858,11 @@ function InterviewBoard({ rows }: { rows: InterviewRow[] }) {
                     >
                       {st.text}
                     </span>
-                    {st.sub ? <span className="block text-muted-foreground">{st.sub}</span> : null}
+                    {st.sub ? (
+                      <span className="block whitespace-pre-line text-muted-foreground">
+                        {st.sub}
+                      </span>
+                    ) : null}
                   </span>
                 </li>
               ))}

@@ -168,4 +168,38 @@ describe("a candidate's interview row", () => {
     expect(stopped.now).toMatchObject({ tone: "stopped", text: "Stopped (on hold)" });
     expect(stopped.steps.at(-1)!.state).toBe("stopped");
   });
+  test("agreeing a time: who on the panel accepted, then where the candidate is", () => {
+    const slot = at(7);
+    const arranging = (extra: Record<string, unknown>) =>
+      interviewRow({
+        ...base,
+        arranging: [
+          {
+            level: 3,
+            slots: [slot],
+            panel: [{ name: "Saranya", state: "accepted", okSlots: [slot] }],
+            call: null,
+            emailedAt: null,
+            chosenAt: null,
+            candidate: null,
+            ...extra,
+          },
+        ],
+      });
+    const waiting = arranging({ call: { status: "approved", endReason: null, since: at(6) } });
+    expect(waiting.steps.at(-1)!.text).toBe("L3 Soft Skills · agreeing a time");
+    expect(waiting.steps.at(-1)!.sub).toBe(
+      "Saranya accepted 07:00\nVishal: AI scheduling call not placed yet (since 06:00)",
+    );
+    expect(waiting.now.text).toBe("Panel accepted — waiting for Vishal");
+    const emailed = arranging({ emailedAt: at(8) });
+    expect(emailed.now.text).toBe("Panel accepted — waiting for Vishal to pick a time");
+    const picked = arranging({ chosenAt: at(9) });
+    expect(picked.now.text).toBe("Time agreed — the interview is being booked");
+    const panelPending = arranging({ panel: [{ name: "Saranya", state: "pending", okSlots: [] }] });
+    expect(panelPending.now.text).toBe("Waiting for the panel to accept a time");
+    expect(panelPending.steps.at(-1)!.sub).toBe(
+      "Saranya has not answered yet\nVishal: not contacted yet".split("\n")[0],
+    );
+  });
 });

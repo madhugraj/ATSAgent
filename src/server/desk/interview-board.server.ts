@@ -32,6 +32,16 @@ type Interview = {
   completedAt: Date | null;
   interviewer: string | null;
 };
+/** How a round's time is being agreed: the panel's answers, then the candidate's. */
+type Arranging = {
+  level: number;
+  slots: Date[];
+  panel: { name: string; state: string; okSlots: Date[] }[];
+  call: { status: string; endReason: string | null; since: Date } | null;
+  emailedAt: Date | null;
+  chosenAt: Date | null;
+  candidate: { state: string } | null;
+};
 type Score = { level: number; evaluator: string; rating: number | null; verdict: string | null };
 type Assessment = {
   level: number;
@@ -78,6 +88,53 @@ function roundResult(scores: Score[]): string {
     .join(" · ");
 }
 
+const CALL: Record<string, string> = {
+  approved: "AI scheduling call not placed yet",
+  dialling: "AI scheduling call ringing now",
+  in_progress: "on the AI scheduling call now",
+  no_answer: "did not answer the AI scheduling call — it will try again",
+  callback: "asked to be called back",
+  fell_back: "the call did not settle a time — times e-mailed",
+  failed: "the AI scheduling call failed — times e-mailed",
+};
+
+/** Who has agreed the time so far, one line for the panel and one for the candidate. */
+function arrangingLines(
+  a: Arranging,
+  candidate: string,
+  when: (d: Date) => string,
+): { lines: string[]; now: string } {
+  const lines: string[] = [];
+  const panelDone = a.panel.length > 0 && a.panel.every((p) => p.state === "accepted");
+  for (const p of a.panel)
+    lines.push(
+      p.state === "accepted"
+        ? `${p.name} accepted ${p.okSlots.length ? p.okSlots.map(when).join(", ") : "the time"}`
+        : p.state === "superseded"
+          ? `${p.name} was replaced`
+          : `${p.name} has not answered yet`,
+    );
+  const first = candidate.split(" ")[0] ?? candidate;
+  let now: string;
+  if (a.chosenAt || a.candidate?.state === "accepted") {
+    lines.push(`${first} confirmed the time`);
+    now = "Time agreed — the interview is being booked";
+  } else if (!panelDone) {
+    now = `Waiting for the panel to accept a time`;
+  } else if (a.call && CALL[a.call.status]) {
+    const since = a.call.status === "approved" ? ` (since ${when(a.call.since)})` : "";
+    lines.push(`${first}: ${CALL[a.call.status]}${since}`);
+    now = `Panel accepted — waiting for ${first}`;
+  } else if (a.emailedAt) {
+    lines.push(`${first}: times e-mailed ${when(a.emailedAt)}, no pick yet`);
+    now = `Panel accepted — waiting for ${first} to pick a time`;
+  } else {
+    lines.push(`${first}: not contacted yet`);
+    now = `Panel accepted — ${first} not contacted yet`;
+  }
+  return { lines, now };
+}
+
 /** One candidate's row, from what is stored (pure; unit-tested). */
 export function interviewRow(input: {
   applicationId: string;
@@ -88,6 +145,7 @@ export function interviewRow(input: {
   scores: Score[];
   assessments: Assessment[];
   offered: number[];
+  arranging?: Arranging[];
   tasks: Task[];
   activeAgent: string | null;
   agentTitle: (t: string) => string;
@@ -146,10 +204,17 @@ export function interviewRow(input: {
           : input.offered.includes(r.level)
             ? `The candidate is picking an L${r.level} time`
             : `Interview coordinator is arranging L${r.level}`;
+      const arr = !booked ? input.arranging?.find((x) => x.level === r.level) : undefined;
+      const agreeing = arr ? arrangingLines(arr, input.name, input.when) : null;
+      if (agreeing) nowText = agreeing.now;
       step = {
         state: "current",
-        text: `${label} · ${where}`,
-        ...(past ? { sub: "The time has passed and no scorecard is in yet." } : {}),
+        text: `${label} · ${agreeing ? "agreeing a time" : where}`,
+        ...(past
+          ? { sub: "The time has passed and no scorecard is in yet." }
+          : agreeing
+            ? { sub: agreeing.lines.join("\n") }
+            : {}),
       };
     } else {
       step = { state: stopped ? "stopped" : "todo", text: label };
@@ -276,6 +341,51 @@ export async function interviewBoard(
     application_id: string;
     level: number;
   }[];
+  const offers = (await db.execute(sql`
+    select distinct on (o.application_id, o.level) o.id, o.application_id, o.level, o.slots,
+      o.chosen_at, o.link_emailed_at
+    from interview_slot_offers o
+    where o.org_id = ${orgId} and o.application_id in (${idList}) and o.status in ('offered', 'booked')
+    order by o.application_id, o.level, o.created_at desc`)) as unknown as {
+    id: string;
+    application_id: string;
+    level: number;
+    slots: string[] | null;
+    chosen_at: string | null;
+    link_emailed_at: string | null;
+  }[];
+  const offerIds = offers.map((o) => o.id);
+  const confirmations = offerIds.length
+    ? ((await db.execute(sql`
+        select offer_id, party, coalesce(nullif(name, ''), email) as name, state, ok_slots
+        from interview_confirmations
+        where org_id = ${orgId} and offer_id in (${sql.join(
+          offerIds.map((id) => sql`${id}::uuid`),
+          sql`, `,
+        )})
+        order by created_at`)) as unknown as {
+        offer_id: string;
+        party: string;
+        name: string;
+        state: string;
+        ok_slots: string[] | null;
+      }[])
+    : [];
+  const calls = offerIds.length
+    ? ((await db.execute(sql`
+        select distinct on (slot_offer_id) slot_offer_id, status, end_reason, created_at
+        from screening_calls
+        where org_id = ${orgId} and purpose = 'scheduling' and slot_offer_id in (${sql.join(
+          offerIds.map((id) => sql`${id}::uuid`),
+          sql`, `,
+        )})
+        order by slot_offer_id, created_at desc`)) as unknown as {
+        slot_offer_id: string;
+        status: string;
+        end_reason: string | null;
+        created_at: string;
+      }[])
+    : [];
   const tasks = (await db.execute(sql`
     select t.id, r.agent_type, t.title, t.status, t.created_at,
       t.proposed_action -> 'args' -> 'subject' ->> 'type' as subject,
@@ -358,6 +468,34 @@ export async function interviewBoard(
           reviewDecision: x.review_decision,
         })),
       offered: offered.filter((o) => o.application_id === a.id).map((o) => o.level),
+      arranging: offers
+        .filter((o) => o.application_id === a.id)
+        .map((o) => {
+          const conf = confirmations.filter((c) => c.offer_id === o.id);
+          const call = calls.find((c) => c.slot_offer_id === o.id);
+          const cand = conf.filter((c) => c.party === "candidate").at(-1);
+          return {
+            level: o.level,
+            slots: (o.slots ?? []).map((x) => new Date(x)),
+            panel: conf
+              .filter((c) => c.party === "panelist")
+              .map((c) => ({
+                name: nameOf(c.name),
+                state: c.state,
+                okSlots: (c.ok_slots ?? []).map((x) => new Date(x)),
+              })),
+            call: call
+              ? {
+                  status: call.status,
+                  endReason: call.end_reason,
+                  since: new Date(call.created_at),
+                }
+              : null,
+            emailedAt: o.link_emailed_at ? new Date(o.link_emailed_at) : null,
+            chosenAt: o.chosen_at ? new Date(o.chosen_at) : null,
+            candidate: cand ? { state: cand.state } : null,
+          };
+        }),
       tasks: tasks
         .filter((t) => t.application_id === a.id)
         .map((t) => ({
