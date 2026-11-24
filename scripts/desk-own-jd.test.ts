@@ -1,7 +1,8 @@
 /**
  * The person's own JD attached in the hiring desk (file text or long paste):
  *  - it is kept in the thread word for word, marked as their JD;
- *  - before the role is approved, the desk says it will be filed on approval;
+ *  - before the role exists, the desk reads it like any message (details are taken);
+ *  - when the role is approved, the JD agent is told to file it, not draft one;
  *  - a role that already has an approved JD keeps it — nothing is replaced and
  *    no JD agent starts.
  * Run: DATABASE_URL=postgres://…/atsagent_test SESSION_SECRET=… bun test scripts/desk-own-jd.test.ts
@@ -103,8 +104,25 @@ describe("own JD attached in the hiring desk", () => {
       body: OWN_JD,
       card: { type: desk.OWN_JD_CARD, fileName: "rsm-uganda.pdf" },
     });
+    // The desk takes a turn on it (here without an AI key, it says so).
     expect(m[1]?.role).toBe("desk");
-    expect(m[1]?.body).toContain("Once the role is raised and approved");
+  });
+
+  test("the approved role's JD agent files the shared JD instead of drafting", async () => {
+    const reqId = await requisition("approved");
+    const conv = await thread(reqId);
+    const req = { id: reqId, code: "REQ-OJD", title: "Regional Sales Manager" };
+    expect(await desk.jdGoalForRequisition(orgId, req)).toContain("Draft its job description");
+    await db.insert(hiringMessages).values({
+      conversationId: conv.id,
+      orgId,
+      role: "user",
+      body: OWN_JD,
+      card: { type: desk.OWN_JD_CARD, fileName: null } as never,
+    });
+    const goal = await desk.jdGoalForRequisition(orgId, req);
+    expect(goal).toContain("import_jd_version");
+    expect(goal).not.toContain("Draft its job description");
   });
 
   test("a role still in approval waits for its approval", async () => {

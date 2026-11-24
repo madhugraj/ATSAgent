@@ -432,6 +432,7 @@ const SYSTEM = [
   "You are the hiring desk of an applicant tracking system. A recruiter describes a hiring need in a chat.",
   "Each turn, return JSON with:",
   '- "slots": only the hiring details the LATEST message states or changes (omit the rest). Fields: roleTitle, location, workMode (onsite|hybrid|remote — "office"/"WFO" means onsite, "WFH"/"work from home" means remote; a message that says "hybrid" sets hybrid even next to a city), experienceMin, experienceMax (years), openings, mustHaveSkills, goodToHaveSkills (short skill names), budgetLpaMax (lakhs per annum — the budget; when a band is given as well, the budget is the figure called budget, not the top of the band), bandLpaMin and bandLpaMax (a pay band the person gives, lakhs per annum; only when stated), maxNoticeDays, employmentType (full_time|contract|internship), urgency (immediate|within_a_month|flexible), hiringManager (the person who manages this hire, exactly as named — a name or an e-mail; never guess one, and never set hiringManagerMemberId). "a candidate" means openings 1. Expand obvious role shorthands (e.g. "Full stack" → "Full Stack Developer"). Never invent values that were not said.',
+  "- When the latest message is the recruiter's own job description, take every hiring detail it states (role, location, work mode, experience, openings, must-have and good-to-have skills, employment type, responsibilities, reporting line, education) and never ask for something it already states; that JD is filed as written once the role is approved, so do not offer to draft one.",
   '- JD details (only when the person gives them): responsibilities (their key responsibilities, as text), reportingTo, successMeasures (what success looks like), education. If they ask you to fill these from the market / research / "you decide", set researchRole true.',
   '- "command": {"type":"none"} unless the person asks to act: "talk to / screen / call the first 5" → {"type":"screen","top":5}; "screen 1, 3 and 4" → {"type":"screen","ranks":[1,3,4]}; "create a new role" → {"type":"new_role"}; "use REQ-2026-014" → {"type":"use_existing","code":"REQ-2026-014"}.',
   '- "command" also: "close / cancel / delete / withdraw this role" → {"type":"close_role"}.',
@@ -666,12 +667,21 @@ async function threadHasOwnJd(conv: { id: string; orgId: string }): Promise<bool
   return Boolean(m);
 }
 
+/** The JD agent's goal for an approved requisition, from its hiring thread (if any). */
+export async function jdGoalForRequisition(
+  orgId: string,
+  req: { id: string; code: string; title: string },
+): Promise<string> {
+  const conv = await conversationForRequisition(orgId, req.id);
+  return (await jdAgentBrief(conv ? { id: conv.id, orgId } : null, req)).goal;
+}
+
 /** The JD agent's goal: file the person's own JD when they shared one, else draft. */
 async function jdAgentBrief(
-  conv: { id: string; orgId: string },
+  conv: { id: string; orgId: string } | null,
   req: { code: string; title: string },
 ): Promise<{ goal: string; announce: string }> {
-  if (await threadHasOwnJd(conv))
+  if (conv && (await threadHasOwnJd(conv)))
     return {
       goal: `Requisition ${req.code} "${req.title}": the person shared their own job description in this thread. File it word for word with import_jd_version (leave jdText out) — do not draft a new one — and get it approved by the department head.`,
       announce:
@@ -695,18 +705,14 @@ export async function attachOwnJd(
   text: string,
   fileName: string | null,
 ): Promise<void> {
-  await postMessage(conv, {
-    role: "user",
-    body: text,
-    card: { type: OWN_JD_CARD, fileName },
-  });
+  const card = { type: OWN_JD_CARD, fileName };
   if (!conv.requisitionId) {
-    await postMessage(conv, {
-      role: "desk",
-      body: "Got your job description. Once the role is raised and approved, the JD agent will file it exactly as written for the department head's approval.",
-    });
+    // Still describing the role: the desk reads the JD like any message, so
+    // every detail it states (title, place, experience, skills, duties) is taken.
+    await handleUserMessage(conv, userId, text, card);
     return;
   }
+  await postMessage(conv, { role: "user", body: text, card });
   const [req] = await db
     .select({ status: requisitions.status })
     .from(requisitions)
@@ -1251,11 +1257,12 @@ export async function handleUserMessage(
   conv: Conversation,
   userId: string,
   text: string,
+  card?: DeskCard,
 ): Promise<void> {
   // The desk's AI work for a role counts towards that role's hiring cost.
   const { withAiSubject } = await import("../agents/context");
   return withAiSubject({ requisitionId: conv.requisitionId }, () =>
-    handleUserMessageInner(conv, userId, text),
+    handleUserMessageInner(conv, userId, text, card),
   );
 }
 
@@ -1263,8 +1270,9 @@ async function handleUserMessageInner(
   conv: Conversation,
   userId: string,
   text: string,
+  card?: DeskCard,
 ): Promise<void> {
-  await postMessage(conv, { role: "user", body: text });
+  await postMessage(conv, { role: "user", body: text, ...(card ? { card } : {}) });
   const history = await db
     .select({ role: hiringMessages.role, body: hiringMessages.body })
     .from(hiringMessages)
@@ -3317,7 +3325,7 @@ export async function advanceGathering(
     return;
   }
   // One question for a deeper JD, asked once; any answer (or "research it") moves on.
-  if (!slots.jdDetailsAsked) {
+  if (!slots.jdDetailsAsked && !(await threadHasOwnJd(conv))) {
     const asked = { ...slots, jdDetailsAsked: true };
     await db
       .update(hiringConversations)
