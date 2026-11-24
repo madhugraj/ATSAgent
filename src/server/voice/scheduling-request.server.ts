@@ -44,7 +44,15 @@ export async function checkSchedulingCall(
   applicationId: string,
   now = Date.now(),
   /** A person on the team may call again about a round already spoken about (agents never may). */
-  opts: { byPerson?: boolean } = {},
+  opts: {
+    byPerson?: boolean;
+    /**
+     * The system's one reminder call for these times (0092): the e-mailed link has
+     * gone unanswered, so one more call is allowed even after an earlier call or a
+     * conversation about the round — never a second reminder.
+     */
+    reminder?: boolean;
+  } = {},
 ): Promise<SchedulingCheck> {
   const policy = await phoneScreeningPolicyOf(orgId);
   if (!policy.schedulingEnabled)
@@ -136,9 +144,15 @@ export async function checkSchedulingCall(
         eq(screeningCalls.orgId, orgId),
         eq(screeningCalls.slotOfferId, offer.id),
         ne(screeningCalls.status, "cancelled"),
+        // A reminder is blocked only by an earlier reminder (or a call still waiting).
+        opts.reminder
+          ? sql`(${screeningCalls.reminder} or ${screeningCalls.status} in ('approved', 'callback', 'no_answer', 'dialling', 'in_progress'))`
+          : sql`true`,
       ),
     )
     .limit(1);
+  if (already && opts.reminder)
+    return { ok: false, reason: "A reminder call was already arranged for these times." };
   if (already)
     return { ok: false, reason: "A scheduling call was already arranged for these times." };
 
@@ -159,7 +173,7 @@ export async function checkSchedulingCall(
     )
     .limit(1);
   // An agent never calls again about a round; a person on the team may decide to.
-  if (spoken && !opts.byPerson)
+  if (spoken && !opts.byPerson && !opts.reminder)
     return {
       ok: false,
       reason: "The assistant already spoke with them about this round; these times go by e-mail.",
@@ -331,4 +345,75 @@ export async function raiseUnansweredOffers(now = Date.now(), orgId?: string): P
     raised++;
   }
   return raised;
+}
+
+/** The e-mailed times unanswered this long → one reminder call (0092). */
+export const REMINDER_CALL_AFTER_HOURS = 3;
+
+/**
+ * Reminder calls (0092): an open offer whose link was e-mailed at least
+ * REMINDER_CALL_AFTER_HOURS ago and is still unanswered gets one more
+ * scheduling call — even when the assistant already spoke with the candidate
+ * about the round (the times went by e-mail after that call) — once per offer.
+ * Every other rule of `checkSchedulingCall` holds. Run by the agent tick.
+ */
+export async function remindUnansweredOffers(orgId?: string, now = Date.now()): Promise<number> {
+  const rows = (await db.execute(sql`
+    select o.id, o.org_id, o.application_id
+    from interview_slot_offers o
+    join phone_screening_settings s on s.org_id = o.org_id
+    where o.status = 'offered'
+      and o.link_emailed_at is not null
+      and o.link_emailed_at <= ${new Date(now - REMINDER_CALL_AFTER_HOURS * HOUR).toISOString()}::timestamptz
+      and s.enabled and s.scheduling_enabled
+      ${orgId ? sql`and o.org_id = ${orgId}` : sql``}
+      and o.expires_at > ${new Date(now).toISOString()}::timestamptz
+      and not exists (select 1 from screening_calls c where c.slot_offer_id = o.id and c.reminder)
+    limit 50`)) as unknown as { id: string; org_id: string; application_id: string }[];
+  let arranged = 0;
+  for (const r of rows) {
+    const c = await checkSchedulingCall(r.org_id, r.application_id, now, { reminder: true });
+    if (!c.ok || c.offer.id !== r.id) continue;
+    try {
+      const alternates = await findAlternates(r.org_id, c.offer, now);
+      const policy = await phoneScreeningPolicyOf(r.org_id);
+      const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+      const dueAt = nextWindowStart(now, policy, (await getOrgEmailSettings(r.org_id)).timezone);
+      const [row] = await db
+        .insert(screeningCalls)
+        .values({
+          orgId: r.org_id,
+          candidateId: c.candidateId,
+          applicationId: r.application_id,
+          requisitionId: c.requisitionId,
+          purpose: "scheduling",
+          slotOfferId: r.id,
+          alternates,
+          reminder: true,
+          requestedBy:
+            c.offer.createdBy ??
+            (await (await import("./confirm-calls.server")).principalOf(r.org_id)),
+          status: "approved",
+          dueAt,
+        })
+        .returning({ id: screeningCalls.id });
+      await writeAudit({
+        actor: "system:scheduling-reminder",
+        orgId: r.org_id,
+        action: "scheduling_call.requested",
+        entityType: "screening_call",
+        entityId: row!.id,
+        detail: {
+          applicationId: r.application_id,
+          offerId: r.id,
+          reminder: true,
+          dueAt: dueAt.toISOString(),
+        },
+      });
+      arranged++;
+    } catch {
+      /* one offer never stops the sweep */
+    }
+  }
+  return arranged;
 }

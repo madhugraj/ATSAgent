@@ -34,7 +34,9 @@ async function assertCallRole(userId: string, orgId: string): Promise<void> {
 }
 
 const ListInput = z.object({
-  purpose: z.enum(["screening", "scheduling", "negotiation"]).optional(),
+  purpose: z
+    .enum(["screening", "scheduling", "negotiation", "confirmation", "panel_check"])
+    .optional(),
   verdict: z.enum(["pass", "attention", "breach"]).optional(),
   status: z.enum(["due", "reviewing", "done", "failed"]).optional(),
   /** Only reviews no person has read yet. */
@@ -46,7 +48,7 @@ const ListInput = z.object({
 export type CallReviewRow = {
   id: string;
   callId: string;
-  purpose: "screening" | "scheduling" | "negotiation";
+  purpose: "screening" | "scheduling" | "negotiation" | "confirmation" | "panel_check";
   status: "due" | "reviewing" | "done" | "failed";
   scope: "full" | "timing_only";
   verdict: "pass" | "attention" | "breach" | null;

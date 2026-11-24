@@ -21,6 +21,8 @@ const CHARTERS = [
   charter.SCREENING_CALL_CHARTER,
   charter.SCHEDULING_CALL_CHARTER,
   charter.NEGOTIATION_CALL_CHARTER,
+  charter.CONFIRMATION_CALL_CHARTER,
+  charter.PANEL_CHECK_CALL_CHARTER,
 ];
 
 describe("the voice agents' charter", () => {

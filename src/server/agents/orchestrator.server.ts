@@ -963,6 +963,22 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
   } catch (err) {
     log.warn("interview.scorecard_sweep_failed", { error: err as Error });
   }
+  // Calls that collect an answer: the candidate confirms tomorrow's round; a silent
+  // panelist is phoned alongside the reminder e-mail (migration 0092).
+  try {
+    const { requestConfirmationCalls, requestPanelCheckCalls } =
+      await import("../voice/confirm-calls.server");
+    await requestConfirmationCalls(opts.orgId);
+    // The e-mailed interview times still unanswered: one reminder call.
+    const { remindUnansweredOffers } = await import("../voice/scheduling-request.server");
+    await remindUnansweredOffers(opts.orgId);
+    await requestPanelCheckCalls(opts.orgId);
+    // Panel members with no mobile are asked to add one (twice at most).
+    const { sweepMobileAsks } = await import("@/lib/panelist-mobile.server");
+    await sweepMobileAsks(opts.orgId);
+  } catch (err) {
+    log.warn("interview.answer_call_request_failed", { error: err as Error });
+  }
   // Booked rounds coming up: the candidate and the panel are reminded ~24 h and ~1 h before.
   try {
     const { sweepInterviewReminders } = await import("@/lib/interview-reminders.server");

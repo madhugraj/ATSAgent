@@ -11,7 +11,12 @@ export type Enforced = "code" | "instruction";
 export type Rule = { rule: string; enforced: Enforced };
 
 export type VoiceCharter = {
-  agent: "screening_call" | "scheduling_call" | "negotiation_call";
+  agent:
+    | "screening_call"
+    | "scheduling_call"
+    | "negotiation_call"
+    | "confirmation_call"
+    | "panel_check_call";
   /** The one job of the call. */
   purpose: string;
   /** Said on every call, in this order. */
@@ -151,6 +156,78 @@ export const SCHEDULING_CALL_CHARTER: VoiceCharter = {
       "None of the times work, or they set a condition: their words go to the team, who offer other times.",
     ),
     c("Not a good time: one short call-back, or the times by e-mail with a link."),
+  ],
+  tone: COMMON_TONE,
+};
+
+/**
+ * The attendance confirmation call (0092): the day before a booked round whose
+ * candidate has not confirmed it, one short call to ask whether they will
+ * attend — through the same answer as the invite's confirm link.
+ */
+export const CONFIRMATION_CALL_CHARTER: VoiceCharter = {
+  agent: "confirmation_call",
+  purpose:
+    "Confirm that the candidate will attend their booked interview at the booked time — nothing else. A yes confirms it; a no, with their words, goes to the hiring team to re-schedule.",
+  mustSay: [
+    c(
+      "That it is an AI recruiting assistant, in its first line, before anything about the interview.",
+    ),
+    c(
+      "That it notes the call for the hiring team and that the call is checked for quality — before the candidate's go-ahead counts.",
+    ),
+    i("The booked round, day, time, length and format, exactly as the system states them."),
+  ],
+  may: [
+    c(
+      "The booked interview's round, day, time, length, format and how to join, and that it is with a person or a panel from the hiring team.",
+    ),
+  ],
+  mustNot: [
+    ...COMMON_MUST_NOT,
+    c("Move, cancel or re-book the interview, or agree any other time."),
+    c("Record a yes the candidate did not clearly give."),
+  ],
+  handOff: [
+    ...COMMON_HAND_OFF,
+    c(
+      "They cannot make it, or are unsure: their words go to the hiring team, who re-schedule with them.",
+    ),
+  ],
+  tone: COMMON_TONE,
+};
+
+/**
+ * The panel time check (0092): a panelist who has not answered an interview
+ * time within the reminder window is phoned once, alongside the reminder
+ * e-mail, and says which of the times they can do — through the same answer
+ * as their confirm link.
+ */
+export const PANEL_CHECK_CALL_CHARTER: VoiceCharter = {
+  agent: "panel_check_call",
+  purpose:
+    "Ask a member of the interview panel which of the proposed interview times they can do, so the candidate is not kept waiting — nothing else.",
+  mustSay: [
+    c("That it is an AI assistant from the talent acquisition team, in its first line."),
+    c(
+      "That it notes the call for the hiring team and that the call is checked for quality — before their go-ahead counts.",
+    ),
+    i("The candidate, the role, the round and the times, exactly as the system states them."),
+  ],
+  may: [
+    c("The round, its length and format, the candidate's name and role, and the proposed times."),
+  ],
+  mustNot: [
+    ...COMMON_MUST_NOT,
+    c("Record a time the panelist did not clearly say they can do, or any time not in its list."),
+    i("Share the candidate's scores, screening results or anything beyond their name and role."),
+  ],
+  handOff: [
+    ...COMMON_HAND_OFF.slice(0, 1),
+    c('"Please don\'t call me": recorded, and no AI call dials them again.'),
+    c(
+      "None of the times work: their words go to the hiring team with their answer, as on the confirm link.",
+    ),
   ],
   tone: COMMON_TONE,
 };

@@ -118,6 +118,20 @@ export const AGENT_CATALOG: AgentInfo[] = [
       "Phones a candidate who has not picked one of the e-mailed interview times, when the Interview coordinator asks and a person approves: says it is an AI and books one of those times (or another the interviewers are free for) — never changes the interview, never discusses pay or results.",
   },
   {
+    type: "confirmation_call",
+    label: "Confirmation call agent",
+    phase: 3,
+    description:
+      "The day before a booked interview the candidate has not confirmed, phones them once: says it is an AI, reads out the booked time and asks whether they will attend. A yes confirms it; a no, in their words, goes to the hiring team to re-schedule — it never moves the interview itself.",
+  },
+  {
+    type: "panel_check_call",
+    label: "Panel time-check call agent",
+    phase: 3,
+    description:
+      "Phones a panel member who has not answered a proposed interview time within the reminder window (a mobile in the panel directory): says it is an AI, reads out the times and records which ones they can do — the same answer as their confirm link.",
+  },
+  {
     type: "negotiation_call",
     label: "Negotiation call agent",
     phase: 4,

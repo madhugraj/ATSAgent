@@ -8,7 +8,7 @@
 
 /** Tool names of all three calls — never words a person says on a call. */
 const TOOL_NAMES =
-  /\b(record_details|record_answer|record_consent|end_call|book_slot|record_availability|record_permission|end_scheduling_call|end_negotiation_call|record_call_notes|record_their_position|state_offer|explain_offer|request_human_call|action_input|tool_call|function_call)\b/i;
+  /\b(record_details|record_answer|record_consent|end_call|book_slot|record_availability|record_permission|end_scheduling_call|record_attendance_go_ahead|record_panel_go_ahead|will_attend|cannot_attend|end_confirmation_call|answer_times|end_panel_call|end_negotiation_call|record_call_notes|record_their_position|state_offer|explain_offer|request_human_call|action_input|tool_call|function_call)\b/i;
 /** Code fences, JSON keys, reasoning labels. */
 const CODE_OR_REASONING = /```|\{\s*"|"\s*:\s*[{["]|\b(thought|reasoning)\s*"?\s*:/i;
 

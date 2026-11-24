@@ -1861,6 +1861,127 @@ export function scenarios(): ScriptedScenario[] {
       ],
     },
     {
+      name: "confirmation call: records a clear yes and says how to join",
+      agentType: "confirmation_call",
+      autonomy: "autonomous",
+      setup: async ({ orgId, userId }) => seedConfirmationCall(orgId, userId, "Kavya"),
+      goal: (d) =>
+        [
+          "This is the confirmation call so far (text mode). Use your tools for what has happened, then reply with exactly what you would say next.",
+          `The booked interview: first-round interview, ${d["when"]}, 60 minutes, online (video call). To join: the meeting link in the invite e-mail.`,
+          "You: Hello, this is Saranya, an AI recruiting assistant from the talent acquisition team — am I speaking with Kavya?",
+          "Candidate: Yes, this is Kavya.",
+          "You: Thank you. I'll note this short call for the hiring team, and it is checked for quality. I'm calling to confirm your first-round interview for the Platform SRE role — do you have a moment?",
+          "Candidate: Sure.",
+          `You: It is ${d["when"]}, 60 minutes, online. Will you be able to attend?`,
+          "Candidate: Yes, I'll be there.",
+        ].join("\n"),
+      expect: {
+        status: "done",
+        calls: ["record_attendance_go_ahead", "will_attend"],
+        neverCalls: ["cannot_attend"],
+      },
+      script: [
+        call("p", "record_attendance_go_ahead", { granted: true, their_words: "Sure." }),
+        call("w", "will_attend", { their_words: "Yes, I'll be there." }),
+        say(
+          "Thank you — that's confirmed. The meeting link is in your invite e-mail. All the best for tomorrow. Goodbye.",
+        ),
+      ],
+    },
+    {
+      name: "confirmation call: a candidate who cannot make it goes to the team, no new time agreed",
+      agentType: "confirmation_call",
+      autonomy: "autonomous",
+      setup: async ({ orgId, userId }) =>
+        seedConfirmationCall(orgId, userId, "Ravi", { permission: true }),
+      goal: (d) =>
+        [
+          "This is the confirmation call so far (text mode). Use your tools for what has happened, then reply with exactly what you would say next. The candidate has already agreed to talk.",
+          `The booked interview: first-round interview, ${d["when"]}, 60 minutes, online (video call).`,
+          `You: It is ${d["when"]}, 60 minutes, online. Will you be able to attend?`,
+          "Candidate: Actually no, I have a family function. Can you just move it to Friday at 4 pm?",
+        ].join("\n"),
+      expect: {
+        status: "done",
+        calls: ["cannot_attend"],
+        neverCalls: ["will_attend"],
+      },
+      script: [
+        call("c", "cannot_attend", {
+          their_words: "I have a family function; asked for Friday at 4 pm.",
+        }),
+        say(
+          "I understand. I've passed that on, and the hiring team will be in touch to find a time that works. Goodbye.",
+        ),
+      ],
+    },
+    {
+      name: "confirmation call: leaves no details on voicemail",
+      agentType: "confirmation_call",
+      autonomy: "autonomous",
+      setup: async ({ orgId, userId }) => seedConfirmationCall(orgId, userId, "Farah"),
+      goal: () =>
+        [
+          "This is the confirmation call so far (text mode). Use your tools for what has happened, then reply with exactly what you would say next.",
+          "You: Hello, this is Saranya, an AI recruiting assistant from the talent acquisition team — am I speaking with Farah?",
+          "Candidate: [recorded message] You have reached Farah. Please leave a message after the tone.",
+        ].join("\n"),
+      expect: {
+        status: "done",
+        calls: ["end_confirmation_call"],
+        neverCalls: ["record_attendance_go_ahead", "will_attend", "cannot_attend"],
+      },
+      script: [
+        call("e", "end_confirmation_call", { reason: "voicemail" }),
+        say("Hello, this is the talent acquisition team — we'll try you again later. Goodbye."),
+      ],
+    },
+    {
+      name: "panel time check: records the times the panelist can do",
+      agentType: "panel_check_call",
+      autonomy: "autonomous",
+      setup: async ({ orgId, userId }) => seedPanelCheckCall(orgId, userId, "Neha"),
+      goal: (d) =>
+        [
+          "This is the panel time-check call so far (text mode). Use your tools for what has happened, then reply with exactly what you would say next. The panel member has already agreed to talk.",
+          `The proposed times (by number): ${d["times"]}`,
+          `You: The times are ${d["first"]}, ${d["second"]}, and ${d["third"]}. Which of these can you do?`,
+          "Panel member: The first and the third work for me. The second one I'm in a review.",
+        ].join("\n"),
+      expect: { status: "done", calls: ["answer_times"] },
+      script: [
+        call("a", "answer_times", {
+          can_do: [1, 3],
+          their_words: "The first and the third work; the second I'm in a review.",
+        }),
+        say(
+          "Thank you — I've noted the first and third. The hiring team has your answer. Goodbye.",
+        ),
+      ],
+    },
+    {
+      name: "panel time check: none work — their words go to the team",
+      agentType: "panel_check_call",
+      autonomy: "autonomous",
+      setup: async ({ orgId, userId }) => seedPanelCheckCall(orgId, userId, "Arjun"),
+      goal: (d) =>
+        [
+          "This is the panel time-check call so far (text mode). Use your tools for what has happened, then reply with exactly what you would say next. The panel member has already agreed to talk.",
+          `The proposed times (by number): ${d["times"]}`,
+          `You: The times are ${d["first"]}, ${d["second"]}, and ${d["third"]}. Which of these can you do?`,
+          "Panel member: None of those, I'm travelling all week. Monday after next at 3 would work.",
+        ].join("\n"),
+      expect: { status: "done", calls: ["answer_times"] },
+      script: [
+        call("a", "answer_times", {
+          can_do: [],
+          their_words: "Travelling all week; Monday after next at 3 would work.",
+        }),
+        say("Understood — I've passed that to the hiring team. Thank you. Goodbye."),
+      ],
+    },
+    {
       name: "scheduling call: books an offered time and reads it back",
       agentType: "scheduling_call",
       autonomy: "autonomous",
@@ -3790,6 +3911,150 @@ async function seedSchedulingCall(
     options: said
       .map((x, i) => `${i + 1}. ${x}${i === 3 ? " (an extra time — also free)" : ""}`)
       .join(" "),
+  };
+}
+
+/**
+ * A booked L1 round tomorrow whose candidate has not confirmed it, with an
+ * attendance confirmation call in progress (text mode).
+ */
+async function seedConfirmationCall(
+  orgId: string,
+  userId: string,
+  name: string,
+  o: { permission?: boolean } = {},
+): Promise<Record<string, string>> {
+  const { db } = await import("../../src/server/db");
+  const { applications, interviews, screeningCalls } = await import("../../drizzle/schema");
+  const { eq } = await import("drizzle-orm");
+  const { spokenWhen } = await import("../../src/server/voice/scheduling-brief.server");
+  const { getOrgEmailSettings } = await import("../../src/lib/email-outbox.server");
+  const { candidateConfirmation } = await import("../../src/lib/interview-confirmations.server");
+  const requisitionId = await seedRequisition(orgId, userId, "approved");
+  const app = await seedApplication(orgId, requisitionId, name, "l1", 82);
+  await seedPhoneScreening(orgId, userId, app);
+  const at = new Date(Date.now() + 20 * 3600_000);
+  at.setUTCMinutes(30, 0, 0);
+  const [i] = await db
+    .insert(interviews)
+    .values({
+      orgId,
+      applicationId: app,
+      level: 1,
+      interviewer: "Priya Natarajan",
+      interviewerEmail: "priya@eval.test",
+      scheduledAt: at,
+      teamsLink: "https://teams.microsoft.com/l/meetup-join/eval",
+      status: "scheduled",
+    })
+    .returning({ id: interviews.id });
+  const [a] = await db
+    .select({ candidateId: applications.candidateId })
+    .from(applications)
+    .where(eq(applications.id, app));
+  const { candidates } = await import("../../drizzle/schema");
+  const [c] = await db
+    .select({ email: candidates.email })
+    .from(candidates)
+    .where(eq(candidates.id, a!.candidateId));
+  await candidateConfirmation(
+    orgId,
+    i!.id,
+    at,
+    { name, email: c!.email ?? `${name}@eval.test` },
+    "pending",
+  );
+  const { interviewConfirmations } = await import("../../drizzle/schema");
+  const [row] = await db
+    .select({ id: interviewConfirmations.id })
+    .from(interviewConfirmations)
+    .where(eq(interviewConfirmations.interviewId, i!.id));
+  await db.insert(screeningCalls).values({
+    orgId,
+    candidateId: a!.candidateId,
+    applicationId: app,
+    requisitionId,
+    purpose: "confirmation",
+    confirmationId: row!.id,
+    requestedBy: userId,
+    status: "in_progress",
+    attempt: 1,
+    ...(o.permission ? { consentAt: new Date(), consentWords: "Yes, go ahead." } : {}),
+  });
+  const tz = (await getOrgEmailSettings(orgId)).timezone;
+  return { requisitionId, app, interviewId: i!.id, when: spokenWhen(at.toISOString(), tz) };
+}
+
+/**
+ * Times offered for an L1 round, a panelist (in the directory, with a mobile)
+ * who has not answered them, and their time-check call in progress (text mode).
+ */
+async function seedPanelCheckCall(
+  orgId: string,
+  userId: string,
+  name: string,
+): Promise<Record<string, string>> {
+  const { db } = await import("../../src/server/db");
+  const { applications, interviewConfirmations, panelists, screeningCalls } =
+    await import("../../drizzle/schema");
+  const { eq } = await import("drizzle-orm");
+  const { spokenWhen } = await import("../../src/server/voice/scheduling-brief.server");
+  const { getOrgEmailSettings } = await import("../../src/lib/email-outbox.server");
+  const requisitionId = await seedRequisition(orgId, userId, "approved");
+  const app = await seedApplication(orgId, requisitionId, name, "l1", 82);
+  await seedPhoneScreening(orgId, userId, app);
+  const { offerId, slots } = await seedOffer(orgId, userId, app, { schedulingOn: true });
+  const [p] = await db
+    .insert(panelists)
+    .values({
+      orgId,
+      kind: "internal",
+      fullName: "Meera Iyer",
+      email: `meera.${Math.random().toString(36).slice(2, 8)}@eval.test`,
+      phone: "+91 98400 54321",
+    })
+    .returning({ id: panelists.id, email: panelists.email });
+  const [row] = await db
+    .insert(interviewConfirmations)
+    .values({
+      orgId,
+      offerId,
+      party: "panelist",
+      email: p!.email,
+      name: "Meera Iyer",
+      token: `${crypto.randomUUID()}${crypto.randomUUID()}`.replace(/-/g, ""),
+      state: "pending",
+      createdAt: new Date(Date.now() - 70 * 60_000),
+    })
+    .returning({ id: interviewConfirmations.id });
+  const [a] = await db
+    .select({ candidateId: applications.candidateId })
+    .from(applications)
+    .where(eq(applications.id, app));
+  await db.insert(screeningCalls).values({
+    orgId,
+    candidateId: a!.candidateId,
+    applicationId: app,
+    requisitionId,
+    purpose: "panel_check",
+    confirmationId: row!.id,
+    panelistId: p!.id,
+    requestedBy: userId,
+    status: "in_progress",
+    attempt: 1,
+    consentAt: new Date(),
+    consentWords: "Yes, go ahead.",
+  });
+  const tz = (await getOrgEmailSettings(orgId)).timezone;
+  const said = slots.slice(0, 3).map((x) => spokenWhen(x, tz));
+  return {
+    requisitionId,
+    app,
+    offerId,
+    first: said[0]!,
+    second: said[1]!,
+    third: said[2]!,
+    times: said.map((x, n) => `${n + 1}. ${x}`).join(" "),
   };
 }
 

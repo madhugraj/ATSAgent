@@ -20,8 +20,8 @@ import type { SchedulingFacts } from "./scheduling-prompt";
 import { MAX_OPTIONS } from "./scheduling-call-tools";
 import { phoneScreeningPolicyOf } from "./settings.server";
 
-const ROUND = ["first-round", "second-round", "third-round"];
-const FORMAT: Record<string, string> = {
+export const ROUND = ["first-round", "second-round", "third-round"];
+export const FORMAT: Record<string, string> = {
   online: "online (video call)",
   onsite: "in person",
   phone: "by phone",

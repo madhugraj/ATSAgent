@@ -207,6 +207,7 @@ export async function sendInterviewerBrief(
         ? { panelText: r.panelNames.filter(Boolean).join(", ") }
         : {}),
       ...(await rubricFor(orgId, r.applicationId, r.level)),
+      ...(await mobileAskFor(orgId, r.interviewerEmail)),
       ...(scorecardToken
         ? { scorecardUrl: `${site}/scorecard/${scorecardToken}` }
         : {
@@ -303,4 +304,24 @@ async function rubricFor(
   } catch {
     return {};
   }
+}
+
+/** The add-your-mobile link while the panellist has none on file (0093). */
+async function mobileAskFor(orgId: string, email: string): Promise<{ mobileUrl?: string }> {
+  const { panelists } = await import("@db/schema");
+  const { and, eq, sql } = await import("drizzle-orm");
+  const [p] = await db
+    .select({ id: panelists.id, phone: panelists.phone, out: panelists.aiCallOptOutAt })
+    .from(panelists)
+    .where(
+      and(
+        eq(panelists.orgId, orgId),
+        eq(panelists.active, true),
+        sql`lower(${panelists.email}) = ${email.trim().toLowerCase()}`,
+      ),
+    )
+    .limit(1);
+  if (!p || p.phone || p.out) return {};
+  const { mobileUrl } = await import("./panelist-mobile.server");
+  return { mobileUrl: await mobileUrl(orgId, p.id) };
 }

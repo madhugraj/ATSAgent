@@ -23,6 +23,7 @@ import { template as screeningCallBookedTemplate } from "./screening-call-booked
 import { template as panelSummaryTemplate } from "./panel-summary";
 import { template as panelTimeCheckTemplate } from "./panel-time-check";
 import { template as panelReminderTemplate } from "./panel-reminder";
+import { template as panelMobileAskTemplate } from "./panel-mobile-ask";
 import { template as interviewReminderTemplate } from "./interview-reminder";
 
 /**
@@ -84,5 +85,6 @@ export const TEMPLATES: Record<string, TemplateEntry> = {
   panel_summary: panelSummaryTemplate,
   panel_time_check: panelTimeCheckTemplate,
   panel_reminder: panelReminderTemplate,
+  panel_mobile_ask: panelMobileAskTemplate,
   interview_reminder: interviewReminderTemplate,
 };

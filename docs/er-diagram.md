@@ -787,6 +787,9 @@ erDiagram
     uuid slot_offer_id FK
     jsonb alternates
     uuid negotiation_id FK
+    uuid confirmation_id FK
+    uuid panelist_id FK
+    boolean reminder
     jsonb call_stats "nullable"
     text brief "nullable"
     text last_error "nullable"
@@ -824,6 +827,8 @@ erDiagram
   screening_calls }o--o| screening_runs : "screening_run_id"
   screening_calls }o--o| interview_slot_offers : "slot_offer_id"
   screening_calls }o--o| offer_negotiations : "negotiation_id"
+  screening_calls }o--o| interview_confirmations : "confirmation_id · cascade"
+  screening_calls }o--o| panelists : "panelist_id · cascade"
 ```
 
 ## Offers & onboarding
@@ -1414,9 +1419,11 @@ erDiagram
 | `screening_calls` | `agent_run_id` | `agent_runs` | no action |
 | `screening_calls` | `application_id` | `applications` | no action |
 | `screening_calls` | `candidate_id` | `candidates` | cascade |
+| `screening_calls` | `confirmation_id` | `interview_confirmations` | cascade |
 | `screening_calls` | `kit_id` | `screening_kits` | no action |
 | `screening_calls` | `negotiation_id` | `offer_negotiations` | no action |
 | `screening_calls` | `org_id` | `organizations` | cascade |
+| `screening_calls` | `panelist_id` | `panelists` | cascade |
 | `screening_calls` | `requested_by` | `users` | no action |
 | `screening_calls` | `requested_run_id` | `agent_runs` | no action |
 | `screening_calls` | `requisition_id` | `requisitions` | no action |
@@ -1565,7 +1572,7 @@ erDiagram
 | `panel_agent_settings` | — | 5 | — |
 | `panel_assessments` | — | 23 | (interview_id) |
 | `panelist_scorecard_links` | — | 8 | (interviewId+panelistId), (token_hash) |
-| `panelists` | — | 18 | — |
+| `panelists` | — | 23 | — |
 | `pay_convention_drafts` | — | 11 | — |
 | `pay_figures` | — | 22 | — |
 | `pay_zones` | — | 19 | (orgId+name) |
@@ -1585,7 +1592,7 @@ erDiagram
 | `round_substitutes` | — | 11 | — |
 | `salary_benchmarks` | Intelligence | 15 | — |
 | `scorecard_chases` | — | 7 | (interviewId+email) |
-| `screening_calls` | Screening & interviews | 36 | — |
+| `screening_calls` | Screening & interviews | 39 | — |
 | `screening_kits` | Screening & interviews | 11 | — |
 | `screening_prep_jobs` | Screening & interviews | 10 | (application_id) |
 | `screening_runs` | Screening & interviews | 23 | — |
