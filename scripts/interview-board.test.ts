@@ -123,21 +123,24 @@ describe("a candidate's interview row", () => {
     expect(interviewRow({ ...base, offered: [3] }).now.text).toBe(
       "The candidate is picking an L3 time",
     );
-    const booked = interviewRow({
-      ...base,
-      interviews: [
-        ...base.interviews.slice(0, 2),
-        {
-          level: 3,
-          status: "scheduled",
-          scheduledAt: at(10),
-          completedAt: null,
-          interviewer: "Saranya",
-        },
-      ],
-    });
-    expect(booked.steps.at(-1)!.text).toBe("L3 Soft Skills · booked 10:00 with Saranya");
+    const l3At = (scheduledAt: Date) =>
+      interviewRow({
+        ...base,
+        interviews: [
+          ...base.interviews.slice(0, 2),
+          { level: 3, status: "scheduled", scheduledAt, completedAt: null, interviewer: "Saranya" },
+        ],
+      });
+    const soon = new Date(Date.now() + 86_400_000);
+    const booked = l3At(soon);
+    expect(booked.steps.at(-1)!.text).toBe(
+      `L3 Soft Skills · booked ${base.when(soon)} with Saranya`,
+    );
     expect(booked.now.text).toBe("Waiting for the L3 interview");
+    // The time has passed and no scorecard came: say so.
+    const late = l3At(new Date(Date.now() - 86_400_000));
+    expect(late.now.text).toBe("Waiting for the L3 scorecard");
+    expect(late.steps.at(-1)!.sub).toBe("The time has passed and no scorecard is in yet.");
   });
 
   test("a round skipped for a later one reads 'not held'; a stopped candidate says so", () => {

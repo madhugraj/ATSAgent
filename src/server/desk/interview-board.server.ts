@@ -138,12 +138,19 @@ export function interviewRow(input: {
         : input.offered.includes(r.level)
           ? "times offered to the candidate"
           : "being arranged";
-      nowText = booked
-        ? `Waiting for the L${r.level} interview`
-        : input.offered.includes(r.level)
-          ? `The candidate is picking an L${r.level} time`
-          : `Interview coordinator is arranging L${r.level}`;
-      step = { state: "current", text: `${label} · ${where}` };
+      const past = booked && iv!.scheduledAt != null && iv!.scheduledAt.getTime() < Date.now();
+      nowText = past
+        ? `Waiting for the L${r.level} scorecard`
+        : booked
+          ? `Waiting for the L${r.level} interview`
+          : input.offered.includes(r.level)
+            ? `The candidate is picking an L${r.level} time`
+            : `Interview coordinator is arranging L${r.level}`;
+      step = {
+        state: "current",
+        text: `${label} · ${where}`,
+        ...(past ? { sub: "The time has passed and no scorecard is in yet." } : {}),
+      };
     } else {
       step = { state: stopped ? "stopped" : "todo", text: label };
     }
