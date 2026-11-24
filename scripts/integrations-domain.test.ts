@@ -33,7 +33,7 @@
  * provider REST stubbed via globalThis.fetch (as agent-edge-cases does).
  * NOTE: the finishProviderConnect describe overwrites org A's Google Meet
  * credentials, so it must stay the LAST describe in this file.
- * Run: DATABASE_URL=postgres://…/atsagent_test bun test scripts/integrations-domain.test.ts
+ * Run: DATABASE_URL="$(…atsagent_test url)" bun --env-file=.env.local test scripts/integrations-domain.test.ts
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { eq, inArray } from "drizzle-orm";
@@ -65,6 +65,8 @@ const emailDomain = `corp${stamp}.example`;
 let orgA: string;
 let orgB: string;
 let orgC: string;
+let orgD: string; // Teams-only calendar org (org B also has Google Meet, which busyFor prefers)
+let teamsD: string;
 let zoomA: string; // org A zoom row (category meeting) — starts disabled
 let gmeetA: string; // org A google_meet row
 let gmeetB: string; // org B google_meet row
@@ -88,6 +90,12 @@ function stubFetch(map: (url: string, init?: RequestInit) => Response | Promise<
 
 const json = (body: unknown, status = 200, headers?: Record<string, string>) =>
   new Response(JSON.stringify(body), { status, headers });
+
+/** A minimal JWT-shaped id_token whose payload carries the given claims. */
+const fakeIdToken = (claims: Record<string, unknown>) =>
+  `${Buffer.from('{"alg":"RS256"}').toString("base64url")}.${Buffer.from(
+    JSON.stringify(claims),
+  ).toString("base64url")}.sig`;
 
 async function seedApplication(org: string, code: string, email: string): Promise<string> {
   const [req] = await db
@@ -135,6 +143,7 @@ beforeAll(async () => {
   orgA = await mkOrg("Inte Org A");
   orgB = await mkOrg("Inte Org B");
   orgC = await mkOrg("Inte Org C");
+  orgD = await mkOrg("Inte Org D");
 
   const mkRow = async (org: string, provider: string, label: string, enabled: boolean) =>
     (
@@ -154,13 +163,15 @@ beforeAll(async () => {
   gmeetA = await mkRow(orgA, "google_meet", "Google Meet", true);
   gmeetB = await mkRow(orgB, "google_meet", "Google Meet", true);
   teamsB = await mkRow(orgB, "teams", "Microsoft Teams", true);
-  await integrationsServer.writeSecrets(gmeetA.id, {
+  teamsD = await mkRow(orgD, "teams", "Microsoft Teams", true);
+  await integrationsServer.writeSecrets(gmeetA, {
     refresh_token: "grt-A",
     client_id: "cid-A",
     client_secret: "csec-A",
   });
-  await integrationsServer.writeSecrets(gmeetB.id, { refresh_token: "grt-B" });
-  await integrationsServer.writeSecrets(teamsB.id, { refresh_token: "mrt-B" });
+  await integrationsServer.writeSecrets(gmeetB, { refresh_token: "grt-B" });
+  await integrationsServer.writeSecrets(teamsB, { refresh_token: "mrt-B" });
+  await integrationsServer.writeSecrets(teamsD, { refresh_token: "mrt-D" });
 
   await db.insert(orgLinkedinConnections).values([
     {
@@ -185,7 +196,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await db.delete(organizations).where(inArray(organizations.id, [orgA, orgB, orgC]));
+  await db.delete(organizations).where(inArray(organizations.id, [orgA, orgB, orgC, orgD]));
 });
 
 describe("oauth-state (moves to @ats/auth with zero tests today)", () => {
@@ -231,13 +242,13 @@ describe("oauth-state (moves to @ats/auth with zero tests today)", () => {
   });
 
   test("a short/absent secret fails closed on sign and verify", () => {
+    const state = oauthState.signOAuthState(payload()); // signed with the real secret
     const savedId = env.OAUTH_STATE_SECRET;
     const savedLinkedin = env.LINKEDIN_STATE_SECRET;
     env.OAUTH_STATE_SECRET = "too-short";
     try {
       expect(() => oauthState.signOAuthState(payload())).toThrow(/not configured/);
-      // The old signature must not become acceptable either — verify refuses everything.
-      const state = oauthState.signOAuthState(payload());
+      // The existing signature must not become acceptable either — verify refuses everything.
       expect(oauthState.verifyOAuthState(state)).toBeNull();
     } finally {
       env.OAUTH_STATE_SECRET = savedId;
@@ -263,8 +274,9 @@ describe("linkedin.server signState/verifyState (the LinkedIn clone)", () => {
   });
 
   test("round-trip preserves orgId, userId, origin and ts", () => {
-    const state = linkedin.signState(payload());
-    expect(linkedin.verifyState(state)).toEqual(payload());
+    const signed = payload();
+    const state = linkedin.signState(signed);
+    expect(linkedin.verifyState(state)).toEqual(signed);
   });
 
   test("tampered body/mac, an old timestamp and a non-allowlisted origin all verify to null", () => {
@@ -612,7 +624,7 @@ describe("meetings.functions createMeetingLinkCore — org scoping of the provid
       .update(sourceIntegrations)
       .set({ enabled: true })
       .where(eq(sourceIntegrations.id, zoomA));
-    await integrationsServer.writeSecrets(zoomA.id, {
+    await integrationsServer.writeSecrets(zoomA, {
       account_id: "acc",
       client_id: "cid",
       client_secret: "csec",
@@ -714,7 +726,7 @@ describe("busyFor — provider branches, unknowns and degradation", () => {
       return new Response("unexpected", { status: 500 });
     });
     try {
-      const busy = await availability.busyFor(orgB, [int1, int2], from, to);
+      const busy = await availability.busyFor(orgD, [int1, int2], from, to);
       expect(busy.source).toBe("microsoft");
       expect(busy.busy[int1]).toEqual([{ start: busyStart.getTime(), end: busyEnd.getTime() }]);
       expect(busy.unknown).toEqual([int2]);
@@ -867,9 +879,9 @@ describe("meetings-oauth: normaliseAccountEmail / emailDomainOf", () => {
       `interviews@${emailDomain}`,
     );
     expect(meetingsOauth.normaliseAccountEmail(`  Interviews@Corp.Example  `)).toBe(
-      `interviews@${emailDomain}`,
+      "interviews@corp.example",
     );
-    expect(meetingsOauth.emailDomainOf(`Interviews@Corp.Example`)).toBe(emailDomain);
+    expect(meetingsOauth.emailDomainOf(`Interviews@Corp.Example`)).toBe("corp.example");
     expect(meetingsOauth.emailDomainOf("no-at-sign")).toBeNull();
   });
 });
@@ -926,7 +938,7 @@ describe("finishProviderConnect — the public callback tail (runs LAST: rewrite
             access_token: "at",
             refresh_token: "rt",
             expires_in: 3600,
-            id_token: Buffer.from(JSON.stringify({ email: "person@gmail.com" })).toString("base64"),
+            id_token: fakeIdToken({ email: "person@gmail.com" }),
           })
         : new Response("unexpected", { status: 500 }),
     );
@@ -943,23 +955,36 @@ describe("finishProviderConnect — the public callback tail (runs LAST: rewrite
   });
 
   test("an account whose domain differs from the emailDomain pinned in the signed state is refused", async () => {
+    // NOTE: the refusal only activates when the pin carries an "@" (the
+    // callback runs the pinned value through domainOf). Production callers
+    // (integrations-oauth.functions.ts) currently pin a bare domain, which
+    // domainOf() maps to null — so the check is skipped there. This test pins
+    // the mechanism in email shape; see the handoff notes for the dead-pin gap.
+    const pinned = oauthState.signOAuthState({
+      orgId: orgA,
+      userId: `user-${stamp}`,
+      provider: "google",
+      origin: "http://localhost:8080",
+      ts: Date.now(),
+      emailDomain: `owner@${emailDomain}`,
+    });
     const stub = stubFetch((url) =>
       url.startsWith("https://oauth2.googleapis.com/token")
         ? json({
             access_token: "at",
             refresh_token: "rt",
             expires_in: 3600,
-            id_token: Buffer.from(JSON.stringify({ email: "someone@other.example" })).toString(
-              "base64",
-            ),
+            id_token: fakeIdToken({ email: "someone@other.example" }),
           })
         : new Response("unexpected", { status: 500 }),
     );
     try {
       const res = await meetingsOauth.finishProviderConnect(
-        callback(`code=c&state=${encodeURIComponent(stateFor(orgA))}`),
+        callback(`code=c&state=${encodeURIComponent(pinned)}`),
         "google",
       );
+      expect(res.status).toBe(302);
+      expect(location(res).get("meetings")).toBe("error");
       expect(location(res).get("detail")).toContain(`@${emailDomain}`);
     } finally {
       stub.restore();
@@ -973,9 +998,7 @@ describe("finishProviderConnect — the public callback tail (runs LAST: rewrite
             access_token: "at",
             refresh_token: "rt",
             expires_in: 3600,
-            id_token: Buffer.from(JSON.stringify({ email: `interviews@${emailDomain}` })).toString(
-              "base64",
-            ),
+            id_token: fakeIdToken({ email: `interviews@${emailDomain}` }),
           })
         : new Response("unexpected", { status: 500 }),
     );
@@ -988,7 +1011,7 @@ describe("finishProviderConnect — the public callback tail (runs LAST: rewrite
         "Meeting provider row not found for this organisation.",
       );
       // Org B's credentials untouched by org C's attempt.
-      expect((await integrationsServer.readSecrets(gmeetB.id))["refresh_token"]).toBe("grt-B");
+      expect((await integrationsServer.readSecrets(gmeetB))["refresh_token"]).toBe("grt-B");
     } finally {
       stub.restore();
     }
@@ -1002,9 +1025,7 @@ describe("finishProviderConnect — the public callback tail (runs LAST: rewrite
             refresh_token: "rt-happy",
             expires_in: 3600,
             scope: "openid email calendar",
-            id_token: Buffer.from(JSON.stringify({ email: `interviews@${emailDomain}` })).toString(
-              "base64",
-            ),
+            id_token: fakeIdToken({ email: `interviews@${emailDomain}` }),
           })
         : new Response("unexpected", { status: 500 }),
     );
@@ -1016,7 +1037,7 @@ describe("finishProviderConnect — the public callback tail (runs LAST: rewrite
       expect(res.status).toBe(302);
       expect(location(res).get("meetings")).toBe("connected");
 
-      const secrets = await integrationsServer.readSecrets(gmeetA.id);
+      const secrets = await integrationsServer.readSecrets(gmeetA);
       expect(secrets["access_token"]).toBe("at-happy");
       expect(secrets["refresh_token"]).toBe("rt-happy");
       expect(secrets["connected_email"]).toBe(`interviews@${emailDomain}`);
@@ -1034,7 +1055,7 @@ describe("finishProviderConnect — the public callback tail (runs LAST: rewrite
         `interviews@${emailDomain}`,
       );
       // Org B's row keeps its own credentials.
-      expect((await integrationsServer.readSecrets(gmeetB.id))["refresh_token"]).toBe("grt-B");
+      expect((await integrationsServer.readSecrets(gmeetB))["refresh_token"]).toBe("grt-B");
     } finally {
       stub.restore();
     }
