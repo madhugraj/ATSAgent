@@ -48,6 +48,10 @@ We credit reporters in release notes on request.
   set a panellist's mobile, the browser sees its last four digits only, each change is audited
   `panelist.phone_set` (last four digits), the number is never given to the model, and a
   panellist's "don't call me" is recorded (`panelist.ai_call_opt_out`) and honoured by the dispatcher.
+  Panellists can add their own mobile through a private `/panel-mobile/<token>` link (0093): the
+  token is an HMAC of the server secret and the panellist, only its SHA-256 is stored, the public
+  server functions are rate-limited with every RPC, return only the first name, organisation and
+  last four digits, and a save is audited `panelist.phone_set` as the panellist.
   On a call the assistant says it is an AI; nothing is recorded before the candidate consents, the
   transcript is kept only after consent (no audio is stored), answers are accepted only for the kit's
   questions, and what it may write about the candidate is notice period and availability — the

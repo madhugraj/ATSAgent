@@ -973,6 +973,9 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
     const { remindUnansweredOffers } = await import("../voice/scheduling-request.server");
     await remindUnansweredOffers(opts.orgId);
     await requestPanelCheckCalls(opts.orgId);
+    // Panel members with no mobile are asked to add one (twice at most).
+    const { sweepMobileAsks } = await import("@/lib/panelist-mobile.server");
+    await sweepMobileAsks(opts.orgId);
   } catch (err) {
     log.warn("interview.answer_call_request_failed", { error: err as Error });
   }

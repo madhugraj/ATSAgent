@@ -34,6 +34,8 @@ interface Props {
   competencies?: string;
   candidateUrl?: string;
   scorecardUrl?: string;
+  /** Add-your-mobile link, while none is on file (0093). */
+  mobileUrl?: string;
   /** Accept the time or say it does not work (absent once accepted). */
   confirmUrl?: string;
   /** The latest the round can move to under the hiring SLA. */
@@ -109,6 +111,7 @@ const Email = ({
   competencies,
   candidateUrl,
   scorecardUrl,
+  mobileUrl,
   confirmUrl,
   latestText,
   confirmed,
@@ -203,6 +206,11 @@ const Email = ({
         {scorecardUrl ? (
           <a href={scorecardUrl} style={quiet}>
             Scorecard
+          </a>
+        ) : null}
+        {mobileUrl ? (
+          <a href={mobileUrl} style={quiet}>
+            Add your mobile
           </a>
         ) : null}
       </p>
