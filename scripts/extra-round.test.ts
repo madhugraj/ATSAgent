@@ -13,6 +13,8 @@ import { and, eq } from "drizzle-orm";
 const { db } = await import("../src/server/db");
 const {
   agentEvents,
+  agentRuns,
+  agentTasks,
   applications,
   auditLog,
   candidates,
@@ -232,6 +234,27 @@ describe("another interview round", () => {
     });
     if ("error" in info) throw new Error(info.error);
     expect(info.detail).toContain("Add L2 · Practical Python to");
+  });
+
+  test("approving the card while it is the open request is not refused as a duplicate", async () => {
+    const x = await scoredCandidate(1);
+    const info = await gate.roundGateFor(orgId, subjectFor(x));
+    if ("error" in info) throw new Error(info.error);
+    const [run] = await db
+      .insert(agentRuns)
+      .values({ orgId, agentType: "evaluation", principalUserId: hmId, goal: "t" } as never)
+      .returning({ id: agentRuns.id });
+    await db.insert(agentTasks).values({
+      orgId,
+      runId: run!.id,
+      kind: "gate",
+      status: "open",
+      title: "One more round",
+      proposedAction: { name: "propose_extra_round", args: { subject: info.subject } },
+    } as never);
+    expect(await gate.extraRoundBlocked(orgId, x.applicationId)).toContain("already waiting");
+    await gate.performRoundGate(orgId, actor(), info.subject, { status: "approved" });
+    expect(await stageOf(x.applicationId)).toBe("l2");
   });
 
   test("declined: nothing changes", async () => {
