@@ -1772,9 +1772,19 @@ export async function taskDeciders(
 export async function taskStatuses(orgId: string, ids: string[]): Promise<Record<string, string>> {
   if (!ids.length) return {};
   const rows = await db
-    .select({ id: agentTasks.id, status: agentTasks.status, response: agentTasks.response })
+    .select({
+      id: agentTasks.id,
+      runId: agentTasks.runId,
+      status: agentTasks.status,
+      response: agentTasks.response,
+      action: agentTasks.proposedAction,
+    })
     .from(agentTasks)
     .where(and(eq(agentTasks.orgId, orgId), inArray(agentTasks.id, ids)));
+  const failed = await failedApprovedCalls(
+    orgId,
+    rows.filter((r) => r.status === "approved"),
+  );
   return Object.fromEntries(
     rows.map((r) => [
       r.id,
@@ -1783,9 +1793,42 @@ export async function taskStatuses(orgId: string, ids: string[]): Promise<Record
         : r.status === "cancelled" &&
             /moved from/.test(String((r.response as { reason?: string } | null)?.reason ?? ""))
           ? "stale"
-          : r.status,
+          : failed.has(r.id)
+            ? "approved_failed"
+            : r.status,
     ]),
   );
+}
+
+/**
+ * Approved tasks whose action then errored when the agent ran it: the run's
+ * transcript holds the tool result for the task's call id, marked isError.
+ */
+async function failedApprovedCalls(
+  orgId: string,
+  tasks: { id: string; runId: string | null; action: unknown }[],
+): Promise<Set<string>> {
+  const byCall = new Map<string, string>();
+  for (const t of tasks) {
+    const callId = (t.action as { toolCallId?: string } | null)?.toolCallId;
+    if (t.runId && callId) byCall.set(callId, t.id);
+  }
+  const runIds = [...new Set(tasks.map((t) => t.runId).filter((x): x is string => !!x))];
+  if (!byCall.size || !runIds.length) return new Set();
+  const runs = await db
+    .select({ transcript: agentRuns.transcript })
+    .from(agentRuns)
+    .where(and(eq(agentRuns.orgId, orgId), inArray(agentRuns.id, runIds)));
+  const out = new Set<string>();
+  for (const run of runs)
+    for (const m of (run.transcript ?? []) as {
+      role?: string;
+      toolCallId?: string;
+      isError?: boolean;
+    }[])
+      if (m.role === "tool" && m.isError && m.toolCallId && byCall.has(m.toolCallId))
+        out.add(byCall.get(m.toolCallId)!);
+  return out;
 }
 
 /* ------------------------------------------------------------- progress */

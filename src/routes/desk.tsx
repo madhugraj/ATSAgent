@@ -2308,6 +2308,7 @@ function RankedCard({
 const TASK_STATUS: Record<string, string> = {
   open: "Waiting for you",
   approved: "Approved",
+  approved_failed: "Approved — failed",
   rejected: "Declined",
   changes_requested: "Changes requested",
   stale: "No longer applies — the candidate moved on",
@@ -2399,7 +2400,12 @@ function TaskCard({
       ) : null}
       <div className="flex flex-wrap items-center gap-2">
         <p className="font-medium">{String(card["title"])}</p>
-        <Badge variant={status === "open" ? "default" : "outline"} className="ml-auto">
+        <Badge
+          variant={
+            status === "open" ? "default" : status === "approved_failed" ? "destructive" : "outline"
+          }
+          className="ml-auto"
+        >
           {TASK_STATUS[status] ?? status}
         </Badge>
       </div>
