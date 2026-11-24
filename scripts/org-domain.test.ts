@@ -296,12 +296,12 @@ describe("importFromProvider / testProvider refusals", () => {
         secrets: { api_key: "t" },
         config: { base_url: "https://api.naukri.com" },
       });
-      // id → candidate_id → a fresh random UUID (a bare `uuid` field is ignored).
+      // id → candidate_id → uuid → a fresh random UUID only as the last resort
+      // (issue #93: a bare `uuid` field must not fall through to a random id,
+      // or dedupe against later imports from the same provider breaks).
       expect(out[0]!.external_id).toBe("p1");
       expect(out[1]!.external_id).toBe("p2");
-      expect(out[2]!.external_id).toMatch(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
-      );
+      expect(out[2]!.external_id).toBe("p3");
       expect(out[0]).toMatchObject({
         full_name: "Asha Rao",
         experience_years: 7,

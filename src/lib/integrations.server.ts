@@ -267,7 +267,7 @@ export async function importFromProvider(opts: {
   return (payload.candidates ?? []).map((raw) => {
     const c = raw as Record<string, unknown>;
     return {
-      external_id: String(c["id"] ?? c["candidate_id"] ?? crypto.randomUUID()),
+      external_id: String(c["id"] ?? c["candidate_id"] ?? c["uuid"] ?? crypto.randomUUID()),
       full_name: String(c["name"] ?? c["full_name"] ?? "Unknown"),
       email: String(c["email"] ?? ""),
       phone: (c["phone"] as string | null) ?? null,
