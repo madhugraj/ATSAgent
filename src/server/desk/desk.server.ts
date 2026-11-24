@@ -439,7 +439,7 @@ const SYSTEM = [
   "You are the hiring desk of an applicant tracking system. A recruiter describes a hiring need in a chat.",
   "Each turn, return JSON with:",
   '- "slots": only the hiring details the LATEST message states or changes (omit the rest). Fields: roleTitle, location, workMode (onsite|hybrid|remote — "office"/"WFO" means onsite, "WFH"/"work from home" means remote; a message that says "hybrid" sets hybrid even next to a city), experienceMin, experienceMax (years), openings, mustHaveSkills, goodToHaveSkills (short skill names), budgetLpaMax (lakhs per annum — the budget; when a band is given as well, the budget is the figure called budget, not the top of the band), bandLpaMin and bandLpaMax (a pay band the person gives, lakhs per annum; only when stated), maxNoticeDays, employmentType (full_time|contract|internship), urgency (immediate|within_a_month|flexible), hiringManager (the person who manages this hire, exactly as named — a name or an e-mail; never guess one, and never set hiringManagerMemberId). "a candidate" means openings 1. Expand obvious role shorthands (e.g. "Full stack" → "Full Stack Developer"). Never invent values that were not said.',
-  "- When the recruiter says they already have a job description, ask them to attach it with the paperclip in the message box (PDF, Word or text) — never ask them to paste it, and never offer to write one.",
+  '- When the recruiter says they already have a job description and FACTS show the role has none yet, ask them to attach it with the paperclip in the message box (PDF, Word or text) — never ask them to paste it, and never offer to write one. When FACTS show the role already has a job description, say which version and status it has and that typing "show the JD" displays it — do not ask for another.',
   "- When the latest message is the recruiter's own job description, take every hiring detail it states (role, location, work mode, experience, openings, must-have and good-to-have skills, employment type, responsibilities, reporting line, education) and never ask for something it already states; that JD is filed as written once the role is approved, so do not offer to draft one.",
   '- JD details (only when the person gives them): responsibilities (their key responsibilities, as text), reportingTo, successMeasures (what success looks like), education. If they ask you to fill these from the market / research / "you decide", set researchRole true.',
   '- "command": {"type":"none"} unless the person asks to act: "talk to / screen / call the first 5" → {"type":"screen","top":5}; "screen 1, 3 and 4" → {"type":"screen","ranks":[1,3,4]}; "create a new role" → {"type":"new_role"}; "use REQ-2026-014" → {"type":"use_existing","code":"REQ-2026-014"}.',
@@ -3027,6 +3027,57 @@ export async function publishRole(conv: Conversation, userId: string): Promise<s
     `Requisition ${req.code} "${req.title}" needs candidates. Publish it internally and prepare the external posts (LinkedIn and job boards) for review.`,
     conv.requisitionId,
     "I've asked the Publishing agent to post the role internally and prepare the LinkedIn and job-board posts. Each job-board post goes to the HR head for approval and is published as them — unless your organisation pre-approved that board for an Autonomous agent.",
+  );
+}
+
+/**
+ * After the JD agent files a version: put the JD itself in the run's thread,
+ * right above its approval request, so the approver reads what they approve.
+ */
+export async function postFiledJd(
+  orgId: string,
+  runId: string,
+  jdId: string,
+  own: boolean,
+): Promise<void> {
+  const [run] = await db
+    .select({ conversationId: agentRuns.conversationId })
+    .from(agentRuns)
+    .where(and(eq(agentRuns.id, runId), eq(agentRuns.orgId, orgId)))
+    .limit(1);
+  if (!run?.conversationId) return;
+  const [jd] = await db
+    .select({
+      version: jobDescriptions.version,
+      status: jobDescriptions.status,
+      fullText: jobDescriptions.fullText,
+      templateName: jobDescriptions.templateName,
+      requisitionId: jobDescriptions.requisitionId,
+      code: requisitions.code,
+    })
+    .from(jobDescriptions)
+    .innerJoin(requisitions, eq(requisitions.id, jobDescriptions.requisitionId))
+    .where(and(eq(jobDescriptions.id, jdId), eq(jobDescriptions.orgId, orgId)))
+    .limit(1);
+  if (!jd?.fullText?.trim()) return;
+  await postMessage(
+    { id: run.conversationId, orgId },
+    {
+      role: "agent",
+      agentType: "jd",
+      body: own
+        ? `Your job description, filed word for word as version ${jd.version}:`
+        : `Job description drafted as version ${jd.version}:`,
+      card: {
+        type: "jd",
+        requisitionId: jd.requisitionId,
+        code: jd.code,
+        version: jd.version,
+        status: jd.status.replace("_", " "),
+        templateName: own ? null : jd.templateName,
+        text: jd.fullText.slice(0, 20_000),
+      },
+    },
   );
 }
 
