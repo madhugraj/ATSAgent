@@ -23,6 +23,12 @@ export const ExtraRound = z.object({
 });
 export type ExtraRoundT = z.infer<typeof ExtraRound>;
 
+/** The plan numbers rounds itself: "L3 - Hands-on" is stored as "Hands-on". */
+export function cleanRound(r: ExtraRoundT): ExtraRoundT {
+  const name = r.name.replace(/^L\s?\d\s*[-–—·:.]?\s*/i, "").trim();
+  return { ...r, name: name.length >= 2 ? name : r.name };
+}
+
 export type RoundAdditionSubject = {
   type: "round_addition";
   applicationId: string;
@@ -113,6 +119,7 @@ export async function roundGateFor(
   const { plan } = await planFor(orgId, f.requisitionId);
   const level = plan.rounds.length + 1;
   const { assigneeUserId, decider } = await deciderOf(orgId, f.hmMemberId);
+  subject = { ...subject, round: cleanRound(subject.round) };
   const detail = [
     `Add L${level} · ${subject.round.name} to ${f.code} ${f.title}, and move ${f.candidate} into it.`,
     subject.round.focus ? `Focus: ${subject.round.focus}` : "",
@@ -154,7 +161,7 @@ export async function performRoundGate(
       "This role's interview plan changed since this was proposed; refresh to see it.",
     );
   const edited = (decision.args as { round?: unknown } | undefined)?.round;
-  const round = edited === undefined ? subject.round : ExtraRound.parse(edited);
+  const round = cleanRound(edited === undefined ? subject.round : ExtraRound.parse(edited));
   const level = plan.rounds.length + 1;
   await savePlan(orgId, f.requisitionId, {
     ...plan,
@@ -234,7 +241,7 @@ export function registerRoundTools(): void {
           type: "round_addition",
           applicationId: i.applicationId,
           requisitionId: f.requisitionId,
-          round: i.round,
+          round: cleanRound(i.round),
           reason: i.reason,
         },
       };

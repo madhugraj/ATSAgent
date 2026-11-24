@@ -219,6 +219,21 @@ describe("another interview round", () => {
     expect(await gate.roundAddedWords(orgId, info.subject)).toContain("L3 Hands-on build");
   });
 
+  test("a level in the drafted name is dropped — the plan numbers its rounds", async () => {
+    expect(gate.cleanRound({ ...ROUND, name: "L3 - Hands-on Project Depth" }).name).toBe(
+      "Hands-on Project Depth",
+    );
+    expect(gate.cleanRound({ ...ROUND, name: "L3: Culture" }).name).toBe("Culture");
+    expect(gate.cleanRound({ ...ROUND, name: "Leadership" }).name).toBe("Leadership");
+    const x = await scoredCandidate(1);
+    const info = await gate.roundGateFor(orgId, {
+      ...subjectFor(x),
+      round: { ...ROUND, name: "L2 - Practical Python" },
+    });
+    if ("error" in info) throw new Error(info.error);
+    expect(info.detail).toContain("Add L2 · Practical Python to");
+  });
+
   test("declined: nothing changes", async () => {
     const x = await scoredCandidate(1);
     const info = await gate.roundGateFor(orgId, subjectFor(x));
