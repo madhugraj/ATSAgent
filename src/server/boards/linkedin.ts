@@ -9,7 +9,12 @@
  */
 import { safeFetch } from "../safe-fetch";
 import type { LinkedinCapability } from "../../lib/linkedin.server";
-import { LinkedinAuthError, probeCapabilities, REST_VERSION } from "../../lib/linkedin.server";
+import {
+  LinkedinAuthError,
+  postAsMember,
+  probeCapabilities,
+  REST_VERSION,
+} from "../../lib/linkedin.server";
 import {
   integrationConfig,
   type BoardAdapter,
@@ -78,6 +83,19 @@ async function capabilitiesImpl(conn: BoardConnection): Promise<BoardCapabilitie
   }
   const posting = probes.find((p) => p.id === "job_postings");
   const applications = probes.find((p) => p.id === "applications");
+  // Without the Job Posting product the role still goes out as a post on the
+  // connected member's feed with the apply link (the same as the page's
+  // "Publish to LinkedIn"); applicants come back through that link.
+  const feed =
+    !posting?.ready && Boolean(conn.memberSub) && !integrationConfig(conn, "organization_urn");
+  if (feed)
+    return {
+      posting: true,
+      applications: null,
+      applicationsMode: "none",
+      detail:
+        "Posts on the connected member's LinkedIn feed with your apply link; applicants come back through that link. Jobs-board listings need LinkedIn's Job Posting product.",
+    };
   return {
     posting: posting?.ready ?? null,
     applications: applications?.ready ?? null,
@@ -93,9 +111,17 @@ async function publishPostingImpl(
   if (!conn.accessToken) throw new Error("Connect the organisation's LinkedIn account first.");
   const organizationUrn = integrationConfig(conn, "organization_urn");
   if (!organizationUrn) {
-    throw new Error(
-      "Structured LinkedIn listings need your LinkedIn Job Posting contract and the company page URN from its onboarding pack — add it on the Integrations page. Until then use the feed-post designer above.",
-    );
+    // No Job Posting contract: a feed post as the connected member, with the apply link.
+    if (!conn.memberSub) throw new Error("Reconnect LinkedIn on the Integrations page first.");
+    const base = listingDescription(input.requisition, input.postText);
+    const text = (
+      base.includes(input.applyUrl) ? base : `${base}\n\nApply: ${input.applyUrl}`
+    ).slice(0, 3000);
+    const urn = await postAsMember(conn.accessToken, conn.memberSub, text);
+    return {
+      externalId: urn,
+      externalUrl: urn ? `https://www.linkedin.com/feed/update/${encodeURIComponent(urn)}` : null,
+    };
   }
 
   const body = {
@@ -132,6 +158,8 @@ async function closePostingImpl(
   reason: "filled" | "closed" | "withdrawn",
 ): Promise<void> {
   if (!conn.accessToken) throw new Error("Connect the organisation's LinkedIn account first.");
+  // A feed post is not a listing: it stays on the member's feed (the apply link closes with the role).
+  if (/^urn:li:(share|ugcPost):/.test(externalId)) return;
   const res = await safeFetch(`${API_URL}/rest/jobPostings/${encodeURIComponent(externalId)}`, {
     method: "PATCH",
     headers: { ...restHeaders(conn.accessToken), "Content-Type": "application/json" },
