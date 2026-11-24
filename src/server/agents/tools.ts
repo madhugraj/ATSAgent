@@ -551,7 +551,7 @@ export function registerPhase1Tools(): void {
   registerTool({
     name: "import_jd_version",
     description:
-      "File the person's OWN job description for the requisition, word for word, as the next version for Department Head review — use this instead of submit_jd_version whenever they gave you a JD. Leave jdText out to take the JD they pasted into this hiring thread (their latest long message); pass jdText only when the run has no thread. Blank must-have / good-to-have skills and experience on the requisition are filled from it; nothing already set is overwritten.",
+      "File the person's OWN job description for the requisition, word for word, as the next version for Department Head review — use this instead of submit_jd_version whenever they gave you a JD. Leave jdText out to take the JD they attached or pasted into this hiring thread; pass jdText only when the run has no thread. Blank must-have / good-to-have skills and experience on the requisition are filled from it; nothing already set is overwritten.",
     input: RequisitionId.extend({
       jdText: z.string().min(200).max(30000).optional(),
     }),
@@ -575,7 +575,7 @@ export function registerPhase1Tools(): void {
           .limit(1);
         if (run?.conversationId) {
           const recent = await db
-            .select({ body: hiringMessages.body })
+            .select({ body: hiringMessages.body, card: hiringMessages.card })
             .from(hiringMessages)
             .where(
               and(
@@ -585,8 +585,13 @@ export function registerPhase1Tools(): void {
               ),
             )
             .orderBy(desc(hiringMessages.createdAt))
-            .limit(20);
-          jdText = recent.find((m) => m.body.trim().length >= 200)?.body.trim() ?? "";
+            .limit(50);
+          // An attached JD (file or long paste) wins; else their latest long message.
+          const attached = recent.find(
+            (m) => (m.card as { type?: string } | null)?.type === "own_jd",
+          );
+          jdText =
+            (attached ?? recent.find((m) => m.body.trim().length >= 200))?.body.trim() ?? "";
         }
       }
       if (!jdText) {
