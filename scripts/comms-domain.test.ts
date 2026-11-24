@@ -892,3 +892,122 @@ describe("ics: buildIcs", () => {
     expect(ics).toContain("\r\n");
   });
 });
+
+describe("reminder kinds after #87/#90: interview_reminder, interviewer_reminder, panel_mobile_ask", () => {
+  test("interview_reminder is candidate mail: gated by the org's interview toggle", async () => {
+    await db
+      .update(emailSettings)
+      .set({ enabled: true, interviewEnabled: false })
+      .where(eq(emailSettings.orgId, orgB));
+    await outbox.enqueueEmail({
+      orgId: orgB,
+      kind: "interview_reminder",
+      templateName: "interview_reminder",
+      toEmail: `cand-${stamp}@example.com`,
+      applicationId: appA,
+      idempotencyKey: `comm${stamp}-ir-off`,
+    });
+    expect(await outboxCount(orgB, undefined, "interview_reminder")).toBe(0);
+
+    await db
+      .update(emailSettings)
+      .set({ interviewEnabled: true })
+      .where(eq(emailSettings.orgId, orgB));
+    await outbox.enqueueEmail({
+      orgId: orgB,
+      kind: "interview_reminder",
+      templateName: "interview_reminder",
+      toEmail: `cand-${stamp}@example.com`,
+      applicationId: appA,
+      idempotencyKey: `comm${stamp}-ir-on`,
+    });
+    const row = await outboxRow(orgB, `comm${stamp}-ir-on`);
+    expect(row).not.toBeNull();
+    expect(row!.status).toBe("queued");
+  });
+
+  test("interviewer_reminder and panel_mobile_ask are internal: no kind toggle gates them", async () => {
+    await db
+      .update(emailSettings)
+      .set({
+        enabled: true,
+        ackEnabled: false,
+        stageEnabled: false,
+        interviewEnabled: false,
+        offerEnabled: false,
+      })
+      .where(eq(emailSettings.orgId, orgB));
+    await outbox.enqueueEmail({
+      orgId: orgB,
+      kind: "interviewer_reminder",
+      templateName: "interviewer_reminder",
+      toEmail: `panel-${stamp}@example.com`,
+      idempotencyKey: `comm${stamp}-ivr`,
+    });
+    await outbox.enqueueEmail({
+      orgId: orgB,
+      kind: "panel_mobile_ask",
+      templateName: "panel_mobile_ask",
+      toEmail: `panel-${stamp}@example.com`,
+      idempotencyKey: `comm${stamp}-pma`,
+    });
+    expect(await outboxCount(orgB, undefined, "interviewer_reminder")).toBe(1);
+    expect(await outboxCount(orgB, undefined, "panel_mobile_ask")).toBe(1);
+
+    // …but the master switch still silences internal mail.
+    await db.update(emailSettings).set({ enabled: false }).where(eq(emailSettings.orgId, orgB));
+    await outbox.enqueueEmail({
+      orgId: orgB,
+      kind: "panel_mobile_ask",
+      templateName: "panel_mobile_ask",
+      toEmail: `panel-${stamp}@example.com`,
+      idempotencyKey: `comm${stamp}-pma-off`,
+    });
+    expect(await outboxCount(orgB, `comm${stamp}-pma-off`)).toBe(0);
+    await db.update(emailSettings).set({ enabled: true }).where(eq(emailSettings.orgId, orgB));
+  });
+
+  test("the registry registers both new templates and renders them with real subjects", async () => {
+    const { TEMPLATES } = await import("../src/lib/email-templates/registry");
+    expect(Object.keys(TEMPLATES)).toContain("interview_reminder");
+    expect(Object.keys(TEMPLATES)).toContain("panel_mobile_ask");
+
+    const brandObj = { orgName: "Comms Org", color: "#112233", logo: null };
+    const reminder = await send.renderTemplateEmail(
+      "interview_reminder",
+      {
+        audience: "candidate",
+        step: "day",
+        recipientName: "Asha",
+        candidateName: "Asha",
+        orgName: "Comms Org",
+        jobTitle: "Senior Backend Engineer",
+        roundLabel: "L2 interview",
+        scheduledAtText: "tomorrow at 10:00",
+        durationMins: "60",
+        modeLabel: "Online",
+        withText: "the hiring team",
+      },
+      brandObj,
+    );
+    expect(reminder.subject).toBe(
+      "Reminder: your L2 interview is tomorrow — Senior Backend Engineer",
+    );
+    expect(reminder.html).toContain("Asha");
+    expect(reminder.html).toContain("tomorrow at 10:00");
+
+    const panel = await send.renderTemplateEmail(
+      "panel_mobile_ask",
+      { firstName: "Sivakami", orgName: "Comms Org", actionUrl: "https://example.com/pm" },
+      brandObj,
+    );
+    expect(panel.subject).toBe("Add your mobile for interview time checks");
+    expect(panel.html).toContain("Add my mobile");
+    const again = await send.renderTemplateEmail("panel_mobile_ask", { again: "yes" }, brandObj);
+    expect(again.subject).toBe("Reminder: add your mobile for interview time checks");
+
+    // interviewer_reminder has no template on purpose: it is raw member mail
+    // enqueued by interview-reminders.server, so the registry must NOT know it.
+    expect(Object.keys(TEMPLATES)).not.toContain("interviewer_reminder");
+  });
+});
