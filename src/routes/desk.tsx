@@ -2795,6 +2795,81 @@ const BOARD_TONE: Record<BoardRow["tone"], string> = {
   stopped: "text-muted-foreground",
 };
 
+type InterviewRow = NonNullable<DeskConversationView["progress"]["interviews"]>[number];
+
+/** Each candidate's rounds in order, the hand-overs between them, and who has them now. */
+function InterviewBoard({ rows }: { rows: InterviewRow[] }) {
+  const waiting = rows.filter((r) => r.now.tone === "decide").length;
+  return (
+    <div
+      className="mt-1.5 rounded-md border border-border p-2 text-xs"
+      aria-label="Interview board"
+    >
+      <p className="mb-1 flex items-center justify-between font-medium">
+        <span>
+          {rows.length} {rows.length === 1 ? "candidate" : "candidates"} in interviews
+        </span>
+        {waiting ? <span className="text-primary">{waiting} waiting for you</span> : null}
+      </p>
+      <ul className="divide-y divide-border">
+        {rows.map((r) => (
+          <li key={r.applicationId} className="py-1.5">
+            <p className="truncate font-medium">{r.name}</p>
+            {r.now.taskId ? (
+              <button
+                type="button"
+                className={`text-left underline ${BOARD_TONE[r.now.tone]}`}
+                onClick={() =>
+                  document
+                    .querySelector(`[data-open-task="${r.now.taskId}"]`)
+                    ?.scrollIntoView({ block: "center", behavior: "smooth" })
+                }
+              >
+                Now: {r.now.text}
+              </button>
+            ) : (
+              <p className={BOARD_TONE[r.now.tone]}>Now: {r.now.text}</p>
+            )}
+            <ol className="mt-1 space-y-0.5">
+              {r.steps.map((st, i) => (
+                <li key={i} className="flex gap-1.5">
+                  {st.state === "done" ? (
+                    <CheckCircle2
+                      className="mt-0.5 size-3 shrink-0 text-primary"
+                      aria-label="done"
+                    />
+                  ) : st.state === "current" ? (
+                    <CircleDot className="mt-0.5 size-3 shrink-0 text-primary" aria-label="now" />
+                  ) : (
+                    <Circle
+                      className="mt-0.5 size-3 shrink-0 text-muted-foreground/40"
+                      aria-label={st.state === "stopped" ? "stopped" : "to come"}
+                    />
+                  )}
+                  <span className="min-w-0">
+                    <span
+                      className={
+                        st.state === "current"
+                          ? "font-medium"
+                          : st.state === "done"
+                            ? ""
+                            : "text-muted-foreground"
+                      }
+                    >
+                      {st.text}
+                    </span>
+                    {st.sub ? <span className="block text-muted-foreground">{st.sub}</span> : null}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /** Everyone in screening for this role at a glance: where they are, the score, what waits. */
 function ScreeningBoard({ rows }: { rows: BoardRow[] }) {
   const waiting = rows.filter((r) => r.tone === "decide").length;
@@ -3001,6 +3076,9 @@ function JourneyPanel({ conv, onChanged }: { conv: DeskConversationView; onChang
                 ) : null}
                 {s.key === "screening" && p.screening?.length ? (
                   <ScreeningBoard rows={p.screening} />
+                ) : null}
+                {s.key === "interviews" && p.interviews?.length ? (
+                  <InterviewBoard rows={p.interviews} />
                 ) : null}
               </div>
             </li>

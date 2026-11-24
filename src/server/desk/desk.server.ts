@@ -1743,6 +1743,8 @@ export type ScreeningBoardRow = {
 export type DeskProgress = {
   /** Each screened (or shortlisted) candidate's screening, live. */
   screening?: ScreeningBoardRow[];
+  /** Each candidate who reached an interview: their rounds, hand-overs and who has them now. */
+  interviews?: import("./interview-board.server").InterviewBoardRow[];
   /** The requisition was closed, rejected or deleted — the journey has ended. */
   ended?: { status: "closed" | "rejected" | "deleted"; reason: string | null; by: string | null };
   stages: { key: StageKey; label: string; state: "done" | "current" | "todo" }[];
@@ -1840,6 +1842,7 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
         count(*) filter (where m.id is not null)::int scored,
         count(*) filter (where a.stage in ('l1','l2','l3','offer','offer_pending','offer_released','offer_accepted','hired','joined','joining_deferred'))::int interviewing,
         count(*) filter (where a.stage = 'joined')::int joined,
+        count(*) filter (where a.stage in ('l1','l2','l3'))::int in_rounds,
         (select count(*) from evaluations e join applications a2 on a2.id = e.application_id
           where a2.requisition_id = ${conv.requisitionId} and e.org_id = ${orgId})::int evaluations,
         (select count(*) from offers o join applications a3 on a3.id = o.application_id
@@ -1852,6 +1855,7 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
       scored: number;
       interviewing: number;
       joined: number;
+      in_rounds: number;
       evaluations: number;
       offers: number;
       released: number;
@@ -1881,7 +1885,8 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
     if (jd === "approved") done.add("jd");
     if ((c?.scored ?? 0) > 0) done.add("candidates");
     if ((c?.interviewing ?? 0) > 0) done.add("screening");
-    if ((c?.evaluations ?? 0) > 0) done.add("interviews");
+    // Interviews stay the current step while anyone is still in a round.
+    if ((c?.evaluations ?? 0) > 0 && !(c?.in_rounds ?? 0)) done.add("interviews");
     if ((c?.offers ?? 0) > 0) done.add("decision");
     if ((c?.released ?? 0) > 0) done.add("offer");
     if ((c?.joined ?? 0) > 0) done.add("joining");
@@ -1906,7 +1911,27 @@ export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
   });
   // The screening board stays with the Screening step after the first candidate moves on.
   const screening = conv.requisitionId ? await screeningBoard(conv.orgId, conv.requisitionId) : [];
-  const board = screening.length ? { screening } : {};
+  const tz = await orgTimeZone(conv.orgId);
+  const interviewRows = conv.requisitionId
+    ? await (
+        await import("./interview-board.server")
+      ).interviewBoard(conv.orgId, conv.requisitionId, {
+        agentTitle: (t) => AGENT_TITLE[t] ?? t,
+        when: (d) =>
+          d.toLocaleString("en-IN", {
+            weekday: "short",
+            day: "numeric",
+            month: "short",
+            hour: "2-digit",
+            minute: "2-digit",
+            timeZone: tz,
+          }),
+      })
+    : [];
+  const board = {
+    ...(screening.length ? { screening } : {}),
+    ...(interviewRows.length ? { interviews: interviewRows } : {}),
+  };
   if (current === null) return { stages, next: null, ...board };
   const cur: StageKey = current;
 
