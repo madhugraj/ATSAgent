@@ -137,6 +137,28 @@ describe("a candidate's interview row", () => {
       `L3 Soft Skills · booked ${base.when(soon)} with Saranya`,
     );
     expect(booked.now.text).toBe("Waiting for the L3 interview");
+    // Booked, but the panellist has not confirmed this time yet: say so, and whom it waits for.
+    const unconfirmed = interviewRow({
+      ...base,
+      interviews: [
+        ...base.interviews.slice(0, 2),
+        {
+          level: 3,
+          status: "scheduled",
+          scheduledAt: soon,
+          completedAt: null,
+          interviewer: "Saranya",
+        },
+      ],
+      confirmations: [
+        { level: 3, party: "candidate", name: "Vishal", state: "accepted" },
+        { level: 3, party: "panelist", name: "Saranya", state: "pending" },
+      ],
+    });
+    expect(unconfirmed.steps.at(-1)!.sub).toBe(
+      "Vishal confirmed\nSaranya has not confirmed this time yet",
+    );
+    expect(unconfirmed.now.text).toBe("Booked — waiting for Saranya to confirm");
     // The time has passed and no scorecard came: say so.
     const late = l3At(new Date(Date.now() - 86_400_000));
     expect(late.now.text).toBe("Waiting for the L3 scorecard");

@@ -146,6 +146,8 @@ export function interviewRow(input: {
   assessments: Assessment[];
   offered: number[];
   arranging?: Arranging[];
+  /** Answers to a booked round's time, per level (panel and candidate). */
+  confirmations?: { level: number; party: string; name: string; state: string }[];
   tasks: Task[];
   activeAgent: string | null;
   agentTitle: (t: string) => string;
@@ -207,6 +209,21 @@ export function interviewRow(input: {
       const arr = !booked ? input.arranging?.find((x) => x.level === r.level) : undefined;
       const agreeing = arr ? arrangingLines(arr, input.name, input.when) : null;
       if (agreeing) nowText = agreeing.now;
+      // A booked time: who has confirmed it, and who has not yet.
+      const conf = booked
+        ? (input.confirmations ?? []).filter((c) => c.level === r.level && c.state !== "superseded")
+        : [];
+      const first = input.name.split(" ")[0] ?? input.name;
+      const confLines = conf.map((c) =>
+        c.party === "candidate"
+          ? `${first} ${c.state === "accepted" ? "confirmed" : "has not confirmed yet"}`
+          : `${c.name} ${c.state === "accepted" ? "confirmed" : "has not confirmed this time yet"}`,
+      );
+      const unconfirmed = conf.filter((c) => c.state !== "accepted");
+      if (!past && unconfirmed.length)
+        nowText = `Booked — waiting for ${unconfirmed
+          .map((c) => (c.party === "candidate" ? first : c.name))
+          .join(" and ")} to confirm`;
       step = {
         state: "current",
         text: `${label} · ${agreeing ? "agreeing a time" : where}`,
@@ -214,7 +231,9 @@ export function interviewRow(input: {
           ? { sub: "The time has passed and no scorecard is in yet." }
           : agreeing
             ? { sub: agreeing.lines.join("\n") }
-            : {}),
+            : confLines.length
+              ? { sub: confLines.join("\n") }
+              : {}),
       };
     } else {
       step = { state: stopped ? "stopped" : "todo", text: label };
@@ -371,6 +390,18 @@ export async function interviewBoard(
         ok_slots: string[] | null;
       }[])
     : [];
+  const bookedConf = (await db.execute(sql`
+    select i.application_id, i.level, c.party, coalesce(nullif(c.name, ''), c.email) as name, c.state
+    from interview_confirmations c join interviews i on i.id = c.interview_id
+    where c.org_id = ${orgId} and i.org_id = ${orgId} and i.application_id in (${idList})
+      and i.status in ('scheduled', 'rescheduled')
+    order by c.created_at`)) as unknown as {
+    application_id: string;
+    level: number;
+    party: string;
+    name: string;
+    state: string;
+  }[];
   const calls = offerIds.length
     ? ((await db.execute(sql`
         select distinct on (slot_offer_id) slot_offer_id, status, end_reason, created_at
@@ -496,6 +527,9 @@ export async function interviewBoard(
             candidate: cand ? { state: cand.state } : null,
           };
         }),
+      confirmations: bookedConf
+        .filter((c) => c.application_id === a.id)
+        .map((c) => ({ level: c.level, party: c.party, name: nameOf(c.name), state: c.state })),
       tasks: tasks
         .filter((t) => t.application_id === a.id)
         .map((t) => ({
