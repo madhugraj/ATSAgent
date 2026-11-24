@@ -147,4 +147,35 @@ describe("own JD attached in the hiring desk", () => {
       .where(eq(agentRuns.conversationId, conv.id));
     expect(runs).toHaveLength(0);
   });
+
+  test("“stop” cancels the role's running agents and keeps the role open", async () => {
+    const reqId = await requisition("approved");
+    const conv = await thread(reqId);
+    const [run] = await db
+      .insert(agentRuns)
+      .values({
+        orgId,
+        agentType: "intake",
+        goal: "Rank candidates",
+        status: "running",
+        principalUserId: userId,
+        subjectType: "requisition",
+        subjectId: reqId,
+      } as never)
+      .returning({ id: agentRuns.id });
+    expect(await desk.stopRoleAgents(conv, userId)).toBe(1);
+    const [after] = await db
+      .select({ status: agentRuns.status })
+      .from(agentRuns)
+      .where(eq(agentRuns.id, run!.id));
+    expect(after?.status).toBe("cancelled");
+    const [req] = await db
+      .select({ status: requisitions.status })
+      .from(requisitions)
+      .where(eq(requisitions.id, reqId));
+    expect(req?.status).toBe("approved");
+    const m = await messages(conv.id);
+    expect(m.at(-1)?.body).toContain("Stopped:");
+    expect(await desk.stopRoleAgents(conv, userId)).toBe(0);
+  });
 });

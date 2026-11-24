@@ -374,6 +374,10 @@ const Command = z.discriminatedUnion("type", [
   z.object({ type: z.literal("new_role") }),
   z.object({ type: z.literal("use_existing"), code: z.string().max(40).optional() }),
   z.object({ type: z.literal("close_role") }),
+  /** "Stop" / "pause": halt every agent working on this role; the role itself stays open. */
+  z.object({ type: z.literal("stop_agents") }),
+  /** "Carry on" / "resume": start the agent for the role's next step again. */
+  z.object({ type: z.literal("resume_agents") }),
   /** "Show me the JD": post the role's latest job description into the thread. */
   z.object({ type: z.literal("show_jd") }),
   /** "Show the interview plan / rounds / panel size": post the role's plan, editable in place. */
@@ -437,6 +441,7 @@ const SYSTEM = [
   '- JD details (only when the person gives them): responsibilities (their key responsibilities, as text), reportingTo, successMeasures (what success looks like), education. If they ask you to fill these from the market / research / "you decide", set researchRole true.',
   '- "command": {"type":"none"} unless the person asks to act: "talk to / screen / call the first 5" → {"type":"screen","top":5}; "screen 1, 3 and 4" → {"type":"screen","ranks":[1,3,4]}; "create a new role" → {"type":"new_role"}; "use REQ-2026-014" → {"type":"use_existing","code":"REQ-2026-014"}.',
   '- "command" also: "close / cancel / delete / withdraw this role" → {"type":"close_role"}.',
+  '- "command" also: "stop", "pause", "hold on", "stop the agents", "wait" (on their own, about the agents\' work) → {"type":"stop_agents"}; "carry on", "resume", "continue", "start the agents again" → {"type":"resume_agents"}.',
   '- Going back a step: "re-score the candidates" → {"type":"go_back","step":"rescore"}; "send Meera back to screening", "move candidate 2 back to shortlisted", "undo the rejection of Ravi", "bring her back to L1" → {"type":"go_back","step":"move_candidate"} with "name" or "ranks":[n] and "toStage" (one of sourced, applied, ai_screened, shortlisted, l1, l2, l3, reserve — "screening" is "applied", undoing a rejection is "shortlisted" unless they say otherwise). Add "reason":"<their words>" when they say why; when the desk has just asked why and they answer, it is the same go_back command with "reason" and the details from the conversation. Never feedback.',
   '- An AI screening call that FACTS shows is already arranged: "when is the call?" → {"type":"manage_call","action":"when"}; "call now", "call her now", "move the call to Friday 3 pm", "she is unavailable tomorrow, call on Thursday" → {"type":"manage_call","action":"move","when":"now" or "YYYY-MM-DD HH:mm" in the organisation\'s time (NOW gives today)}; "cancel the call" → {"type":"manage_call","action":"cancel"}. Add "name" when they name the candidate and "reason" with their words. With no call arranged, calling is call_candidate.',
   '- "call again", "do the screening call again", "redo the AI call", "phone Meera", "call candidate 2" → {"type":"call_candidate"} with "name" when they name the candidate (as they said it) or "ranks":[n] for a rank — never feedback, even when OPEN REQUESTS lists something: the system arranges an AI phone screening call. Add "reason":"<their words>" when they say why. When the desk has just asked why a call should be repeated and they answer, that is the same command with "reason" (and the name from the conversation).',
@@ -1392,6 +1397,19 @@ async function handleUserMessageInner(
   }
   if (cmd.type === "close_role") {
     await offerCloseRole(conv);
+    return;
+  }
+  if (cmd.type === "stop_agents") {
+    await stopRoleAgents(conv, userId);
+    return;
+  }
+  if (cmd.type === "resume_agents") {
+    const started = conv.requisitionId ? await startStage(conv, userId) : null;
+    if (!started)
+      await postMessage(conv, {
+        role: "desk",
+        body: "Nothing is waiting to start for this role right now — tell me what you'd like done next.",
+      });
     return;
   }
   if (cmd.type === "research") {
@@ -3158,6 +3176,41 @@ export async function closeRole(
   await advanceRequisitionCore(actor, { id: req.id, status: to, comment: reason });
   await onRequisitionEnded(conv.orgId, req.id, to, userId, reason);
   return { action: to === "rejected" ? "reject" : "close" };
+}
+
+/**
+ * "Stop": cancel every agent run still working on this thread's role (the
+ * role, its candidates, and anything the thread started) and their open
+ * requests. The role stays open; "carry on" starts its next step again.
+ */
+export async function stopRoleAgents(conv: Conversation, userId: string): Promise<number> {
+  const scope = conv.requisitionId
+    ? or(
+        eq(agentRuns.conversationId, conv.id),
+        eq(agentRuns.subjectId, conv.requisitionId),
+        sql`${agentRuns.subjectId} in (select id from applications where requisition_id = ${conv.requisitionId} and org_id = ${conv.orgId})`,
+      )
+    : eq(agentRuns.conversationId, conv.id);
+  const active = await db
+    .select({ id: agentRuns.id, agentType: agentRuns.agentType })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.orgId, conv.orgId),
+        inArray(agentRuns.status, ["queued", "running", "awaiting_human"]),
+        scope,
+      ),
+    );
+  const { cancelRun } = await import("../agents/runtime.server");
+  for (const r of active) await cancelRun({ orgId: conv.orgId, runId: r.id, userId });
+  const names = [...new Set(active.map((r) => AGENT_NAME[r.agentType] ?? r.agentType))];
+  await postMessage(conv, {
+    role: "desk",
+    body: names.length
+      ? `Stopped: ${names.join(", ")}. Their open requests are withdrawn and the role stays open. Say "carry on" when you want the next step started again.`
+      : "No agent is working on this role right now, so there was nothing to stop.",
+  });
+  return active.length;
 }
 
 /** Mark the thread closed and say why (once). */
