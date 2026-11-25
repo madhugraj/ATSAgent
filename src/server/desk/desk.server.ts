@@ -371,6 +371,31 @@ const Command = z.discriminatedUnion("type", [
       .optional(),
     reason: z.string().trim().max(500).optional(),
   }),
+  /** "Show me the candidates" / "who is shortlisted?": post the role's pipeline, optionally one stage. */
+  z.object({
+    type: z.literal("show_candidates"),
+    stage: z
+      .enum([
+        "sourced",
+        "applied",
+        "ai_screened",
+        "shortlisted",
+        "l1",
+        "l2",
+        "l3",
+        "on_hold",
+        "reserve",
+      ])
+      .optional(),
+  }),
+  /** "Any other matching CVs in the pool?" / "rescan the pool": search the talent pool (not yet in this pipeline). */
+  z.object({ type: z.literal("search_pool") }),
+  /** "Add them" / "add Priya and Arun" after a pool search: add those people to the pipeline and score them. */
+  z.object({
+    type: z.literal("add_from_pool"),
+    names: z.array(z.string().trim().min(1).max(120)).max(20).optional(),
+    all: z.boolean().optional(),
+  }),
   z.object({ type: z.literal("new_role") }),
   z.object({ type: z.literal("use_existing"), code: z.string().max(40).optional() }),
   z.object({ type: z.literal("close_role") }),
@@ -435,6 +460,7 @@ const SYSTEM = [
   '- JD details (only when the person gives them): responsibilities (their key responsibilities, as text), reportingTo, successMeasures (what success looks like), education. If they ask you to fill these from the market / research / "you decide", set researchRole true.',
   '- "command": {"type":"none"} unless the person asks to act: "talk to / screen / call the first 5" → {"type":"screen","top":5}; "screen 1, 3 and 4" → {"type":"screen","ranks":[1,3,4]}; "create a new role" → {"type":"new_role"}; "use REQ-2026-014" → {"type":"use_existing","code":"REQ-2026-014"}.',
   '- "command" also: "close / cancel / delete / withdraw this role" → {"type":"close_role"}.',
+  '- Candidates: "show me the candidates / the list", "who is shortlisted?", "who is in L1?" → {"type":"show_candidates"} with "stage" when they ask about one stage (shortlisted, l1, …); the system posts the list with names. "Any other / more matching CVs in the pool?", "rescan / search / check the pool", "find more candidates like X" → {"type":"search_pool"}; the system searches the talent pool for people not yet in this role\'s pipeline. Right after a pool search, "add them", "add Priya and Arun", "add all" → {"type":"add_from_pool"} with "names" (as they said them) or "all":true. Never answer these from FACTS counts and never send the person to another page instead; never treat a pool search as a re-score.',
   '- Going back a step: "re-score the candidates" → {"type":"go_back","step":"rescore"}; "send Meera back to screening", "move candidate 2 back to shortlisted", "undo the rejection of Ravi", "bring her back to L1" → {"type":"go_back","step":"move_candidate"} with "name" or "ranks":[n] and "toStage" (one of sourced, applied, ai_screened, shortlisted, l1, l2, l3, reserve — "screening" is "applied", undoing a rejection is "shortlisted" unless they say otherwise). Add "reason":"<their words>" when they say why; when the desk has just asked why and they answer, it is the same go_back command with "reason" and the details from the conversation. Never feedback.',
   '- An AI screening call that FACTS shows is already arranged: "when is the call?" → {"type":"manage_call","action":"when"}; "call now", "call her now", "move the call to Friday 3 pm", "she is unavailable tomorrow, call on Thursday" → {"type":"manage_call","action":"move","when":"now" or "YYYY-MM-DD HH:mm" in the organisation\'s time (NOW gives today)}; "cancel the call" → {"type":"manage_call","action":"cancel"}. Add "name" when they name the candidate and "reason" with their words. With no call arranged, calling is call_candidate.',
   '- "call again", "do the screening call again", "redo the AI call", "phone Meera", "call candidate 2" → {"type":"call_candidate"} with "name" when they name the candidate (as they said it) or "ranks":[n] for a rank — never feedback, even when OPEN REQUESTS lists something: the system arranges an AI phone screening call. Add "reason":"<their words>" when they say why. When the desk has just asked why a call should be repeated and they answer, that is the same command with "reason" (and the name from the conversation).',
@@ -978,6 +1004,7 @@ export async function rankedCandidates(
   orgId: string,
   requisitionId: string,
   limit = 15,
+  stage?: string,
 ): Promise<RankedItem[]> {
   const rows = await db
     .select({
@@ -1000,6 +1027,7 @@ export async function rankedCandidates(
         eq(applications.orgId, orgId),
         eq(applications.requisitionId, requisitionId),
         notInArray(applications.stage, CLOSED_STAGES as never),
+        stage ? eq(applications.stage, stage as never) : undefined,
       ),
     )
     .orderBy(desc(sql`coalesce(${matchScores.overallScore}, -1)`), asc(candidates.fullName))
@@ -1046,6 +1074,126 @@ export async function postRankedList(conv: Conversation): Promise<void> {
     body: `Here are the top ${items.length} matches, best first. Pick the ones to screen, or say for example "talk to the first 5".`,
     card: { type: "ranked_candidates", requisitionId: conv.requisitionId, items },
   });
+}
+
+/** "Show me the candidates" / "who is shortlisted?": the pipeline as a ranked card, with names. */
+export async function showCandidates(conv: Conversation, stage?: string): Promise<void> {
+  if (!conv.requisitionId) {
+    await postMessage(conv, { role: "desk", body: "There is no role yet, so no candidates." });
+    return;
+  }
+  const items = await rankedCandidates(conv.orgId, conv.requisitionId, 50, stage);
+  const { STAGE_LABEL } = await import("@/lib/lifecycle");
+  const where = stage ? ` at ${STAGE_LABEL[stage as Stage] ?? stage}` : " in this role's pipeline";
+  if (!items.length) {
+    await postMessage(conv, {
+      role: "desk",
+      body: `No candidates${where} right now. Say "search the pool" to look for matching CVs in your talent pool.`,
+    });
+    return;
+  }
+  await postMessage(conv, {
+    role: "desk",
+    body: `${plural(items.length, "candidate")}${where}, best first: ${items
+      .map((i) => `${i.rank}. ${i.name}${i.score != null ? ` (${i.score})` : ""}`)
+      .join(", ")}.`,
+    card: { type: "ranked_candidates", requisitionId: conv.requisitionId, items },
+  });
+}
+
+type PoolPick = { candidateId: string; name: string };
+
+/** "Any other matching CVs in the pool?": search the talent pool for people not yet in this pipeline. */
+export async function searchPoolFromDesk(conv: Conversation): Promise<void> {
+  if (!conv.requisitionId) {
+    await postMessage(conv, {
+      role: "desk",
+      body: "Let's settle the role first, then I'll search the pool.",
+    });
+    return;
+  }
+  const { searchTalentPool } = await import("../agents/talent-search.server");
+  let r: Awaited<ReturnType<typeof searchTalentPool>>;
+  try {
+    r = await searchTalentPool(conv.orgId, conv.requisitionId, 15);
+  } catch (e) {
+    await postMessage(conv, {
+      role: "desk",
+      body: `I couldn't search the talent pool: ${e instanceof Error ? e.message : "it failed."}`,
+    });
+    return;
+  }
+  const searched = r.searchedFor.map((g) => g.skill).join(", ");
+  if (!r.matches.length) {
+    await postMessage(conv, {
+      role: "desk",
+      body: `I searched the talent pool${searched ? ` for ${searched}` : ""} and found no one else who matches and isn't already in this role's pipeline.`,
+      card: { type: "bring_candidates", requisitionId: conv.requisitionId, found: 0 },
+    });
+    return;
+  }
+  const items: PoolPick[] = r.matches.map((m) => ({ candidateId: m.candidateId, name: m.name }));
+  await postMessage(conv, {
+    role: "desk",
+    body: [
+      `${plural(r.matches.length, "more person", "more people")} in the talent pool match${searched ? ` (searched for ${searched})` : ""} and aren't in this pipeline yet:`,
+      ...r.matches.map(
+        (m, i) =>
+          `${i + 1}. ${m.name} — ${m.experienceYears} yrs${m.location ? `, ${m.location}` : ""}${m.inBand ? "" : " (outside the experience band)"}: ${m.why}`,
+      ),
+      'Say "add them" (or name the ones you want) to add them to the pipeline and score them.',
+    ].join("\n"),
+    card: { type: "pool_matches", requisitionId: conv.requisitionId, items },
+  });
+}
+
+/** "Add them" after a pool search: the person's pick is the decision; add as that person, then score. */
+export async function addFromPoolDesk(
+  conv: Conversation,
+  userId: string,
+  cmd: { names?: string[] | undefined; all?: boolean | undefined },
+): Promise<void> {
+  const say = (body: string) => postMessage(conv, { role: "desk", body });
+  if (!conv.requisitionId) return say("Let's settle the role first.");
+  const [m] = await db
+    .select({ card: hiringMessages.card })
+    .from(hiringMessages)
+    .where(
+      and(
+        eq(hiringMessages.conversationId, conv.id),
+        sql`${hiringMessages.card} ->> 'type' = 'pool_matches'`,
+      ),
+    )
+    .orderBy(desc(hiringMessages.createdAt))
+    .limit(1);
+  const found = ((m?.card as { items?: PoolPick[] } | null)?.items ?? []) as PoolPick[];
+  if (!found.length) return say('Search the pool first — say "search the pool".');
+  const wanted = cmd.names?.map((n) => n.toLowerCase()) ?? [];
+  const pick =
+    cmd.all || !wanted.length
+      ? found
+      : found.filter((f) => wanted.some((w) => f.name.toLowerCase().includes(w)));
+  if (!pick.length)
+    return say(
+      `None of those names are in the last pool search: ${found.map((f) => f.name).join(", ")}.`,
+    );
+  const { activeOrgOf } = await import("@/lib/auth.middleware");
+  const org = await activeOrgOf(userId);
+  if (!org || org.orgId !== conv.orgId)
+    return say("You are not a member of this organisation any more.");
+  const { addApplicationsCore } = await import("@/lib/pipeline.server");
+  const r = await addApplicationsCore(
+    { orgId: conv.orgId, userId, memberEmail: org.memberEmail },
+    {
+      requisitionId: conv.requisitionId,
+      candidateIds: pick.map((p) => p.candidateId),
+      source: "talent_pool",
+    },
+  );
+  await say(
+    `Added ${plural(r.added, "candidate")} to the pipeline${r.skipped.length ? ` (skipped ${r.skipped.map((s) => `${s.name}: ${s.reason}`).join("; ")})` : ""}. Scoring them now.`,
+  );
+  if (r.added) await scoreAndRank(conv, userId);
 }
 
 /** Resolve "the first 5" / ranks against the latest ranked list in the thread. */
@@ -1277,6 +1425,18 @@ async function handleUserMessageInner(
       return;
     }
     await screenCandidates(conv, userId, ids);
+    return;
+  }
+  if (cmd.type === "show_candidates") {
+    await showCandidates(conv, cmd.stage);
+    return;
+  }
+  if (cmd.type === "search_pool") {
+    await searchPoolFromDesk(conv);
+    return;
+  }
+  if (cmd.type === "add_from_pool") {
+    await addFromPoolDesk(conv, userId, cmd);
     return;
   }
   if (cmd.type === "manage_call") {
