@@ -35,6 +35,8 @@ export type CaptureInput = {
   candidateName?: string | null;
   /** Retain validated LinkedIn evidence even when its original CV is still pending. */
   profileOnly?: boolean;
+  /** A Recruiter search lead or recommended match: has not applied, no CV. */
+  sourced?: boolean;
   requisitionId?: string | null;
   /**
    * The job portal the person is capturing from (job-channels.ts), e.g. an
@@ -129,7 +131,8 @@ async function nextCaptureCode(orgId: string): Promise<string> {
 }
 
 /** A portal the person posts on by hand, else the companion itself. */
-function captureSource(channel: string | null | undefined): string {
+function captureSource(channel: string | null | undefined, sourced = false): string {
+  if (sourced) return "linkedin_sourced";
   const c = channelById(channel);
   return c && (c.route === "assisted" || c.route === "partner_api") ? c.id : "browser_capture";
 }
@@ -256,7 +259,7 @@ export async function capture(input: CaptureInput): Promise<CaptureResult> {
         fileName,
         requisitionId: input.requisitionId ?? null,
         orgId: org.id,
-        source: captureSource(input.channel),
+        source: captureSource(input.channel, input.sourced),
         fullName: input.candidateName ?? null,
         identityKey: input.publicProfileUrl ?? input.sourceUrl ?? null,
         profileUrl: input.publicProfileUrl ?? input.sourceUrl ?? null,
