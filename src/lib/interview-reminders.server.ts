@@ -12,7 +12,14 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "../server/db";
-import { applications, candidates, interviews, organizations, requisitions } from "@db/schema";
+import {
+  applications,
+  candidates,
+  interviewConfirmations,
+  interviews,
+  organizations,
+  requisitions,
+} from "@db/schema";
 
 export const REMINDER_WINDOWS = { dayHours: 24, soonHours: 1, freshBookingHours: 3 } as const;
 const HOUR = 3600_000;
@@ -41,6 +48,34 @@ export function reminderKey(
   step: ReminderStep,
 ): string {
   return `interview-reminder:${interviewId}:${scheduledAt.toISOString()}:${email.toLowerCase()}:${step}`;
+}
+
+/**
+ * The panelist's own confirmation link for this booked time, if they were asked
+ * for one: the reminder links to it so they can change the time or length
+ * without signing in. None is created here — a reminder never opens a new ask.
+ */
+async function panelistToken(
+  orgId: string,
+  interviewId: string,
+  scheduledAt: Date,
+  email: string,
+): Promise<string | null> {
+  const [row] = await db
+    .select({ token: interviewConfirmations.token })
+    .from(interviewConfirmations)
+    .where(
+      and(
+        eq(interviewConfirmations.orgId, orgId),
+        eq(interviewConfirmations.interviewId, interviewId),
+        eq(interviewConfirmations.party, "panelist"),
+        eq(interviewConfirmations.email, email.toLowerCase()),
+        eq(interviewConfirmations.scheduledAt, scheduledAt),
+        inArray(interviewConfirmations.state, ["pending", "accepted"]),
+      ),
+    )
+    .limit(1);
+  return row?.token ?? null;
 }
 
 export async function sweepInterviewReminders(orgId?: string, now = Date.now()): Promise<number> {
@@ -145,6 +180,7 @@ export async function sweepInterviewReminders(orgId?: string, now = Date.now()):
         sent++;
       }
       for (const p of panel) {
+        const token = await panelistToken(r.orgId, r.id, r.scheduledAt, p.email);
         await enqueueEmail({
           orgId: r.orgId,
           kind: "interviewer_reminder",
@@ -157,6 +193,7 @@ export async function sweepInterviewReminders(orgId?: string, now = Date.now()):
             audience: "panel",
             recipientName: p.name ?? undefined,
             actionUrl: `${site}/interviews/mine`,
+            ...(token ? { changeUrl: `${site}/confirm/${token}?change=1` } : {}),
           },
         });
         sent++;
