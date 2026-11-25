@@ -483,7 +483,7 @@ describe("intake & matching agent", () => {
 });
 
 describe("screening agent", () => {
-  test("a shortlist event starts screening for the requisition when switched on", async () => {
+  test("a shortlist event starts screening for that candidate when switched on", async () => {
     await enable("screening");
     const id = await application("Eve", "applied", 80, ["Kubernetes"]);
     await moveStageCore(
@@ -495,7 +495,9 @@ describe("screening agent", () => {
     expect(runs).toHaveLength(1);
     expect(runs[0]).toMatchObject({
       agentType: "screening",
-      subjectId: reqId,
+      // Per candidate, so a role-level run waiting on a person cannot swallow it.
+      subjectType: "application",
+      subjectId: id,
       principalUserId: recruiter,
     });
   });

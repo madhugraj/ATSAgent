@@ -1205,7 +1205,7 @@ export async function startRun(input: {
   maxSteps?: number;
   /** Hiring-desk thread; defaults to the thread of the subject's requisition. */
   conversationId?: string | null;
-}): Promise<{ runId: string }> {
+}): Promise<{ runId: string; deduped?: true }> {
   // Studio agents (`studio:<slug>`) resolve to their published version, and
   // only in an organisation the super admin granted them to.
   const resolved = await runDefinition(input.orgId, input.agentType);
@@ -1297,7 +1297,8 @@ export async function startRun(input: {
       agent: input.agentType,
       run_id: existing.id,
     });
-    return { runId: existing.id };
+    // Callers must not announce this as new work: the goal went nowhere.
+    return { runId: existing.id, deduped: true as const };
   }
   await writeAudit({
     actor: `agent:${input.agentType}:${run!.id}`,

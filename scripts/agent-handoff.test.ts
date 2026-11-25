@@ -352,7 +352,8 @@ describe("A. orchestrator handoffs (every agent on)", () => {
       actorUserId: hrId,
       payload: { applicationIds: [a] },
     });
-    expectRun(out, "screening", R(), ["1 candidate(s) were shortlisted"], {
+    // Per candidate: a role-level run waiting on a person cannot swallow it.
+    expectRun(out, "screening", A(a), ["A candidate was shortlisted", `application ${a}`], {
       edge: "H4",
       from: "intake",
     });

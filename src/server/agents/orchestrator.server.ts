@@ -287,22 +287,27 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
     await onJdApproved(e.orgId, req.id, e.subjectType === "jd" ? e.subjectId : null);
   }
 
+  // Per candidate (subject: the application): a role-level run waiting on a
+  // person holds the role's one run slot and would swallow these.
   if (e.type === "application.shortlisted") {
     const ids = (e.payload as { applicationIds?: string[] }).applicationIds ?? [];
-    await dispatch(
-      "screening",
-      `${ids.length} candidate(s) were shortlisted for ${req.code} "${req.title}". Prepare their screening kits, send assessments and summarise who should proceed.`,
-    );
+    for (const id of ids)
+      await dispatch(
+        "screening",
+        `A candidate was shortlisted for ${req.code} "${req.title}":\n- application ${id}\nPrepare their screening kit, arrange their screening as your instructions say, and summarise whether they should proceed.`,
+        { type: "application", id },
+      );
   }
 
   if (e.type === "application.advanced") {
     const ids = (e.payload as { applicationIds?: string[] }).applicationIds ?? [];
-    await dispatch(
-      "interview",
-      `${ids.length} candidate(s) advanced to an interview round for ${req.code} "${req.title}". Book their next rounds.`,
-      // One candidate: the run is theirs, so its cost counts in their hiring cost.
-      ids.length === 1 ? { type: "application", id: ids[0]! } : undefined,
-    );
+    for (const id of ids)
+      await dispatch(
+        "interview",
+        `A candidate advanced to an interview round for ${req.code} "${req.title}":\n- application ${id}\nBook their next round.`,
+        // The run is theirs, so its cost counts in their hiring cost.
+        { type: "application", id },
+      );
   }
 
   if (e.type === "scorecard.submitted") {
@@ -1049,6 +1054,9 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
   try {
     const { announceNewApplicants } = await import("../desk/desk.server");
     await announceNewApplicants(opts.orgId);
+    // Desk requests queued behind a busy agent start once it is free.
+    const { drainQueuedWork } = await import("../desk/desk.server");
+    await drainQueuedWork(opts.orgId);
   } catch (err) {
     log.warn("desk.announce_failed", { error: err as Error });
   }
