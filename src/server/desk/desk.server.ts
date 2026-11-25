@@ -668,18 +668,16 @@ async function startForThread(
     return null;
   }
   const { startRun } = await import("../agents/runtime.server");
-  const { activeRunFor } = await import("../agents/tools");
-  // One run per requisition per agent: the desk path used to bypass the
-  // dispatch dedupe, so a re-ask could stack a second active run.
-  if (!opts.applicationId && (await activeRunFor(conv.orgId, agentType, requisitionId))) {
-    await postMessage(conv, {
-      role: "desk",
-      body: `The ${AGENT_NAME[agentType] ?? agentType} is already working on this role — its requests will appear here as they come.`,
-      agentType,
-    });
+  // One active run per agent and requisition (a database rule). When one is
+  // already active the request is queued on the thread — never dropped and
+  // never announced as started — and starts when that run ends.
+  const queue = () =>
+    queueWork(conv, { agentType, principalUserId, goal, requisitionId, announce });
+  if (!opts.applicationId && (await blockingRun(conv.orgId, agentType, requisitionId))) {
+    await queue();
     return null;
   }
-  const { runId } = await startRun({
+  const started = await startRun({
     orgId: conv.orgId,
     agentType,
     principalUserId,
@@ -688,6 +686,11 @@ async function startForThread(
     subjectId: opts.applicationId ?? requisitionId,
     conversationId: conv.id,
   });
+  if (started.deduped) {
+    await queue();
+    return null;
+  }
+  const { runId } = started;
   if (!opts.quiet) await postMessage(conv, { role: "desk", body: announce, agentType });
   const { kickAgents } = await import("../agents/orchestrator.server");
   kickAgents(conv.orgId);
@@ -828,6 +831,139 @@ export async function attachOwnJd(
       ? "I've asked the JD agent to file your job description as written as the next version; it replaces the current one once the department head approves it."
       : brief.announce,
   );
+}
+
+/** The active run of this agent holding the role's one run slot, if any. */
+async function blockingRun(orgId: string, agentType: string, requisitionId: string) {
+  const [run] = await db
+    .select({ id: agentRuns.id, status: agentRuns.status })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.orgId, orgId),
+        eq(agentRuns.agentType, agentType as AgentType),
+        eq(agentRuns.subjectType, "requisition"),
+        eq(agentRuns.subjectId, requisitionId),
+        eq(agentRuns.mode, "live"),
+        inArray(agentRuns.status, ["queued", "running", "awaiting_human"]),
+      ),
+    )
+    .limit(1);
+  return run ?? null;
+}
+
+export const QUEUED_WORK_CARD = "queued_work";
+
+type QueuedWork = {
+  type: typeof QUEUED_WORK_CARD;
+  agentType: AgentType;
+  principalUserId: string;
+  goal: string;
+  requisitionId: string;
+  announce: string;
+  state: "waiting" | "started" | "dropped";
+};
+
+/**
+ * Hold a request for an agent that is busy on this role, and say plainly
+ * why: what the active run is waiting on, or that it is mid-way.
+ * drainQueuedWork starts it once that run ends.
+ */
+async function queueWork(conv: Conversation, w: Omit<QueuedWork, "type" | "state">): Promise<void> {
+  const name = AGENT_NAME[w.agentType] ?? w.agentType;
+  const run = await blockingRun(conv.orgId, w.agentType, w.requisitionId);
+  let why = `The ${name} is mid-way through other work on this role.`;
+  if (run?.status === "awaiting_human") {
+    const tasks = await db
+      .select({ title: agentTasks.title })
+      .from(agentTasks)
+      .where(and(eq(agentTasks.runId, run.id), eq(agentTasks.status, "open")))
+      .limit(3);
+    why = tasks.length
+      ? `The ${name} is waiting on you for ${tasks.map((t) => `"${t.title}"`).join(", ")}.`
+      : `The ${name} is waiting on a person's decision on this role.`;
+  }
+  // The same request already queued: say so, don't stack it.
+  const [dup] = await db
+    .select({ id: hiringMessages.id })
+    .from(hiringMessages)
+    .where(
+      and(
+        eq(hiringMessages.conversationId, conv.id),
+        sql`${hiringMessages.card} ->> 'type' = ${QUEUED_WORK_CARD}`,
+        sql`${hiringMessages.card} ->> 'state' = 'waiting'`,
+        sql`${hiringMessages.card} ->> 'goal' = ${w.goal}`,
+      ),
+    )
+    .limit(1);
+  await postMessage(conv, {
+    role: "desk",
+    agentType: w.agentType,
+    body: dup
+      ? `${why} This is already queued and starts as soon as that is done.`
+      : `${why} I've queued this — it starts as soon as that is done.`,
+    ...(dup ? {} : { card: { ...w, type: QUEUED_WORK_CARD, state: "waiting" } as never }),
+  });
+}
+
+/**
+ * Start queued desk requests whose agent is free on the role again. Runs
+ * when any run finishes and from the scheduler sweep (a run can also end by
+ * being cancelled or closed as stale).
+ */
+export async function drainQueuedWork(orgId?: string): Promise<number> {
+  const rows = await db
+    .select({
+      id: hiringMessages.id,
+      conversationId: hiringMessages.conversationId,
+      card: hiringMessages.card,
+    })
+    .from(hiringMessages)
+    .innerJoin(hiringConversations, eq(hiringConversations.id, hiringMessages.conversationId))
+    .where(
+      and(
+        orgId ? eq(hiringConversations.orgId, orgId) : undefined,
+        sql`${hiringMessages.card} ->> 'type' = ${QUEUED_WORK_CARD}`,
+        sql`${hiringMessages.card} ->> 'state' = 'waiting'`,
+      ),
+    )
+    .orderBy(asc(hiringMessages.createdAt))
+    .limit(50);
+  let started = 0;
+  const busy = new Set<string>();
+  for (const r of rows) {
+    const w = r.card as QueuedWork;
+    const key = `${w.agentType}:${w.requisitionId}`;
+    if (busy.has(key)) continue; // one start per agent and role per pass
+    const [conv] = await db
+      .select()
+      .from(hiringConversations)
+      .where(eq(hiringConversations.id, r.conversationId))
+      .limit(1);
+    if (!conv) continue;
+    const mark = (state: QueuedWork["state"]) =>
+      db
+        .update(hiringMessages)
+        .set({ card: { ...w, state } as never })
+        .where(eq(hiringMessages.id, r.id));
+    if (conv.status === "closed" || conv.deletedAt) {
+      await mark("dropped");
+      continue;
+    }
+    busy.add(key);
+    if (await blockingRun(conv.orgId, w.agentType, w.requisitionId)) continue;
+    await mark("started");
+    const runId = await startForThread(
+      conv,
+      w.agentType,
+      w.principalUserId,
+      w.goal,
+      w.requisitionId,
+      w.announce,
+    );
+    if (runId) started++;
+  }
+  return started;
 }
 
 async function latestJdStatus(orgId: string, requisitionId: string) {
@@ -1899,7 +2035,12 @@ export async function onRunFinished(run: {
   result: string | null;
   error: string | null;
 }): Promise<void> {
-  if (!run.conversationId || run.mode === "replay") return;
+  if (run.mode === "replay") return;
+  // This run may have been holding the role's slot for queued desk work.
+  await drainQueuedWork(run.orgId).catch((e) =>
+    log.warn("desk.drain_failed", { org_id: run.orgId, error: String(e) }),
+  );
+  if (!run.conversationId) return;
   const conv = await loadConversation(run.orgId, run.conversationId).catch(() => null);
   if (!conv) return;
   const name = AGENT_NAME[run.agentType] ?? `${run.agentType} agent`;

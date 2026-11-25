@@ -142,6 +142,59 @@ describe("rules", () => {
     expect((await open())[0]!.severity).toBe("serious");
   });
 
+  test("desk request queued behind a busy agent: warning past the threshold, serious later, clears once started", async () => {
+    const { hiringConversations, hiringMessages } = await import("../drizzle/schema");
+    const [conv] = await db
+      .insert(hiringConversations)
+      .values({ orgId, createdBy: userId, title: "Health queue" } as never)
+      .returning({ id: hiringConversations.id });
+    const card = (state: string) => ({
+      type: "queued_work",
+      agentType: "sourcing",
+      principalUserId: userId,
+      goal: "g",
+      requisitionId: crypto.randomUUID(),
+      announce: "a",
+      state,
+    });
+    const [m] = await db
+      .insert(hiringMessages)
+      .values({
+        conversationId: conv!.id,
+        orgId,
+        role: "desk",
+        body: "queued",
+        card: card("waiting"),
+        createdAt: ago(60), // fresh: not yet blocked
+      } as never)
+      .returning({ id: hiringMessages.id });
+    await evaluate();
+    expect(await open()).toHaveLength(0);
+    await db
+      .update(hiringMessages)
+      .set({ createdAt: ago((HEALTH.queuedWorkHours + 1) * 60) })
+      .where(eq(hiringMessages.id, m!.id));
+    await evaluate();
+    expect((await open())[0]).toMatchObject({
+      rule: "hitl.queued_work_blocked",
+      severity: "warning",
+      agentType: "sourcing",
+    });
+    await db
+      .update(hiringMessages)
+      .set({ createdAt: ago((HEALTH.queuedWorkSeriousHours + 1) * 60) })
+      .where(eq(hiringMessages.id, m!.id));
+    await evaluate();
+    expect((await open())[0]!.severity).toBe("serious");
+    await db
+      .update(hiringMessages)
+      .set({ card: card("started") as never })
+      .where(eq(hiringMessages.id, m!.id));
+    await evaluate();
+    expect(await open()).toHaveLength(0);
+    await db.delete(hiringConversations).where(eq(hiringConversations.id, conv!.id));
+  });
+
   test("sourcing that finds nobody for a role, run after run, is flagged", async () => {
     const { requisitions } = await import("../drizzle/schema");
     const [q] = await db

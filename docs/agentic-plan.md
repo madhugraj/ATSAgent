@@ -764,20 +764,21 @@ Openings, resolutions and acknowledgements are audited. Serious and critical
 issues appear in the HR head / CBO / owner notification bell until
 acknowledged; every issue is listed on Governance → Agent observability.
 
-| Element           | Rule                  | Severity          | Fires when                                                                      |
-| ----------------- | --------------------- | ----------------- | ------------------------------------------------------------------------------- |
-| Harness           | `harness.stuck_run`   | critical          | a run is still "running" 15 min after its lease expired, or was reclaimed twice |
-| Harness           | `harness.failures`    | serious           | 3+ failed runs of one agent in 24 h                                             |
-| Harness           | `scheduler.heartbeat` | critical          | no scheduler tick for 5+ min (checked on read)                                  |
-| Human-in-the-loop | `hitl.overdue`        | warning → serious | a request is open past 48 h (serious past 120 h)                                |
-| Human-in-the-loop | `hitl.decline_rate`   | warning           | more than half of 6+ requests declined in 7 days                                |
-| Tools             | `tools.error_rate`    | serious           | more than 20% of 10+ tool calls failed in 24 h                                  |
-| AI skills         | `skills.ai_errors`    | serious           | more than 20% of 5+ AI requests in runs failed in 24 h                          |
-| AI skills         | `skills.latency`      | warning           | AI p95 above 60 s over 24 h                                                     |
-| Budget            | `budget.paused`       | warning           | runs paused at the monthly token budget                                         |
-| Definition        | `definition.churn`    | warning           | definition changed under 3+ running runs in 7 days                              |
-| Audit             | `audit.gap`           | critical          | a write / external tool call has no audit entry                                 |
-| Orchestrator      | `orchestrator.events` | serious           | lifecycle events failed, or pending 15+ min                                     |
+| Element           | Rule                       | Severity          | Fires when                                                                                 |
+| ----------------- | -------------------------- | ----------------- | ------------------------------------------------------------------------------------------ |
+| Harness           | `harness.stuck_run`        | critical          | a run is still "running" 15 min after its lease expired, or was reclaimed twice            |
+| Harness           | `harness.failures`         | serious           | 3+ failed runs of one agent in 24 h                                                        |
+| Harness           | `scheduler.heartbeat`      | critical          | no scheduler tick for 5+ min (checked on read)                                             |
+| Human-in-the-loop | `hitl.overdue`             | warning → serious | a request is open past 48 h (serious past 120 h)                                           |
+| Human-in-the-loop | `hitl.queued_work_blocked` | warning → serious | a Hiring desk request has been queued behind a busy agent for over 4 h (serious past 24 h) |
+| Human-in-the-loop | `hitl.decline_rate`        | warning           | more than half of 6+ requests declined in 7 days                                           |
+| Tools             | `tools.error_rate`         | serious           | more than 20% of 10+ tool calls failed in 24 h                                             |
+| AI skills         | `skills.ai_errors`         | serious           | more than 20% of 5+ AI requests in runs failed in 24 h                                     |
+| AI skills         | `skills.latency`           | warning           | AI p95 above 60 s over 24 h                                                                |
+| Budget            | `budget.paused`            | warning           | runs paused at the monthly token budget                                                    |
+| Definition        | `definition.churn`         | warning           | definition changed under 3+ running runs in 7 days                                         |
+| Audit             | `audit.gap`                | critical          | a write / external tool call has no audit entry                                            |
+| Orchestrator      | `orchestrator.events`      | serious           | lifecycle events failed, or pending 15+ min                                                |
 
 | Tools | `tools.injection` | warning → serious | a tool result carrying third-party text looked like instructions to the model (serious from 3 in 24 h) |
 

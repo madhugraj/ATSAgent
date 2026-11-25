@@ -32,6 +32,10 @@ import { log } from "../log";
 export const HEALTH = {
   /** Human request open longer than this is overdue (hours). */
   hitlSlaHours: 48,
+  /** A desk request queued behind a busy agent this long is blocked (hours)… */
+  queuedWorkHours: 4,
+  /** …and serious after this many hours. */
+  queuedWorkSeriousHours: 24,
   /** …and serious after this many hours. */
   hitlSeriousHours: 120,
   /** A running run whose lease expired this long ago is stuck (minutes). */
@@ -344,6 +348,28 @@ export const RULES: Rule[] = [
         title: `${x.n} request(s) waiting on a person past the ${HEALTH.hitlSlaHours} h SLA (oldest ${x.oldest_h} h)`,
         detail: { overdue: x.n, oldestHours: x.oldest_h },
         severity: x.oldest_h >= HEALTH.hitlSeriousHours ? "serious" : "warning",
+      }));
+    },
+  },
+  {
+    id: "hitl.queued_work_blocked",
+    element: "hitl",
+    severity: "warning",
+    description: `Something a person asked for on the Hiring desk has been queued for more than ${HEALTH.queuedWorkHours} hours (serious after ${HEALTH.queuedWorkSeriousHours} hours) because the same agent is still busy on that role — usually waiting on a person's decision. Deciding that request lets the queued work start.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ agent_type: string; n: number; oldest_h: number }>(sql`
+        select m.card ->> 'agentType' agent_type, count(*)::int n,
+          floor(max(extract(epoch from (now() - m.created_at)) / 3600))::int oldest_h
+        from hiring_messages m join hiring_conversations c on c.id = m.conversation_id
+        where c.org_id = ${orgId}
+          and m.card ->> 'type' = 'queued_work' and m.card ->> 'state' = 'waiting'
+          and m.created_at < now() - make_interval(hours => ${HEALTH.queuedWorkHours})
+        group by 1`);
+      return r.map((x) => ({
+        agentType: x.agent_type,
+        title: `${x.n} desk request(s) queued behind a busy agent (oldest ${x.oldest_h} h)`,
+        detail: { queued: x.n, oldestHours: x.oldest_h },
+        severity: x.oldest_h >= HEALTH.queuedWorkSeriousHours ? "serious" : "warning",
       }));
     },
   },

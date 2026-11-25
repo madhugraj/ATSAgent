@@ -553,6 +553,52 @@ describe("runs post to their thread", () => {
   });
 });
 
+/* ------------------------------------------------- busy agent: queue, never drop */
+
+describe("an agent busy on the role", () => {
+  test("a request behind a run waiting on a person is queued, said honestly, and starts when it ends", async () => {
+    const first = await confirming();
+    await desk.continueWithRole(first, recruiter, existingReq);
+    const [parked] = (await runsOf(first.id)).filter((r) => r.agentType === "intake");
+    expect(parked).toBeDefined();
+    // The run now waits on a person's decision.
+    await db
+      .update(agentRuns)
+      .set({ status: "awaiting_human" })
+      .where(eq(agentRuns.id, parked!.id));
+    await db
+      .insert(agentTasks)
+      .values({ orgId, runId: parked!.id, kind: "clarification", title: "Which weights?" });
+
+    const second = await confirming();
+    await desk.continueWithRole(second, recruiter, existingReq);
+    expect((await runsOf(second.id)).filter((r) => r.agentType === "intake")).toHaveLength(0);
+    const said = (await messages(second.id)).at(-1)!;
+    expect(said.body).toContain('waiting on you for "Which weights?"');
+    expect(said.body).toContain("queued");
+    expect(said.body).not.toMatch(/I've asked/);
+    expect(said.card).toMatchObject({ type: "queued_work", state: "waiting", agentType: "intake" });
+
+    // Asking again does not stack a second queued request.
+    await desk.continueWithRole(await reload(second.id), recruiter, existingReq);
+    const queued = (await messages(second.id)).filter(
+      (m) => (m.card as { type?: string } | null)?.type === "queued_work",
+    );
+    expect(queued).toHaveLength(1);
+
+    // Still busy: draining starts nothing.
+    expect(await desk.drainQueuedWork(orgId)).toBe(0);
+    // The person decides; the run ends — the queued request starts.
+    await db.update(agentRuns).set({ status: "done" }).where(eq(agentRuns.id, parked!.id));
+    expect(await desk.drainQueuedWork(orgId)).toBe(1);
+    expect((await runsOf(second.id)).filter((r) => r.agentType === "intake")).toHaveLength(1);
+    const after = await messages(second.id);
+    expect((after.find((m) => m.id === said.id)!.card as { state: string }).state).toBe("started");
+    expect(after.at(-1)!.body).toMatch(/Intake & matching agent/);
+    expect(await desk.drainQueuedWork(orgId)).toBe(0); // started once, not again
+  });
+});
+
 /* -------------------------------------------------------------- screening */
 
 describe("talk to the first N", () => {
