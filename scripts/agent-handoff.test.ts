@@ -1315,3 +1315,108 @@ describe("work for an agent that is busy on the same candidate", () => {
     expect(pendingHeld.length).toBeLessThanOrEqual(1);
   });
 });
+
+describe("work for an agent that is busy on the same role", () => {
+  test("role-level work is held behind a run waiting on a person, merged, said in the thread, then starts once", async () => {
+    await setAgent("jd", true);
+    await db
+      .delete(agentPolicies)
+      .where(and(eq(agentPolicies.orgId, orgId), eq(agentPolicies.agentType, "*" as never)));
+    await settleRuns();
+    await db
+      .update(requisitions)
+      .set({ status: "approved" } as never)
+      .where(eq(requisitions.id, reqId));
+    await db.delete(agentEvents).where(eq(agentEvents.orgId, orgId));
+    const [conv] = await db
+      .insert(hiringConversations)
+      .values({ orgId, createdBy: hrId, requisitionId: reqId, status: "active" } as never)
+      .returning({ id: hiringConversations.id });
+    // A JD agent run on the role, waiting on a person.
+    const { runId: busy } = await startRun({
+      orgId,
+      agentType: "jd",
+      principalUserId: hrId,
+      goal: "Draft the job description.",
+      subjectType: "requisition",
+      subjectId: reqId,
+    });
+    await db
+      .update(agentRuns)
+      .set({ status: "awaiting_human" } as never)
+      .where(eq(agentRuns.id, busy));
+    await db.insert(agentTasks).values({
+      orgId,
+      runId: busy,
+      kind: "clarification",
+      status: "open",
+      title: "Which template?",
+    } as never);
+
+    const since = new Date();
+    const changes = (comment: string) =>
+      emitAgentEvent({
+        orgId,
+        type: "jd.changes_requested",
+        subjectType: "requisition",
+        subjectId: reqId,
+        actorUserId: hrId,
+        payload: { comment },
+      });
+    await changes("Shorter, please");
+    await changes("Add on-call duties");
+    // An event the busy run caused itself is covered by it: not held.
+    await db.insert(agentEvents).values({
+      orgId,
+      type: "jd.changes_requested",
+      subjectType: "requisition",
+      subjectId: reqId,
+      actorUserId: hrId,
+      sourceRunId: busy,
+      payload: { comment: "from the run itself" },
+    } as never);
+    await processAgentEvents({ orgId });
+
+    const jdRuns = async () =>
+      (await runsSince(since)).filter((r) => r.agentType === "jd" && r.id !== busy);
+    expect(await jdRuns()).toHaveLength(0);
+    const held = await db
+      .select()
+      .from(agentEvents)
+      .where(and(eq(agentEvents.orgId, orgId), eq(agentEvents.type, "agent.dispatch_deferred")));
+    expect(held).toHaveLength(1); // merged into one item
+    expect(held[0]).toMatchObject({
+      status: "pending",
+      subjectType: "requisition",
+      subjectId: reqId,
+    });
+    const goal = String((held[0]!.payload as { goal?: string }).goal);
+    expect(goal).toContain("Shorter, please");
+    expect(goal).toContain("Add on-call duties");
+    expect(goal).not.toContain("from the run itself");
+    const said = await db
+      .select({ body: hiringMessages.body })
+      .from(hiringMessages)
+      .where(eq(hiringMessages.conversationId, conv!.id));
+    expect(said.map((m) => m.body)).toContain(
+      'The JD agent is waiting on you for "Which template?", so new work for it is queued — it starts as soon as that is done.',
+    );
+
+    // Still busy: it waits, without counting as a failure.
+    await processAgentEvents({ orgId });
+    expect(await jdRuns()).toHaveLength(0);
+
+    // The person decides; the run ends — the held work starts, once.
+    await db
+      .update(agentRuns)
+      .set({ status: "done" } as never)
+      .where(eq(agentRuns.id, busy));
+    await processAgentEvents({ orgId });
+    const started = await jdRuns();
+    expect(started).toHaveLength(1);
+    expect(started[0]!.goal).toContain("Add on-call duties");
+    await processAgentEvents({ orgId });
+    expect(await jdRuns()).toHaveLength(1);
+    await db.delete(hiringConversations).where(eq(hiringConversations.id, conv!.id));
+  });
+});
