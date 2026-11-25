@@ -1,13 +1,15 @@
 import * as React from "react";
 
 import type { TemplateEntry } from "./registry";
-import { EmailLayout, layoutStyles } from "./email-layout";
+import { EmailAction, EmailLayout, layoutStyles } from "./email-layout";
 
 interface Props {
   candidateName?: string;
   orgName?: string;
   /** One or more role titles, already joined ("Data Engineer and ML Engineer"). */
   jobTitle?: string;
+  /** The role's public page (the first role when several matched). */
+  roleUrl?: string;
   optOutUrl?: string;
 }
 
@@ -21,6 +23,7 @@ const Email = ({
   candidateName,
   orgName = "the hiring team",
   jobTitle = "an open role",
+  roleUrl,
   optOutUrl,
 }: Props) => (
   <EmailLayout
@@ -34,6 +37,7 @@ const Email = ({
       <strong>{jobTitle}</strong> role. The recruiting team is reviewing it now and will write to
       you as things progress.
     </p>
+    {roleUrl ? <EmailAction href={roleUrl} label="View the role" /> : null}
     <p style={text}>
       If you are interested, there is nothing you need to do. If you are not looking right now,
       simply reply and we will withdraw your profile from this role.
@@ -57,6 +61,7 @@ export const template = {
     candidateName: "Asha",
     orgName: "Yavar TechWorks",
     jobTitle: "Data Engineer",
+    roleUrl: "https://example.com/apply/abc",
     optOutUrl: "https://example.com/api/public/contact-preferences?t=abc",
   },
 } satisfies TemplateEntry;

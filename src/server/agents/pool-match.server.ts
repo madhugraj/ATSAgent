@@ -214,6 +214,7 @@ async function introduce(
 ) {
   const { enqueueEmail } = await import("@/lib/email-outbox.server");
   const { optOutUrl } = await import("@/lib/pool-contact.server");
+  const { applyUrl } = await import("./sourcing.server");
   const [org] = await db
     .select({ name: organizations.name })
     .from(organizations)
@@ -242,6 +243,7 @@ async function introduce(
         candidateName: p.name,
         orgName: org?.name ?? "the hiring team",
         jobTitle,
+        roleUrl: applyUrl(reqIds[0]!, "pool_match_intro"),
         optOutUrl: optOutUrl(candidateId),
       },
     }).catch((e) => console.error("[pool-match] intro email not queued:", e));
