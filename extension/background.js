@@ -11,7 +11,11 @@
  * and stops the moment the recruiter presses Stop.
  */
 
-const MAX_PROFILES = 40;
+const DEFAULT_LIMIT = 40;
+const HARD_LIMIT = 100;
+const MAX_PAGES = 10;
+/** Where the sweep reads people from. Only applicants carry a CV file. */
+const SOURCES = ["applicants", "recommended", "search"];
 const PACE = {
   safe: [7000, 13000],
   balanced: [3000, 6000],
@@ -858,7 +862,8 @@ async function downloadResumeFromButton(tabId, expectedName) {
 }
 
 /** Collect applicant/profile links from a Recruiter list page. */
-function collectApplicantLinks() {
+function collectApplicantLinks(source = "applicants") {
+  const sourced = source !== "applicants";
   const out = [];
   const seen = new Set();
   const current = new URL(location.href);
@@ -872,7 +877,7 @@ function collectApplicantLinks() {
     const publicProfile = /linkedin\.com\/in\//i.test(href);
     if (!recruiterProfile && !publicProfile) continue;
     const row = a.closest("li, tr, article, [role=row], [data-test-applicant-row]");
-    if (publicProfile) {
+    if (publicProfile && !sourced) {
       const explicitApplicantRow = Boolean(
         row &&
         !row.closest("aside") &&
@@ -885,7 +890,12 @@ function collectApplicantLinks() {
     const targetProject = target.searchParams.get("project");
     if (currentProject && targetProject && targetProject !== currentProject) continue;
     if (recruiterProfile && currentProject && !targetProject) continue;
-    if (/recommended|suggested|similar/i.test(a.closest("section, aside")?.innerText || ""))
+    if (publicProfile && sourced && (!row || row.closest("aside"))) continue;
+    // On the applicant list, recommendation panels are someone else's list.
+    if (
+      !sourced &&
+      /recommended|suggested|similar/i.test(a.closest("section, aside")?.innerText || "")
+    )
       continue;
     const clean = href.split("#")[0];
     if (seen.has(clean)) continue;
@@ -976,6 +986,7 @@ async function fileApplicant({
   requisitionId,
   candidateName,
   profileOnly = false,
+  sourced = false,
 }) {
   const payload = {
     kind: "cv",
@@ -985,6 +996,7 @@ async function fileApplicant({
     publicProfileUrl: page.publicProfileUrl || null,
     candidateName: candidateName || null,
     profileOnly,
+    sourced,
     ...(page.resume ? { file: page.resume } : {}),
     ...(requisitionId ? { requisitionId } : {}),
   };
@@ -1002,32 +1014,99 @@ async function tally(result) {
   });
 }
 
-/** Walk LinkedIn's virtual list and retain each applicant's exact profile URL. */
-async function gatherApplicantLinks(tabId) {
+/**
+ * Press the list's own "Next" page control, if there is one and it is enabled.
+ * Returns the first profile link before the click so the caller can tell when
+ * the new page has replaced the old one.
+ */
+function clickNextPage() {
+  const controls = [
+    ...document.querySelectorAll(
+      'button[aria-label*="next" i], a[aria-label*="next" i], [data-test-pagination-next], button, a[role="button"]',
+    ),
+  ];
+  const next = controls.find((el) => {
+    const label = `${el.getAttribute("aria-label") || ""} ${el.innerText || ""}`.trim();
+    if (!/^next\b|next page|\bnext$/i.test(label)) return false;
+    if (el.disabled || el.getAttribute("aria-disabled") === "true") return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  });
+  if (!next) return { ok: false, marker: null };
+  const marker =
+    document.querySelector('a[href*="/talent/"][href*="/profile"], a[href*="linkedin.com/in/"]')
+      ?.href || null;
+  next.scrollIntoView({ block: "center" });
+  next.click();
+  return { ok: true, marker };
+}
+
+function firstProfileHref() {
+  return (
+    document.querySelector('a[href*="/talent/"][href*="/profile"], a[href*="linkedin.com/in/"]')
+      ?.href || null
+  );
+}
+
+const LIST_NAME = {
+  applicants: "the applicant list",
+  recommended: "recommended matches",
+  search: "the search results",
+};
+
+/**
+ * Walk LinkedIn's virtual list — and its following pages — retaining each
+ * person's exact profile URL, up to the run's limit.
+ */
+async function gatherApplicantLinks(tabId, source = "applicants", limit = DEFAULT_LIMIT) {
   const links = [];
   const seen = new Set();
-  for (let pass = 0; pass < 16 && links.length < MAX_PROFILES; pass += 1) {
-    if (await stopRequested()) return links;
-    const batch = (await run(tabId, collectApplicantLinks).catch(() => [])) ?? [];
-    let added = 0;
-    for (const item of batch) {
-      if (!item?.url || seen.has(item.url)) continue;
-      seen.add(item.url);
-      links.push(item);
-      added += 1;
+  const listName = LIST_NAME[source] || LIST_NAME.applicants;
+  for (let page = 1; page <= MAX_PAGES && links.length < limit; page += 1) {
+    for (let pass = 0; pass < 16 && links.length < limit; pass += 1) {
+      if (await stopRequested()) return links;
+      const batch = (await run(tabId, collectApplicantLinks, [source]).catch(() => [])) ?? [];
+      let added = 0;
+      for (const item of batch) {
+        if (!item?.url || seen.has(item.url)) continue;
+        seen.add(item.url);
+        links.push(item);
+        added += 1;
+      }
+      await setRun({
+        note: `Reading ${listName}, page ${page} — ${links.length} found so far…`,
+      });
+      const scrolled = await run(tabId, rowScan, ["scroll"]).catch(() => null);
+      if (!scrolled?.moved && added === 0) break;
+      if (!(await interruptibleSleep(900))) return links;
     }
-    await setRun({ note: `Reading the applicant list — ${links.length} found so far…` });
-    const scrolled = await run(tabId, rowScan, ["scroll"]).catch(() => null);
-    if (!scrolled?.moved && added === 0) break;
-    if (!(await interruptibleSleep(900))) return links;
+    if (links.length >= limit) break;
+    const turned = await run(tabId, clickNextPage).catch(() => null);
+    if (!turned?.ok) break;
+    // Wait for the next page to replace this one, at human pace.
+    let changed = false;
+    for (let t = 0; t < 20; t += 1) {
+      if (!(await interruptibleSleep(600))) return links;
+      const first = await run(tabId, firstProfileHref).catch(() => null);
+      if (first && first !== turned.marker) {
+        changed = true;
+        break;
+      }
+    }
+    if (!changed) break;
+    if (!(await interruptibleSleep(jitter([1500, 3000])))) return links;
   }
-  return links.slice(0, MAX_PROFILES);
+  return links.slice(0, limit);
 }
 
 /* -------------------------------------------------------------------- sweep */
 
-async function sweep({ site, token, pace, tabId, captureJd }) {
+async function sweep({ site, token, pace, tabId, captureJd, source, limit }) {
   let requisitionId = null;
+  source = SOURCES.includes(source) ? source : "applicants";
+  // Only applicants have a CV on LinkedIn; everyone else is a sourced profile.
+  const sourced = source !== "applicants";
+  limit = Math.min(HARD_LIMIT, Math.max(1, Number(limit) || DEFAULT_LIMIT));
   // Use the Recruiter tab the HR user opened. LinkedIn changes its address to
   // the selected applicant, which makes the sweep visible and gives ATSIQ the
   // exact Recruiter profile link for every candidate.
@@ -1061,12 +1140,12 @@ async function sweep({ site, token, pace, tabId, captureJd }) {
   // Keep exact profile URLs before leaving the virtualised applicant list. A
   // hard navigation per person prevents LinkedIn's previous detail panel (and
   // its CV button) from being reused for the next applicant.
-  const queue = await gatherApplicantLinks(workTabId);
+  const queue = await gatherApplicantLinks(workTabId, source, limit);
   await setRun({
     total: queue.length,
     note: queue.length
-      ? `${queue.length} applicants found — opening each profile directly…`
-      : "No applicant profile links were found — open the applicant list for one job and try again.",
+      ? `${queue.length} ${sourced ? "profiles" : "applicants"} found — opening each profile directly…`
+      : `No profile links were found on ${LIST_NAME[source]} — open it for one job and try again.`,
   });
 
   for (let i = 0; i < queue.length; i += 1) {
@@ -1114,7 +1193,22 @@ async function sweep({ site, token, pace, tabId, captureJd }) {
         page.publicProfileUrl || null,
       ]).catch(() => null);
       if (deep?.text && deep.text.length > (page.text?.length ?? 0)) page.text = deep.text;
-      if (!page.resume) {
+      if (sourced) {
+        // A sourced person has not applied and has no CV on LinkedIn: file the
+        // profile text, marked as sourced, never as an application with a CV.
+        page.resume = null;
+        await tally(
+          await fileApplicant({
+            site,
+            token,
+            page,
+            requisitionId,
+            candidateName,
+            profileOnly: true,
+            sourced: true,
+          }),
+        );
+      } else if (!page.resume) {
         try {
           page.resume = await downloadResumeFromButton(workTabId, candidateName);
         } catch (downloadError) {
@@ -1140,7 +1234,8 @@ async function sweep({ site, token, pace, tabId, captureJd }) {
           continue;
         }
       }
-      await tally(await fileApplicant({ site, token, page, requisitionId, candidateName }));
+      if (!sourced)
+        await tally(await fileApplicant({ site, token, page, requisitionId, candidateName }));
     } catch (e) {
       if (await stopRequested()) {
         await setRun({ running: false, note: "Stopped." });
@@ -1166,7 +1261,7 @@ async function sweep({ site, token, pace, tabId, captureJd }) {
   const done = await getRun();
   await setRun({
     running: false,
-    note: `Finished — ${done?.imported ?? 0} filed, ${done?.skipped ?? 0} without a readable CV, ${
+    note: `Finished — ${done?.imported ?? 0} filed${sourced ? " as sourced profiles" : ""}, ${done?.skipped ?? 0} ${sourced ? "not stored" : "without a readable CV"}, ${
       done?.failed ?? 0
     } skipped.`,
   });

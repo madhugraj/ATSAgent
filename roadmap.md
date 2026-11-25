@@ -235,6 +235,7 @@ Plan: `docs/org-context-agent-plan.md` (decided 2026-10-27; O0 built 2026-10-27,
 ## Distribution agent (2026-10-21)
 
 - [x] Hand posting with the companion (2026-10-22): the Distribution agent 1.1.0 plans roles for portals a person posts on ("waiting to be posted"); ATSIQ Capture 1.16.0 on Internshala and Apna lists them, fills the portal's form in the person's own signed-in browser (never submits), records the posting from the portal's own listing page, and sends applicants into the role credited to the portal (`/api/public/distribution`, capture `channel`); the daily check chases postings still waiting after 2 days
+- [x] Recruiter sweep sources (2026-11-25): ATSIQ Capture 1.17.0 sweeps Applicants, Recommended matches or Search results / pipeline, page by page (Next), up to 25 / 40 / 100 people per run at human pace; recommended matches and search leads have no CV on LinkedIn, so they are filed as profile text with source `linkedin_sourced` ("Sourced on LinkedIn (has not applied)") — never as an application with a CV
 - [ ] Partner portals (Naukri, Indeed, LinkedIn) handed to the Distribution agent once partner access is approved
 
 - [x] Distribution agent v1.0.0 (owner HR head): advertises approved roles across the job portals by the route each allows — requests feed listings (HR head approves; pre-approvable per feed for Autonomous), reminds a person to post where no integration exists with the role's ready text — and runs a daily check: CVs arriving by portal, listings quiet for a week, unread careers-inbox mail, portal CVs with no role

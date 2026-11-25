@@ -170,13 +170,25 @@
 
     <hr />
 
-    <h2>Guided applicant sweep</h2>
+    <h2>Guided Recruiter sweep</h2>
     <p class="hint" style="margin-top: 0">
-      Open your Recruiter applicant list for one job, then press Start. Each exact profile is opened
-      in turn in your browser. ATSIQ reads the active profile, finds its CV in Highlights or
-      Attachments, stores the original file, captures the public profile and verifies it. Up to 40
-      per run.
+      Open the list in Recruiter, then press Start. Applicants bring their CV; recommended matches
+      and search leads come in as sourced profiles.
     </p>
+
+    <label for="source">Sweep</label>
+    <select id="source">
+      <option value="applicants">Applicants</option>
+      <option value="recommended">Recommended matches</option>
+      <option value="search">Search results or pipeline</option>
+    </select>
+
+    <label for="limit">Up to</label>
+    <select id="limit">
+      <option value="25">25 people</option>
+      <option value="40">40 people</option>
+      <option value="100">100 people</option>
+    </select>
 
     <label for="pace">Pace</label>
     <select id="pace">
