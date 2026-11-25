@@ -88,6 +88,7 @@ import {
   scoreDeskCandidates,
   startDeskStage,
   screenDeskCandidates,
+  addDeskPoolCandidates,
   sendDeskMessage,
   startDeskConversation,
   type DeskCardView,
@@ -1929,6 +1930,8 @@ function Card({
     return <HiringManagerOptionsCard card={card} conv={conv} onChanged={onChanged} />;
   if (card.type === "ranked_candidates")
     return <RankedCard card={card} conv={conv} onChanged={onChanged} />;
+  if (card.type === "pool_matches")
+    return <PoolMatchesCard card={card} conv={conv} onChanged={onChanged} />;
   if (card.type === "task") return <TaskCard card={card} conv={conv} onChanged={onChanged} />;
   if (card.type === "screening_result")
     return (
@@ -2081,6 +2084,99 @@ type RankedItem = {
   missing: string[];
   risks: number;
 };
+
+type PoolPickView = {
+  candidateId: string;
+  name: string;
+  experienceYears: number;
+  location: string | null;
+  why: string;
+  inBand: boolean;
+};
+
+/** People from a pool search: pick who joins the pipeline; they're scored and ranked next. */
+function PoolMatchesCard({
+  card,
+  conv,
+  onChanged,
+}: {
+  card: DeskCardView;
+  conv: DeskConversationView;
+  onChanged: () => void;
+}) {
+  const items = (card["items"] as unknown as PoolPickView[]) ?? [];
+  const [picked, setPicked] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const toggle = (id: string, on: boolean) =>
+    setPicked((p) => (on ? [...p, id] : p.filter((x) => x !== id)));
+  async function add(ids: string[]) {
+    setBusy(true);
+    try {
+      const r = await addDeskPoolCandidates({ data: { id: conv.id, candidateIds: ids } });
+      toast.success(`${r.added} ${r.added === 1 ? "candidate" : "candidates"} added and scored`);
+      setPicked([]);
+      setDone(true);
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not add the candidates");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="overflow-x-auto rounded-lg border border-border">
+      <table className="w-full text-sm">
+        <thead className="text-left text-xs text-muted-foreground">
+          <tr className="border-b border-border">
+            <th className="w-8 px-2 py-2" />
+            <th className="px-2 py-2 font-medium">#</th>
+            <th className="px-2 py-2 font-medium">Candidate</th>
+            <th className="px-2 py-2 font-medium">Why they match</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((r, i) => (
+            <tr key={r.candidateId} className="border-b border-border/60 align-top">
+              <td className="px-2 py-2">
+                <Checkbox
+                  checked={picked.includes(r.candidateId)}
+                  disabled={done}
+                  onCheckedChange={(v) => toggle(r.candidateId, Boolean(v))}
+                  aria-label={`Select ${r.name}`}
+                />
+              </td>
+              <td className="num px-2 py-2 text-muted-foreground">{i + 1}</td>
+              <td className="px-2 py-2">
+                <p className="font-medium">{r.name}</p>
+                <p className="text-xs text-muted-foreground">
+                  {r.experienceYears} yrs{r.location ? ` · ${r.location}` : ""}
+                  {r.inBand ? "" : " · outside the experience band"}
+                </p>
+              </td>
+              <td className="px-2 py-2 text-xs">{r.why}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {done ? null : (
+        <div className="flex flex-wrap gap-2 border-t border-border p-2">
+          <Button size="sm" disabled={busy || !picked.length} onClick={() => add(picked)}>
+            {busy ? "Adding and scoring…" : `Add selected (${picked.length})`}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => add(items.map((i) => i.candidateId))}
+          >
+            Add all {items.length}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function RankedCard({
   card,

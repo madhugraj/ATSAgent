@@ -67,6 +67,16 @@ export const deskScenarios: DeskScenario[] = [
     message: "any more profiles for this role?",
     expect: { type: "search_pool" },
   },
+  {
+    name: "pool: any more potential candidates",
+    message: "I want to know if there are any more potential candidates in the pool",
+    expect: { type: "search_pool" },
+  },
+  {
+    name: "pool: anyone else suitable",
+    message: "is there anyone else suitable for this role?",
+    expect: { type: "search_pool" },
+  },
   // Adding from a pool search
   {
     name: "pool add: add them",

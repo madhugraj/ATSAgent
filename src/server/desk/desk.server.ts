@@ -1076,12 +1076,30 @@ export async function postRankedList(conv: Conversation): Promise<void> {
   });
 }
 
-/** "Show me the candidates" / "who is shortlisted?": the pipeline as a ranked card, with names. */
+/** Score anyone in the role's pipeline still unscored, so lists rank everyone. */
+async function scorePipeline(conv: Conversation): Promise<number> {
+  if (!conv.requisitionId) return 0;
+  const { scoreUnscored } = await import("@/lib/autoscore.server");
+  try {
+    const r = await scoreUnscored({
+      orgId: conv.orgId,
+      requisitionId: conv.requisitionId,
+      limit: 25,
+    });
+    return r.scored;
+  } catch (e) {
+    log.warn("desk.score_pipeline_failed", { org_id: conv.orgId, error: String(e) });
+    return 0;
+  }
+}
+
+/** "Show me the candidates" / "who is shortlisted?": the pipeline as a ranked card to pick from. */
 export async function showCandidates(conv: Conversation, stage?: string): Promise<void> {
   if (!conv.requisitionId) {
     await postMessage(conv, { role: "desk", body: "There is no role yet, so no candidates." });
     return;
   }
+  const scored = await scorePipeline(conv);
   const items = await rankedCandidates(conv.orgId, conv.requisitionId, 50, stage);
   const { STAGE_LABEL } = await import("@/lib/lifecycle");
   const where = stage ? ` at ${STAGE_LABEL[stage as Stage] ?? stage}` : " in this role's pipeline";
@@ -1094,16 +1112,25 @@ export async function showCandidates(conv: Conversation, stage?: string): Promis
   }
   await postMessage(conv, {
     role: "desk",
-    body: `${plural(items.length, "candidate")}${where}, best first: ${items
-      .map((i) => `${i.rank}. ${i.name}${i.score != null ? ` (${i.score})` : ""}`)
-      .join(", ")}.`,
+    body: `${plural(items.length, "candidate")}${where}, best first${scored ? ` (${scored} newly scored)` : ""}.`,
     card: { type: "ranked_candidates", requisitionId: conv.requisitionId, items },
   });
 }
 
-type PoolPick = { candidateId: string; name: string };
+export type PoolPick = {
+  candidateId: string;
+  name: string;
+  experienceYears: number;
+  location: string | null;
+  why: string;
+  inBand: boolean;
+};
 
-/** "Any other matching CVs in the pool?": search the talent pool for people not yet in this pipeline. */
+/**
+ * "Any more potential candidates in the pool?": score anyone in the pipeline
+ * still unscored (they are potential matches too), then search the talent pool
+ * for people not yet in it. Both come back as lists to pick from.
+ */
 export async function searchPoolFromDesk(conv: Conversation): Promise<void> {
   if (!conv.requisitionId) {
     await postMessage(conv, {
@@ -1111,6 +1138,18 @@ export async function searchPoolFromDesk(conv: Conversation): Promise<void> {
       body: "Let's settle the role first, then I'll search the pool.",
     });
     return;
+  }
+  const scored = await scorePipeline(conv);
+  if (scored) {
+    await postMessage(conv, {
+      role: "desk",
+      body: `${plural(scored, "candidate")} in the pipeline had no score yet — scored now. The pipeline, best first:`,
+      card: {
+        type: "ranked_candidates",
+        requisitionId: conv.requisitionId,
+        items: await rankedCandidates(conv.orgId, conv.requisitionId, 50),
+      },
+    });
   }
   const { searchTalentPool } = await import("../agents/talent-search.server");
   let r: Awaited<ReturnType<typeof searchTalentPool>>;
@@ -1127,33 +1166,40 @@ export async function searchPoolFromDesk(conv: Conversation): Promise<void> {
   if (!r.matches.length) {
     await postMessage(conv, {
       role: "desk",
-      body: `I searched the talent pool${searched ? ` for ${searched}` : ""} and found no one else who matches and isn't already in this role's pipeline.`,
+      body: `No one else in the talent pool matches${searched ? ` ${searched}` : ""} outside this role's pipeline.`,
       card: { type: "bring_candidates", requisitionId: conv.requisitionId, found: 0 },
     });
     return;
   }
-  const items: PoolPick[] = r.matches.map((m) => ({ candidateId: m.candidateId, name: m.name }));
+  const items: PoolPick[] = r.matches.map((m) => ({
+    candidateId: m.candidateId,
+    name: m.name,
+    experienceYears: m.experienceYears,
+    location: m.location,
+    why: m.why,
+    inBand: m.inBand,
+  }));
   await postMessage(conv, {
     role: "desk",
-    body: [
-      `${plural(r.matches.length, "more person", "more people")} in the talent pool match${searched ? ` (searched for ${searched})` : ""} and aren't in this pipeline yet:`,
-      ...r.matches.map(
-        (m, i) =>
-          `${i + 1}. ${m.name} — ${m.experienceYears} yrs${m.location ? `, ${m.location}` : ""}${m.inBand ? "" : " (outside the experience band)"}: ${m.why}`,
-      ),
-      'Say "add them" (or name the ones you want) to add them to the pipeline and score them.',
-    ].join("\n"),
+    body: `${plural(items.length, "more person", "more people")} in the talent pool match and aren't in this pipeline yet. Pick who to add — they're scored and join the list.`,
     card: { type: "pool_matches", requisitionId: conv.requisitionId, items },
   });
 }
 
-/** "Add them" after a pool search: the person's pick is the decision; add as that person, then score. */
+/** Adding from a pool search: the person's pick is the decision; add as that person, then score. */
 export async function addFromPoolDesk(
   conv: Conversation,
   userId: string,
-  cmd: { names?: string[] | undefined; all?: boolean | undefined },
-): Promise<void> {
-  const say = (body: string) => postMessage(conv, { role: "desk", body });
+  cmd: {
+    names?: string[] | undefined;
+    all?: boolean | undefined;
+    candidateIds?: string[] | undefined;
+  },
+): Promise<number> {
+  const say = async (body: string) => {
+    await postMessage(conv, { role: "desk", body });
+    return 0;
+  };
   if (!conv.requisitionId) return say("Let's settle the role first.");
   const [m] = await db
     .select({ card: hiringMessages.card })
@@ -1169,13 +1215,15 @@ export async function addFromPoolDesk(
   const found = ((m?.card as { items?: PoolPick[] } | null)?.items ?? []) as PoolPick[];
   if (!found.length) return say('Search the pool first — say "search the pool".');
   const wanted = cmd.names?.map((n) => n.toLowerCase()) ?? [];
-  const pick =
-    cmd.all || !wanted.length
+  // Only people from the latest pool search can be added this way.
+  const pick = cmd.candidateIds?.length
+    ? found.filter((f) => cmd.candidateIds!.includes(f.candidateId))
+    : cmd.all || !wanted.length
       ? found
       : found.filter((f) => wanted.some((w) => f.name.toLowerCase().includes(w)));
   if (!pick.length)
     return say(
-      `None of those names are in the last pool search: ${found.map((f) => f.name).join(", ")}.`,
+      `None of those are in the last pool search: ${found.map((f) => f.name).join(", ")}.`,
     );
   const { activeOrgOf } = await import("@/lib/auth.middleware");
   const org = await activeOrgOf(userId);
@@ -1194,6 +1242,7 @@ export async function addFromPoolDesk(
     `Added ${plural(r.added, "candidate")} to the pipeline${r.skipped.length ? ` (skipped ${r.skipped.map((s) => `${s.name}: ${s.reason}`).join("; ")})` : ""}. Scoring them now.`,
   );
   if (r.added) await scoreAndRank(conv, userId);
+  return r.added;
 }
 
 /** Resolve "the first 5" / ranks against the latest ranked list in the thread. */

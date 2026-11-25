@@ -501,6 +501,25 @@ export const screenDeskCandidates = createServerFn({ method: "POST" })
     return { screening: n };
   });
 
+/** Add people picked from a pool search to the role's pipeline; they are then scored and ranked. */
+export const addDeskPoolCandidates = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        candidateIds: z.array(z.string().uuid()).min(1).max(20),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    await registered();
+    const { addFromPoolDesk } = await import("../server/desk/desk.server");
+    const added = await addFromPoolDesk(conv, context.userId, { candidateIds: data.candidateIds });
+    return { added };
+  });
+
 export const closeDeskConversation = createServerFn({ method: "POST" })
   .middleware([requireOrg])
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
