@@ -407,6 +407,7 @@ erDiagram
     text website_url "nullable"
     text x_url "nullable"
     boolean consent_given
+    timestamptz contact_opt_out_at "nullable"
     timestamptz ai_call_opt_out_at "nullable"
     timestamptz created_at
     timestamptz role_match_checked_at "nullable"
@@ -1525,7 +1526,7 @@ erDiagram
 | `candidate_ownership_events` | Candidates & pipeline | 8 | — |
 | `candidate_referrals` | Candidates & pipeline | 11 | — |
 | `candidate_verifications` | Candidates & pipeline | 11 | — |
-| `candidates` | Candidates & pipeline | 43 | — |
+| `candidates` | Candidates & pipeline | 44 | — |
 | `capture_events` | Sourcing & integrations | 10 | — |
 | `comp_knowledge` | Intelligence | 17 | — |
 | `compensation_details` | — | 19 | — |

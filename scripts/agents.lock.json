@@ -92,8 +92,8 @@
     "hash": "98ed1fd50a4d432bb58ba0b4b452338f862bee967b68d7a72a6dcfdd2744eda1"
   },
   "sourcing": {
-    "version": "1.0.5",
-    "hash": "347fa5876b9523b0d7ccba0ff0ab5422eef399a25c0e17984fbe2a4102f947b5"
+    "version": "1.0.6",
+    "hash": "6dbd8e12343fe2d786723709ad799f8a7f881131710b2c759027a1d99ca7330f"
   },
   "voice_guard": {
     "version": "1.4.1",

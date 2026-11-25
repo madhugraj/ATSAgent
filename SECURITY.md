@@ -204,6 +204,12 @@ never while in approval (send it back for changes instead) or once closed; they 
 change is audited with its before and after values. Sending a requisition back for changes is limited to
 the current approver, its raiser and HR leadership, and is recorded on its approval trail.
 
+A talent-pool member's opt-out link (`/api/public/contact-preferences?t=<token>`) carries an HMAC
+of the candidate id signed with `SESSION_SECRET` (constant-time compare). GET only shows a confirm
+button, so mail scanners that prefetch links change nothing; POST records the opt-out, suppresses
+queued invitations and introductions and appends `candidate.contact_opt_out` to `audit_log`. It is
+rate-limited with every `/api/public` path.
+
 The candidate's pay discussion page (`/negotiate/<token>`) is public in the same way: a 64-hex token
 issued only when a person approved the message, showing that message, the proposed figure and its
 levers; it records one answer (accept, another figure, a call) — claimed in the update itself —

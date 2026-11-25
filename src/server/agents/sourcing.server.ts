@@ -9,8 +9,8 @@
  * - roleTraction: applicants by channel, the last 7 days, shortlist depth and
  *   whether the role is starving, by explicit thresholds (SOURCING).
  * - pastCandidates: people who did well for other roles (reached a shortlist
- *   or an interview, or were held in reserve), consented, are not in this
- *   pipeline and were not invited for it recently — ranked against this
+ *   or an interview, or were held in reserve), consented, did not opt out,
+ *   are not in this pipeline and were not emailed about any role recently — ranked against this
  *   role's must-haves.
  */
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -25,6 +25,7 @@ import {
 } from "@db/schema";
 import { env } from "../env";
 import { trackedApplyUrl } from "@/lib/job-channels";
+import { OUTREACH } from "@/lib/pool-contact.server";
 
 /** Explicit thresholds, so every "starving" verdict is explainable. */
 export const SOURCING = {
@@ -286,11 +287,15 @@ export async function pastCandidates(
     join requisitions rq on rq.id = a.requisition_id
     where a.org_id = ${orgId} and c.org_id = ${orgId}
       and a.requisition_id <> ${requisitionId}
-      and a.stage in (${sql.join(
+      and (a.stage in (${sql.join(
         STRONG_PAST_STAGES.map((s) => sql`${s}`),
         sql`, `,
       )})
+        -- Turned down after an interview round: the rejection email says we may write again.
+        or (a.stage = 'rejected' and exists (
+          select 1 from stage_events e where e.application_id = a.id and e.to_stage in ('l1','l2','l3'))))
       and c.consent_given
+      and c.contact_opt_out_at is null
       and c.pool_use = 'pool'
       and not exists (select 1 from applications x where x.candidate_id = c.id and x.requisition_id = ${requisitionId})
       and not exists (
@@ -300,6 +305,14 @@ export async function pastCandidates(
         select 1 from email_outbox o where o.org_id = ${orgId} and o.kind = 'role_invite'
           and o.idempotency_key like ${`role_invite:${requisitionId}:`} || c.id::text || ':%'
           and o.created_at >= now() - make_interval(days => ${SOURCING.reinviteDays})
+      )
+      -- One invitation or introduction per person per OUTREACH.gapDays, across every role.
+      and not exists (
+        select 1 from email_outbox o where o.org_id = ${orgId}
+          and o.kind in ('role_invite', 'pool_match_intro')
+          and o.status in ('queued', 'held', 'sent')
+          and split_part(o.idempotency_key, ':', 3) = c.id::text
+          and o.created_at >= now() - make_interval(days => ${OUTREACH.gapDays})
       )
     order by c.id, a.last_activity_at desc
     limit 300`)) as unknown as {
@@ -384,7 +397,7 @@ export async function starvingRoles(
   return out;
 }
 
-/** Candidates may be invited only if they consented, have an email and are not in the pipeline. */
+/** Candidates may be invited only if they consented, did not opt out, have an email and are not in the pipeline. */
 export async function invitable(
   orgId: string,
   requisitionId: string,
@@ -399,6 +412,7 @@ export async function invitable(
       name: candidates.fullName,
       email: candidates.email,
       consent: candidates.consentGiven,
+      optedOut: candidates.contactOptOutAt,
     })
     .from(candidates)
     .where(and(eq(candidates.orgId, orgId), inArray(candidates.id, candidateIds)));
@@ -422,6 +436,7 @@ export async function invitable(
     const c = rows.find((x) => x.id === id);
     if (!c) skipped.push({ id, reason: "not in this organisation's talent pool" });
     else if (!c.consent) skipped.push({ id, reason: "has not consented to be contacted" });
+    else if (c.optedOut) skipped.push({ id, reason: "asked not to be emailed about new roles" });
     else if (!c.email) skipped.push({ id, reason: "has no email address" });
     else if (inPipeline.has(id)) skipped.push({ id, reason: "is already in this role's pipeline" });
     else ok.push({ id, name: c.name, email: c.email });

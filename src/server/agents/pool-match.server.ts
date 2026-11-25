@@ -7,7 +7,9 @@
  * equivalents in skills or CV text, the experience band). A strong match is
  * added to that role's pipeline with source "pool_match", so the Intake &
  * matching agent scores it within minutes and the role's desk thread
- * announces it.
+ * announces it. Each person added is told once, by email, that they are being
+ * considered (pool_match_intro, with an opt-out link); people who opted out
+ * of role emails are never matched.
  *
  * Plain code, no agent run: one skill expansion per role (cached), then pure
  * matching per CV. Part of the Sourcing agent's remit, so it runs only for
@@ -18,7 +20,7 @@
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 
 import { db } from "../db";
-import { applications, candidates, requisitions } from "@db/schema";
+import { applications, candidates, organizations, requisitions } from "@db/schema";
 import { writeAudit } from "../audit";
 import { expandSkills, rankPool } from "./talent-search.server";
 
@@ -61,6 +63,8 @@ export async function matchNewCvsToRoles(orgId: string): Promise<PoolMatchResult
       skills: candidates.skills,
       resumeText: candidates.resumeText,
       currentEmployer: candidates.currentEmployer,
+      email: candidates.email,
+      consent: candidates.consentGiven,
     })
     .from(candidates)
     .where(
@@ -68,6 +72,7 @@ export async function matchNewCvsToRoles(orgId: string): Promise<PoolMatchResult
         eq(candidates.orgId, orgId),
         isNull(candidates.roleMatchCheckedAt),
         eq(candidates.isInternal, false),
+        isNull(candidates.contactOptOutAt),
         // CVs a portal limited to their own role are never matched to others (0045).
         eq(candidates.poolUse, "pool"),
         sql`${candidates.createdAt} >= now() - make_interval(days => ${POOL_MATCH.recentDays})`,
@@ -180,6 +185,8 @@ export async function matchNewCvsToRoles(orgId: string): Promise<PoolMatchResult
     }
   }
 
+  if (added.length) await introduce(orgId, added, fresh, roles);
+
   await db
     .update(candidates)
     .set({ roleMatchCheckedAt: new Date() })
@@ -193,4 +200,50 @@ export async function matchNewCvsToRoles(orgId: string): Promise<PoolMatchResult
       ),
     );
   return { checked: fresh.length, added };
+}
+
+/**
+ * Tell each person added this sweep, once, that they are being considered —
+ * one email naming every role they matched. Needs an email and consent.
+ */
+async function introduce(
+  orgId: string,
+  added: PoolMatchResult["added"],
+  people: { id: string; name: string; email: string | null; consent: boolean }[],
+  roles: { id: string; title: string }[],
+) {
+  const { enqueueEmail } = await import("@/lib/email-outbox.server");
+  const { optOutUrl } = await import("@/lib/pool-contact.server");
+  const [org] = await db
+    .select({ name: organizations.name })
+    .from(organizations)
+    .where(eq(organizations.id, orgId))
+    .limit(1);
+  const byPerson = new Map<string, string[]>();
+  for (const a of added)
+    byPerson.set(a.candidateId, [...(byPerson.get(a.candidateId) ?? []), a.requisitionId]);
+  for (const [candidateId, reqIds] of byPerson) {
+    const p = people.find((x) => x.id === candidateId);
+    if (!p?.email || !p.consent) continue;
+    const titles = reqIds
+      .map((id) => roles.find((r) => r.id === id)?.title)
+      .filter(Boolean) as string[];
+    const jobTitle =
+      titles.length <= 1
+        ? (titles[0] ?? "an open role")
+        : `${titles.slice(0, -1).join(", ")} and ${titles.at(-1)}`;
+    await enqueueEmail({
+      orgId,
+      kind: "pool_match_intro",
+      templateName: "pool_match_intro",
+      toEmail: p.email,
+      idempotencyKey: `pool_match_intro:${reqIds[0]}:${candidateId}`,
+      templateData: {
+        candidateName: p.name,
+        orgName: org?.name ?? "the hiring team",
+        jobTitle,
+        optOutUrl: optOutUrl(candidateId),
+      },
+    }).catch((e) => console.error("[pool-match] intro email not queued:", e));
+  }
 }

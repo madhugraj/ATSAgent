@@ -15,6 +15,7 @@ import { template as memberReminderTemplate } from "./member-reminder";
 import { template as agentDigestTemplate } from "./agent-digest";
 import { template as documentRequestTemplate } from "./document-request";
 import { template as roleInviteTemplate } from "./role-invite";
+import { template as poolMatchIntroTemplate } from "./pool-match-intro";
 import { template as interviewerBriefTemplate } from "./interviewer-brief";
 import { template as interviewSlotsTemplate } from "./interview-slots";
 import { template as compensationFormTemplate } from "./compensation-form";
@@ -77,6 +78,7 @@ export const TEMPLATES: Record<string, TemplateEntry> = {
   agent_digest: agentDigestTemplate,
   document_request: documentRequestTemplate,
   role_invite: roleInviteTemplate,
+  pool_match_intro: poolMatchIntroTemplate,
   interviewer_brief: interviewerBriefTemplate,
   compensation_form: compensationFormTemplate,
   offer_negotiation: offerNegotiationTemplate,

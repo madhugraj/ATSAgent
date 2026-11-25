@@ -581,3 +581,4 @@ Study in `docs/hrms-integrations-study.md`: vendor API landscape (Keka, greytHR,
 - [ ] Run current security checks and resolve release blockers (basic scan passed; dependency scan parser blocked by URL-pinned xlsx package)
 - [ ] Publish and verify the production release (after revalidation on the clean database)
 - [x] Pre-onboarding: per-employer salary breakup captured verbatim; multi-page, scanned, merged and zipped uploads read as individual documents
+- [x] Talent-pool contact: pool matches get a one-time "your profile is being considered" email (`pool_match_intro`); invitations and introductions carry a signed opt-out link that stops matching and outreach (audited, migration 0094); one outreach email per person per 14 days across roles; people turned down after an interview round can be invited again, as the rejection email says (Sourcing agent v1.0.6)

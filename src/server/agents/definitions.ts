@@ -1353,7 +1353,7 @@ export function registerPhase6Agents(): void {
     // 1.0.5: add_to_pipeline now reports `skipped` (already in the pipeline)
     // instead of failing the whole batch on the unique index;
     // search_talent_pool matches carry `inBand` and rank in-band first.
-    version: "1.0.5",
+    version: "1.0.6",
     owner: "hr_head",
     responsibility:
       "Keeps an approved, published role supplied with candidates: watches applicants by channel, tops up the pipeline from the talent pool, invites strong past candidates to apply, and says what to change when a role is starving.",

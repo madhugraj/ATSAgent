@@ -11,9 +11,10 @@ interface Props {
   applyUrl?: string;
   /** Why we thought of them (their earlier application), one short line. */
   context?: string;
+  optOutUrl?: string;
 }
 
-const { text } = layoutStyles;
+const { text, link } = layoutStyles;
 
 /** A past candidate who did well is invited to apply for a new role (approved per send). */
 const Email = ({
@@ -23,6 +24,7 @@ const Email = ({
   location,
   applyUrl,
   context,
+  optOutUrl,
 }: Props) => (
   <EmailLayout
     preview={`A new role you may like — ${jobTitle}`}
@@ -36,10 +38,14 @@ const Email = ({
       for your experience.
     </p>
     {applyUrl ? <EmailAction href={applyUrl} label="View the role and apply" /> : null}
-    <p style={text}>
-      No pressure — if the timing is not right, simply ignore this email. Reply if you would rather
-      not hear from us about future roles.
-    </p>
+    <p style={text}>No pressure — if the timing is not right, simply ignore this email.</p>
+    {optOutUrl ? (
+      <p style={text}>
+        <a href={optOutUrl} style={link}>
+          Stop emails about new roles
+        </a>
+      </p>
+    ) : null}
   </EmailLayout>
 );
 
@@ -53,6 +59,7 @@ export const template = {
     jobTitle: "UI/UX Engineer",
     location: "Remote",
     applyUrl: "https://example.com/apply/abc",
+    optOutUrl: "https://example.com/api/public/contact-preferences?t=abc",
     context: "You interviewed with us for Product Designer earlier this year.",
   },
 } satisfies TemplateEntry;
