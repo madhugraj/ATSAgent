@@ -21,7 +21,8 @@
     "eval:weights": "bun scripts/weight-eval.ts",
     "test:e2e": "bun scripts/local-e2e/e2e-check.ts",
     "bias-report": "bun scripts/bias-report.ts",
-    "prepare": "git config core.hooksPath .githooks || true"
+    "prepare": "git config core.hooksPath .githooks || true",
+    "eval:desk": "bun scripts/desk-eval.ts"
   },
   "overrides": {
     "rolldown": "1.2.1",

@@ -348,6 +348,35 @@ describe("desk: after the JD, and new applicants", () => {
     expect(runs[0]!.subjectId).toBe(role);
   });
 
+  test("a starving role is not re-searched while the pool is unchanged", async () => {
+    await db.insert(agentPolicies).values({ orgId, agentType: "sourcing", enabled: true });
+    const [prev] = await db
+      .insert(agentRuns)
+      .values({
+        orgId,
+        agentType: "sourcing",
+        status: "done",
+        principalUserId: userId,
+        goal: "earlier run",
+        subjectType: "requisition",
+        subjectId: role,
+        createdAt: new Date(Date.now() - 2 * 864e5),
+      })
+      .returning();
+    await db
+      .update(candidates)
+      .set({ createdAt: new Date(Date.now() - 3 * 864e5) })
+      .where(eq(candidates.orgId, orgId));
+    await db
+      .update(jobDescriptions)
+      .set({ createdAt: new Date(Date.now() - 3 * 864e5) })
+      .where(eq(jobDescriptions.requisitionId, role));
+    expect(await sourcing.starvingRoles(orgId)).toEqual([]);
+    await candidate("Newcomer");
+    expect((await sourcing.starvingRoles(orgId)).map((r) => r.id)).toEqual([role]);
+    await db.delete(agentRuns).where(eq(agentRuns.id, prev!.id));
+  });
+
   test("switching the Publishing agent on from the thread starts publishing (audited)", async () => {
     const conv = await thread();
     const runId = await desk.enableAgentForThread(conv, userId, "publishing");
