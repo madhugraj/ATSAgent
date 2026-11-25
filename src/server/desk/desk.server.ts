@@ -3080,6 +3080,45 @@ export async function retryRun(conv: Conversation, userId: string, runId: string
  * The orchestrator wanted to start an agent for a thread's role but it is
  * switched off: say so in the thread (once) instead of stalling silently.
  */
+/**
+ * Work for an agent busy on this role was held (it starts when that run
+ * ends): tell the role's thread what it waits on, once per wait.
+ */
+export async function noteHeldWork(
+  orgId: string,
+  requisitionId: string,
+  agentType: string,
+): Promise<void> {
+  const conv = await conversationForRequisition(orgId, requisitionId);
+  if (!conv) return;
+  const name = AGENT_TITLE[agentType] ?? agentType;
+  const tasks = await db
+    .select({ title: agentTasks.title })
+    .from(agentTasks)
+    .innerJoin(agentRuns, eq(agentRuns.id, agentTasks.runId))
+    .where(
+      and(
+        eq(agentTasks.orgId, orgId),
+        eq(agentTasks.status, "open"),
+        eq(agentRuns.agentType, agentType as AgentType),
+        eq(agentRuns.subjectId, requisitionId),
+      ),
+    )
+    .limit(3);
+  const why = tasks.length
+    ? `The ${name} is waiting on you for ${tasks.map((t) => `"${t.title}"`).join(", ")}`
+    : `The ${name} is still busy on this role`;
+  const body = `${why}, so new work for it is queued — it starts as soon as that is done.`;
+  const [last] = await db
+    .select({ body: hiringMessages.body })
+    .from(hiringMessages)
+    .where(eq(hiringMessages.conversationId, conv.id))
+    .orderBy(desc(hiringMessages.createdAt))
+    .limit(1);
+  if (last?.body === body) return;
+  await postMessage(conv, { role: "desk", body, agentType });
+}
+
 export async function notifyAgentOff(
   orgId: string,
   requisitionId: string,

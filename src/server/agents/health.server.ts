@@ -1010,7 +1010,7 @@ export const RULES: Rule[] = [
     id: "orchestrator.work_held",
     element: "orchestrator",
     severity: "warning",
-    description: `Work for an agent has waited more than ${HEALTH.deferredWaitHours} hours because that agent is still busy on the same candidate — usually a request to a person that nobody has answered. Answer or decline the open request so the agent can move on.`,
+    description: `Work for an agent has waited more than ${HEALTH.deferredWaitHours} hours because that agent is still busy on the same candidate or role — usually a request to a person that nobody has answered. Answer or decline the open request so the agent can move on.`,
     evaluate: async (orgId) => {
       const r = await rows<{ agent: string; n: number }>(sql`
         select payload ->> 'agent' agent, count(*)::int n from agent_events

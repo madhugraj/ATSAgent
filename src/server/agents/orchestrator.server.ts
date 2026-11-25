@@ -40,6 +40,25 @@ const DEFERRED_MAX_DAYS = 7;
 /** The agent is still busy on this candidate: try the deferred work next tick. */
 class StillBusy extends Error {}
 
+/** The agent's active runs on a subject (to tell covered work from new work). */
+async function activeRunsOn(
+  orgId: string,
+  agent: string,
+  subjectId: string,
+): Promise<{ id: string; goal: string }[]> {
+  return db
+    .select({ id: agentRuns.id, goal: agentRuns.goal })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.orgId, orgId),
+        eq(agentRuns.agentType, agent as never),
+        eq(agentRuns.subjectId, subjectId),
+        inArray(agentRuns.status, ["queued", "running", "awaiting_human"]),
+      ),
+    );
+}
+
 export type OrchestratorCounts = {
   processed: number;
   started: number;
@@ -237,12 +256,19 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
       return;
     }
     if (await activeRunFor(e.orgId, agent, subject.id)) {
-      // Per-candidate work for an agent already busy on that candidate (often
+      // Work for an agent already busy on the same candidate or role (often
       // waiting on a person for something else) is held, not dropped, and
-      // starts once that run is done. Role-level work is covered by the run.
-      if (subject.type === "application" && e.type !== DEFERRED_DISPATCH) {
-        // One held item per agent and candidate: later work joins it, so the
-        // agent starts once with everything, not once per event.
+      // starts once that run is done. A run waiting on a person does not
+      // cover new work, so role-level work is held too — unless the active
+      // run was started for this very goal.
+      const active = await activeRunsOn(e.orgId, agent, subject.id);
+      const covered =
+        // The busy run caused this event itself (its own follow-on step).
+        active.some((r) => r.id === e.sourceRunId) ||
+        (subject.type === "requisition" && active.some((r) => r.goal.includes(goal)));
+      if (!covered && e.type !== DEFERRED_DISPATCH) {
+        // One held item per agent and candidate (or role): later work joins
+        // it, so the agent starts once with everything, not once per event.
         const [held] = await db
           .select({ id: agentEvents.id, payload: agentEvents.payload })
           .from(agentEvents)
@@ -275,11 +301,16 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
           await emitAgentEvent({
             orgId: e.orgId,
             type: DEFERRED_DISPATCH,
-            subjectType: "application",
+            subjectType: subject.type,
             subjectId: subject.id,
             actorUserId: e.actorUserId,
             payload: { agent, goal, requisitionId: req.id, after: e.type },
           });
+          // The role's desk thread hears why nothing happened yet.
+          const { noteHeldWork } = await import("../desk/desk.server");
+          await noteHeldWork(e.orgId, req.id, agent).catch((err) =>
+            log.warn("desk.note_held_failed", { org_id: e.orgId, error: err as Error }),
+          );
         }
         log.info("agent.orchestrator.dispatch_deferred", {
           org_id: e.orgId,
@@ -310,7 +341,7 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
     }
     if (p.agent && p.goal)
       await dispatch(p.agent as Parameters<typeof dispatch>[0], p.goal, {
-        type: "application",
+        type: e.subjectType === "requisition" ? "requisition" : "application",
         id: e.subjectId,
       });
     return { started, synced };
