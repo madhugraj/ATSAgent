@@ -636,6 +636,13 @@ async function startForThread(
   goal: string,
   requisitionId: string,
   announce: string,
+  /**
+   * Work about one candidate: the run's subject is the application, not the
+   * role, so a role-level run parked on a person's decision cannot swallow it
+   * (one active run per agent and requisition is a database rule — startRun
+   * hands back the parked run). The caller dedupes per candidate.
+   */
+  opts: { applicationId?: string; quiet?: boolean } = {},
 ): Promise<string | null> {
   if (!(await agentOn(conv.orgId, agentType))) {
     await postMessage(conv, {
@@ -648,7 +655,7 @@ async function startForThread(
   const { activeRunFor } = await import("../agents/tools");
   // One run per requisition per agent: the desk path used to bypass the
   // dispatch dedupe, so a re-ask could stack a second active run.
-  if (await activeRunFor(conv.orgId, agentType, requisitionId)) {
+  if (!opts.applicationId && (await activeRunFor(conv.orgId, agentType, requisitionId))) {
     await postMessage(conv, {
       role: "desk",
       body: `The ${AGENT_NAME[agentType] ?? agentType} is already working on this role — its requests will appear here as they come.`,
@@ -661,11 +668,11 @@ async function startForThread(
     agentType,
     principalUserId,
     goal: `${goal}\n\nRequisition id: ${requisitionId}`,
-    subjectType: "requisition",
-    subjectId: requisitionId,
+    subjectType: opts.applicationId ? "application" : "requisition",
+    subjectId: opts.applicationId ?? requisitionId,
     conversationId: conv.id,
   });
-  await postMessage(conv, { role: "desk", body: announce, agentType });
+  if (!opts.quiet) await postMessage(conv, { role: "desk", body: announce, agentType });
   const { kickAgents } = await import("../agents/orchestrator.server");
   kickAgents(conv.orgId);
   return runId;
@@ -1281,7 +1288,7 @@ export async function screenCandidates(
   const ids = [...new Set(applicationIds)].slice(0, 20);
   if (!ids.length) throw new Error("No candidates selected.");
   const rows = await db
-    .select({ id: applications.id, name: candidates.fullName })
+    .select({ id: applications.id, name: candidates.fullName, stage: applications.stage })
     .from(applications)
     .innerJoin(candidates, eq(candidates.id, applications.candidateId))
     .where(
@@ -1334,27 +1341,81 @@ export async function screenCandidates(
           )`)) as unknown as { id: string }[]
     ).map((r) => r.id),
   );
+  // Picked candidates already named by an active Screening run are in hand;
+  // anyone else starts now, even while an older run waits on a person.
+  const active = (await db
+    .select({ goal: agentRuns.goal })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.orgId, conv.orgId),
+        eq(agentRuns.agentType, "screening"),
+        inArray(agentRuns.status, ["queued", "running", "awaiting_human"]),
+      ),
+    )) as { goal: string | null }[];
+  for (const r of rows)
+    if (active.some((a) => a.goal?.includes(`application ${r.id}`))) underWay.add(r.id);
   const busy = rows.filter((r) => underWay.has(r.id));
   const fresh = rows.filter((r) => !underWay.has(r.id));
   if (busy.length) {
     await postMessage(conv, {
       role: "desk",
-      body: `${busy.map((r) => r.name).join(", ")} ${busy.length === 1 ? "is" : "are"} already being screened for this role (a call is arranged or the assessment was sent), so I haven't started again. Their progress shows on the candidate page.`,
+      body: `${busy.map((r) => r.name).join(", ")} ${busy.length === 1 ? "is" : "are"} already being screened for this role, so I haven't started again. Their progress shows on the candidate page.`,
     });
   }
+  // Picking someone to screen is the person's decision to shortlist them: the
+  // Screening agent only calls or sends assessments to shortlisted candidates,
+  // and agents never take someone out of reserve or on hold themselves.
   if (fresh.length) {
-    await startForThread(
-      conv,
-      "screening",
-      userId,
-      [
-        `The recruiter chose these candidates for screening for ${req?.code} "${req?.title}":`,
-        ...fresh.map((r) => `- application ${r.id}`),
-        "Shortlist any that are not shortlisted yet, prepare a screening kit for each that has none (reuse an existing kit), arrange their screening as your instructions say, and summarise who should proceed.",
-      ].join("\n"),
-      conv.requisitionId,
-      `Screening ${plural(fresh.length, "candidate")}: ${fresh.map((r) => r.name).join(", ")}. The Screening agent is preparing their screening.`,
+    const { canMove } = await import("@/lib/lifecycle");
+    const toShortlist = fresh.filter(
+      (r) => r.stage !== "shortlisted" && canMove(r.stage as Stage, "shortlisted"),
     );
+    if (toShortlist.length) {
+      const { activeOrgOf } = await import("@/lib/auth.middleware");
+      const org = await activeOrgOf(userId);
+      if (!org || org.orgId !== conv.orgId)
+        throw new Error("You are not a member of this organisation any more.");
+      const { moveStageCore } = await import("@/lib/pipeline.server");
+      const actor = { orgId: conv.orgId, userId, memberEmail: org.memberEmail };
+      for (const r of toShortlist)
+        await moveStageCore(actor, {
+          applicationId: r.id,
+          toStage: "shortlisted",
+          reason: "Picked for screening on the Hiring desk",
+        });
+    }
+  }
+  if (fresh.length) {
+    // One run per candidate (subject: the application), so each pick starts
+    // even while an older role-level Screening run waits on a person.
+    let started = 0;
+    for (const r of fresh) {
+      const runId = await startForThread(
+        conv,
+        "screening",
+        userId,
+        [
+          `The recruiter chose this candidate for screening for ${req?.code} "${req?.title}":`,
+          `- application ${r.id}`,
+          "Shortlist them if they are not shortlisted yet, prepare a screening kit if they have none (reuse an existing kit), arrange their screening as your instructions say, and summarise whether they should proceed.",
+        ].join("\n"),
+        conv.requisitionId,
+        "",
+        { applicationId: r.id, quiet: true },
+      );
+      if (runId) started++;
+      else break; // agent switched off: startForThread already said so
+    }
+    if (started)
+      await postMessage(conv, {
+        role: "desk",
+        body: `Screening ${plural(started, "candidate")}: ${fresh
+          .slice(0, started)
+          .map((r) => r.name)
+          .join(", ")}. The Screening agent is preparing their screening.`,
+        agentType: "screening",
+      });
   }
   return rows.length;
 }

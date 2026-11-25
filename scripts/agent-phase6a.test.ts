@@ -497,12 +497,34 @@ describe("talk to the first N", () => {
     await runAgentTick({ orgId });
     deskScript.push({ command: { type: "screen", top: 2 } });
     await desk.handleUserMessage(await reload(conv.id), recruiter, "talk to the first 2");
-    const screening = (await runsOf(conv.id)).find((r) => r.agentType === "screening");
-    expect(screening).toBeDefined();
-    expect(screening!.goal).toContain(apps[1]!); // Bala, rank 1
-    expect(screening!.goal).toContain(apps[2]!); // Chitra, rank 2
-    expect(screening!.goal).not.toContain(apps[0]!);
+    // One run per picked candidate, each scoped to its application.
+    const screening = (await runsOf(conv.id)).filter((r) => r.agentType === "screening");
+    const goals = screening.map((r) => r.goal).join("\n");
+    expect(screening).toHaveLength(2);
+    expect(goals).toContain(apps[1]!); // Bala, rank 1
+    expect(goals).toContain(apps[2]!); // Chitra, rank 2
+    expect(goals).not.toContain(apps[0]!);
     expect((await messages(conv.id)).at(-1)!.body).toMatch(/Bala, Chitra/);
+  });
+
+  test("a later pick starts while an earlier Screening run is still active; a re-pick does not stack", async () => {
+    const conv = await confirming();
+    await desk.continueWithRole(conv, recruiter, existingReq);
+    agentScript.push(say("Ranked."));
+    await runAgentTick({ orgId });
+    deskScript.push({ command: { type: "screen", ranks: [1] } });
+    await desk.handleUserMessage(await reload(conv.id), recruiter, "screen 1");
+    // The first run is still active (not ticked) when the person picks again.
+    deskScript.push({ command: { type: "screen", ranks: [2] } });
+    await desk.handleUserMessage(await reload(conv.id), recruiter, "screen 2");
+    let screening = (await runsOf(conv.id)).filter((r) => r.agentType === "screening");
+    expect(screening).toHaveLength(2);
+    expect(screening.map((r) => r.goal).join("\n")).toContain(apps[2]!); // Chitra
+    expect((await messages(conv.id)).at(-1)!.body).not.toMatch(/already working/);
+    deskScript.push({ command: { type: "screen", ranks: [2] } });
+    await desk.handleUserMessage(await reload(conv.id), recruiter, "screen 2 again");
+    screening = (await runsOf(conv.id)).filter((r) => r.agentType === "screening");
+    expect(screening).toHaveLength(2);
   });
 
   test("candidates of another role are refused", async () => {
