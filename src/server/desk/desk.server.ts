@@ -1392,7 +1392,7 @@ export async function searchPoolFromDesk(conv: Conversation): Promise<void> {
   }));
   await postMessage(conv, {
     role: "desk",
-    body: `${plural(items.length, "more person", "more people")} in the talent pool match and aren't in this pipeline yet. Pick who to add — they're scored and join the list.`,
+    body: `${plural(items.length, "more match", "more matches")} in the talent pool, not in this pipeline yet. Pick who to add — they're scored and join the list.`,
     card: { type: "pool_matches", requisitionId: conv.requisitionId, items },
   });
 }
