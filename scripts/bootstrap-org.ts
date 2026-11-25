@@ -6,9 +6,10 @@
  *
  * No password is ever set or seen here: the owner sets it from the emailed
  * link (single use, valid 60 minutes), which also confirms their email. Needs
- * SMTP_URL (and EMAIL_FROM on a verified sending domain) to send the link;
- * without them everything else is created and the owner can use
- * "Forgot password" on the sign-in page once email is configured.
+ * SMTP_URL or the Microsoft Graph credentials (plus EMAIL_FROM on a verified
+ * sending domain) to send the link; without them everything else is created
+ * and the owner can use "Forgot password" on the sign-in page once email is
+ * configured.
  * Idempotent: re-running updates nothing that already exists.
  *
  * Runs against a local database only, unless the operator opts in for a
@@ -152,9 +153,15 @@ console.log(
 );
 
 // The set-password link, through the same path as "Forgot password".
-if (!process.env["SMTP_URL"]) {
+const emailConfigured = Boolean(
+  process.env["SMTP_URL"] ||
+  (process.env["MICROSOFT_OAUTH_TENANT_ID"] &&
+    process.env["MICROSOFT_OAUTH_CLIENT_ID"] &&
+    process.env["MICROSOFT_OAUTH_CLIENT_SECRET"]),
+);
+if (!emailConfigured) {
   console.log(
-    "Email is not configured (SMTP_URL is not set), so no link was sent. Set SMTP_URL and EMAIL_FROM in .env.local, then re-run this or use “Forgot password” on the sign-in page.",
+    "Email is not configured (no SMTP_URL and no Microsoft Graph credentials), so no link was sent. Set SMTP_URL or MICROSOFT_OAUTH_TENANT_ID/CLIENT_ID/CLIENT_SECRET plus EMAIL_FROM, then re-run this or use “Forgot password” on the sign-in page.",
   );
 } else if (user.passwordHash) {
   console.log("This person already has a password; use “Forgot password” to change it.");
@@ -164,7 +171,7 @@ if (!process.env["SMTP_URL"]) {
   const siteUrl = (process.env["PUBLIC_SITE_URL"] ?? "http://localhost:9000").replace(/\/$/, "");
   const token = signActionToken(user.id, "password-reset", 60 * 60 * 1000);
   await sendTemplateEmail("password-recovery", email, {
-    templateData: { siteName: "ATSIQ", confirmationUrl: `${siteUrl}/auth/reset?token=${token}` },
+    templateData: { siteName: "Scouts", confirmationUrl: `${siteUrl}/auth/reset?token=${token}` },
   });
   console.log(`Sent the set-password link to ${email} (valid 60 minutes).`);
 }
