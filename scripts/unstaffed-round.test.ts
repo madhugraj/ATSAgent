@@ -129,6 +129,34 @@ describe("a round with no interviewer", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]!.to).toBe(`vishal-${stamp}@cand.local`);
     expect((sent[0]!.data as Record<string, string>).stageBody).toContain("We are sorry");
+    // A stand-in card for the round is closed, so the coordinator is not held up.
+    const [run] = await db
+      .insert(S.agentRuns)
+      .values({
+        orgId,
+        agentType: "interview",
+        principalUserId: hmId,
+        goal: "t",
+        status: "awaiting_human",
+      } as never)
+      .returning({ id: S.agentRuns.id });
+    const y = await round(0.5, "Swetha");
+    const [card] = await db
+      .insert(S.agentTasks)
+      .values({
+        orgId,
+        runId: run!.id,
+        kind: "gate",
+        status: "open",
+        title: "Stand-in for an L1 interview",
+        proposedAction: {
+          args: { subject: { type: "panel_substitute", applicationId: y.applicationId, level: 1 } },
+        },
+      } as never)
+      .returning({ id: S.agentTasks.id });
+    await sweepInterviewReminders(orgId);
+    const [closed] = await db.select().from(S.agentTasks).where(eq(S.agentTasks.id, card!.id));
+    expect(closed!.status).toBe("cancelled");
     const missed = await db
       .select()
       .from(S.agentEvents)

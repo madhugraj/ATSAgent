@@ -744,6 +744,8 @@ export async function recordMissedRound(
     detail: { outcome, note: note || null, level: r.level },
   });
   if (outcome !== "candidate_no_show") await apologiseToCandidate(orgId, r);
+  const { closeRoundRequests } = await import("../server/agents/runtime.server");
+  await closeRoundRequests(orgId, r.applicationId, r.level);
   const { emitAgentEvent } = await import("../server/agents/events");
   await emitAgentEvent({
     orgId,
