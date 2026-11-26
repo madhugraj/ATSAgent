@@ -2920,6 +2920,35 @@ export async function cancelStaleRequests(
   return closed.length;
 }
 
+/**
+ * A round that will not happen (called off, missed): its open stand-in
+ * requests no longer apply — closed, so the Interview coordinator can offer
+ * new times instead of waiting on them.
+ */
+export async function closeRoundRequests(
+  orgId: string,
+  applicationId: string,
+  level: number,
+): Promise<number> {
+  const open = await db
+    .select({ id: agentTasks.id, runId: agentTasks.runId, orgId: agentTasks.orgId })
+    .from(agentTasks)
+    .where(
+      and(
+        eq(agentTasks.orgId, orgId),
+        eq(agentTasks.status, "open"),
+        sql`${agentTasks.proposedAction} -> 'args' -> 'subject' ->> 'type' = 'panel_substitute'`,
+        sql`${agentTasks.proposedAction} -> 'args' -> 'subject' ->> 'applicationId' = ${applicationId}`,
+        sql`(${agentTasks.proposedAction} -> 'args' -> 'subject' ->> 'level')::int = ${level}`,
+      ),
+    );
+  return closeTasks(
+    open as TaskRef[],
+    `The L${level} interview will not go ahead as booked; new times are being offered.`,
+    "system:round-missed",
+  );
+}
+
 /* ------------------------------------- requests that outlived their work */
 
 type TaskRef = { id: string; runId: string; orgId: string };
