@@ -696,49 +696,113 @@ export const markInterviewOutcomeCore = createServerOnlyFn(async function markIn
       ["recruiter", "hiring_manager", "hr_head", "president_cbo"],
       "Only an interviewer on this round or the hiring team can mark it.",
     );
-  const status = data.outcome === "candidate_no_show" ? "no_show" : "cancelled";
+  await recordMissedRound(ctx.orgId, r, data.outcome, data.note, {
+    email: ctx.email,
+    userId: ctx.userId,
+  });
+  return { ok: true };
+});
+
+/**
+ * Record a booked round that did not (or will not) happen, tell the hiring
+ * desk, and have the Interview coordinator offer new times. When it was on our
+ * side — the interviewer could not make it, or it was called off — the
+ * candidate is told at once, with an apology, so nobody waits in an empty call.
+ */
+export async function recordMissedRound(
+  orgId: string,
+  r: {
+    id: string;
+    level: number;
+    applicationId: string;
+    requisitionId: string;
+    candidateName: string | null;
+  },
+  outcome: "candidate_no_show" | "interviewer_unavailable" | "cancelled",
+  note: string,
+  actor: { email: string; userId: string | null },
+): Promise<void> {
+  const status = outcome === "candidate_no_show" ? "no_show" : "cancelled";
   const label =
-    data.outcome === "candidate_no_show"
+    outcome === "candidate_no_show"
       ? "the candidate did not join"
-      : data.outcome === "interviewer_unavailable"
+      : outcome === "interviewer_unavailable"
         ? "the interviewer could not make it"
         : "it was cancelled";
   await db
     .update(interviews)
-    .set({ status, outcomeNote: [label, data.note].filter(Boolean).join(" — ") })
-    .where(and(eq(interviews.orgId, ctx.orgId), eq(interviews.id, r.id)));
+    .set({ status, outcomeNote: [label, note].filter(Boolean).join(" — ") })
+    .where(and(eq(interviews.orgId, orgId), eq(interviews.id, r.id)));
   const { writeAudit } = await import("../server/audit");
   await writeAudit({
-    actor: ctx.email,
-    actorUserId: ctx.userId,
-    orgId: ctx.orgId,
+    actor: actor.email,
+    actorUserId: actor.userId,
+    orgId,
     action: `interview.${status}`,
     entityType: "interview",
     entityId: r.id,
-    detail: { outcome: data.outcome, note: data.note || null, level: r.level },
+    detail: { outcome, note: note || null, level: r.level },
   });
+  if (outcome !== "candidate_no_show") await apologiseToCandidate(orgId, r);
   const { emitAgentEvent } = await import("../server/agents/events");
   await emitAgentEvent({
-    orgId: ctx.orgId,
+    orgId,
     type: "interview.missed",
     subjectType: "application",
     subjectId: r.applicationId,
-    actorUserId: ctx.userId,
-    payload: { requisitionId: r.requisitionId, level: r.level, outcome: data.outcome },
+    actorUserId: actor.userId,
+    payload: { requisitionId: r.requisitionId, level: r.level, outcome },
   });
   try {
     const desk = await import("../server/desk/desk.server");
-    const conv = await desk.conversationForRequisition(ctx.orgId, r.requisitionId);
+    const conv = await desk.conversationForRequisition(orgId, r.requisitionId);
     if (conv)
       await desk.postMessage(conv, {
         role: "desk",
-        body: `${r.candidateName}'s L${r.level} interview did not happen: ${label}${data.note ? ` ("${data.note}")` : ""}. Nothing about the candidate changed; the Interview coordinator offers new times when it is on.`,
+        body: `${r.candidateName}'s L${r.level} interview did not happen: ${label}${note ? ` ("${note}")` : ""}.${outcome === "candidate_no_show" ? "" : " The candidate was told, with an apology."} Nothing about the candidate changed; the Interview coordinator offers new times when it is on.`,
       });
   } catch {
     /* the thread is a courtesy; the audit trail has the record */
   }
-  return { ok: true };
-});
+}
+
+/** The candidate is told the round is moving, with an apology; new times follow. */
+async function apologiseToCandidate(
+  orgId: string,
+  r: { id: string; level: number; applicationId: string },
+): Promise<void> {
+  const [c] = await db
+    .select({
+      email: candidates.email,
+      name: candidates.fullName,
+      jobTitle: requisitions.title,
+      orgName: organizations.name,
+    })
+    .from(applications)
+    .innerJoin(candidates, eq(candidates.id, applications.candidateId))
+    .innerJoin(requisitions, eq(requisitions.id, applications.requisitionId))
+    .innerJoin(organizations, eq(organizations.id, applications.orgId))
+    .where(and(eq(applications.orgId, orgId), eq(applications.id, r.applicationId)))
+    .limit(1);
+  if (!c?.email) return;
+  const { enqueueEmail } = await import("./email-outbox.server");
+  await enqueueEmail({
+    orgId,
+    // An interview e-mail (not a stage update: a later one must not replace it).
+    kind: "interview_reminder",
+    templateName: "stage_update",
+    toEmail: c.email,
+    applicationId: r.applicationId,
+    idempotencyKey: `interview-moved:${r.id}`,
+    templateData: {
+      candidateName: c.name?.split(" ")[0] ?? undefined,
+      orgName: c.orgName,
+      jobTitle: c.jobTitle,
+      stageHeading: `Your L${r.level} interview is being moved`,
+      stageBody: `We are sorry — your interviewer cannot make the booked time, so this interview will not go ahead as planned. Please do not wait in the meeting. We will send you new times shortly.`,
+    },
+  });
+}
 
 export const markInterviewOutcome = createServerFn({ method: "POST" })
   .middleware([requirePanel])
