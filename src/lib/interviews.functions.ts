@@ -777,8 +777,13 @@ async function apologiseToCandidate(
       name: candidates.fullName,
       jobTitle: requisitions.title,
       orgName: organizations.name,
+      scheduledAt: interviews.scheduledAt,
     })
     .from(applications)
+    .innerJoin(
+      interviews,
+      and(eq(interviews.applicationId, applications.id), eq(interviews.id, r.id)),
+    )
     .innerJoin(candidates, eq(candidates.id, applications.candidateId))
     .innerJoin(requisitions, eq(requisitions.id, applications.requisitionId))
     .innerJoin(organizations, eq(organizations.id, applications.orgId))
@@ -799,7 +804,10 @@ async function apologiseToCandidate(
       orgName: c.orgName,
       jobTitle: c.jobTitle,
       stageHeading: `Your L${r.level} interview is being moved`,
-      stageBody: `We are sorry — your interviewer cannot make the booked time, so this interview will not go ahead as planned. Please do not wait in the meeting. We will send you new times shortly.`,
+      stageBody:
+        c.scheduledAt && c.scheduledAt.getTime() <= Date.now()
+          ? "We are sorry — your interviewer could not join at the booked time, and you were left waiting. That should not have happened. We will send you new times shortly."
+          : "We are sorry — your interviewer cannot make the booked time, so this interview will not go ahead as planned. Please do not wait in the meeting. We will send you new times shortly.",
     },
   });
 }
