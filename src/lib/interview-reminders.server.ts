@@ -78,6 +78,98 @@ async function panelistToken(
   return row?.token ?? null;
 }
 
+/** Everyone on the round said they cannot make it (pure). */
+export function noInterviewer(r: {
+  lead: string | null;
+  panel: { email: string }[] | null;
+  unavailable: { email: string }[] | null;
+}): boolean {
+  const away = new Set((r.unavailable ?? []).map((u) => u.email.trim().toLowerCase()));
+  const people = [r.lead, ...(r.panel ?? []).map((p) => p.email)]
+    .map((e) => e?.trim().toLowerCase())
+    .filter(Boolean) as string[];
+  return people.every((e) => away.has(e));
+}
+
+/** Within this many hours of the start, an unstaffed round is moved and the candidate told. */
+export const UNSTAFFED_MOVE_HOURS = 1;
+
+/**
+ * A booked round nobody on the panel can make, and no stand-in approved: the
+ * candidate is not reminded; whoever decides the stand-in (else the HR heads)
+ * is told once, the day before; an hour before, the round is called off, the
+ * candidate is told with an apology and new times are offered. Returns true
+ * when the round is unstaffed (so no reminders go out for it).
+ */
+async function unstaffed(
+  r: {
+    id: string;
+    orgId: string | null;
+    applicationId: string;
+    level: number;
+    scheduledAt: Date | null;
+    lead: string | null;
+    panel: { email: string }[] | null;
+    unavailable: { email: string }[] | null;
+    candidateName: string | null;
+    jobTitle: string | null;
+  },
+  now: number,
+  site: string,
+): Promise<boolean> {
+  if (!r.orgId || !r.scheduledAt || !noInterviewer(r)) return false;
+  const hours = (r.scheduledAt.getTime() - now) / HOUR;
+  const [app] = await db
+    .select({ requisitionId: applications.requisitionId })
+    .from(applications)
+    .where(and(eq(applications.orgId, r.orgId), eq(applications.id, r.applicationId)))
+    .limit(1);
+  if (!app) return true;
+  if (hours <= UNSTAFFED_MOVE_HOURS) {
+    const { recordMissedRound } = await import("./interviews.functions");
+    await recordMissedRound(
+      r.orgId,
+      { ...r, requisitionId: app.requisitionId },
+      "interviewer_unavailable",
+      "no interviewer was available and no stand-in was approved in time",
+      { email: "system", userId: null },
+    );
+    return true;
+  }
+  const rows = (await db.execute(sql`
+    select distinct u.email from agent_tasks t join users u on u.id = t.assignee_user_id
+     where t.org_id = ${r.orgId} and t.status = 'open'
+       and t.proposed_action #>> '{args,subject,type}' = 'panel_substitute'
+       and t.proposed_action #>> '{args,subject,applicationId}' = ${r.applicationId}
+    union
+    select distinct u.email from user_roles ur join users u on u.id = ur.user_id
+     where ur.org_id = ${r.orgId} and ur.role = 'hr_head'
+       and not exists (select 1 from agent_tasks t
+         where t.org_id = ${r.orgId} and t.status = 'open' and t.assignee_user_id is not null
+           and t.proposed_action #>> '{args,subject,type}' = 'panel_substitute'
+           and t.proposed_action #>> '{args,subject,applicationId}' = ${r.applicationId})
+  `)) as unknown as { email: string }[];
+  const { enqueueEmail, formatInOrgTZ, getOrgEmailSettings } =
+    await import("./email-outbox.server");
+  const when = formatInOrgTZ(r.scheduledAt, (await getOrgEmailSettings(r.orgId)).timezone);
+  for (const { email } of rows) {
+    await enqueueEmail({
+      orgId: r.orgId,
+      kind: "member_reminder",
+      templateName: "member_reminder",
+      toEmail: email,
+      applicationId: r.applicationId,
+      idempotencyKey: `interview-unstaffed:${r.id}:${r.scheduledAt.toISOString()}:${email}`,
+      templateData: {
+        heading: `No interviewer for ${r.candidateName ?? "a candidate"}'s L${r.level} interview`,
+        message: `${r.candidateName ?? "The candidate"}'s L${r.level} interview for ${r.jobTitle ?? "the role"} is on ${when}, and nobody on the panel can make it. Approve the stand-in on the hiring desk or move the round. If nothing changes, the round is called off an hour before and the candidate is told.`,
+        actionUrl: `${site}/desk`,
+      },
+    });
+  }
+  return true;
+}
+
 export async function sweepInterviewReminders(orgId?: string, now = Date.now()): Promise<number> {
   const rounds = await db
     .select({
@@ -133,6 +225,11 @@ export async function sweepInterviewReminders(orgId?: string, now = Date.now()):
       (r.scheduledAt.getTime() - now) / HOUR,
       r.createdAt ? (now - r.createdAt.getTime()) / HOUR : Infinity,
     );
+    try {
+      if (await unstaffed(r, now, site)) continue;
+    } catch {
+      /* one round never stops the sweep */
+    }
     if (!step) continue;
     try {
       let tz = tzByOrg.get(r.orgId);
