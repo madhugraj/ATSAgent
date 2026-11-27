@@ -178,16 +178,35 @@ export const submitApplicationImpl = createServerOnlyFn(async function submitApp
     const fullName =
       (data.fullName ?? p?.full_name ?? "").trim() || data.fileName.replace(/\.[^.]+$/, "");
 
-    const [existing] = await db
-      .select({ id: candidates.id })
-      .from(candidates)
-      .where(and(eq(candidates.email, email), eq(candidates.orgId, r.orgId)))
-      .limit(1);
+    // Identity resolution, lookup-only (design §1.4): an unauthenticated
+    // applicant may find a match and link their application to it, but the
+    // identity module never merges, mutates, or attaches anything to the
+    // existing record from this path. A conflicting-evidence match also
+    // queues a merge suggestion for a recruiter.
+    const { resolveIdentity, enqueueMergeSuggestion, legacyIdentityLookup } =
+      await import("../server/candidates/identity.server");
+    const outcome = await resolveIdentity({
+      orgId: r.orgId,
+      fullName,
+      email,
+      phone: (data.phone ?? p?.phone) || null,
+      linkedinUrl: p?.linkedin_url || null,
+      githubUrl: p?.github_url || null,
+      education: p?.education ?? null,
+      location: p?.location ?? null,
+    });
+    // Keyless rows (pre-A1 records) keep today's exact-email link.
+    const legacy =
+      outcome.outcome === "merged" || outcome.outcome === "attach"
+        ? null
+        : await legacyIdentityLookup(db, r.orgId, { email });
 
     let candidateId: string;
-    if (existing) {
+    if (outcome.outcome === "merged" || outcome.outcome === "attach") {
       // Public applicants never overwrite an existing talent-pool record.
-      candidateId = existing.id;
+      candidateId = outcome.candidateId;
+    } else if (legacy) {
+      candidateId = legacy.id;
     } else {
       const [created] = await db
         .insert(candidates)
@@ -211,6 +230,41 @@ export const submitApplicationImpl = createServerOnlyFn(async function submitApp
         .returning({ id: candidates.id });
       if (!created) throw new Error("Could not save your application.");
       candidateId = created.id;
+      if (outcome.outcome === "review") {
+        try {
+          await enqueueMergeSuggestion({
+            orgId: r.orgId,
+            existingId: outcome.matchedCandidateId,
+            newcomerId: candidateId,
+            score: outcome.score,
+            reasons: outcome.reasons,
+          });
+        } catch (e) {
+          console.error("[apply] could not enqueue the merge suggestion:", e);
+        }
+      }
+    }
+
+    // The CV is kept as a version. When it matched someone already on file it
+    // stays pending (outside their profile) until a recruiter accepts it —
+    // unauthenticated input never changes an existing person (M0 verdict).
+    if (r.orgId) {
+      const matchedExisting =
+        outcome.outcome === "merged" || outcome.outcome === "attach" || Boolean(legacy);
+      try {
+        const { recordCvVersion } = await import("../server/candidates/versions.server");
+        await recordCvVersion({
+          orgId: r.orgId,
+          candidateId,
+          requisitionId: r.id,
+          source: "apply",
+          fileName: data.fileName,
+          parsedText: data.resumeText,
+          accepted: !matchedExisting,
+        });
+      } catch (e) {
+        console.error("[apply] could not record the CV version:", e);
+      }
     }
 
     const [app] = await db
@@ -258,7 +312,11 @@ export const submitApplicationImpl = createServerOnlyFn(async function submitApp
     return {
       ok: true as const,
       alreadyApplied: Boolean(app),
-      merged: Boolean(existing),
+      merged:
+        outcome.outcome === "merged" ||
+        outcome.outcome === "attach" ||
+        outcome.outcome === "review" ||
+        Boolean(legacy),
       name: fullName,
     };
   }

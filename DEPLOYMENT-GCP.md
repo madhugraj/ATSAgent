@@ -177,15 +177,16 @@ All under the new domain:
 
 All endpoints expect `Authorization: Bearer $CRON_SECRET`:
 
-| Job                        | Target                                                     | Typical cadence |
-| -------------------------- | ---------------------------------------------------------- | --------------- |
-| Agent runtime tick         | `https://z-atsiq.yavar.ai/api/public/agent-tick`           | every 1 min     |
-| Careers-inbox scoring      | `https://z-atsiq.yavar.ai/api/public/inbox-sync`           | every 5–15 min  |
-| Candidate re-sync/scoring  | `https://z-atsiq.yavar.ai/api/public/sync-candidates`      | hourly          |
-| Candidate email outbox     | `https://z-atsiq.yavar.ai/api/public/process-email-outbox` | every 5 min     |
-| HRMS employee sync         | `https://z-atsiq.yavar.ai/api/public/sync-hrms`            | every 15 min    |
-| Job-board application sync | `https://z-atsiq.yavar.ai/api/public/board-sync`           | every 15 min    |
-| Screening-kit preparation  | `https://z-atsiq.yavar.ai/api/public/screening-prep`       | every 5 min     |
+| Job                                    | Target                                                     | Typical cadence |
+| -------------------------------------- | ---------------------------------------------------------- | --------------- |
+| Agent runtime tick                     | `https://z-atsiq.yavar.ai/api/public/agent-tick`           | every 1 min     |
+| Careers-inbox scoring                  | `https://z-atsiq.yavar.ai/api/public/inbox-sync`           | every 5–15 min  |
+| Candidate re-sync/scoring              | `https://z-atsiq.yavar.ai/api/public/sync-candidates`      | hourly          |
+| Candidate email outbox                 | `https://z-atsiq.yavar.ai/api/public/process-email-outbox` | every 5 min     |
+| HRMS employee sync                     | `https://z-atsiq.yavar.ai/api/public/sync-hrms`            | every 15 min    |
+| Job-board application sync             | `https://z-atsiq.yavar.ai/api/public/board-sync`           | every 15 min    |
+| Screening-kit preparation              | `https://z-atsiq.yavar.ai/api/public/screening-prep`       | every 5 min     |
+| CV processing (claims, archive import) | `https://z-atsiq.yavar.ai/api/public/cv-processing`        | every 2 min     |
 
 ## 7. Example Kubernetes objects (sketch)
 

@@ -28,7 +28,13 @@ import { PRICE_LIST, priceBucket, priceEntry, type OrgRate } from "../ai-pricing
 export const COST_STAGES: { stage: string; features: string[] }[] = [
   {
     stage: "Reading & checking the CV",
-    features: ["resume_parse", "claim_verify", "linkedin_signal", "writing_signal"],
+    features: [
+      "resume_parse",
+      "cv_claims_extract",
+      "claim_verify",
+      "linkedin_signal",
+      "writing_signal",
+    ],
   },
   {
     stage: "Matching",

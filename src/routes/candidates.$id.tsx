@@ -3,6 +3,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { toast } from "sonner";
+
+import { CandidateProfileSection } from "@/components/candidate-profile";
 import { requireRouteCapability } from "@/lib/route-guard";
 import { ScreeningPanel } from "@/components/ScreeningPanel";
 import { CandidateCollab } from "@/components/CandidateCollab";
@@ -417,6 +419,8 @@ function CandidateDetail() {
               </ol>
             )}
           </section>
+
+          <CandidateProfileSection candidateId={id} requisitionId={firstReqId || null} />
 
           <AgentActivitySection candidateId={id} />
         </div>

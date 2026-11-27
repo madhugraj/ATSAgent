@@ -814,7 +814,9 @@ export const candidateIdentityKeys = pgTable(
       .notNull(),
     keyValue: text("key_value").notNull(),
     /** The CV version that produced this key (uuid until A2 adds the FK). */
-    sourceVersionId: uuid("source_version_id"),
+    sourceVersionId: uuid("source_version_id").references(() => candidateCvVersions.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -903,6 +905,94 @@ export const candidateMerges = pgTable(
     undoNote: text("undo_note"),
   },
   (t) => [index("candidate_merges_candidate_idx").on(t.orgId, t.survivorId, t.mergedId)],
+);
+
+/**
+ * Every CV a person sent, kept (docs/candidate-identification/track-a-design.md
+ * §2.1). `accepted` is false for CVs that arrived on an unauthenticated surface
+ * and matched an existing person: they stay out of the profile until a recruiter
+ * accepts them (M0 verdict, finding 2). candidates.resumeText/resumeFilePath stay
+ * the denormalised copy of the newest accepted version.
+ */
+export const candidateCvVersions = pgTable(
+  "candidate_cv_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    candidateId: uuid("candidate_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "cascade" }),
+    requisitionId: uuid("requisition_id").references(() => requisitions.id, {
+      onDelete: "set null",
+    }),
+    source: text("source").notNull(),
+    fileHash: text("file_hash"),
+    filePath: text("file_path"),
+    fileName: text("file_name"),
+    parsedText: text("parsed_text").notNull().default(""),
+    accepted: boolean("accepted").notNull().default(true),
+    extractionStatus: text("extraction_status")
+      .$type<"pending" | "running" | "done" | "failed" | "skipped">()
+      .notNull()
+      .default("pending"),
+    extractionAttempts: integer("extraction_attempts").notNull().default(0),
+    extractionLeaseUntil: timestamp("extraction_lease_until", { withTimezone: true }),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("candidate_cv_versions_candidate_idx").on(t.orgId, t.candidateId, t.submittedAt),
+    index("candidate_cv_versions_extract_idx").on(t.extractionStatus, t.createdAt),
+    check(
+      "candidate_cv_versions_status_check",
+      sql`${t.extractionStatus} in ('pending','running','done','failed','skipped')`,
+    ),
+  ],
+);
+
+/** One evidenced statement a CV version makes (design §2.1). */
+export const candidateClaims = pgTable(
+  "candidate_claims",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    candidateId: uuid("candidate_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "cascade" }),
+    versionId: uuid("version_id")
+      .notNull()
+      .references(() => candidateCvVersions.id, { onDelete: "cascade" }),
+    claimType: text("claim_type")
+      .$type<"skill" | "role" | "project" | "cert" | "achievement">()
+      .notNull(),
+    normalisedValue: text("normalised_value").notNull(),
+    rawValue: text("raw_value").notNull(),
+    evidenceStrength: text("evidence_strength")
+      .$type<"demonstrated" | "listed" | "inferred">()
+      .notNull(),
+    passage: text("passage").notNull(),
+    employer: text("employer"),
+    startText: text("start_text"),
+    endText: text("end_text"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("candidate_claims_candidate_idx").on(t.orgId, t.candidateId),
+    index("candidate_claims_version_idx").on(t.versionId),
+    index("candidate_claims_value_idx").on(t.orgId, t.normalisedValue),
+    check(
+      "candidate_claims_type_check",
+      sql`${t.claimType} in ('skill','role','project','cert','achievement')`,
+    ),
+    check(
+      "candidate_claims_strength_check",
+      sql`${t.evidenceStrength} in ('demonstrated','listed','inferred')`,
+    ),
+  ],
 );
 
 /**

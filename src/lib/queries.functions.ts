@@ -7,7 +7,7 @@
  * snake_case column names, ISO date strings.
  */
 import { sharedFrom } from "./pool-share";
-import { and, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
@@ -180,7 +180,8 @@ export const listCandidates = createServerFn({ method: "POST" })
     const ownRows = await db
       .select()
       .from(candidates)
-      .where(eq(candidates.orgId, context.orgId))
+      // Absorbed rows are tombstones after a merge (plan row 1).
+      .where(and(eq(candidates.orgId, context.orgId), isNull(candidates.mergedIntoId)))
       .orderBy(desc(candidates.createdAt));
 
     const fullShared = fullOwners.length
@@ -188,7 +189,7 @@ export const listCandidates = createServerFn({ method: "POST" })
           .select()
           .from(candidates)
           // CVs a portal limited to their role never leave the organisation (0045).
-          .where(sharedFrom(fullOwners))
+          .where(and(sharedFrom(fullOwners), isNull(candidates.mergedIntoId)))
           .orderBy(desc(candidates.createdAt))
       : [];
 
@@ -216,7 +217,7 @@ export const listCandidates = createServerFn({ method: "POST" })
             createdAt: candidates.createdAt,
           })
           .from(candidates)
-          .where(sharedFrom(redactedOwners))
+          .where(and(sharedFrom(redactedOwners), isNull(candidates.mergedIntoId)))
           .orderBy(desc(candidates.createdAt))
       : [];
 

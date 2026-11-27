@@ -1,5 +1,6 @@
 import { poolUseFor } from "./job-channels";
-import { and, eq } from "drizzle-orm";
+import { computeIdentityKeys } from "./candidates/identity-normalise";
+import { and, eq, isNull } from "drizzle-orm";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
@@ -69,7 +70,14 @@ export const attachApplication = createServerFn({ method: "POST" })
         poolUseSource: candidates.poolUseSource,
       })
       .from(candidates)
-      .where(and(eq(candidates.id, data.candidateId), eq(candidates.orgId, context.orgId)))
+      .where(
+        and(
+          eq(candidates.id, data.candidateId),
+          eq(candidates.orgId, context.orgId),
+          // A tombstone (absorbed by a merge) is not a person to attach.
+          isNull(candidates.mergedIntoId),
+        ),
+      )
       .limit(1);
     if (!cand) throw new Error("Candidate not found.");
     const { assertReusable } = await import("./pipeline.server");
@@ -120,6 +128,20 @@ export const createCandidate = createServerFn({ method: "POST" })
   .middleware([requireOrg, requireCapability("matching.pool")])
   .validator((data: unknown) => CreateCandidateInput.parse(data))
   .handler(async ({ data, context }) => {
+    // Identity resolution (plan row 1): a recruiter's deliberate "new person"
+    // entry is never auto-merged — any collision (strong key, shared detail or
+    // fuzzy evidence) creates the record AND queues a review suggestion
+    // instead of the silent duplicate this path used to allow (design §1.7).
+    const { resolveIdentity, insertCandidateKeys, enqueueMergeSuggestion } =
+      await import("../server/candidates/identity.server");
+    const outcome = await resolveIdentity({
+      orgId: context.orgId,
+      fullName: data.fullName,
+      email: data.email,
+      linkedinUrl: data.linkedinUrl || null,
+      githubUrl: data.githubUrl || null,
+    });
+
     const [row] = await db
       .insert(candidates)
       .values({
@@ -152,6 +174,39 @@ export const createCandidate = createServerFn({ method: "POST" })
       })
       .returning({ id: candidates.id });
     if (!row) throw new Error("Could not save the candidate");
+
+    try {
+      await insertCandidateKeys(
+        db,
+        context.orgId,
+        row.id,
+        computeIdentityKeys({
+          fullName: data.fullName,
+          email: data.email,
+          linkedinUrl: data.linkedinUrl || null,
+          githubUrl: data.githubUrl || null,
+        }),
+      );
+    } catch (e) {
+      console.error("[createCandidate] could not record identity keys:", e);
+    }
+    if (outcome.outcome !== "new") {
+      try {
+        await enqueueMergeSuggestion({
+          orgId: context.orgId,
+          existingId:
+            outcome.outcome === "review" ? outcome.matchedCandidateId : outcome.candidateId,
+          newcomerId: row.id,
+          score: outcome.outcome === "review" ? outcome.score : 1,
+          reasons:
+            outcome.outcome === "review"
+              ? outcome.reasons
+              : [{ signal: "strong_key", detail: "manual add collides with an existing record" }],
+        });
+      } catch (e) {
+        console.error("[createCandidate] could not enqueue the merge suggestion:", e);
+      }
+    }
 
     if (data.requisitionId) {
       const { assertRequisitionInOrg } = await import("../server/guards");

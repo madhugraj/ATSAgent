@@ -85,6 +85,35 @@ const REGION_CALLING_CODES: Record<string, string> = {
   za: "27",
 };
 
+export type IdentityKeyType =
+  | "email"
+  | "phone"
+  | "linkedin"
+  | "github"
+  | "file_hash"
+  | "placeholder"
+  | "external"
+  | "shared_email"
+  | "shared_phone"
+  | "shared_linkedin"
+  | "shared_github";
+
+export type NewKeyInput = { keyType: IdentityKeyType; keyValue: string };
+
+export type IdentityKeyInput = {
+  fullName: string;
+  email?: string | null;
+  phone?: string | null;
+  linkedinUrl?: string | null;
+  githubUrl?: string | null;
+  fileHash?: string | null;
+  externalProvider?: string | null;
+  externalId?: string | null;
+};
+
+/** The auto-merge key types backed by the partial unique index. */
+const STRONG_KEY_TYPES: IdentityKeyType[] = ["email", "phone", "linkedin", "github", "file_hash"];
+
 export const regionCallingCode = (region?: string | null): string | null => {
   const r = (region ?? "").trim().toLowerCase();
   return REGION_CALLING_CODES[r] ?? null;
@@ -215,3 +244,38 @@ export function fuzzyIdentityScore(input: FuzzyInput): FuzzyBreakdown {
     ],
   };
 }
+
+/**
+ * Normalised identity keys for one person. Placeholder addresses key under
+ * `placeholder` (they match each other by equality exactly as today's lookup
+ * does, never a real address); a phone that only parses to last-10-digits
+ * keys under `shared_phone` — a collision there may be two people sharing a
+ * number, so it reviews instead of merging (design §1.2).
+ */
+export function computeIdentityKeys(
+  input: IdentityKeyInput,
+  defaultRegion?: string | null,
+): NewKeyInput[] {
+  const keys: NewKeyInput[] = [];
+  const rawEmail = (input.email ?? "").trim();
+  const email = normEmail(rawEmail);
+  if (email) keys.push({ keyType: "email", keyValue: email });
+  else if (rawEmail && isPlaceholderEmail(rawEmail))
+    keys.push({ keyType: "placeholder", keyValue: rawEmail.toLowerCase() });
+  const phone = normPhone(input.phone, defaultRegion);
+  if (phone.strong) keys.push({ keyType: "phone", keyValue: phone.strong });
+  else if (phone.weak) keys.push({ keyType: "shared_phone", keyValue: phone.weak });
+  const linkedin = normProfileUrl(input.linkedinUrl);
+  if (linkedin) keys.push({ keyType: "linkedin", keyValue: linkedin });
+  const github = normProfileUrl(input.githubUrl);
+  if (github) keys.push({ keyType: "github", keyValue: github });
+  if (input.fileHash) keys.push({ keyType: "file_hash", keyValue: input.fileHash });
+  if (input.externalProvider && input.externalId)
+    keys.push({
+      keyType: "external",
+      keyValue: `${input.externalProvider}:${input.externalId}`,
+    });
+  return keys;
+}
+
+export const isStrongKeyType = (t: IdentityKeyType) => STRONG_KEY_TYPES.includes(t);

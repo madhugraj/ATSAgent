@@ -18,6 +18,8 @@ import { and, desc, eq, getTableName, inArray, isNull, ne, or, sql } from "drizz
 import { db } from "../db";
 import { writeAudit } from "../audit";
 import {
+  candidateClaims,
+  candidateCvVersions,
   applications,
   candidateAssessments,
   candidateIdentityKeys,
@@ -36,13 +38,16 @@ import {
   trainingFeedback,
 } from "@db/schema";
 import {
+  computeIdentityKeys,
   fuzzyIdentityScore,
   isPlaceholderEmail,
+  isStrongKeyType,
   normEmail,
   normPhone,
   normProfileUrl,
   nameTokens,
   tokenJaccard,
+  type IdentityKeyInput,
   type TimelineEntry,
 } from "../../lib/candidates/identity-normalise";
 
@@ -74,52 +79,17 @@ export const getIdentitySettings = async (orgId: string): Promise<IdentitySettin
 
 /* ------------------------------------------------------------------ keys */
 
-export type IdentityKeyInput = {
-  fullName: string;
-  email?: string | null;
-  phone?: string | null;
-  linkedinUrl?: string | null;
-  githubUrl?: string | null;
-  fileHash?: string | null;
-  externalProvider?: string | null;
-  externalId?: string | null;
-};
+// computeIdentityKeys lives in the pure module (identity-normalise.ts) so
+// client-reachable server-fn modules can use it without bundling server code.
+export {
+  computeIdentityKeys,
+  isStrongKeyType,
+  type IdentityKeyInput,
+  type NewKeyInput,
+} from "../../lib/candidates/identity-normalise";
 
 /** The auto-merge key types backed by the partial unique index. */
 const STRONG_TYPES: KeyRow["keyType"][] = ["email", "phone", "linkedin", "github", "file_hash"];
-
-/**
- * Normalised identity keys for one person. Placeholder addresses key under
- * `placeholder` (they match each other by equality exactly as today's lookup
- * does, never a real address); a phone that only parses to last-10-digits
- * keys under `shared_phone` — a collision there may be two people sharing a
- * number, so it reviews instead of merging (design §1.2).
- */
-export function computeIdentityKeys(
-  input: IdentityKeyInput,
-  defaultRegion?: string | null,
-): NewKey[] {
-  const keys: NewKey[] = [];
-  const rawEmail = (input.email ?? "").trim();
-  const email = normEmail(rawEmail);
-  if (email) keys.push({ keyType: "email", keyValue: email });
-  else if (rawEmail && isPlaceholderEmail(rawEmail))
-    keys.push({ keyType: "placeholder", keyValue: rawEmail.toLowerCase() });
-  const phone = normPhone(input.phone, defaultRegion);
-  if (phone.strong) keys.push({ keyType: "phone", keyValue: phone.strong });
-  else if (phone.weak) keys.push({ keyType: "shared_phone", keyValue: phone.weak });
-  const linkedin = normProfileUrl(input.linkedinUrl);
-  if (linkedin) keys.push({ keyType: "linkedin", keyValue: linkedin });
-  const github = normProfileUrl(input.githubUrl);
-  if (github) keys.push({ keyType: "github", keyValue: github });
-  if (input.fileHash) keys.push({ keyType: "file_hash", keyValue: input.fileHash });
-  if (input.externalProvider && input.externalId)
-    keys.push({
-      keyType: "external",
-      keyValue: `${input.externalProvider}:${input.externalId}`,
-    });
-  return keys;
-}
 
 const SHARED_TYPE_NAMES = [
   "shared_email",
@@ -138,6 +108,82 @@ const sharedTypeOf = (t: KeyRow["keyType"]): KeyRow["keyType"] | null =>
         : t === "github"
           ? "shared_github"
           : null;
+
+/**
+ * Insert identity keys for a candidate; identical existing keys are left as
+ * they are — for a merged arrival the survivor already holds the key, for a
+ * review arrival the colliding key stays deferred to the suggestion's
+ * decision (design §1.1). Callers that need the concurrent-arrival arbiter
+ * use [[lookupKeyOwners]] against a thrown unique violation instead.
+ */
+export async function insertCandidateKeys(
+  exec: DbExec,
+  orgId: string,
+  candidateId: string,
+  keys: NewKey[],
+): Promise<void> {
+  if (keys.length === 0) return;
+  await exec
+    .insert(candidateIdentityKeys)
+    .values(keys.map((k) => ({ orgId, candidateId, ...k })))
+    .onConflictDoNothing();
+}
+
+/** Who holds these keys right now (the concurrent-arrival fallback path). */
+export async function lookupKeyOwners(
+  exec: DbExec,
+  orgId: string,
+  keys: NewKey[],
+): Promise<{ keyType: KeyRow["keyType"]; keyValue: string; candidateId: string }[]> {
+  if (keys.length === 0) return [];
+  return exec
+    .select({
+      keyType: candidateIdentityKeys.keyType,
+      keyValue: candidateIdentityKeys.keyValue,
+      candidateId: candidateIdentityKeys.candidateId,
+    })
+    .from(candidateIdentityKeys)
+    .where(
+      and(
+        eq(candidateIdentityKeys.orgId, orgId),
+        or(
+          ...keys.map((k) =>
+            and(
+              eq(candidateIdentityKeys.keyType, k.keyType),
+              eq(candidateIdentityKeys.keyValue, k.keyValue),
+            ),
+          ),
+        ),
+      ),
+    );
+}
+
+/**
+ * Legacy exact-email / linkedin lookup for rows that predate the identity
+ * module or were created outside it (fixtures, imports, the IJP path before
+ * A1b) and therefore hold no keys. Intake paths fall back to this after a
+ * "new"/"review" outcome so pre-A1 records keep deduping; an adopted row gets
+ * its keys backfilled by the caller. Org-scoped, tombstones excluded.
+ */
+export async function legacyIdentityLookup(
+  exec: DbExec,
+  orgId: string,
+  input: { email?: string | null; linkedinUrl?: string | null },
+): Promise<{ id: string } | null> {
+  const email = normEmail(input.email);
+  const linkedin = normProfileUrl(input.linkedinUrl);
+  if (!email && !linkedin) return null;
+  const preds = [
+    ...(email ? [eq(candidates.email, email.toLowerCase())] : []),
+    ...(linkedin ? [eq(candidates.linkedinUrl, linkedin)] : []),
+  ];
+  const [row] = await exec
+    .select({ id: candidates.id })
+    .from(candidates)
+    .where(and(eq(candidates.orgId, orgId), isNull(candidates.mergedIntoId), or(...preds)))
+    .limit(1);
+  return row ?? null;
+}
 
 /* --------------------------------------------------------------- resolve */
 
@@ -169,8 +215,12 @@ export type ResolveIdentityOutcome =
  * block and are scored with timeline/education evidence. Nothing fuzzy merges
  * here, ever.
  */
+/** A db executor: the pool, or the caller's transaction (A1b intake wiring). */
+export type DbExec = typeof db | Tx;
+
 export async function resolveIdentity(
   input: ResolveIdentityInput,
+  exec: DbExec = db,
 ): Promise<ResolveIdentityOutcome> {
   const settings = await getIdentitySettings(input.orgId);
   const keys = computeIdentityKeys(input, settings.defaultPhoneRegion);
@@ -187,7 +237,7 @@ export async function resolveIdentity(
 
   // 1. Block: which existing candidates hold any of these keys?
   const hits = lookupTuples.length
-    ? await db
+    ? await exec
         .select({ key: candidateIdentityKeys })
         .from(candidateIdentityKeys)
         .innerJoin(candidates, eq(candidates.id, candidateIdentityKeys.candidateId))
@@ -219,7 +269,7 @@ export async function resolveIdentity(
     ks.some((k) => k.keyType === "file_hash"),
   );
   if (fileHit) {
-    const [existing] = await db
+    const [existing] = await exec
       .select({ fullName: candidates.fullName })
       .from(candidates)
       .where(and(eq(candidates.id, fileHit[0]), eq(candidates.orgId, input.orgId)))
@@ -275,7 +325,7 @@ export async function resolveIdentity(
   }
 
   // 5. No key overlap: fuzzy career-history evidence decides.
-  return findFuzzyMatches(input, settings);
+  return findFuzzyMatches(input, settings, exec);
 }
 
 const NAME_BLOCK_LIMIT = 200;
@@ -288,10 +338,11 @@ const NAME_BLOCK_LIMIT = 200;
 async function findFuzzyMatches(
   input: ResolveIdentityInput,
   settings: IdentitySettings,
+  exec: DbExec = db,
 ): Promise<ResolveIdentityOutcome> {
   const tokens = nameTokens(input.fullName);
   if (tokens.length === 0) return { outcome: "new" };
-  const block = await db
+  const block = await exec
     .select()
     .from(candidates)
     .where(
@@ -439,6 +490,8 @@ function childDescriptors(tx: Tx, orgId: string) {
     trainingFeedback,
     inboxMessages,
     captureEvents,
+    candidateCvVersions,
+    candidateClaims,
   ] as const;
   return tables.map((t) => ({
     name: getTableName(t),
@@ -479,12 +532,38 @@ export function mergeCandidateFields(
   const resume = survivor.resumeText ?? "";
   for (const [key, value] of Object.entries(absorbed)) {
     if (
-      ["id", "createdAt", "orgId", "skills", "resumeText", "mergedIntoId", "fileHash"].includes(key)
+      [
+        "id",
+        "createdAt",
+        "orgId",
+        "skills",
+        "resumeText",
+        "mergedIntoId",
+        "fileHash",
+        "poolUse",
+        "poolUseSource",
+        "consentGiven",
+        "aiCallOptOutAt",
+        "suspectedPromptInjection",
+      ].includes(key)
     )
       continue;
     const current = (survivor as unknown as Record<string, unknown>)[key];
     if (isBlank(current) && !isBlank(value)) patch[key] = value;
   }
+  // Consent and restrictions survive a merge: the stricter of the two wins
+  // (M0 verdict finding 5). A portal-terms ('role_only') person never becomes
+  // pool-matchable by being merged into a pool record.
+  if (absorbed.poolUse === "role_only" && survivor.poolUse !== "role_only") {
+    patch["poolUse"] = "role_only";
+    patch["poolUseSource"] = absorbed.poolUseSource ?? survivor.poolUseSource ?? null;
+  }
+  if (absorbed.consentGiven === false && survivor.consentGiven !== false)
+    patch["consentGiven"] = false;
+  if (absorbed.aiCallOptOutAt && !survivor.aiCallOptOutAt)
+    patch["aiCallOptOutAt"] = absorbed.aiCallOptOutAt;
+  if (absorbed.suspectedPromptInjection && !survivor.suspectedPromptInjection)
+    patch["suspectedPromptInjection"] = true;
   for (const s of absorbed.skills ?? []) if (s.trim()) skills.add(s.trim());
   if (skills.size !== (survivor.skills ?? []).length) patch["skills"] = [...skills];
   if ((absorbed.resumeText ?? "").length > resume.length) patch["resumeText"] = absorbed.resumeText;

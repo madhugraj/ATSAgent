@@ -557,21 +557,27 @@ export const applyInternally = createServerFn({ method: "POST" })
       .limit(1);
     if (!requisition) throw new Error("Requisition not found");
 
+    // Identity resolution (plan row 1): the raw-email lookup this path used
+    // before was not even lowercased — normalisation now happens in one place.
+    const { resolveIdentity, insertCandidateKeys, enqueueMergeSuggestion } =
+      await import("../server/candidates/identity.server");
     const email = data.email.trim();
-    const [existing] = await db
-      .select({ id: candidates.id })
-      .from(candidates)
-      .where(and(eq(candidates.orgId, context.orgId), eq(candidates.email, email)))
-      .limit(1);
+    const outcome = await resolveIdentity({
+      orgId: context.orgId,
+      fullName: data.fullName.trim(),
+      email,
+    });
 
-    let candidateId = existing?.id ?? null;
+    let candidateId =
+      outcome.outcome === "merged" || outcome.outcome === "attach" ? outcome.candidateId : null;
+    let created = false;
     if (!candidateId) {
       const [row] = await db
         .insert(candidates)
         .values({
           orgId: context.orgId,
           fullName: data.fullName.trim(),
-          email,
+          email: email.toLowerCase(),
           source: "ijp",
           isInternal: true,
           employeeId: data.employeeId.trim(),
@@ -586,6 +592,30 @@ export const applyInternally = createServerFn({ method: "POST" })
         .returning({ id: candidates.id });
       if (!row) throw new Error("Could not register the employee");
       candidateId = row.id;
+      created = true;
+    }
+
+    if (created) {
+      try {
+        await insertCandidateKeys(db, context.orgId, candidateId, [
+          { keyType: "email", keyValue: email.toLowerCase() },
+        ]);
+      } catch (e) {
+        console.error("[ijp] could not record identity keys:", e);
+      }
+      if (outcome.outcome === "review") {
+        try {
+          await enqueueMergeSuggestion({
+            orgId: context.orgId,
+            existingId: outcome.matchedCandidateId,
+            newcomerId: candidateId,
+            score: outcome.score,
+            reasons: outcome.reasons,
+          });
+        } catch (e) {
+          console.error("[ijp] could not enqueue the merge suggestion:", e);
+        }
+      }
     }
 
     await db.insert(applications).values({
