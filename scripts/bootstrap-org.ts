@@ -153,21 +153,17 @@ console.log(
 );
 
 // The set-password link, through the same path as "Forgot password".
-const emailConfigured = Boolean(
-  process.env["SMTP_URL"] ||
-  (process.env["MICROSOFT_OAUTH_TENANT_ID"] &&
-    process.env["MICROSOFT_OAUTH_CLIENT_ID"] &&
-    process.env["MICROSOFT_OAUTH_CLIENT_SECRET"]),
-);
+const { emailTransportConfigured, sendTemplateEmail } =
+  await import("../src/lib/email-templates/send-email");
+const emailConfigured = emailTransportConfigured();
 if (!emailConfigured) {
   console.log(
-    "Email is not configured (no SMTP_URL and no Microsoft Graph credentials), so no link was sent. Set SMTP_URL or MICROSOFT_OAUTH_TENANT_ID/CLIENT_ID/CLIENT_SECRET plus EMAIL_FROM, then re-run this or use “Forgot password” on the sign-in page.",
+    "Email is not configured (no SMTP_URL and no OAuth mail credentials), so no link was sent. Set SMTP_URL or MICROSOFT_OAUTH_TENANT_ID/CLIENT_ID/CLIENT_SECRET plus EMAIL_FROM, then re-run this or use “Forgot password” on the sign-in page.",
   );
 } else if (user.passwordHash) {
   console.log("This person already has a password; use “Forgot password” to change it.");
 } else {
   const { signActionToken } = await import("../src/server/action-token");
-  const { sendTemplateEmail } = await import("../src/lib/email-templates/send-email");
   const siteUrl = (process.env["PUBLIC_SITE_URL"] ?? "http://localhost:9000").replace(/\/$/, "");
   const token = signActionToken(user.id, "password-reset", 60 * 60 * 1000);
   await sendTemplateEmail("password-recovery", email, {

@@ -106,6 +106,25 @@ export async function renderTemplateEmail(
   return { subject, html, text, inline };
 }
 
+/** True when any mail transport is configured (SMTP_URL or the Graph mail credentials). */
+export function emailTransportConfigured(): boolean {
+  return Boolean(
+    process.env["SMTP_URL"] ||
+    (process.env["MICROSOFT_OAUTH_TENANT_ID"] &&
+      process.env["MICROSOFT_OAUTH_CLIENT_ID"] &&
+      process.env["MICROSOFT_OAUTH_CLIENT_SECRET"]),
+  );
+}
+
+// Vendor-neutral operator hint for "nothing can send": callers relay error
+// messages to clients (e.g. registration), so no transport/vendor branding.
+function notConfiguredError(): Error {
+  return new Error(
+    "Email is not configured: set SMTP_URL, or the OAuth mail credentials " +
+      "(MICROSOFT_OAUTH_TENANT_ID, MICROSOFT_OAUTH_CLIENT_ID, MICROSOFT_OAUTH_CLIENT_SECRET)",
+  );
+}
+
 // Client-credentials token for Graph, cached until shortly before Entra's
 // ~60-min expiry — one token per pod instead of one per email.
 let graphToken: { value: string; expiresAt: number } | null = null;
@@ -134,7 +153,7 @@ async function graphAccessToken(
     const detail = (await res.json().catch(() => null)) as { error_description?: unknown } | null;
     const reason =
       detail?.error_description != null ? String(detail.error_description) : `HTTP ${res.status}`;
-    throw new Error(`Graph token request failed (${reason})`);
+    throw new Error(`Email token request failed (${reason})`);
   }
   const body = (await res.json()) as { access_token: string; expires_in: number };
   graphToken = { value: body.access_token, expiresAt: Date.now() + (body.expires_in - 300) * 1000 };
@@ -174,41 +193,50 @@ export async function sendTemplateEmail(
   );
   const from = process.env["EMAIL_FROM"] || `${SITE_NAME} <noreply@${FROM_DOMAIN}>`;
 
+  const mail = {
+    from,
+    to: recipient,
+    subject,
+    html,
+    text,
+    ...(options.replyTo ? { replyTo: options.replyTo } : {}),
+    ...(options.attachments?.length || inline.length
+      ? {
+          attachments: [
+            ...inline.map((a) => ({
+              filename: "logo",
+              cid: a.cid,
+              content: a.content,
+              contentType: a.contentType,
+              contentDisposition: "inline" as const,
+            })),
+            ...(options.attachments ?? []).map((a) => ({
+              filename: a.filename,
+              content: Buffer.from(a.contentBase64, "base64"),
+              contentType: a.contentType,
+            })),
+          ],
+        }
+      : {}),
+    headers: { "X-ATSIQ-Idempotency-Key": options.idempotencyKey || crypto.randomUUID() },
+  };
+
   const smtpUrl = process.env["SMTP_URL"];
+  const useGraph = !smtpUrl && emailTransportConfigured();
+
+  // Test runs share .env.local, whose SMTP relay — and, once the Graph mail
+  // credentials are set, whose Graph mailbox — reaches real inboxes: render
+  // and "send" in memory instead, so a test never e-mails a real person.
+  // Graph has no in-memory transport, so test mode downgrades any configured
+  // transport to the SMTP jsonTransport.
+  if (process.env["NODE_ENV"] === "test") {
+    if (!smtpUrl && !useGraph) throw notConfiguredError();
+    await nodemailer.createTransport({ jsonTransport: true }).sendMail(mail);
+    return { sent: true };
+  }
+
   if (smtpUrl) {
-    // Test runs share .env.local, whose SMTP relay reaches real inboxes: render
-    // and "send" in memory instead, so a test never e-mails a real person.
-    const transporter =
-      process.env["NODE_ENV"] === "test"
-        ? nodemailer.createTransport({ jsonTransport: true })
-        : nodemailer.createTransport(smtpUrl);
-    await transporter.sendMail({
-      from,
-      to: recipient,
-      subject,
-      html,
-      text,
-      ...(options.replyTo ? { replyTo: options.replyTo } : {}),
-      ...(options.attachments?.length || inline.length
-        ? {
-            attachments: [
-              ...inline.map((a) => ({
-                filename: "logo",
-                cid: a.cid,
-                content: a.content,
-                contentType: a.contentType,
-                contentDisposition: "inline" as const,
-              })),
-              ...(options.attachments ?? []).map((a) => ({
-                filename: a.filename,
-                content: Buffer.from(a.contentBase64, "base64"),
-                contentType: a.contentType,
-              })),
-            ],
-          }
-        : {}),
-      headers: { "X-ATSIQ-Idempotency-Key": options.idempotencyKey || crypto.randomUUID() },
-    });
+    await nodemailer.createTransport(smtpUrl).sendMail(mail);
     return { sent: true };
   }
 
@@ -217,11 +245,12 @@ export async function sendTemplateEmail(
   // SMTP basic auth outright, so this is the working transport there; the app
   // registration's Mail.Send permission is admin-consented. The token endpoint
   // must be tenant-specific: /organizations rejects client_credentials with a
-  // misleading Conditional Access error (AADSTS53003).
+  // misleading Conditional Access error (AADSTS53003). Never reached under
+  // NODE_ENV=test (downgraded to the in-memory transport above).
   const graphTenant = process.env["MICROSOFT_OAUTH_TENANT_ID"];
   const graphClientId = process.env["MICROSOFT_OAUTH_CLIENT_ID"];
   const graphSecret = process.env["MICROSOFT_OAUTH_CLIENT_SECRET"];
-  if (graphTenant && graphClientId && graphSecret) {
+  if (useGraph && graphTenant && graphClientId && graphSecret) {
     const mailboxMatch = /<([^>]+)>/.exec(from);
     const mailbox = mailboxMatch?.[1] ?? from.trim();
     const displayName = mailboxMatch
@@ -276,13 +305,10 @@ export async function sendTemplateEmail(
       } | null;
       const reason =
         detail?.error?.message != null ? String(detail.error.message) : `HTTP ${response.status}`;
-      throw new Error(`Graph sendMail failed (${reason})`);
+      throw new Error(`Email send failed (${reason})`);
     }
     return { sent: true };
   }
 
-  throw new Error(
-    "Email is not configured: set SMTP_URL, or the Microsoft Graph credentials " +
-      "(MICROSOFT_OAUTH_TENANT_ID, MICROSOFT_OAUTH_CLIENT_ID, MICROSOFT_OAUTH_CLIENT_SECRET)",
-  );
+  throw notConfiguredError();
 }

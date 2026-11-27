@@ -830,7 +830,17 @@ describe("send-email: sendTemplateEmail + renderTemplateEmail", () => {
     await expect(send.renderTemplateEmail(`nope-${stamp}`)).rejects.toThrow("Available:");
   });
 
-  test("an unset SMTP_URL fails vendor-neutral before any transport is created", async () => {
+  test("an unset transport fails vendor-neutral before any transport is created", async () => {
+    // With the Graph fallback, SMTP_URL alone no longer decides "configured":
+    // scrub the Graph credentials too, or .env.local machines would send (or
+    // real-POST) instead of throwing.
+    const graphKeys = [
+      "MICROSOFT_OAUTH_TENANT_ID",
+      "MICROSOFT_OAUTH_CLIENT_ID",
+      "MICROSOFT_OAUTH_CLIENT_SECRET",
+    ];
+    const hadGraph = graphKeys.map((k) => [k, process.env[k]] as const);
+    for (const k of graphKeys) delete process.env[k];
     const had = process.env.SMTP_URL;
     delete process.env.SMTP_URL;
     try {
@@ -840,6 +850,10 @@ describe("send-email: sendTemplateEmail + renderTemplateEmail", () => {
     } finally {
       if (had === undefined) delete process.env.SMTP_URL;
       else process.env.SMTP_URL = had;
+      for (const [k, v] of hadGraph) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
     }
   });
 
