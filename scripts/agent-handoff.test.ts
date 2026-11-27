@@ -23,6 +23,7 @@ const {
   agentEvents,
   agentPolicies,
   agentRuns,
+  agentTasks,
   applications,
   candidates,
   hiringConversations,
@@ -1187,5 +1188,235 @@ describe("E. org-wide switch off: HR completes the pipeline by hand", () => {
       .where(and(eq(agentEvents.orgId, orgId), gte(agentEvents.createdAt, since)));
     expect(stuck.length).toBeGreaterThan(0);
     expect(stuck.every((e) => e.status === "done")).toBe(true);
+  });
+});
+
+describe("work for an agent that is busy on the same candidate", () => {
+  test("a candidate moving on is held behind an open request, then starts once it is answered", async () => {
+    await setAgent("interview", true);
+    // Earlier tests may have paused every agent of the organisation.
+    await db
+      .delete(agentPolicies)
+      .where(and(eq(agentPolicies.orgId, orgId), eq(agentPolicies.agentType, "*" as never)));
+    await settleRuns();
+    // Earlier tests may have paused the shared role; nothing starts for a paused role.
+    await db
+      .update(requisitions)
+      .set({ status: "approved" } as never)
+      .where(eq(requisitions.id, reqId));
+    const appId = await application("l2");
+    // An Interview coordinator run on this candidate, waiting on a person
+    // (a stand-in for the L2 round).
+    const { runId: busy } = await startRun({
+      orgId,
+      agentType: "interview",
+      principalUserId: hrId,
+      goal: "A panellist cannot make the L2 interview; propose a stand-in.",
+      subjectType: "application",
+      subjectId: appId,
+    });
+    await db
+      .update(agentRuns)
+      .set({ status: "awaiting_human" } as never)
+      .where(eq(agentRuns.id, busy));
+    const [task] = await db
+      .insert(agentTasks)
+      .values({
+        orgId,
+        runId: busy,
+        kind: "gate",
+        status: "open",
+        title: "Stand-in for an L2 interview",
+        proposedAction: {
+          name: "propose_substitute",
+          args: { subject: { type: "panel_substitute", applicationId: appId, level: 2 } },
+        },
+      } as never)
+      .returning({ id: agentTasks.id });
+
+    // A person keeps the stand-in card open, and another event for the candidate arrives.
+    const since = new Date();
+    await emitAgentEvent({
+      orgId,
+      type: "application.advanced",
+      subjectType: "requisition",
+      subjectId: reqId,
+      actorUserId: hrId,
+      payload: { applicationIds: [appId] },
+    });
+    await processAgentEvents({ orgId });
+    const interviewRuns = async () =>
+      (await runsSince(since)).filter(
+        (r) => r.agentType === "interview" && r.subjectId === appId && r.id !== busy,
+      );
+    expect(await interviewRuns()).toHaveLength(0);
+    const held = await db
+      .select()
+      .from(agentEvents)
+      .where(and(eq(agentEvents.orgId, orgId), eq(agentEvents.type, "agent.dispatch_deferred")));
+    expect(held).toHaveLength(1);
+    expect(held[0]).toMatchObject({ status: "pending", subjectId: appId, attempts: 0 });
+    // More work for the same agent and candidate joins the held item instead of piling up.
+    await emitAgentEvent({
+      orgId,
+      type: "application.advanced",
+      subjectType: "requisition",
+      subjectId: reqId,
+      actorUserId: hrId,
+      payload: { applicationIds: [appId] },
+    });
+    await emitAgentEvent({
+      orgId,
+      type: "interview.missed",
+      subjectType: "application",
+      subjectId: appId,
+      actorUserId: hrId,
+      payload: { applicationId: appId, level: 2 },
+    });
+    await processAgentEvents({ orgId });
+    const stillOne = await db
+      .select()
+      .from(agentEvents)
+      .where(and(eq(agentEvents.orgId, orgId), eq(agentEvents.type, "agent.dispatch_deferred")));
+    expect(stillOne).toHaveLength(1);
+    // Still busy on the next tick: it keeps waiting, without counting as a failure.
+    await processAgentEvents({ orgId });
+    const [again] = await db.select().from(agentEvents).where(eq(agentEvents.id, held[0]!.id));
+    expect(again).toMatchObject({ status: "pending", attempts: 0 });
+
+    // The candidate moves on from L2: the stand-in for that round is closed as stale.
+    await moveStageCore(
+      { orgId, userId: hrId, memberEmail: `hr-${stamp}@test.local` },
+      { applicationId: appId, toStage: "l3" as never, reason: "Another round" },
+    );
+    const [t] = await db.select().from(agentTasks).where(eq(agentTasks.id, task!.id));
+    expect(t!.status).toBe("cancelled");
+    expect(JSON.stringify(t!.response)).toContain("stand-in for that round no longer applies");
+
+    // Once the busy run is done, the held work starts.
+    await db
+      .update(agentRuns)
+      .set({ status: "done" } as never)
+      .where(eq(agentRuns.id, busy));
+    await processAgentEvents({ orgId });
+    // Exactly one new coordinator run starts with everything held; later work waits behind it
+    // as a single held item, never one run per event.
+    expect(await interviewRuns()).toHaveLength(1);
+    const pendingHeld = await db
+      .select()
+      .from(agentEvents)
+      .where(
+        and(
+          eq(agentEvents.orgId, orgId),
+          eq(agentEvents.type, "agent.dispatch_deferred"),
+          eq(agentEvents.status, "pending"),
+        ),
+      );
+    expect(pendingHeld.length).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("work for an agent that is busy on the same role", () => {
+  test("role-level work is held behind a run waiting on a person, merged, said in the thread, then starts once", async () => {
+    await setAgent("jd", true);
+    await db
+      .delete(agentPolicies)
+      .where(and(eq(agentPolicies.orgId, orgId), eq(agentPolicies.agentType, "*" as never)));
+    await settleRuns();
+    await db
+      .update(requisitions)
+      .set({ status: "approved" } as never)
+      .where(eq(requisitions.id, reqId));
+    await db.delete(agentEvents).where(eq(agentEvents.orgId, orgId));
+    const [conv] = await db
+      .insert(hiringConversations)
+      .values({ orgId, createdBy: hrId, requisitionId: reqId, status: "active" } as never)
+      .returning({ id: hiringConversations.id });
+    // A JD agent run on the role, waiting on a person.
+    const { runId: busy } = await startRun({
+      orgId,
+      agentType: "jd",
+      principalUserId: hrId,
+      goal: "Draft the job description.",
+      subjectType: "requisition",
+      subjectId: reqId,
+    });
+    await db
+      .update(agentRuns)
+      .set({ status: "awaiting_human" } as never)
+      .where(eq(agentRuns.id, busy));
+    await db.insert(agentTasks).values({
+      orgId,
+      runId: busy,
+      kind: "clarification",
+      status: "open",
+      title: "Which template?",
+    } as never);
+
+    const since = new Date();
+    const changes = (comment: string) =>
+      emitAgentEvent({
+        orgId,
+        type: "jd.changes_requested",
+        subjectType: "requisition",
+        subjectId: reqId,
+        actorUserId: hrId,
+        payload: { comment },
+      });
+    await changes("Shorter, please");
+    await changes("Add on-call duties");
+    // An event the busy run caused itself is covered by it: not held.
+    await db.insert(agentEvents).values({
+      orgId,
+      type: "jd.changes_requested",
+      subjectType: "requisition",
+      subjectId: reqId,
+      actorUserId: hrId,
+      sourceRunId: busy,
+      payload: { comment: "from the run itself" },
+    } as never);
+    await processAgentEvents({ orgId });
+
+    const jdRuns = async () =>
+      (await runsSince(since)).filter((r) => r.agentType === "jd" && r.id !== busy);
+    expect(await jdRuns()).toHaveLength(0);
+    const held = await db
+      .select()
+      .from(agentEvents)
+      .where(and(eq(agentEvents.orgId, orgId), eq(agentEvents.type, "agent.dispatch_deferred")));
+    expect(held).toHaveLength(1); // merged into one item
+    expect(held[0]).toMatchObject({
+      status: "pending",
+      subjectType: "requisition",
+      subjectId: reqId,
+    });
+    const goal = String((held[0]!.payload as { goal?: string }).goal);
+    expect(goal).toContain("Shorter, please");
+    expect(goal).toContain("Add on-call duties");
+    expect(goal).not.toContain("from the run itself");
+    const said = await db
+      .select({ body: hiringMessages.body })
+      .from(hiringMessages)
+      .where(eq(hiringMessages.conversationId, conv!.id));
+    expect(said.map((m) => m.body)).toContain(
+      'The JD agent is waiting on you for "Which template?", so new work for it is queued — it starts as soon as that is done.',
+    );
+
+    // Still busy: it waits, without counting as a failure.
+    await processAgentEvents({ orgId });
+    expect(await jdRuns()).toHaveLength(0);
+
+    // The person decides; the run ends — the held work starts, once.
+    await db
+      .update(agentRuns)
+      .set({ status: "done" } as never)
+      .where(eq(agentRuns.id, busy));
+    await processAgentEvents({ orgId });
+    const started = await jdRuns();
+    expect(started).toHaveLength(1);
+    expect(started[0]!.goal).toContain("Add on-call duties");
+    await processAgentEvents({ orgId });
+    expect(await jdRuns()).toHaveLength(1);
+    await db.delete(hiringConversations).where(eq(hiringConversations.id, conv!.id));
   });
 });

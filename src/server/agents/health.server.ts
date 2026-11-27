@@ -106,6 +106,8 @@ export const HEALTH = {
   assessmentWaitHours: 2,
   /** …a panel review left open by the HR head this long (hours). */
   reviewWaitHours: 48,
+  /** Work held for an agent busy on the same candidate this long (hours). */
+  deferredWaitHours: 24,
   /** Model replies cut off at the output limit without acting, in 24 h. */
   cutOffReplies24h: 2,
   /** One run asking people this many questions (7 days) is going round in circles. */
@@ -971,6 +973,24 @@ export const RULES: Rule[] = [
     },
   },
   {
+    id: "orchestrator.work_held",
+    element: "orchestrator",
+    severity: "warning",
+    description: `Work for an agent has waited more than ${HEALTH.deferredWaitHours} hours because that agent is still busy on the same candidate or role — usually a request to a person that nobody has answered. Answer or decline the open request so the agent can move on.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ agent: string; n: number }>(sql`
+        select payload ->> 'agent' agent, count(*)::int n from agent_events
+        where org_id = ${orgId} and type = 'agent.dispatch_deferred' and status = 'pending'
+          and created_at < now() - make_interval(hours => ${HEALTH.deferredWaitHours})
+        group by 1`);
+      return r.map((x) => ({
+        agentType: x.agent,
+        title: `${x.n} piece(s) of work held over ${HEALTH.deferredWaitHours} hours behind an open request`,
+        detail: { held: x.n },
+      }));
+    },
+  },
+  {
     id: "orchestrator.events",
     element: "orchestrator",
     severity: "serious",
@@ -978,7 +998,8 @@ export const RULES: Rule[] = [
     evaluate: async (orgId) => {
       const r = await rows<{ failed: number; stale: number }>(sql`
         select count(*) filter (where status = 'failed' and updated_at >= now() - interval '24 hours')::int failed,
-          count(*) filter (where status = 'pending' and created_at < now() - make_interval(mins => ${HEALTH.eventBacklogMinutes}))::int stale
+          count(*) filter (where status = 'pending' and type <> 'agent.dispatch_deferred'
+            and created_at < now() - make_interval(mins => ${HEALTH.eventBacklogMinutes}))::int stale
         from agent_events where org_id = ${orgId}`);
       const x = r[0];
       if (!x || (!x.failed && !x.stale)) return [];

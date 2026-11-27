@@ -461,6 +461,35 @@ export async function performReviewGate(
       cancelledRounds: cancelled,
     },
   });
+  // A disagreement held the hiring decision: going with the panel releases it.
+  if (a.outcome === "disagree" && decision.status === "approved" && a.panelVerdict)
+    try {
+      const { progressOf } = await import("@/lib/interview-plan.server");
+      const progress = await progressOf(orgId, a.applicationId);
+      const finalRound = a.level >= progress.finalLevel;
+      // Only when a hiring decision is due now (a non-final select just moves on).
+      if (finalRound || a.panelVerdict !== "select") {
+        const { emitAgentEvent } = await import("../agents/events");
+        await emitAgentEvent({
+          orgId,
+          type: "scorecard.submitted",
+          subjectType: "requisition",
+          subjectId: app.requisitionId,
+          actorUserId: userId,
+          payload: {
+            applicationId: a.applicationId,
+            level: a.level,
+            verdict: a.panelVerdict,
+            roundComplete: true,
+            finalRound,
+            policy: progress.plan.verdictPolicy,
+            afterPanelReview: { agentVerdict: a.verdict, agentRating: a.rating },
+          },
+        });
+      }
+    } catch (err) {
+      log.warn("panel.review_release_failed", { org_id: orgId, error: err as Error });
+    }
   // Training data: a person judged the agent's view against the panel's.
   try {
     const t = await import("../training/capture.server");
