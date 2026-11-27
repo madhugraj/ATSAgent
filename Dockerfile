@@ -10,6 +10,8 @@ RUN bun install --frozen-lockfile
 
 COPY . .
 
+# The browser companion download (Integrations → Capture extension).
+RUN bun scripts/build-extension-zip.mjs
 RUN bun run build
 
 # Database migrations and one-off admin scripts (docs/deployment-scouts-gcp.md):

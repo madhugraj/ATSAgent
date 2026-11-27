@@ -61,3 +61,4 @@ test_data/*.mp4
 # Local scratch scripts and Claude Code session files.
 /smoke*.mjs
 .claude/
+public/atsiq-capture.zip

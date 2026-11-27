@@ -1,7 +1,7 @@
 const $ = (id) => document.getElementById(id);
 // Capture posts carry the org's capture key — the destination must be one of
 // ours. Never let the destination become user-editable text (phishing vector).
-const ALLOWED_SITES = ["https://atsiq.yavar.ai", "http://localhost:8080", "http://localhost:9000"];
+const ALLOWED_SITES = ["https://www.scouts.yavar.ai", "https://atsiq.yavar.ai", "http://localhost:8080", "http://localhost:9000"];
 const status = (msg, cls = "") => {
   const el = $("status");
   el.textContent = msg;
@@ -9,7 +9,7 @@ const status = (msg, cls = "") => {
 };
 
 chrome.storage.local.get(["site", "token", "kind", "pace", "source", "limit"], (saved) => {
-  $("site").value = saved.site || "https://atsiq.yavar.ai";
+  $("site").value = saved.site || "https://www.scouts.yavar.ai";
   $("token").value = saved.token || "";
   $("kind").value = saved.kind || "cv";
   $("pace").value = saved.pace || "safe";
@@ -82,7 +82,7 @@ async function grabPage() {
 
 function settings() {
   const requested = $("site").value.trim().replace(/\/$/, "");
-  const site = ALLOWED_SITES.includes(requested) ? requested : "https://atsiq.yavar.ai";
+  const site = ALLOWED_SITES.includes(requested) ? requested : "https://www.scouts.yavar.ai";
   const token = $("token").value.trim();
   return { site, token };
 }
