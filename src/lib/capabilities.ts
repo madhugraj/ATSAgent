@@ -215,6 +215,14 @@ export const CAPABILITY_MESSAGE = "This area is not part of your organisation's 
  * tool either to declare a `capability` or to appear here; a tool that does
  * both is a mapping error the sweep reports.
  */
+/**
+ * CONSCIOUS DECISION (B1a review, 2026-11-27): a tool's `capability` is a
+ * tenant gate, not part of the agent's contract with the model — it is
+ * deliberately excluded from manifest.server.ts's canonicalManifest, so
+ * declaring or changing it does NOT bump agent versions or agents.lock.json.
+ * A reviewer seeing agents.lock unchanged next to new `capability:` fields is
+ * looking at intent, not a missed version bump.
+ */
 export const TOOL_EXEMPT: ReadonlySet<string> = new Set([
   // Requisition / JD context reads.
   "list_departments",
