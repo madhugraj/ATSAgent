@@ -152,3 +152,13 @@ The tracks don't touch the same tables or screens until track C. Row 8 needs bot
 2. **Claude reviews** for correctness, the security invariants, scope against this plan, tests and docs. The verdict is **Approved** or **Changes requested**, with numbered findings.
 3. **The product owner gives final approval** on invariant-touching PRs (identity, erasure, grants, AI calls). Nothing merges red or unreviewed.
 4. **After merge,** the reviewer ticks the milestone in the table above and the next gate opens.
+
+## Decision log
+
+| Date       | Decision                                                                                                                                                                                                                                                                            | By                       |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| 2026-11-27 | M0 Track A design (PR #112) approved with conditions; A1 may start.                                                                                                                                                                                                                 | Reviewer + product owner |
+| 2026-11-27 | M0 Track B design (PR #113) approved with conditions; B1 may start (B1a/B1b split allowed).                                                                                                                                                                                         | Reviewer + product owner |
+| 2026-11-27 | Bulk JD import may create **approved** requisitions only when tenant governance has turned `auto_approved` on, with step-up and an audit entry. Each auto-approval's trail cites that setting's audit id. The opt-in is bulk-path-only, and new tenants default to `approval_gate`. | Product owner            |
+| 2026-11-27 | Developer 5 owns the tenant sector taxonomy table (B3) and the `capture.server.ts` requisitionId extension (B3); Developer 4 rebases on both.                                                                                                                                       | Reviewer                 |
+| 2026-11-27 | No embeddings in B3; revisit after the C3 evaluation. `docx` dependency approved. Brand fonts deferred.                                                                                                                                                                             | Reviewer                 |
