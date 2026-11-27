@@ -21,7 +21,6 @@ import { requireOrg } from "./auth.middleware";
 import { requireCapability } from "./capabilities.server";
 
 type CandRow = typeof candidates.$inferSelect;
-type CandInsert = typeof candidates.$inferInsert;
 
 const isBlank = (v: unknown) =>
   v === null ||
@@ -31,43 +30,12 @@ const isBlank = (v: unknown) =>
   (typeof v === "number" && v === 0);
 
 /**
- * Field-level merge that never loses information: the survivor keeps everything
- * it already has and only fills its blanks from the duplicates. Skills are
- * unioned and the longest resume text wins. Identity/audit columns (id,
- * createdAt, orgId) are never taken from a duplicate.
- */
-function mergeCandidateFields(survivor: CandRow, dupes: CandRow[]): CandInsert {
-  const patch: Record<string, unknown> = {};
-  const skills = new Set((survivor.skills ?? []).map((s) => s.trim()).filter(Boolean));
-  let resume = survivor.resumeText ?? "";
-
-  for (const d of dupes) {
-    for (const [key, value] of Object.entries(d)) {
-      if (
-        key === "id" ||
-        key === "createdAt" ||
-        key === "orgId" ||
-        key === "skills" ||
-        key === "resumeText"
-      )
-        continue;
-      const current = patch[key] ?? (survivor as unknown as Record<string, unknown>)[key];
-      if (isBlank(current) && !isBlank(value)) patch[key] = value;
-    }
-    for (const s of d.skills ?? []) if (s.trim()) skills.add(s.trim());
-    if ((d.resumeText ?? "").length > resume.length) resume = d.resumeText ?? "";
-  }
-
-  if (skills.size !== (survivor.skills ?? []).length) patch["skills"] = [...skills];
-  if (resume !== (survivor.resumeText ?? "")) patch["resumeText"] = resume;
-  return patch as CandInsert;
-}
-
-/**
- * Merge duplicates into one record: fill blanks, re-point applications and all
- * child records at the survivor, then delete the emptied duplicates. Nothing is
- * dropped silently — applications that already exist on the survivor for the
- * same requisition are removed as true duplicates.
+ * Merge duplicates into one record through the reversible identity core
+ * (plan row 1): each duplicate is tombstoned (not deleted) into the survivor,
+ * every moved or deleted child is snapshotted, and each merge is audited and
+ * undoable from the merge review queue. Sequential so each duplicate's merge
+ * is a separate undoable step; applications the survivor already holds for the
+ * same requisition are removed as true duplicates and restored on undo.
  */
 export const mergeCandidatesFn = createServerFn({ method: "POST" })
   .middleware([requireOrg, requireCapability("matching.pool")])
@@ -90,81 +58,21 @@ export const mergeCandidatesFn = createServerFn({ method: "POST" })
         ),
       );
     const byId = new Map(rows.map((r) => [r.id, r]));
-    const survivor = byId.get(data.survivorId);
-    if (!survivor) throw new Error("Survivor candidate not found in your organisation.");
-    const others = data.dupeIds
-      .map((id) => byId.get(id))
-      .filter((r): r is CandRow => r !== undefined);
+    if (!byId.get(data.survivorId))
+      throw new Error("Survivor candidate not found in your organisation.");
+    const others = data.dupeIds.filter((id) => byId.has(id) && id !== data.survivorId);
     if (others.length === 0) return { merged: 0, movedApplications: 0 };
 
-    const patch = mergeCandidateFields(survivor, others);
-    if (Object.keys(patch).length > 0) {
-      await db.update(candidates).set(patch).where(eq(candidates.id, survivor.id));
+    const { mergeCandidatesCore } = await import("../server/candidates/identity.server");
+    let movedApplications = 0;
+    for (const id of others) {
+      const result = await mergeCandidatesCore({
+        orgId: context.orgId,
+        survivorId: data.survivorId,
+        mergedId: id,
+        actor: { userId: context.userId, email: context.memberEmail },
+      });
+      movedApplications += result.movedChildren;
     }
-
-    const dupeIds = others.map((d) => d.id);
-
-    const survivorApps = await db
-      .select({ id: applications.id, requisitionId: applications.requisitionId })
-      .from(applications)
-      .where(and(eq(applications.candidateId, survivor.id), eq(applications.orgId, context.orgId)));
-    const taken = new Set(survivorApps.map((a) => a.requisitionId));
-
-    const dupeApps = await db
-      .select({ id: applications.id, requisitionId: applications.requisitionId })
-      .from(applications)
-      .where(
-        and(inArray(applications.candidateId, dupeIds), eq(applications.orgId, context.orgId)),
-      );
-
-    let moved = 0;
-    for (const a of dupeApps) {
-      if (taken.has(a.requisitionId)) {
-        await db
-          .delete(applications)
-          .where(and(eq(applications.id, a.id), eq(applications.orgId, context.orgId)));
-        continue;
-      }
-      await db
-        .update(applications)
-        .set({ candidateId: survivor.id })
-        .where(and(eq(applications.id, a.id), eq(applications.orgId, context.orgId)));
-      taken.add(a.requisitionId);
-      moved++;
-    }
-
-    // Child records that hang off the candidate directly — explicit per table.
-    await db
-      .update(socialProfiles)
-      .set({ candidateId: survivor.id })
-      .where(
-        and(inArray(socialProfiles.candidateId, dupeIds), eq(socialProfiles.orgId, context.orgId)),
-      );
-    await db
-      .update(candidateVerifications)
-      .set({ candidateId: survivor.id })
-      .where(
-        and(
-          inArray(candidateVerifications.candidateId, dupeIds),
-          eq(candidateVerifications.orgId, context.orgId),
-        ),
-      );
-    await db
-      .update(candidateAssessments)
-      .set({ candidateId: survivor.id })
-      .where(
-        and(
-          inArray(candidateAssessments.candidateId, dupeIds),
-          eq(candidateAssessments.orgId, context.orgId),
-        ),
-      );
-
-    await db
-      .delete(candidates)
-      .where(and(inArray(candidates.id, dupeIds), eq(candidates.orgId, context.orgId)));
-    // Agent requests about a duplicate's dropped applications no longer apply.
-    const { afterSubjectsDeleted } = await import("../server/agents/runtime.server");
-    await afterSubjectsDeleted(context.orgId);
-
-    return { merged: others.length, movedApplications: moved };
+    return { merged: others.length, movedApplications };
   });

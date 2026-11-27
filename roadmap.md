@@ -26,8 +26,14 @@ Candidate Identification platform work, rows 0 and 5 (`docs/candidate-identifica
       `shared_*` key so the detail never auto-merges anyone again)
 - [x] Per-organisation thresholds (`candidate_identity_settings`): auto-merge switch, fuzzy
       high/low thresholds, default phone region — DB defaults, no backfill
-- [ ] A1b: route all nine candidate-creating intake paths through the module (the scattered
-      exact-email checks go away then)
+- [x] A1b: all candidate-creating intake paths route through the module — intake core
+      (upload, inbox, board, capture), public apply (lookup-only: links the application,
+      never mutates, conflicting evidence queues a review), IJP apply (the raw-email lookup
+      is gone), recruiter manual add (a collision queues a review instead of silently
+      duplicating), provider search import (the external-id upsert stays as a signal key);
+      the talent-pool bulk merge goes through the reversible core; tombstoned rows are
+      invisible to the pool-match sweep, talent search, the candidates list and attach;
+      the unassigned pool keeps its legacy lookup until assignment
 
 ## Pay terms — Phase 1 foundation (2026-11-11)
 
