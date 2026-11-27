@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { requireRouteCapability } from "@/lib/route-guard";
 import { RECENT_MESSAGES, SCREENABLE, foldText, supersededMessages } from "@/lib/desk-view";
 import { AgentMarkdown } from "@/components/AgentMarkdown";
 import { ScreeningResultSummary, WhyThisScore } from "@/components/ScreeningRationale";
@@ -97,6 +98,7 @@ import {
 } from "@/lib/hiring-desk.functions";
 
 export const Route = createFileRoute("/desk")({
+  beforeLoad: requireRouteCapability,
   validateSearch: z.object({
     c: z.string().optional(),
     split: z.string().optional(),

@@ -1,12 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Archive, KeyRound, RotateCcw, Search, Trash2, UserMinus } from "lucide-react";
 
 import {
   addPlatformAdmin,
+  applyWorkflowProfile,
   claimSuperUser,
   deleteOrgUserAsSuperUser,
   deleteOrganizationAsSuperUser,
@@ -14,10 +15,12 @@ import {
   listOrgAgreementsAsSuperUser,
   listOrgUsersAsSuperUser,
   listPlatformAdmins,
+  readWorkflowProfile,
   removePlatformAdmin,
   reviewOrganization,
   setOrganizationStatus,
   updateOrganizationAsSuperUser,
+  type WorkflowProfileRead,
 } from "@/lib/platform.functions";
 import { usePlatform } from "@/hooks/usePlatform";
 import { AGREEMENT_KINDS, AGREEMENTS } from "@/lib/legal/agreements";
@@ -71,6 +74,8 @@ function Platform() {
   const deleteUser = useServerFn(deleteOrgUserAsSuperUser);
   const dropOrg = useServerFn(deleteOrganizationAsSuperUser);
   const fetchAgreements = useServerFn(listOrgAgreementsAsSuperUser);
+  const fetchProfile = useServerFn(readWorkflowProfile);
+  const applyProfile = useServerFn(applyWorkflowProfile);
 
   const [busy, setBusy] = useState<string | null>(null);
   const [q, setQ] = useState("");
@@ -87,6 +92,15 @@ function Platform() {
   const [usersOf, setUsersOf] = useState<{ id: string; name: string } | null>(null);
   const [deleteOrg, setDeleteOrg] = useState<{ id: string; name: string } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState("");
+  const [workflowOf, setWorkflowOf] = useState<{ id: string; name: string } | null>(null);
+  const [wfProfile, setWfProfile] = useState<"full_pipeline" | "template" | "custom">(
+    "full_pipeline",
+  );
+  const [wfWorkflowId, setWfWorkflowId] = useState("");
+  const [wfMode, setWfMode] = useState<"approval_gate" | "auto_approved">("approval_gate");
+  const [wfLookback, setWfLookback] = useState(90);
+  const [wfTolerance, setWfTolerance] = useState(0.2);
+  const [wfSeededFor, setWfSeededFor] = useState<string | null>(null);
 
   const orgs = useQuery({
     queryKey: ["platform_orgs"],
@@ -108,6 +122,23 @@ function Platform() {
     queryFn: () => fetchOrgUsers({ data: { orgId: usersOf!.id } }),
     enabled: Boolean(usersOf?.id),
   });
+  const workflowProfile = useQuery({
+    queryKey: ["platform_org_profile", workflowOf?.id],
+    queryFn: () => fetchProfile({ data: { orgId: workflowOf!.id } }),
+    enabled: Boolean(workflowOf?.id),
+  });
+
+  // Seed the dialog's form from the org's stored profile, once per dialog open.
+  useEffect(() => {
+    const d: WorkflowProfileRead | undefined = workflowProfile.data;
+    if (!workflowOf || !d || wfSeededFor === workflowOf.id) return;
+    setWfSeededFor(workflowOf.id);
+    setWfProfile(d.profile);
+    setWfWorkflowId(d.workflowId ?? "");
+    setWfMode(d.settings.jdRequisitionMode ?? "approval_gate");
+    setWfLookback(d.settings.jdDuplicateLookbackDays ?? 90);
+    setWfTolerance(d.settings.payVarianceTolerance ?? 0.2);
+  }, [workflowProfile.data, workflowOf, wfSeededFor]);
 
   async function run(key: string, fn: () => Promise<unknown>, ok: string) {
     setBusy(key);
@@ -330,6 +361,13 @@ function Platform() {
                         </Button>
                         <Button
                           size="sm"
+                          variant="outline"
+                          onClick={() => setWorkflowOf({ id: o.id, name: o.name })}
+                        >
+                          Workflow
+                        </Button>
+                        <Button
+                          size="sm"
                           variant={o.status === "archived" ? "secondary" : "destructive"}
                           disabled={busy === `st:${o.id}`}
                           onClick={() =>
@@ -531,6 +569,150 @@ function Platform() {
               <p className="py-2 text-sm text-muted-foreground">Loading users…</p>
             ) : null}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(workflowOf)}
+        onOpenChange={(o) => {
+          if (!o) {
+            setWorkflowOf(null);
+            setWfSeededFor(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Workflow — {workflowOf?.name}</DialogTitle>
+            <DialogDescription>
+              {(() => {
+                const d = workflowProfile.data;
+                if (!d) return "Loading…";
+                const current =
+                  d.profile === "full_pipeline"
+                    ? "Full pipeline"
+                    : d.workflowName
+                      ? `${d.profile === "template" ? "Template" : "Custom"} — ${d.workflowName}`
+                      : d.profile;
+                return `${current} · ${d.capabilities.length} capabilities`;
+              })()}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              {(
+                [
+                  ["full_pipeline", "Full pipeline"],
+                  ["template", "Template"],
+                  ["custom", "Custom"],
+                ] as const
+              ).map(([value, label]) => (
+                <label key={value} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name="wf-profile"
+                    checked={wfProfile === value}
+                    onChange={() => setWfProfile(value)}
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+            {wfProfile !== "full_pipeline" ? (
+              <select
+                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                value={wfWorkflowId}
+                onChange={(e) => setWfWorkflowId(e.target.value)}
+              >
+                <option value="">Published workflow…</option>
+                {(workflowProfile.data?.publishedWorkflows ?? []).map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+            <div className="grid gap-2 sm:grid-cols-3">
+              <select
+                className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                value={wfMode}
+                onChange={(e) => setWfMode(e.target.value as "approval_gate" | "auto_approved")}
+              >
+                <option value="approval_gate">Approval gate</option>
+                <option value="auto_approved">Auto-approved</option>
+              </select>
+              <Input
+                type="number"
+                min={1}
+                max={365}
+                value={wfLookback}
+                onChange={(e) => {
+                  const n = e.target.valueAsNumber;
+                  if (Number.isFinite(n)) setWfLookback(n);
+                }}
+                placeholder="Duplicate lookback (days)"
+              />
+              <Input
+                type="number"
+                min={0}
+                max={1}
+                step={0.05}
+                value={wfTolerance}
+                onChange={(e) => {
+                  const n = e.target.valueAsNumber;
+                  if (Number.isFinite(n)) setWfTolerance(n);
+                }}
+                placeholder="Pay variance tolerance"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setWorkflowOf(null);
+                setWfSeededFor(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={
+                busy === `wf:${workflowOf?.id}` ||
+                (wfProfile !== "full_pipeline" && !wfWorkflowId) ||
+                !Number.isFinite(wfLookback) ||
+                !Number.isFinite(wfTolerance)
+              }
+              onClick={() =>
+                workflowOf &&
+                run(
+                  `wf:${workflowOf.id}`,
+                  async () => {
+                    await applyProfile({
+                      data: {
+                        orgId: workflowOf.id,
+                        profile: wfProfile,
+                        workflowId: wfProfile === "full_pipeline" ? undefined : wfWorkflowId,
+                        settings: {
+                          jdRequisitionMode: wfMode,
+                          jdDuplicateLookbackDays: wfLookback,
+                          payVarianceTolerance: wfTolerance,
+                        },
+                      },
+                    });
+                    qc.invalidateQueries({
+                      queryKey: ["platform_org_profile", workflowOf.id],
+                    });
+                    setWorkflowOf(null);
+                    setWfSeededFor(null);
+                  },
+                  "Workflow profile applied",
+                )
+              }
+            >
+              Apply
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

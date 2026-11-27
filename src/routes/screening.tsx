@@ -15,6 +15,7 @@ import {
   type ScreeningBucket,
   type ScreeningQueueRow,
 } from "@/lib/data";
+import { requireRouteCapability } from "@/lib/route-guard";
 import { listScreeningQueue } from "@/lib/screening-queue.functions";
 import { canonical, type Stage } from "@/lib/lifecycle";
 import { ScreeningPanel } from "@/components/ScreeningPanel";
@@ -35,6 +36,7 @@ import {
 } from "@/components/ui/select";
 
 export const Route = createFileRoute("/screening")({
+  beforeLoad: requireRouteCapability,
   head: () => ({
     meta: [
       { title: "Screening call support — questions, answers & second-level score" },

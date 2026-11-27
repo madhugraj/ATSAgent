@@ -327,6 +327,7 @@ export function registerPhase4Tools(): void {
       "Email the candidate a private pay & availability form: current pay (fixed / variable), expected CTC, notice period, earliest joining date, competing offers, location and relocation. Only TA and HR see the answers. Due date, reminders and closing follow the organisation's assessment policy; reminders are automatic. Refused when the details are already known for this application or a form is already open; figures only on the candidate's talent-pool profile (perhaps from an earlier process) must be confirmed with it first. Leaves the organisation, so a person approves it unless the form is pre-approved.",
     input: AppId,
     risk: "external",
+    capability: "recruiting.offers",
     templateOf: () => "compensation_form",
     describe: () => "Send the pay & availability form to the candidate",
     precheck: async (ctx, i) => {
@@ -369,6 +370,7 @@ export function registerPhase4Tools(): void {
       message: z.string().min(80).max(3000),
     }),
     risk: "write",
+    capability: "recruiting.offers",
     describe: (i) =>
       `Prepare a pay discussion: propose ${i.proposedCtc.toLocaleString("en")} (ceiling ${i.ceiling.toLocaleString("en")}) in the role's pay currency`,
     run: async (ctx, i) => {
@@ -383,6 +385,7 @@ export function registerPhase4Tools(): void {
       "Email the candidate the prepared pay message with a private link to accept, suggest another figure or ask for a call. Always approved by the HR head first — who may edit the words — whatever the agent's autonomy; it is then sent as them.",
     input: z.object({ negotiationId: z.string().uuid(), message: z.string().min(80).max(3000) }),
     risk: "external",
+    capability: "recruiting.offers",
     // No template: a pay message is never pre-approved, so a person always approves it.
     templateOf: () => null,
     approverRole: "hr_head",
@@ -422,6 +425,7 @@ export function registerPhase4Tools(): void {
         .optional(),
     }),
     risk: "write",
+    capability: "recruiting.offers",
     describe: (i) =>
       `Draft an offer at ${i.offeredCtc.toLocaleString("en")} in the role's pay currency`,
     precheck: (ctx, i) => offerReadiness(ctx, i.applicationId),
@@ -508,6 +512,7 @@ export function registerPhase4Tools(): void {
       rationale: z.string().min(10).max(1500),
     }),
     risk: "write",
+    capability: "recruiting.offers",
     describe: (i) =>
       `Revise the offer to ${i.offeredCtc.toLocaleString("en")} in the role's pay currency`,
     // An offer sent back is revised only once the candidate's expectation is
@@ -561,6 +566,7 @@ export function registerPhase4Tools(): void {
       "Generate the offer letter for a draft offer from the organisation's offer-letter template and save it on the offer.",
     input: OfferId.extend({ templateId: z.string().uuid().optional() }),
     risk: "write",
+    capability: "recruiting.offers",
     skills: ["offer_letter"],
     describe: () => "Generate the offer letter",
     run: async (ctx, i) => {
@@ -581,6 +587,7 @@ export function registerPhase4Tools(): void {
     description: "Send a draft offer with its letter into the approval chain (HR head → CBO).",
     input: OfferId,
     risk: "write",
+    capability: "recruiting.offers",
     describe: () => "Submit the offer for HR head approval",
     run: async (ctx, i) => {
       const { advanceOfferCore } = await import("@/lib/offers.functions");
@@ -668,6 +675,7 @@ export function registerPhase4Tools(): void {
       note: z.string().max(600).optional(),
     }),
     risk: "external",
+    capability: "recruiting.offers",
     templateOf: () => "document_request",
     describe: (i) => `Email the candidate for ${i.documentTypes.length} document(s)`,
     precheck: async (ctx, i) => {

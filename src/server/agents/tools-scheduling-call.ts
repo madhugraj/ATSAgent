@@ -122,6 +122,7 @@ export function registerSchedulingCallTools(): void {
       "Ask for a short AI call to a candidate whose offered interview times went only by e-mail because no call could be placed when they were offered: the Scheduling call agent phones them inside the calling window and books one of those times (or up to three more that are free for the interviewers), or notes when they are free. Offering times normally places this call by itself — use this only when told a call is now possible. Refused when scheduling calls are off, no offered times are waiting, every time is less than four hours away, the candidate has no Indian mobile or asked not to be called, a call was already arranged, or the assistant already spoke with them about this round — then leave it to the e-mail.",
     input: z.object({ applicationId: z.string().uuid() }),
     risk: "external",
+    capability: "recruiting.interviews",
     templateOf: () => "scheduling_call",
     skills: ["scheduling_call"],
     describe: () => "Phone the candidate to pick an interview time",
@@ -164,6 +165,7 @@ export function registerSchedulingCallTools(): void {
       description: SCHEDULING_TOOL_DESCRIPTIONS[name],
       input: SCHEDULING_TOOL_INPUTS[name] as z.ZodType<Record<string, unknown>>,
       risk: "write",
+      capability: "recruiting.interviews",
       describe: () => `On the call: ${name.replace(/_/g, " ")}`,
       run: async (ctx, i) => applyToCall(ctx, name, i),
     });

@@ -223,6 +223,7 @@ export function registerPhase3Tools(): void {
       reason: z.string().min(10).max(600),
     }),
     risk: "write",
+    capability: "recruiting.interviews",
     describe: (i) => `Interview panel for L${i.level}`,
     precheck: async (ctx, i) => {
       const { approvedPanel } = await import("@/lib/panels.server");
@@ -261,6 +262,7 @@ export function registerPhase3Tools(): void {
       reason: z.string().min(10).max(600),
     }),
     risk: "write",
+    capability: "recruiting.interviews",
     describe: (i) => `A new panellist for L${i.level}`,
     proposes: async (ctx, i) => {
       await assertRequisitionInOrg(i.requisitionId, ctx.orgId);
@@ -310,6 +312,7 @@ export function registerPhase3Tools(): void {
       reason: z.string().min(10).max(600),
     }),
     risk: "write",
+    capability: "recruiting.interviews",
     describe: (i) => `Stand-in for an L${i.level} interview`,
     proposes: async (ctx, i) => {
       await loadApplication(ctx.orgId, i.applicationId);
@@ -349,6 +352,7 @@ export function registerPhase3Tools(): void {
       panelEmails: z.array(z.string().email()).max(2).optional(),
     }),
     risk: "external",
+    capability: "recruiting.interviews",
     templateOf: () => "interview_invite",
     describe: (i) => `Book L${i.level} with ${i.interviewerEmail} at ${i.scheduledAt}`,
     precheck: (ctx, i) => panelRefusal(ctx, i),
@@ -484,6 +488,7 @@ export function registerPhase3Tools(): void {
       agenda: z.string().max(2000).optional(),
     }),
     risk: "external",
+    capability: "recruiting.interviews",
     templateOf: () => "interview_slots",
     describe: (i) =>
       `Offer ${i.slots.length} L${i.level} interview times with ${i.interviewerEmail}`,

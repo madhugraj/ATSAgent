@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
+import { requireRouteCapability } from "@/lib/route-guard";
 import { sourceLabel } from "@/lib/job-channels";
 
 import {
@@ -38,6 +39,7 @@ import {
 } from "@/components/ui/select";
 
 export const Route = createFileRoute("/reports")({
+  beforeLoad: requireRouteCapability,
   head: () => ({
     meta: [
       { title: "Hiring Analytics — funnel, SLA, offers & interview load" },

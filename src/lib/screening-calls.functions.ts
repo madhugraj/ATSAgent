@@ -11,12 +11,13 @@ import { z } from "zod";
 import { applications, requisitions, screeningCalls, screeningKits } from "@db/schema";
 import { db } from "../server/db";
 import { assertRole, requireOrg } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 
 /** Who may ask for or cancel a call (the same people who run screening). */
 const CALL_ROLES = ["recruiter", "hr_head", "president_cbo"] as const;
 
 export const listScreeningCalls = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.voice")])
   .validator((d: unknown) => z.object({ candidateId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const rows = await db
@@ -80,7 +81,7 @@ export const listScreeningCalls = createServerFn({ method: "POST" })
 
 /** Ask for a call now — the person asking is the approval. Audited. */
 export const callCandidateNow = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.voice")])
   .validator((d: unknown) =>
     z.object({ candidateId: z.string().uuid(), requisitionId: z.string().uuid() }).parse(d),
   )
@@ -116,7 +117,7 @@ export const callCandidateNow = createServerFn({ method: "POST" })
 
 /** Cancel a call that has not happened yet. Audited. */
 export const cancelScreeningCall = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.voice")])
   .validator((d: unknown) => z.object({ callId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     await assertRole(
@@ -157,7 +158,7 @@ export const cancelScreeningCall = createServerFn({ method: "POST" })
 
 /** When the candidate asked not to be called by the AI assistant (null: never). */
 export const getAiCallOptOut = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.voice")])
   .validator((d: unknown) => z.object({ candidateId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const { candidates } = await import("@db/schema");
@@ -174,7 +175,7 @@ export const getAiCallOptOut = createServerFn({ method: "POST" })
  * (waiting calls are cancelled), or they asked to be called again. Audited.
  */
 export const setAiCallOptOut = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.voice")])
   .validator((d: unknown) =>
     z.object({ candidateId: z.string().uuid(), optOut: z.boolean() }).parse(d),
   )

@@ -9,6 +9,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { requireOrg } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 
 const Token = z.string().regex(/^[a-f0-9]{64}$/, "This link is not valid.");
 
@@ -48,7 +49,7 @@ export const answerTime = createServerFn({ method: "POST" })
   });
 
 export const sendInviteNow = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.interviews")])
   .validator((d: unknown) => z.object({ interviewId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const { releaseInviteNow } = await import("./interview-confirmations.server");
@@ -60,7 +61,7 @@ export const sendInviteNow = createServerFn({ method: "POST" })
   });
 
 export const roundConfirmations = createServerFn({ method: "GET" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.interviews")])
   .validator((d: unknown) =>
     z.object({ interviewIds: z.array(z.string().uuid()).max(500) }).parse(d),
   )
@@ -71,7 +72,7 @@ export const roundConfirmations = createServerFn({ method: "GET" })
 
 /** Interviewers whose scorecard is past due (2 h after the round), by round id. */
 export const overdueScorecards = createServerFn({ method: "GET" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.interviews")])
   .validator((d: unknown) =>
     z.object({ interviewIds: z.array(z.string().uuid()).max(500) }).parse(d),
   )

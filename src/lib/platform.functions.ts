@@ -6,6 +6,8 @@ import { db } from "../server/db";
 import { writeAudit } from "../server/audit";
 import { deletePrefix } from "../server/storage";
 import {
+  agentWorkflowGrants,
+  agentWorkflows,
   aiProviderCredentials,
   aiSettings,
   applications,
@@ -21,6 +23,7 @@ import {
   matchScores,
   offers,
   orgMembers,
+  orgWorkflowProfiles,
   organizations,
   platformAdmins,
   requisitions,
@@ -28,8 +31,16 @@ import {
   stageEvents,
   userRoles,
   users,
+  type WorkflowProfileKind,
 } from "@db/schema";
 import { requireIdentity, requirePlatformAdmin } from "./auth.middleware";
+import { CAPABILITIES, type Capability, type WorkflowProfileSettings } from "./capabilities";
+import { invalidateCapabilities } from "./capabilities.server";
+import {
+  WorkflowProfileSettingsInput,
+  applyWorkflowProfileCore,
+  providedSettings,
+} from "./workflow-profile.functions";
 
 /**
  * Platform (product owner) layer. A super user is anyone whose email address is on the
@@ -60,6 +71,13 @@ export type PlatformOrg = {
   offers: number;
   hires: number;
   lastActivityAt: string | null;
+
+  /** The applied workflow profile; null = full pipeline (no row yet). */
+  workflowProfile: {
+    profile: WorkflowProfileKind;
+    workflowName: string | null;
+    settings: WorkflowProfileSettings;
+  } | null;
 };
 
 export type PlatformState = {
@@ -182,7 +200,7 @@ export const removePlatformAdmin = createServerFn({ method: "POST" })
 export const listAllOrganizations = createServerFn({ method: "GET" })
   .middleware([requirePlatformAdmin])
   .handler(async (): Promise<PlatformOrg[]> => {
-    const [orgs, members, reqs, cands, apps, ivs, ofrs] = await Promise.all([
+    const [orgs, members, reqs, cands, apps, ivs, ofrs, profiles] = await Promise.all([
       db
         .select()
         .from(organizations)
@@ -199,6 +217,15 @@ export const listAllOrganizations = createServerFn({ method: "GET" })
         .from(applications),
       db.select({ orgId: interviews.orgId }).from(interviews),
       db.select({ orgId: offers.orgId, status: offers.status }).from(offers),
+      db
+        .select({
+          orgId: orgWorkflowProfiles.orgId,
+          profile: orgWorkflowProfiles.profile,
+          workflowName: agentWorkflows.name,
+          settings: orgWorkflowProfiles.settings,
+        })
+        .from(orgWorkflowProfiles)
+        .leftJoin(agentWorkflows, eq(agentWorkflows.id, orgWorkflowProfiles.workflowId)),
     ]);
 
     const count = <T extends { orgId: string | null }>(
@@ -236,6 +263,16 @@ export const listAllOrganizations = createServerFn({ method: "GET" })
         offers: count(ofrs, o.id),
         hires: orgApps.filter((a) => a.stage === "joined" || a.stage === "hired").length,
         lastActivityAt: last ? last.toISOString() : null,
+        workflowProfile: (() => {
+          const p = profiles.find((r) => r.orgId === o.id);
+          return p
+            ? {
+                profile: p.profile,
+                workflowName: p.workflowName,
+                settings: (p.settings ?? {}) as WorkflowProfileSettings,
+              }
+            : null;
+        })(),
       };
     });
   });
@@ -539,4 +576,116 @@ export const reviewOrganization = createServerFn({ method: "POST" })
     await db.update(organizations).set(patch).where(eq(organizations.id, data.orgId));
 
     return { ok: true, emailed, emailError, notifiedAt: emailed ? now.toISOString() : null };
+  });
+
+const ApplyWorkflowProfileInput = z.object({
+  orgId: z.string().uuid(),
+  profile: z.enum(["full_pipeline", "template", "custom"]),
+  /** The published workflow a template/custom profile runs. */
+  workflowId: z.string().uuid().nullish(),
+  settings: WorkflowProfileSettingsInput.optional(),
+});
+
+export type ApplyWorkflowProfileInput = z.infer<typeof ApplyWorkflowProfileInput>;
+
+export type AppliedWorkflowProfile = {
+  ok: true;
+  profile: WorkflowProfileKind;
+  workflowId: string | null;
+  capabilities: Capability[];
+  settings: WorkflowProfileSettings;
+};
+
+/**
+ * Apply a tenant's workflow profile (docs/candidate-identification/
+ * track-b-design.md §1.4). Verifies the workflow is published, its studio
+ * agents are granted to the org, keeps the workflow grant bookkeeping in step,
+ * resolves the capability set server-side, refuses settings whose capability
+ * dependency is missing, and audits the whole apply. Switching profiles only
+ * writes the profile row and grants — no tenant data is touched.
+ */
+export const applyWorkflowProfile = createServerFn({ method: "POST" })
+  .middleware([requirePlatformAdmin])
+  .validator((data: unknown) => ApplyWorkflowProfileInput.parse(data))
+  .handler(async ({ data, context }): Promise<AppliedWorkflowProfile> => {
+    return applyWorkflowProfileCore({
+      orgId: data.orgId,
+      profile: data.profile,
+      workflowId: data.workflowId ?? null,
+      settings: data.settings,
+      actor: { email: context.email, userId: context.userId },
+    });
+  });
+
+export type WorkflowProfileRead = {
+  orgId: string;
+  orgName: string;
+  profile: WorkflowProfileKind;
+  workflowId: string | null;
+  workflowName: string | null;
+  capabilities: Capability[];
+  settings: WorkflowProfileSettings;
+  appliedAt: string | null;
+  appliedByEmail: string | null;
+  /** Published workflows the profile can point at (the dialog's picker). */
+  publishedWorkflows: { id: string; name: string; publishedVersion: number }[];
+};
+
+/** Admin read behind the Workflow dialog: the current profile and readiness. */
+export const readWorkflowProfile = createServerFn({ method: "POST" })
+  .middleware([requirePlatformAdmin])
+  .validator((data: unknown) => z.object({ orgId: z.string().uuid() }).parse(data))
+  .handler(async ({ data }): Promise<WorkflowProfileRead> => {
+    const [[org], [row], published] = await Promise.all([
+      db
+        .select({ name: organizations.name })
+        .from(organizations)
+        .where(eq(organizations.id, data.orgId))
+        .limit(1),
+      db
+        .select({
+          profile: orgWorkflowProfiles.profile,
+          workflowId: orgWorkflowProfiles.workflowId,
+          workflowName: agentWorkflows.name,
+          resolvedCapabilities: orgWorkflowProfiles.resolvedCapabilities,
+          settings: orgWorkflowProfiles.settings,
+          appliedAt: orgWorkflowProfiles.appliedAt,
+          appliedByEmail: users.email,
+        })
+        .from(orgWorkflowProfiles)
+        .leftJoin(agentWorkflows, eq(agentWorkflows.id, orgWorkflowProfiles.workflowId))
+        .leftJoin(users, eq(users.id, orgWorkflowProfiles.appliedBy))
+        .where(eq(orgWorkflowProfiles.orgId, data.orgId))
+        .limit(1),
+      db
+        .select({
+          id: agentWorkflows.id,
+          name: agentWorkflows.name,
+          publishedVersion: agentWorkflows.publishedVersion,
+        })
+        .from(agentWorkflows)
+        .where(eq(agentWorkflows.status, "published"))
+        .orderBy(agentWorkflows.name),
+    ]);
+    const publishedWorkflows = published
+      .filter((w): w is typeof w & { publishedVersion: number } => w.publishedVersion != null)
+      .map(({ id, name, publishedVersion }) => ({ id, name, publishedVersion }));
+    return {
+      orgId: data.orgId,
+      orgName: org?.name ?? "",
+      profile: row?.profile ?? "full_pipeline",
+      workflowId: row?.workflowId ?? null,
+      workflowName: row?.workflowName ?? null,
+      capabilities: row
+        ? row.profile === "full_pipeline"
+          ? [...CAPABILITIES]
+          : row.resolvedCapabilities.filter((c): c is Capability =>
+              (CAPABILITIES as readonly string[]).includes(c),
+            )
+        : [...CAPABILITIES],
+      settings: (row?.settings ?? {}) as WorkflowProfileSettings,
+      appliedAt: row?.appliedAt ? row.appliedAt.toISOString() : null,
+      appliedByEmail: row?.appliedByEmail ?? null,
+      publishedWorkflows,
+    };
   });

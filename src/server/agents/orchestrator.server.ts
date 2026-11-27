@@ -26,9 +26,10 @@ import {
   requisitions,
 } from "@db/schema";
 import { log } from "../log";
+import { capabilitiesOf } from "@/lib/capabilities.server";
 import { agentRunScope } from "./context";
 import { loadPolicy } from "./policy";
-import { getAgent } from "./registry";
+import { agentGatedOff, getAgent } from "./registry";
 import { startRun, syncGateTasks } from "./runtime.server";
 import { activeRunFor } from "./tools";
 
@@ -220,6 +221,12 @@ async function handle(e: Event): Promise<{ started: number; synced: number }> {
       // A hiring-desk thread waiting on this role hears why nothing happens.
       const { notifyAgentOff } = await import("../desk/desk.server");
       await notifyAgentOff(e.orgId, req.id, agent);
+      return;
+    }
+    // The tenant's workflow profile gates the agent off entirely (§1.2) — the
+    // same rule startRun enforces; the scheduler must not even try.
+    if (agentGatedOff(await capabilitiesOf(e.orgId), agent)) {
+      log.info("agent.orchestrator.gated", { org_id: e.orgId, agent, type: e.type });
       return;
     }
     if (await activeRunFor(e.orgId, agent, subject.id)) return;
@@ -766,6 +773,7 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
   // at the next 6-hourly pass; agent-added ones are scored by the run that added them.
   if (getAgent("intake")) {
     for (const orgId of await enabledOrgs("intake", opts.orgId)) {
+      if (agentGatedOff(await capabilitiesOf(orgId), "intake")) continue;
       const fresh = (await db.execute(sql`
         select a.requisition_id id, count(*)::int n, string_agg(distinct a.source, ', ') sources
         from ${applications} a
@@ -812,11 +820,17 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
     const { starvingRoles } = await import("./sourcing.server");
     const { matchNewCvsToRoles } = await import("./pool-match.server");
     for (const orgId of await enabledOrgs("sourcing", opts.orgId)) {
-      try {
-        await matchNewCvsToRoles(orgId);
-      } catch (err) {
-        log.warn("pool.match_failed", { org_id: orgId, error: err as Error });
+      const caps = await capabilitiesOf(orgId);
+      // Pool match writes straight into the pipeline: a tenant whose profile
+      // gates the pool capability off gets no automatic additions (§1.2).
+      if (caps.includes("matching.pool")) {
+        try {
+          await matchNewCvsToRoles(orgId);
+        } catch (err) {
+          log.warn("pool.match_failed", { org_id: orgId, error: err as Error });
+        }
       }
+      if (agentGatedOff(caps, "sourcing")) continue;
       for (const r of await starvingRoles(orgId)) {
         const principal = r.createdBy ?? (await ownerOf(orgId));
         if (!principal) continue;
@@ -836,6 +850,7 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
   // listings, unread inbox mail and role-limited CVs past retention.
   if (getAgent("distribution")) {
     for (const orgId of await enabledOrgs("distribution", opts.orgId)) {
+      if (agentGatedOff(await capabilitiesOf(orgId), "distribution")) continue;
       const [recent] = await db
         .select({ id: agentRuns.id })
         .from(agentRuns)
@@ -1077,6 +1092,7 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
   }
   if (getAgent("intake")) {
     for (const orgId of await enabledOrgs("intake", opts.orgId)) {
+      if (agentGatedOff(await capabilitiesOf(orgId), "intake")) continue;
       const reqs = await db
         .select({
           id: requisitions.id,

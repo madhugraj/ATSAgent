@@ -7,6 +7,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { assertRole, requireOrg } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 
 const Profile = z.object({
   active: z.boolean(),
@@ -16,14 +17,14 @@ const Profile = z.object({
 });
 
 export const listInterviewerProfiles = createServerFn({ method: "GET" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.interviews")])
   .handler(async ({ context }) => {
     const { interviewerProfilesOf } = await import("./interviewers.server");
     return interviewerProfilesOf(context.orgId);
   });
 
 export const setInterviewerProfile = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.interviews")])
   .validator((d: unknown) => z.object({ memberId: z.string().uuid(), profile: Profile }).parse(d))
   .handler(async ({ data, context }) => {
     await assertRole(

@@ -5,6 +5,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Copy, ExternalLink, Loader2 } from "lucide-react";
 
+import { requireRouteCapability } from "@/lib/route-guard";
 import { PageHeader } from "@/components/ats";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,6 +21,7 @@ import { JOB_CHANNELS, ROUTE_LABEL, sourceLabel, type FeedFormat } from "@/lib/j
 import { useOrg } from "@/hooks/useOrg";
 
 export const Route = createFileRoute("/distribution")({
+  beforeLoad: requireRouteCapability,
   head: () => ({ meta: [{ title: "Job distribution — ATSIQ" }] }),
   component: Distribution,
 });
