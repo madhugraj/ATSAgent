@@ -1,0 +1,38 @@
+{{- if .Values.voiceWorker.enabled }}
+# Voice worker (AI phone calls): dials out over SIP/RTP through Cloud NAT.
+# No Service, no route. Recreate strategy: a new pod must not start while the
+# old one is still on a call.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "atsagent.fullname" . }}-voice-worker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "atsagent.labels" . | nindent 4 }}
+    app.kubernetes.io/component: voice-worker
+spec:
+  replicas: {{ .Values.voiceWorker.replicas }}
+  strategy: { type: Recreate }
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "atsagent.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: voice-worker
+  template:
+    metadata:
+      labels:
+        {{- include "atsagent.labels" . | nindent 8 }}
+        app.kubernetes.io/component: voice-worker
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.voiceWorker.terminationGracePeriodSeconds }}
+      containers:
+        - name: voice-worker
+          image: "{{ .Values.image.repository }}:{{ required "image.tag is required (short SHA)" .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["node", ".output/voice-worker/index.mjs"]
+          envFrom:
+            - secretRef: { name: {{ .Values.env.existingSecret }} }
+            - secretRef: { name: {{ .Values.voiceWorker.existingSecret }} }
+          resources:
+            {{- toYaml .Values.voiceWorker.resources | nindent 12 }}
+{{- end }}
