@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "atsagent.fullname" . }}-parser
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "atsagent.labels" . | nindent 4 }}
+    app.kubernetes.io/component: parser
+spec:
+  selector:
+    app.kubernetes.io/name: {{ include "atsagent.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: parser
+  ports:
+    - { port: {{ .Values.parser.service.port }}, targetPort: http }
