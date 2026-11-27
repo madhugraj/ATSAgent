@@ -31,6 +31,7 @@ import {
   Target,
   Settings,
   SlidersHorizontal,
+  FileStack,
   Users,
   Waypoints,
   Upload,
@@ -182,6 +183,15 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: Briefcase,
         show: (c) =>
           c.inOrg && (!c.capabilities || c.capabilities.includes("pipeline.requisitions")),
+        cap: "pipeline.requisitions",
+        mode: "manual",
+      },
+      {
+        to: "/jd-import",
+        label: "JD import",
+        icon: FileStack,
+        show: (c) =>
+          c.recruiterView && (!c.capabilities || c.capabilities.includes("pipeline.requisitions")),
         cap: "pipeline.requisitions",
         mode: "manual",
       },

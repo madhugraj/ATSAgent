@@ -559,9 +559,16 @@ export const requisitions = pgTable(
     paysByLocation: boolean("pays_by_location").notNull().default(false),
     /** The date the role must be filled by — its urgency (joining after it is checked). */
     neededBy: date("needed_by"),
+    /**
+     * The organisation's own job reference (e.g. a client quoting code), read
+     * from an imported JD (migration 0097). Indexed, deliberately not unique:
+     * codes are legitimately reused after a role closes.
+     */
+    externalJobCode: text("external_job_code"),
   },
   (t) => [
     uniqueIndex("requisitions_org_code_key").on(t.orgId, t.code),
+    index("requisitions_org_external_job_code_idx").on(t.orgId, t.externalJobCode),
     check("requisitions_pay_currency_check", sql`${t.payCurrency} ~ '^[A-Z]{3}$'`),
     check(
       "requisitions_pay_basis_check",
@@ -5272,4 +5279,111 @@ export const policyBriefings = pgTable(
       sql`${t.status} in ('pending','approved','rejected','superseded')`,
     ),
   ],
+);
+
+/* ------------------------------------------- bulk JD import (B3, 0097) */
+
+/**
+ * One JD's structured requirements (docs/candidate-identification/track-b-design.md
+ * §3.3). Created at extraction time — before any requisition exists — and
+ * linked to its job description once the requisition is created; rows held
+ * for a duplicate review stay standalone until the recruiter decides.
+ */
+export const jdRequirementProfiles = pgTable(
+  "jd_requirement_profiles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    jobDescriptionId: uuid("job_description_id").references(() => jobDescriptions.id, {
+      onDelete: "cascade",
+    }),
+    requisitionId: uuid("requisition_id").references(() => requisitions.id, {
+      onDelete: "cascade",
+    }),
+    profile: jsonb("profile")
+      .$type<import("../src/lib/jd-requirements").RequirementProfile>()
+      .notNull(),
+    roleFamily: text("role_family"),
+    sector: text("sector"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("jd_requirement_profiles_jd_key")
+      .on(t.jobDescriptionId)
+      .where(sql`${t.jobDescriptionId} is not null`),
+    index("jd_requirement_profiles_org_family_idx").on(t.orgId, t.roleFamily),
+    index("jd_requirement_profiles_req_idx").on(t.requisitionId),
+  ],
+);
+
+/**
+ * One file of a bulk JD import and where it stands (§3.2). Kept server-side so
+ * a pending duplicate review survives a closed tab; pending rows are deleted
+ * when the import is closed.
+ */
+export const jdImportItems = pgTable(
+  "jd_import_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    importId: uuid("import_id").notNull(),
+    fileName: text("file_name").notNull(),
+    /** created | review | linked | error */
+    status: text("status").notNull(),
+    profileId: uuid("profile_id").references(() => jdRequirementProfiles.id, {
+      onDelete: "set null",
+    }),
+    /** The existing requisition the check matched (review / linked). */
+    matchRequisitionId: uuid("match_requisition_id").references(() => requisitions.id, {
+      onDelete: "set null",
+    }),
+    /** The requisition this file created (created). */
+    requisitionId: uuid("requisition_id").references(() => requisitions.id, {
+      onDelete: "set null",
+    }),
+    /** duplicate | variant | distinct — the system's proposal. */
+    proposedVerdict: text("proposed_verdict"),
+    /** duplicate | variant | distinct — the recruiter's decision. */
+    decidedVerdict: text("decided_verdict"),
+    similarity: numeric("similarity", { precision: 4, scale: 3 }),
+    /** { reasons, fieldDiffs, hardDifferences, notCompared, jobCodeMatch }. */
+    comparison: jsonb("comparison"),
+    comparisons: integer("comparisons").notNull().default(0),
+    error: text("error"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    decidedBy: uuid("decided_by").references(() => users.id, { onDelete: "set null" }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("jd_import_items_org_import_idx").on(t.orgId, t.importId),
+    check(
+      "jd_import_items_status_check",
+      sql`${t.status} in ('created','review','linked','error')`,
+    ),
+  ],
+);
+
+/**
+ * The tenant's sector taxonomy (§3.3): seeded with the platform default on
+ * first use, edited by tenant governance. JD extraction maps to it; the
+ * matching engine (C1) reads it as its sector factor.
+ */
+export const sectorTaxonomyTerms = pgTable(
+  "sector_taxonomy_terms",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    term: text("term").notNull(),
+    parentId: uuid("parent_id"),
+    seededDefault: boolean("seeded_default").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("sector_taxonomy_terms_org_term_key").on(t.orgId, t.term)],
 );

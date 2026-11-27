@@ -281,9 +281,11 @@ export async function latestInferenceFor(q: {
   features: string[];
   applicationId?: string | null;
   candidateId?: string | null;
+  /** Requisition-level calls (e.g. the JD duplicate check) carry only this subject. */
+  requisitionId?: string | null;
   before?: Date;
 }): Promise<string | null> {
-  if (!q.applicationId && !q.candidateId) return null;
+  if (!q.applicationId && !q.candidateId && !q.requisitionId) return null;
   const { inArray } = await import("drizzle-orm");
   const [row] = await db
     .select({ id: trainingInferences.id })
@@ -294,7 +296,9 @@ export async function latestInferenceFor(q: {
         inArray(trainingInferences.feature, q.features),
         q.applicationId
           ? eq(trainingInferences.applicationId, q.applicationId)
-          : eq(trainingInferences.candidateId, q.candidateId!),
+          : q.candidateId
+            ? eq(trainingInferences.candidateId, q.candidateId)
+            : eq(trainingInferences.requisitionId, q.requisitionId!),
         lte(trainingInferences.createdAt, endOfMs(q.before ?? new Date())),
       ),
     )

@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-134 tables across 9 domains.
+137 tables across 9 domains.
 
 ## Identity & access
 
@@ -332,6 +332,7 @@ erDiagram
     text contract_type "nullable"
     boolean pays_by_location
     date needed_by "nullable"
+    text external_job_code "nullable"
   }
   job_descriptions {
     uuid id PK
@@ -1333,6 +1334,15 @@ erDiagram
 | `interview_transcripts` | `org_id` | `organizations` | cascade |
 | `interviews` | `application_id` | `applications` | cascade |
 | `interviews` | `org_id` | `organizations` | cascade |
+| `jd_import_items` | `created_by` | `users` | no action |
+| `jd_import_items` | `decided_by` | `users` | no action |
+| `jd_import_items` | `match_requisition_id` | `requisitions` | no action |
+| `jd_import_items` | `org_id` | `organizations` | cascade |
+| `jd_import_items` | `profile_id` | `jd_requirement_profiles` | no action |
+| `jd_import_items` | `requisition_id` | `requisitions` | no action |
+| `jd_requirement_profiles` | `job_description_id` | `job_descriptions` | cascade |
+| `jd_requirement_profiles` | `org_id` | `organizations` | cascade |
+| `jd_requirement_profiles` | `requisition_id` | `requisitions` | cascade |
 | `job_descriptions` | `org_id` | `organizations` | cascade |
 | `job_descriptions` | `requisition_id` | `requisitions` | cascade |
 | `job_index_notifications` | `org_id` | `organizations` | cascade |
@@ -1467,6 +1477,7 @@ erDiagram
 | `screening_runs` | `kit_id` | `screening_kits` | cascade |
 | `screening_runs` | `org_id` | `organizations` | cascade |
 | `screening_runs` | `requisition_id` | `requisitions` | no action |
+| `sector_taxonomy_terms` | `org_id` | `organizations` | cascade |
 | `sessions` | `user_id` | `users` | cascade |
 | `skill_edges` | `org_id` | `organizations` | cascade |
 | `skill_evidence` | `candidate_id` | `candidates` | cascade |
@@ -1583,6 +1594,8 @@ erDiagram
 | `interview_slot_offers` | — | 23 | (token) |
 | `interview_transcripts` | — | 8 | (interview_id) |
 | `interviews` | Screening & interviews | 25 | — |
+| `jd_import_items` | — | 18 | — |
+| `jd_requirement_profiles` | — | 8 | — |
 | `job_descriptions` | Requisitions & job content | 17 | — |
 | `job_index_notifications` | — | 10 | — |
 | `master_items` | Organisations & masters | 8 | — |
@@ -1621,7 +1634,7 @@ erDiagram
 | `product_catalogue_commercials` | Organisations & masters | 8 | — |
 | `rate_limit_hits` | — | 3 | — |
 | `requisition_board_postings` | — | 16 | (requisitionId+provider) |
-| `requisitions` | Requisitions & job content | 55 | (orgId+code) |
+| `requisitions` | Requisitions & job content | 56 | (orgId+code) |
 | `role_panels` | — | 9 | (requisitionId+level) |
 | `round_substitutes` | — | 11 | — |
 | `salary_benchmarks` | Intelligence | 15 | — |
@@ -1630,6 +1643,7 @@ erDiagram
 | `screening_kits` | Screening & interviews | 11 | — |
 | `screening_prep_jobs` | Screening & interviews | 10 | (application_id) |
 | `screening_runs` | Screening & interviews | 23 | — |
+| `sector_taxonomy_terms` | — | 6 | (orgId+term) |
 | `service_request_minutes` | — | 7 | — |
 | `sessions` | Identity & access | 9 | (token_hash) |
 | `skill_edges` | Intelligence | 8 | — |

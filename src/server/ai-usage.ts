@@ -28,6 +28,9 @@ export const AI_FEATURES = [
   "market_benchmark",
   "salary_research",
   "template_import",
+  // Bulk JD import (docs/candidate-identification/track-b-design.md §3–4).
+  "jd_requirements",
+  "jd_duplicate_check",
   "jobcard_qa",
   "offer_letter",
   "offer_policy_check",

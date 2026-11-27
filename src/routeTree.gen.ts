@@ -22,6 +22,7 @@ import { Route as HiringCostRouteImport } from './routes/hiring-cost'
 import { Route as IjpRouteImport } from './routes/ijp'
 import { Route as InboxRouteImport } from './routes/inbox'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
+import { Route as JdImportRouteImport } from './routes/jd-import'
 import { Route as MastersRouteImport } from './routes/masters'
 import { Route as MatchingRouteImport } from './routes/matching'
 import { Route as OffersRouteImport } from './routes/offers'
@@ -156,6 +157,11 @@ const InboxRoute = InboxRouteImport.update({
 const IntegrationsRoute = IntegrationsRouteImport.update({
   id: '/integrations',
   path: '/integrations',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const JdImportRoute = JdImportRouteImport.update({
+  id: '/jd-import',
+  path: '/jd-import',
   getParentRoute: () => rootRouteImport,
 } as any)
 const MastersRoute = MastersRouteImport.update({
@@ -530,6 +536,7 @@ export interface FileRoutesByFullPath {
   '/ijp': typeof IjpRoute
   '/inbox': typeof InboxRoute
   '/integrations': typeof IntegrationsRoute
+  '/jd-import': typeof JdImportRoute
   '/masters': typeof MastersRoute
   '/matching': typeof MatchingRoute
   '/offers': typeof OffersRoute
@@ -615,6 +622,7 @@ export interface FileRoutesByTo {
   '/ijp': typeof IjpRoute
   '/inbox': typeof InboxRoute
   '/integrations': typeof IntegrationsRoute
+  '/jd-import': typeof JdImportRoute
   '/masters': typeof MastersRoute
   '/matching': typeof MatchingRoute
   '/offers': typeof OffersRoute
@@ -701,6 +709,7 @@ export interface FileRoutesById {
   '/ijp': typeof IjpRoute
   '/inbox': typeof InboxRoute
   '/integrations': typeof IntegrationsRoute
+  '/jd-import': typeof JdImportRoute
   '/masters': typeof MastersRoute
   '/matching': typeof MatchingRoute
   '/offers': typeof OffersRoute
@@ -788,6 +797,7 @@ export interface FileRouteTypes {
     | '/ijp'
     | '/inbox'
     | '/integrations'
+    | '/jd-import'
     | '/masters'
     | '/matching'
     | '/offers'
@@ -873,6 +883,7 @@ export interface FileRouteTypes {
     | '/ijp'
     | '/inbox'
     | '/integrations'
+    | '/jd-import'
     | '/masters'
     | '/matching'
     | '/offers'
@@ -958,6 +969,7 @@ export interface FileRouteTypes {
     | '/ijp'
     | '/inbox'
     | '/integrations'
+    | '/jd-import'
     | '/masters'
     | '/matching'
     | '/offers'
@@ -1044,6 +1056,7 @@ export interface RootRouteChildren {
   IjpRoute: typeof IjpRoute
   InboxRoute: typeof InboxRoute
   IntegrationsRoute: typeof IntegrationsRoute
+  JdImportRoute: typeof JdImportRoute
   MastersRoute: typeof MastersRoute
   MatchingRoute: typeof MatchingRoute
   OffersRoute: typeof OffersRoute
@@ -1207,6 +1220,13 @@ declare module '@tanstack/react-router' {
       path: '/integrations'
       fullPath: '/integrations'
       preLoaderRoute: typeof IntegrationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/jd-import': {
+      id: '/jd-import'
+      path: '/jd-import'
+      fullPath: '/jd-import'
+      preLoaderRoute: typeof JdImportRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/masters': {
@@ -1716,6 +1736,7 @@ const rootRouteChildren: RootRouteChildren = {
   IjpRoute: IjpRoute,
   InboxRoute: InboxRoute,
   IntegrationsRoute: IntegrationsRoute,
+  JdImportRoute: JdImportRoute,
   MastersRoute: MastersRoute,
   MatchingRoute: MatchingRoute,
   OffersRoute: OffersRoute,
