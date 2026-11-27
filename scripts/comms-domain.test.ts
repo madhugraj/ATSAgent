@@ -483,7 +483,10 @@ describe("email-outbox: held mail release/drop", () => {
     // The prefix's % is escaped: only the literal-% row releases.
     const released = await outbox.releaseHeldEmails(orgA, `comm${stamp}%hld`);
     expect(released).toBe(1);
-    expect((await outboxRow(orgA, `comm${stamp}%hld-a`))!.status).toBe("queued");
+    // Releasing also starts a send in the background: the row may already be sent.
+    expect(["queued", "sending", "sent"]).toContain(
+      (await outboxRow(orgA, `comm${stamp}%hld-a`))!.status,
+    );
     expect((await outboxRow(orgA, `comm${stamp}Zhld-b`))!.status).toBe("held");
     expect((await outboxRow(orgB, `comm${stamp}%hld-c`))!.status).toBe("held");
 
