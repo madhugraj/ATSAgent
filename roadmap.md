@@ -7,6 +7,28 @@ Candidate Identification platform work, rows 0 and 5 (`docs/candidate-identifica
 
 # Roadmap
 
+## Candidate identification — row 1, candidate identity (2026-11-27)
+
+- Plan: `docs/candidate-identification-plan.md` (row 1 of the execution table);
+  design: `docs/candidate-identification/track-a-design.md`
+- [x] Normalised strong identity keys per organisation (email, E.164 phone, LinkedIn/GitHub,
+      CV file hash, external id) in `candidate_identity_keys`, unique per organisation per key;
+      placeholder addresses key separately so email-less captures dedupe as before
+- [x] One identity module (`src/server/candidates/identity.server.ts`): strong-key auto-merge
+      (per-organisation switch), shared contact details and fuzzy name + career-timeline evidence
+      → merge review queue; nothing fuzzy merges automatically
+- [x] Reversible merges: the absorbed row becomes a tombstone (`candidates.merged_into_id`),
+      `candidate_merges.undo_snapshot` holds every re-pointed and deleted child row; undo restores
+      original ids and dates and refuses when a moved record changed after the merge; every merge,
+      undo, decision and threshold change is audited
+- [x] Merge review screen at `/candidates/merge-review`: side-by-side pair with the signals
+      that fired, survivor swap, Merge (step-up) / Keep separate (demotes the collision to a
+      `shared_*` key so the detail never auto-merges anyone again)
+- [x] Per-organisation thresholds (`candidate_identity_settings`): auto-merge switch, fuzzy
+      high/low thresholds, default phone region — DB defaults, no backfill
+- [ ] A1b: route all nine candidate-creating intake paths through the module (the scattered
+      exact-email checks go away then)
+
 ## Pay terms — Phase 1 foundation (2026-11-11)
 
 - Plan: `docs/pay-terms-plan.md` (currency, pay basis, kinds of work, pay zones,
@@ -155,6 +177,8 @@ Candidate Identification platform work, rows 0 and 5 (`docs/candidate-identifica
 - [ ] S0/S1 on real accounts: grant `OnlineMeetingTranscript.Read.All`, reconnect Teams, _Try again_ on the first call, check the transcript arrives
 - [x] S2 (migration 0061): the L1, L2 and L3 panel agents (1.0.0, risk tier high, switched on in Agent settings) started by `interview.transcript_ready` for their own level; `assess_round` stores the hidden view in `panel_assessments` (quotes checked against the transcript, round competencies only, talk time and questions counted in code, prompt injection flagged) and returns counts only; `send_panel_summary` e-mails each panellist a factual summary with judgement sentences removed; health rule `panel.assessment_missing`; one rehearsal per agent
 - [x] S3 (migration 0062): agree / partial / disagree against the panel's scorecards by a fixed rule when the round's last scorecard arrives; a disagreement holds the move (and the next round) while the level's agent is on; the panel agents (1.1.0) raise the HR head's card with `request_panel_review` (gate `panel_review`) — both views and how the round was run side by side; go with the panel, confirm, hold or reject (stopping cancels later rounds not yet held); audited, captured as training feedback; late assessments compared when they land; health rule `panel.review_unresolved`
+- [x] Handover after a stage move: a stand-in proposed for a round closes as stale once the candidate leaves that round; work for an agent busy on the same candidate is held (`agent.dispatch_deferred`) and starts when that run is done, instead of being dropped; health rule `orchestrator.work_held` (held over 24 h)
+- [x] Final-round disagreement: with no next stage to hold, the hiring decision waits instead — the Evaluation agent (1.3.0) writes the debrief only, and the decision is asked for, naming the agent's dissent, once the HR head goes with the panel
 - [ ] S4–S5: views, settings for thresholds, a real test
 
 ## Voice screening agent (2026-10-23)
@@ -376,6 +400,7 @@ Plan: `docs/org-context-agent-plan.md` (decided 2026-10-27; O0 built 2026-10-27,
 - [x] Shared cores: `scheduleInterviewCore` (round, stage, candidate invite with calendar file) and `createMeetingLinkCore`
 - [x] Interview coordinator — books the next round for candidates who advanced: panel limited to active members (prior interviewers first, then hiring managers / department heads), proposed working-hours slot, optional Zoom / Meet / Teams link; the candidate invite is reviewed unless the interview invitation is pre-approved. No calendar free/busy integration yet — slots are proposals a person reviews
 - [x] Evaluation agent — debrief across match, screening, assessment and every scorecard (disagreements surfaced), organisation-wide selection-parity check, and a hiring decision request
+- [x] Another interview round (Evaluation agent 1.4.0): when the hiring manager declines a hiring decision because they want one more round, the agent drafts it from the earlier rounds' feedback (`propose_extra_round`, gate `round_addition`); the hiring manager edits and approves it on the desk card; approving adds it to the role's plan (up to 3 rounds, for every candidate of the role), moves the candidate into it and the Interview coordinator arranges the panel and times; audited (`interview_plan.round_added`)
 - [x] Hiring decisions as inbox gates for the hiring manager — approving a reject or hold moves the candidate as the decider; approving a select records the decision and emits `hiring.selected` for the Offer agent (Phase 4); declining changes nothing; stale proposals cannot be decided
 - [x] Orchestrator: advancing into a round (by a verdict, not by booking) starts the coordinator; each submitted scorecard starts one evaluation per candidate
 - [x] Follow-up agent v1.1.0 also chases interviews that ended without a scorecard; human-in-the-loop tool contracts are now part of every manifest hash (all agents bumped to v1.1.0 under change control)
@@ -467,7 +492,7 @@ Plan: `docs/agentic-plan.md`.
 ATSAgent builds, runs and deploys with no Lovable packages, routes, env vars or hosted services.
 
 - [x] Build — `@lovable.dev/vite-tanstack-config` replaced by an explicit `vite.config.ts` (TanStack Start, Tailwind, tsconfig paths, React, Nitro `node-server` on build); `bun.lock` resolves from the public npm registry
-- [x] Email — SMTP (`SMTP_URL`) is the only transport; `@lovable.dev/email-js`, `@lovable.dev/webhooks-js`, the `/lovable/email/*` routes and the four auth templates only they rendered are gone
+- [x] Email — first-party transports only: SMTP (`SMTP_URL`), else Microsoft Graph client-credentials `sendMail` as the `EMAIL_FROM` mailbox (`MICROSOFT_OAUTH_*` keys) when the tenant blocks SMTP basic auth; `@lovable.dev/email-js`, `@lovable.dev/webhooks-js`, the `/lovable/email/*` routes and the four auth templates only they rendered are gone
 - [x] Careers inbox — the Gmail reader behind Lovable's connector gateway is retired; mail arrives only through each organisation's careers address (signed inbound webhook), and `/api/public/inbox-sync` now scores what arrived
 - [x] Leftovers — `@supabase/supabase-js`, the unused Supabase clients, editor-preview auth/error hooks, `.lovable/`, `supabase/` and `drizzle/migrations/` removed; DB types live in `src/lib/database.types.ts`, cron auth in `src/server/cron-auth.ts`
 - [x] Config — `LOVABLE_CRON_SECRET(_PREVIOUS)` renamed to `CRON_SECRET(_PREVIOUS)`; migration `0023` moves `ai_settings` off the `'lovable'` provider default to `openai` / `gpt-5.5`

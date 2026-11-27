@@ -1,0 +1,133 @@
+# Scouts (ATSAgent) — production values for ns ats-agent-prod on platform-gateway.
+# Image tag: plain short SHA (no env prefix).
+#
+# Deploy order (namespace + secrets must exist BEFORE helm install — the
+# migrate pre-install hook and all pods reference them):
+#   1. kubectl create namespace ats-agent-prod
+#   2. create secrets: ats-agent-env, ats-agent-parser, ats-agent-voice (when
+#      SIP creds arrive), ats-agent-db-owner (username/password for postgres
+#      owner — password must match DATABASE_URL in ats-agent-env)
+#   3. FIRST INSTALL ONLY — two phases, because the migrate pre-install hook
+#      runs before the CNPG Cluster (regular resource) is applied:
+#        a. helm upgrade --install ats-agent . -n ats-agent-prod \
+#             --set namespace.create=false --set image.tag=<sha> \
+#             --set migrate.enabled=false
+#        b. wait for kubectl get clusters.postgresql.cnpg.io -n ats-agent-prod
+#           ats-agent-db → "Cluster in healthy state", then:
+#           helm upgrade ats-agent . -n ats-agent-prod \
+#             --set namespace.create=false --set image.tag=<sha>
+#      Subsequent upgrades are a single helm upgrade (migrate runs against the
+#      live DB).
+#   4. wait: kubectl -n envoy-gateway-system get certificate www-scouts-yavar-ai-tls
+#      → Ready=True (HTTP-01 needs DNS *.scouts.yavar.ai → 8.231.119.239 first)
+#   5. THEN hand-patch the listener certRef (test-op JSON patch, verify
+#      Accepted=True + Programmed=True immediately after) — one bad certRef on
+#      the shared gateway kills ALL routes:
+#      kubectl -n envoy-gateway-system patch gateway platform-gateway --type=json \
+#        -p '[{"op":"test","path":"/spec/listeners/1/name","value":"yavar-dev-https"},
+#             {"op":"add","path":"/spec/listeners/1/tls/certificateRefs/-",
+#              "value":{"group":"","kind":"Secret","name":"www-scouts-yavar-ai-tls"}}]'
+
+namespace:
+  create: true
+
+fullnameOverride: ats-agent
+
+image:
+  repository: asia-south1-docker.pkg.dev/yavar-studio/yavar-platform/ats-agent
+  tag: "" # required: short SHA, e.g. --set image.tag=abc1234
+  pullPolicy: IfNotPresent
+
+# Migrations run from the same image built with `docker build --target migrate`
+# (final runtime image has no scripts/ or drizzle/). Tagged <tag>-migrate.
+migrate:
+  enabled: true
+  tagSuffix: -migrate
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+
+# Pre-created out-of-band (step 2 above) — the chart only references them:
+#   ats-agent-env   : envFrom for app + migrate job
+#     Required to boot: DATABASE_URL (in-cluster ats-agent-db-rw), SESSION_SECRET,
+#     SECRET_ENCRYPTION_KEY, PUBLIC_SITE_URL (https://www.scouts.yavar.ai)
+#     Optional: SMTP_URL (else Graph mail via MICROSOFT_OAUTH_* keys), OAUTH_*
+#     (features dark), CRON_SECRET
+#   ats-agent-parser: PARSER_TOKEN — the chart injects it into BOTH the parser
+#     and the app pod from this one secret, so the two cannot drift
+#   ats-agent-voice : voice-worker SIP credentials (pending from PBX provider)
+env:
+  existingSecret: ats-agent-env
+  plain:
+    TRUSTED_PROXY_COUNT: "1"
+    RATE_LIMIT_STORE: postgres
+
+# In-namespace postgres via CloudNativePG (operator present in cluster;
+# pattern copied from atsiq-db). RW service: ats-agent-db-rw.<ns>.svc:5432
+postgres:
+  enabled: true
+  clusterName: ats-agent-db
+  image: ghcr.io/cloudnative-pg/postgresql:16.4
+  instances: 2
+  maxSyncReplicas: 1
+  dbName: scouts
+  dbOwner: scouts
+  ownerSecret: ats-agent-db-owner # username=scouts, password=<generated>
+  storage:
+    size: 10Gi
+    storageClass: standard-rwo
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }
+
+app:
+  replicas: 2
+  serviceAccount:
+    create: true
+    # googleServiceAccount: set to enable Workload Identity annotation if needed
+  resources:
+    requests: { cpu: 500m, memory: 1Gi }
+    limits: { memory: 2Gi }
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+
+parser:
+  replicas: 2
+  existingSecret: ats-agent-parser
+  resources:
+    requests: { cpu: 500m, memory: 1Gi }
+    limits: { memory: 1Gi }
+  service:
+    port: 8080
+
+voiceWorker:
+  # disabled until SIP credentials (ats-agent-voice) arrive from the PBX provider
+  enabled: false
+  replicas: 1
+  existingSecret: ats-agent-voice
+  terminationGracePeriodSeconds: 1900 # let in-flight calls (max 30 min) finish
+  resources:
+    requests: { cpu: 500m, memory: 512Mi }
+    limits: { memory: 1Gi }
+
+# Envoy Gateway exposure: platform-gateway (envoy-gateway-system) serves
+# *.yavar.ai on listeners yavar-dev-http / yavar-dev-https.
+gateway:
+  namespace: envoy-gateway-system
+  name: platform-gateway
+  httpListener: yavar-dev-http # 301 redirect to HTTPS
+  httpsListener: yavar-dev-https # main route; 300s timeout for slow server fns
+  requestTimeout: 300s
+
+certificate:
+  enabled: true
+  namespace: envoy-gateway-system # certs for gateway listeners live beside the gateway
+  issuer:
+    kind: ClusterIssuer
+    name: letsencrypt-gateway # HTTP-01 only, solved via yavar-dev-http
+  dnsNames: [www.scouts.yavar.ai] # apex scouts.yavar.ai NOT included (separate A record)
+  secretName: www-scouts-yavar-ai-tls
+  duration: 2160h
+  renewBefore: 360h

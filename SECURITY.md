@@ -30,6 +30,13 @@ We credit reporters in release notes on request.
   are the mandatory tenant boundary.
 - Roles are stored in a separate membership-role table. Platform administration is a separate,
   server-validated allowlist and is never inferred from browser storage.
+- Candidate merges (candidate identity, `src/server/candidates/identity.server.ts`) are
+  org-scoped like every tenant query — identity keys are unique per organisation, so identical
+  contact details in two tenants never match. A merge is a privileged decision: the client
+  confirms through step-up, the server re-verifies both rows inside the caller's org, records a
+  reversible undo snapshot, and appends `candidate.merge` / `candidate.merge.undo` /
+  `candidate.merge.suggestion_decided` to the audit log; unauthenticated surfaces (public apply)
+  are lookup-only and can never mutate or merge an existing record.
 - HR copilot data is role-filtered on the server (`src/lib/copilot-scope.ts`,
   `src/server/copilot/data.server.ts`): recruiters receive no pay or budget figures, hiring
   managers and department heads only their own roles and approvals at their stage, governance
