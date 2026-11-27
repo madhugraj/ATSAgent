@@ -761,7 +761,10 @@ export function registerPhase3Agents(): void {
     // only within the hiring SLA, or step down; then the agent proposes a stand-in for
     // the booked time and never offers the candidate a later one. It never changes a
     // round's scorecard — panelists propose, the hiring manager approves.
-    version: "2.6.0",
+    // 2.7.0: a panel no-show (a panellist did not join a booked round and gave no
+    // notice) — a stand-in for each who missed is proposed before new times, and
+    // nobody who missed is offered to the candidate again for that round.
+    version: "2.7.0",
     owner: "hr_head",
     responsibility:
       "Books the next interview round for candidates who advanced: proposes each round's panel from the panel directory for a person to approve (asking HR to add someone when nobody fits), then free times for that panel, the candidate's choice of time, a meeting link, and invites to both the candidate and the interviewers.",
@@ -833,7 +836,7 @@ export function registerPhase3Agents(): void {
       "3. find_interview_slots with the applicationId and the round's level (so times start after the candidate's earlier round ends) for the first interviewer with the rest as panelEmails, then offer_interview_slots with three of them, the same panelEmails, and nextRound.focus as the agenda (60 minutes, online; add a meeting provider only if you were told one is connected). Each panelist is asked first (the result's `via` is panel) and ticks the times they can do; the candidate is offered only the times the whole panel can do. Once the panel has answered, the system places a short AI scheduling call to the candidate by itself and e-mails the times with a private link only if that call does not book. When no time suits the whole panel you are told what each said and their suggested times — offer new times starting from those suggestions. When they pick a time the booking — meeting link, the candidate's invite and every interviewer's brief with the round's rubric — happens then. A person reviews the offer unless it is pre-approved.",
       "When the candidate did not take offered times (declined or expired): offer three different times — other days and times of day, honouring any note they gave. Offering them decides the call or the e-mail by itself; never also request_scheduling_call. If offering again is refused or impossible, ask_human so a person calls them.",
       "When you are told times went by e-mail only and a call is now possible: request_scheduling_call for that candidate and nothing else (do not offer new times). Its rules — the panel's agreement, the candidate's opt-out, a time at least four hours ahead, one call per offer, one conversation per round — are checked for you: if it is refused, say why in your summary and leave it to the e-mail.",
-      "4. A round that did not happen (status no_show or cancelled) is scheduled again the same way.",
+      "4. A round that did not happen (status no_show or cancelled) is scheduled again the same way. When you are told it was a panel no-show (a panellist did not join and gave no notice), never schedule it with anyone who missed: list_substitutes and propose_substitute for each of them first; once a stand-in is approved, offer new times with the candidate's panel (step 2f). If no stand-in exists or one is declined, handoff with the reason — the candidate must not be left without a round.",
       "5. Use schedule_interview (a fixed time) only when a person gave you the exact time to book.",
       "6. If an offer is declined, propose other times once, then hand off.",
       "Finish with a list: candidate, level, interviewers, what was offered or booked.",
