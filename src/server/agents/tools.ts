@@ -6,6 +6,11 @@
  *
  * Gate actions (approving, releasing, rejecting) are not tools — agents ask
  * for them with request_approval (registry gate guard).
+ *
+ * A tool that writes into a capability area declares `capability`
+ * (docs/candidate-identification/track-b-design.md §1.2); the runtime hides it
+ * and refuses calls to it when the organisation's workflow profile gates that
+ * capability off. Read-only tools stay open and are listed in TOOL_EXEMPT.
  */
 import { rupees } from "@/lib/money";
 import { isCurrencyCode } from "@/lib/iso";
@@ -293,6 +298,7 @@ export function registerPhase1Tools(): void {
       "Create a new requisition as a DRAFT (not yet submitted). Returns its id and code.",
     input: DraftFields,
     risk: "write",
+    capability: "pipeline.requisitions",
     describe: (i) => `Create draft requisition "${i.title}" (${i.openings} opening(s))`,
     run: async (ctx, i) => {
       const { createRequisitionCore } = await import("@/lib/requisitions.server");
@@ -332,6 +338,7 @@ export function registerPhase1Tools(): void {
       "Change fields of a requisition that is still a draft (or was rejected / put on hold).",
     input: RequisitionId.extend({ changes: DraftFields.partial() }),
     risk: "write",
+    capability: "pipeline.requisitions",
     describe: (i) => `Update draft requisition (${Object.keys(i.changes).join(", ")})`,
     run: async (ctx, i) => {
       const { updateRequisitionDraftCore } = await import("@/lib/requisitions.server");
@@ -358,6 +365,7 @@ export function registerPhase1Tools(): void {
       bandMax: z.number().positive(),
     }),
     risk: "write",
+    capability: "pipeline.requisitions",
     describe: (i) =>
       `Set budget ${i.budgetCtc.toLocaleString("en")} (band ${i.bandMin.toLocaleString("en")}–${i.bandMax.toLocaleString("en")}) in the role's pay currency`,
     run: async (ctx, i) => {
@@ -401,6 +409,7 @@ export function registerPhase1Tools(): void {
         .optional(),
     }),
     risk: "write",
+    capability: "pipeline.requisitions",
     describe: (i) =>
       `Set pay terms${i.zone ? ` (${i.zone})` : ""}${i.kind ? `: ${i.kind.replace(/_/g, " ")}` : ""}${i.basis ? `, ${i.basis}` : ""}${i.currency ? `, ${i.currency.toUpperCase()}` : ""}${i.neededBy ? `, needed by ${i.neededBy}` : ""}`,
     run: async (ctx, i) => {
@@ -445,6 +454,7 @@ export function registerPhase1Tools(): void {
         .optional(),
     }),
     risk: "write",
+    capability: "pipeline.requisitions",
     describe: () => "Save candidate-scoring weights",
     run: async (ctx, i) => {
       const { requisitionId, custom, ...w } = i;
@@ -461,6 +471,7 @@ export function registerPhase1Tools(): void {
       "Send a complete draft requisition into the approval chain (Department Head → HR head → CBO).",
     input: RequisitionId,
     risk: "write",
+    capability: "pipeline.requisitions",
     describe: () => "Submit the requisition for Department Head approval",
     run: async (ctx, i) => {
       const { advanceRequisitionCore } = await import("@/lib/requisitions.server");
@@ -482,6 +493,7 @@ export function registerPhase1Tools(): void {
       templateName: z.string().min(1).max(200).optional(),
     }),
     risk: "write",
+    capability: "pipeline.requisitions",
     skills: ["jd_generate"],
     describe: (i) =>
       i.revisionNotes
@@ -648,6 +660,7 @@ export function registerPhase1Tools(): void {
     description: "Open an approved requisition to employees on the internal job board (IJP).",
     input: RequisitionId,
     risk: "write",
+    capability: "sourcing.distribution",
     describe: () => "Post the requisition on the internal job board",
     run: async (ctx, i) => {
       const r = await loadRequisition(ctx.orgId, i.requisitionId);
@@ -667,6 +680,7 @@ export function registerPhase1Tools(): void {
       postText: z.string().max(3000).optional(),
     }),
     risk: "external",
+    capability: "sourcing.distribution",
     templateOf: (i) => `job_board:${i.provider}`,
     approverRole: "hr_head",
     describe: (i) => `Publish the requisition on ${i.provider}`,

@@ -19,6 +19,7 @@ import {
   sourceIntegrations,
 } from "@db/schema";
 import { requireOrg, requireRole } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 import { seedSourceIntegrations } from "../server/integration-seeds.server";
 
 const PROVIDERS = ["linkedin", "indeed", "naukri"] as const;
@@ -58,7 +59,7 @@ type BoardProviderStatus = {
 
 /** Posting + per-provider readiness for one requisition's "Job boards" panel. */
 export const boardPostingStatus = createServerFn({ method: "GET" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("sourcing.distribution")])
   .validator((data: unknown) => z.object({ requisitionId: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const [requisition] = await db
@@ -164,7 +165,7 @@ const PublishInput = z.object({
 
 /** Publish this requisition on one board (capability-gated, audited). */
 export const publishToBoard = createServerFn({ method: "POST" })
-  .middleware([requireRole("hr_head")])
+  .middleware([requireRole("hr_head"), requireCapability("sourcing.distribution")])
   .validator((data: unknown) => PublishInput.parse(data))
   .handler(async ({ data, context }) => {
     const { publishToBoardImpl } = await import("../server/boards/publish.server");
@@ -185,7 +186,7 @@ const CloseInput = z.object({
 
 /** Close / mark filled a board posting (audited; vendor call is best-effort). */
 export const closeBoardPosting = createServerFn({ method: "POST" })
-  .middleware([requireRole("hr_head")])
+  .middleware([requireRole("hr_head"), requireCapability("sourcing.distribution")])
   .validator((data: unknown) => CloseInput.parse(data))
   .handler(async ({ data, context }) => {
     const { closeBoardPostingImpl } = await import("../server/boards/publish.server");

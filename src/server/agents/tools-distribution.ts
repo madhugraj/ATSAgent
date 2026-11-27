@@ -57,6 +57,7 @@ export function registerDistributionTools(): void {
       "Put an approved requisition on one aggregator's job feed (jooble, adzuna or jora); the aggregator lists it from the organisation's feed and candidates apply on the role's apply page. The HR head approves each listing unless the organisation pre-approved that feed for an Autonomous agent. Roles hired for a client are never listed. Jora lists Australian roles only.",
     input: ReqId.extend({ channel: z.enum(FEEDS) }),
     risk: "external",
+    capability: "sourcing.distribution",
     templateOf: (i) => `job_board:${i.channel}`,
     approverRole: "hr_head",
     describe: (i) => `List the role on the ${channelById(i.channel)?.name ?? i.channel} job feed`,
@@ -90,6 +91,7 @@ export function registerDistributionTools(): void {
       "Plan an approved requisition for portals a person posts on (no integration, or the partner integration is not connected): each becomes 'waiting to be posted'. In the person's own signed-in browser the ATSIQ browser extension then fills the portal's posting form with the role's text and records the posting once they submit it — the agent never logs in to a portal. Portals already live are left alone.",
     input: ReqId.extend({ channels: z.array(z.enum(BY_HAND)).min(1).max(12) }),
     risk: "write",
+    capability: "sourcing.distribution",
     describe: (i) =>
       `Plan the role for posting on ${i.channels.map((c) => channelById(c)?.name ?? c).join(", ")}`,
     run: async (ctx, i) => {
@@ -118,6 +120,7 @@ export function registerDistributionTools(): void {
       "Ask the HR head to erase CVs a portal limited to their role, now that the role is over (up to 25 at a time, ids from list_role_limited_cvs). Erasing removes the person, their applications and their CV file for good. Anyone hired or back in an open role is skipped.",
     input: z.object({ candidateIds: z.array(z.string().uuid()).min(1).max(25) }),
     risk: "external",
+    capability: "sourcing.distribution",
     approverRole: "hr_head",
     describe: (i) => `Erase ${i.candidateIds.length} CV(s) a portal limited to their role`,
     precheck: async (ctx, i) => {

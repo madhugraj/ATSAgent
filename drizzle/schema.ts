@@ -741,6 +741,17 @@ export const candidates = pgTable(
      */
     poolUse: text("pool_use").$type<"pool" | "role_only">().notNull().default("pool"),
     poolUseSource: text("pool_use_source"),
+    /** sha256 of the last uploaded CV's bytes (candidate identity, migration 0094). */
+    fileHash: text("file_hash"),
+    /**
+     * Set when this row was absorbed by a merge (candidate identity, migration
+     * 0094): the row is a tombstone — hidden from every candidate read path by
+     * an `is null` predicate on this column — instead of deleted, so merges
+     * stay reversible.
+     */
+    mergedIntoId: uuid("merged_into_id").references((): AnyPgColumn => candidates.id, {
+      onDelete: "set null",
+    }),
   },
   (t) => [
     index("candidates_skills_gin").using("gin", t.skills),
@@ -753,6 +764,175 @@ export const candidates = pgTable(
     index("candidates_role_match_pending_idx")
       .on(t.orgId, t.createdAt)
       .where(sql`${t.roleMatchCheckedAt} is null`),
+    index("candidates_merged_tombstone_idx")
+      .on(t.orgId)
+      .where(sql`${t.mergedIntoId} is not null`),
+  ],
+);
+
+/* ---------------------------------------------------- candidate identity (0094) */
+
+/**
+ * Normalised strong identity keys, one row per key per candidate
+ * (docs/candidate-identification/track-a-design.md §1.1). The partial unique
+ * index over the auto-merge types makes a duplicate person un-representable in
+ * one organisation; shared_* keys record contact details two people
+ * legitimately share (family email, agency phone) and sit outside the unique
+ * index — a collision on them routes to review, never auto-merge.
+ */
+export const candidateIdentityKeys = pgTable(
+  "candidate_identity_keys",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    candidateId: uuid("candidate_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "cascade" }),
+    keyType: text("key_type")
+      .$type<
+        | "email"
+        | "phone"
+        | "linkedin"
+        | "github"
+        | "file_hash"
+        | "placeholder"
+        | "external"
+        | "shared_email"
+        | "shared_phone"
+        | "shared_linkedin"
+        | "shared_github"
+      >()
+      .notNull(),
+    keyValue: text("key_value").notNull(),
+    /** The CV version that produced this key (uuid until A2 adds the FK). */
+    sourceVersionId: uuid("source_version_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("candidate_identity_keys_unique")
+      .on(t.orgId, t.keyType, t.keyValue)
+      .where(
+        sql`${t.keyType} not in ('shared_email','shared_phone','shared_linkedin','shared_github')`,
+      ),
+    index("candidate_identity_keys_lookup_idx").on(t.orgId, t.keyType, t.keyValue),
+    index("candidate_identity_keys_candidate_idx").on(t.candidateId),
+  ],
+);
+
+/**
+ * The merge review queue: fuzzy-evidence pairs awaiting a human decision
+ * (docs/candidate-identification/track-a-design.md §1.1). Nothing fuzzy ever
+ * merges automatically — this table is where those pairs wait.
+ */
+export const candidateMergeSuggestions = pgTable(
+  "candidate_merge_suggestions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    candidateAId: uuid("candidate_a_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "cascade" }),
+    candidateBId: uuid("candidate_b_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "cascade" }),
+    /** 0–1 fuzzy score; strong-key-only suggestions carry 1. */
+    score: numeric("score", { precision: 4, scale: 3 }).notNull().default("1"),
+    /** Per-signal breakdown shown on the review card (name, timeline, education, …). */
+    reasons: jsonb("reasons")
+      .$type<{ signal: string; detail: string }[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /** pending | merged | kept_separate | stale */
+    status: text("status")
+      .$type<"pending" | "merged" | "kept_separate" | "stale">()
+      .notNull()
+      .default("pending"),
+    decidedBy: uuid("decided_by"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decisionNote: text("decision_note"),
+    mergeId: uuid("merge_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("candidate_merge_suggestions_queue_idx").on(t.orgId, t.status, t.createdAt),
+    check(
+      "candidate_merge_suggestions_status_check",
+      sql`${t.status} in ('pending','merged','kept_separate','stale')`,
+    ),
+  ],
+);
+
+/**
+ * One row per executed merge, holding everything needed to undo it
+ * (docs/candidate-identification/track-a-design.md §1.1). undoSnapshot keeps
+ * the full pre-merge row of every record the merge re-pointed or deleted —
+ * it is the transactional undo mechanism, not the audit log.
+ */
+export const candidateMerges = pgTable(
+  "candidate_merges",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    survivorId: uuid("survivor_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "cascade" }),
+    /** The absorbed row — a tombstone after the merge (candidates.mergedIntoId). */
+    mergedId: uuid("merged_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "cascade" }),
+    undoSnapshot: jsonb("undo_snapshot")
+      .$type<import("../src/server/candidates/identity.server").MergeUndoSnapshot>()
+      .notNull(),
+    createdBy: uuid("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    undoneBy: uuid("undone_by"),
+    undoneAt: timestamp("undone_at", { withTimezone: true }),
+    undoNote: text("undo_note"),
+  },
+  (t) => [index("candidate_merges_candidate_idx").on(t.orgId, t.survivorId, t.mergedId)],
+);
+
+/**
+ * Per-tenant identity thresholds (docs/candidate-identification/track-a-design.md
+ * §1.1). DB-level defaults mean existing tenants need no backfill.
+ */
+export const candidateIdentitySettings = pgTable(
+  "candidate_identity_settings",
+  {
+    orgId: uuid("org_id")
+      .primaryKey()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** Merge automatically on a strong-key collision (default on). */
+    autoMergeStrongKeys: boolean("auto_merge_strong_keys").notNull().default(true),
+    /** Fuzzy score at or above this goes to the merge review queue. */
+    fuzzyHighThreshold: numeric("fuzzy_high_threshold", { precision: 3, scale: 2 })
+      .notNull()
+      .default("0.85"),
+    /** Below this a newcomer is kept as a new person; between low and high → review. */
+    fuzzyLowThreshold: numeric("fuzzy_low_threshold", { precision: 3, scale: 2 })
+      .notNull()
+      .default("0.6"),
+    /** ISO 3166 alpha-2 region used to normalise phones that lack a country code. */
+    defaultPhoneRegion: text("default_phone_region"),
+    /** Which consistency flags show once A2 lands (all on by default). */
+    flagConfig: jsonb("flag_config")
+      .$type<Record<string, boolean>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedBy: uuid("updated_by"),
+  },
+  (t) => [
+    check(
+      "candidate_identity_settings_thresholds_check",
+      sql`${t.fuzzyLowThreshold} >= 0 and ${t.fuzzyLowThreshold} <= ${t.fuzzyHighThreshold} and ${t.fuzzyHighThreshold} <= 1`,
+    ),
   ],
 );
 
@@ -3814,6 +3994,49 @@ export const panelAgentSettings = pgTable(
     check(
       "panel_agent_settings_levels_check",
       sql`${t.levels} <@ array[1, 2, 3] and cardinality(${t.levels}) between 1 and 3`,
+    ),
+  ],
+);
+
+/* ------------------------------------------------ tenant workflow profile */
+// docs/candidate-identification/track-b-design.md §1.3 — migration 0094.
+
+/** The workflow profile kinds a tenant can run. Absence of a row means `full_pipeline`. */
+export type WorkflowProfileKind = "full_pipeline" | "template" | "custom";
+
+/**
+ * Per tenant: which way of working the organisation runs, which published
+ * workflow backs it (template/custom), the capability set that was resolved at
+ * apply time, and profile-level settings. Written only by the platform-admin
+ * apply step; switching profiles never deletes any other data.
+ */
+export const orgWorkflowProfiles = pgTable(
+  "org_workflow_profiles",
+  {
+    orgId: uuid("org_id")
+      .primaryKey()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    profile: text("profile").$type<WorkflowProfileKind>().notNull(),
+    /** The workflow a `template`/`custom` profile runs; null for `full_pipeline`. */
+    workflowId: uuid("workflow_id").references(() => agentWorkflows.id, { onDelete: "set null" }),
+    /** Capabilities resolved at apply time (derived from the workflow graph, never client-set). */
+    resolvedCapabilities: jsonb("resolved_capabilities")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /** Profile settings: jdRequisitionMode, jdDuplicateLookbackDays, payVarianceTolerance. */
+    settings: jsonb("settings")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    appliedBy: uuid("applied_by").references(() => users.id, { onDelete: "set null" }),
+    appliedAt: timestamp("applied_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      "org_workflow_profiles_profile_check",
+      sql`${t.profile} in ('full_pipeline', 'template', 'custom')`,
     ),
   ],
 );

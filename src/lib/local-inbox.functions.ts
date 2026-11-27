@@ -9,6 +9,7 @@ import { z } from "zod";
 import { db } from "../server/db";
 import { inboxMessages, organizations } from "@db/schema";
 import { requireOrg } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 
 export type InboxRow = {
   id: string;
@@ -79,7 +80,7 @@ export const orgInbox = createServerFn({ method: "GET" })
   });
 
 export const retryInboxMessage = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("sourcing.distribution")])
   .validator((data: unknown) => z.object({ messageId: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const { retryMessage } = await import("./local-inbox.server");
@@ -87,7 +88,7 @@ export const retryInboxMessage = createServerFn({ method: "POST" })
   });
 
 export const removeInboxMessage = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("sourcing.distribution")])
   .validator((data: unknown) => z.object({ messageId: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     await db
@@ -103,7 +104,7 @@ export const removeInboxMessage = createServerFn({ method: "POST" })
  * can claim the same one.
  */
 export const saveCareersEmail = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("sourcing.distribution")])
   .validator((data: unknown) => z.object({ email: z.string().max(320).nullish() }).parse(data))
   .handler(async ({ data, context }) => {
     const email = (data.email ?? "").trim().toLowerCase();

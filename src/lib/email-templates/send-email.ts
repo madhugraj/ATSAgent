@@ -4,7 +4,7 @@ import nodemailer from "nodemailer";
 import { TEMPLATES, type TemplateData } from "./registry";
 import { BRAND, EmailBrandCtx } from "./email-layout";
 
-// Server-only: sends over SMTP_URL. Never import from client components.
+// Server-only: sends over SMTP_URL or Microsoft Graph. Never import from client components.
 
 const SITE_NAME = "ATSIQ";
 // Domain shown in the default From: header; override with EMAIL_FROM.
@@ -125,9 +125,65 @@ export async function renderTemplateEmail(
   return { subject, html, text, inline };
 }
 
+/** True when any mail transport is configured (SMTP_URL or the Graph mail credentials). */
+export function emailTransportConfigured(): boolean {
+  return Boolean(
+    process.env["SMTP_URL"] ||
+    (process.env["MICROSOFT_OAUTH_TENANT_ID"] &&
+      process.env["MICROSOFT_OAUTH_CLIENT_ID"] &&
+      process.env["MICROSOFT_OAUTH_CLIENT_SECRET"]),
+  );
+}
+
+// Vendor-neutral operator hint for "nothing can send": callers relay error
+// messages to clients (e.g. registration), so no transport/vendor branding.
+function notConfiguredError(): Error {
+  return new Error(
+    "Email is not configured: set SMTP_URL, or the OAuth mail credentials " +
+      "(MICROSOFT_OAUTH_TENANT_ID, MICROSOFT_OAUTH_CLIENT_ID, MICROSOFT_OAUTH_CLIENT_SECRET)",
+  );
+}
+
+// Client-credentials token for Graph, cached until shortly before Entra's
+// ~60-min expiry — one token per pod instead of one per email.
+let graphToken: { value: string; expiresAt: number } | null = null;
+
+async function graphAccessToken(
+  tenant: string,
+  clientId: string,
+  clientSecret: string,
+): Promise<string> {
+  if (graphToken && Date.now() < graphToken.expiresAt) return graphToken.value;
+  const res = await fetch(
+    `https://login.microsoftonline.com/${encodeURIComponent(tenant)}/oauth2/v2.0/token`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      signal: AbortSignal.timeout(15_000),
+      body: new URLSearchParams({
+        grant_type: "client_credentials",
+        client_id: clientId,
+        client_secret: clientSecret,
+        scope: "https://graph.microsoft.com/.default",
+      }),
+    },
+  );
+  if (!res.ok) {
+    const detail = (await res.json().catch(() => null)) as { error_description?: unknown } | null;
+    const reason =
+      detail?.error_description != null ? String(detail.error_description) : `HTTP ${res.status}`;
+    throw new Error(`Email token request failed (${reason})`);
+  }
+  const body = (await res.json()) as { access_token: string; expires_in: number };
+  graphToken = { value: body.access_token, expiresAt: Date.now() + (body.expires_in - 300) * 1000 };
+  return graphToken.value;
+}
+
 /**
- * Renders a registered template and sends it over the deployment's SMTP
- * relay (SMTP_URL). Any transport failure throws; the email outbox
+ * Renders a registered template and sends it. Transport, in order: the
+ * deployment's SMTP relay (SMTP_URL), else Microsoft Graph client-credentials
+ * sendMail as the EMAIL_FROM mailbox (works where the tenant blocks SMTP
+ * basic auth). Any transport failure throws; the email outbox
  * (src/lib/email-outbox.server.ts) owns retries.
  */
 export async function sendTemplateEmail(
@@ -156,27 +212,7 @@ export async function sendTemplateEmail(
   );
   const from = process.env["EMAIL_FROM"] || `${SITE_NAME} <noreply@${FROM_DOMAIN}>`;
 
-  // A missing relay fails loudly first, in tests as everywhere else.
-  const smtpUrl = process.env["SMTP_URL"];
-  if (!smtpUrl) {
-    throw new Error("Email is not configured: set SMTP_URL");
-  }
-  if (process.env["NODE_ENV"] === "test") {
-    testOutbox.push({ template: templateName, to: recipient, subject });
-    return { sent: true };
-  }
-  if (undeliverableAddress(recipient)) {
-    console.warn(`[email] not sent: ${templateName} to a reserved test address`);
-    return { sent: true };
-  }
-
-  // Test runs share .env.local, whose SMTP relay reaches real inboxes: render
-  // and "send" in memory instead, so a test never e-mails a real person.
-  const transporter =
-    process.env["NODE_ENV"] === "test"
-      ? nodemailer.createTransport({ jsonTransport: true })
-      : nodemailer.createTransport(smtpUrl);
-  await transporter.sendMail({
+  const mail = {
     from,
     to: recipient,
     subject,
@@ -202,6 +238,102 @@ export async function sendTemplateEmail(
         }
       : {}),
     headers: { "X-ATSIQ-Idempotency-Key": options.idempotencyKey || crypto.randomUUID() },
-  });
-  return { sent: true };
+  };
+
+  const smtpUrl = process.env["SMTP_URL"];
+  const useGraph = !smtpUrl && emailTransportConfigured();
+
+  // Test runs share .env.local, whose SMTP relay — and, once the Graph mail
+  // credentials are set, whose Graph mailbox — reaches real inboxes: render
+  // and "send" in memory instead, so a test never e-mails a real person.
+  // Graph has no in-memory transport, so test mode downgrades any configured
+  // transport to the SMTP jsonTransport.
+  if (process.env["NODE_ENV"] === "test") {
+    // A missing transport fails loudly, in tests as everywhere else.
+    if (!smtpUrl && !useGraph) throw notConfiguredError();
+    testOutbox.push({ template: templateName, to: recipient, subject });
+    await nodemailer.createTransport({ jsonTransport: true }).sendMail(mail);
+    return { sent: true };
+  }
+  if (undeliverableAddress(recipient)) {
+    console.warn(`[email] not sent: ${templateName} to a reserved test address`);
+    return { sent: true };
+  }
+
+  if (smtpUrl) {
+    await nodemailer.createTransport(smtpUrl).sendMail(mail);
+    return { sent: true };
+  }
+
+  // Microsoft Graph — client-credentials sendMail as the mailbox in EMAIL_FROM
+  // (atsiq@yavar.ai in prod). The yavar.ai tenant's security defaults block
+  // SMTP basic auth outright, so this is the working transport there; the app
+  // registration's Mail.Send permission is admin-consented. The token endpoint
+  // must be tenant-specific: /organizations rejects client_credentials with a
+  // misleading Conditional Access error (AADSTS53003). Never reached under
+  // NODE_ENV=test (downgraded to the in-memory transport above).
+  const graphTenant = process.env["MICROSOFT_OAUTH_TENANT_ID"];
+  const graphClientId = process.env["MICROSOFT_OAUTH_CLIENT_ID"];
+  const graphSecret = process.env["MICROSOFT_OAUTH_CLIENT_SECRET"];
+  if (useGraph && graphTenant && graphClientId && graphSecret) {
+    const mailboxMatch = /<([^>]+)>/.exec(from);
+    const mailbox = mailboxMatch?.[1] ?? from.trim();
+    const displayName = mailboxMatch
+      ? from.slice(0, mailboxMatch.index).trim().replace(/^"|"$/g, "")
+      : undefined;
+    const token = await graphAccessToken(graphTenant, graphClientId, graphSecret);
+    const response = await fetch(
+      `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/sendMail`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(30_000),
+        body: JSON.stringify({
+          message: {
+            subject,
+            body: { contentType: "HTML", content: html },
+            from: {
+              emailAddress: { address: mailbox, ...(displayName ? { name: displayName } : {}) },
+            },
+            toRecipients: [{ emailAddress: { address: recipient } }],
+            ...(options.replyTo
+              ? { replyTo: [{ emailAddress: { address: options.replyTo } }] }
+              : {}),
+            ...(inline.length || options.attachments?.length
+              ? {
+                  attachments: [
+                    ...inline.map((a) => ({
+                      "@odata.type": "#microsoft.graph.fileAttachment",
+                      name: a.cid,
+                      contentType: a.contentType,
+                      contentBytes: a.content.toString("base64"),
+                      contentId: a.cid,
+                      isInline: true,
+                    })),
+                    ...(options.attachments ?? []).map((a) => ({
+                      "@odata.type": "#microsoft.graph.fileAttachment",
+                      name: a.filename,
+                      contentType: a.contentType,
+                      contentBytes: a.contentBase64,
+                    })),
+                  ],
+                }
+              : {}),
+          },
+          saveToSentItems: true,
+        }),
+      },
+    );
+    if (!response.ok) {
+      const detail = (await response.json().catch(() => null)) as {
+        error?: { message?: unknown };
+      } | null;
+      const reason =
+        detail?.error?.message != null ? String(detail.error.message) : `HTTP ${response.status}`;
+      throw new Error(`Email send failed (${reason})`);
+    }
+    return { sent: true };
+  }
+
+  throw notConfiguredError();
 }

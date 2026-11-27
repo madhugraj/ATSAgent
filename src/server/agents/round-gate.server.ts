@@ -236,6 +236,7 @@ export async function roundAddedWords(orgId: string, subject: RoundAdditionSubje
 export function registerRoundTools(): void {
   registerTool({
     name: "propose_extra_round",
+    capability: "recruiting.interviews",
     description:
       "When the hiring manager declines a hiring decision because they want another interview round, propose that round for them to edit and approve: a short name, a one-line focus and 1–8 competencies to rate, drawn from the gaps and open questions in the earlier rounds' scorecards (never a new requirement the role does not have). The round is added to the role's plan for every candidate; you never add it yourself.",
     input: z.object({

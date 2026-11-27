@@ -17,6 +17,7 @@ import {
   requisitions,
 } from "@db/schema";
 import { assertRole, requireOrg, requirePanel } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 import { canMove, REASON_REQUIRED, STAGE_LABEL, type Stage } from "./lifecycle";
 import { buildIcs } from "./ics";
 import { meetingRefOf, type MeetingRef } from "./meeting-ref";
@@ -102,7 +103,7 @@ export type MyInterview = {
 
 /** Every interview assigned to the signed-in user, newest first. */
 export const myInterviews = createServerFn({ method: "GET" })
-  .middleware([requirePanel])
+  .middleware([requirePanel, requireCapability("recruiting.interviews")])
   .handler(async ({ context }): Promise<MyInterview[]> => {
     const email = actorOf(context).toLowerCase();
 
@@ -611,7 +612,7 @@ export const submitScorecardCore = createServerOnlyFn(async function submitScore
  * Refused unless the caller's email is on the round.
  */
 export const myRoundBrief = createServerFn({ method: "GET" })
-  .middleware([requirePanel])
+  .middleware([requirePanel, requireCapability("recruiting.interviews")])
   .validator((d: unknown) => z.object({ interviewId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const [r] = await db
@@ -635,7 +636,7 @@ export const myRoundBrief = createServerFn({ method: "GET" })
   });
 
 export const submitScorecard = createServerFn({ method: "POST" })
-  .middleware([requirePanel])
+  .middleware([requirePanel, requireCapability("recruiting.interviews")])
   .validator((data: unknown) => ScorecardInput.parse(data))
   .handler(async ({ data, context }): Promise<ScorecardResult> =>
     submitScorecardCore(
@@ -815,7 +816,7 @@ async function apologiseToCandidate(
 }
 
 export const markInterviewOutcome = createServerFn({ method: "POST" })
-  .middleware([requirePanel])
+  .middleware([requirePanel, requireCapability("recruiting.interviews")])
   .validator((data: unknown) => OutcomeInput.parse(data))
   .handler(async ({ data, context }) =>
     markInterviewOutcomeCore(
@@ -934,7 +935,7 @@ export const interviewerUnavailableCore = createServerOnlyFn(
 );
 
 export const interviewerUnavailable = createServerFn({ method: "POST" })
-  .middleware([requirePanel])
+  .middleware([requirePanel, requireCapability("recruiting.interviews")])
   .validator((data: unknown) => UnavailableInput.parse(data))
   .handler(async ({ data, context }) =>
     interviewerUnavailableCore(
@@ -1291,7 +1292,7 @@ export const scheduleInterviewCore = createServerOnlyFn(async function scheduleI
 });
 
 export const scheduleInterview = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.interviews")])
   .validator((data: unknown) => ScheduleInput.parse(data))
   .handler(async ({ data, context }) =>
     scheduleInterviewCore({ orgId: context.orgId, actor: actorOf(context) }, data),
@@ -1313,7 +1314,7 @@ const AiScreenSaveInput = z.object({
  * failures of that stage bump, so it stays best-effort.
  */
 export const saveAiInterview = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.interviews")])
   .validator((data: unknown) => AiScreenSaveInput.parse(data))
   .handler(async ({ data, context }) => {
     const [application] = await db

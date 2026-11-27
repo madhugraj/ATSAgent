@@ -438,7 +438,7 @@ async function notifySloAlert(
     target: s.target,
   });
 
-  if (process.env["SMTP_URL"]) {
+  if ((await import("@/lib/email-templates/send-email")).emailTransportConfigured()) {
     const admins = await db.select({ email: platformAdmins.email }).from(platformAdmins);
     const { sendTemplateEmail } = await import("@/lib/email-templates/send-email");
     let sent = 0;

@@ -7,6 +7,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { assertRole, requireOrg } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 
 const PanelistBody = z.object({
   fullName: z.string().trim().min(2).max(120),
@@ -19,14 +20,14 @@ const PanelistBody = z.object({
 });
 
 export const listPanelDirectory = createServerFn({ method: "GET" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.interviews")])
   .handler(async ({ context }) => {
     const { listPanelists } = await import("./panelists.server");
     return listPanelists(context.orgId);
   });
 
 export const addToPanelDirectory = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.interviews")])
   .validator((d: unknown) => PanelistBody.parse(d))
   .handler(async ({ data, context }) => {
     await assertRole(
@@ -40,7 +41,7 @@ export const addToPanelDirectory = createServerFn({ method: "POST" })
   });
 
 export const setPanelDirectoryActive = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.interviews")])
   .validator((d: unknown) => z.object({ id: z.string().uuid(), active: z.boolean() }).parse(d))
   .handler(async ({ data, context }) => {
     await assertRole(
@@ -54,7 +55,7 @@ export const setPanelDirectoryActive = createServerFn({ method: "POST" })
   });
 
 export const setPanelDirectoryPhone = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.interviews")])
   .validator((d: unknown) =>
     z.object({ id: z.string().uuid(), phone: z.string().trim().max(30).nullable() }).parse(d),
   )

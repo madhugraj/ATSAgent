@@ -24,6 +24,7 @@ import {
   type ScreeningCallTurn,
 } from "@db/schema";
 import { requireOrg } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 
 /** Who may read call transcripts — and so the reviews that quote them. */
 const CALL_ROLES = ["recruiter", "hr_head", "president_cbo"] as const;
@@ -65,7 +66,7 @@ export type CallReviewRow = {
 };
 
 export const listCallReviews = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.voice")])
   .validator((d: unknown) => ListInput.parse(d ?? {}))
   .handler(async ({ data, context }): Promise<{ rows: CallReviewRow[]; total: number }> => {
     await assertCallRole(context.userId, context.orgId);
@@ -146,7 +147,7 @@ export type CallReviewDetail = CallReviewRow & {
 };
 
 export const getCallReview = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.voice")])
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<CallReviewDetail> => {
     await assertCallRole(context.userId, context.orgId);
@@ -225,7 +226,7 @@ export const getCallReview = createServerFn({ method: "POST" })
  * Guard's run and — when confirmed — the call agent's run.
  */
 export const acknowledgeCallReview = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.voice")])
   .validator((d: unknown) =>
     z
       .object({
@@ -308,7 +309,7 @@ export const acknowledgeCallReview = createServerFn({ method: "POST" })
 
 /** Review the call again (e.g. after the Voice Guard changed). Audited. */
 export const reviewCallAgain = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.voice")])
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     await assertCallRole(context.userId, context.orgId);
@@ -347,7 +348,7 @@ export type CallReviewSummary = {
 
 /** Last 7 days of reviews — the card on the agent health page. */
 export const callReviewSummary = createServerFn({ method: "GET" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.voice")])
   .handler(async ({ context }): Promise<CallReviewSummary> => {
     await assertCallRole(context.userId, context.orgId);
     const since = new Date(Date.now() - 7 * 86_400_000);

@@ -29,6 +29,7 @@ import {
   type Application,
   type Candidate,
 } from "@/lib/data";
+import { requireRouteCapability } from "@/lib/route-guard";
 import { parseResume } from "@/lib/matching.functions";
 import { verifyCandidates } from "@/lib/verification.functions";
 import { getResumeDownloadUrl } from "@/lib/resume.functions";
@@ -70,6 +71,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 export const Route = createFileRoute("/candidates/")({
+  beforeLoad: requireRouteCapability,
   head: () => ({
     meta: [
       { title: "Talent Pool — pipeline states, match scores & authenticity" },

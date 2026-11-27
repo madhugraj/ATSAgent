@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { requireRouteCapability } from "@/lib/route-guard";
 import { placeLabel } from "@/lib/work-mode";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -80,6 +81,7 @@ import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 
 export const Route = createFileRoute("/requisitions/$id")({
+  beforeLoad: requireRouteCapability,
   head: () => ({
     meta: [
       { title: "Requisition detail & AI job description — ATS" },

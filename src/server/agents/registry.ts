@@ -4,11 +4,18 @@
  * A tool wraps the core logic of an existing server function; it runs with
  * the run's principal so `assertRole` and org predicates apply exactly as for
  * that person. Agents only see the tools their definition lists.
+ *
+ * Tenant workflow profiles (docs/candidate-identification/track-b-design.md
+ * §1.2): a tool that writes into a capability area declares `capability`, and
+ * the runtime hides it and refuses calls to it when the organisation's profile
+ * gates that capability off. A tool without `capability` must be in
+ * TOOL_EXEMPT (src/lib/capabilities.ts) — the CI sweep checks that.
  */
 import type { z } from "zod";
 
 import type { AiFeature } from "../ai-usage";
 import type { AgentType } from "@db/schema";
+import { AGENT_CAPABILITIES, type Capability } from "@/lib/capabilities";
 import type { AppRole } from "@/lib/auth.middleware";
 import type { ToolRisk } from "./policy";
 
@@ -32,6 +39,14 @@ export type AgentTool<I = unknown> = {
   untrustedOutput?: boolean;
   /** AI features (skills) the tool itself calls — ledger slugs from AI_FEATURES. */
   skills?: AiFeature[];
+  /**
+   * Tenant capability this tool needs (docs/candidate-identification/
+   * track-b-design.md §1.2). The runtime hides the tool from a model whose
+   * organisation lacks it and refuses a call to it before any side effect.
+   * Absent = exempt: a tool with no capability here must appear in
+   * TOOL_EXEMPT (src/lib/capabilities.ts) — the CI sweep checks that.
+   */
+  capability?: Capability;
   /** One-line description of the call, used as the approval card title. */
   describe?: (input: I) => string;
   /**
@@ -232,12 +247,35 @@ export function listAgents(): AgentDefinition[] {
   return [...agents.values()];
 }
 
-/** Every registered tool's name and whether it carries an approval card (CI checks). */
-export function listTools(): { name: string; proposes: boolean }[] {
+/**
+ * Every registered tool's name, whether it carries an approval card, and the
+ * capability it declares (null = exempt; the CI sweep checks each exempt tool
+ * against TOOL_EXEMPT in src/lib/capabilities.ts).
+ */
+export function listTools(): {
+  name: string;
+  proposes: boolean;
+  capability: Capability | null;
+}[] {
   return [...tools.values()].map((t) => ({
     name: t.name,
     proposes: Boolean((t as { proposes?: unknown }).proposes),
+    capability: (t as { capability?: Capability }).capability ?? null,
   }));
+}
+
+/** Refusal copy when a run's agent type is gated off (mirrors CAPABILITY_MESSAGE). */
+export const AGENT_CAPABILITY_MESSAGE =
+  "This agent is not part of this organisation's current workflow.";
+
+/**
+ * True when every capability the agent type needs (AGENT_CAPABILITIES) is
+ * gated off, so startRun must refuse it. Empty or absent entries are never
+ * gated; `full_pipeline` resolves to every capability, so it can never fire.
+ */
+export function agentGatedOff(capabilities: readonly string[], agentType: string): boolean {
+  const needed = AGENT_CAPABILITIES[agentType];
+  return Boolean(needed?.length) && !needed!.some((c) => capabilities.includes(c));
 }
 
 /** Skills an agent exercises: its own model turns plus every AI feature its tools call. */

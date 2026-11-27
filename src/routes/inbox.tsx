@@ -12,6 +12,7 @@ import {
   saveCareersEmail,
   type InboxRow,
 } from "@/lib/local-inbox.functions";
+import { requireRouteCapability } from "@/lib/route-guard";
 import { EmptyState, PageHeader } from "@/components/ats";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +25,7 @@ import {
 } from "@/components/ui/select";
 
 export const Route = createFileRoute("/inbox")({
+  beforeLoad: requireRouteCapability,
   head: () => ({
     meta: [
       { title: "Careers Inbox — Automatic CV Intake" },

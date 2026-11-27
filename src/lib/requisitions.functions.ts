@@ -10,6 +10,7 @@ import { z } from "zod";
 import { db } from "../server/db";
 import { applications, candidates, departments, requisitions } from "@db/schema";
 import { assertRole, requireOrg, requireRole } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 
 const ReqStatus = z.enum([
   "draft",
@@ -26,7 +27,7 @@ const ReqStatus = z.enum([
 
 /** Approve/advance a requisition: role-checked status bump, trail rebuilt server-side. */
 export const advanceRequisition = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("pipeline.requisitions")])
   .validator((data: unknown) =>
     z
       .object({
@@ -52,7 +53,7 @@ export const advanceRequisition = createServerFn({ method: "POST" })
  * machine (reject / close) so the trail stays intact.
  */
 export const deleteRequisition = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("pipeline.requisitions")])
   .validator((data: unknown) =>
     z
       .object({
@@ -110,7 +111,7 @@ export const deleteRequisition = createServerFn({ method: "POST" })
 
 /** Publish / unpublish an approved requisition on the internal job board. */
 export const setRequisitionIjp = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("pipeline.requisitions")])
   .validator((data: unknown) =>
     z.object({ id: z.string().uuid(), enabled: z.boolean() }).parse(data),
   )
@@ -126,7 +127,7 @@ export const setRequisitionIjp = createServerFn({ method: "POST" })
 
 /** Employee-facing note shown on the internal job board. */
 export const setRequisitionIjpNotes = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("pipeline.requisitions")])
   .validator((data: unknown) =>
     z.object({ id: z.string().uuid(), notes: z.string().nullish() }).parse(data),
   )
@@ -140,7 +141,7 @@ export const setRequisitionIjpNotes = createServerFn({ method: "POST" })
 
 /** Persist the six match weights configured for this requisition. */
 export const saveRequisitionWeights = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("pipeline.requisitions")])
   .validator((data: unknown) =>
     z
       .object({
@@ -168,7 +169,7 @@ export const saveRequisitionWeights = createServerFn({ method: "POST" })
 
 /** Write budget CTC + band (e.g. chosen from a market benchmark) and the ladder level they came from. */
 export const updateRequisitionCompensation = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("pipeline.requisitions")])
   .validator((data: unknown) =>
     z
       .object({
@@ -214,7 +215,7 @@ const JdVersion = z.object({
  * never collide on the same number.
  */
 export const saveJobDescription = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("pipeline.requisitions")])
   .validator((data: unknown) =>
     z
       .object({
@@ -242,7 +243,7 @@ export const saveJobDescription = createServerFn({ method: "POST" })
 
 /** Approve a JD version — a department-head-and-above decision. */
 export const approveJobDescription = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("pipeline.requisitions")])
   .validator((data: unknown) =>
     z.object({ id: z.string().uuid(), fullText: z.string().nullish() }).parse(data),
   )
@@ -257,7 +258,7 @@ export const approveJobDescription = createServerFn({ method: "POST" })
 
 /** Send a JD version back with the reviewer's comment — department head and above. */
 export const requestJdChanges = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("pipeline.requisitions")])
   .validator((data: unknown) =>
     z.object({ id: z.string().uuid(), comment: z.string().min(1).max(4000) }).parse(data),
   )
@@ -276,7 +277,7 @@ export const requestJdChanges = createServerFn({ method: "POST" })
  * policy is decided against the live requisition row before the call.
  */
 export const syncRequisitionFromJd = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("pipeline.requisitions")])
   .validator((data: unknown) =>
     z
       .object({
@@ -312,7 +313,7 @@ export const syncRequisitionFromJd = createServerFn({ method: "POST" })
  * the PostgREST call did.
  */
 export const addApplicationsToRequisition = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("pipeline.requisitions")])
   .validator((data: unknown) =>
     z
       .object({
@@ -340,7 +341,7 @@ export const addApplicationsToRequisition = createServerFn({ method: "POST" })
  * unique index `requisitions_org_code_key` with a raw database error.
  */
 export const createRequisition = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("pipeline.requisitions")])
   .validator((data: unknown) =>
     z
       .object({
@@ -422,7 +423,7 @@ const JobCardZoneInput = z.object({
  * ride on top of the selected template; empty object = pure template defaults.
  */
 export const saveJobCardOverrides = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("pipeline.requisitions")])
   .validator((data: unknown) =>
     z
       .object({
@@ -471,7 +472,7 @@ export const saveJobCardOverrides = createServerFn({ method: "POST" })
 
 /** Quick-add a department straight from the requisition form; returns its id. */
 export const createDepartment = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("pipeline.requisitions")])
   .validator((data: unknown) => z.object({ name: z.string().min(1) }).parse(data))
   .handler(async ({ data, context }) => {
     const [row] = await db
@@ -488,7 +489,7 @@ export const createDepartment = createServerFn({ method: "POST" })
 
 /** Add a department to the workforce plan from the budgets panel. */
 export const addDepartment = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("pipeline.requisitions")])
   .validator((data: unknown) =>
     z
       .object({
@@ -521,7 +522,7 @@ export const addDepartment = createServerFn({ method: "POST" })
  * applications trip the unique index and the error propagates).
  */
 export const applyInternally = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("pipeline.requisitions")])
   .validator((data: unknown) =>
     z
       .object({
@@ -586,7 +587,7 @@ export const applyInternally = createServerFn({ method: "POST" })
 
 /** The approver at the current step corrects a requisition in approval. */
 export const editRequisitionInApproval = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("pipeline.requisitions")])
   .validator((data: unknown) =>
     z
       .object({
@@ -617,7 +618,7 @@ export const editRequisitionInApproval = createServerFn({ method: "POST" })
 
 /** Send a requisition in approval back to draft with what should change. */
 export const sendBackRequisition = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("pipeline.requisitions")])
   .validator((data: unknown) =>
     z
       .object({
