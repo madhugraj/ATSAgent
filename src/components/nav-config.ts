@@ -35,6 +35,7 @@ import {
   Users,
   Waypoints,
   Upload,
+  ListOrdered,
 } from "lucide-react";
 
 import type { Capability } from "@/lib/capabilities";
@@ -193,6 +194,15 @@ export const NAV_GROUPS: NavGroup[] = [
         show: (c) =>
           c.recruiterView && (!c.capabilities || c.capabilities.includes("pipeline.requisitions")),
         cap: "pipeline.requisitions",
+        mode: "manual",
+      },
+      {
+        to: "/shortlists",
+        label: "Shortlists",
+        icon: ListOrdered,
+        show: (c) =>
+          c.recruiterView && (!c.capabilities || c.capabilities.includes("matching.shortlist")),
+        cap: "matching.shortlist",
         mode: "manual",
       },
       // Matching is a hiring-team tool: recruiters run it, hiring managers and

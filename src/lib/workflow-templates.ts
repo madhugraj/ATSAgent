@@ -380,4 +380,60 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
       },
     ],
   },
+  {
+    id: "candidate-identification",
+    name: "Candidate identification: JD → ranked shortlist",
+    description:
+      "For organisations that only need the right candidates found. JDs come in through bulk JD import; each approved role is ranked against the whole talent pool automatically (evidence pass + requirement review). Start it for a role: the JD agent checks the imported JD for gaps, then the Intake & matching agent summarises the ranked shortlist and the evidence still missing for the recruiter. No interviews, offers or calls; nobody is contacted, moved or rejected.",
+    graph: {
+      nodes: [
+        n("trigger", "trigger", 300, 0, { label: "Role imported", event: "manual" }),
+        n("jd", "agent", 280, 110, {
+          label: "Check the imported JD",
+          agentType: "jd",
+          goal: "Requisition {{payload.requisitionId}} came from bulk JD import. Check its JD against the organisation's JD template and list anything missing or unclear (requirements, location, pay). Never change approved text.",
+        }),
+        n("jdOk", "condition", 300, 210, {
+          label: "Checked?",
+          field: "last.status",
+          op: "eq",
+          value: "done",
+        }),
+        n("intake", "agent", 280, 310, {
+          label: "Summarise the shortlist",
+          agentType: "intake",
+          goal: "Requisition {{payload.requisitionId}} has been ranked against the talent pool. For the recruiter, summarise the strongest candidates and the evidence each is still missing. Never contact, move or reject anyone; the recruiter decides on the shortlist page.",
+        }),
+        n("report", "report", 300, 420, { label: "Run report" }),
+        n("end", "end", 320, 520, { label: "Done" }),
+      ],
+      edges: [
+        { id: "e1", source: "trigger", target: "jd" },
+        { id: "e2", source: "jd", target: "jdOk" },
+        { id: "e2y", source: "jdOk", target: "intake", branch: "yes" },
+        { id: "e2n", source: "jdOk", target: "report", branch: "no" },
+        { id: "e3", source: "intake", target: "report" },
+        { id: "e4", source: "report", target: "end" },
+      ],
+    },
+    tests: [
+      {
+        name: "JD checked → shortlist summarised",
+        subjectType: "requisition",
+        payload: { requisitionId: "REQ-1" },
+        outcomes: {
+          jd: { status: "done", result: "No gaps" },
+          intake: { status: "done", result: "Top 5 summarised" },
+        },
+        expectEnd: "end",
+      },
+      {
+        name: "JD check fails → straight to the report",
+        subjectType: "requisition",
+        payload: { requisitionId: "REQ-1" },
+        outcomes: { jd: { status: "failed", result: "" } },
+        expectEnd: "end",
+      },
+    ],
+  },
 ];

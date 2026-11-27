@@ -65,6 +65,16 @@ Candidate Identification platform work, rows 0 and 5 (`docs/candidate-identifica
       weights; reruns re-review only candidates whose profile changed; new evidence
       re-queues the organisation's requisitions. Merged, non-consented and portal-terms
       people stay out of the pool. The pool-match agent's own limits are unchanged
+- [x] C2: Shortlists (`/shortlists`): every ranked role with pool / reviewed / shortlisted
+      counts; per role, candidates in score order with factor breakdown, per-requirement
+      verdicts and the CV passages behind them, knock-outs and the rationale; Shortlist /
+      Reject / Undo (recruiter-side roles, audited, recorded as training feedback when
+      consented) — shortlisting adds the person to the role like a pool match, never moves an
+      existing application; re-rank; CSV export. "Candidate identification" workflow
+      template (JD agent + Intake & matching agent): its capabilities are requisitions,
+      pool and shortlist — no interviews, offers or calls
+- [x] C3: Evaluate on the shortlist page — paste the people actually shortlisted or placed;
+      precision/recall at 5/10/20/50 and each person's rank (read-only)
 
 ## Pay terms — Phase 1 foundation (2026-11-11)
 
