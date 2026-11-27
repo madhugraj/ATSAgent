@@ -170,6 +170,7 @@ describe("capability derivation from a published workflow graph", () => {
       "recruiting.screening",
       "recruiting.voice",
       "matching.pool",
+      "matching.shortlist",
     ]);
   });
 
@@ -229,6 +230,7 @@ describe("apply core", () => {
       "pipeline.requisitions",
       "recruiting.screening",
       "matching.pool",
+      "matching.shortlist",
     ]);
     const [row] = await db
       .select()
@@ -263,6 +265,7 @@ describe("apply core", () => {
       "pipeline.requisitions",
       "recruiting.screening",
       "matching.pool",
+      "matching.shortlist",
     ]);
     expect((row!.settings as { jdRequisitionMode?: string }).jdRequisitionMode).toBeUndefined();
   });
