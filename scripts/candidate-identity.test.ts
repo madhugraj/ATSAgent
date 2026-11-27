@@ -674,3 +674,195 @@ describe("decision guards (verdict 114 blockers)", () => {
     ).toThrow(/already been decided/);
   });
 });
+
+describe("intake wiring (A1b)", () => {
+  const { mergeCandidatesCore } = identity;
+  let intake: typeof import("../src/lib/intake.server");
+
+  test("ingest merges through an identity key (linkedin) despite a different email, and records the newcomer's other keys on the survivor", async () => {
+    intake ??= await import("../src/lib/intake.server");
+    const linkedin = `linkedin.com/a1b-intake-${stamp}`;
+    const first = await intake.ingestCandidate({
+      resumeText: "A1b intake — platform engineer.",
+      fileName: "a1b-one.pdf",
+      orgId: orgA,
+      source: "talent_pool",
+      parsed: {
+        full_name: "Intake Person",
+        email: `intake-one-${stamp}@${dom}`,
+        skills: ["Go"],
+        linkedin_url: linkedin,
+      } as never,
+    });
+    const second = await intake.ingestCandidate({
+      resumeText: "A1b intake — platform engineer, new mail.",
+      fileName: "a1b-two.pdf",
+      orgId: orgA,
+      source: "inbox",
+      parsed: {
+        full_name: "Intake Person",
+        email: `intake-two-${stamp}@${dom}`,
+        skills: ["Go", "K8s"],
+        linkedin_url: linkedin,
+      } as never,
+    });
+    expect(second.merged).toBe(true);
+    expect(second.candidateId).toBe(first.candidateId);
+    const keys = await db
+      .select()
+      .from(candidateIdentityKeys)
+      .where(
+        and(
+          eq(candidateIdentityKeys.orgId, orgA),
+          eq(candidateIdentityKeys.candidateId, first.candidateId),
+        ),
+      );
+    const values = keys.map((k) => `${k.keyType}=${k.keyValue}`);
+    expect(values).toContain(`email=intake-one-${stamp}@${dom}`);
+    expect(values).toContain(`email=intake-two-${stamp}@${dom}`);
+    expect(values).toContain(`linkedin=${linkedin}`);
+  });
+
+  test("fuzzy evidence on a trusted surface creates the newcomer AND queues a review suggestion", async () => {
+    intake ??= await import("../src/lib/intake.server");
+    const hist = [
+      { company: "Wireworks", start: 2020 },
+      { company: "Northgate", start: 2023 },
+    ];
+    await intake.ingestCandidate({
+      resumeText: "Fuzzy wiring — engineer.",
+      fileName: "fz-one.pdf",
+      orgId: orgA,
+      source: "talent_pool",
+      parsed: {
+        full_name: "Ondrea Marlowe",
+        email: `ondrea-one-${stamp}@${dom}`,
+        skills: ["Go"],
+        employment_history: hist,
+        education: "IIT Madras",
+        location: "Chennai",
+      } as never,
+    });
+    const second = await intake.ingestCandidate({
+      resumeText: "Fuzzy wiring — engineer, rewritten CV.",
+      fileName: "fz-two.pdf",
+      orgId: orgA,
+      source: "talent_pool",
+      parsed: {
+        full_name: "Ondrea Marlowe",
+        email: `ondrea-two-${stamp}@${dom}`,
+        skills: ["Go"],
+        employment_history: [
+          { company: "Northgate", start: "2023" },
+          { company: "Wireworks", start: "2020" },
+        ],
+        education: "IIT Madras",
+        location: "Chennai",
+      } as never,
+    });
+    expect(second.candidateId).not.toBeFalsy();
+    const suggestions = await db
+      .select()
+      .from(candidateMergeSuggestions)
+      .where(
+        and(
+          eq(candidateMergeSuggestions.orgId, orgA),
+          eq(candidateMergeSuggestions.status, "pending"),
+        ),
+      );
+    const pair = suggestions.find(
+      (s) => s.candidateAId === second.candidateId || s.candidateBId === second.candidateId,
+    );
+    expect(pair).toBeTruthy();
+    // Decide it away so later runs of the fuzzy suite stay deterministic.
+    await identity.decideSuggestion({
+      orgId: orgA,
+      suggestionId: pair!.id,
+      decision: "keep_separate",
+      actor,
+    });
+  });
+
+  test("unassigned-pool arrivals keep the legacy lookup and get no identity keys", async () => {
+    intake ??= await import("../src/lib/intake.server");
+    const first = await intake.ingestCandidate({
+      resumeText: "Pool path — no org.",
+      fileName: "pool-one.pdf",
+      orgId: null,
+      source: "talent_pool",
+      parsed: {
+        full_name: "Pool Person",
+        email: `pool-${stamp}@${dom}`,
+        skills: ["Go"],
+      } as never,
+    });
+    const second = await intake.ingestCandidate({
+      resumeText: "Pool path — no org, again.",
+      fileName: "pool-two.pdf",
+      orgId: null,
+      source: "talent_pool",
+      parsed: {
+        full_name: "Pool Person",
+        email: `pool-${stamp}@${dom}`,
+        skills: ["Go"],
+      } as never,
+    });
+    expect(second.merged).toBe(true);
+    expect(second.candidateId).toBe(first.candidateId);
+    const keys = await db
+      .select()
+      .from(candidateIdentityKeys)
+      .where(eq(candidateIdentityKeys.candidateId, first.candidateId));
+    expect(keys.length).toBe(0);
+  });
+
+  test("a tombstoned candidate is invisible to the pool-match sweep", async () => {
+    intake ??= await import("../src/lib/intake.server");
+    const { matchNewCvsToRoles } = await import("../src/server/agents/pool-match.server");
+    const survivor = await mkCandidate(orgA, {
+      fullName: "Sweep Keeper",
+      email: `sweep-keeper-${stamp}@${dom}`,
+    });
+    const absorbed = await mkCandidate(orgA, {
+      fullName: "Sweep Ghost",
+      email: `sweep-ghost-${stamp}@${dom}`,
+    });
+    await db
+      .update(candidates)
+      .set({ roleMatchCheckedAt: null })
+      .where(eq(candidates.id, survivor.id));
+    await mergeCandidatesCore({
+      orgId: orgA,
+      survivorId: survivor.id,
+      mergedId: absorbed.id,
+      actor,
+    });
+    const req = (
+      await db
+        .insert(requisitions)
+        .values({
+          orgId: orgA,
+          code: `REQ-SWEEP-${stamp}`,
+          title: "Sweep Engineer",
+          status: "approved",
+          mustHaveSkills: ["Go"],
+          createdBy: userId,
+        } as never)
+        .returning({ id: requisitions.id })
+    )[0]!.id;
+    const result = await matchNewCvsToRoles(orgA);
+    void req;
+    const ghost = (await db.select().from(candidates).where(eq(candidates.id, absorbed.id)))[0]!;
+    // The tombstone was never selected: its cursor stays null and no
+    // application appeared for it.
+    expect(ghost.mergedIntoId).toBe(survivor.id);
+    expect(ghost.roleMatchCheckedAt).toBeNull();
+    const ghostApps = await db
+      .select()
+      .from(applications)
+      .where(eq(applications.candidateId, absorbed.id));
+    expect(ghostApps.length).toBe(0);
+    void survivor;
+    void result;
+  });
+});
