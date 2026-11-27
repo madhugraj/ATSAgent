@@ -569,6 +569,7 @@ export function registerPhase1Tools(): void {
     input: RequisitionId.extend({
       jdText: z.string().min(200).max(30000).optional(),
     }),
+    capability: "pipeline.requisitions",
     risk: "write",
     skills: ["jd_import"],
     describe: () => "File the person's own job description for review",

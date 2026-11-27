@@ -350,6 +350,7 @@ export const SERVER_FN_MODULE_CAPABILITY: Record<string, Capability | null> = {
   "agent-governance.functions.ts": null,
   "agent-intelligence.functions.ts": null,
   "agents-observability.functions.ts": null,
+  "voice-observability.functions.ts": null, // Agent observability → Voice agents
   "agents-telemetry.functions.ts": null,
   "panel-agent.functions.ts": null, // silent-panel settings (governance)
   "ai-settings.functions.ts": null, // Integrations (governance)
