@@ -288,6 +288,13 @@ function ensureSliFlusher() {
 }
 
 async function applySecurityHeaders(response: Response, request: Request): Promise<Response> {
+  // Response.redirect() and fetch() responses have immutable headers; copy
+  // them first (an email-confirmation redirect 500'd here).
+  try {
+    response.headers.set("x-content-type-options", "nosniff");
+  } catch {
+    response = new Response(response.body, response);
+  }
   // HSTS on every response: once a browser has seen it over https, plain-http
   // requests to this host are upgraded before they leave the browser.
   response.headers.set("strict-transport-security", "max-age=31536000; includeSubDomains");
