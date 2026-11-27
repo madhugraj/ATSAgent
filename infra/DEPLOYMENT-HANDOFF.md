@@ -199,15 +199,16 @@ On the Cloud Run URL:
 
 Cloud Scheduler (all call the app with `Authorization: Bearer <value of atsiq-cron-secret>`):
 
-| Schedule       | Target                                                                                                                                                             |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| every 5–15 min | `https://atsiq.yavar.ai/api/public/inbox-sync` (scores candidates that arrived through the careers-inbox webhook)                                                  |
-| hourly         | `https://atsiq.yavar.ai/api/public/sync-candidates`                                                                                                                |
-| every 5 min    | `https://atsiq.yavar.ai/api/public/process-email-outbox` (drains the candidate email queue)                                                                        |
-| every 15 min   | `https://atsiq.yavar.ai/api/public/sync-hrms` (refreshes the HRMS employee caches)                                                                                 |
-| every 15 min   | `https://atsiq.yavar.ai/api/public/board-sync` (job-board application poll/backfill + webhook-event retention)                                                     |
-| every 5 min    | `https://atsiq.yavar.ai/api/public/screening-prep` (prepares screening kits for shortlisted candidates in the background; retries ≤3)                              |
-| every 1 min    | `https://atsiq.yavar.ai/api/public/agent-tick` (drives the agent runtime: claims queued runs, resumes runs after a human decision; no-op until agents are enabled) |
+| Schedule       | Target                                                                                                                                                                         |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| every 5–15 min | `https://atsiq.yavar.ai/api/public/inbox-sync` (scores candidates that arrived through the careers-inbox webhook)                                                              |
+| hourly         | `https://atsiq.yavar.ai/api/public/sync-candidates`                                                                                                                            |
+| every 5 min    | `https://atsiq.yavar.ai/api/public/process-email-outbox` (drains the candidate email queue)                                                                                    |
+| every 15 min   | `https://atsiq.yavar.ai/api/public/sync-hrms` (refreshes the HRMS employee caches)                                                                                             |
+| every 15 min   | `https://atsiq.yavar.ai/api/public/board-sync` (job-board application poll/backfill + webhook-event retention)                                                                 |
+| every 5 min    | `https://atsiq.yavar.ai/api/public/screening-prep` (prepares screening kits for shortlisted candidates in the background; retries ≤3)                                          |
+| every 2 min    | `https://atsiq.yavar.ai/api/public/cv-processing` (extracts evidence claims from new CV versions; from A3 also drains archive imports; retries ≤3, defers at the AI spend cap) |
+| every 1 min    | `https://atsiq.yavar.ai/api/public/agent-tick` (drives the agent runtime: claims queued runs, resumes runs after a human decision; no-op until agents are enabled)             |
 
 Registering these in Cloud Scheduler is a **devops step** — the app only serves the
 routes. Until `screening-prep` is registered, screening kits are still built when a

@@ -34,6 +34,16 @@ Candidate Identification platform work, rows 0 and 5 (`docs/candidate-identifica
       the talent-pool bulk merge goes through the reversible core; tombstoned rows are
       invisible to the pool-match sweep, talent search, the candidates list and attach;
       the unassigned pool keeps its legacy lookup until assignment
+- [x] A2: every CV is kept as a version (`candidate_cv_versions`; same file for the same
+      person is one version); claims (`candidate_claims`) extracted through the gateway
+      (`cv_claims_extract`) with evidence strength and the exact source passage — claims
+      whose passage is not in the CV are dropped; consolidated profile on the candidate page
+      (strength = max across versions, versions shown per claim); consistency flags (date,
+      title, overlapping employers, single-source, JD wording copied) are display-only;
+      public-apply CVs matching an existing person stay pending until a recruiter accepts
+      them; merges move versions and claims and keep the stricter consent / pool-use;
+      erasure removes every version file and any record merged into the person; existing
+      CVs are backfilled as versions without AI calls (extraction is opt-in per candidate)
 
 ## Pay terms — Phase 1 foundation (2026-11-11)
 
@@ -619,4 +629,4 @@ Study in `docs/hrms-integrations-study.md`: vendor API landscape (Keka, greytHR,
 - [ ] Run current security checks and resolve release blockers (basic scan passed; dependency scan parser blocked by URL-pinned xlsx package)
 - [ ] Publish and verify the production release (after revalidation on the clean database)
 - [x] Pre-onboarding: per-employer salary breakup captured verbatim; multi-page, scanned, merged and zipped uploads read as individual documents
-- [x] Talent-pool contact: pool matches get a one-time "your profile is being considered" email (`pool_match_intro`); invitations and introductions carry a signed opt-out link that stops matching and outreach (audited, migration 0096); one outreach email per person per 14 days across roles; people turned down after an interview round can be invited again, as the rejection email says (Sourcing agent v1.0.6)
+- [x] Talent-pool contact: pool matches get a one-time "your profile is being considered" email (`pool_match_intro`); invitations and introductions carry a signed opt-out link that stops matching and outreach (audited, migration 0097); one outreach email per person per 14 days across roles; people turned down after an interview round can be invited again, as the rejection email says (Sourcing agent v1.0.6)

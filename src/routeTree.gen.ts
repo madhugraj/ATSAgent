@@ -78,6 +78,7 @@ import { Route as ApiPublicAgentTickRouteImport } from './routes/api/public/agen
 import { Route as ApiPublicBoardSyncRouteImport } from './routes/api/public/board-sync'
 import { Route as ApiPublicCaptureRouteImport } from './routes/api/public/capture'
 import { Route as ApiPublicContactPreferencesRouteImport } from './routes/api/public/contact-preferences'
+import { Route as ApiPublicCvProcessingRouteImport } from './routes/api/public/cv-processing'
 import { Route as ApiPublicDistributionRouteImport } from './routes/api/public/distribution'
 import { Route as ApiPublicInboundEmailRouteImport } from './routes/api/public/inbound-email'
 import { Route as ApiPublicInboxSyncRouteImport } from './routes/api/public/inbox-sync'
@@ -438,6 +439,11 @@ const ApiPublicContactPreferencesRoute =
     path: '/api/public/contact-preferences',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicCvProcessingRoute = ApiPublicCvProcessingRouteImport.update({
+  id: '/api/public/cv-processing',
+  path: '/api/public/cv-processing',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicDistributionRoute = ApiPublicDistributionRouteImport.update({
   id: '/api/public/distribution',
   path: '/api/public/distribution',
@@ -581,6 +587,7 @@ export interface FileRoutesByFullPath {
   '/api/public/board-sync': typeof ApiPublicBoardSyncRoute
   '/api/public/capture': typeof ApiPublicCaptureRoute
   '/api/public/contact-preferences': typeof ApiPublicContactPreferencesRoute
+  '/api/public/cv-processing': typeof ApiPublicCvProcessingRoute
   '/api/public/distribution': typeof ApiPublicDistributionRoute
   '/api/public/inbound-email': typeof ApiPublicInboundEmailRoute
   '/api/public/inbox-sync': typeof ApiPublicInboxSyncRoute
@@ -665,6 +672,7 @@ export interface FileRoutesByTo {
   '/api/public/board-sync': typeof ApiPublicBoardSyncRoute
   '/api/public/capture': typeof ApiPublicCaptureRoute
   '/api/public/contact-preferences': typeof ApiPublicContactPreferencesRoute
+  '/api/public/cv-processing': typeof ApiPublicCvProcessingRoute
   '/api/public/distribution': typeof ApiPublicDistributionRoute
   '/api/public/inbound-email': typeof ApiPublicInboundEmailRoute
   '/api/public/inbox-sync': typeof ApiPublicInboxSyncRoute
@@ -750,6 +758,7 @@ export interface FileRoutesById {
   '/api/public/board-sync': typeof ApiPublicBoardSyncRoute
   '/api/public/capture': typeof ApiPublicCaptureRoute
   '/api/public/contact-preferences': typeof ApiPublicContactPreferencesRoute
+  '/api/public/cv-processing': typeof ApiPublicCvProcessingRoute
   '/api/public/distribution': typeof ApiPublicDistributionRoute
   '/api/public/inbound-email': typeof ApiPublicInboundEmailRoute
   '/api/public/inbox-sync': typeof ApiPublicInboxSyncRoute
@@ -836,6 +845,7 @@ export interface FileRouteTypes {
     | '/api/public/board-sync'
     | '/api/public/capture'
     | '/api/public/contact-preferences'
+    | '/api/public/cv-processing'
     | '/api/public/distribution'
     | '/api/public/inbound-email'
     | '/api/public/inbox-sync'
@@ -920,6 +930,7 @@ export interface FileRouteTypes {
     | '/api/public/board-sync'
     | '/api/public/capture'
     | '/api/public/contact-preferences'
+    | '/api/public/cv-processing'
     | '/api/public/distribution'
     | '/api/public/inbound-email'
     | '/api/public/inbox-sync'
@@ -1004,6 +1015,7 @@ export interface FileRouteTypes {
     | '/api/public/board-sync'
     | '/api/public/capture'
     | '/api/public/contact-preferences'
+    | '/api/public/cv-processing'
     | '/api/public/distribution'
     | '/api/public/inbound-email'
     | '/api/public/inbox-sync'
@@ -1089,6 +1101,7 @@ export interface RootRouteChildren {
   ApiPublicBoardSyncRoute: typeof ApiPublicBoardSyncRoute
   ApiPublicCaptureRoute: typeof ApiPublicCaptureRoute
   ApiPublicContactPreferencesRoute: typeof ApiPublicContactPreferencesRoute
+  ApiPublicCvProcessingRoute: typeof ApiPublicCvProcessingRoute
   ApiPublicDistributionRoute: typeof ApiPublicDistributionRoute
   ApiPublicInboundEmailRoute: typeof ApiPublicInboundEmailRoute
   ApiPublicInboxSyncRoute: typeof ApiPublicInboxSyncRoute
@@ -1589,6 +1602,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicContactPreferencesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/cv-processing': {
+      id: '/api/public/cv-processing'
+      path: '/api/public/cv-processing'
+      fullPath: '/api/public/cv-processing'
+      preLoaderRoute: typeof ApiPublicCvProcessingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/distribution': {
       id: '/api/public/distribution'
       path: '/api/public/distribution'
@@ -1753,6 +1773,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicBoardSyncRoute: ApiPublicBoardSyncRoute,
   ApiPublicCaptureRoute: ApiPublicCaptureRoute,
   ApiPublicContactPreferencesRoute: ApiPublicContactPreferencesRoute,
+  ApiPublicCvProcessingRoute: ApiPublicCvProcessingRoute,
   ApiPublicDistributionRoute: ApiPublicDistributionRoute,
   ApiPublicInboundEmailRoute: ApiPublicInboundEmailRoute,
   ApiPublicInboxSyncRoute: ApiPublicInboxSyncRoute,

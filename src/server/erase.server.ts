@@ -8,7 +8,7 @@
  */
 import { and, eq, inArray } from "drizzle-orm";
 
-import { candidates, captureEvents } from "@db/schema";
+import { candidateCvVersions, candidates, captureEvents } from "@db/schema";
 import { db } from "./db";
 import { deleteObject } from "./storage";
 
@@ -26,7 +26,36 @@ export async function eraseCandidatesCore(
     .from(candidates)
     .where(and(inArray(candidates.id, candidateIds), eq(candidates.orgId, orgId)));
   if (!found.length) return [];
+  // Records merged into an erased person are that same person: erase them too,
+  // so no tombstone keeps their name, contacts or CV text (design §2.5).
+  const tombstones = await db
+    .select({
+      id: candidates.id,
+      fullName: candidates.fullName,
+      resumeFilePath: candidates.resumeFilePath,
+    })
+    .from(candidates)
+    .where(
+      and(
+        eq(candidates.orgId, orgId),
+        inArray(
+          candidates.mergedIntoId,
+          found.map((r) => r.id),
+        ),
+      ),
+    );
+  for (const t of tombstones) if (!found.some((f) => f.id === t.id)) found.push(t);
   const ids = found.map((r) => r.id);
+  // Every stored CV version's file goes first (delete-files-first, abort on failure).
+  const versionFiles = await db
+    .select({ filePath: candidateCvVersions.filePath })
+    .from(candidateCvVersions)
+    .where(
+      and(eq(candidateCvVersions.orgId, orgId), inArray(candidateCvVersions.candidateId, ids)),
+    );
+  const paths = new Set(versionFiles.map((v) => v.filePath).filter((p): p is string => Boolean(p)));
+  for (const f of found) if (f.resumeFilePath) paths.delete(f.resumeFilePath);
+  for (const p of paths) await deleteObject(p);
   await db
     .update(captureEvents)
     .set({ candidateId: null })

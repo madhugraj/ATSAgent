@@ -18,6 +18,8 @@ import { and, desc, eq, getTableName, inArray, isNull, ne, or, sql } from "drizz
 import { db } from "../db";
 import { writeAudit } from "../audit";
 import {
+  candidateClaims,
+  candidateCvVersions,
   applications,
   candidateAssessments,
   candidateIdentityKeys,
@@ -488,6 +490,8 @@ function childDescriptors(tx: Tx, orgId: string) {
     trainingFeedback,
     inboxMessages,
     captureEvents,
+    candidateCvVersions,
+    candidateClaims,
   ] as const;
   return tables.map((t) => ({
     name: getTableName(t),
@@ -528,12 +532,38 @@ export function mergeCandidateFields(
   const resume = survivor.resumeText ?? "";
   for (const [key, value] of Object.entries(absorbed)) {
     if (
-      ["id", "createdAt", "orgId", "skills", "resumeText", "mergedIntoId", "fileHash"].includes(key)
+      [
+        "id",
+        "createdAt",
+        "orgId",
+        "skills",
+        "resumeText",
+        "mergedIntoId",
+        "fileHash",
+        "poolUse",
+        "poolUseSource",
+        "consentGiven",
+        "aiCallOptOutAt",
+        "suspectedPromptInjection",
+      ].includes(key)
     )
       continue;
     const current = (survivor as unknown as Record<string, unknown>)[key];
     if (isBlank(current) && !isBlank(value)) patch[key] = value;
   }
+  // Consent and restrictions survive a merge: the stricter of the two wins
+  // (M0 verdict finding 5). A portal-terms ('role_only') person never becomes
+  // pool-matchable by being merged into a pool record.
+  if (absorbed.poolUse === "role_only" && survivor.poolUse !== "role_only") {
+    patch["poolUse"] = "role_only";
+    patch["poolUseSource"] = absorbed.poolUseSource ?? survivor.poolUseSource ?? null;
+  }
+  if (absorbed.consentGiven === false && survivor.consentGiven !== false)
+    patch["consentGiven"] = false;
+  if (absorbed.aiCallOptOutAt && !survivor.aiCallOptOutAt)
+    patch["aiCallOptOutAt"] = absorbed.aiCallOptOutAt;
+  if (absorbed.suspectedPromptInjection && !survivor.suspectedPromptInjection)
+    patch["suspectedPromptInjection"] = true;
   for (const s of absorbed.skills ?? []) if (s.trim()) skills.add(s.trim());
   if (skills.size !== (survivor.skills ?? []).length) patch["skills"] = [...skills];
   if ((absorbed.resumeText ?? "").length > resume.length) patch["resumeText"] = absorbed.resumeText;

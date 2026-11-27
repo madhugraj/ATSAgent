@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-130 tables across 9 domains.
+132 tables across 9 domains.
 
 ## Identity & access
 
@@ -1250,8 +1250,15 @@ erDiagram
 | `candidate_assessments` | `candidate_id` | `candidates` | cascade |
 | `candidate_assessments` | `org_id` | `organizations` | cascade |
 | `candidate_assessments` | `requisition_id` | `requisitions` | no action |
+| `candidate_claims` | `candidate_id` | `candidates` | cascade |
+| `candidate_claims` | `org_id` | `organizations` | cascade |
+| `candidate_claims` | `version_id` | `candidate_cv_versions` | cascade |
+| `candidate_cv_versions` | `candidate_id` | `candidates` | cascade |
+| `candidate_cv_versions` | `org_id` | `organizations` | cascade |
+| `candidate_cv_versions` | `requisition_id` | `requisitions` | no action |
 | `candidate_identity_keys` | `candidate_id` | `candidates` | cascade |
 | `candidate_identity_keys` | `org_id` | `organizations` | cascade |
+| `candidate_identity_keys` | `source_version_id` | `candidate_cv_versions` | no action |
 | `candidate_identity_settings` | `org_id` | `organizations` | cascade |
 | `candidate_merge_suggestions` | `candidate_a_id` | `candidates` | cascade |
 | `candidate_merge_suggestions` | `candidate_b_id` | `candidates` | cascade |
@@ -1536,6 +1543,8 @@ erDiagram
 | `board_webhook_events` | — | 15 | (dedupe_key) |
 | `call_reviews` | — | 22 | (call_id) |
 | `candidate_assessments` | Candidates & pipeline | 23 | (token) |
+| `candidate_claims` | — | 13 | — |
+| `candidate_cv_versions` | — | 15 | — |
 | `candidate_identity_keys` | — | 7 | — |
 | `candidate_identity_settings` | — | 8 | — |
 | `candidate_merge_suggestions` | — | 12 | — |
