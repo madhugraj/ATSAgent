@@ -1,0 +1,21 @@
+{{- if .Values.certificate.enabled }}
+# Per-host cert for the gateway listener. Issued BEFORE the listener certRef
+# patch is applied (see values.yaml gateway comment — a certRef to a missing
+# secret takes down every route on platform-gateway).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .Values.certificate.secretName }}
+  namespace: {{ .Values.certificate.namespace }}
+  labels:
+    {{- include "atsagent.labels" . | nindent 4 }}
+spec:
+  secretName: {{ .Values.certificate.secretName }}
+  duration: {{ .Values.certificate.duration }}
+  renewBefore: {{ .Values.certificate.renewBefore }}
+  dnsNames:
+    {{- toYaml .Values.certificate.dnsNames | nindent 4 }}
+  issuerRef:
+    kind: {{ .Values.certificate.issuer.kind }}
+    name: {{ .Values.certificate.issuer.name }}
+{{- end }}

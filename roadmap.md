@@ -485,7 +485,7 @@ Plan: `docs/agentic-plan.md`.
 ATSAgent builds, runs and deploys with no Lovable packages, routes, env vars or hosted services.
 
 - [x] Build — `@lovable.dev/vite-tanstack-config` replaced by an explicit `vite.config.ts` (TanStack Start, Tailwind, tsconfig paths, React, Nitro `node-server` on build); `bun.lock` resolves from the public npm registry
-- [x] Email — SMTP (`SMTP_URL`) is the only transport; `@lovable.dev/email-js`, `@lovable.dev/webhooks-js`, the `/lovable/email/*` routes and the four auth templates only they rendered are gone
+- [x] Email — first-party transports only: SMTP (`SMTP_URL`), else Microsoft Graph client-credentials `sendMail` as the `EMAIL_FROM` mailbox (`MICROSOFT_OAUTH_*` keys) when the tenant blocks SMTP basic auth; `@lovable.dev/email-js`, `@lovable.dev/webhooks-js`, the `/lovable/email/*` routes and the four auth templates only they rendered are gone
 - [x] Careers inbox — the Gmail reader behind Lovable's connector gateway is retired; mail arrives only through each organisation's careers address (signed inbound webhook), and `/api/public/inbox-sync` now scores what arrived
 - [x] Leftovers — `@supabase/supabase-js`, the unused Supabase clients, editor-preview auth/error hooks, `.lovable/`, `supabase/` and `drizzle/migrations/` removed; DB types live in `src/lib/database.types.ts`, cron auth in `src/server/cron-auth.ts`
 - [x] Config — `LOVABLE_CRON_SECRET(_PREVIOUS)` renamed to `CRON_SECRET(_PREVIOUS)`; migration `0023` moves `ai_settings` off the `'lovable'` provider default to `openai` / `gpt-5.5`
