@@ -54,9 +54,11 @@ function JdImportPage() {
 
   async function upload(files: FileList | null) {
     if (!files?.length) return;
+    // Copy before any await: the input is cleared right after this call, and
+    // a first upload awaits navigation — the live FileList was empty by then.
+    const all = Array.from(files);
     const importId = session ?? crypto.randomUUID();
     if (!session) await navigate({ to: "/jd-import", search: { session: importId } });
-    const all = Array.from(files);
     setBusy({ done: 0, total: all.length });
     let done = 0;
     await mapWithLimit(all, 3, async (file) => {
