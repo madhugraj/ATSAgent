@@ -43,6 +43,9 @@ export default defineConfig(({ command }) => ({
     // playwright runs from node_modules at runtime (dynamic import in
     // src/lib/org-context.server.ts); bundling it breaks on chromium-bidi.
     external: ["playwright", "playwright-core", "chromium-bidi"],
+    // safe-fetch imports undici directly; left external, nitro does not copy
+    // it into .output and the image's bundle check fails. Bundled instead.
+    noExternal: ["undici"],
   },
   build: {
     rolldownOptions: {
@@ -85,7 +88,16 @@ export default defineConfig(({ command }) => ({
     }),
     // Self-hosted deploys (Docker/GKE/Cloud Run) run a Node server:
     // `vite build` produces .output/server/index.mjs.
-    ...(command === "build" ? [nitro({ preset: "node-server" })] : []),
+    ...(command === "build"
+      ? [
+          nitro({
+            preset: "node-server",
+            // safe-fetch imports undici directly; nitro's trace leaves it out of
+            // .output (the image's bundle check fails), so it is bundled in.
+            noExternals: ["undici"],
+          }),
+        ]
+      : []),
     viteReact(),
   ],
 }));
