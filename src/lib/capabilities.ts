@@ -88,7 +88,7 @@ export const AGENT_CAPABILITIES: Record<string, Capability[]> = {
   jd: ["pipeline.requisitions"],
   publishing: ["sourcing.distribution"],
   distribution: ["sourcing.distribution"],
-  intake: ["matching.pool", "recruiting.screening"],
+  intake: ["matching.pool", "recruiting.screening", "matching.shortlist"],
   screening: ["recruiting.screening"],
   screening_call: ["recruiting.voice"],
   interview: ["recruiting.interviews"],
@@ -103,7 +103,7 @@ export const AGENT_CAPABILITIES: Record<string, Capability[]> = {
   offer: ["recruiting.offers"],
   evaluation: ["recruiting.interviews"],
   onboarding: ["recruiting.offers"],
-  sourcing: ["matching.pool"],
+  sourcing: ["matching.pool", "matching.shortlist"],
   voice_guard: ["recruiting.voice"],
   // Shared or cross-cutting agents: not capability-restricted as a whole;
   // the tools they call carry their own capability and are gated per call.
@@ -128,6 +128,7 @@ export type RouteCapabilityRule = {
 export const ROUTE_CAPABILITIES: RouteCapabilityRule[] = [
   { prefix: "/requisitions", capability: "pipeline.requisitions" },
   { prefix: "/jd-import", capability: "pipeline.requisitions" },
+  { prefix: "/shortlists", capability: "matching.shortlist" },
   { prefix: "/matching", capability: "matching.pool" },
   { prefix: "/screening", capability: "recruiting.screening" },
   { prefix: "/interviews", capability: "recruiting.interviews" },
@@ -325,6 +326,7 @@ export const SERVER_FN_MODULE_CAPABILITY: Record<string, Capability | null> = {
   "candidates.identity.functions.ts": "matching.pool",
   "candidates.profile.functions.ts": "matching.pool",
   "candidates.archive.functions.ts": "matching.pool",
+  "shortlist.functions.ts": "matching.shortlist",
   "resume.functions.ts": "matching.pool",
   "intake.functions.ts": "matching.pool",
   "dedupe.functions.ts": "matching.pool",

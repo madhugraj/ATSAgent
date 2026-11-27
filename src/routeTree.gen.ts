@@ -67,6 +67,8 @@ import { Route as RequisitionsIndexRouteImport } from './routes/requisitions.ind
 import { Route as RequisitionsIdRouteImport } from './routes/requisitions.$id'
 import { Route as ScheduleTokenRouteImport } from './routes/schedule.$token'
 import { Route as ScorecardTokenRouteImport } from './routes/scorecard.$token'
+import { Route as ShortlistsIndexRouteImport } from './routes/shortlists.index'
+import { Route as ShortlistsRequisitionIdRouteImport } from './routes/shortlists.$requisitionId'
 import { Route as WWorkflowIdRouteImport } from './routes/w.$workflowId'
 import { Route as ApiAuthChangePasswordRouteImport } from './routes/api/auth/change-password'
 import { Route as ApiAuthConfirmRouteImport } from './routes/api/auth/confirm'
@@ -384,6 +386,16 @@ const ScorecardTokenRoute = ScorecardTokenRouteImport.update({
   path: '/scorecard/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ShortlistsIndexRoute = ShortlistsIndexRouteImport.update({
+  id: '/shortlists/',
+  path: '/shortlists/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ShortlistsRequisitionIdRoute = ShortlistsRequisitionIdRouteImport.update({
+  id: '/shortlists/$requisitionId',
+  path: '/shortlists/$requisitionId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const WWorkflowIdRoute = WWorkflowIdRouteImport.update({
   id: '/w/$workflowId',
   path: '/w/$workflowId',
@@ -577,11 +589,13 @@ export interface FileRoutesByFullPath {
   '/requisitions/$id': typeof RequisitionsIdRoute
   '/schedule/$token': typeof ScheduleTokenRoute
   '/scorecard/$token': typeof ScorecardTokenRoute
+  '/shortlists/$requisitionId': typeof ShortlistsRequisitionIdRoute
   '/w/$workflowId': typeof WWorkflowIdRoute
   '/agents/': typeof AgentsIndexRoute
   '/candidates/': typeof CandidatesIndexRoute
   '/interviews/': typeof InterviewsIndexRoute
   '/requisitions/': typeof RequisitionsIndexRoute
+  '/shortlists/': typeof ShortlistsIndexRoute
   '/api/auth/change-password': typeof ApiAuthChangePasswordRoute
   '/api/auth/confirm': typeof ApiAuthConfirmRoute
   '/api/auth/login': typeof ApiAuthLoginRoute
@@ -663,11 +677,13 @@ export interface FileRoutesByTo {
   '/requisitions/$id': typeof RequisitionsIdRoute
   '/schedule/$token': typeof ScheduleTokenRoute
   '/scorecard/$token': typeof ScorecardTokenRoute
+  '/shortlists/$requisitionId': typeof ShortlistsRequisitionIdRoute
   '/w/$workflowId': typeof WWorkflowIdRoute
   '/agents': typeof AgentsIndexRoute
   '/candidates': typeof CandidatesIndexRoute
   '/interviews': typeof InterviewsIndexRoute
   '/requisitions': typeof RequisitionsIndexRoute
+  '/shortlists': typeof ShortlistsIndexRoute
   '/api/auth/change-password': typeof ApiAuthChangePasswordRoute
   '/api/auth/confirm': typeof ApiAuthConfirmRoute
   '/api/auth/login': typeof ApiAuthLoginRoute
@@ -750,11 +766,13 @@ export interface FileRoutesById {
   '/requisitions/$id': typeof RequisitionsIdRoute
   '/schedule/$token': typeof ScheduleTokenRoute
   '/scorecard/$token': typeof ScorecardTokenRoute
+  '/shortlists/$requisitionId': typeof ShortlistsRequisitionIdRoute
   '/w/$workflowId': typeof WWorkflowIdRoute
   '/agents/': typeof AgentsIndexRoute
   '/candidates/': typeof CandidatesIndexRoute
   '/interviews/': typeof InterviewsIndexRoute
   '/requisitions/': typeof RequisitionsIndexRoute
+  '/shortlists/': typeof ShortlistsIndexRoute
   '/api/auth/change-password': typeof ApiAuthChangePasswordRoute
   '/api/auth/confirm': typeof ApiAuthConfirmRoute
   '/api/auth/login': typeof ApiAuthLoginRoute
@@ -838,11 +856,13 @@ export interface FileRouteTypes {
     | '/requisitions/$id'
     | '/schedule/$token'
     | '/scorecard/$token'
+    | '/shortlists/$requisitionId'
     | '/w/$workflowId'
     | '/agents/'
     | '/candidates/'
     | '/interviews/'
     | '/requisitions/'
+    | '/shortlists/'
     | '/api/auth/change-password'
     | '/api/auth/confirm'
     | '/api/auth/login'
@@ -924,11 +944,13 @@ export interface FileRouteTypes {
     | '/requisitions/$id'
     | '/schedule/$token'
     | '/scorecard/$token'
+    | '/shortlists/$requisitionId'
     | '/w/$workflowId'
     | '/agents'
     | '/candidates'
     | '/interviews'
     | '/requisitions'
+    | '/shortlists'
     | '/api/auth/change-password'
     | '/api/auth/confirm'
     | '/api/auth/login'
@@ -1010,11 +1032,13 @@ export interface FileRouteTypes {
     | '/requisitions/$id'
     | '/schedule/$token'
     | '/scorecard/$token'
+    | '/shortlists/$requisitionId'
     | '/w/$workflowId'
     | '/agents/'
     | '/candidates/'
     | '/interviews/'
     | '/requisitions/'
+    | '/shortlists/'
     | '/api/auth/change-password'
     | '/api/auth/confirm'
     | '/api/auth/login'
@@ -1097,11 +1121,13 @@ export interface RootRouteChildren {
   RequisitionsIdRoute: typeof RequisitionsIdRoute
   ScheduleTokenRoute: typeof ScheduleTokenRoute
   ScorecardTokenRoute: typeof ScorecardTokenRoute
+  ShortlistsRequisitionIdRoute: typeof ShortlistsRequisitionIdRoute
   WWorkflowIdRoute: typeof WWorkflowIdRoute
   AgentsIndexRoute: typeof AgentsIndexRoute
   CandidatesIndexRoute: typeof CandidatesIndexRoute
   InterviewsIndexRoute: typeof InterviewsIndexRoute
   RequisitionsIndexRoute: typeof RequisitionsIndexRoute
+  ShortlistsIndexRoute: typeof ShortlistsIndexRoute
   ApiAuthChangePasswordRoute: typeof ApiAuthChangePasswordRoute
   ApiAuthConfirmRoute: typeof ApiAuthConfirmRoute
   ApiAuthLoginRoute: typeof ApiAuthLoginRoute
@@ -1537,6 +1563,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ScorecardTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/shortlists/': {
+      id: '/shortlists/'
+      path: '/shortlists'
+      fullPath: '/shortlists/'
+      preLoaderRoute: typeof ShortlistsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/shortlists/$requisitionId': {
+      id: '/shortlists/$requisitionId'
+      path: '/shortlists/$requisitionId'
+      fullPath: '/shortlists/$requisitionId'
+      preLoaderRoute: typeof ShortlistsRequisitionIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/w/$workflowId': {
       id: '/w/$workflowId'
       path: '/w/$workflowId'
@@ -1777,11 +1817,13 @@ const rootRouteChildren: RootRouteChildren = {
   RequisitionsIdRoute: RequisitionsIdRoute,
   ScheduleTokenRoute: ScheduleTokenRoute,
   ScorecardTokenRoute: ScorecardTokenRoute,
+  ShortlistsRequisitionIdRoute: ShortlistsRequisitionIdRoute,
   WWorkflowIdRoute: WWorkflowIdRoute,
   AgentsIndexRoute: AgentsIndexRoute,
   CandidatesIndexRoute: CandidatesIndexRoute,
   InterviewsIndexRoute: InterviewsIndexRoute,
   RequisitionsIndexRoute: RequisitionsIndexRoute,
+  ShortlistsIndexRoute: ShortlistsIndexRoute,
   ApiAuthChangePasswordRoute: ApiAuthChangePasswordRoute,
   ApiAuthConfirmRoute: ApiAuthConfirmRoute,
   ApiAuthLoginRoute: ApiAuthLoginRoute,
