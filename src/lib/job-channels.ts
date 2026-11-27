@@ -322,6 +322,7 @@ const OWN_SOURCES: Record<string, string> = {
   bulk_upload: "Manual upload",
   hiring_desk: "Hiring desk upload",
   browser_capture: "LinkedIn companion",
+  linkedin_sourced: "Sourced on LinkedIn (has not applied)",
   referral: "Referral",
   consultant: "Consultant",
   campus: "Campus",

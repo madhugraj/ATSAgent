@@ -197,6 +197,7 @@ const INTERNAL_SOURCES = new Set([
   "talent_pool",
   "agent_talent_pool",
   "browser_capture",
+  "linkedin_sourced",
   "capture",
   "manual",
   "upload",

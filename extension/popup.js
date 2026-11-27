@@ -8,11 +8,13 @@ const status = (msg, cls = "") => {
   el.className = cls;
 };
 
-chrome.storage.local.get(["site", "token", "kind", "pace"], (saved) => {
+chrome.storage.local.get(["site", "token", "kind", "pace", "source", "limit"], (saved) => {
   $("site").value = saved.site || "https://atsiq.yavar.ai";
   $("token").value = saved.token || "";
   $("kind").value = saved.kind || "cv";
   $("pace").value = saved.pace || "safe";
+  $("source").value = saved.source || "applicants";
+  $("limit").value = saved.limit || "40";
 });
 
 $("save").addEventListener("click", () => {
@@ -166,14 +168,16 @@ $("start").addEventListener("click", async () => {
   const { site, token } = settings();
   const pace = $("pace").value;
   if (!site || !token) return status("Add your ATSIQ address and capture key first.", "err");
-  chrome.storage.local.set({ site, token, pace });
+  const source = $("source").value;
+  const limit = Number($("limit").value);
+  chrome.storage.local.set({ site, token, pace, source, limit: String(limit) });
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) return status("Open your applicant list first.", "err");
 
   const res = await chrome.runtime.sendMessage({
     type: "start",
-    payload: { site, token, pace, tabId: tab.id, captureJd: $("jd").checked },
+    payload: { site, token, pace, tabId: tab.id, captureJd: $("jd").checked, source, limit },
   });
   if (!res?.ok) return status(res?.error || "The sweep could not start.", "err");
   status("Sweep running — you can close this window.", "ok");
