@@ -21,6 +21,8 @@ interface Props {
   withText?: string;
   /** Panel only: the interviewer's interviews page. */
   actionUrl?: string;
+  /** Panel only: their confirmation link, opened on changing the time or length. */
+  changeUrl?: string;
 }
 
 const { text, link } = layoutStyles;
@@ -68,6 +70,7 @@ const Email = ({
   whereText,
   withText,
   actionUrl,
+  changeUrl,
 }: Props) => {
   const panel = audience === "panel";
   return (
@@ -131,13 +134,22 @@ const Email = ({
         </tbody>
       </table>
       {panel ? (
-        actionUrl ? (
-          <p style={text}>
-            <a href={actionUrl} style={button}>
-              Open the interview brief
-            </a>
-          </p>
-        ) : null
+        <>
+          {actionUrl ? (
+            <p style={text}>
+              <a href={actionUrl} style={button}>
+                Open the interview brief
+              </a>
+            </p>
+          ) : null}
+          {changeUrl ? (
+            <p style={text}>
+              <a href={changeUrl} style={link}>
+                Change the time or length
+              </a>
+            </p>
+          ) : null}
+        </>
       ) : (
         <p style={text}>
           If something has come up and this time no longer works, reply to this email and the team
