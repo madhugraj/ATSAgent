@@ -191,6 +191,15 @@ export const EVAL_CATALOG: Record<string, EvalExplainer> = {
       "It does not reject Ben itself — it asks a person to approve the rejection, with the reason.",
     ],
   },
+  "intake: summarises a ranked shortlist as a requirement checklist": {
+    title: "Summarises a ranked role as a requirement checklist",
+    situation:
+      "A role already ranked against the talent pool: Asha scored 82 with Kubernetes shown in her CV.",
+    checks: [
+      "It reads the ranking and replies with a table of candidates and which requirements each meets.",
+      "It adds, moves, rejects and contacts nobody — the recruiter decides on the shortlist page.",
+    ],
+  },
   "screening: prepares the kit and proposes the assessment": {
     title: "Sets up screening for a shortlisted candidate",
     situation: "Meera has just been shortlisted.",
