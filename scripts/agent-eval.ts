@@ -43,6 +43,7 @@ const tools = [
   await import("../src/server/agents/tools-org").then((m) => m.registerOrgTools),
   await import("../src/server/agents/tools-expert").then((m) => m.registerExpertTools),
   await import("../src/server/agents/tools-panel").then((m) => m.registerPanelTools),
+  await import("../src/server/agents/round-gate.server").then((m) => m.registerRoundTools),
 ];
 const defs = await import("../src/server/agents/definitions");
 /** Every real agent and tool, as production registers them (scenarios that
