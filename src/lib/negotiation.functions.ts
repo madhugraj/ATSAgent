@@ -6,6 +6,7 @@ import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { assertRole, requireOrg } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 
 /** What an AI pay call may explain (validated again in the request core). */
 const CallBriefInput = z.object({
@@ -42,7 +43,7 @@ export const answerNegotiationPage = createServerFn({ method: "POST" })
 
 /** One discussion with its brief, for TA / HR / CBO / owners only. */
 export const getNegotiation = createServerFn({ method: "GET" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.offers")])
   .validator((d: unknown) => z.object({ applicationId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const { PAY_ROLES } = await import("./compensation.server");
@@ -113,7 +114,7 @@ const aiCallState = createServerOnlyFn(async function aiCallState(
 
 /** TA / HR arrange an AI pay call, with at most one improved figure (≤ the ceiling). */
 export const arrangeNegotiationCall = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.offers")])
   .validator((d: unknown) =>
     z
       .object({
@@ -146,7 +147,7 @@ export const arrangeNegotiationCall = createServerFn({ method: "POST" })
   });
 
 export const recordNegotiationCall = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.offers")])
   .validator((d: unknown) =>
     z.object({ negotiationId: z.string().uuid(), outcome: z.unknown() }).parse(d),
   )
