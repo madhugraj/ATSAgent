@@ -25,6 +25,9 @@ ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3000
 COPY --from=build /app/.output ./.output
+# safe-fetch imports undici at runtime and nitro does not copy it into
+# .output; it has no dependencies of its own.
+COPY --from=build /app/node_modules/undici ./node_modules/undici
 # Fail the build if the bundle imports a package that is not in the image
 # (only .output is copied here), instead of a 500 on the first request.
 COPY --from=build /app/scripts/check-bundle-imports.mjs /tmp/check-bundle-imports.mjs
