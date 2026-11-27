@@ -1,5 +1,27 @@
 # Roadmap
 
+## Candidate identification — row 1, candidate identity (2026-11-27)
+
+- Plan: `docs/candidate-identification-plan.md` (row 1 of the execution table);
+  design: `docs/candidate-identification/track-a-design.md`
+- [x] Normalised strong identity keys per organisation (email, E.164 phone, LinkedIn/GitHub,
+      CV file hash, external id) in `candidate_identity_keys`, unique per organisation per key;
+      placeholder addresses key separately so email-less captures dedupe as before
+- [x] One identity module (`src/server/candidates/identity.server.ts`): strong-key auto-merge
+      (per-organisation switch), shared contact details and fuzzy name + career-timeline evidence
+      → merge review queue; nothing fuzzy merges automatically
+- [x] Reversible merges: the absorbed row becomes a tombstone (`candidates.merged_into_id`),
+      `candidate_merges.undo_snapshot` holds every re-pointed and deleted child row; undo restores
+      original ids and dates and refuses when a moved record changed after the merge; every merge,
+      undo, decision and threshold change is audited
+- [x] Merge review screen at `/candidates/merge-review`: side-by-side pair with the signals
+      that fired, survivor swap, Merge (step-up) / Keep separate (demotes the collision to a
+      `shared_*` key so the detail never auto-merges anyone again)
+- [x] Per-organisation thresholds (`candidate_identity_settings`): auto-merge switch, fuzzy
+      high/low thresholds, default phone region — DB defaults, no backfill
+- [ ] A1b: route all nine candidate-creating intake paths through the module (the scattered
+      exact-email checks go away then)
+
 ## Pay terms — Phase 1 foundation (2026-11-11)
 
 - Plan: `docs/pay-terms-plan.md` (currency, pay basis, kinds of work, pay zones,
