@@ -36,6 +36,16 @@ export const WorkflowProfileSettingsInput = z
     jdRequisitionMode: z.enum(["approval_gate", "auto_approved"]),
     jdDuplicateLookbackDays: z.number().int().min(1).max(365),
     payVarianceTolerance: z.number().min(0).max(1),
+    profileMatchTopK: z.number().int().min(5).max(200),
+    profileMatchWeights: z
+      .object({
+        must: z.number().min(0).max(1),
+        nice: z.number().min(0).max(1),
+        experience: z.number().min(0).max(1),
+        sector: z.number().min(0).max(1),
+        location: z.number().min(0).max(1),
+      })
+      .partial(),
   })
   .partial();
 
