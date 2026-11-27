@@ -85,7 +85,16 @@ export default defineConfig(({ command }) => ({
     }),
     // Self-hosted deploys (Docker/GKE/Cloud Run) run a Node server:
     // `vite build` produces .output/server/index.mjs.
-    ...(command === "build" ? [nitro({ preset: "node-server" })] : []),
+    ...(command === "build"
+      ? [
+          nitro({
+            preset: "node-server",
+            // safe-fetch imports undici directly; nitro's trace leaves it out of
+            // .output (the image's bundle check fails), so it is bundled in.
+            noExternals: ["undici"],
+          }),
+        ]
+      : []),
     viteReact(),
   ],
 }));
