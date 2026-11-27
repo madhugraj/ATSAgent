@@ -43,6 +43,9 @@ export default defineConfig(({ command }) => ({
     // playwright runs from node_modules at runtime (dynamic import in
     // src/lib/org-context.server.ts); bundling it breaks on chromium-bidi.
     external: ["playwright", "playwright-core", "chromium-bidi"],
+    // safe-fetch imports undici directly; left external, nitro does not copy
+    // it into .output and the image's bundle check fails. Bundled instead.
+    noExternal: ["undici"],
   },
   build: {
     rolldownOptions: {
