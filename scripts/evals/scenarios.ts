@@ -754,6 +754,65 @@ export function scenarios(): ScriptedScenario[] {
       ],
     },
     {
+      name: "intake: summarises a ranked shortlist as a requirement checklist",
+      agentType: "intake",
+      autonomy: "act_and_notify",
+      setup: async ({ orgId, userId }) => {
+        const { db } = await import("../../src/server/db");
+        const { candidates, profileMatchRuns, profileMatchScores } =
+          await import("../../drizzle/schema");
+        const requisitionId = await seedRequisition(orgId, userId, "approved");
+        await db
+          .insert(profileMatchRuns)
+          .values({ orgId, requisitionId, status: "done", poolSize: 2, judged: 1 } as never);
+        const [c] = await db
+          .insert(candidates)
+          .values({ orgId, fullName: "Asha Rao", email: `asha-${Date.now()}@eval.local` })
+          .returning({ id: candidates.id });
+        await db.insert(profileMatchScores).values({
+          orgId,
+          requisitionId,
+          candidateId: c!.id,
+          coarseScore: "0.8",
+          coarseRank: 1,
+          overallScore: 82,
+          reviewStage: "judged",
+          factors: [],
+          requirements: [
+            {
+              requirement: "Kubernetes",
+              kind: "must",
+              verdict: "met",
+              strength: "demonstrated",
+              evidence: [],
+              note: null,
+            },
+          ],
+          knockouts: [],
+          rationale: "Ran Kubernetes clusters in production.",
+        } as never);
+        return { requisitionId };
+      },
+      goal: (d) =>
+        `Requisition ${d["requisitionId"]} has been ranked against the talent pool. Summarise the strongest candidates.\n\nRequisition id: ${d["requisitionId"]}`,
+      expect: {
+        status: "done",
+        calls: ["get_ranked_shortlist"],
+        neverCalls: [
+          "add_to_pipeline",
+          "move_candidate",
+          "request_approval",
+          "score_new_applications",
+        ],
+      },
+      script: [
+        (m) => call("g", "get_ranked_shortlist", { requisitionId: idFromGoal(m), limit: 10 }),
+        say(
+          "| Rank | Candidate | Score | Kubernetes |\n|---|---|---|---|\n| 1 | Asha Rao | 82 | ✓ |",
+        ),
+      ],
+    },
+    {
       name: "screening: prepares the kit and proposes the assessment",
       agentType: "screening",
       setup: async ({ orgId, userId }) => {

@@ -110,6 +110,94 @@ export type ShortlistRow = {
   decisionNote: string | null;
 };
 
+/**
+ * One requisition's ranked shortlist, org-scoped. Shared by the shortlist page
+ * and the intake agent's read-only get_ranked_shortlist tool. The caller has
+ * already checked the requisition belongs to the organisation.
+ */
+export async function loadShortlist(
+  orgId: string,
+  requisitionId: string,
+  filter: "all" | "shortlisted" | "rejected" | "open" = "all",
+  limit = 100,
+) {
+  const [req] = await db
+    .select({ id: requisitions.id, title: requisitions.title, code: requisitions.code })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, requisitionId), eq(requisitions.orgId, orgId)));
+  const [run] = await db
+    .select()
+    .from(profileMatchRuns)
+    .where(
+      and(eq(profileMatchRuns.requisitionId, requisitionId), eq(profileMatchRuns.orgId, orgId)),
+    );
+  const where = [
+    eq(profileMatchScores.orgId, orgId),
+    eq(profileMatchScores.requisitionId, requisitionId),
+  ];
+  if (filter === "shortlisted") where.push(eq(profileMatchScores.decision, "shortlisted"));
+  if (filter === "rejected") where.push(eq(profileMatchScores.decision, "rejected"));
+  if (filter === "open") where.push(sql`${profileMatchScores.decision} is null`);
+  const rows = await db
+    .select({
+      s: profileMatchScores,
+      name: candidates.fullName,
+      location: candidates.location,
+      experienceYears: candidates.experienceYears,
+      currentEmployer: candidates.currentEmployer,
+    })
+    .from(profileMatchScores)
+    .innerJoin(candidates, eq(candidates.id, profileMatchScores.candidateId))
+    .where(and(...where, eq(candidates.orgId, orgId)))
+    .orderBy(
+      sql`${profileMatchScores.overallScore} desc nulls last`,
+      asc(profileMatchScores.coarseRank),
+    )
+    .limit(limit);
+  const out: ShortlistRow[] = rows.map((r, i) => ({
+    candidateId: r.s.candidateId,
+    name: r.name,
+    location: r.location,
+    experienceYears: Number(r.experienceYears) || 0,
+    currentRole: r.currentEmployer,
+    rank: i + 1,
+    score: r.s.overallScore ?? Math.round(Number(r.s.coarseScore) * 100),
+    reviewed: r.s.reviewStage === "judged",
+    factors: r.s.factors,
+    requirements: r.s.requirements,
+    knockouts: r.s.knockouts,
+    rationale: r.s.rationale,
+    decision: r.s.decision,
+    decisionNote: r.s.decisionNote,
+  }));
+  // Version file names for the cited passages.
+  const versionIds = [
+    ...new Set(
+      out.flatMap((r) => r.requirements.flatMap((q) => q.evidence.map((e) => e.versionId))),
+    ),
+  ];
+  const versions = versionIds.length
+    ? await db
+        .select({ id: candidateCvVersions.id, fileName: candidateCvVersions.fileName })
+        .from(candidateCvVersions)
+        .where(
+          and(eq(candidateCvVersions.orgId, orgId), inArray(candidateCvVersions.id, versionIds)),
+        )
+    : [];
+  return {
+    requisition: req!,
+    run: run
+      ? {
+          status: run.status,
+          pool: run.poolSize,
+          lastRunAt: run.lastRunAt?.toISOString() ?? null,
+        }
+      : null,
+    versionNames: Object.fromEntries(versions.map((v) => [v.id, v.fileName ?? "CV"])),
+    rows: out,
+  };
+}
+
 export const getShortlistFn = createServerFn({ method: "POST" })
   .middleware([requireOrg, requireCapability("matching.shortlist")])
   .validator((d: unknown) =>
@@ -124,87 +212,7 @@ export const getShortlistFn = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { assertRequisitionInOrg } = await import("../server/guards");
     await assertRequisitionInOrg(data.requisitionId, context.orgId);
-    const [req] = await db
-      .select({ id: requisitions.id, title: requisitions.title, code: requisitions.code })
-      .from(requisitions)
-      .where(and(eq(requisitions.id, data.requisitionId), eq(requisitions.orgId, context.orgId)));
-    const [run] = await db
-      .select()
-      .from(profileMatchRuns)
-      .where(
-        and(
-          eq(profileMatchRuns.requisitionId, data.requisitionId),
-          eq(profileMatchRuns.orgId, context.orgId),
-        ),
-      );
-    const where = [
-      eq(profileMatchScores.orgId, context.orgId),
-      eq(profileMatchScores.requisitionId, data.requisitionId),
-    ];
-    if (data.filter === "shortlisted") where.push(eq(profileMatchScores.decision, "shortlisted"));
-    if (data.filter === "rejected") where.push(eq(profileMatchScores.decision, "rejected"));
-    if (data.filter === "open") where.push(sql`${profileMatchScores.decision} is null`);
-    const rows = await db
-      .select({
-        s: profileMatchScores,
-        name: candidates.fullName,
-        location: candidates.location,
-        experienceYears: candidates.experienceYears,
-        currentEmployer: candidates.currentEmployer,
-      })
-      .from(profileMatchScores)
-      .innerJoin(candidates, eq(candidates.id, profileMatchScores.candidateId))
-      .where(and(...where, eq(candidates.orgId, context.orgId)))
-      .orderBy(
-        sql`${profileMatchScores.overallScore} desc nulls last`,
-        asc(profileMatchScores.coarseRank),
-      )
-      .limit(data.limit);
-    const out: ShortlistRow[] = rows.map((r, i) => ({
-      candidateId: r.s.candidateId,
-      name: r.name,
-      location: r.location,
-      experienceYears: Number(r.experienceYears) || 0,
-      currentRole: r.currentEmployer,
-      rank: i + 1,
-      score: r.s.overallScore ?? Math.round(Number(r.s.coarseScore) * 100),
-      reviewed: r.s.reviewStage === "judged",
-      factors: r.s.factors,
-      requirements: r.s.requirements,
-      knockouts: r.s.knockouts,
-      rationale: r.s.rationale,
-      decision: r.s.decision,
-      decisionNote: r.s.decisionNote,
-    }));
-    // Version file names for the cited passages.
-    const versionIds = [
-      ...new Set(
-        out.flatMap((r) => r.requirements.flatMap((q) => q.evidence.map((e) => e.versionId))),
-      ),
-    ];
-    const versions = versionIds.length
-      ? await db
-          .select({ id: candidateCvVersions.id, fileName: candidateCvVersions.fileName })
-          .from(candidateCvVersions)
-          .where(
-            and(
-              eq(candidateCvVersions.orgId, context.orgId),
-              inArray(candidateCvVersions.id, versionIds),
-            ),
-          )
-      : [];
-    return {
-      requisition: req!,
-      run: run
-        ? {
-            status: run.status,
-            pool: run.poolSize,
-            lastRunAt: run.lastRunAt?.toISOString() ?? null,
-          }
-        : null,
-      versionNames: Object.fromEntries(versions.map((v) => [v.id, v.fileName ?? "CV"])),
-      rows: out,
-    };
+    return loadShortlist(context.orgId, data.requisitionId, data.filter, data.limit);
   });
 
 export const decideShortlistFn = createServerFn({ method: "POST" })

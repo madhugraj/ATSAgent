@@ -65,6 +65,8 @@ Candidate Identification platform work, rows 0 and 5 (`docs/candidate-identifica
       weights; reruns re-review only candidates whose profile changed; new evidence
       re-queues the organisation's requisitions. Merged, non-consented and portal-terms
       people stay out of the pool. The pool-match agent's own limits are unchanged
+- [x] Intake agent 1.6.0: read-only `get_ranked_shortlist`; on a role ranked against the
+      talent pool it replies with a requirement checklist table and changes nothing.
 - [x] C2: Shortlists (`/shortlists`): every ranked role with pool / reviewed / shortlisted
       counts; per role, candidates in score order with factor breakdown, per-requirement
       verdicts and the CV passages behind them, knock-outs and the rationale; Shortlist /

@@ -227,6 +227,46 @@ export function registerPhase2Tools(): void {
   });
 
   registerTool({
+    name: "get_ranked_shortlist",
+    description:
+      "Read a requisition's ranking against the whole talent pool (profile matching): candidates in score order with each requirement's verdict (met / partial / missing), the CV passage behind it, knock-outs, the rationale and any decision a recruiter already recorded. Read-only — it changes nothing and contacts nobody. ranked=false means the role has not been ranked yet.",
+    input: ReqId.extend({ limit: z.number().int().min(1).max(25).default(10) }),
+    risk: "read",
+    untrustedOutput: true,
+    capability: "matching.shortlist",
+    run: async (ctx, i) => {
+      const { assertRequisitionInOrg } = await import("../guards");
+      await assertRequisitionInOrg(i.requisitionId, ctx.orgId);
+      const { loadShortlist } = await import("@/lib/shortlist.functions");
+      const r = await loadShortlist(ctx.orgId, i.requisitionId, "all", i.limit);
+      return {
+        ranked: Boolean(r.run && r.rows.length),
+        status: r.run?.status ?? "not_ranked",
+        poolSize: r.run?.pool ?? 0,
+        candidates: r.rows.map((c) => ({
+          rank: c.rank,
+          candidateId: c.candidateId,
+          name: c.name,
+          score: c.score,
+          reviewed: c.reviewed,
+          currentRole: c.currentRole,
+          location: c.location,
+          experienceYears: c.experienceYears,
+          requirements: c.requirements.map((q) => ({
+            requirement: q.requirement,
+            kind: q.kind,
+            verdict: q.verdict,
+            evidence: q.evidence.slice(0, 1).map((e) => e.passage.slice(0, 200)),
+          })),
+          knockouts: c.knockouts.map((k) => k.detail),
+          rationale: c.rationale,
+          decision: c.decision,
+        })),
+      };
+    },
+  });
+
+  registerTool({
     name: "add_to_pipeline",
     description: "Add talent-pool candidates to a requisition's pipeline (they are then scored).",
     input: ReqId.extend({ candidateIds: z.array(z.string().uuid()).min(1).max(20) }),
