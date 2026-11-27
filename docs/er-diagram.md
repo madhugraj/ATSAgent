@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-132 tables across 9 domains.
+134 tables across 9 domains.
 
 ## Identity & access
 
@@ -1245,6 +1245,10 @@ erDiagram
 | `call_reviews` | `agent_run_id` | `agent_runs` | no action |
 | `call_reviews` | `call_id` | `screening_calls` | cascade |
 | `call_reviews` | `org_id` | `organizations` | cascade |
+| `candidate_archive_imports` | `org_id` | `organizations` | cascade |
+| `candidate_archive_items` | `candidate_id` | `candidates` | no action |
+| `candidate_archive_items` | `import_id` | `candidate_archive_imports` | cascade |
+| `candidate_archive_items` | `org_id` | `organizations` | cascade |
 | `candidate_assessments` | `application_id` | `applications` | no action |
 | `candidate_assessments` | `candidate_id` | `candidates` | cascade |
 | `candidate_assessments` | `org_id` | `organizations` | cascade |
@@ -1541,6 +1545,8 @@ erDiagram
 | `board_sync_state` | — | 11 | (integration_id) |
 | `board_webhook_events` | — | 15 | (dedupe_key) |
 | `call_reviews` | — | 22 | (call_id) |
+| `candidate_archive_imports` | — | 11 | — |
+| `candidate_archive_items` | — | 15 | (importId+fileHash) |
 | `candidate_assessments` | Candidates & pipeline | 23 | (token) |
 | `candidate_claims` | — | 13 | — |
 | `candidate_cv_versions` | — | 15 | — |

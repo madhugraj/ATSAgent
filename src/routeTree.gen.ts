@@ -53,6 +53,7 @@ import { Route as AssessTokenRouteImport } from './routes/assess.$token'
 import { Route as AuthResetRouteImport } from './routes/auth.reset'
 import { Route as CandidatesIndexRouteImport } from './routes/candidates.index'
 import { Route as CandidatesIdRouteImport } from './routes/candidates.$id'
+import { Route as CandidatesImportRouteImport } from './routes/candidates.import'
 import { Route as CandidatesMergeReviewRouteImport } from './routes/candidates.merge-review'
 import { Route as ConfirmTokenRouteImport } from './routes/confirm.$token'
 import { Route as InterviewsIndexRouteImport } from './routes/interviews.index'
@@ -312,6 +313,11 @@ const CandidatesIdRoute = CandidatesIdRouteImport.update({
   path: '/candidates/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CandidatesImportRoute = CandidatesImportRouteImport.update({
+  id: '/candidates/import',
+  path: '/candidates/import',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CandidatesMergeReviewRoute = CandidatesMergeReviewRouteImport.update({
   id: '/candidates/merge-review',
   path: '/candidates/merge-review',
@@ -553,6 +559,7 @@ export interface FileRoutesByFullPath {
   '/assess/$token': typeof AssessTokenRoute
   '/auth/reset': typeof AuthResetRoute
   '/candidates/$id': typeof CandidatesIdRoute
+  '/candidates/import': typeof CandidatesImportRoute
   '/candidates/merge-review': typeof CandidatesMergeReviewRoute
   '/confirm/$token': typeof ConfirmTokenRoute
   '/interviews/mine': typeof InterviewsMineRoute
@@ -637,6 +644,7 @@ export interface FileRoutesByTo {
   '/assess/$token': typeof AssessTokenRoute
   '/auth/reset': typeof AuthResetRoute
   '/candidates/$id': typeof CandidatesIdRoute
+  '/candidates/import': typeof CandidatesImportRoute
   '/candidates/merge-review': typeof CandidatesMergeReviewRoute
   '/confirm/$token': typeof ConfirmTokenRoute
   '/interviews/mine': typeof InterviewsMineRoute
@@ -722,6 +730,7 @@ export interface FileRoutesById {
   '/assess/$token': typeof AssessTokenRoute
   '/auth/reset': typeof AuthResetRoute
   '/candidates/$id': typeof CandidatesIdRoute
+  '/candidates/import': typeof CandidatesImportRoute
   '/candidates/merge-review': typeof CandidatesMergeReviewRoute
   '/confirm/$token': typeof ConfirmTokenRoute
   '/interviews/mine': typeof InterviewsMineRoute
@@ -808,6 +817,7 @@ export interface FileRouteTypes {
     | '/assess/$token'
     | '/auth/reset'
     | '/candidates/$id'
+    | '/candidates/import'
     | '/candidates/merge-review'
     | '/confirm/$token'
     | '/interviews/mine'
@@ -892,6 +902,7 @@ export interface FileRouteTypes {
     | '/assess/$token'
     | '/auth/reset'
     | '/candidates/$id'
+    | '/candidates/import'
     | '/candidates/merge-review'
     | '/confirm/$token'
     | '/interviews/mine'
@@ -976,6 +987,7 @@ export interface FileRouteTypes {
     | '/assess/$token'
     | '/auth/reset'
     | '/candidates/$id'
+    | '/candidates/import'
     | '/candidates/merge-review'
     | '/confirm/$token'
     | '/interviews/mine'
@@ -1061,6 +1073,7 @@ export interface RootRouteChildren {
   AssessTokenRoute: typeof AssessTokenRoute
   AuthResetRoute: typeof AuthResetRoute
   CandidatesIdRoute: typeof CandidatesIdRoute
+  CandidatesImportRoute: typeof CandidatesImportRoute
   CandidatesMergeReviewRoute: typeof CandidatesMergeReviewRoute
   ConfirmTokenRoute: typeof ConfirmTokenRoute
   InterviewsMineRoute: typeof InterviewsMineRoute
@@ -1413,6 +1426,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CandidatesIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/candidates/import': {
+      id: '/candidates/import'
+      path: '/candidates/import'
+      fullPath: '/candidates/import'
+      preLoaderRoute: typeof CandidatesImportRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/candidates/merge-review': {
       id: '/candidates/merge-review'
       path: '/candidates/merge-review'
@@ -1725,6 +1745,7 @@ const rootRouteChildren: RootRouteChildren = {
   AssessTokenRoute: AssessTokenRoute,
   AuthResetRoute: AuthResetRoute,
   CandidatesIdRoute: CandidatesIdRoute,
+  CandidatesImportRoute: CandidatesImportRoute,
   CandidatesMergeReviewRoute: CandidatesMergeReviewRoute,
   ConfirmTokenRoute: ConfirmTokenRoute,
   InterviewsMineRoute: InterviewsMineRoute,

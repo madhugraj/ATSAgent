@@ -25,9 +25,11 @@ async function run(request: Request) {
   }
 
   try {
+    const { drainArchiveImports } = await import("@/server/candidates/archive-import.server");
     const { drainClaimsExtraction } = await import("@/server/candidates/versions.server");
+    const archive = await drainArchiveImports({ limit: Math.min(opts.max ?? 10, 25) });
     const claims = await drainClaimsExtraction({ limit: opts.max ?? 20 });
-    return Response.json({ claims });
+    return Response.json({ archive, claims });
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
   }

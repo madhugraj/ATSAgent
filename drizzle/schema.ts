@@ -988,6 +988,74 @@ export const candidateClaims = pgTable(
   ],
 );
 
+/** One bulk archive import (A3, design §3.1). */
+export const candidateArchiveImports = pgTable(
+  "candidate_archive_imports",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    createdBy: uuid("created_by"),
+    status: text("status")
+      .$type<"staging" | "running" | "paused" | "done" | "cancelled">()
+      .notNull()
+      .default("staging"),
+    trialRun: boolean("trial_run").notNull().default(false),
+    trialLimit: integer("trial_limit"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("candidate_archive_imports_org_idx").on(t.orgId, t.createdAt),
+    check(
+      "candidate_archive_imports_status_check",
+      sql`${t.status} in ('staging','running','paused','done','cancelled')`,
+    ),
+  ],
+);
+
+export type ArchiveItemStatus =
+  "pending" | "running" | "done" | "merged" | "needs_review" | "skipped" | "failed";
+
+/** One file of an archive import; its staged bytes are deleted at every terminal state. */
+export const candidateArchiveItems = pgTable(
+  "candidate_archive_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    importId: uuid("import_id")
+      .notNull()
+      .references(() => candidateArchiveImports.id, { onDelete: "cascade" }),
+    fileName: text("file_name").notNull(),
+    fileHash: text("file_hash").notNull(),
+    fileSize: integer("file_size").notNull().default(0),
+    stagedPath: text("staged_path"),
+    status: text("status").$type<ArchiveItemStatus>().notNull().default("pending"),
+    candidateId: uuid("candidate_id").references(() => candidates.id, { onDelete: "set null" }),
+    detail: text("detail"),
+    trial: jsonb("trial").$type<Record<string, unknown>>(),
+    attempts: integer("attempts").notNull().default(0),
+    leaseUntil: timestamp("lease_until", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("candidate_archive_items_import_hash_key").on(t.importId, t.fileHash),
+    index("candidate_archive_items_queue_idx").on(t.status, t.updatedAt),
+    index("candidate_archive_items_import_idx").on(t.importId, t.status),
+    check(
+      "candidate_archive_items_status_check",
+      sql`${t.status} in ('pending','running','done','merged','needs_review','skipped','failed')`,
+    ),
+  ],
+);
+
 /**
  * Per-tenant identity thresholds (docs/candidate-identification/track-a-design.md
  * §1.1). DB-level defaults mean existing tenants need no backfill.

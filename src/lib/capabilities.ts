@@ -314,6 +314,7 @@ export const SERVER_FN_MODULE_CAPABILITY: Record<string, Capability | null> = {
   "candidates.functions.ts": "matching.pool",
   "candidates.identity.functions.ts": "matching.pool",
   "candidates.profile.functions.ts": "matching.pool",
+  "candidates.archive.functions.ts": "matching.pool",
   "resume.functions.ts": "matching.pool",
   "intake.functions.ts": "matching.pool",
   "dedupe.functions.ts": "matching.pool",
