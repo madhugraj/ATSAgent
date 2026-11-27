@@ -35,7 +35,7 @@ fullnameOverride: ats-agent
 
 image:
   repository: asia-south1-docker.pkg.dev/yavar-studio/yavar-platform/ats-agent
-  tag: ""            # required: short SHA, e.g. --set image.tag=abc1234
+  tag: "" # required: short SHA, e.g. --set image.tag=abc1234
   pullPolicy: IfNotPresent
 
 # Migrations run from the same image built with `docker build --target migrate`
@@ -50,8 +50,10 @@ migrate:
 #   ats-agent-env   : envFrom for app + migrate job
 #     Required to boot: DATABASE_URL (in-cluster ats-agent-db-rw), SESSION_SECRET,
 #     SECRET_ENCRYPTION_KEY, PUBLIC_SITE_URL (https://www.scouts.yavar.ai)
-#     Optional: SMTP_URL (email degraded until set), OAUTH_* (features dark), CRON_SECRET
-#   ats-agent-parser: PARSER_TOKEN
+#     Optional: SMTP_URL (else Graph mail via MICROSOFT_OAUTH_* keys), OAUTH_*
+#     (features dark), CRON_SECRET
+#   ats-agent-parser: PARSER_TOKEN — the chart injects it into BOTH the parser
+#     and the app pod from this one secret, so the two cannot drift
 #   ats-agent-voice : voice-worker SIP credentials (pending from PBX provider)
 env:
   existingSecret: ats-agent-env
@@ -69,7 +71,7 @@ postgres:
   maxSyncReplicas: 1
   dbName: scouts
   dbOwner: scouts
-  ownerSecret: ats-agent-db-owner   # username=scouts, password=<generated>
+  ownerSecret: ats-agent-db-owner # username=scouts, password=<generated>
   storage:
     size: 10Gi
     storageClass: standard-rwo
@@ -105,7 +107,7 @@ voiceWorker:
   enabled: false
   replicas: 1
   existingSecret: ats-agent-voice
-  terminationGracePeriodSeconds: 1900   # let in-flight calls (max 30 min) finish
+  terminationGracePeriodSeconds: 1900 # let in-flight calls (max 30 min) finish
   resources:
     requests: { cpu: 500m, memory: 512Mi }
     limits: { memory: 1Gi }
@@ -115,17 +117,17 @@ voiceWorker:
 gateway:
   namespace: envoy-gateway-system
   name: platform-gateway
-  httpListener: yavar-dev-http     # 301 redirect to HTTPS
-  httpsListener: yavar-dev-https   # main route; 300s timeout for slow server fns
+  httpListener: yavar-dev-http # 301 redirect to HTTPS
+  httpsListener: yavar-dev-https # main route; 300s timeout for slow server fns
   requestTimeout: 300s
 
 certificate:
   enabled: true
-  namespace: envoy-gateway-system   # certs for gateway listeners live beside the gateway
+  namespace: envoy-gateway-system # certs for gateway listeners live beside the gateway
   issuer:
     kind: ClusterIssuer
-    name: letsencrypt-gateway       # HTTP-01 only, solved via yavar-dev-http
-  dnsNames: [www.scouts.yavar.ai]   # apex scouts.yavar.ai NOT included (separate A record)
+    name: letsencrypt-gateway # HTTP-01 only, solved via yavar-dev-http
+  dnsNames: [www.scouts.yavar.ai] # apex scouts.yavar.ai NOT included (separate A record)
   secretName: www-scouts-yavar-ai-tls
   duration: 2160h
   renewBefore: 360h
