@@ -65,6 +65,7 @@ export function registerVoiceGuardTools(): void {
       "File your review of the call for a person (Call reviews). One verdict per check you were given (pass, breach, or not_applicable when it could not arise on this call). Every finding names its check, a severity (critical: the candidate was misled, a record is wrong or a hard rule was broken — pay, protected questions, a promise or agreement; high: a clear breach of the call's rules; low: a lapse in manner) and quotes the transcript: evidence is the turn number and the exact words from that turn — a quote that is not in that turn is dropped. qualityScore 1–5 is how the call would feel to the candidate. The summary is two or three plain sentences. Changes nothing on the call.",
     input: SubmitCallReviewInput,
     risk: "write",
+    capability: "recruiting.voice",
     describe: () => "File the call review",
     run: async (ctx, i) => {
       const { fileReview } = await import("../voice/guard/review.server");

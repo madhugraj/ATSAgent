@@ -156,6 +156,7 @@ export function registerNegotiationCallTools(): void {
         .optional(),
     }),
     risk: "external",
+    capability: "recruiting.offers",
     // No template: a pay call is never pre-approved, so the HR head always approves it.
     templateOf: () => null,
     approverRole: "hr_head",
@@ -228,6 +229,7 @@ export function registerNegotiationCallTools(): void {
       description: NEGOTIATION_TOOL_DESCRIPTIONS[name],
       input: NEGOTIATION_TOOL_INPUTS[name] as z.ZodType<Record<string, unknown>>,
       risk: "write",
+      capability: "recruiting.offers",
       describe: () => `On the call: ${name.replace(/_/g, " ")}`,
       run: async (ctx, i) => applyToCall(ctx, name, i),
     });

@@ -24,6 +24,7 @@ export function registerPanelTools(): void {
       "Ask the HR head to review a round where the panel has finished scoring and your view of the call differs from theirs. A proposal: it opens the HR head's decision — the system states both views side by side and carries out what they decide. Use it only when told a review is due.",
     input: RoundId,
     risk: "write",
+    capability: "recruiting.interviews",
     describe: () => "Panel review for the HR head",
     precheck: async (ctx, i) => {
       const { reviewPrecheck } = await import("../panel/review.server");
@@ -60,6 +61,7 @@ export function registerPanelTools(): void {
       "Read the round's call transcript and record this agent's own view of the candidate (rating, verdict, per-competency notes with quoted evidence) and of the panel (competencies covered, talk time, questions on protected ground). The view is stored hidden until the panel has scored; this returns only counts.",
     input: RoundId,
     risk: "write",
+    capability: "recruiting.interviews",
     skills: ["panel_assess"],
     describe: () => "Assess the interview call (kept hidden until the panel has scored)",
     precheck: async (ctx, i) => {
@@ -82,6 +84,7 @@ export function registerPanelTools(): void {
       "E-mail everyone on the round's panel a factual summary of the call — what was asked and how the candidate answered — with no score, verdict or recommendation. Once per round.",
     input: RoundId,
     risk: "external",
+    capability: "recruiting.interviews",
     skills: ["panel_summary"],
     templateOf: () => "panel_summary",
     describe: () => "E-mail the panel a factual summary of the call",

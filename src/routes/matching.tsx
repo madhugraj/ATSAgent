@@ -5,6 +5,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
+import { requireRouteCapability } from "@/lib/route-guard";
 import { useNavCtx } from "@/hooks/useNavCtx";
 import { ChevronDown, Github, Linkedin, Loader2, PenLine, Target, UserPlus } from "lucide-react";
 import { z } from "zod";
@@ -56,6 +57,7 @@ import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 
 export const Route = createFileRoute("/matching")({
+  beforeLoad: requireRouteCapability,
   validateSearch: z.object({ req: z.string().optional() }),
   head: () => ({
     meta: [

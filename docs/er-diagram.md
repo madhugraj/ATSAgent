@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-125 tables across 9 domains.
+126 tables across 9 domains.
 
 ## Identity & access
 
@@ -1355,6 +1355,9 @@ erDiagram
 | `org_profiles` | `org_id` | `organizations` | cascade |
 | `org_profiles` | `updated_by` | `users` | no action |
 | `org_profiles` | `website_confirmed_by` | `users` | no action |
+| `org_workflow_profiles` | `applied_by` | `users` | no action |
+| `org_workflow_profiles` | `org_id` | `organizations` | cascade |
+| `org_workflow_profiles` | `workflow_id` | `agent_workflows` | no action |
 | `panel_agent_settings` | `org_id` | `organizations` | cascade |
 | `panel_agent_settings` | `updated_by` | `users` | no action |
 | `panel_assessments` | `agent_run_id` | `agent_runs` | no action |
@@ -1568,6 +1571,7 @@ erDiagram
 | `org_pool_shares` | Organisations & masters | 10 | (ownerOrg+partnerOrg) |
 | `org_profile_versions` | Organisations & masters | 16 | (orgId+version) |
 | `org_profiles` | Organisations & masters | 12 | — |
+| `org_workflow_profiles` | — | 8 | — |
 | `organizations` | Organisations & masters | 35 | (slug), (capture_token), (capture_token_hash), (distribution_token_hash) |
 | `panel_agent_settings` | — | 5 | — |
 | `panel_assessments` | — | 23 | (interview_id) |
