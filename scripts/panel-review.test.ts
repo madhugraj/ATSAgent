@@ -29,6 +29,7 @@ const {
 } = await import("../drizzle/schema");
 const { submitScorecardCore } = await import("../src/lib/interviews.functions");
 const review = await import("../src/server/panel/review.server");
+const { hiringDecisionBlocked } = await import("../src/lib/interview-plan.server");
 
 const stamp = Date.now();
 const HR = `hr-${stamp}@test.local`;
@@ -54,7 +55,10 @@ async function member(email: string, roles: string[]) {
 }
 
 /** A candidate at L1 whose L1 round was held, with the agent's view of it. */
-async function heldRound(agent: { rating: number; verdict: "select" | "hold" | "reject" } | null) {
+async function heldRound(
+  agent: { rating: number; verdict: "select" | "hold" | "reject" } | null,
+  reqId?: string,
+) {
   const [cand] = await db
     .insert(candidates)
     .values({
@@ -65,7 +69,12 @@ async function heldRound(agent: { rating: number; verdict: "select" | "hold" | "
     .returning({ id: candidates.id });
   const [app] = await db
     .insert(applications)
-    .values({ orgId, requisitionId, candidateId: cand!.id, stage: "l1" } as never)
+    .values({
+      orgId,
+      requisitionId: reqId ?? requisitionId,
+      candidateId: cand!.id,
+      stage: "l1",
+    } as never)
     .returning({ id: applications.id });
   const [r] = await db
     .insert(interviews)
@@ -372,5 +381,76 @@ describe("an assessment after the panel scored", () => {
     // The assessing run raises the card itself: no second event.
     expect(await reviewEvents(x.applicationId)).toHaveLength(0);
     expect(await review.reconcileAfterAssessment(orgId, x.interviewId, 1, "x")).toBeNull();
+  });
+});
+
+describe("a disagreement on the role's final round", () => {
+  let finalReq: string;
+  beforeAll(async () => {
+    const [req] = await db
+      .insert(requisitions)
+      .values({
+        orgId,
+        code: `PRF-${stamp}`,
+        title: "One-round role",
+        status: "approved",
+        mustHaveSkills: ["Go"],
+        createdBy: hrId,
+        interviewPlan: {
+          rounds: [{ level: 1, name: "Technical", focus: "", competencies: ["Go"], panelSize: 1 }],
+          verdictPolicy: "recommend",
+        },
+      } as never)
+      .returning({ id: requisitions.id });
+    finalReq = req!.id;
+  });
+  const scorecardEvents = async (applicationId: string) =>
+    (
+      await db
+        .select({ payload: agentEvents.payload })
+        .from(agentEvents)
+        .where(eq(agentEvents.type, "scorecard.submitted"))
+    )
+      .map((e) => e.payload as Record<string, unknown>)
+      .filter((p) => p["applicationId"] === applicationId);
+
+  test("holds the hiring decision until the HR head reviews, then releases it with the dissent", async () => {
+    const x = await heldRound({ rating: 2, verdict: "reject" }, finalReq);
+    const res = await score(x, 4, "select");
+    expect(res.panelCheck).toBe("disagree");
+    const [first] = await scorecardEvents(x.applicationId);
+    expect(first).toMatchObject({ finalRound: true, heldForPanelReview: true });
+    expect(await hiringDecisionBlocked(orgId, x.applicationId, "select")).toContain(
+      "panel review comes first",
+    );
+    await review.performReviewGate(
+      orgId,
+      hrId,
+      HR,
+      { type: "panel_review", interviewId: x.interviewId },
+      { status: "approved" },
+    );
+    expect(await hiringDecisionBlocked(orgId, x.applicationId, "select")).toBeNull();
+    const events = await scorecardEvents(x.applicationId);
+    expect(events).toHaveLength(2);
+    expect(events[1]).toMatchObject({
+      finalRound: true,
+      verdict: "select",
+      afterPanelReview: { agentVerdict: "reject", agentRating: 2 },
+    });
+    expect(events[1]!["heldForPanelReview"]).toBeUndefined();
+  });
+
+  test("stopped by the HR head: no hiring decision is released", async () => {
+    const x = await heldRound({ rating: 2, verdict: "reject" }, finalReq);
+    await score(x, 4, "select");
+    await review.performReviewGate(
+      orgId,
+      hrId,
+      HR,
+      { type: "panel_review", interviewId: x.interviewId },
+      { status: "rejected", reason: "Agree with the agent on depth." },
+    );
+    expect(await scorecardEvents(x.applicationId)).toHaveLength(1);
   });
 });
