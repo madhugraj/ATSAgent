@@ -40,13 +40,20 @@ candidate. Columns: `id`, `orgId`, `candidateId` (FK → candidates, cascade),
 `external`), `keyValue` text, `sourceVersionId` (plain uuid in migration 0094 — the FK
 constraint to `candidate_cv_versions` is added by the A2 migration, so 0094 never
 references a table that does not exist yet), `createdAt`.
-Unique index on (`orgId`, `keyType`, `keyValue`) — the schema-level guarantee the plan
-asks for. Placeholder emails (§1.2) are keyed under `placeholder` with their
-deterministic value, so they match only among themselves exactly as today's lookup
-does, and never collide with a real address. `external` keys carry the existing
+Partial **unique** index on (`orgId`, `keyType`, `keyValue`) over the auto-merge key
+types (`email`, `phone`, `linkedin`, `github`, `file_hash`) — the schema-level
+guarantee the plan asks for — plus a non-unique index over the remaining types.
+Placeholder emails (§1.2) are keyed under `placeholder` with their deterministic
+value, so they match only among themselves exactly as today's lookup does, and never
+collide with a real address. `external` keys carry the existing
 `(externalProvider, externalId)` pair (schema.ts:750) so board-synced candidates
 participate in the same index; the provider's own upsert stays as an additional
-write-path signal.
+write-path signal. When a strong-key collision is decided **keep separate**, the key
+stays with its existing owner and the newcomer records it under the matching
+`shared_*` type (`shared_email`, `shared_phone`, …) — outside the unique index by
+construction. A future intake colliding with a `shared_*` key routes to review rather
+than auto-merging into either person (a shared family or agency email must never
+silently merge anyone).
 
 **`candidate_merge_suggestions`** — the review queue, shaped like
 `planChangeProposals` (the repo's review-queue template, schema.ts:1189): `id`,
@@ -70,11 +77,19 @@ merge had to delete outright, e.g. a duplicate application for a requisition the
 survivor already applied to (forced by the `applications_requisition_candidate_key`
 unique index, schema.ts:779). Undo re-inserts deleted rows with their original ids and
 `createdAt` values and re-points the rest back, all in one transaction; the snapshot is
-then cleared. `writeAudit` entries (`candidate.merge`, `candidate.merge.undo`,
-`candidate.merge.suggestion_decided`) are written fire-and-forget alongside — audit
-never carries transactional weight, the snapshot does. Automatic strong-key merges
-made at intake write the same `candidate.merge` audit with the intake source in
-`detail`.
+then cleared. **Undo after later activity:** for every re-pointed child the snapshot
+also stores its post-merge fingerprint (for applications: stage and `updatedAt`; for
+other children: `updatedAt` where the table has one). Undo is **refused with a clear
+message** if any re-pointed child changed since the merge (a stage move on a
+re-pointed application, a new note/verification on either side) — the merge is
+history, not a live structure, and un-merging a moved application would corrupt the
+pipeline; children unchanged since the merge restore cleanly. New rows created on the
+survivor after the merge (new applications, new versions) do not block undo and stay
+on the survivor. Both cases are tested. `writeAudit` entries (`candidate.merge`,
+`candidate.merge.undo`, `candidate.merge.suggestion_decided`) are written
+fire-and-forget alongside — audit never carries transactional weight, the snapshot
+does. Automatic strong-key merges made at intake write the same `candidate.merge`
+audit with the intake source in `detail`.
 
 **`candidate_identity_settings`** — thresholds as tenant settings, following the
 per-domain settings-table pattern (`panelAgentSettings`, schema.ts:3799): `orgId`
@@ -176,12 +191,16 @@ one candidate deterministically.
   stays where it is; identity runs after it.
 - The public apply path (apply.functions.ts:119) keeps its asymmetry, now stated as a
   hard rule for the identity module: on unauthenticated surfaces `resolveIdentity` is
-  **lookup-only** — it may return the existing candidate's id (today's behaviour), but
-  it never merges, never mutates the existing row, and never attaches a version or
-  claim to it. The applicant's CV is stored only on the newly inserted row; a strong
-  or fuzzy hit links the application to the existing id and, when the evidence
-  conflicts, additionally enqueues a review suggestion for a recruiter. This keeps the
-  public page from becoming a record-takeover vector.
+  **lookup-only** — it never merges, never mutates the existing row, and never
+  attaches a _live_ version or claim to it. A hit **links the application to the
+  existing candidate** (today's behaviour) and, when the evidence conflicts,
+  additionally enqueues a review suggestion. The submitted CV is stored as a
+  **pending version** (§2.1 `status: 'pending'`) against that candidate — excluded
+  from every profile read, the current-version denormalisation and claims extraction
+  until a recruiter accepts it from the review queue; rejection discards the version
+  and its stored file. Unauthenticated input therefore never changes the profile.
+  In A1 (before the version table exists) the pending-version mechanics are
+  represented by the suggestion row alone; the pending version itself lands with A2.
 - Queue hygiene: erasure of either candidate removes the suggestion row via the
   cascade FK; a merge that absorbs either side of a pending suggestion flips it to
   `stale` in the same transaction (§1.1) — the queue never shows dead pairs, and
@@ -198,8 +217,9 @@ bordered blocks): each side shows name, normalised contacts, employment timeline
 education, source, and the per-signal reasons with `SkillPills`-style agree/conflict
 tones. Actions: **Merge** (wrapped in `withStepUp()`, the established privileged-decision
 pattern from AgentTaskCard.tsx:46) and **Keep separate**. Both write audit and decide
-the suggestion row. Merge picks the survivor by the existing convention (oldest row);
-the card shows which side will survive. Self-explanatory per house rules: no helper
+the suggestion row. The survivor defaults to the oldest row (existing convention) and
+the reviewer can **swap the survivor** on the card before merging; the card always
+shows which side will survive. Self-explanatory per house rules: no helper
 sentences, counts appear once, `num` class for figures, vendor names nowhere.
 
 The existing bulk-merge toolbar on candidates.index.tsx routes through the same service
@@ -273,8 +293,13 @@ keeps deriving the org from the requisition row it fetched (apply.functions.ts:1
 and never accepts a client-supplied orgId), `source` text (upload / apply / inbox / board /
 ijp / archive_import), `fileHash` text, `filePath` text (`<orgId>/<candidateId>/<versionId>/<file>`
 in the same private bucket), `parsedText` text, `parsed` jsonb (the existing `ParsedCv`
-shape), `submittedAt`, `receivedAt`, `extractionStatus` text in (`pending`, `done`,
-`failed`, `skipped`). Index on (`candidateId`, `submittedAt`). The candidate row keeps
+shape), `submittedAt`, `receivedAt`, `status` text in (`pending`, `active`,
+`rejected`) default `active`, `extractionStatus` text in (`pending`, `done`,
+`failed`, `skipped`). Index on (`candidateId`, `submittedAt`). Only `active` versions
+take part in the profile, claims extraction and the current-version denormalisation;
+`pending` versions exist solely for unauthenticated submissions awaiting recruiter
+acceptance from the review queue (§1.4), and `rejected` ones are deleted together with
+their stored file. The candidate row keeps
 `resumeFilePath`/`resumeText` as the _current_ version's denormalised copy so all
 existing readers keep working.
 
@@ -450,7 +475,8 @@ attempts/backoff, src/lib/screening-prep.server.ts:65). The import copies that s
   src/lib/cv-text.server.ts:20) — there is no CV OCR. Design: items with empty text
   after parse go to a `needs_review`/`failed` state with an actionable reason, and a
   new `cv_ocr` AI_FEATURES slug (vision call through the gateway, precedent:
-  `org_document_ocr`) processes them when the tenant enables it — spend-capped and
+  `org_document_ocr`) processes them when the tenant enables it — the setting is
+  **off by default** (M0 answer), spend-capped and
   ledger-recorded like every other call. Parse-service outage must be distinguished
   from bad files: empty text with a healthy parser is retryable, not a permanent
   failure (parseRemote returns `""` on every failure, so the probe is attempts +
@@ -529,9 +555,8 @@ code (hard rule).
 - strong-key merge: same person, different email on the second CV → merged via phone/
   linkedin; `autoMergeStrongKeys` off → same hit produces a suggestion, and the
   newcomer's key row appears only after the decision;
-- file hash: same file, same name → version attach; same file bytes, different name →
-  review suggestion, never merge or attach; same file hash never creates a second
-  candidate;
+- file hash: same bytes + same name → version attach, no second candidate; same file
+  bytes with a different name → review suggestion, never merge or attach;
 - phone strength: full-E.164 hit merges; last-10-digits-only hit goes to the review
   queue even when it is the only signal;
 - fuzzy: same name + overlapping timeline → suggestion; same name, disjoint timeline →
@@ -544,8 +569,15 @@ code (hard rule).
   re-inserted with original ids/createdAt** (merge two candidates that each applied to
   the same requisition, undo, assert both applications exist again), audit rows written
   (`candidate.merge` for automatic intake merges too, `candidate.merge.undo`);
+- undo refusal: a re-pointed application whose stage moved after the merge → undo
+  refused with a clear message; an untouched merge → undo proceeds and post-merge
+  survivor rows stay on the survivor;
+- shared keys: strong-key collision decided keep-separate → key recorded as
+  `shared_*` on the newcomer; a third intake with that key → review queue, never
+  auto-merge into either person;
 - review queue: decision transitions; pending suggestion flips `stale` in-transaction
-  when a merge absorbs either side; erasure removes the pair row;
+  when a merge absorbs either side; erasure removes the pair row; survivor swap
+  respected by the merge service;
 - concurrency: two simultaneous intakes of the same email → one candidate, one merge,
   via the key unique-violation retry;
 - merged-row invisibility: a candidate with `mergedIntoId` set is excluded from the
@@ -626,26 +658,21 @@ override of every `POOL_MATCH` constant, ranking eval on seeded data.
    producer in src (tests only) and stays handled in normalisation for compatibility.
    Still open: whether a placeholder-keyed candidate whose _real_ email arrives later
    should auto-merge with the placeholder record (today it never does — the new email
-   is a different key) or enqueue a review suggestion. Leaning: review suggestion.
-2. **Long CVs vs the 60 k `untrusted()` cap:** chunk at role boundaries and merge claim
-   sets, or accept the 20 k slice `parseCv` already uses? Chunking doubles AI cost per
-   long CV; decide after the trial-run cost report (A3).
-3. **Survivor rules:** oldest-wins is today's convention; should the most complete
-   record win instead (more fields filled, more versions)? Queue UI must show which
-   side survives either way.
-4. **Merge of application rows:** same-requisition duplicates are deleted today
-   (unique index on (requisitionId, candidateId)); undo restores them — confirm product
-   is happy that a post-undo application reappears with its original created date.
-5. **Retention per version** (plan §2b.5): per-tenant days-based retention implies a
-   reaper tick in A3; confirm the default (keep everything vs 24 months) with the
-   product owner before A3.
-6. **OCR scope:** is `cv_ocr` in A3 or deferred until a tenant actually ships scanned
-   archives? Cost per scanned CV will drive adoption; the trial-run report should
-   measure it either way.
-7. **C1 contract items for the D5 conversation** (blocking C1 code, not A1–A3): new
-   table vs `match_scores` extension; whether profile scores replace the autoscore
-   flow for identification-mode tenants; exact factor list and weights schema; how
-   knock-outs are represented.
-8. **Sector taxonomy source for C1:** does the configurable taxonomy (plan row 8's
-   `Sectors` setting) come from D5's track or is it D4's table? Assumed D5-adjacent;
-   C1 consumes it either way.
+   All eight questions were answered at M0 sign-off (reviews/m0-track-a-verdict.md);
+   recorded here so the note stays the single source:
+
+1. **Placeholder emails:** real email arriving on a placeholder-keyed record →
+   **review suggestion** (agreed, not auto-merge).
+1. **Long CVs vs the 60 k `untrusted()` cap:** use the 20 k slice `parseCv` already
+   uses for now; revisit chunking with the A3 trial-run cost report.
+1. **Survivor rules:** oldest-wins stays the default; the reviewer can swap the
+   survivor on the review card (§1.5).
+1. **Merge of application rows:** undo restores applications with their **original
+   dates** — confirmed.
+1. **Retention per version:** keep everything until the tenant sets a period; the
+   product owner confirms before A3.
+1. **OCR scope:** `cv_ocr` ships in A3 behind a tenant setting, **off by default**;
+   the trial run measures its cost.
+1. **C1 contract items:** settled with Developer 5 before any C1 code, as written.
+1. **Sector taxonomy:** Developer 5 owns the taxonomy table (B3 needs it for
+   extraction); C1 consumes it.
