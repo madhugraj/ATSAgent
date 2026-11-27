@@ -88,7 +88,9 @@ function ArchiveImportPage() {
   const [name, setName] = useState("");
   const [trial, setTrial] = useState(true);
   const [trialLimit, setTrialLimit] = useState(250);
-  const [staging, setStaging] = useState<{ done: number; total: number } | null>(null);
+  const [staging, setStaging] = useState<{ done: number; total: number; waiting?: boolean } | null>(
+    null,
+  );
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function upload(fileList: FileList | null) {
@@ -120,7 +122,21 @@ function ArchiveImportPage() {
           size += f.bytes.byteLength;
           i++;
         }
-        const r = await stage({ data: { importId: id, files: batch } });
+        // Server-fn RPCs are rate-limited per caller (60/min); a large archive
+        // sends more batches than that. A limited call comes back empty —
+        // wait out the window and resend the same batch (staging de-duplicates
+        // by content hash, so a resend never double-stages).
+        let r: Awaited<ReturnType<typeof stage>> | undefined;
+        for (let attempt = 0; attempt < 6; attempt++) {
+          r = await stage({ data: { importId: id, files: batch } }).catch((e: unknown) => {
+            if (e instanceof Error && /too many requests/i.test(e.message)) return undefined;
+            throw e;
+          });
+          if (r) break;
+          setStaging({ done: i, total: files.length, waiting: true });
+          await new Promise((res) => setTimeout(res, 61_000));
+        }
+        if (!r) throw new Error("The server is busy — try the import again in a few minutes.");
         staged += r.staged;
         duplicate += r.duplicate;
         rejected.push(...r.rejected.map((x) => `${x.name}: ${x.reason}`));
@@ -206,6 +222,7 @@ function ArchiveImportPage() {
             <Progress value={(staging.done / staging.total) * 100} />
             <div className="num text-xs text-muted-foreground">
               {staging.done} / {staging.total}
+              {staging.waiting ? " · paused a minute" : ""}
             </div>
           </div>
         ) : (
