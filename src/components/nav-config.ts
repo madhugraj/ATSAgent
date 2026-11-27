@@ -13,6 +13,7 @@ import {
   Database,
   FileSignature,
   Gauge,
+  GitMerge,
   Globe2,
   Handshake,
   Inbox,
@@ -232,6 +233,15 @@ export const NAV_GROUPS: NavGroup[] = [
         to: "/candidates",
         label: "Talent pool",
         icon: Users,
+        show: (c) =>
+          c.recruiterView && (!c.capabilities || c.capabilities.includes("matching.pool")),
+        cap: "matching.pool",
+        mode: "manual",
+      },
+      {
+        to: "/candidates/merge-review",
+        label: "Merge review",
+        icon: GitMerge,
         show: (c) =>
           c.recruiterView && (!c.capabilities || c.capabilities.includes("matching.pool")),
         cap: "matching.pool",

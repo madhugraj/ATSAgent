@@ -35,6 +35,9 @@ const schema = z.object({
   OAUTH_STATE_SECRET: z.string().optional(),
   MICROSOFT_OAUTH_CLIENT_ID: z.string().optional(),
   MICROSOFT_OAUTH_CLIENT_SECRET: z.string().optional(),
+  // Tenant-specific directory id — client-credentials mail (Graph sendMail as
+  // the EMAIL_FROM mailbox) must hit this tenant's token endpoint, not /organizations.
+  MICROSOFT_OAUTH_TENANT_ID: z.string().optional(),
   GOOGLE_CALENDAR_OAUTH_CLIENT_ID: z.string().optional(),
   GOOGLE_CALENDAR_OAUTH_CLIENT_SECRET: z.string().optional(),
   ZOOM_OAUTH_CLIENT_ID: z.string().optional(),

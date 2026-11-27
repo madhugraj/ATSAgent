@@ -1,0 +1,30 @@
+{{- if .Values.migrate.enabled }}
+# DB migrations run once per release, before the rollout (idempotent; never
+# drizzle-kit migrate). Same image as the app but built with
+# `docker build --target migrate` — the runtime stage has no scripts/.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "atsagent.fullname" . }}-migrate
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "atsagent.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      containers:
+        - name: migrate
+          image: "{{ .Values.image.repository }}:{{ required "image.tag is required (short SHA)" .Values.image.tag }}{{ .Values.migrate.tagSuffix }}"
+          envFrom:
+            - secretRef: { name: {{ .Values.env.existingSecret }} }
+          resources:
+            {{- toYaml .Values.migrate.resources | nindent 12 }}
+{{- end }}

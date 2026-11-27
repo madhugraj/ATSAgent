@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-126 tables across 9 domains.
+130 tables across 9 domains.
 
 ## Identity & access
 
@@ -431,6 +431,8 @@ erDiagram
     jsonb career_metrics "nullable"
     text pool_use
     text pool_use_source "nullable"
+    text file_hash "nullable"
+    uuid merged_into_id "nullable"
   }
   applications {
     uuid id PK
@@ -1247,6 +1249,15 @@ erDiagram
 | `candidate_assessments` | `candidate_id` | `candidates` | cascade |
 | `candidate_assessments` | `org_id` | `organizations` | cascade |
 | `candidate_assessments` | `requisition_id` | `requisitions` | no action |
+| `candidate_identity_keys` | `candidate_id` | `candidates` | cascade |
+| `candidate_identity_keys` | `org_id` | `organizations` | cascade |
+| `candidate_identity_settings` | `org_id` | `organizations` | cascade |
+| `candidate_merge_suggestions` | `candidate_a_id` | `candidates` | cascade |
+| `candidate_merge_suggestions` | `candidate_b_id` | `candidates` | cascade |
+| `candidate_merge_suggestions` | `org_id` | `organizations` | cascade |
+| `candidate_merges` | `merged_id` | `candidates` | cascade |
+| `candidate_merges` | `org_id` | `organizations` | cascade |
+| `candidate_merges` | `survivor_id` | `candidates` | cascade |
 | `candidate_notes` | `candidate_id` | `candidates` | cascade |
 | `candidate_notes` | `org_id` | `organizations` | cascade |
 | `candidate_ownership_events` | `candidate_id` | `candidates` | cascade |
@@ -1524,11 +1535,15 @@ erDiagram
 | `board_webhook_events` | — | 15 | (dedupe_key) |
 | `call_reviews` | — | 22 | (call_id) |
 | `candidate_assessments` | Candidates & pipeline | 23 | (token) |
+| `candidate_identity_keys` | — | 7 | — |
+| `candidate_identity_settings` | — | 8 | — |
+| `candidate_merge_suggestions` | — | 12 | — |
+| `candidate_merges` | — | 10 | — |
 | `candidate_notes` | Candidates & pipeline | 8 | — |
 | `candidate_ownership_events` | Candidates & pipeline | 8 | — |
 | `candidate_referrals` | Candidates & pipeline | 11 | — |
 | `candidate_verifications` | Candidates & pipeline | 11 | — |
-| `candidates` | Candidates & pipeline | 43 | — |
+| `candidates` | Candidates & pipeline | 45 | — |
 | `capture_events` | Sourcing & integrations | 10 | — |
 | `comp_knowledge` | Intelligence | 17 | — |
 | `compensation_details` | — | 19 | — |

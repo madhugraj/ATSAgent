@@ -175,6 +175,30 @@ describe("the panel directory", () => {
     ]);
   });
 
+  test("a colleague invited but not yet signed in can be put on a panel; a revoked one cannot", async () => {
+    const [invited] = await db
+      .insert(orgMembers)
+      .values({
+        orgId,
+        email: `invited@${domain}`,
+        fullName: "Invited Colleague",
+        status: "invited",
+        isOwner: false,
+      } as never)
+      .returning({ id: orgMembers.id });
+    // Chosen for a panel: saved (they score through their private link).
+    const saved = await panels.savePanel(orgId, hrId, reqId, 1, [invited!.id], true);
+    expect(saved.members.map((m) => m.email)).toEqual([`invited@${domain}`]);
+    // Access revoked: no longer on any new panel.
+    await db
+      .update(orgMembers)
+      .set({ status: "revoked" } as never)
+      .where(eq(orgMembers.id, invited!.id));
+    await expect(panels.savePanel(orgId, hrId, reqId, 1, [invited!.id], true)).rejects.toThrow(
+      /active entry of your panel directory/,
+    );
+  });
+
   test("an approved panellist without a login may interview; an unknown or inactive one may not", async () => {
     // Slot offers and agent bookings check the interviewer with this — a
     // directory panellist on the approved panel must not be refused there.

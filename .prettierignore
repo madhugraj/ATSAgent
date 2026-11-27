@@ -13,6 +13,9 @@ docs/voice-agents-charter.md
 # Generated doc (node scripts/gen-er-diagram.mjs)
 docs/er-diagram.md
 
+# Helm templates are Go-template text, not YAML — prettier cannot parse them.
+infra/helm/ats-agent/templates/
+
 # Agent manifest and prompt files — a reformat would change agents.lock.json
 # hashes and voice behaviour (refactor rule 4). Never format these.
 src/server/agents/definitions.ts

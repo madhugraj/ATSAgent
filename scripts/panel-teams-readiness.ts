@@ -178,12 +178,13 @@ add(
 );
 
 // 7. E-mail, for the panel's summary.
+const { emailTransportConfigured } = await import("../src/lib/email-templates/send-email");
 add(
   "E-mail can be sent (panel summary)",
-  process.env["SMTP_URL"] ? "yes" : "check",
-  process.env["SMTP_URL"]
-    ? "SMTP configured"
-    : "No SMTP_URL: summaries queue but are not delivered.",
+  emailTransportConfigured() ? "yes" : "check",
+  emailTransportConfigured()
+    ? "SMTP or OAuth mail configured"
+    : "No SMTP_URL and no OAuth mail credentials: summaries queue but are not delivered.",
 );
 
 console.log(`\nSilent panel agents — Teams test readiness (L${level})\n`);
