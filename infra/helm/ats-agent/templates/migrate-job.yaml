@@ -19,6 +19,7 @@ spec:
   template:
     spec:
       restartPolicy: Never
+      automountServiceAccountToken: false
       containers:
         - name: migrate
           image: "{{ .Values.image.repository }}:{{ required "image.tag is required (short SHA)" .Values.image.tag }}{{ .Values.migrate.tagSuffix }}"

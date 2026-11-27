@@ -13,6 +13,10 @@ metadata:
 spec:
   replicas: {{ .Values.voiceWorker.replicas }}
   strategy: { type: Recreate }
+  # Recreate waits for the old pod's full grace period (an in-flight call, up
+  # to ~30 min) before the new pod starts; the 600s default deadline would
+  # mark the rollout ProgressDeadlineExceeded while the drain is legitimate.
+  progressDeadlineSeconds: {{ add .Values.voiceWorker.terminationGracePeriodSeconds 300 }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "atsagent.name" . }}
@@ -25,6 +29,7 @@ spec:
         app.kubernetes.io/component: voice-worker
     spec:
       terminationGracePeriodSeconds: {{ .Values.voiceWorker.terminationGracePeriodSeconds }}
+      automountServiceAccountToken: false
       containers:
         - name: voice-worker
           image: "{{ .Values.image.repository }}:{{ required "image.tag is required (short SHA)" .Values.image.tag }}"
