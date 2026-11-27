@@ -377,6 +377,10 @@ gcloud auth configure-docker $REGION-docker.pkg.dev --quiet
 (cd extension && zip -qr ../public/atsiq-capture.zip manifest.json background.js popup.js popup.html portal-fill.js)
 docker build -t $IMG:$TAG . && docker push $IMG:$TAG
 docker build --target migrate -t $IMG-migrate:$TAG . && docker push $IMG-migrate:$TAG
+# The runtime build fails with "Bundle imports packages that are not in the
+# image" if .output imports a package it did not ship (it once shipped without
+# undici, so every server-side fetch returned 500). Build from a clean clone with
+# this Dockerfile (bun install --frozen-lockfile); never push an image that skipped it.
 
 kubectl apply -f infra/gke/00-namespace.yaml
 # Secrets from Secret Manager

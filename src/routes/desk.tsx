@@ -2840,6 +2840,13 @@ function TaskCard({
             onSave={(round) => decide({ status: "approved", args: { round } })}
             onBack={() => setChanging(false)}
           />
+        ) : changing && extraRound ? (
+          <ExtraRoundEdit
+            proposed={card["round"] as ExtraRoundDraft}
+            busy={busy}
+            onSave={(round) => decide({ status: "approved", args: { round } })}
+            onBack={() => setChanging(false)}
+          />
         ) : changing ? (
           <PanelChange
             requisitionId={String(card["requisitionId"])}
