@@ -1963,7 +1963,7 @@ export const contentTemplates = pgTable(
       .notNull()
       .default(sql`'{}'::jsonb`),
     instructions: text("instructions"),
-    /** job_card only — stored object key under `${orgId}/branding/`. */
+    /** Letterhead logo for job_card, offer_letter and jd exports — object key under `${orgId}/branding/`. */
     logoPath: text("logo_path"),
     logoContentType: text("logo_content_type"),
     /** job_card — full-bleed background artwork; job text renders on top. */

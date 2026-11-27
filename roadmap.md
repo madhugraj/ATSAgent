@@ -1,3 +1,10 @@
+# Content templates — branded JDs + tenant workflow profile (2026-11-27)
+
+Candidate Identification platform work, rows 0 and 5 (`docs/candidate-identification/`, design in `docs/candidate-identification/track-b-design.md`):
+
+- **Tenant workflow profile (B1)**: `org_workflow_profiles` (migration 0094; absent row = full pipeline) applied by a platform super admin per organisation; the resolved capability set (`src/lib/capabilities*.ts`) gates nav, routes, server functions (`requireCapability`, B1b) and agent tools (B1a) — enforced by the strict completeness sweep; template/custom profiles fail closed if their workflow loses publication or its grant; governance-only settings (approval gate vs auto-approved bulk requisitions, duplicate lookback, pay tolerance) with step-up on `auto_approved`; switching never deletes data and every change is audited.
+- **Branded JD templates (B2)**: the `jd` template config carries accent, letterhead/footer lines, writing style and font; import from a sample file now fences the sample as untrusted data and starts the analyst prompt with the injection rules (fixing a pre-existing unfenced path — invariant called out in the PR); writing style, boilerplate and instructions render into generation prompts inside `untrusted_data` fences; save-time config validation; `writeAudit` on template save/delete/default; branded PDF and Word export of every JD from the requisition page (`docx` npm, covered by the bundle-import guard's build-time check).
+
 # Roadmap
 
 ## Pay terms — Phase 1 foundation (2026-11-11)
