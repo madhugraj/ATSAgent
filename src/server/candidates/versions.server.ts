@@ -255,7 +255,7 @@ export async function drainClaimsExtraction(
   const orgFilter = opts.orgId ? sql`and org_id = ${opts.orgId}` : sql``;
   const claimed = (await db.execute(sql`
     update candidate_cv_versions set extraction_status = 'running',
-      extraction_lease_until = ${new Date(Date.now() + CLAIMS_LEASE_MS)},
+      extraction_lease_until = ${new Date(Date.now() + CLAIMS_LEASE_MS).toISOString()}::timestamptz,
       extraction_attempts = extraction_attempts + 1
     where id in (
       select id from candidate_cv_versions
