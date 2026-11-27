@@ -12,6 +12,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { requireOrg, requireRole } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 
 const ReqId = z.object({ requisitionId: z.string().uuid() });
 const Channel = z.string().min(2).max(40);
@@ -24,7 +25,7 @@ const actorOf = (c: { memberEmail: string; userId: string }) => ({
 
 /** Every channel's state for one role. */
 export const roleDistribution = createServerFn({ method: "GET" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("sourcing.distribution")])
   .validator((data: unknown) => ReqId.parse(data))
   .handler(async ({ data, context }) =>
     (await server()).distributionStatus(context.orgId, data.requisitionId),
@@ -32,14 +33,14 @@ export const roleDistribution = createServerFn({ method: "GET" })
 
 /** Copy and steps for posting one role on a portal by hand. */
 export const rolePostingPack = createServerFn({ method: "GET" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("sourcing.distribution")])
   .validator((data: unknown) => ReqId.extend({ channel: Channel }).parse(data))
   .handler(async ({ data, context }) =>
     (await server()).postingPack(context.orgId, data.requisitionId, data.channel),
   );
 
 export const addRoleToFeed = createServerFn({ method: "POST" })
-  .middleware([requireRole("hr_head")])
+  .middleware([requireRole("hr_head"), requireCapability("sourcing.distribution")])
   .validator((data: unknown) => ReqId.extend({ channel: Channel }).parse(data))
   .handler(async ({ data, context }) => {
     await (
@@ -49,7 +50,7 @@ export const addRoleToFeed = createServerFn({ method: "POST" })
   });
 
 export const markRolePosted = createServerFn({ method: "POST" })
-  .middleware([requireRole("hr_head")])
+  .middleware([requireRole("hr_head"), requireCapability("sourcing.distribution")])
   .validator((data: unknown) =>
     ReqId.extend({ channel: Channel, url: z.string().max(500).nullish() }).parse(data),
   )
@@ -67,7 +68,7 @@ export const markRolePosted = createServerFn({ method: "POST" })
   });
 
 export const takeRoleDown = createServerFn({ method: "POST" })
-  .middleware([requireRole("hr_head")])
+  .middleware([requireRole("hr_head"), requireCapability("sourcing.distribution")])
   .validator((data: unknown) => ReqId.extend({ channel: Channel }).parse(data))
   .handler(async ({ data, context }) => {
     await (
@@ -77,7 +78,7 @@ export const takeRoleDown = createServerFn({ method: "POST" })
   });
 
 export const setRoleGoogleListing = createServerFn({ method: "POST" })
-  .middleware([requireRole("hr_head")])
+  .middleware([requireRole("hr_head"), requireCapability("sourcing.distribution")])
   .validator((data: unknown) => ReqId.extend({ listed: z.boolean() }).parse(data))
   .handler(async ({ data, context }) => {
     await (
@@ -88,11 +89,11 @@ export const setRoleGoogleListing = createServerFn({ method: "POST" })
 
 /** Organisation settings for the Job distribution page. */
 export const distributionOverview = createServerFn({ method: "GET" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("sourcing.distribution")])
   .handler(async ({ context }) => (await server()).distributionSettings(context.orgId));
 
 export const setGoogleJobsEnabled = createServerFn({ method: "POST" })
-  .middleware([requireRole("hr_head")])
+  .middleware([requireRole("hr_head"), requireCapability("sourcing.distribution")])
   .validator((data: unknown) => z.object({ enabled: z.boolean() }).parse(data))
   .handler(async ({ data, context }) => {
     await (await server()).setGoogleJobs(context.orgId, actorOf(context), data.enabled);
@@ -101,18 +102,18 @@ export const setGoogleJobsEnabled = createServerFn({ method: "POST" })
 
 /** The feed links (they name the feed, so only the HR head sees them). */
 export const jobFeedLinks = createServerFn({ method: "POST" })
-  .middleware([requireRole("hr_head")])
+  .middleware([requireRole("hr_head"), requireCapability("sourcing.distribution")])
   .handler(async ({ context }) => (await server()).feedLinks(context.orgId));
 
 export const rotateJobFeedLinks = createServerFn({ method: "POST" })
-  .middleware([requireRole("hr_head")])
+  .middleware([requireRole("hr_head"), requireCapability("sourcing.distribution")])
   .handler(async ({ context }) => ({
     urls: await (await server()).rotateFeedToken(context.orgId, actorOf(context)),
   }));
 
 /** Applicants and how far they got, per source. */
 export const channelSourceReport = createServerFn({ method: "GET" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("sourcing.distribution")])
   .validator((data: unknown) =>
     z.object({ days: z.number().int().min(7).max(365).default(90) }).parse(data),
   )

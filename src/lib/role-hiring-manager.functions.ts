@@ -7,11 +7,12 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { requireOrg } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 
 const ReqInput = z.object({ requisitionId: z.string().uuid() });
 
 export const getRoleHiringManager = createServerFn({ method: "GET" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("pipeline.requisitions")])
   .validator((d: unknown) => ReqInput.parse(d))
   .handler(async ({ data, context }) => {
     const { assertRequisitionInOrg } = await import("../server/guards");
@@ -21,7 +22,7 @@ export const getRoleHiringManager = createServerFn({ method: "GET" })
   });
 
 export const setRoleHiringManager = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("pipeline.requisitions")])
   .validator((d: unknown) => ReqInput.extend({ memberId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const { assertRequisitionInOrg } = await import("../server/guards");

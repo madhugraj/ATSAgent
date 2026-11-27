@@ -4,6 +4,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Bot, FlaskConical, Loader2, Send, Sparkles } from "lucide-react";
 
+import { requireRouteCapability } from "@/lib/route-guard";
 import { EmptyState, PageHeader } from "@/components/ats";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,6 +34,7 @@ const TABS = ["decisions", "acted", "activity"] as const;
 type AgentsTab = (typeof TABS)[number];
 
 export const Route = createFileRoute("/agents/")({
+  beforeLoad: requireRouteCapability,
   validateSearch: (search: Record<string, unknown>): { tab?: AgentsTab } =>
     TABS.includes(search["tab"] as AgentsTab) && search["tab"] !== "decisions"
       ? { tab: search["tab"] as AgentsTab }

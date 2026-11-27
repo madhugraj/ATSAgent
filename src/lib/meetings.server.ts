@@ -240,6 +240,56 @@ export async function msDelegatedToken(s: Record<string, string>): Promise<strin
   return String(body["access_token"] ?? "");
 }
 
+/**
+ * A calendar event with a Teams meeting, sent to the attendees (the panel), so
+ * the interview is on their calendars with Outlook's own reminder. Null when
+ * there is nobody to invite or the calendar cannot be written (no consent):
+ * the caller then makes a bare online meeting, as before. Transcripts find the
+ * meeting by its join link either way.
+ */
+export async function teamsCalendarInvite(
+  base: string,
+  headers: Record<string, string>,
+  req: MeetingRequest,
+): Promise<MeetingResult | null> {
+  const attendees = [...new Set(req.attendees.map((e) => e?.trim().toLowerCase()).filter(Boolean))];
+  if (!attendees.length) return null;
+  const start = new Date(req.startIso);
+  const end = new Date(start.getTime() + req.durationMins * 60_000);
+  try {
+    const evt = await fetch(`${base}/events`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        subject: req.topic,
+        body: req.agenda ? { contentType: "text", content: req.agenda } : undefined,
+        start: { dateTime: start.toISOString(), timeZone: "UTC" },
+        end: { dateTime: end.toISOString(), timeZone: "UTC" },
+        attendees: attendees.map((address) => ({ emailAddress: { address }, type: "required" })),
+        isOnlineMeeting: true,
+        onlineMeetingProvider: "teamsForBusiness",
+        isReminderOn: true,
+        reminderMinutesBeforeStart: 15,
+      }),
+    });
+    if (!evt.ok) return null;
+    const body = (await evt.json()) as Record<string, unknown>;
+    const joinUrl = (body["onlineMeeting"] as { joinUrl?: string } | undefined)?.joinUrl;
+    if (!joinUrl) {
+      // An invite without a link is no use to the panel: withdraw it.
+      if (body["id"])
+        await fetch(`${base}/events/${encodeURIComponent(String(body["id"]))}`, {
+          method: "DELETE",
+          headers,
+        }).catch(() => undefined);
+      return null;
+    }
+    return { joinUrl, externalId: (body["id"] as string | undefined) ?? null, provider: "teams" };
+  } catch {
+    return null;
+  }
+}
+
 async function teamsMeeting(
   s: Record<string, string>,
   req: MeetingRequest,
@@ -250,9 +300,14 @@ async function teamsMeeting(
     const token = await msDelegatedToken(s);
     const start = new Date(req.startIso);
     const end = new Date(start.getTime() + req.durationMins * 60_000);
+    const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+    // The panel gets it on their calendar (Outlook reminds them): an invite
+    // with the Teams link. Without calendar consent, a bare online meeting.
+    const invite = await teamsCalendarInvite("https://graph.microsoft.com/v1.0/me", headers, req);
+    if (invite) return invite;
     const res = await fetch("https://graph.microsoft.com/v1.0/me/onlineMeetings", {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({
         subject: req.topic,
         startDateTime: start.toISOString(),
@@ -276,7 +331,14 @@ async function teamsMeeting(
   const user = encodeURIComponent(s["organizer_email"]!);
   const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 
-  // Preferred: dedicated online meeting (needs OnlineMeetings.ReadWrite.All + access policy).
+  // Preferred: a calendar invite to the panel with the Teams link, so it is on
+  // their calendars; then a bare online meeting (OnlineMeetings.ReadWrite.All).
+  const invite = await teamsCalendarInvite(
+    `https://graph.microsoft.com/v1.0/users/${user}`,
+    headers,
+    req,
+  );
+  if (invite) return invite;
   const direct = await fetch(`https://graph.microsoft.com/v1.0/users/${user}/onlineMeetings`, {
     method: "POST",
     headers,

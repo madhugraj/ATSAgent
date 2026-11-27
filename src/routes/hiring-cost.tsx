@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { requireRouteCapability } from "@/lib/route-guard";
 import { EmptyState, PageHeader, StatCard } from "@/components/ats";
 import { CostFigure, PricingNote } from "@/components/HiringCost";
 import { AgentOptimisationTips } from "@/components/AgentUtilisation";
@@ -10,6 +11,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { getOrgHiringCost } from "@/lib/hiring-cost.functions";
 
 export const Route = createFileRoute("/hiring-cost")({
+  beforeLoad: requireRouteCapability,
   head: () => ({
     meta: [
       { title: "Hiring cost — AI spend per hire, per role and per candidate" },

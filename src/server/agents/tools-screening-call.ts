@@ -126,6 +126,7 @@ export function registerScreeningCallTools(): void {
     risk: "external",
     // Pre-approvable like a candidate message: Autonomous, or the org whitelists it.
     templateOf: () => "screening_call",
+    capability: "recruiting.voice",
     skills: ["screening_call", "screening_grade"],
     describe: () => "Phone the candidate for an AI screening call",
     precheck: async (ctx, i) => {
@@ -152,6 +153,7 @@ export function registerScreeningCallTools(): void {
       description: CALL_TOOL_DESCRIPTIONS[name],
       input: CALL_TOOL_INPUTS[name] as z.ZodType<Record<string, unknown>>,
       risk: "write",
+      capability: "recruiting.voice",
       describe: () => `On the call: ${name.replace(/_/g, " ")}`,
       run: async (ctx, i) => applyToCall(ctx, name, i),
     });

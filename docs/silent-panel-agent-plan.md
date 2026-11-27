@@ -211,7 +211,10 @@ round's panel result with the agent's assessment, by a fixed rule in code
   the candidate before the next round.
 - **After the final round**, nothing moves on its own today (the hiring manager
   decides). The reconciliation result goes into the hiring-decision card and
-  the Evaluation agent's debrief instead; a disagreement also alerts the HR head.
+  the Evaluation agent's debrief instead. A disagreement holds the hiring
+  decision: the Evaluation agent writes the debrief only, and the decision is
+  asked for once the HR head goes with the panel, naming the agent's dissent.
+  If the HR head holds or rejects, no decision is asked for.
 - The HR head's decisions are taken server-side with `assertRole`, audited
   (`panel_review.decided`), and recorded with `captureFeedback`: a person
   judging the agent's assessment is training data.

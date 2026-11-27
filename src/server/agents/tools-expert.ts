@@ -89,6 +89,7 @@ export function registerExpertTools(): void {
       brief: ExpertBriefContent,
     }),
     risk: "write",
+    capability: "recruiting.interviews",
     describe: () => "The role expert brief",
     proposes: async (ctx, i) => {
       await assertRequisitionInOrg(i.requisitionId, ctx.orgId);

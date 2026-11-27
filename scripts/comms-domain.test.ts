@@ -483,7 +483,10 @@ describe("email-outbox: held mail release/drop", () => {
     // The prefix's % is escaped: only the literal-% row releases.
     const released = await outbox.releaseHeldEmails(orgA, `comm${stamp}%hld`);
     expect(released).toBe(1);
-    expect((await outboxRow(orgA, `comm${stamp}%hld-a`))!.status).toBe("queued");
+    // Releasing also starts a send in the background: the row may already be sent.
+    expect(["queued", "sending", "sent"]).toContain(
+      (await outboxRow(orgA, `comm${stamp}%hld-a`))!.status,
+    );
     expect((await outboxRow(orgA, `comm${stamp}Zhld-b`))!.status).toBe("held");
     expect((await outboxRow(orgB, `comm${stamp}%hld-c`))!.status).toBe("held");
 
@@ -689,13 +692,10 @@ describe("local-inbox: receiveMail transport outcomes", () => {
     expect(res.detail).toBe("That organisation is not active.");
   });
 
-  test("KNOWN BUG, pinned: a duplicate provider delivery errors instead of skipping", async () => {
-    // receiveMail's 23505 check reads only the top-level error code, but
-    // drizzle 0.45 wraps the Postgres error in DrizzleQueryError (the 23505
-    // sits on .cause — see how runtime.server.ts isActiveRunConflict walks
-    // the chain). The intended 'skipped / Already received.' outcome is
-    // unreachable today: the duplicate lands as a generic 'error'. When the
-    // cause-chain check is added, FLIP this to expect skipped.
+  test("a duplicate provider delivery is skipped (dedupe survives the drizzle wrap)", async () => {
+    // FLIPPED from the KNOWN BUG pin: receiveMail's 23505 check now walks the
+    // drizzle 0.45 wrap (the PG code sits on .cause, as runtime.server.ts
+    // isActiveRunConflict already does), so the intended outcome holds.
     await insertMail(orgA, {
       toAddress: `commo${stamp}@${INBOX_DOMAIN}`,
       providerMessageId: `pm-${stamp}`,
@@ -706,8 +706,8 @@ describe("local-inbox: receiveMail transport outcomes", () => {
       from: `appl${stamp}@example.com`,
       messageId: `pm-${stamp}`,
     });
-    expect(res.status).toBe("error");
-    expect(res.detail).toContain("Failed query");
+    expect(res.status).toBe("skipped");
+    expect(res.detail).toBe("Already received.");
     // at least the unique index still refused the second row
     const [count] = await db
       .select({ count: sql<number>`count(*)::int` })

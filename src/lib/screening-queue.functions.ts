@@ -17,6 +17,7 @@ import { z } from "zod";
 import { db } from "../server/db";
 import { applications, candidates, matchScores, requisitions } from "@db/schema";
 import { requireOrg } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 
 /** JSON-safe value — what a server function is allowed to return. */
 type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
@@ -168,7 +169,7 @@ type QueueSqlRow = Omit<ScreeningQueueRow, "applied_at" | "red_flag_count"> & {
 };
 
 export const listScreeningQueue = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.screening")])
   .validator((data: unknown) =>
     z
       .object({
@@ -267,7 +268,7 @@ const bucketCounts = createServerOnlyFn(async function bucketCounts(
 
 /** Dashboard "Needs you today": bucket counts only — no rows shipped. */
 export const screeningQueueCounts = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.screening")])
   .handler(async ({ context }): Promise<ScreeningQueueCounts> =>
     bucketCounts(context.orgId, null, ""),
   );
@@ -275,7 +276,7 @@ export const screeningQueueCounts = createServerFn({ method: "POST" })
 /* ------------------------------------------------ selected candidate pane */
 
 export const getScreeningCandidate = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.screening")])
   .validator((data: unknown) =>
     z.object({ candidateId: z.string().uuid(), applicationId: z.string().uuid() }).parse(data),
   )

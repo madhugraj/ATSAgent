@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { requireRouteCapability } from "@/lib/route-guard";
 import { applicationsQuery, candidatesQuery, offersQuery, requisitionsQuery } from "@/lib/data";
 import { advanceOffer, createOffer, sendBackOffer } from "@/lib/offers.functions";
 import { withStepUp } from "@/lib/step-up-client";
@@ -22,6 +23,7 @@ import {
 } from "@/components/ui/select";
 
 export const Route = createFileRoute("/offers")({
+  beforeLoad: requireRouteCapability,
   head: () => ({
     meta: [
       { title: "Offers & Approvals — ATS" },

@@ -170,6 +170,7 @@ export function registerPhase2Tools(): void {
       "Score every unscored application for a requisition against its JD (up to 25 per call). Strong matches are shortlisted automatically, the rest are held at ai_screened for a person to review.",
     input: ReqId,
     risk: "write",
+    capability: "recruiting.screening",
     skills: ["candidate_score", "linkedin_signal", "writing_signal"],
     describe: () => "Score new applications against the JD",
     run: async (ctx, i) => {
@@ -189,6 +190,7 @@ export function registerPhase2Tools(): void {
       "Move a candidate who has not reached an interview round (sourced, applied, ai_screened, shortlisted, on_hold or reserve) to shortlisted, on_hold or reserve, with a reason. Candidates in an interview round, an offer stage or a closed stage are never moved by an agent. Rejections are never done with this tool — propose them with request_approval.",
     input: AppId.extend({ toStage: z.enum(AGENT_STAGES), reason: z.string().min(3).max(500) }),
     risk: "write",
+    capability: "recruiting.screening",
     describe: (i) => `Move a candidate to ${i.toStage}: ${i.reason}`,
     run: async (ctx, i) => {
       const app = await loadApplication(ctx.orgId, i.applicationId);
@@ -229,6 +231,7 @@ export function registerPhase2Tools(): void {
     description: "Add talent-pool candidates to a requisition's pipeline (they are then scored).",
     input: ReqId.extend({ candidateIds: z.array(z.string().uuid()).min(1).max(20) }),
     risk: "write",
+    capability: "matching.pool",
     describe: (i) => `Add ${i.candidateIds.length} talent-pool candidate(s) to the pipeline`,
     run: async (ctx, i) => {
       const { addApplicationsCore } = await import("@/lib/pipeline.server");
@@ -245,6 +248,7 @@ export function registerPhase2Tools(): void {
     description: "Add a note to a candidate's record that the hiring team will see.",
     input: z.object({ candidateId: z.string().uuid(), note: z.string().min(3).max(4000) }),
     risk: "write",
+    capability: "recruiting.screening",
     describe: () => "Add a note to the candidate's record",
     run: async (ctx, i) => {
       const { addCandidateNoteCore } = await import("@/lib/pipeline.server");
@@ -434,6 +438,7 @@ export function registerPhase2Tools(): void {
       "Build the screening-call kit (questions and focus areas) for a shortlisted candidate if it is missing.",
     input: AppId,
     risk: "write",
+    capability: "recruiting.screening",
     skills: ["screening_kit"],
     describe: () => "Prepare the screening-call kit",
     run: async (ctx, i) => {
@@ -455,6 +460,7 @@ export function registerPhase2Tools(): void {
       "Create a role-specific written assessment for a shortlisted candidate and email them the private link. The due date and when the link closes follow the organisation's assessment policy (default: due in 3 working days, reminders on day 2 and the due day, link closes after 7 days); reminders and the overdue follow-up are automatic. Leaves the organisation, so a person approves it unless the assessment email is pre-approved.",
     input: AppId,
     risk: "external",
+    capability: "recruiting.screening",
     skills: ["assessment_generate"],
     templateOf: () => "assessment_invite",
     describe: () => "Send a written assessment",
@@ -503,6 +509,7 @@ export function registerPhase2Tools(): void {
       "Email a candidate a reminder about an assessment they have not completed yet (once per day at most).",
     input: AppId,
     risk: "external",
+    capability: "recruiting.screening",
     templateOf: () => "assessment_invite",
     describe: () => "Send an assessment reminder to the candidate",
     run: async (ctx, i) => {

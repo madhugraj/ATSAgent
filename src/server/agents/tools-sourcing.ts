@@ -44,6 +44,7 @@ export function registerSourcingTools(): void {
       "People the organisation already knows who did well for other roles (shortlisted, interviewed, held in reserve, declined an offer or turned down after an interview), consented to be contacted, did not opt out of role emails, are not in this role's pipeline, are not employees, were not invited for this role in the last 30 days and were not emailed about any role in the last 14 days — ranked against this role's must-haves by meaning, each with why they matched and how far they got before.",
     input: ReqId.extend({ limit: z.number().int().min(1).max(20).default(10) }),
     risk: "read",
+    capability: "matching.pool",
     untrustedOutput: true,
     skills: ["talent_search"],
     run: async (ctx, i) => {
@@ -60,6 +61,7 @@ export function registerSourcingTools(): void {
       candidateIds: z.array(z.string().uuid()).min(1).max(10),
     }),
     risk: "external",
+    capability: "matching.pool",
     templateOf: () => "role_invite",
     describe: (i) => `Invite ${i.candidateIds.length} past candidate(s) to apply`,
     run: async (ctx, i) => {
