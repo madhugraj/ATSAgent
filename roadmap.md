@@ -69,7 +69,7 @@ Candidate Identification platform work, rows 0 and 5 (`docs/candidate-identifica
       counts; per role, candidates in score order with factor breakdown, per-requirement
       verdicts and the CV passages behind them, knock-outs and the rationale; Shortlist /
       Reject / Undo (recruiter-side roles, audited, recorded as training feedback when
-      consented) — shortlisting adds the person to the role as "sourced", never moves an
+      consented) — shortlisting adds the person to the role like a pool match, never moves an
       existing application; re-rank; CSV export. "Candidate identification" workflow
       template (JD agent + Intake & matching agent): its capabilities are requisitions,
       pool and shortlist — no interviews, offers or calls

@@ -1,8 +1,8 @@
 /**
  * Shortlist (plan rows 9–10, C2): every server function is capability-gated and
  * org-scoped; decisions need a recruiter-side role and are audited; a
- * shortlist decision adds the person to the role's pipeline as "sourced" only
- * (no stage jump, no message); the Candidate Identification template grants
+ * shortlist decision adds the person to the role's pipeline like a pool match
+ * (default stage, no message); the Candidate Identification template grants
  * the shortlist capability through its agents.
  *
  * Run: bun test scripts/shortlist.test.ts
@@ -40,8 +40,8 @@ describe("shortlist server functions", () => {
     );
     expect(rerank).toContain("assertRole(");
   });
-  test("shortlisting adds the person as sourced and never moves an existing application", () => {
-    expect(src).toContain('stage: "sourced"');
+  test("shortlisting adds the person like a pool match and never moves an existing application", () => {
+    expect(src).not.toMatch(/insert\(applications\)[\s\S]{0,400}?\bstage\s*:/);
     expect(src).toContain(".onConflictDoNothing()");
     expect(src).not.toMatch(/update\(applications\)/);
   });

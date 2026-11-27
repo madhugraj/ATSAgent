@@ -63,7 +63,7 @@ export const listRankedRequisitionsFn = createServerFn({ method: "GET" })
     const stats = await db
       .select({
         requisitionId: profileMatchScores.requisitionId,
-        reviewed: sql<number>`count(*) filter (where ${profileMatchScores.stage} = 'judged')::int`,
+        reviewed: sql<number>`count(*) filter (where ${profileMatchScores.reviewStage} = 'judged')::int`,
         shortlisted: sql<number>`count(*) filter (where ${profileMatchScores.decision} = 'shortlisted')::int`,
         top: sql<number | null>`max(${profileMatchScores.overallScore})`,
       })
@@ -168,7 +168,7 @@ export const getShortlistFn = createServerFn({ method: "POST" })
       currentRole: r.currentEmployer,
       rank: i + 1,
       score: r.s.overallScore ?? Math.round(Number(r.s.coarseScore) * 100),
-      reviewed: r.s.stage === "judged",
+      reviewed: r.s.reviewStage === "judged",
       factors: r.s.factors,
       requirements: r.s.requirements,
       knockouts: r.s.knockouts,
@@ -242,8 +242,8 @@ export const decideShortlistFn = createServerFn({ method: "POST" })
       .returning();
     if (!row) throw new Error("That candidate is not ranked for this role.");
 
-    // A shortlisted person joins the role's pipeline as sourced (no stage jump,
-    // no message); an existing application is left exactly as it is.
+    // A shortlisted person joins the role's pipeline the way pool matches do
+    // (default stage, no message); an existing application is left exactly as it is.
     if (decision === "shortlisted")
       await db
         .insert(applications)
@@ -252,7 +252,6 @@ export const decideShortlistFn = createServerFn({ method: "POST" })
           requisitionId: data.requisitionId,
           candidateId: data.candidateId,
           source: "profile_match",
-          stage: "sourced",
         })
         .onConflictDoNothing();
 
