@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db } from "../server/db";
 import { applications } from "@db/schema";
 import { assertRole, requireOrg } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 import { canMove, REASON_REQUIRED, STAGE_LABEL, type Stage } from "./lifecycle";
 
 const STAGES = Object.keys(STAGE_LABEL) as [Stage, ...Stage[]];
@@ -33,7 +34,7 @@ const MoveInput = z.object({
  * updates `applications.stage` directly.
  */
 export const moveStage = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("pipeline.requisitions")])
   .validator((data: unknown) => MoveInput.parse(data))
   .handler(async ({ data, context }) => {
     const { moveStageCore } = await import("./pipeline.server");
@@ -51,7 +52,7 @@ export const moveStage = createServerFn({ method: "POST" })
 
 /** Same validation, applied to a selection from the talent pool table. */
 export const moveStages = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("pipeline.requisitions")])
   .validator((data: unknown) =>
     z
       .object({

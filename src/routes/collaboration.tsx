@@ -5,6 +5,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Building2, HandHeart, Inbox, Users } from "lucide-react";
 
+import { requireRouteCapability } from "@/lib/route-guard";
 import { useMe } from "@/hooks/useMe";
 import { useOrg } from "@/hooks/useOrg";
 import {
@@ -32,6 +33,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 
 export const Route = createFileRoute("/collaboration")({
+  beforeLoad: requireRouteCapability,
   head: () => ({
     meta: [
       { title: "Team & sharing — recruiter hand-offs and talent requests" },

@@ -3818,6 +3818,49 @@ export const panelAgentSettings = pgTable(
   ],
 );
 
+/* ------------------------------------------------ tenant workflow profile */
+// docs/candidate-identification/track-b-design.md §1.3 — migration 0094.
+
+/** The workflow profile kinds a tenant can run. Absence of a row means `full_pipeline`. */
+export type WorkflowProfileKind = "full_pipeline" | "template" | "custom";
+
+/**
+ * Per tenant: which way of working the organisation runs, which published
+ * workflow backs it (template/custom), the capability set that was resolved at
+ * apply time, and profile-level settings. Written only by the platform-admin
+ * apply step; switching profiles never deletes any other data.
+ */
+export const orgWorkflowProfiles = pgTable(
+  "org_workflow_profiles",
+  {
+    orgId: uuid("org_id")
+      .primaryKey()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    profile: text("profile").$type<WorkflowProfileKind>().notNull(),
+    /** The workflow a `template`/`custom` profile runs; null for `full_pipeline`. */
+    workflowId: uuid("workflow_id").references(() => agentWorkflows.id, { onDelete: "set null" }),
+    /** Capabilities resolved at apply time (derived from the workflow graph, never client-set). */
+    resolvedCapabilities: jsonb("resolved_capabilities")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /** Profile settings: jdRequisitionMode, jdDuplicateLookbackDays, payVarianceTolerance. */
+    settings: jsonb("settings")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    appliedBy: uuid("applied_by").references(() => users.id, { onDelete: "set null" }),
+    appliedAt: timestamp("applied_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      "org_workflow_profiles_profile_check",
+      sql`${t.profile} in ('full_pipeline', 'template', 'custom')`,
+    ),
+  ],
+);
+
 /** A round's call transcript, as the meeting provider wrote it (candidate data). */
 export const interviewTranscripts = pgTable(
   "interview_transcripts",

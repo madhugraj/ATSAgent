@@ -7,9 +7,10 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { requireOrg } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 
 export const getRoleCost = createServerFn({ method: "GET" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("insights.reports")])
   .validator((d: unknown) => z.object({ requisitionId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const { assertRequisitionInOrg } = await import("../server/guards");
@@ -19,7 +20,7 @@ export const getRoleCost = createServerFn({ method: "GET" })
   });
 
 export const getCandidateCost = createServerFn({ method: "GET" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("insights.reports")])
   .validator((d: unknown) => z.object({ applicationId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const { candidateCost } = await import("../server/agents/hiring-cost.server");
@@ -28,7 +29,7 @@ export const getCandidateCost = createServerFn({ method: "GET" })
 
 /** Hiring cost across every role, month by month — HR head, CBO or owner. */
 export const getOrgHiringCost = createServerFn({ method: "GET" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("insights.reports")])
   .validator((d: unknown) =>
     z.object({ months: z.number().int().min(1).max(24).default(6) }).parse(d ?? {}),
   )
