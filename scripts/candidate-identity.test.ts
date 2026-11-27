@@ -50,6 +50,16 @@ let orgB: string;
 let userId: string;
 let reqId: string;
 
+/** Poll a query until it returns rows (fire-and-forget writes land a tick later). */
+async function eventually<T>(q: () => Promise<T[]>, ms = 2000): Promise<T[]> {
+  const end = Date.now() + ms;
+  for (;;) {
+    const rows = await q();
+    if (rows.length || Date.now() > end) return rows;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
 function hashOf(v: string) {
   return createHash("sha256").update(v).digest("hex");
 }
@@ -407,10 +417,13 @@ describe("merge and undo", () => {
     expect(keys!.some((k) => k.keyValue === `ada-b-${stamp}@${dom}`)).toBe(true);
 
     // Merge is audited.
-    const audits = await db
-      .select()
-      .from(auditLog)
-      .where(and(eq(auditLog.orgId, orgA), eq(auditLog.action, "candidate.merge")));
+    // writeAudit is fire-and-forget by design: wait for the row, don't race it.
+    const audits = await eventually(() =>
+      db
+        .select()
+        .from(auditLog)
+        .where(and(eq(auditLog.orgId, orgA), eq(auditLog.action, "candidate.merge"))),
+    );
     expect(audits.length).toBeGreaterThanOrEqual(1);
 
     // Undo restores the deleted application with its original id and date.
