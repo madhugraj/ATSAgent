@@ -33,6 +33,12 @@ export type WorkflowProfileSettings = {
   jdDuplicateLookbackDays?: number;
   /** Duplicate check: pay bands diverging more than this fraction can never be duplicates. */
   payVarianceTolerance?: number;
+  /** Profile matching: how many top candidates per requisition get the AI review. */
+  profileMatchTopK?: number;
+  /** Profile matching: factor weights (normalised at use). */
+  profileMatchWeights?: Partial<
+    Record<"must" | "nice" | "experience" | "sector" | "location", number>
+  >;
 };
 
 export const DEFAULT_PROFILE_SETTINGS: Required<Pick<WorkflowProfileSettings, never>> & {
@@ -58,6 +64,8 @@ export const SETTING_CAPABILITIES: {
   },
   jdDuplicateLookbackDays: {},
   payVarianceTolerance: {},
+  profileMatchTopK: {},
+  profileMatchWeights: {},
 };
 
 /** Capabilities a setting value depends on (empty when it has none). */

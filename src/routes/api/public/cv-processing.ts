@@ -29,7 +29,9 @@ async function run(request: Request) {
     const { drainClaimsExtraction } = await import("@/server/candidates/versions.server");
     const archive = await drainArchiveImports({ limit: Math.min(opts.max ?? 10, 25) });
     const claims = await drainClaimsExtraction({ limit: opts.max ?? 20 });
-    return Response.json({ archive, claims });
+    const { drainProfileMatches } = await import("@/server/candidates/profile-match.server");
+    const matching = await drainProfileMatches({ limit: 2 });
+    return Response.json({ archive, claims, matching });
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
   }

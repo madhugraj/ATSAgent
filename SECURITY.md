@@ -475,3 +475,11 @@ mandatory document type has been validated.
   prefix. Trial runs keep only counts and hashed identity keys, never file bytes or
   contact details.
 - Issues CSV cells are escaped against spreadsheet formula injection.
+
+## Profile matching (Candidate Identification C1)
+
+- JD requirements and candidate profiles both enter the review prompt through `untrusted()`
+  with `INJECTION_RULES`; the model's JSON is zod-validated.
+- A verdict counts only through citations that resolve to the candidate's own stored
+  claims; anything else is treated as missing evidence. The score is computed in code.
+- Matching never changes a stage, rejects or contacts anyone; it only ranks.

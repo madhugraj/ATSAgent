@@ -40,6 +40,7 @@ export const COST_STAGES: { stage: string; features: string[] }[] = [
     stage: "Matching",
     features: [
       "candidate_score",
+      "profile_match",
       "talent_search",
       "agent_intake",
       "agent_sourcing",

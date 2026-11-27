@@ -312,6 +312,12 @@ export async function drainClaimsExtraction(
     }
   };
   await Promise.all(Array.from({ length: Math.max(1, opts.concurrency ?? 3) }, worker));
+  if (counts.done) {
+    const { queueMatchesForOrgs } = await import("./profile-match.server");
+    await queueMatchesForOrgs([...new Set(items.map((i) => i.org_id))]).catch((e: unknown) =>
+      log.warn("claims.queue_matches_failed", { error: e as Error }),
+    );
+  }
   return counts;
 }
 

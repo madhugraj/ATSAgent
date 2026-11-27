@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-137 tables across 9 domains.
+139 tables across 9 domains.
 
 ## Identity & access
 
@@ -1430,6 +1430,11 @@ erDiagram
 | `policy_sources` | `org_id` | `organizations` | cascade |
 | `policy_sources` | `zone_id` | `pay_zones` | cascade |
 | `pooling_regions` | `org_id` | `organizations` | cascade |
+| `profile_match_runs` | `org_id` | `organizations` | cascade |
+| `profile_match_runs` | `requisition_id` | `requisitions` | cascade |
+| `profile_match_scores` | `candidate_id` | `candidates` | cascade |
+| `profile_match_scores` | `org_id` | `organizations` | cascade |
+| `profile_match_scores` | `requisition_id` | `requisitions` | cascade |
 | `requisition_board_postings` | `org_id` | `organizations` | cascade |
 | `requisition_board_postings` | `requisition_id` | `requisitions` | cascade |
 | `requisitions` | `created_by` | `users` | no action |
@@ -1632,6 +1637,8 @@ erDiagram
 | `policy_sources` | — | 12 | (orgId+url) |
 | `pooling_regions` | — | 5 | (orgId+name) |
 | `product_catalogue_commercials` | Organisations & masters | 8 | — |
+| `profile_match_runs` | — | 11 | — |
+| `profile_match_scores` | — | 19 | (requisitionId+candidateId) |
 | `rate_limit_hits` | — | 3 | — |
 | `requisition_board_postings` | — | 16 | (requisitionId+provider) |
 | `requisitions` | Requisitions & job content | 56 | (orgId+code) |

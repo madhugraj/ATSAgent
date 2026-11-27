@@ -55,6 +55,16 @@ Candidate Identification platform work, rows 0 and 5 (`docs/candidate-identifica
       and the import prefix is swept when it finishes. Deferred: OCR for scanned files
       (unreadable files are listed), per-version retention (keep everything until a tenant
       sets a period), the scheduled file-drop pull channel
+- [x] C1: profile-based matching (`profile_match_scores`, `profile_match_runs`): approved
+      requisitions with a requirement profile (bulk JD import) are ranked automatically —
+      an evidence pass over the whole eligible pool (must/nice requirements expanded once
+      into CV terms; demonstrated > listed > CV-text hits; experience band, location,
+      sector) and a requirement-by-requirement review for the top K (tenant setting,
+      default 50) whose verdicts must cite the candidate's own claims — uncited verdicts
+      count as missing; the score is computed in code from the verdicts and tenant
+      weights; reruns re-review only candidates whose profile changed; new evidence
+      re-queues the organisation's requisitions. Merged, non-consented and portal-terms
+      people stay out of the pool. The pool-match agent's own limits are unchanged
 
 ## Pay terms — Phase 1 foundation (2026-11-11)
 

@@ -5387,3 +5387,104 @@ export const sectorTaxonomyTerms = pgTable(
   },
   (t) => [uniqueIndex("sector_taxonomy_terms_org_term_key").on(t.orgId, t.term)],
 );
+
+/* ------------------------------------------- profile matching (C1, row 8) */
+
+export type MatchEvidenceRef = { claimId: string; versionId: string; passage: string };
+export type MatchFactor = {
+  key: "must" | "nice" | "experience" | "sector" | "location";
+  score: number;
+  weight: number;
+  evidence: MatchEvidenceRef[];
+};
+export type MatchRequirement = {
+  requirement: string;
+  kind: "must" | "nice";
+  verdict: "met" | "partial" | "missing";
+  strength: "demonstrated" | "listed" | "inferred" | null;
+  evidence: MatchEvidenceRef[];
+  note: string | null;
+};
+export type MatchKnockout = {
+  kind: "location" | "right_to_work" | "language" | "experience";
+  detail: string;
+};
+
+/** One candidate scored against one requisition's requirement profile (C1). */
+export const profileMatchScores = pgTable(
+  "profile_match_scores",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    requisitionId: uuid("requisition_id")
+      .notNull()
+      .references(() => requisitions.id, { onDelete: "cascade" }),
+    candidateId: uuid("candidate_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "cascade" }),
+    coarseScore: numeric("coarse_score", { precision: 6, scale: 3 }).notNull().default("0"),
+    coarseRank: integer("coarse_rank"),
+    overallScore: integer("overall_score"),
+    stage: text("stage").$type<"coarse" | "judged">().notNull().default("coarse"),
+    factors: jsonb("factors")
+      .$type<MatchFactor[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    requirements: jsonb("requirements")
+      .$type<MatchRequirement[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    knockouts: jsonb("knockouts")
+      .$type<MatchKnockout[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    rationale: text("rationale"),
+    profileStamp: text("profile_stamp").notNull().default(""),
+    decision: text("decision").$type<"shortlisted" | "rejected">(),
+    decidedBy: uuid("decided_by"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decisionNote: text("decision_note"),
+    judgedAt: timestamp("judged_at", { withTimezone: true }),
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("profile_match_scores_req_cand_key").on(t.requisitionId, t.candidateId),
+    index("profile_match_scores_rank_idx").on(t.orgId, t.requisitionId),
+    check("profile_match_scores_stage_check", sql`${t.stage} in ('coarse','judged')`),
+    check(
+      "profile_match_scores_decision_check",
+      sql`${t.decision} is null or ${t.decision} in ('shortlisted','rejected')`,
+    ),
+  ],
+);
+
+/** Per-requisition matching state: cached term expansions and the last run. */
+export const profileMatchRuns = pgTable(
+  "profile_match_runs",
+  {
+    requisitionId: uuid("requisition_id")
+      .primaryKey()
+      .references(() => requisitions.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    expansions: jsonb("expansions")
+      .$type<{ requirement: string; kind: "must" | "nice"; terms: string[] }[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    expansionsStamp: text("expansions_stamp").notNull().default(""),
+    poolSize: integer("pool_size").notNull().default(0),
+    judged: integer("judged").notNull().default(0),
+    status: text("status")
+      .$type<"idle" | "queued" | "running" | "failed">()
+      .notNull()
+      .default("idle"),
+    lastError: text("last_error"),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    requestedAt: timestamp("requested_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("profile_match_runs_org_idx").on(t.orgId)],
+);
