@@ -18,10 +18,11 @@ export const PANEL_NO_SHOW_WINDOW_DAYS = 90;
 export type PanelNoShow = { email: string; memberId: string | null; name: string };
 
 /**
- * Who on the round missed it without notice (pure): everyone on the round,
- * less anyone who said beforehand they could not make it and less the person
- * marking it when they are on the round (they were there to mark it). Empty
- * when the round had not started — a change before the start is notice.
+ * Who on the round missed it without notice (pure). When the person marking
+ * it named who did not join, those of them on the round; otherwise everyone on
+ * the round less the person marking it (they were there to mark it). Anyone
+ * who said beforehand they could not make it gave notice and is left out.
+ * Empty when the round had not started — a change before the start is notice.
  */
 export function noShowEmails(
   r: {
@@ -32,13 +33,15 @@ export function noShowEmails(
   },
   markedBy: string,
   now = Date.now(),
+  named?: string[],
 ): string[] {
   if (!r.scheduledAt || r.scheduledAt.getTime() > now) return [];
   const norm = (e: string | null | undefined) => e?.trim().toLowerCase() ?? "";
   const gaveNotice = new Set((r.unavailable ?? []).map((u) => norm(u.email)));
   const me = norm(markedBy);
   const people = [...new Set([r.lead, ...(r.panel ?? []).map((p) => p.email)].map(norm))];
-  return people.filter((e) => e && !gaveNotice.has(e) && e !== me);
+  const picked = named ? new Set(named.map(norm)) : null;
+  return people.filter((e) => e && !gaveNotice.has(e) && (picked ? picked.has(e) : e !== me));
 }
 
 /**
@@ -57,6 +60,7 @@ export async function handlePanelNoShow(
   },
   markedBy: string,
   actor: { email: string; userId: string | null },
+  named?: string[],
 ): Promise<PanelNoShow[]> {
   const [iv] = await db
     .select({
@@ -73,7 +77,7 @@ export async function handlePanelNoShow(
     .where(and(eq(interviews.orgId, orgId), eq(interviews.id, r.id)))
     .limit(1);
   if (!iv) return [];
-  const emails = noShowEmails(iv, markedBy);
+  const emails = noShowEmails(iv, markedBy, Date.now(), named);
   if (!emails.length) return [];
 
   const nameOf = (e: string) =>

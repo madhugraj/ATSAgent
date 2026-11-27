@@ -24,7 +24,14 @@ import {
 } from "@/components/CompetencyRating";
 import { PanelBriefView } from "@/components/PanelBriefView";
 import { ChangeTime, ScorecardChange } from "@/components/interviews/PanelChanges";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useOrg } from "@/hooks/useOrg";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -109,10 +116,42 @@ function MyInterviewsPage() {
     round: MyInterview,
     kind: "candidate_no_show" | "interviewer_unavailable" | "cancelled",
   ) {
+    if (kind === "interviewer_unavailable") {
+      setNoShow({
+        round,
+        missed: new Set(round.panel_people.filter((p) => p.me).map((p) => p.email)),
+        note: "",
+      });
+      return;
+    }
     const note = window.prompt("Anything to add for the team? (optional)") ?? "";
     try {
       await outcome({ data: { interviewId: round.id, outcome: kind, note } });
       toast.success("Recorded — the team is told and new times will be offered");
+      qc.invalidateQueries({ queryKey: ["my_interviews"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not record this");
+    }
+  }
+
+  const [noShow, setNoShow] = useState<{
+    round: MyInterview;
+    missed: Set<string>;
+    note: string;
+  } | null>(null);
+  async function recordNoShow() {
+    if (!noShow || !noShow.missed.size) return;
+    try {
+      await outcome({
+        data: {
+          interviewId: noShow.round.id,
+          outcome: "interviewer_unavailable",
+          note: noShow.note,
+          missed: [...noShow.missed],
+        },
+      });
+      toast.success("Recorded — the HR head is told and a stand-in will be arranged");
+      setNoShow(null);
       qc.invalidateQueries({ queryKey: ["my_interviews"] });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not record this");
@@ -187,6 +226,50 @@ function MyInterviewsPage() {
               <ScorecardChange token={changing.change_token} />
             </div>
           ) : null}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={!!noShow} onOpenChange={(o) => !o && setNoShow(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Who did not join?</DialogTitle>
+          </DialogHeader>
+          {noShow ? (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                {noShow.round.panel_people.map((p) => (
+                  <label key={p.email} className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={noShow.missed.has(p.email)}
+                      onCheckedChange={(c) =>
+                        setNoShow((n) => {
+                          if (!n) return n;
+                          const missed = new Set(n.missed);
+                          if (c) missed.add(p.email);
+                          else missed.delete(p.email);
+                          return { ...n, missed };
+                        })
+                      }
+                    />
+                    {p.me ? `${p.name} (you)` : p.name}
+                  </label>
+                ))}
+              </div>
+              <Textarea
+                value={noShow.note}
+                maxLength={500}
+                placeholder="Note (optional)"
+                onChange={(e) => setNoShow((n) => (n ? { ...n, note: e.target.value } : n))}
+              />
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNoShow(null)}>
+              Cancel
+            </Button>
+            <Button disabled={!noShow?.missed.size} onClick={() => void recordNoShow()}>
+              Record
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
       <PageHeader
@@ -332,7 +415,7 @@ function MyInterviewsPage() {
                         <SelectContent>
                           <SelectItem value="candidate_no_show">Candidate did not join</SelectItem>
                           <SelectItem value="interviewer_unavailable">
-                            I could not make it
+                            Panel did not join
                           </SelectItem>
                           <SelectItem value="cancelled">Cancelled</SelectItem>
                         </SelectContent>

@@ -521,6 +521,37 @@ describe("no-shows and cancellations", () => {
     await db.delete(auditLog).where(eq(auditLog.orgId, orgId));
   });
 
+  test("panel no-show: the person marking it names who did not join — themselves included", async () => {
+    const { auditLog } = await import("../drizzle/schema");
+    const r = await book(1, [B]);
+    await expect(
+      iv.markInterviewOutcomeCore(
+        { orgId, userId: people[B]!.id, email: people[B]!.email },
+        {
+          interviewId: r.id,
+          outcome: "interviewer_unavailable",
+          note: "",
+          missed: ["stranger@else.local"],
+        },
+      ),
+    ).rejects.toThrow(/only people on this round/i);
+    await iv.markInterviewOutcomeCore(
+      { orgId, userId: people[B]!.id, email: people[B]!.email },
+      {
+        interviewId: r.id,
+        outcome: "interviewer_unavailable",
+        note: "",
+        missed: [people[B]!.email],
+      },
+    );
+    const audits = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.orgId, orgId), eq(auditLog.action, "interview.panel_no_show")));
+    expect(audits.map((a) => (a.detail as { email: string }).email)).toEqual([people[B]!.email]);
+    await db.delete(auditLog).where(eq(auditLog.orgId, orgId));
+  });
+
   test("panel no-show: notice given beforehand, or a round not yet started, is not a no-show", () => {
     const { noShowEmails } = panelNoShow;
     const past = new Date(Date.now() - 3600_000);
@@ -528,6 +559,10 @@ describe("no-shows and cancellations", () => {
     expect(noShowEmails(round, "c@x")).toEqual(["a@x", "b@x"]);
     expect(noShowEmails(round, "a@x")).toEqual(["b@x"]);
     expect(noShowEmails({ ...round, unavailable: [{ email: "b@x" }] }, "c@x")).toEqual(["a@x"]);
+    expect(noShowEmails(round, "a@x", Date.now(), ["A@x"])).toEqual(["a@x"]);
+    expect(
+      noShowEmails({ ...round, unavailable: [{ email: "a@x" }] }, "c@x", Date.now(), ["a@x"]),
+    ).toEqual([]);
     expect(noShowEmails({ ...round, scheduledAt: new Date(Date.now() + 3600_000) }, "c@x")).toEqual(
       [],
     );
