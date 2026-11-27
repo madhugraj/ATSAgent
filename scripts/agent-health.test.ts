@@ -172,6 +172,30 @@ describe("rules", () => {
     expect((await open()).filter((i) => i.rule === "sourcing.no_supply")).toHaveLength(0);
   });
 
+  test("a panel no-show (missed a booked round without notice) is critical at once", async () => {
+    await evaluate();
+    expect((await open()).filter((i) => i.rule === "interview.panel_no_shows")).toHaveLength(0);
+    await db.insert(auditLog).values({
+      orgId,
+      actor: "system",
+      action: "interview.panel_no_show",
+      entityType: "interview",
+      detail: { email: "late@test.local", level: 1 },
+    });
+    await evaluate();
+    expect((await open()).find((i) => i.rule === "interview.panel_no_shows")).toMatchObject({
+      agentType: "interview",
+      severity: "critical",
+    });
+    // Older than the 7-day window: resolved.
+    await db
+      .update(auditLog)
+      .set({ createdAt: ago(8 * 24 * 60) })
+      .where(eq(auditLog.orgId, orgId));
+    await evaluate();
+    expect((await open()).filter((i) => i.rule === "interview.panel_no_shows")).toHaveLength(0);
+  });
+
   test("an offer going back and forth (3+ revisions, still open) is flagged", async () => {
     const { offers, applications, candidates, requisitions } = await import("../drizzle/schema");
     const [q] = await db

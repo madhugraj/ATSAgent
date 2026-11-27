@@ -747,6 +747,14 @@ export async function recordMissedRound(
   if (outcome !== "candidate_no_show") await apologiseToCandidate(orgId, r);
   const { closeRoundRequests } = await import("../server/agents/runtime.server");
   await closeRoundRequests(orgId, r.applicationId, r.level);
+  // A panellist who did not join and gave no notice: warned, escalated to the
+  // HR heads, and replaced by a stand-in before new times go to the candidate.
+  const missed =
+    outcome === "interviewer_unavailable"
+      ? await (
+          await import("./panel-no-show.server")
+        ).handlePanelNoShow(orgId, r, actor.email, actor)
+      : [];
   const { emitAgentEvent } = await import("../server/agents/events");
   await emitAgentEvent({
     orgId,
@@ -754,7 +762,14 @@ export async function recordMissedRound(
     subjectType: "application",
     subjectId: r.applicationId,
     actorUserId: actor.userId,
-    payload: { requisitionId: r.requisitionId, level: r.level, outcome },
+    payload: {
+      requisitionId: r.requisitionId,
+      level: r.level,
+      outcome,
+      ...(missed.length
+        ? { noShows: missed.map((m) => ({ memberId: m.memberId, name: m.name })) }
+        : {}),
+    },
   });
   try {
     const desk = await import("../server/desk/desk.server");
@@ -762,7 +777,7 @@ export async function recordMissedRound(
     if (conv)
       await desk.postMessage(conv, {
         role: "desk",
-        body: `${r.candidateName}'s L${r.level} interview did not happen: ${label}${note ? ` ("${note}")` : ""}.${outcome === "candidate_no_show" ? "" : " The candidate was told, with an apology."} Nothing about the candidate changed; the Interview coordinator offers new times when it is on.`,
+        body: `${r.candidateName}'s L${r.level} interview did not happen: ${label}${note ? ` ("${note}")` : ""}.${outcome === "candidate_no_show" ? "" : " The candidate was told, with an apology."}${missed.length ? ` Panel no-show: ${missed.map((m) => m.name).join(", ")} did not join and gave no notice — each was warned and the HR head was told. The Interview coordinator proposes a stand-in for each before offering new times.` : " Nothing about the candidate changed; the Interview coordinator offers new times when it is on."}`,
       });
   } catch {
     /* the thread is a courtesy; the audit trail has the record */

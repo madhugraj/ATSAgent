@@ -35,6 +35,7 @@ const planServer = await import("../src/lib/interview-plan.server");
 const iv = await import("../src/lib/interviews.functions");
 await import("../src/server/agents");
 const { getTool } = await import("../src/server/agents/registry");
+const panelNoShow = await import("../src/lib/panel-no-show.server");
 
 const stamp = Date.now();
 let orgId: string;
@@ -95,6 +96,7 @@ beforeAll(async () => {
   await user("Priya", ["hiring_manager"]);
   await user("Ravi", ["department_head"]);
   await user("Sam", ["recruiter"]);
+  await user("Hema", ["hr_head"]);
   const [r] = await db
     .insert(requisitions)
     .values({
@@ -469,6 +471,66 @@ describe("no-shows and cancellations", () => {
       .from(agentRuns)
       .where(and(eq(agentRuns.orgId, orgId), eq(agentRuns.agentType, "interview")));
     expect(run!.goal).toMatch(/did not happen \(candidate no show\)\. Offer new times/);
+  });
+
+  test("panel no-show: each who missed is warned, the HR head told, a stand-in asked for", async () => {
+    const { auditLog } = await import("../drizzle/schema");
+    const HR = 3;
+    const r = await book(1, [B]);
+    await iv.markInterviewOutcomeCore(
+      { orgId, userId: people[C]!.id, email: people[C]!.email },
+      { interviewId: r.id, outcome: "interviewer_unavailable", note: "Nobody joined" },
+    );
+    const audits = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.orgId, orgId), eq(auditLog.action, "interview.panel_no_show")));
+    expect(audits.map((a) => (a.detail as { email: string }).email).sort()).toEqual(
+      [people[A]!.email, people[B]!.email].sort(),
+    );
+    const mail = await db.select().from(emailOutbox).where(eq(emailOutbox.orgId, orgId));
+    const warned = mail.filter((m) => m.idempotencyKey.startsWith("panel-no-show-warning:"));
+    expect(warned.map((m) => m.toEmail).sort()).toEqual(
+      [people[A]!.email, people[B]!.email].sort(),
+    );
+    const escalated = mail.filter((m) => m.idempotencyKey.startsWith("panel-no-show-escalation:"));
+    expect(escalated.map((m) => m.toEmail)).toEqual([people[HR]!.email]);
+    const [ev] = await events("interview.missed");
+    expect((ev!.payload as { noShows: unknown[] }).noShows).toHaveLength(2);
+    await db
+      .insert(agentPolicies)
+      .values({ orgId, agentType: "interview", enabled: true })
+      .onConflictDoNothing();
+    const { processAgentEvents } = await import("../src/server/agents/orchestrator.server");
+    await processAgentEvents({ orgId });
+    const [run] = await db
+      .select()
+      .from(agentRuns)
+      .where(and(eq(agentRuns.orgId, orgId), eq(agentRuns.agentType, "interview")));
+    expect(run!.goal).toMatch(/panel no-show .* propose_substitute/);
+    // A second miss by the same person tells them it is a repeat.
+    const again = await book(1, [B]);
+    await iv.markInterviewOutcomeCore(
+      { orgId, userId: people[C]!.id, email: people[C]!.email },
+      { interviewId: again.id, outcome: "interviewer_unavailable", note: "" },
+    );
+    const repeat = (await db.select().from(emailOutbox).where(eq(emailOutbox.orgId, orgId))).find(
+      (m) => m.idempotencyKey === `panel-no-show-warning:${again.id}:${people[B]!.email}`,
+    );
+    expect(JSON.stringify(repeat!.templateData)).toMatch(/once before/);
+    await db.delete(auditLog).where(eq(auditLog.orgId, orgId));
+  });
+
+  test("panel no-show: notice given beforehand, or a round not yet started, is not a no-show", () => {
+    const { noShowEmails } = panelNoShow;
+    const past = new Date(Date.now() - 3600_000);
+    const round = { scheduledAt: past, lead: "a@x", panel: [{ email: "B@x" }], unavailable: [] };
+    expect(noShowEmails(round, "c@x")).toEqual(["a@x", "b@x"]);
+    expect(noShowEmails(round, "a@x")).toEqual(["b@x"]);
+    expect(noShowEmails({ ...round, unavailable: [{ email: "b@x" }] }, "c@x")).toEqual(["a@x"]);
+    expect(noShowEmails({ ...round, scheduledAt: new Date(Date.now() + 3600_000) }, "c@x")).toEqual(
+      [],
+    );
   });
 
   test("health: repeated candidate no-shows are flagged", async () => {
