@@ -9,10 +9,11 @@ import { z } from "zod";
 import { db } from "../server/db";
 import { candidates } from "@db/schema";
 import { requireOrg } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 import { getObject, isStorageConfigured } from "../server/storage";
 
 export const getResumeDownloadUrl = createServerFn({ method: "GET" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("matching.pool")])
   .validator((data: unknown) => z.object({ candidateId: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const [candidate] = await db

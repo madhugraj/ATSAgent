@@ -11,11 +11,12 @@ import { z } from "zod";
 import { db } from "../server/db";
 import { requisitions } from "@db/schema";
 import { requireOrg } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 
 const ReqInput = z.object({ requisitionId: z.string().uuid() });
 
 export const getInterviewPlan = createServerFn({ method: "GET" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.interviews")])
   .validator((d: unknown) => ReqInput.parse(d))
   .handler(async ({ data, context }) => {
     const { assertRequisitionInOrg } = await import("../server/guards");
@@ -25,7 +26,7 @@ export const getInterviewPlan = createServerFn({ method: "GET" })
   });
 
 export const saveInterviewPlan = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.interviews")])
   .validator((d: unknown) => ReqInput.extend({ plan: z.unknown().nullable() }).parse(d))
   .handler(async ({ data, context }) => {
     const { assertRequisitionInOrg } = await import("../server/guards");
@@ -61,7 +62,7 @@ export const saveInterviewPlan = createServerFn({ method: "POST" })
 
 /** Panelists' proposed scorecard changes for a role (src/lib/panel-changes.server.ts). */
 export const listPlanProposals = createServerFn({ method: "GET" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.interviews")])
   .validator((d: unknown) => ReqInput.parse(d))
   .handler(async ({ data, context }) => {
     const { assertRequisitionInOrg } = await import("../server/guards");
@@ -72,7 +73,7 @@ export const listPlanProposals = createServerFn({ method: "GET" })
 
 /** The hiring manager (or, after a wait, the HR head) approves or rejects one. */
 export const decidePlanProposal = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.interviews")])
   .validator((d: unknown) =>
     z
       .object({

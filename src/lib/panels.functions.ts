@@ -11,9 +11,10 @@ import { z } from "zod";
 import { panelists } from "@db/schema";
 import { db } from "../server/db";
 import { requireOrg } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 
 export const getPanelChoices = createServerFn({ method: "GET" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.interviews")])
   .validator((d: unknown) =>
     z.object({ requisitionId: z.string().uuid(), level: z.number().int().min(1).max(3) }).parse(d),
   )

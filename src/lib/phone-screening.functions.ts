@@ -8,6 +8,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { assertRole, requireOrg, requireRole } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 
 const Policy = z
   .object({
@@ -35,7 +36,7 @@ const Policy = z
 
 /** The policy plus what is still missing before calls can be placed. */
 export const getPhoneScreening = createServerFn({ method: "GET" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.voice")])
   .handler(async ({ context }) => {
     const { phoneScreeningPolicyOf, phoneScreeningReadiness } =
       await import("../server/voice/settings.server");
@@ -48,7 +49,7 @@ export const getPhoneScreening = createServerFn({ method: "GET" })
 
 /** Change the phone screening policy — HR head, CBO or owner; audited. */
 export const setPhoneScreening = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.voice")])
   .validator((d: unknown) => Policy.parse(d))
   .handler(async ({ data, context }) => {
     await assertRole(

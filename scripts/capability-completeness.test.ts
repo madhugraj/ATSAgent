@@ -22,6 +22,7 @@ import { NAV_GROUPS } from "../src/components/nav-config";
 import {
   NAV_EXEMPT_PREFIXES,
   ROUTE_CAPABILITIES,
+  SERVER_FN_MODULE_CAPABILITY,
   TOOL_EXEMPT,
   routeCapabilityOf,
   capabilitiesAdmitRoute,
@@ -133,11 +134,11 @@ describe("tool registry completeness", () => {
   });
 });
 
-/* ------------------------- 4. server-function sweep (report-only in B1a) */
+/* ------------------------- 4. server-function sweep (strict since B1b) */
 
 describe("server function capability coverage", () => {
-  test("tenant-scoped server fn modules carry a capability check (report-only until B1b)", () => {
-    const missing: string[] = [];
+  test("every tenant-scoped server fn module is classified in SERVER_FN_MODULE_CAPABILITY", () => {
+    const unclassified: string[] = [];
     const dirs = [join(ROOT, "src", "lib"), join(ROOT, "src", "server")];
     for (const dir of dirs) {
       for (const file of readdirSync(dir)) {
@@ -145,21 +146,35 @@ describe("server function capability coverage", () => {
         const source = readFileSync(join(dir, file), "utf8");
         const createsFns = source.includes("createServerFn");
         const tenantScoped = /requireOrg|requireRole|requirePanel/.test(source);
-        if (!createsFns || !tenantScoped) continue;
-        if (/requireCapability|assertCapability/.test(source)) continue;
-        missing.push(`src/${join(dir, file).replace(ROOT, "")}`);
+        const definesCapability = /requireCapability|assertCapability/.test(source);
+        if (!createsFns || !tenantScoped || definesCapability) continue;
+        if (!(file in SERVER_FN_MODULE_CAPABILITY)) unclassified.push(file);
       }
     }
-    // B1a: report. B1b: CAPABILITY_SWEEP_STRICT=1 turns this into the gate.
-    if (process.env.CAPABILITY_SWEEP_STRICT === "1") {
-      expect(missing).toEqual([]);
-    } else {
-      console.log(
-        `[capability-sweep] B1a report — ${missing.length} module(s) still to gain requireCapability in B1b:\n  ${missing.join("\n  ")}`,
-      );
-      // Honest pin for B1a only: the report must not be silently empty, or the
-      // B1b work would not exist. Must be removed when strict mode lands.
-      expect(missing.length).toBeGreaterThan(0);
+    expect(unclassified).toEqual([]);
+  });
+
+  test("capability-mapped modules attach requireCapability; exempt modules do not", () => {
+    const libDir = join(ROOT, "src", "lib");
+    const violations: string[] = [];
+    for (const [file, cap] of Object.entries(SERVER_FN_MODULE_CAPABILITY)) {
+      const path = join(libDir, file);
+      let source: string;
+      try {
+        source = readFileSync(path, "utf8");
+      } catch {
+        violations.push(`${file}: mapped but missing`); // a stale map entry
+        continue;
+      }
+      const createsFns = source.includes("createServerFn");
+      const tenantScoped = /requireOrg|requireRole|requirePanel/.test(source);
+      if (!createsFns || !tenantScoped) {
+        violations.push(`${file}: mapped but no longer tenant-scoped`); // a stale map entry
+        continue;
+      }
+      if (cap != null && !source.includes("requireCapability"))
+        violations.push(`${file}: mapped to ${cap} but no requireCapability attached`);
     }
+    expect(violations).toEqual([]);
   });
 });

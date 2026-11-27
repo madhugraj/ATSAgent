@@ -8,11 +8,12 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { assertRole, requireOrg } from "./auth.middleware";
+import { requireCapability } from "./capabilities.server";
 
 const OfferRef = z.object({ offerId: z.string().uuid() });
 
 export const getOfferCheck = createServerFn({ method: "GET" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.offers")])
   .validator((d: unknown) => OfferRef.parse(d))
   .handler(async ({ data, context }) => {
     const { db } = await import("../server/db");
@@ -37,7 +38,7 @@ export const getOfferCheck = createServerFn({ method: "GET" })
   });
 
 export const runOfferCheck = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.offers")])
   .validator((d: unknown) => OfferRef.parse(d))
   .handler(async ({ data, context }) => {
     await assertRole(
@@ -51,7 +52,7 @@ export const runOfferCheck = createServerFn({ method: "POST" })
   });
 
 export const overrideOfferCheck = createServerFn({ method: "POST" })
-  .middleware([requireOrg])
+  .middleware([requireOrg, requireCapability("recruiting.offers")])
   .validator((d: unknown) =>
     OfferRef.extend({ reason: z.string().trim().min(10).max(1000) }).parse(d),
   )
