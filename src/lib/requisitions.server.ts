@@ -94,11 +94,35 @@ export type RequisitionFields = {
   workMode?: "onsite" | "hybrid" | "remote" | null;
 };
 
+/**
+ * Bulk JD import only (track-b-design §3.4): create the requisition already
+ * approved under the organisation's auto-approve policy. The trail entry is
+ * built here, server-side, and cites the audit row that enabled the policy.
+ * No other caller passes this — the desk and agent tools stay on
+ * draft / pending_dh.
+ */
+export type AutoApproveGrant = { policyAuditId: string };
+
 export async function createRequisitionCore(
   actor: LifecycleActor,
   f: RequisitionFields,
   status: "draft" | "pending_dh",
+  opts: { autoApprove?: AutoApproveGrant | undefined; externalJobCode?: string | null } = {},
 ): Promise<{ id: string; code: string }> {
+  const finalStatus: ReqStatus = opts.autoApprove ? "approved" : status;
+  const trail = opts.autoApprove
+    ? [
+        {
+          from: null,
+          to: "approved",
+          actor: actor.memberEmail,
+          decision: "auto_approved",
+          comment: "Bulk JD import",
+          policyAuditId: opts.autoApprove.policyAuditId,
+          at: new Date().toISOString(),
+        },
+      ]
+    : [];
   // The organisation may insist on an approved organisation profile first.
   const { assertProfileAllowsRequisition } = await import("./org-profile.server");
   await assertProfileAllowsRequisition(actor.orgId);
@@ -144,7 +168,9 @@ export async function createRequisitionCore(
           clientName: f.clientName,
           costCenter: f.costCenter,
           createdBy: actor.userId,
-          status,
+          status: finalStatus,
+          approvalTrail: trail as never,
+          externalJobCode: opts.externalJobCode ?? null,
         })
         .returning({ id: requisitions.id });
     } catch (e) {
@@ -161,7 +187,7 @@ export async function createRequisitionCore(
     subjectType: "requisition",
     subjectId: row!.id,
     actorUserId: actor.userId,
-    payload: { status, via: actor.via ?? null },
+    payload: { status: finalStatus, via: actor.via ?? null },
   });
   return { id: row!.id, code };
 }
@@ -572,6 +598,8 @@ export async function saveJobDescriptionCore(
     templateId?: string | null;
     templateName?: string | null;
   },
+  /** Bulk JD import under the auto-approve policy only (see AutoApproveGrant). */
+  opts: { autoApprove?: AutoApproveGrant | undefined } = {},
 ): Promise<{ id: string; version: number }> {
   const [requisition] = await db
     .select({ id: requisitions.id })
@@ -609,7 +637,7 @@ export async function saveJobDescriptionCore(
       requisitionId: input.requisitionId,
       orgId: actor.orgId,
       version,
-      status: "pending_dh",
+      status: opts.autoApprove ? "approved" : "pending_dh",
       purpose: input.jd.purpose,
       responsibilities: input.jd.responsibilities,
       mustHave: input.jd.must_have,
