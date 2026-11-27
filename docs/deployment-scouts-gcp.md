@@ -62,16 +62,16 @@ own AI provider key in the app (Integrations → AI model), encrypted with
 
 ## 1. Inputs to collect before starting
 
-| Item                              | Example / who provides it                                                                                                                                                               |
-| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GCP project                       | `yavar-scouts-prod` (new project recommended)                                                                                                                                           |
-| Region                            | `asia-south1` (Mumbai)                                                                                                                                                                  |
-| Repository                        | `https://github.com/madhugraj/ATSAgent` — deploy branch `main`                                                                                                                          |
-| DNS zone for `yavar.ai`           | Who manages it (Cloud DNS or external registrar)                                                                                                                                        |
-| SMTP for transactional mail       | `smtps://user:pass@smtp.provider.com:465` + a verified `EMAIL_FROM` (e.g. `Scouts <no-reply@scouts.yavar.ai>`)                                                                          |
-| SIP trunk / PBX (phone screening) | `SIP_SERVER`, `SIP_PORT`, `SIP_USER`, `SIP_PASSWORD`, `SIP_AUTH_USER`, `SIP_DOMAIN`, `SIP_CALLER_NAME` — from the telephony provider; they must allow-list our **static NAT IP** (§3.3) |
-| OAuth apps (optional features)    | Google sign-in, Google Calendar, Microsoft, Zoom, LinkedIn — client id/secret each (§8)                                                                                                 |
-| First platform admin              | Owner e-mail for `bootstrap-org.ts` (§7)                                                                                                                                                |
+| Item                              | Example / who provides it                                                                                                                                                                                                                                                                                                       |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GCP project                       | `yavar-scouts-prod` (new project recommended)                                                                                                                                                                                                                                                                                   |
+| Region                            | `asia-south1` (Mumbai)                                                                                                                                                                                                                                                                                                          |
+| Repository                        | `https://github.com/madhugraj/ATSAgent` — deploy branch `main`                                                                                                                                                                                                                                                                  |
+| DNS zone for `yavar.ai`           | Who manages it (Cloud DNS or external registrar)                                                                                                                                                                                                                                                                                |
+| SMTP for transactional mail       | `smtps://user:pass@smtp.provider.com:465` + a verified `EMAIL_FROM` (e.g. `Scouts <no-reply@scouts.yavar.ai>`). Tenants that block SMTP basic auth: leave `SMTP_URL` empty and set `MICROSOFT_OAUTH_TENANT_ID`/`MICROSOFT_OAUTH_CLIENT_ID`/`MICROSOFT_OAUTH_CLIENT_SECRET` (Entra app with admin-consented `Mail.Send`) instead |
+| SIP trunk / PBX (phone screening) | `SIP_SERVER`, `SIP_PORT`, `SIP_USER`, `SIP_PASSWORD`, `SIP_AUTH_USER`, `SIP_DOMAIN`, `SIP_CALLER_NAME` — from the telephony provider; they must allow-list our **static NAT IP** (§3.3)                                                                                                                                         |
+| OAuth apps (optional features)    | Google sign-in, Google Calendar, Microsoft, Zoom, LinkedIn — client id/secret each (§8)                                                                                                                                                                                                                                         |
+| First platform admin              | Owner e-mail for `bootstrap-org.ts` (§7)                                                                                                                                                                                                                                                                                        |
 
 Placeholders used below — export them in your shell:
 
@@ -311,6 +311,11 @@ S3_SECRET_ACCESS_KEY=<hmac secret>
 # --- e-mail (sign-up confirmation, password reset, candidate mail)
 SMTP_URL=smtps://user:pass@smtp.example.com:465
 EMAIL_FROM=Scouts <no-reply@scouts.yavar.ai>
+# If the tenant blocks SMTP basic auth, leave SMTP_URL empty and use Graph
+# client-credentials mail as the EMAIL_FROM mailbox instead:
+# MICROSOFT_OAUTH_TENANT_ID=<directory (tenant) id>
+# MICROSOFT_OAUTH_CLIENT_ID=<existing app registration id>
+# MICROSOFT_OAUTH_CLIENT_SECRET=<its secret; Mail.Send admin-consented>
 
 # --- scheduler (Cloud Scheduler sends Authorization: Bearer <CRON_SECRET>)
 CRON_SECRET=<openssl rand -hex 32>
@@ -369,6 +374,11 @@ the worker holds no AI key. Without `SIP_*` the worker exits with a clear log li
 ---
 
 ## 6. First deployment by hand (do this once before turning on CI/CD)
+
+> The `ats-agent-prod` namespace runs from the Helm chart in
+> `infra/helm/ats-agent/` instead of the raw manifests below — its deploy
+> runbook (namespace, secrets, first-install two-phase, listener cert patch)
+> is the comment header of `infra/helm/ats-agent/values.yaml`.
 
 ```bash
 TAG=$(git rev-parse --short HEAD)
@@ -429,7 +439,9 @@ kubectl -n scouts run bootstrap --rm -it --restart=Never \
 ```
 
 It creates the organisation, makes the owner the platform super admin, and
-e-mails a one-time link (60 minutes) to set the password — `SMTP_URL` must work.
+e-mails a one-time link (60 minutes) to set the password — the configured
+transport (`SMTP_URL`, or the Graph credentials when `SMTP_URL` is empty) must
+work.
 No password is ever set or seen by the operator. Idempotent. Check the output:
 it ends with `Sent the set-password link to …`; anything else (an error, or
 `Email is not configured`) means no email was sent. If the owner already has a
