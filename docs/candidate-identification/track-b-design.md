@@ -1,10 +1,11 @@
 # Track B design — workflow profile, branded JD templates, bulk JD import, duplicate JD check
 
-Developer 5 · milestone M0 (design only, no code) · plan rows 0, 5, 6, 7.
+Developer 5 · plan rows 0, 5, 6, 7.
 Everything here is platform capability for every tenant; client specifics are settings, never code.
-Milestone mapping: **B1** = row 0 (§1), **B2** = row 5 (§2), **B3** = rows 6–7 (§3–4). One PR per milestone after this note is signed off.
+Milestone mapping: **B1** = row 0 (§1), split into **B1a + B1b** (§1.8, per review condition 6); **B2** = row 5 (§2); **B3** = rows 6–7 (§3–4); follow-up **B3b** = §6 Q8. One PR per milestone.
 
 All paths are relative to the repo root; line references are against `origin/main` at 6f5d8350.
+Updated 2026-11-27 with the M0 review verdict (PR #113: approved with conditions 1–6, folded in here).
 
 ---
 
@@ -38,9 +39,11 @@ A fixed capability vocabulary in a new module `src/lib/capabilities.ts` (plain c
 
 - **Role-gated, unchanged (exempt from capabilities):** `/team`, `/organisation`, `/org-profile`, `/integrations`, `/masters`, `/templates`, `/brain`, `/agents/settings|observability|governance|intelligence|register`, `/platform*` — every profile needs the governance surfaces to configure the tenant; the platform surface is super-user only.
 - **Capability-gated but currently shown to everyone, called out explicitly because they reach agent tools:** `/desk` (hiring copilot), `/agents` ("Waiting for you" + agent activity — recruiter-facing, _not_ part of the governance exemption), `/collaboration`, `/catalogue`, `/skill-ontology`, `/w/$workflowId`. These are classified per capability at build time in `capabilities.ts`; e.g. a Candidate Identification tenant keeps `/desk` (its copilot drives JD → shortlist) but loses offer/voice tools.
-- A CI test (§5) enumerates `NAV_GROUPS` and the generated route tree and **fails if any item is unclassified** — the completeness rule is enforced, not asserted.
+- A CI sweep test (§5) enumerates `NAV_GROUPS` and the generated route tree and **fails if any item is unclassified** — the completeness rule is enforced, not asserted. (In B1a it runs **report-only**; it is switched to failing in B1b — §1.8.)
 
 **Agent → capability map** (static, in `capabilities.ts`): each agent _type_ in `src/server/agents/definitions.ts` declares which capabilities its tools need (e.g. `interview`/panel agents → `recruiting.interviews`; the `*_call` agents — `screening_call`, `scheduling_call`, `confirmation_call`, `panel_check_call`, `negotiation_call` — → `recruiting.voice`; `intake`+`sourcing` → `matching.pool`; `publishing` → `sourcing.distribution`; `requisition`/`jd` → `pipeline.requisitions`). This map is the deterministic bridge from a workflow graph to a capability set, and the basis for tool gating (§1.5).
+
+**Setting → capability dependencies:** `jdRequisitionMode: 'approval_gate'` requires `pipeline.approvals`; `auto_approved` does not (§3.4). `applyWorkflowProfile` refuses (with a plain-language error) an apply whose chosen settings depend on a capability the profile does not resolve; changing settings later re-checks the same rule (§1.4).
 
 ### 1.3 Storage
 
@@ -50,10 +53,13 @@ New table `org_workflow_profiles`, following the `panel_agent_settings` orgId-pr
 - `profile text not null` — CHECK in `('full_pipeline', 'template', 'custom')`
 - `workflowId uuid null references agent_workflows` — set for `template` / `custom` (which published workflow the tenant runs)
 - `resolvedCapabilities jsonb not null default '[]'` — the capability set computed at apply time (transparency + cheap reads; always recomputed server-side at apply, never trusted from client)
-- `settings jsonb not null default '{}'` — profile-level settings, declared keys: `jdRequisitionMode: 'auto_approved' | 'approval_gate'` (§3.4), `jdDuplicateLookbackDays: number` (default 90, §4.3), `payVarianceTolerance: number` (default 0.20, §4.3 hard-difference pay band)
+- `settings jsonb not null default '{}'` — profile-level settings, declared keys and defaults:
+  - `jdRequisitionMode: 'approval_gate' | 'auto_approved'` — **default `approval_gate`** (review condition 1; supersedes the earlier Q5 proposal)
+  - `jdDuplicateLookbackDays: number` (default 90, §4.3)
+  - `payVarianceTolerance: number` (default 0.20, §4.3 hard-difference pay band)
 - `appliedBy` → users, `appliedAt`, `updatedAt`
 
-Settings are chosen by the platform admin in the apply step and changeable later by tenant governance (`hr_head`/owner) through a small tenant-side settings fn; **both paths are audited** (`platform.workflow_profile.settings_updated` / `workflow_profile.settings_updated` with before/after).
+**Who may change what (review condition 1):** non-default settings are chosen by the platform admin in the apply step, or later by **tenant governance only** (`hr_head`/president_cbo/owner). Enabling `auto_approved` additionally requires **step-up re-authentication** (`withStepUp`, src/lib/step-up-client.ts, with the server signalling `STEP_UP_REQUIRED`) and is audited (`workflow_profile.settings_updated` / `platform.workflow_profile.settings_updated` with before/after); the audit row's id is what auto-approvals trace back to (§3.4). The other settings keys are governance-editable with audit but no step-up.
 
 **Absence of a row means `full_pipeline` with all capabilities** — so every existing tenant and every new tenant is untouched by default, and no seeding is needed in `src/lib/org.functions.ts`. A resolver `capabilitiesOf(orgId)` (new `src/lib/capabilities.server.ts`, 30 s per-process cache like `captureEnabled`) returns the full set when the row is absent. `full_pipeline` resolves to all capabilities, preserving today's behaviour exactly. The 30 s staleness after a tightening apply is accepted and stated (server fns are authoritative; the apply is audited); the cache-invalidation test is scoped to a single process (§5).
 
@@ -63,8 +69,9 @@ Capability derivation for `template` / `custom`: union of capabilities declared 
 
 A new per-row action **Workflow** on the tenant table in `src/routes/platform.tsx` (~lines 330–365, alongside Edit / Users / Archive), backed by two new server fns in `src/lib/platform.functions.ts`, both `.middleware([requirePlatformAdmin])`, following the `grantWorkflow` / `updateOrganizationAsSuperUser` patterns:
 
-- `applyWorkflowProfile` — input `{ orgId, profile, workflowId?, settings? }`. Steps: verify org exists; for `template`/`custom` verify the workflow is published and (reusing the `grantWorkflow` logic) that every `studio:` agent in its graph has an org grant — surface "Grant the studio agent … first." otherwise; grant the workflow if not already live-granted; soft-revoke grants of workflows no longer referenced; upsert the profile row with resolved capabilities; `writeAudit({ action: "platform.workflow_profile.applied", entityType: "organization", entityId: orgId, orgId, detail: { from, to, workflowId, resolvedCapabilities, settings } })`.
+- `applyWorkflowProfile` — input `{ orgId, profile, workflowId?, settings? }`. Steps: verify org exists; for `template`/`custom` verify the workflow is published and (reusing the `grantWorkflow` logic) that every `studio:` agent in its graph has an org grant — surface "Grant the studio agent … first." otherwise; grant the workflow if not already live-granted; soft-revoke grants of workflows no longer referenced; resolve capabilities and **refuse when a chosen setting depends on a capability the resolved set lacks** (e.g. `jdRequisitionMode: 'approval_gate'` with a profile whose graph grants no `pipeline.approvals`); upsert the profile row with resolved capabilities; `writeAudit({ action: "platform.workflow_profile.applied", entityType: "organization", entityId: orgId, orgId, detail: { from, to, workflowId, resolvedCapabilities, settings } })`. The platform admin may set `auto_approved` here — audited on the same row.
 - `readWorkflowProfile` — admin read for the dialog (current profile, grants, settings, readiness).
+- Tenant-side `saveWorkflowProfileSettings` (`requireRole`-gated to governance): settings changes with the §1.3 rules — `auto_approved` demands step-up; every change audited with before/after.
 
 A **custom** profile points at a workflow built in the workflow studio (`agent_blueprints` / studio flow) and published; the apply step is identical — the difference is only provenance, not storage. This is deliberately _not_ an extension of `WORKFLOW_TEMPLATES` (src/lib/workflow-templates.ts), which is the graph-template library for super admins; the Candidate Identification template (row 10, C2) becomes a sixth entry there, gets published, and is then selectable by this step.
 
@@ -72,9 +79,9 @@ A **custom** profile points at a workflow built in the workflow studio (`agent_b
 
 - **NavCtx** gains `capabilities: string[]` (resolved server-side, delivered by `myOrg` or a sibling query in useNavCtx). `nav-config.ts` items gain `cap?: Capability`; `show` becomes `has(cap) && <existing role predicate>`. AppShell and CommandPalette both filter via `show(ctx)` already, so both follow.
 - **Routes**: a shared TanStack `beforeLoad` helper `requireRouteCapability(cap)` — async, calls a small server fn (`requireOrg` + resolver) and `redirect({ to: "/" })` when the capability is missing. This is the first route guard in the tree; the note accepts that router context must not be widened (the async server-fn check is the pattern, matching how `/platform` answers rather than throws).
-- **Server functions are authoritative**: new `requireCapability(cap)` middleware composes after `requireOrg`/`requireRole`/`requirePanel` in each function's `.middleware([...])` chain (it needs only `context.orgId`, which `requirePanel` also yields — the panel-only interviewer's own `requirePanel` interview fns keep working under `recruiting.interviews`), plus an imperative `assertCapability(orgId, cap)` (mirroring `assertRole`) for functions with conditional behaviour.
-- **Agent tools are gated too**: the `AgentTool` shape (src/server/agents/registry.ts:24) gains an optional `capability`; the tool executor refuses a tool whose capability is missing from `capabilitiesOf(run.orgId)` with a vendor-neutral error, and `enabledOrgs`/`startRun` skip agent types whose entire toolset is gated off, so a gated-off agent never starts and never bills. Without this, the copilot (`/desk`) and tools like `draft_requisition`/`publish_to_job_board` would bypass the profile entirely — the profile would be cosmetic.
-- **Completeness is enforced, not asserted**: a CI test (the `agents.lock.json` precedent) walks every tenant-scoped server fn (anything behind a `requireOrg`-chain middleware) and the agent tool registry, and fails unless each declares `requireCapability`/`assertCapability`/a tool `capability`, or appears on a reviewed explicit allowlist in `capabilities.ts` (governance fns, platform fns, public/apply paths).
+- **Server functions are authoritative**: new `requireCapability(cap)` middleware composes after `requireOrg`/`requireRole`/`requirePanel` in each function's `.middleware([...])` chain (it needs only `context.orgId`, which `requirePanel` also yields — the panel-only interviewer's own `requirePanel` interview fns keep working under `recruiting.interviews`), plus an imperative `assertCapability(orgId, cap)` (mirroring `assertRole`) for functions with conditional behaviour. _(Added across server functions in B1b — §1.8.)_
+- **Agent tools are gated too**: the `AgentTool` shape (src/server/agents/registry.ts:24) gains an optional `capability`; the tool executor refuses a tool whose capability is missing from `capabilitiesOf(run.orgId)` with a vendor-neutral error, and `enabledOrgs`/`startRun` skip agent types whose entire toolset is gated off, so a gated-off agent never starts and never bills. Without this, the copilot (`/desk`) and tools like `draft_requisition`/`publish_to_job_board` would bypass the profile entirely — the profile would be cosmetic. _(In B1a.)_
+- **Completeness is enforced, not asserted**: a CI sweep test (the `agents.lock.json` precedent) walks every tenant-scoped server fn (anything behind a `requireOrg`-chain middleware) and the agent tool registry, and fails unless each declares `requireCapability`/`assertCapability`/a tool `capability`, or appears on a reviewed explicit allowlist in `capabilities.ts` (governance fns, platform fns, public/apply paths). _(B1a: the tool-registry half fails and the server-fn half runs report-only; B1b: both fail — §1.8.)_
 - **Rate limiting**: new fns are server-fn RPCs and inherit the per-caller per-path `/_serverFn` limiter in src/server.ts (60/min) automatically; no new public routes.
 
 ### 1.6 Switching never deletes data
@@ -91,13 +98,19 @@ The apply step writes only the profile row and grant bookkeeping. Requisitions, 
 - Workflow archived or version unpublished after apply: `grantedWorkflows(orgId)` already joins on live grants and non-archived workflows; the capability cache re-resolves on expiry, and the tenant falls back to gated-off surfaces (never to a broken page).
 - Capability cache staleness: 30 s per process (module-level map, `captureEnabled` precedent, capture.server.ts:40) — after a tightening apply another instance may serve the broader set for up to 30 s; accepted, and the apply is audited.
 
+### 1.8 Milestone split (review condition 6)
+
+- **B1a**: `org_workflow_profiles` table + migration + ER diagram; `capabilities.ts` (vocabulary, agent→capability map, exemptions, allowlist) and `capabilities.server.ts` (resolver, cache, `assertCapability`); apply step + tenant settings fn; **nav gating** (`cap` on NavItems) + **route `beforeLoad` guard** + **agent-tool gating** (executor refusal + `startRun` skip); completeness sweep with the server-fn half in **report-only** mode; tests + screenshots.
+- **B1b**: `requireCapability` added across all tenant-scoped server functions per the sweep's report; sweep switched to **failing**; tests.
+- Both land before B2. The B1 PRs carry this note update.
+
 ---
 
 ## 2. Branded JD templates (row 5 / B2)
 
 ### 2.1 Today
 
-`content_templates` kind `jd` (schema.ts:1952) holds only `JdTemplateConfig` = `sections[]` + `boilerplate` (src/lib/templates.server.ts:45). Branding fields exist on the table but are documented as job_card/offer_letter: `logoPath/logoContentType` (already used by offer letters), `backgroundPath`, plus per-kind config fields `accentColor` (offer_letter :137), `headerLines/footerLines/refFormat/signatory`, and `fontFamily` enum `system|serif|mono` on job-card zones (:79). Import from a sample file exists (`analyzeTemplateFile`, templates.functions.ts:87, feature `template_import`, suggestion-only) — note this path today interpolates the uploaded file's text into the prompt **without `untrusted()` fencing and without `INJECTION_RULES`**, a pre-existing gap B2 fixes as part of the work. PDF generation is exclusively client-side jsPDF; the offer letter (`src/lib/offer-letter-pdf.ts`) is the closest branded-export precedent: logo via `getTemplateLogo`, accent via `hexRgb`, WinAnsi `pdfText()` glyph sanitizer (₹ → "Rs. "), per-page footer. **There is no Word/DOCX writer anywhere** — mammoth/fflate DOCX code is read-only.
+`content_templates` kind `jd` (schema.ts:1952) holds only `JdTemplateConfig` = `sections[]` + `boilerplate` (src/lib/templates.server.ts:45). Branding fields exist on the table but are documented as job_card/offer_letter: `logoPath/logoContentType` (already used by offer letters), `backgroundPath`, plus per-kind config fields `accentColor` (offer_letter :137), `headerLines/footerLines/refFormat/signatory`, and `fontFamily` enum `system|serif|mono` on job-card zones (:79). Import from a sample file exists (`analyzeTemplateFile`, templates.functions.ts:87, feature `template_import`, suggestion-only) — note this path today interpolates the uploaded file's text into the prompt **without `untrusted()` fencing and without `INJECTION_RULES`**, a pre-existing gap B2 fixes as part of the work (invariant-touching; called out in the B2 PR). PDF generation is exclusively client-side jsPDF; the offer letter (`src/lib/offer-letter-pdf.ts`) is the closest branded-export precedent: logo via `getTemplateLogo`, accent via `hexRgb`, WinAnsi `pdfText()` glyph sanitizer (₹ → "Rs. "), per-page footer. **There is no Word/DOCX writer anywhere** — mammoth/fflate DOCX code is read-only.
 
 ### 2.2 Branding on the `jd` template
 
@@ -110,18 +123,18 @@ Extend `JdTemplateConfig` (zod in `templates.server.ts`) with the offer_letter-s
 
 Logo: reuse the existing `logoPath/logoContentType` columns and `uploadTemplateLogo` / `getTemplateLogo` (templates.functions.ts:405/:513) unchanged — the comment on schema.ts:1966 ("job_card only") is corrected. Storage keys stay `${orgId}/branding/logo-<templateId>-<ts>`. Theme = accent + footer/header furniture; a full-bleed background is _not_ offered for JDs (it is a print layout, not a card).
 
-**Fonts constraint, stated honestly**: jsPDF ships only WinAnsi built-ins (the offer letter literally rewrites ₹ → "Rs. ", offer-letter-pdf.ts:14). Brand TTF embedding is possible (`addFont`) but is new scope; B2 ships the three built-in stacks + accent + logo, and defers embedded brand fonts (open question §6).
+**Fonts: deferred by review** (Q3 answer) — jsPDF built-in stacks + accent + logo in B2; true brand fonts (TTF embedding or an HTML-render path) stay out of scope until the pilot demands them.
 
 **Prompt hygiene**: extracted `writingStyle`, `boilerplate`, section headings and `instructions` originate in an uploaded external file — stored as template _data_ and rendered into `buildTemplateSystemPrompt` inside an `untrusted_data` fence (reusing the gateway's `untrusted()` sanitation), never spliced into the system prompt as bare instructions. The same fencing applies to the import analyst call (§2.3).
 
 ### 2.3 Import from a sample JD
 
-Extend the existing `analyzeTemplateFile` jd path rather than adding a flow: `TEMPLATE_EXTRACTION_HINT.jd` (templates.server.ts:28) and the jd analyst spec gain "header/footer lines and a writing-style summary" alongside the existing section-order/boilerplate/tone extraction. **Fix the pre-existing invariant gap on this path in the same PR**: the sample file's text enters the prompt through `untrusted("sample_jd", text)` and the analyst system prompt starts with `INJECTION_RULES` (matching `suggestWeightsCore`/`parseResume`, not the legacy shape). **Accent colour is not AI-extracted from text** (consistent with §6 Q4): the editor pre-fills from `organizations.brandColor` and the user picks; only image/vision samples may hint at colour later. Same rules as today otherwise: one `aiJson` call, feature `template_import`, zod-validated suggestion, nothing persists until Save; the sample's original file is kept via the existing `uploadTemplateSource`. Save-time validation: the editor path validates the jd config against the kind schema at save (today `saveTemplate` accepts any record, templates.functions.ts:311, and a corrupt config silently degrades on read — kept as backstop only).
+Extend the existing `analyzeTemplateFile` jd path rather than adding a flow: `TEMPLATE_EXTRACTION_HINT.jd` (templates.server.ts:28) and the jd analyst spec gain "header/footer lines and a writing-style summary" alongside the existing section-order/boilerplate/tone extraction. **Fix the pre-existing invariant gap on this path in the same PR**: the sample file's text enters the prompt through `untrusted("sample_jd", text)` and the analyst system prompt starts with `INJECTION_RULES` (matching `suggestWeightsCore`/`parseResume`, not the legacy shape). **Accent colour is not AI-extracted from text**: the editor pre-fills from `organizations.brandColor` and the user picks; only image/vision samples may hint at colour later. Same rules as today otherwise: one `aiJson` call, feature `template_import`, zod-validated suggestion, nothing persists until Save; the sample's original file is kept via the existing `uploadTemplateSource`. Save-time validation: the editor path validates the jd config against the kind schema at save (today `saveTemplate` accepts any record, templates.functions.ts:311, and a corrupt config silently degrades on read — kept as backstop only).
 
 ### 2.4 PDF / Word export
 
 - **PDF** (client-side jsPDF, new `src/lib/jd-pdf.ts` mirroring `offer-letter-pdf.ts`): A4, logo from `getTemplateLogo`, accent-coloured section headings built from the template's `sections` order, `pdfText()` glyph sanitizer, footer lines per page. Input is the JD's `full_text` markdown (render headings/paragraphs/bullets; no tables in v1). Trigger: "Download PDF" on the requisition JD panel.
-- **Word** (new dependency `docx` npm, client-side, new `src/lib/jd-docx.ts`): same content model → `.docx` Blob download. This is the only new dependency in Track B; there is no existing writer to reuse (open question §6).
+- **Word** (dependency `docx` npm — **approved at review, MIT** — client-side, new `src/lib/jd-docx.ts`): same content model → `.docx` Blob download. The Docker bundle-import guard from #111 (`scripts/check-bundle-imports.mjs`) must cover the new package so the image build fails if it stops resolving.
 - Template changes are audited: `templates.functions.ts` has zero `writeAudit` calls today — B2 adds `writeAudit` (`jd_template.updated` / `jd_template.deleted` / `jd_template.default_set`, actor `context.memberEmail`) on save/delete/set-default for the jd kind. Exports are reads; they are not audited (consistent with the offer letter).
 
 ### 2.5 Edge cases
@@ -139,19 +152,23 @@ Extend the existing `analyzeTemplateFile` jd path rather than adding a flow: `TE
 
 One JD per requisition, created manually: paste-or-file import on the requisition page (`importJd`, matching.functions.ts:131, feature `jd_import` — it predates `untrusted()`/`schema` and extracts no pay/sector/job-code fields). `createRequisition` always submits to `pending_dh` (requisitions.functions.ts:409); true drafts exist only via the agent tool. No bulk path, no job code, no sector column. Bulk CV intake (src/lib/cv-intake.ts) is the established bulk-file pattern: client-side `extractResumeText` per file, per-file status states, `mapWithLimit` concurrency, per-row error isolation. `assertProfileAllowsRequisition` gates every requisition insert (requisitions.server.ts:103).
 
-### 3.2 Flow
+### 3.2 Flow, with server-side pending review (review condition 4)
 
 New screen **JD import** (route `/jd-import`, capability `pipeline.requisitions`, roles `hr_head | president_cbo | recruiter` via `requireOrg` middleware plus an in-handler `assertRole(userId, orgId, ["hr_head","president_cbo","recruiter"])` — `requireRole` takes exactly one role in this codebase (auth.middleware.ts:186), so the array form goes through `assertRole`, matching its existing signature). The UI mirrors `CvUpload`:
 
 1. Recruiter drops N files (PDF/DOCX/TXT; client-side extraction via `extractResumeText`, scanned-PDF and `.doc` refused as today).
-2. Per file, client → `importJdBulk` (server fn, `mapWithLimit` 3 in the client): server extracts the **requirement profile** (§3.3), runs the duplicate check **before creating anything** (§4), and returns one of `created` (requisition + JD made), `duplicate_review` (nothing created; the extracted profile is held in the review row for the side-by-side decision), or `error`.
-3. Review list shows per-file state; `duplicate_review` rows open the side-by-side UI (§4.4). Review state is held client-side in the import session; re-importing recomputes deterministically, and a decided `duplicate` row never leaves a half-created requisition behind.
+2. Per file, client → `importJdBulk` (server fn, `mapWithLimit` 3 in the client): server extracts the **requirement profile** (§3.3), runs the duplicate check **before creating anything** (§4), and returns one of `created` (requisition + JD made), `duplicate_review` (**persisted server-side** — an `jd_import_items` row plus the standalone `jd_requirement_profiles` row, org-scoped, so closing the tab loses nothing and the paid-for extraction survives), or `error`.
+3. Review list shows per-file state from the server rows; `duplicate_review` rows open the side-by-side UI (§4.4). Decisions are server fns; pending rows are erased with the import session (§4.5).
 
 All per-file failures are isolated; the batch never aborts. AI spend is capped automatically by the existing per-org monthly cap; comparison counts are bounded per §4.5 (per-JD K=5 and a per-import ceiling).
 
 ### 3.3 Requirement extraction schema
 
-New module `src/lib/jd-requirements.ts` with the shared zod `RequirementProfile`, stored in a new table `jd_requirement_profiles` (one row per `job_descriptions` id, FK cascade, orgId column for tenant scoping, jsonb `profile` + plain `roleFamily` column for narrowing). Extraction is one `aiJson` call, **new AI_FEATURES slug `jd_requirements`**, `INJECTION_RULES` + `untrusted("job_description", text)` (≤20k chars), zod `schema`, following the `parseResume` "use null when genuinely absent" precedent — _not_ the legacy `importJd` shape:
+New module `src/lib/jd-requirements.ts` with the shared zod `RequirementProfile`. Storage: `jd_requirement_profiles` (orgId column for tenant scoping; **`jobDescriptionId uuid null`** with a partial unique index `where job_description_id is not null` — the row is created at extraction time, before any requisition/JD exists, and is linked to the JD only when the requisition is created; duplicate-review rows keep it standalone). Payload: jsonb `profile` + plain `roleFamily` + `sector` columns for narrowing.
+
+**Tenant sector taxonomy (Track A Q8, assigned to B3)**: new table `sector_taxonomy_terms` (`orgId`, `term`, `parentId` for a simple hierarchy, `seededDefault boolean`) seeded with a platform default taxonomy on first use, editable by tenant governance as a tenant setting. Extraction maps the JD's sector against this taxonomy; C1's matching engine consumes it as its sector factor.
+
+Extraction is one `aiJson` call, **new AI_FEATURES slug `jd_requirements`**, `INJECTION_RULES` + `untrusted("job_description", text)` (≤20k chars), zod `schema`, following the `parseResume` "use null when genuinely absent" precedent — _not_ the legacy `importJd` shape:
 
 ```
 title, roleFamily (from the tenant's role archetypes/ontology)
@@ -173,20 +190,25 @@ pay: { status: 'unknown' }
 
 **Pay is never defaulted.** `requisitions.payCurrency` is `NOT NULL default 'INR'` (schema.ts:552) and is _not_ written from extraction; the extracted truth lives in `jd_requirement_profiles.profile.pay`, `status: 'unknown'` when the JD says nothing, regardless of tenant reporting currency. This consciously avoids repeating the INR defaults on `salaryBenchmarks.currency` (schema.ts:665) and friends; the reporting-currency normalisation for comparisons (§4) uses `organizations.currency` at compare time, never as a storage default.
 
-Sync to existing columns happens only where semantics match and the field is empty (the `syncRequisitionFromJd` "fills blanks, never overwrites" pattern): must/nice → skill arrays, experience → `experienceMin/Max`, location → `location`, remote → `workMode`, right-to-work → `workAuthorizationRequired`. New column `externalJobCode text null` on `requisitions` (index `(orgId, external_job_code)`) for §4's deterministic check; `sector` stays on the profile row until row 8's taxonomy work lands. Legacy JDs get profiles on demand via a governance-gated `backfillJdProfile` server fn that extracts once, **persists** to `jd_requirement_profiles` (so it is never re-derived), and counts its AI call against the caps in §4.5.
+Sync to existing columns happens only where semantics match and the field is empty (the `syncRequisitionFromJd` "fills blanks, never overwrites" pattern): must/nice → skill arrays, experience → `experienceMin/Max`, location → `location`, remote → `workMode`, right-to-work → `workAuthorizationRequired`. New column `externalJobCode text null` on `requisitions` (check-only + index `(orgId, external_job_code)` — **no unique constraint**, agreed at review, §6 Q6) for §4's deterministic check. Legacy JDs get profiles on demand via a governance-gated `backfillJdProfile` server fn that extracts once, **persists** to `jd_requirement_profiles` (so it is never re-derived), and counts its AI call against the caps in §4.5.
 
-### 3.4 Lightweight requisition
+### 3.4 Lightweight requisition (review condition 1)
 
-Created only after the duplicate verdict is **distinct** (or the recruiter accepts a variant, §4.4). Per-tenant setting `settings.jdRequisitionMode` on the profile row (§1.3):
+Created only after the duplicate verdict is **distinct** (or the recruiter accepts a variant, §4.4). Per-tenant setting `settings.jdRequisitionMode` (§1.3):
 
-- **`auto_approved`** (default): requisition created directly at `status: 'approved'` via a **dedicated opt-in on the core** — `createRequisitionCore(payload, { autoApprove: true })`, a separate explicit field that only the bulk server fn passes (a widened status parameter on the shared core would silently extend the capability to the desk and agent-tool callers, which must remain on `draft`/`pending_dh`). The core builds the `approvalTrail` entry server-side — `{ from: null, to: "approved", actor: <importer email>, decision: "auto_approved", comment: "Bulk JD import" }` — and `writeAudit("requisition.auto_created", ...)` fires. Matching (which requires approved requisitions) can run immediately. The JD version is saved at `status: 'approved'` through the same explicit mechanism (today JDs land at `pending_dh`, requisitions.server.ts:612).
-- **`approval_gate`**: requisition at `pending_dh` and JD at `pending_dh` — the existing chain runs untouched.
+- **`approval_gate` (default — for every new tenant and until governance opts out)**: requisition at `pending_dh` and JD at `pending_dh` — the existing chain runs untouched. This mode requires the `pipeline.approvals` capability (§1.2 dependency rule).
+- **`auto_approved`**: requisition created directly at `status: 'approved'` via a **dedicated opt-in on the core** — `createRequisitionCore(payload, { autoApprove: true })`, a separate explicit field that only the bulk server fn passes (a widened status parameter on the shared core would silently extend the capability to the desk and agent-tool callers, which must remain on `draft`/`pending_dh`). Guards around the setting:
+  - **Only tenant governance can turn `auto_approved` on**, with **step-up re-authentication**; the platform admin may also set it at apply time (§1.4). Every enabling/change is audited.
+  - **The trail entry traces to the authorising policy**: the core builds `{ from: null, to: "approved", actor: <importer email>, decision: "auto_approved", comment: "Bulk JD import", policyAuditId: <id of the audit_log row that enabled auto_approved for this org> }` server-side — every auto-approval links back to the person who authorised the policy.
+  - `writeAudit("requisition.auto_created", ...)` fires per row.
+  - The opt-in stays **bulk-path-only**.
+  - Matching (which requires approved requisitions) can run immediately; the JD version is saved at `status: 'approved'` through the same explicit mechanism (today JDs land at `pending_dh`, requisitions.server.ts:612).
 
 Both modes skip panel/budget fields (lightweight = `openings`, title, location, skills, pay-band fields only). `assertProfileAllowsRequisition` still runs per row — a tenant with an unapproved org profile refuses the whole file with a clear row error.
 
 ### 3.5 Migration & audit
 
-Migration: `jd_requirement_profiles` table + `requisitions.externalJobCode` column, one idempotent SQL file (next free number when the B3 PR opens), `docs/er-diagram.md` regenerated. Audit: `jd_import.bulk_completed` (summary counts) and `requisition.auto_created` per auto-approved row.
+Migration (one idempotent SQL file, next free number when the B3 PR opens; `docs/er-diagram.md` regenerated): `jd_requirement_profiles` (with nullable `jobDescriptionId`), `jd_import_items`, `sector_taxonomy_terms`, `requisitions.externalJobCode`. Audit: `jd_import.bulk_completed` (summary counts), `requisition.auto_created` per auto-approved row.
 
 ---
 
@@ -194,55 +216,61 @@ Migration: `jd_requirement_profiles` table + `requisitions.externalJobCode` colu
 
 ### 4.1 Today
 
-`src/lib/jd-dedupe.ts` is lexical only: token-Jaccard on title (+ department/location/skill boosts), an acknowledgement gate before create (requisitions.index.tsx:264). The agent tool `find_similar_requisitions` is ILIKE word overlap. **No embedding/vector infrastructure exists in the repo.**
+`src/lib/jd-dedupe.ts` is lexical only: token-Jaccard on title (+ department/location/skill boosts), an acknowledgement gate before create (requisitions.index.tsx:264). The agent tool `find_similar_requisitions` is ILIKE word overlap. **No embedding/vector infrastructure exists in the repo.** (Review answer to Q1: none is needed for B3 — deterministic narrowing + pairwise comparison ships; embeddings are revisited after the C3 evaluation and would go through the gateway.)
 
 ### 4.2 Requirement profile
 
-Built once per JD at import (§3.3) and persisted; legacy JDs are backfilled on demand and persisted once (§3.3). Comparison uses the profile, never the raw text.
+Built once per JD at import and **persisted immediately** (standalone `jd_requirement_profiles` row, §3.3 — it exists before and independent of any requisition); legacy JDs are backfilled on demand and persisted once. Comparison uses the profile, never the raw text.
 
 ### 4.3 Narrowing, then field-by-field comparison — before the requisition is created
 
-**Narrow (cheap, deterministic):** candidate set = same org, same `roleFamily`, requisition status live (or created within `settings.jdDuplicateLookbackDays`, default 90), cap K=5 most-recent. Files earlier in the **same batch count too**: files are processed sequentially, so a requisition created earlier in the import is a narrowing candidate for later files, and two files in one batch that duplicate each other resolve through the same side-by-side UI. No embeddings in B3 (open question §6); role family + recency carries the narrowing, and the lexical `findDuplicateRequisitions` Jaccard score re-ranks within the narrowed set.
+**Narrow (cheap, deterministic):** candidate set = same org, same `roleFamily`, requisition status live (or created within `settings.jdDuplicateLookbackDays`, default 90), cap K=5 most-recent. Files earlier in the **same batch count too**: files are processed sequentially, so a requisition created earlier in the import is a narrowing candidate for later files, and two files in one batch that duplicate each other resolve through the same side-by-side UI.
+
+**Job code rule (review condition 3, replacing the earlier absolute rule):** an `externalJobCode` match against a **live** requisition _proposes_ `duplicate` with **no AI call**; a match against a **closed** requisition is just a normal comparison candidate (codes may legitimately be reused after close-out, which is why there is no unique constraint). Either way the recruiter confirms — nothing is linked without a click, as §4.4 promises.
 
 **Compare (new AI_FEATURES slug `jd_duplicate_check`):** one `aiJson` call per pair, `untrusted()`-fenced with both requirement profiles (small structured JSON, not raw text), zod schema `{ similarity: 0–1, mustHaveOverlap, responsibilityThemes, fieldDiffs[] }`. Ontology equivalents ("B2B sales" ≈ "business development") come from the existing skill-expansion groups (`groupsFor`, pool-match.server.ts:40).
 
-**Hard differences are decided in code, before and after the AI call:** differing country, seniority band (where both known), employment type, hiring client, or pay bands beyond `settings.payVarianceTolerance` ⇒ the pair cannot be `duplicate` (at most `variant`), whatever the AI says. Same `externalJobCode` ⇒ `duplicate` deterministically, no AI call at all.
+**Hard differences are decided in code, before and after the AI call:** differing country, seniority band (where both known), employment type, hiring client, or pay bands beyond `settings.payVarianceTolerance` ⇒ the pair cannot be `duplicate` (at most `variant`), whatever the AI says.
 
 **Verdicts, with reasons:**
 
-- **Duplicate (repost)** → the import row is marked _linked_ to the existing requisition (which passes `assertRequisitionInOrg` before being accepted) and **no requisition is created** — the existing requisition's shortlist is reused as-is, nothing deleted, no status transitions on live rows.
-- **Variant** (same role, different location/level) → recruiter accepts; _then_ the lightweight requisition is created (§3.4) and its shortlist seeded by copying the earlier requisition's shortlist rows once with `source: 'seeded'` (org-scoped, additive, the source shortlist untouched).
+- **Duplicate (repost)** → the `jd_import_items` row is marked _linked_ to the existing requisition (which passes `assertRequisitionInOrg` before being accepted) and **no requisition is created** — the existing requisition's shortlist is reused as-is, nothing deleted, no status transitions on live rows.
+- **Variant** (same role, different location/level) → recruiter accepts; _then_ the lightweight requisition is created (§3.4) and its shortlist seeded by copying the earlier requisition's shortlist rows once with `source: 'seeded'` (org-scoped, additive, the source shortlist untouched) — **skipping candidates whose `poolUse` is `'role_only'`** (review condition 2: portal terms limit them to their original role).
 - **Distinct** → the lightweight requisition is created (§3.4), no seeding.
 
 Because creation waits for the verdict, there is no "withdraw an auto-approved requisition" problem: nothing to undo.
 
 ### 4.4 Side-by-side UI, recruiter decides
 
-The import review row (and a later entry on the requisition page) shows both requirement profiles field by field: pay/currency/period/bound, location + remote, seniority, employment type, must-haves as set-overlap chips with ontology equivalents called out, responsibility themes, job code, hiring client — with the verdict reasons listed and the hard-difference flags marked. Buttons: **Duplicate / Variant / Distinct**. The system never merges JDs on its own; the AI verdict is a suggestion and the recruiter's click is the decision.
+The review row (rendered from the server-side `jd_import_items` row, §3.2) shows both requirement profiles field by field: pay/currency/period/bound, location + remote, seniority, employment type, must-haves as set-overlap chips with ontology equivalents called out, responsibility themes, job code, hiring client — with the verdict reasons listed and the hard-difference flags marked. Buttons: **Duplicate / Variant / Distinct**. The system never merges JDs on its own; the AI verdict is a suggestion and the recruiter's click is the decision.
 
-**Feedback:** every decision is recorded with `captureFeedback` (src/server/training/capture.server.ts:242): `source: "jd_duplicate_review"`, `label: <verdict>`, `original: { aiVerdict, similarity, fieldDiffs }`, `corrected: { chosenAction }`, `requisitionId` (the existing twin, or the newly created variant). **Inference linkage needs a small extension, stated as B3 scope**: the `jd_duplicate_check` call runs wrapped in `withAiSubject({ requisitionId })` (src/server/agents/context.ts — the gateway already stamps `requisitionId` onto `training_inferences` through it), and `latestInferenceFor` (capture.server.ts:279, which today hard-returns null without an `applicationId`/`candidateId`) gains a `requisitionId` subject branch, so the feedback row links to the exact comparison instead of silently recording `inferenceId: null`. Capture stays consent-gated and never blocks the action.
+**Feedback:** every decision is recorded with `captureFeedback` (src/server/training/capture.server.ts:242): `source: "jd_duplicate_review"`, `label: <verdict>`, `original: { aiVerdict, similarity, fieldDiffs }`, `corrected: { chosenAction }`, `requisitionId` (the existing twin, or the newly created variant). **Inference linkage is B3 scope (review answer to Q4 — this module change is owned here; D4 rebases on it)**: the `jd_duplicate_check` call runs wrapped in `withAiSubject({ requisitionId })` (src/server/agents/context.ts — the gateway already stamps `requisitionId` onto `training_inferences` through it), and `latestInferenceFor` (capture.server.ts:279, which today hard-returns null without an `applicationId`/`candidateId`) gains a `requisitionId` subject branch, so the feedback row links to the exact comparison instead of silently recording `inferenceId: null`. Capture stays consent-gated and never blocks the action.
 
-### 4.5 Caps and edge cases
+### 4.5 Caps, erasure and edge cases
 
 - **Comparison caps**: per new JD, at most K=5 pairs; per import run, at most 50 comparisons (rows beyond the cap fall back to the lexical verdict with a `not_compared` flag, so the batch never stalls). The per-org monthly AI cap still applies on top of both.
+- **Pending-review rows (`jd_import_items`) are erased with the import**: dismissing/completing a session deletes that session's pending rows (org-scoped delete); decided rows' feedback lives in `training_feedback`/`audit_log` and is not lost. No requisition, JD or profile row is deleted by a dismissal — only the review bookkeeping.
 - JD with no pay in both profiles → pay is _equal-unknown_, never a hard difference and never a similarity signal.
 - `roleFamily` extraction uncertain → widen the narrowed set to unfamily'd JDs rather than skip the check.
-- The lexical check on the manual create-requisition flow stays as-is; the semantic check runs on the bulk path and is exposed on the requisition page for single imports (shared core in `src/lib/jd-duplicate.server.ts`).
+- The lexical check on the manual create-requisition flow stays as-is in B3; the semantic check attaches to the manual requisition-page import in a follow-up **B3b** after B3 merges (review answer to Q8), sharing the core in `src/lib/jd-duplicate.server.ts`.
 
 ---
 
 ## 5. Test list
 
-**B1 (row 0)** — `scripts/workflow-profile.test.ts`, plus the completeness test
+**B1a** — `scripts/workflow-profile.test.ts`, plus the completeness sweep (report-only on server fns)
 
 - New tenant / tenant without a profile row behaves exactly as `full_pipeline` (all capabilities; every existing server fn passes unchanged).
-- Apply `template` with a published workflow: nav items with missing capabilities hidden; route `beforeLoad` redirects; gated server fns (e.g. offers) throw the capability error with the same org predicate intact; **agent tools of gated-off types are refused by the executor and their agent types never start** (`startRun`/`enabledOrgs`).
+- Apply `template` with a published workflow: nav items with missing capabilities hidden; route `beforeLoad` redirects; **agent tools of gated-off types are refused by the executor and their agent types never start** (`startRun`/`enabledOrgs`).
 - Switch back to `full_pipeline`: all data still present (requisitions/applications/interviews rows untouched), everything visible again; cancelled runs stay cancelled.
-- **Completeness sweep**: a test enumerates every `NavItem` and every route in the generated tree and fails on any item without a capability or recorded exemption; a second sweep walks every tenant-scoped server fn and registered agent tool and fails unless it declares a capability check or sits on the reviewed allowlist (the CI-enforced lock pattern).
+- **Completeness sweep**: enumerates every `NavItem` and every route in the generated tree and fails on any item without a capability or recorded exemption; the tool-registry half fails on ungated tools; the server-fn half logs a report (B1a) / fails (B1b).
 - Audit rows written for every apply (`platform.workflow_profile.applied`) and grant/revoke; `from`/`to` in detail; settings changes audited on both the platform and tenant paths.
-- Refusals: unpublished workflow, missing studio-agent grant, unknown profile value (zod), non-platform-admin caller.
+- Refusals: unpublished workflow, missing studio-agent grant, unknown profile value (zod), non-platform-admin caller, **and a settings/capability dependency violation** (e.g. `approval_gate` on a capability set without `pipeline.approvals` — refused; switching the setting later re-checked).
+- `auto_approved` toggle: governance-only change requires step-up (`STEP_UP_REQUIRED` without it) and is audited; a recruiter/owner-without-step-up path is refused.
 - Capability cache invalidated on apply **within the same process** (cross-instance staleness ≤30 s is accepted and documented).
 - Panel-only members are denied everywhere except their own `requirePanel` interview surfaces, which keep working under `recruiting.interviews`; `/platform*` unaffected by tenant profile.
+
+**B1b** — sweep switched to failing; `requireCapability` present on every tenant-scoped server fn; rerun of the B1a suite green.
 
 **B2 (row 5)** — `scripts/jd-template-branding.test.ts`
 
@@ -251,30 +279,35 @@ The import review row (and a later entry on the requisition page) shows both req
 - `resolveTemplate(orgId, 'jd')` returns logoPath; `getTemplateLogo` refuses a path outside `${orgId}/branding/`.
 - `writeAudit` fired on save/delete/set-default of a jd template.
 - Import path fencing: the sample text reaches the analyst prompt only inside an `untrusted_data` fence with `INJECTION_RULES` in the system prompt; extracted `writingStyle`/`boilerplate` are stored as data, and `buildTemplateSystemPrompt` renders them fenced.
+- Bundle-import guard covers the `docx` package (Docker build fails if it stops resolving).
 - PDF/DOCX builder unit tests: section order from template, accent applied, WinAnsi sanitization (₹ → "Rs. "), footer lines per page. Visual acceptance vs sample JD is manual (milestone gate, screenshots in the PR).
 
 **B3 (rows 6–7)** — `scripts/jd-bulk-import.test.ts`, `scripts/jd-duplicate.test.ts`
 
 - Extraction schema: JD with explicit USD/monthly/range → `pay.status 'known'` with fields; JD without salary → `pay.status 'unknown'`, and `requisitions.payCurrency` left untouched (never INR-by-default).
+- Sector: extraction maps to the tenant's `sector_taxonomy_terms` (seeded default present on first use; governance edit reflected in the next extraction).
 - `untrusted()` + zod enforced: extraction refuses when the model returns shape-invalid JSON (gateway 502 path, one corrective retry).
-- Reworded repost (same role, re-worded bullets, new ref) → `duplicate`; same title, different country → blocked to `variant`/`distinct` by the hard-difference rule; same `externalJobCode` → deterministic `duplicate` with zero AI calls.
+- Reworded repost (same role, re-worded bullets, new ref) → `duplicate`; same title, different country → blocked to `variant`/`distinct` by the hard-difference rule; same `externalJobCode` against a **live** requisition → proposed `duplicate` with zero AI calls; same code against a **closed** requisition → normal AI comparison.
 - **Duplicate action**: no requisition created for the linked row; the existing requisition and its shortlist are untouched; linking with a foreign-org requisitionId is refused (`assertRequisitionInOrg`).
-- **Variant action**: exactly one pass of shortlist rows copied with `source: 'seeded'`, org-scoped, additive; the source shortlist unchanged.
+- **Variant action**: exactly one pass of shortlist rows copied with `source: 'seeded'`, org-scoped, additive, the source shortlist unchanged, **and `poolUse: 'role_only'` candidates are skipped**.
+- **Pending review is server-side**: a `duplicate_review` row survives in `jd_import_items` (with its persisted profile) across a simulated new session; dismissing the session erases exactly that session's pending rows and nothing else.
 - Narrowing never crosses tenants (org predicate on every query), stays inside the role family + lookback window, **and includes requisitions created earlier in the same batch** (in-batch duplicate resolves via the same UI).
 - Recruiter decision recorded via `captureFeedback` only when the org's capture consent is on (and `resetCaptureCache` in tests), with `inferenceId` resolved through the `withAiSubject`/`requisitionId` branch; nothing recorded when consent is off; the action never blocks either way.
-- Both requisition modes: `auto_approved` trail entry + audit (and the desk/agent-tool callers still cannot produce an auto-approved row — the opt-in is bulk-path-only); `approval_gate` lands at `pending_dh`; lightweight row has no panel/budget writes.
+- Both requisition modes: `approval_gate` (default) lands at `pending_dh`; `auto_approved` trail entry carries `policyAuditId` pointing at the audit row that enabled the setting + `requisition.auto_created` audit (and the desk/agent-tool callers still cannot produce an auto-approved row — the opt-in is bulk-path-only); lightweight row has no panel/budget writes.
 - Caps: per-JD K=5 and per-import 50 respected; over-cap rows fall back to lexical with `not_compared`.
 - Per-file failure isolation: one bad file leaves the rest of the batch `created`; `backfillJdProfile` persists once and does not re-derive.
 
+**B3b (follow-up)** — semantic check wired into the single-requisition import path; tests ported from the bulk suite.
+
 ---
 
-## 6. Open questions (for review sign-off)
+## 6. Questions — resolved at M0 review (2026-11-27)
 
-1. **Embeddings for narrowing.** The plan (§2a) names embedding similarity, but the repo has no vector substrate and the AI invariant restricts provider calls to `aiJson`/`aiResearchJson`/`aiAgentStep` — an embeddings call would need a gateway extension. B3 ships deterministic narrowing (role family + recency) + AI pairwise compare over ≤5 candidates. Acceptable for row 7's "done when", or should the gateway gain an embeddings path first?
-2. **Word export dependency.** No DOCX writer exists; propose the `docx` npm package client-side. Any objection to the new dependency?
-3. **Brand fonts.** jsPDF built-ins only in B2 (WinAnsi; ₹→"Rs." precedent). True brand fonts need TTF embedding or an HTML-render path that doesn't exist. Defer?
-4. **Capture plumbing extension.** §4.4 adds a `requisitionId` subject to `withAiSubject`/`latestInferenceFor` — a small change inside the training-capture module. Confirm it may land in B3 rather than waiting for D4's track (it touches `capture.server.ts`, which D4 also uses).
-5. **Default `jdRequisitionMode`.** Plan says "approval gate optional per tenant" — proposing `auto_approved` as the default (matching the plan's "no approval gate" default for lightweight requisitions) with the gate as opt-in. Confirm.
-6. **`externalJobCode` uniqueness.** Uniqueness is enforced per org among _live_ requisitions only (a partial unique index) or not at all (check-only)? Proposing check-only + index, since reposts legitimately reuse codes after close-out.
-7. **Score contract with D4 (rows 8–9).** To be agreed before C2 build starts, not blocking this note. Today there are two ranking surfaces: the deterministic pool pre-ranker `rankPool` (src/lib/shortlist.ts:9–18: `candidate, fit, mustHits, mustMisses, goodHits, experienceOk, locationOk`) and the talent-search agent's result shape (src/server/agents/talent-search.server.ts:24–31: `skillHits, textHits, inBand, why`); persisted per-application scoring is `match_scores` (schema.ts:800 — seven dimension scores — skills, experience, career, impact, innovation, education, social — plus `overallScore`, `customScores` evidence, `rationale`, `riskFlags`, `recommendation`). C1 decides which of these (or its successor) the shortlist view renders.
-8. **Where the semantic check attaches on single imports.** Proposing the same core runs on the manual requisition-page import after B3 lands, replacing the lexical-only gate there; confirm scope is in B3 and not deferred.
+1. **Embeddings**: not needed for B3. Role family + recency narrowing with pairwise comparison ships; revisited after the C3 evaluation, and any embeddings path goes through the gateway.
+2. **Word export**: `docx` npm (MIT) approved; the Docker bundle-import guard (#111) must cover it.
+3. **Brand fonts**: deferred — built-in stacks + accent + logo for B2.
+4. **Capture plumbing**: the `capture.server.ts` extension lands in B3, owned here; D4 rebases on it.
+5. **Default `jdRequisitionMode`**: superseded by review condition 1 — `approval_gate` is the default; `auto_approved` is governance-only with step-up.
+6. **`externalJobCode`**: check-only + index, no unique constraint.
+7. **Score contract**: agreed with D4 before C1/C2 code. Surfaces today: `rankPool` (src/lib/shortlist.ts:9–18: `candidate, fit, mustHits, mustMisses, goodHits, experienceOk, locationOk`), the talent-search agent result (src/server/agents/talent-search.server.ts:24–31: `skillHits, textHits, inBand, why`), and `match_scores` (schema.ts:800 — seven dimension scores — skills, experience, career, impact, innovation, education, social — plus `overallScore`, `customScores` evidence, `rationale`, `riskFlags`, `recommendation`).
+8. **Semantic check on single imports**: follow-up B3b after B3 merges, not inside B3.
